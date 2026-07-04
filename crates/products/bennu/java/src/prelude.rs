@@ -10,7 +10,9 @@ pub use crate::infer::{infer_receiver_type, infer_receiver_type_at};
 pub use crate::symbols::{extract_symbols, extract_symbols_from_root};
 
 // The structural model produced by `extract_symbols`.
-pub use crate::symbols::{FieldDecl, FileSymbols, Import, MethodDecl, ParamDecl, TypeDecl};
+pub use crate::symbols::{
+    Annotation, FieldDecl, FileSymbols, Import, MethodDecl, ParamDecl, TypeDecl,
+};
 
 // The resolver seam the type-walk consumes + the member shapes it resolves against.
 pub use crate::seam::{ClassMembers, Member, MemberKind, TypeRef, TypeResolver, Visibility};

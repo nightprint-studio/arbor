@@ -32,6 +32,19 @@ impl Import {
     }
 }
 
+/// A single annotation on a declaration: its simple name plus the optional single-string
+/// argument. `@Service` → `{name:"Service", value:None}`; `@Service("foo")` /
+/// `@Service(value="foo")` → `{name:"Service", value:Some("foo")}`. A non-string argument
+/// (`@RequestMapping(method=POST)`) leaves `value` `None` — only a plain string literal is
+/// captured (the bean-name / stereotype value case).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Annotation {
+    /// The annotation's simple name — its type name's last segment (`lombok.Getter` → `Getter`).
+    pub name: String,
+    /// The unquoted contents of the annotation's first string-literal argument, if any.
+    pub value: Option<String>,
+}
+
 /// A field of a type: its name and its declared type (as written in source).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldDecl {
@@ -43,8 +56,16 @@ pub struct FieldDecl {
     pub is_final: bool,
     /// The declared access level (`public`/`protected`/`private`, else package-private).
     pub visibility: Visibility,
-    /// Simple names of the field's annotations (`Getter`, `Setter`, …) — for Lombok synthesis.
-    pub annotations: Vec<String>,
+    /// The field's annotations (`@Getter`, `@Autowired`, …) — for Lombok synthesis and
+    /// (future) field-injection resolution. Empty for a field with no annotations.
+    pub annotations: Vec<Annotation>,
+}
+
+impl FieldDecl {
+    /// Whether this field carries an annotation with the given simple name.
+    pub fn has_annotation(&self, name: &str) -> bool {
+        self.annotations.iter().any(|a| a.name == name)
+    }
 }
 
 /// A parameter of a method.
@@ -78,9 +99,17 @@ pub struct TypeDecl {
     pub extends: Option<String>,
     /// The `implements` clause type texts (interface `extends` folded in here too).
     pub implements: Vec<String>,
-    /// Simple names of the type's annotations (`Getter`, `Data`, `Slf4j`, …) — the input to
-    /// Lombok generated-member synthesis. Empty for a type with no annotations.
-    pub annotations: Vec<String>,
+    /// The type's annotations (`@Data`, `@Slf4j`, `@Service("foo")`, …) — the input to Lombok
+    /// generated-member synthesis and the Spring stereotype-bean policy. Empty for a type with
+    /// no annotations.
+    pub annotations: Vec<Annotation>,
+}
+
+impl TypeDecl {
+    /// Whether this type carries an annotation with the given simple name.
+    pub fn has_annotation(&self, name: &str) -> bool {
+        self.annotations.iter().any(|a| a.name == name)
+    }
 }
 
 /// The extracted symbols of one `.java` file.
@@ -228,10 +257,12 @@ fn collect_type(
     out.push(TypeDecl { name, fqn, methods, fields, extends, implements, annotations });
 }
 
-/// Collect the simple names of a declaration's annotations from its `modifiers` node. A
-/// `marker_annotation` (`@Getter`) or `annotation` (`@Getter(...)`) contributes its name's LAST
-/// segment (`lombok.Getter` → `Getter`). Empty when the node has no annotations.
-fn collect_annotations(node: &Node, bytes: &[u8]) -> Vec<String> {
+/// Collect a declaration's annotations from its `modifiers` node. A `marker_annotation`
+/// (`@Getter`) or `annotation` (`@Getter(...)`) contributes its name's LAST segment
+/// (`lombok.Getter` → `Getter`) as [`Annotation::name`], plus the unquoted contents of its
+/// first string-literal argument (`@Service("foo")` / `@Service(value="foo")` → `foo`) as
+/// [`Annotation::value`] when present. Empty when the node has no annotations.
+fn collect_annotations(node: &Node, bytes: &[u8]) -> Vec<Annotation> {
     let mut out = Vec::new();
     let mut cw = node.walk();
     for c in node.children(&mut cw) {
@@ -243,12 +274,58 @@ fn collect_annotations(node: &Node, bytes: &[u8]) -> Vec<String> {
             if matches!(a.kind(), "marker_annotation" | "annotation") {
                 if let Some(name) = a.child_by_field_name("name").and_then(|n| node_text(&n, bytes)) {
                     let simple = name.rsplit('.').next().unwrap_or(&name).to_string();
-                    out.push(simple);
+                    let value = annotation_string_value(&a, bytes);
+                    out.push(Annotation { name: simple, value });
                 }
             }
         }
     }
     out
+}
+
+/// The unquoted contents of an annotation's FIRST string-literal argument, whether written as
+/// `@X("v")` (a bare value) or `@X(value="v")` (an `element_value_pair`). `None` for a marker
+/// annotation, an empty arg list, or a non-string argument (`@RequestMapping(method=POST)`).
+fn annotation_string_value(annotation: &Node, bytes: &[u8]) -> Option<String> {
+    let args = annotation.child_by_field_name("arguments")?;
+    let mut aw = args.walk();
+    for arg in args.named_children(&mut aw) {
+        match arg.kind() {
+            "string_literal" => return string_literal_text(&arg, bytes),
+            // `@X(value="v")` — take the string on the RHS of the pair (any pair, since a
+            // single-element annotation's only pair IS `value`).
+            "element_value_pair" => {
+                if let Some(v) = arg.child_by_field_name("value") {
+                    if v.kind() == "string_literal" {
+                        return string_literal_text(&v, bytes);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The contents of a `string_literal` node with the surrounding quotes stripped. Robust across
+/// grammar shapes: prefer the concatenated `string_fragment` children, falling back to trimming
+/// the literal's own `"` delimiters.
+fn string_literal_text(literal: &Node, bytes: &[u8]) -> Option<String> {
+    let mut fragments = String::new();
+    let mut lw = literal.walk();
+    for part in literal.children(&mut lw) {
+        if part.kind() == "string_fragment" {
+            if let Some(t) = node_text(&part, bytes) {
+                fragments.push_str(&t);
+            }
+        }
+    }
+    if !fragments.is_empty() {
+        return Some(fragments);
+    }
+    // Empty string literal (`""`) or a grammar without `string_fragment` nodes: trim the quotes.
+    let raw = node_text(literal, bytes)?;
+    Some(raw.trim_matches('"').to_string())
 }
 
 /// Extract a method_declaration.
@@ -382,4 +459,54 @@ fn is_type_node(n: &Node) -> bool {
 /// Exact source text of a node.
 pub(crate) fn node_text(node: &Node, bytes: &[u8]) -> Option<String> {
     node.utf8_text(bytes).ok().map(|s| s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The annotations of the single top-level type in `src`.
+    fn type_annotations(src: &str) -> Vec<Annotation> {
+        let fs = extract_symbols(src);
+        fs.types.into_iter().next().expect("one type").annotations
+    }
+
+    #[test]
+    fn captures_bare_string_annotation_value() {
+        let ann = type_annotations("@Service(\"fooService\") class FooService {}");
+        assert_eq!(ann, vec![Annotation { name: "Service".into(), value: Some("fooService".into()) }]);
+    }
+
+    #[test]
+    fn captures_value_named_argument() {
+        let ann = type_annotations("@Service(value=\"bar\") class FooService {}");
+        assert_eq!(ann, vec![Annotation { name: "Service".into(), value: Some("bar".into()) }]);
+    }
+
+    #[test]
+    fn marker_annotation_has_no_value() {
+        let ann = type_annotations("@Service class FooService {}");
+        assert_eq!(ann, vec![Annotation { name: "Service".into(), value: None }]);
+    }
+
+    #[test]
+    fn non_string_argument_yields_no_value() {
+        // `@RequestMapping(method=POST)` — the argument isn't a plain string literal.
+        let ann = type_annotations("@RequestMapping(method=POST) class C {}");
+        assert_eq!(ann, vec![Annotation { name: "RequestMapping".into(), value: None }]);
+    }
+
+    #[test]
+    fn qualified_annotation_name_is_simple() {
+        let ann = type_annotations("@lombok.Getter class C {}");
+        assert_eq!(ann, vec![Annotation { name: "Getter".into(), value: None }]);
+    }
+
+    #[test]
+    fn field_annotation_value_is_captured() {
+        let fs = extract_symbols("class C { @Qualifier(\"db\") private DataSource ds; }");
+        let f = &fs.types[0].fields[0];
+        assert!(f.has_annotation("Qualifier"));
+        assert_eq!(f.annotations[0].value.as_deref(), Some("db"));
+    }
 }

@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use bennu_java::prelude::{Import, Member, MemberKind, TypeDecl, TypeRef, Visibility};
+use bennu_java::prelude::{Annotation, Import, Member, MemberKind, TypeDecl, TypeRef, Visibility};
 
 use crate::typemap::type_text_to_ref;
 
@@ -118,8 +118,8 @@ pub(crate) fn backing_field_name(accessor: &str) -> Option<String> {
 }
 
 /// Whether `annotations` contains any of `wanted` (simple names).
-fn has(annotations: &[String], wanted: &[&str]) -> bool {
-    annotations.iter().any(|a| wanted.contains(&a.as_str()))
+fn has(annotations: &[Annotation], wanted: &[&str]) -> bool {
+    annotations.iter().any(|a| wanted.contains(&a.name.as_str()))
 }
 
 /// The Lombok getter name for `field`: `getFoo`, or `isFoo` for a primitive `boolean` (and no
@@ -152,9 +152,9 @@ fn is_primitive_boolean(type_text: &str) -> bool {
 }
 
 /// The binary name of the logger a Lombok logging annotation injects, if any.
-fn logger_type(annotations: &[String]) -> Option<&'static str> {
+fn logger_type(annotations: &[Annotation]) -> Option<&'static str> {
     for a in annotations {
-        let binary = match a.as_str() {
+        let binary = match a.name.as_str() {
             "Slf4j" => "org/slf4j/Logger",
             "Log4j2" => "org/apache/logging/log4j/Logger",
             "Log4j" => "org/apache/log4j/Logger",
@@ -173,6 +173,11 @@ fn logger_type(annotations: &[String]) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A marker annotation (no value) for a test simple name.
+    fn ann(name: &str) -> Annotation {
+        Annotation { name: name.to_string(), value: None }
+    }
 
     fn field(name: &str, type_text: &str) -> bennu_java::prelude::FieldDecl {
         bennu_java::prelude::FieldDecl {
@@ -193,7 +198,7 @@ mod tests {
             fields,
             extends: None,
             implements: Vec::new(),
-            annotations: annotations.iter().map(|s| s.to_string()).collect(),
+            annotations: annotations.iter().map(|s| ann(s)).collect(),
         }
     }
 
@@ -256,7 +261,7 @@ mod tests {
     #[test]
     fn field_level_getter_only_that_field() {
         let mut f = field("id", "long");
-        f.annotations = vec!["Getter".to_string()];
+        f.annotations = vec![ann("Getter")];
         let td = type_with(&[], vec![f, field("name", "String")]);
         let m = synthesize(&td, &[], &BTreeMap::new(), &HashSet::new());
         let names: Vec<&str> = m.methods.iter().map(|x| x.name.as_str()).collect();

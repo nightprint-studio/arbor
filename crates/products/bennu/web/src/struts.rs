@@ -147,6 +147,8 @@ fn parse_action(action: &Node, namespace: &str, source_file: &str, out: &mut Str
         method,
         is_wildcard,
         source_file: source_file.to_string(),
+        // Byte offset of `<action …>` in the fragment — go-to lands on the declaration line.
+        decl_offset: action.range().start,
     });
 }
 

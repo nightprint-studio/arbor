@@ -284,6 +284,24 @@ pub struct DeclarationTarget {
     pub label: String,
 }
 
+// ── JSP page-scoped variable navigation ──────────────────────────────────────
+
+/// Result of `bennu_jsp_nav` — go-to-declaration + find-usages for a JSP **page-scoped
+/// variable** (`<c:set var>` / `<s:set var>` / `<c:forEach var>` / `<s:iterator var>` …) and
+/// its EL/OGNL references (`${var}` / `%{var}` / `%{#var}`). Everything is single-file (JSP
+/// variables are page-scoped), so it needs no project index and always answers. A default
+/// (empty label, no declaration, no usages) when the caret isn't on a JSP variable token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct JspNav {
+    /// A short human label of the variable (`"JSP variable `total`"`).
+    pub label: String,
+    /// The declaring site in this file (`None` when the name is referenced but not declared
+    /// in the page — e.g. a request-scoped attribute set in the action).
+    pub declaration: Option<DeclarationTarget>,
+    /// Every EL/OGNL reference to the variable in this file, in document order.
+    pub usages: Vec<UsageHit>,
+}
+
 // ── hover (editor hover card) ────────────────────────────────────────────────
 
 /// Result of `bennu_hover` — the hover card for the symbol under the caret. `None` on the
@@ -464,35 +482,54 @@ pub struct ClassEntry {
 
 /// One input field of a JSP `<form>`, correlated against its action class — the wire view
 /// of a [`bennu_web`](https://docs.rs/bennu-web) `JspFormField` after the be-layer join.
-/// Returned by `bennu_form_analysis`. The FE shows the field name, its control kind, and
-/// two badges: whether the name **binds** (a writable property of the action class) and
-/// whether it is **validated** (has a rule in the action's validation ruleset).
+/// Returned inside `bennu_form_analysis`. The FE shows the field name, its control kind, the
+/// value it posts, and two badges: whether the name **binds** (a writable property of the
+/// action class) and whether it is **validated** (has a rule in the action's ruleset).
+///
+/// A field can come from an included fragment, not the form's own page: [`Self::source_file`]
+/// tags which JSP the field's tag actually lives in, so the inspector can show where each
+/// parameter comes from (and highlight the ones the file you're viewing contributes).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FormFieldInfo {
     /// The raw form-field name (the `name=` / legacy `property=` attribute value).
     pub name: String,
     /// The control kind label (`text` / `password` / `hidden` / … — `FormControl::as_str`).
     pub control: String,
+    /// The field's submitted `value=` as written (a fixed value or an `${…}`/`%{…}`
+    /// expression) — the "hypothetical value" the form posts. `None` when no `value=`.
+    pub value: Option<String>,
+    /// True when the field is submitted only under a condition (it sits inside a `<c:if>` /
+    /// `<s:if>` / `<c:when>` / `<c:otherwise>`), so the inspector can flag it as not always sent.
+    pub conditional: bool,
+    /// The nearest enclosing condition (`<c:if test>` value, or `"else"`), when `conditional`.
+    pub condition: Option<String>,
     /// True when `name` is a writable property (a `setXxx`) of the resolved action class —
     /// i.e. the field actually binds onto the action. False when unresolved / not a setter.
     pub bound: bool,
     /// True when `name` carries a validation rule for the resolved action class.
     pub validated: bool,
-    /// Start byte offset of the field name value inside the quotes (editor round-trip).
+    /// The forward-slashed path of the JSP this field's tag lives in — the form's host page for
+    /// its own fields, or the included fragment for a spliced-in one. Equals the owning
+    /// [`FormInfo::host_file`] for a field declared directly in the form.
+    pub source_file: String,
+    /// Start byte offset of the field name value inside the quotes, **in `source_file`**.
     pub start: usize,
-    /// End byte offset (exclusive).
+    /// End byte offset (exclusive), in `source_file`.
     pub end: usize,
 }
 
-/// One JSP `<form>` correlated with its action — returned by `bennu_form_analysis`. Carries
+/// One JSP `<form>` correlated with its action — returned inside `bennu_form_analysis`. Carries
 /// the resolved action target (class FQCN + declaring config fragment, both openable go-to
-/// sites) and the per-field bind/validate correlation. A form whose action doesn't resolve
-/// is still listed (all fields `bound = false` / `validated = false`, `action_class = None`)
-/// so the FE always shows every form.
+/// sites) and the **complete, include-expanded** field set: the form's own fields plus every
+/// parameter contributed by a `<jsp:include>`d fragment inside it (each tagged by
+/// [`FormFieldInfo::source_file`]). A form whose action doesn't resolve is still listed (all
+/// fields `bound = false` / `validated = false`, `action_class = None`) so the FE always shows
+/// every form.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FormInfo {
     /// The normalized action reference of the form (`None` when the form has no `action=`
-    /// or it is a computed OGNL expression).
+    /// or it is a computed OGNL expression). For an Entando `action="<wp:action path=…/>"` this
+    /// is the nested tag's resolved path, not the literal attribute text.
     pub action: Option<String>,
     /// The resolved implementation class FQCN (the C1 chain), if resolvable.
     pub action_class: Option<String>,
@@ -501,22 +538,29 @@ pub struct FormInfo {
     pub config_file: Option<String>,
     /// The form's `method=` (raw-lowercased: `get`/`post`), if present.
     pub method: Option<String>,
-    /// Start byte offset of the `<form>` open tag.
+    /// The forward-slashed path of the JSP that declares the `<form>` — may differ from the
+    /// analysed file (a form on a page that includes the fragment you're viewing).
+    pub host_file: String,
+    /// Start byte offset of the `<form>` open tag, in `host_file`.
     pub start: usize,
-    /// End byte offset (exclusive): past the matching close, or the open tag's `>` when the
-    /// close is missing.
+    /// End byte offset (exclusive), in `host_file`.
     pub end: usize,
-    /// The form's input fields, each correlated against the action class.
+    /// The form's input fields — its own plus every included-fragment parameter, source-tagged.
     pub fields: Vec<FormFieldInfo>,
 }
 
-/// The result of `bennu_form_analysis` for one JSP: every `<form>` in the file, correlated.
-/// Empty (`forms = []`) for a non-JSP file, a file with no project, or a file with no forms
-/// — never an error.
+/// The result of `bennu_form_analysis` for one JSP: every `<form>` relevant to the file — the
+/// file's own forms, the forms of fragments it includes, and (the key case) the forms of pages
+/// that include it, each with its complete include-expanded parameter set. Empty
+/// (`forms = []`) for a non-JSP file, a file with no project, or one that participates in no
+/// form — never an error.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FormAnalysis {
-    /// Every `<form>` found in the JSP, in source order.
+    /// Every relevant `<form>`, each with its aggregated fields.
     pub forms: Vec<FormInfo>,
+    /// True when the include walk hit its node cap and left related files unvisited — the FE
+    /// shows a hint so a huge include graph never silently drops coverage.
+    pub truncated: bool,
 }
 
 // ── TODO scan (TODO tool window) ─────────────────────────────────────────────

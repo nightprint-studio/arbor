@@ -34,4 +34,9 @@ pub mod refs;
 pub mod rename;
 pub mod spell;
 pub mod resolver;
+// Spring stereotype-bean policy: reads bennu-java's generic annotations and derives the
+// annotation-declared beans (`@Service`/`@Component`/…) the config resolver consults as a
+// fallback in the C1 chain. Mirrors `lombok` (annotation policy on the java model), but public
+// (the be build calls its project-scan collector).
+pub mod spring_beans;
 pub mod typemap;

@@ -133,6 +133,9 @@ pub struct DefinitionArgs {
 pub struct DefinitionResult {
     /// The struts config fragment the `<action>` is declared in.
     pub config_file: String,
+    /// Byte offset of the `<action>` element in `config_file` — the FE jumps here so go-to
+    /// lands on the declaration line, not the top of the file.
+    pub config_offset: usize,
     /// The resolved implementation class FQCN (the C1 chain), if resolvable.
     pub class_fqcn: Option<String>,
     /// The resolved view JSP (the Tiles chain), if resolvable.
@@ -150,10 +153,29 @@ fn bennu_definition(
     Ok(IndexService::global().definition_action(&args.file, &args.action).map(|d| {
         DefinitionResult {
             config_file: d.config_file,
+            config_offset: d.config_offset,
             class_fqcn: d.class_fqcn,
             view_jsp: d.view_jsp,
         }
     }))
+}
+
+/// Args for [`bennu_bean_class`].
+#[derive(Deserialize)]
+pub struct BeanClassArgs {
+    /// Absolute path to a file inside the project (to pick the owning project's config).
+    pub file: String,
+    /// The Spring bean id under the caret in a config XML (`<action class="beanId">`).
+    pub name: String,
+}
+
+/// Resolve a Spring **bean id** (as written in a struts `<action class="…">` or a spring
+/// `<… ref>`) to its implementation class FQCN — for go-to on a config XML. The FE then opens
+/// that class from the class index. `None` when no project owns the file, its config isn't
+/// built, or the id names no known bean (the FE falls back to treating the value as an FQCN).
+#[arbor_rpc::handler]
+fn bennu_bean_class(_ctx: &BennuState, args: BeanClassArgs) -> Result<Option<String>, String> {
+    Ok(IndexService::global().bean_class(&args.file, &args.name))
 }
 
 /// Args for [`bennu_mapper_definition`].

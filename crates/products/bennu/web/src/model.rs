@@ -32,6 +32,9 @@ pub struct ActionRecord {
     pub is_wildcard: bool,
     /// Config fragment this action was parsed from.
     pub source_file: String,
+    /// Byte offset of the `<action>` element in `source_file` — the go-to target, so a JSP
+    /// action reference jumps to the declaration line, not the top of the file.
+    pub decl_offset: usize,
 }
 
 /// A parsed Struts `<result>` inside an action.
@@ -268,6 +271,18 @@ pub struct JspFormField {
     pub name: String,
     /// What kind of control declared the field.
     pub control: FormControl,
+    /// The field's submitted `value=` as written, if present — the "hypothetical value" the
+    /// form posts. Especially meaningful on a hidden field (a fixed value or an `${…}`/`%{…}`
+    /// expression). `None` when the tag declares no `value`.
+    pub value: Option<String>,
+    /// True when the field sits inside a conditional block (`<c:if>`, `<s:if>`, `<c:when>` /
+    /// `<c:otherwise>`, or a scriptlet `<% if (…) { %>`) — so it is submitted only when that
+    /// condition holds, not unconditionally.
+    pub conditional: bool,
+    /// The nearest enclosing condition expression (the `<c:if test="…">` / `<s:if test="…">`
+    /// value, `"else"` for an `<c:otherwise>`/`<s:else>`, or the raw scriptlet `if (…)`), when
+    /// [`Self::conditional`] is true. `None` for an unconditional field.
+    pub condition: Option<String>,
     /// Start byte offset of the name value inside the quotes.
     pub start: usize,
     /// End byte offset (exclusive).

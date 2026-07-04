@@ -167,7 +167,16 @@
   colour instead of one flat block. <kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click) on an
   <code>action="…"</code> reference jumps to the Struts <code>&lt;action&gt;</code> config, its view
   JSP, or the action class. <kbd>Alt</kbd> + <kbd>F7</kbd> on an action reference lists every JSP
-  that uses it. An absolute action reference that resolves to nothing gets a
+  that uses it. The same keys work on a <strong>page-scoped JSP variable</strong> — a
+  <code>&lt;c:set var="x"&gt;</code>, <code>&lt;s:set var="x"&gt;</code>,
+  <code>&lt;c:forEach var="x"&gt;</code> or <code>&lt;s:iterator var="x"&gt;</code> and its
+  <code>$&lbrace;x&rbrace;</code> / <code>%&lbrace;x&rbrace;</code> references: <kbd>Ctrl</kbd> +
+  <kbd>B</kbd> on a reference jumps to where the variable is set, and <kbd>Alt</kbd> +
+  <kbd>F7</kbd> lists every reference in the page (it's page-scoped, so all in the same file).
+  <kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click) on a JSP <strong>include path</strong> —
+  a <code>&lt;%@ include file="…"&gt;</code> directive, <code>&lt;jsp:include page="…"&gt;</code> or
+  <code>&lt;s:include value="…"&gt;</code> — opens the referenced JSP.
+  An absolute action reference that resolves to nothing gets a
   <strong>warning squiggle</strong> — a wildcard or runtime (<code>$&lbrace;…&rbrace;</code>/<code>%&lbrace;…&rbrace;</code>)
   reference never does. Inline <code>&lt;script&gt;</code> and <code>&lt;style&gt;</code> blocks
   are highlighted as JavaScript and CSS.

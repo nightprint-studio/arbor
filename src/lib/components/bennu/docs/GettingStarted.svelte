@@ -21,8 +21,9 @@
 
 <h2>The layout</h2>
 <ul>
-  <li><strong>Left rail</strong> — Project (files), Structure (symbols of the open file), Search (find in project). Its buttons toggle the matching tool window.</li>
-  <li><strong>Right rail</strong> — Problems (diagnostics) and Outline (symbols), docked on the right.</li>
+  <li><strong>Left rail</strong> — Project (files), Structure (symbols of the open file) and Dependencies. Its buttons toggle the matching tool window.</li>
+  <li><strong>Right rail</strong> — Maven and Services, plus the <strong>Forms</strong> toggle (<kbd>Alt</kbd> + <kbd>3</kbd>) in its bottom cluster.</li>
+  <li><strong>Bottom dock</strong> — Build, Problems, TODO, <strong>Forms</strong> (the JSP form analysis for the open file) and the Terminal, tabbed.</li>
   <li><strong>Footer</strong> — the project JDK, detected capabilities, the index status, the open file's encoding and the caret position.</li>
   <li><strong>Settings / Docs</strong> live at the top-right of the title bar (the gear and the book).</li>
 </ul>

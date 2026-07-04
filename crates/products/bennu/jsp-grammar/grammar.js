@@ -117,20 +117,37 @@ module.exports = grammar({
       $.quoted_value_single,
       $.unquoted_value,
     ),
+    // A quoted attribute value may embed a nested JSP construct — a namespaced taglib tag
+    // (Entando `<wp:action path="…"/>`, `<c:url value="…"/>`), a scriptlet/expression
+    // (`value="<%= foo %>"`) or a comment — whose OWN quotes must not close the outer value.
+    // So the value is a run of text fragments interleaved with those nested constructs.
     quoted_value_double: $ => seq(
       '"',
-      repeat(choice($.el_expression, $.ognl_expression, $.attribute_fragment)),
+      repeat(choice(
+        $.el_expression, $.ognl_expression,
+        $.jsp_comment, $.jsp_expression, $.jsp_scriptlet,
+        $.self_closing_tag, $.start_tag, $.end_tag,
+        $.attribute_fragment,
+      )),
       '"',
     ),
     quoted_value_single: $ => seq(
       "'",
-      repeat(choice($.el_expression, $.ognl_expression, $.attribute_fragment_sq)),
+      repeat(choice(
+        $.el_expression, $.ognl_expression,
+        $.jsp_comment, $.jsp_expression, $.jsp_scriptlet,
+        $.self_closing_tag, $.start_tag, $.end_tag,
+        $.attribute_fragment_sq,
+      )),
       "'",
     ),
-    // A run of value text that is neither the closing quote nor an EL/OGNL start. Named
-    // (not hidden) so the highlighter's leaf classifier can colour it as a string.
-    attribute_fragment: _ => token.immediate(prec(1, /([^"$%#]|\$[^{]|%[^{]|#[^{])+/)),
-    attribute_fragment_sq: _ => token.immediate(prec(1, /([^'$%#]|\$[^{]|%[^{]|#[^{])+/)),
+    // A run of value text that is neither the closing quote, an EL/OGNL start, nor the start
+    // of a nested construct. A `<` that begins a tag / `<%` block / `<!` comment breaks the
+    // run (so the nested-construct rule takes over); a stray `<` (before whitespace, a digit,
+    // etc. — but NOT the closing quote) stays in the run. Named (not hidden) so the
+    // highlighter's leaf classifier colours it as a string.
+    attribute_fragment: _ => token.immediate(prec(1, /([^"$%#<]|\$[^{]|%[^{]|#[^{]|<[^a-zA-Z/%!"])+/)),
+    attribute_fragment_sq: _ => token.immediate(prec(1, /([^'$%#<]|\$[^{]|%[^{]|#[^{]|<[^a-zA-Z/%!'])+/)),
     unquoted_value: _ => token.immediate(/[^\s'">][^\s>]*/),
 
     // Whitespace inside tags (hidden helper leaf).

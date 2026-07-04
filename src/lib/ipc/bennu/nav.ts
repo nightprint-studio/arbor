@@ -21,11 +21,23 @@ export interface DefinitionResult {
   /** Absolute path to the struts config fragment the `<action>` is declared in
    *  (the primary openable go-to-definition target). */
   config_file: string;
+  /** Byte offset of the `<action>` element in `config_file` — jump here so go-to lands on
+   *  the declaration line, not the top of the file. */
+  config_offset: number;
   /** The resolved implementation class FQCN (the C1 chain), if resolvable. A name,
    *  not a path — shown for context, not directly openable. */
   class_fqcn: string | null;
   /** The resolved view JSP (the Tiles chain), if resolvable — a JSP path. */
   view_jsp: string | null;
+}
+
+/** Resolve a Spring **bean id** (a struts `<action class="beanId">` value under the caret in
+ *  a config XML) to its implementation class FQCN — the FE then opens that class from the
+ *  index. `null` when no project owns the file, the config isn't built, or the id names no
+ *  known bean (caller then treats the value as an FQCN directly).
+ *  Wire: `bennu_bean_class` — `{ file, name }`. */
+export function beanClass(file: string, name: string): Promise<string | null> {
+  return bennu('bennu_bean_class', { args: { file, name } });
 }
 
 /** Resolve a JSP form/link **action reference** (`/do/Category/viewTree`, or a bare
@@ -218,6 +230,43 @@ export function references(
  *  Wire: `bennu_action_usages` — `{ file, action }`. */
 export function actionUsages(file: string, action: string): Promise<UsagesResult> {
   return bennu('bennu_action_usages', { args: { file, action } });
+}
+
+// ── JSP page-scoped variable navigation ──────────────────────────────────────────
+
+/** Go-to-declaration + find-usages for a JSP **page-scoped variable** — mirrors the BE
+ *  `JspNav`. Everything is single-file (a JSP variable is page-scoped), so `declaration`
+ *  (when present) and every `usages` hit live in the SAME file as the caret. A default
+ *  (empty label, `declaration: null`, `usages: []`) when the caret isn't on a JSP variable. */
+export interface JspNav {
+  /** A short human label of the variable (`"JSP variable `total`"`). */
+  label: string;
+  /** The declaring `<c:set>`/`<s:set>`/… site in this file, or `null` when the name is
+   *  referenced but not declared in the page. */
+  declaration: DeclarationTarget | null;
+  /** Every EL/OGNL reference to the variable in this file, in document order. */
+  usages: UsageHit[];
+}
+
+/** Resolve the JSP page-scoped variable at `file`:`offset` (a `<c:set var>`/`<s:set var>`/…
+ *  declaration or an `${var}`/`%{var}` reference under the caret) to its in-page declaration
+ *  + all references. `source` is the current (possibly-unsaved) buffer. Single-file and
+ *  index-free — always answers (empty when the caret isn't on a JSP variable).
+ *  Wire: `bennu_jsp_nav` — `JspNavArgs { file, source, offset }`. */
+export function jspNav(file: string, source: string, offset: number): Promise<JspNav> {
+  return bennu('bennu_jsp_nav', { args: { file, source, offset } });
+}
+
+/** Resolve a JSP **include / view reference** under the caret (`<%@ include file>` /
+ *  `<jsp:include page>` / `<s:include value>` / `<c:import url>`) to the absolute
+ *  (forward-slashed) path of the referenced JSP, for cross-file Ctrl+B / Ctrl+click go-to.
+ *  `file` is the JSP being edited (the resolution base — absolute paths resolve against the
+ *  webapp root, relative ones against the JSP's own dir); `path` is the reference token
+ *  (the FE's `refAtCaret()`). Resolves to `null` gracefully when the reference is a computed
+ *  expression, an external `http(s)://` URL, or doesn't point at an existing file.
+ *  Wire: `bennu_jsp_include_target` — `JspIncludeTargetArgs { file, path }`. */
+export function jspIncludeTarget(file: string, path: string): Promise<string | null> {
+  return bennu('bennu_jsp_include_target', { args: { file, path } });
 }
 
 // ── hover (docs §5) ─────────────────────────────────────────────────────────────

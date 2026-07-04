@@ -28,11 +28,40 @@ pub use crate::jsp::{
     normalize_action_ref, parse_jsp, parse_jsp_file, JspActionRef, JspParse, JspTaglib,
 };
 
+// JSP include / view-reference scan + path resolution (go-to on `<%@ include %>`,
+// `<jsp:include>`, `<s:include>`, `<c:import>` → the referenced on-disk JSP).
+pub use crate::jsp_includes::{
+    parse_jsp_includes, parse_jsp_includes_file, resolve_include_target, JspInclude,
+};
+
+// JSP include GRAPH (project-wide forward+reverse include edges) + a cycle-safe transitive
+// walk from a start file — powers the include-aware Forms tool window.
+pub use crate::include_graph::{
+    build_include_graph, related_files, IncludeGraph, IncludeRelation, RelatedFile, RelatedFiles,
+};
+
 // The form records live in `model` (like the other emitted records).
 pub use crate::model::{FormControl, JspForm, JspFormField};
 
-// JSP `<form>` scan (form → action → fields, for the form/field-binding inspector).
-pub use crate::forms::{parse_jsp_forms, parse_jsp_forms_file};
+// JSP `<form>` scan (form → action → fields, for the form/field-binding inspector) + the
+// all-fields scan a fragment (no enclosing `<form>`) contributes to its parent's form.
+pub use crate::forms::{parse_jsp_fields, parse_jsp_fields_file, parse_jsp_forms, parse_jsp_forms_file};
+
+// Include-aware form field aggregation: the complete parameter set a `<form>` posts once its
+// `<jsp:include>`d fragments are spliced in (both directions across the include graph).
+pub use crate::form_expand::{
+    analyze_forms_expanded, ExpandedField, ExpandedForm, ExpandedForms,
+};
+
+// Incremental, persistable include-graph cache (avoids re-parsing every JSP per tab switch).
+pub use crate::include_cache::{file_stamp, IncludeGraphCache};
+
+// JSP page-scoped variable navigation (`<c:set>`/`<s:set>`/… declarations + `${var}`/`%{var}`
+// references) — go-to-declaration + find-usages for JSP-local variables.
+pub use crate::jsp_vars::{
+    line_col, parse_jsp_vars, parse_jsp_vars_file, var_declaration, var_name_at, var_usages,
+    JspVarDecl, JspVarRef, JspVars,
+};
 
 // Struts wildcard support (candidate matching / backref expansion — docs §7).
 pub use crate::struts::{join_ns, WildcardPattern};

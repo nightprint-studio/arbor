@@ -73,9 +73,14 @@ export const elOgnlStream: StreamParser<ElState> = {
     // Numbers (int / decimal).
     if (stream.match(/^\d+(?:\.\d+)?/)) return 'number';
 
-    // OGNL context variable: `#session`, `#request`, `#parameters`, `#attr`, `#this`, …
-    // (`#{ … }` map/deferred-EL is caught by the delimiter branch above.)
-    if (stream.match(/^#[A-Za-z_$][\w$]*/)) return 'variable-2';
+    // OGNL context-variable marker `#` (as in `#session`, `#request`, `#parameters`, `#attr`).
+    // Emit the `#` as its OWN token in a distinct colour (annotation) so the sigil stands out
+    // from the variable name — the identifier rule colours the name next. (`#{ … }` deferred-EL
+    // / map is a delimiter, already caught above.)
+    if (stream.peek() === '#') {
+      stream.next();
+      return 'meta';
+    }
 
     // OGNL static access marker `@com.x.Foo@bar` — the `@`s are operators; the dotted
     // class + member fall through to the identifier / dot rules.

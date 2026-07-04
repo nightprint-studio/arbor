@@ -7,10 +7,10 @@
  *
  * Tool-window layout (IntelliJ New UI):
  *   • LEFT rail (top)     — Project (tree), Structure (symbols), Dependencies.
- *   • LEFT rail (bottom)  — the bottom-dock toggles: Terminal, Problems.
- *   • RIGHT rail          — Maven (top), Services/Run (bottom). Mock panels.
- *   • BOTTOM dock         — Problems + Terminal, tabbed. Its toggles live in the
- *                           left rail's bottom cluster.
+ *   • LEFT rail (bottom)  — bottom-dock toggles: Build, Problems, TODO, Terminal.
+ *   • RIGHT rail          — Maven (top); Services + the Forms toggle (bottom).
+ *   • BOTTOM dock         — Build · Problems · TODO · Forms · Terminal, tabbed.
+ *                           Toggles live in the left rail (+ Forms in the right rail bottom).
  * Find-in-project is a modal (Ctrl+Shift+F), not a rail tool.
  *
  * Rune store — private `$state`, returned getters + methods (CLAUDE.md).
@@ -23,8 +23,9 @@ import type { GenerateMode } from '$lib/components/bennu/bennu-intentions';
 export type LeftPanel = 'project' | 'structure' | 'dependencies';
 /** Right tool windows (activity bar) — mock tool panels for now. */
 export type RightPanel = 'maven' | 'services';
-/** Bottom dock sections (tabbed). */
-export type BottomPanel = 'problems' | 'terminal' | 'build' | 'todos';
+/** Bottom dock sections (tabbed). The Forms inspector lives here (wide, horizontal data)
+ *  rather than in a narrow side panel; its toggle sits in the right rail's bottom cluster. */
+export type BottomPanel = 'problems' | 'terminal' | 'build' | 'todos' | 'forms';
 
 function createBennuUiStore() {
   // Default the Project tool open so the shell shows the tree on launch.
@@ -71,6 +72,12 @@ function createBennuUiStore() {
   // `nonce` makes a repeat jump to the same line fire again.
   let gotoTarget = $state<{ line: number; nonce: number } | null>(null);
 
+  // Goto-by-byte-offset relay — the Forms tool window (a sibling of the editor) asks the
+  // editor to move the caret to a UTF-8 byte offset (a `<form>` tag / field-name span).
+  // Same shape as `gotoTarget`: the editor watches the ticking target and scrolls there,
+  // and the bumped `nonce` re-fires a repeat jump to the same offset.
+  let gotoOffsetTarget = $state<{ offset: number; nonce: number } | null>(null);
+
   // Caret position (the editor pushes it here; the footer displays it).
   let caretLine = $state(1);
   let caretCol = $state(1);
@@ -102,6 +109,7 @@ function createBennuUiStore() {
     get generateMode() { return generateMode; },
     get validationCreatorOpen() { return validationCreatorOpen; },
     get gotoTarget()   { return gotoTarget; },
+    get gotoOffsetTarget() { return gotoOffsetTarget; },
     get revealNonce()  { return revealNonce; },
     get treeExpanded() { return treeExpanded; },
 
@@ -155,6 +163,12 @@ function createBennuUiStore() {
     /** Ask the editor to scroll to a 1-based line (a panel → editor relay). */
     requestGoto(line: number) {
       gotoTarget = { line, nonce: (gotoTarget?.nonce ?? 0) + 1 };
+    },
+
+    /** Ask the editor to move the caret to a **UTF-8 byte offset** and reveal it (the
+     *  Forms tool window → editor relay, for jumping to a `<form>` tag / field name). */
+    requestGotoOffset(offset: number) {
+      gotoOffsetTarget = { offset, nonce: (gotoOffsetTarget?.nonce ?? 0) + 1 };
     },
 
     /** Reveal the active file in the Project tree (ensures Project is open + bumps

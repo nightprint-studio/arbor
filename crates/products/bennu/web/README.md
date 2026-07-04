@@ -25,11 +25,18 @@ onto the [`bennu-index`](../index) seam for the integration to ingest and resolv
 
 - **JSP forms** (`forms` module) — a linear (non-XML) scan of a `.jsp` for `<form>`s
   (HTML `<form>`, Struts `<s:form>`, legacy `<html:form>`) + their input fields
-  (`<input|textarea|select>` / `<s:textfield>` / `<html:text>` …). Each form carries its
-  normalized `action` key + the field names, so the integration can correlate a field
-  against the resolved action class's writable properties (setters) and validation rules
-  ("form → action → fields, which bind, which are validated"). Shares `jsp`'s comment /
-  scriptlet masking + attribute scan.
+  (`<input|textarea|select>` / `<s:textfield>` / `<html:text>` …), each with the value it
+  posts + whether it sits inside a `<c:if>`/`<s:if>` (conditional). The form `action` is
+  normalized (an Entando `action="<wp:action path=…/>"` resolves through the nested tag), so
+  the integration can correlate a field against the resolved action class's writable
+  properties (setters) + validation rules. Shares `jsp`'s comment / scriptlet masking.
+- **Include-aware form aggregation** (`form_expand` + `include_graph` + `include_cache`) —
+  a legacy form is split across `<jsp:include>`s, so `analyze_forms_expanded` walks the
+  project's include graph (both directions, cycle-safe) to give each form its COMPLETE
+  parameter set: the form's own fields plus every input a fragment inside it contributes,
+  each tagged with its `source_file`. `IncludeGraphCache` keeps the graph incremental +
+  serde-persistable (per-file `(mtime,size)` stamps → re-parse only changed files) so the
+  analysis never re-parses the whole project per editor tab switch.
 
 ## Wildcards & Tiles → candidate edges (never a false "missing")
 

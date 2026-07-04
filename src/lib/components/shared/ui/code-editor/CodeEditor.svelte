@@ -235,6 +235,16 @@
     view.focus();
   }
 
+  /** Move the caret to a **UTF-8 byte offset** and reveal it (centred). Backend spans
+   *  (diagnostics, form/field ranges) are byte offsets, so we map through
+   *  `makeByteToU16` against the live buffer before dispatching — the byte-aware sibling
+   *  of {@link scrollToOffset}. No-op when unmounted. */
+  export function scrollToByteOffset(byteOffset: number) {
+    if (!view) return;
+    const b2u = makeByteToU16(view.state.doc.toString());
+    scrollToOffset(b2u(byteOffset));
+  }
+
   export function scrollToLineCol(line: number, col = 1) {
     if (!view) return;
     const doc = view.state.doc;

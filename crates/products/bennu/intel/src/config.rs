@@ -24,6 +24,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::spring_beans::AnnotationBean;
 use bennu_index::prelude::{
     serialize_symbol, BlobWriter, Relation, RelationKind, RelationReader, RelationWriter, Source,
     StoreError, Symbol, SymbolKind,
@@ -55,9 +56,16 @@ pub enum ActionVerdict {
 /// Persist the config-graph into the symbol + relation stores under `index_dir`, then
 /// return a [`ConfigResolver`] over them. The action/bean records get `u32` ids assigned
 /// here; the relations resolve their string endpoints to those ids.
+///
+/// `annotation_beans` are the Spring stereotype-declared beans (`@Service`/`@Component`/…)
+/// collected from the project's Java symbols (Option B: kept in a SEPARATE map here, never
+/// mixed into the pure-XML `graph.beans`). They feed the C1 fallback in
+/// [`ConfigResolver::resolve_action_class`] for annotation-based apps whose bean ids aren't
+/// declared in any XML `<bean>`.
 pub fn ingest_config_graph(
     graph: &WebConfigGraph,
     index_dir: &Path,
+    annotation_beans: &[AnnotationBean],
 ) -> Result<ConfigResolver, StoreError> {
     let mut action_ids: HashMap<String, u32> = HashMap::new();
     let mut bean_ids: HashMap<String, u32> = HashMap::new();
@@ -79,8 +87,9 @@ pub fn ingest_config_graph(
             signature: format!("action {} class={}", a.qualified_name, a.class_ref),
             modifiers: if a.is_wildcard { "wildcard".into() } else { String::new() },
             loc_file: a.source_file.clone(),
-            loc_start: 0,
-            loc_end: 0,
+            // The `<action>` element offset → go-to lands on the declaration, not line 1.
+            loc_start: a.decl_offset as u32,
+            loc_end: a.decl_offset as u32,
             loc_container: String::new(),
             loc_class: String::new(),
             members_json: String::new(),
@@ -168,6 +177,14 @@ pub fn ingest_config_graph(
         .map(|a| (WildcardPattern::compile(&a.name), a.namespace.clone()))
         .collect();
 
+    // The annotation-bean fallback map (Option B): name → bean, kept separate from the
+    // pure-XML graph. Last-writer-wins on a duplicate name (two `@Service("x")` collide) —
+    // a rare, undefined-in-Spring case not worth failing the whole ingest over.
+    let annotation_beans = annotation_beans
+        .iter()
+        .map(|b| (b.name.clone(), b.clone()))
+        .collect();
+
     Ok(ConfigResolver {
         graph: graph.clone(),
         action_ids,
@@ -175,6 +192,7 @@ pub fn ingest_config_graph(
         symbols,
         relations,
         wildcards,
+        annotation_beans,
     })
 }
 
@@ -192,6 +210,12 @@ pub struct ConfigResolver {
     symbols: HashMap<u32, Symbol>,
     relations: Vec<Relation>,
     wildcards: Vec<(WildcardPattern, String)>,
+    /// Annotation-declared Spring beans (`@Service`/`@Component`/…), keyed by bean name.
+    /// The C1 fallback (docs §10) for annotation-based apps: an XML `<bean>` isn't declared
+    /// for the id, so the id resolves against a stereotype-annotated class instead. Kept
+    /// SEPARATE from the pure-XML `graph.beans` (Option B) — fed from the Java symbols at
+    /// ingest, never mixed into bennu-web's parse.
+    annotation_beans: HashMap<String, AnnotationBean>,
 }
 
 impl ConfigResolver {
@@ -201,7 +225,21 @@ impl ConfigResolver {
     /// (unknown) or the action declares no class.
     pub fn resolve_action_class(&self, action_qname: &str) -> Option<String> {
         let key = self.canonical_action_key(action_qname)?;
-        let action_id = *self.action_ids.get(&key)?;
+        if let Some(fqcn) = self.resolve_action_class_xml(&key) {
+            return Some(fqcn);
+        }
+        // C1 fallback (docs §10): the XML `<bean>`s don't name this id → resolve the action's
+        // raw `class=` bean id against the annotation-declared beans (`@Service("foo")`, or a
+        // bare `@Service` on `FooService` → `fooService`). Lights up JSP action go-to→class in
+        // annotation-based apps with zero XML `<bean>`s for the id.
+        let class_ref = self.action_class_ref_id(&key)?;
+        self.annotation_beans.get(class_ref).map(|b| b.fqcn.clone())
+    }
+
+    /// The XML-only C1 resolution (the original path): action → `ActionToClass` edge → bean
+    /// symbol `fqn`, else the Spring parent chain. `None` when the id isn't an XML `<bean>`.
+    fn resolve_action_class_xml(&self, key: &str) -> Option<String> {
+        let action_id = *self.action_ids.get(key)?;
         let bean_id = self
             .relations
             .iter()
@@ -213,6 +251,18 @@ impl ConfigResolver {
         }
         // Bean declares only `parent=` → walk the Spring parent chain via the shared map.
         resolve_bean_map(&self.graph.beans).get(&bean_sym.simple_name).cloned()
+    }
+
+    /// The raw `class=` attribute (the Spring bean id) of the action with the given
+    /// canonicalized qualified name, off the parsed graph. `None` when the action isn't in
+    /// the graph or declares no `class=`.
+    fn action_class_ref_id(&self, qname: &str) -> Option<&str> {
+        self.graph
+            .actions
+            .iter()
+            .find(|a| a.qualified_name == qname)
+            .map(|a| a.class_ref.as_str())
+            .filter(|r| !r.is_empty())
     }
 
     /// The view chain: action → `<result type=tiles>` def → JSP. Answered off the parsed
@@ -261,21 +311,38 @@ impl ConfigResolver {
         let sym = self.symbols.get(&id)?;
         Some(ActionTarget {
             config_file: sym.loc_file.clone(),
+            config_offset: sym.loc_start as usize,
             class_fqcn: self.resolve_action_class(&key),
             view_jsp: self.resolve_action_view(&key),
         })
     }
 
+    /// Resolve a Spring **bean id** (as written in a struts `<action class="beanId">` or a
+    /// spring `<bean ref>`) to the implementation class FQCN — for go-to on a config XML.
+    /// Tries the XML bean map (resolving the `parent=` chain), then the annotation-declared
+    /// bean map (Option B). `None` when the id names no known bean.
+    pub fn resolve_bean_class(&self, bean_id: &str) -> Option<String> {
+        if let Some(fqcn) = resolve_bean_map(&self.graph.beans).get(bean_id) {
+            if !fqcn.is_empty() {
+                return Some(fqcn.clone());
+            }
+        }
+        self.annotation_beans.get(bean_id).map(|b| b.fqcn.clone())
+    }
+
     /// Canonicalize a **raw** JSP action reference (the attribute value the editor sends
     /// verbatim) to a qualified-name key actually present in the graph, or `None`. Tolerant
-    /// in three steps, cheapest first — the fix for go-to / find-usages silently failing on
-    /// every `.action`/`.do` URL or namespace-less reference:
+    /// in four steps, cheapest first — the fix for go-to / find-usages silently failing on
+    /// every `.action`/`.do` URL, servlet-prefixed path, or namespace-less reference:
     ///   1. **exact** — the ref is already a stored qname (`/do/Cat/edit`);
     ///   2. **normalized** — strip a trailing `.action`/`.do` + `?query` (`/do/Cat/edit.action`
     ///      → `/do/Cat/edit`), then exact-match;
-    ///   3. **unambiguous suffix** — a bare `name` (no namespace, as a JSP served under an
-    ///      unknown path emits) matched to a UNIQUE `…/name` action; ambiguous → `None`
-    ///      (never guess between two namespaces).
+    ///   3. **segment-aligned suffix** — a JSP action URL often carries a servlet/filter
+    ///      prefix the Struts namespace doesn't (e.g. Entando's
+    ///      `/ExtStr2/do/FrontEnd/…/processPage.action`), so drop leading path segments and
+    ///      match the LONGEST suffix that is a known action qname;
+    ///   4. **unique trailing name** — as a last resort, a UNIQUE action whose trailing name
+    ///      segment matches (the namespace is unknown); ambiguous → `None` (never guess).
     fn canonical_action_key(&self, raw: &str) -> Option<String> {
         if self.action_ids.contains_key(raw) {
             return Some(raw.to_string());
@@ -284,22 +351,29 @@ impl ConfigResolver {
         if self.action_ids.contains_key(&norm) {
             return Some(norm);
         }
-        // Bare name (`viewTree`) → the namespace is unknown from a JSP; accept only a UNIQUE
-        // `…/viewTree` action so a jump is never to the wrong namespace.
-        if !norm.contains('/') {
-            let suffix = format!("/{norm}");
-            let mut hit: Option<String> = None;
-            for k in self.action_ids.keys() {
-                if k.ends_with(&suffix) {
-                    if hit.is_some() {
-                        return None; // ambiguous across namespaces
-                    }
-                    hit = Some(k.clone());
-                }
+        let segs: Vec<&str> = norm.trim_start_matches('/').split('/').filter(|s| !s.is_empty()).collect();
+        // 3. Longest known-action suffix: drop 1..n leading segments (e.g. the `/ExtStr2`
+        //    servlet prefix) and take the first (= longest) suffix that is a stored qname.
+        for start in 1..segs.len() {
+            let cand = format!("/{}", segs[start..].join("/"));
+            if self.action_ids.contains_key(&cand) {
+                return Some(cand);
             }
-            return hit;
         }
-        None
+        // 4. Unique trailing name segment (subsumes the bare-name case). A top-level action
+        //    with empty namespace is keyed by the bare name; a namespaced one by `…/name`.
+        let last = segs.last()?;
+        let suffix = format!("/{last}");
+        let mut hit: Option<String> = None;
+        for k in self.action_ids.keys() {
+            if k == last || k.ends_with(&suffix) {
+                if hit.is_some() {
+                    return None; // ambiguous across namespaces
+                }
+                hit = Some(k.clone());
+            }
+        }
+        hit
     }
 
     // ── interceptors ──────────────────────────────────────────────────────────
@@ -412,6 +486,18 @@ impl ConfigResolver {
     pub fn bean_count(&self) -> usize {
         self.bean_ids.len()
     }
+
+    /// Look up an annotation-declared Spring bean (`@Service`/`@Component`/…) by its name —
+    /// the C1 fallback map (Option B). For a future `@Autowired`-by-name go-to consumer + the
+    /// index inspector. `None` when no stereotype-annotated class registers that name.
+    pub fn resolve_bean(&self, name: &str) -> Option<&AnnotationBean> {
+        self.annotation_beans.get(name)
+    }
+
+    /// Total annotation-declared beans ingested (accessor for tests / stats).
+    pub fn annotation_bean_count(&self) -> usize {
+        self.annotation_beans.len()
+    }
     pub fn relation_count(&self) -> usize {
         self.relations.len()
     }
@@ -432,6 +518,9 @@ impl ConfigResolver {
 pub struct ActionTarget {
     /// The struts config fragment the `<action>` is declared in.
     pub config_file: String,
+    /// Byte offset of the `<action>` element in `config_file` — the FE jumps here so go-to
+    /// lands on the declaration, not the top of the file.
+    pub config_offset: usize,
     /// The resolved implementation class FQCN (the C1 chain), if resolvable.
     pub class_fqcn: Option<String>,
     /// The resolved view JSP (the Tiles chain), if resolvable.
@@ -517,7 +606,7 @@ mod tests {
             mapper_files: vec![],
         };
         let (graph, _report) = build_web_graph(&inputs);
-        let cfg = ingest_config_graph(&graph, &dir).unwrap();
+        let cfg = ingest_config_graph(&graph, &dir, &[]).unwrap();
 
         // C1: action → bean-id → FQCN, over the ingested ActionToClass edge.
         assert_eq!(
@@ -594,7 +683,7 @@ mod tests {
             mapper_files: vec![],
         };
         let (graph, _report) = build_web_graph(&inputs);
-        let cfg = ingest_config_graph(&graph, &dir).unwrap();
+        let cfg = ingest_config_graph(&graph, &dir, &[]).unwrap();
 
         let fqcn = |cfg: &ConfigResolver, r: &str| cfg.action_class_ref(r).and_then(|t| t.class_fqcn);
 
@@ -616,11 +705,111 @@ mod tests {
         assert_eq!(fqcn(&cfg, "/do/Sec/edit").as_deref(), Some("com.x.SecAction"));
         // 6. a genuinely-unknown ref stays unresolved.
         assert!(cfg.action_class_ref("/do/Cat/ghost").is_none());
+        // 7. servlet/filter-prefixed URL (Entando `<wp:action path="/ExtStr2/...">`): the
+        //    `/ExtStr2` prefix isn't in the Struts namespace, so the longest known-action
+        //    suffix (`/do/Cat/viewTree`) matches after dropping leading segments.
+        assert_eq!(
+            fqcn(&cfg, "/ExtStr2/do/Cat/viewTree.action").as_deref(),
+            Some("com.x.CategoryAction")
+        );
+        // …and a prefixed AMBIGUOUS tail still refuses to guess.
+        assert!(cfg.action_class_ref("/ExtStr2/do/edit.action").is_none());
+
+        // The go-to target carries the `<action>` byte offset (non-zero) so it lands on the
+        // declaration, not line 1.
+        let tgt = cfg.action_class_ref("/do/Cat/viewTree").unwrap();
+        assert!(tgt.config_offset > 0, "action decl offset must be captured");
+        assert!(tgt.config_file.ends_with("s.xml"));
+        // A struts `class="beanId"` resolves to its impl FQCN (config-XML go-to).
+        assert_eq!(cfg.resolve_bean_class("categoryAction").as_deref(), Some("com.x.CategoryAction"));
+        assert_eq!(cfg.resolve_bean_class("nope").as_deref(), None);
 
         // diagnose_action stays strict but suffix-tolerant: the concrete action (with a raw
         // `.action`) is Exists; a dangling absolute ref is Missing.
         assert_eq!(cfg.diagnose_action("/do/Cat/viewTree.action"), ActionVerdict::Exists);
         assert_eq!(cfg.diagnose_action("/do/Cat/ghost"), ActionVerdict::Missing);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Option B C1 fallback: an `<action class="fooService">` with NO matching XML `<bean>`
+    /// resolves through the annotation-declared bean map (`@Service("fooService")`), lighting
+    /// up JSP action go-to→class in annotation-based apps. An XML bean still wins (no
+    /// regression), and the resolved FQCN flows all the way into `action_class_ref().class_fqcn`
+    /// (the struct the FE go-to reads).
+    #[test]
+    fn ingest_annotation_bean_fallback_resolves_action_class() {
+        use bennu_web::prelude::{build_web_graph, WebInputs};
+
+        let dir = std::env::temp_dir().join(format!("bennu-cfg-annbean-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Two actions: `edit` → `fooService` has NO XML bean (annotation-only); `list` →
+        // `barService` DOES have an XML bean (must still win, no regression).
+        let struts = dir.join("s.xml");
+        std::fs::write(
+            &struts,
+            r#"<struts><package name="p" namespace="/do/X" extends="japs-default">
+                <action name="edit" class="fooService"><result type="tiles">v</result></action>
+                <action name="list" class="barService"><result type="tiles">v</result></action>
+              </package></struts>"#,
+        )
+        .unwrap();
+        let beans = dir.join("b.xml");
+        std::fs::write(
+            &beans,
+            r#"<beans><bean id="barService" class="com.x.XmlBarService"/></beans>"#,
+        )
+        .unwrap();
+
+        let inputs = WebInputs {
+            struts_roots: vec![struts],
+            resource_roots: vec![],
+            spring_files: vec![beans],
+            tiles_files: vec![],
+            validation_files: vec![],
+            mapper_files: vec![],
+        };
+        let (graph, _report) = build_web_graph(&inputs);
+
+        // The annotation-declared beans (as `collect_annotation_beans` would produce them):
+        // `fooService` is annotation-only, `barService` also exists as XML (the XML must win).
+        let ann = vec![
+            AnnotationBean {
+                name: "fooService".into(),
+                fqcn: "com.x.FooService".into(),
+                source_file: "com/x/FooService.java".into(),
+            },
+            AnnotationBean {
+                name: "barService".into(),
+                fqcn: "com.x.AnnotationBarService".into(),
+                source_file: "com/x/AnnotationBarService.java".into(),
+            },
+        ];
+        let cfg = ingest_config_graph(&graph, &dir, &ann).unwrap();
+
+        assert_eq!(cfg.annotation_bean_count(), 2);
+
+        // The annotation-bean fallback: `fooService` has no XML bean → resolves to the
+        // `@Service` class.
+        assert_eq!(
+            cfg.resolve_action_class("/do/X/edit").as_deref(),
+            Some("com.x.FooService")
+        );
+        // No regression: the XML `<bean>` for `barService` still wins over the annotation bean.
+        assert_eq!(
+            cfg.resolve_action_class("/do/X/list").as_deref(),
+            Some("com.x.XmlBarService")
+        );
+
+        // The bean is retrievable by name (for the future @Autowired go-to + inspector).
+        assert_eq!(cfg.resolve_bean("fooService").map(|b| b.fqcn.as_str()), Some("com.x.FooService"));
+        assert!(cfg.resolve_bean("nope").is_none());
+
+        // End-to-end: the go-to target struct carries the annotation FQCN (the FE path).
+        let target = cfg.action_class_ref("/do/X/edit").expect("action resolves");
+        assert_eq!(target.class_fqcn.as_deref(), Some("com.x.FooService"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -674,7 +863,7 @@ mod tests {
             mapper_files: vec![],
         };
         let (graph, _report) = build_web_graph(&inputs);
-        let cfg = ingest_config_graph(&graph, &dir).unwrap();
+        let cfg = ingest_config_graph(&graph, &dir, &[]).unwrap();
 
         assert_eq!(cfg.interceptor_count(), 2, "1 interceptor + 1 stack");
         assert_eq!(cfg.validation_count(), 1);
@@ -744,7 +933,7 @@ mod tests {
             mapper_files: vec![mapper],
         };
         let (graph, _report) = build_web_graph(&inputs);
-        let cfg = ingest_config_graph(&graph, &dir).unwrap();
+        let cfg = ingest_config_graph(&graph, &dir, &[]).unwrap();
 
         assert_eq!(cfg.mapper_count(), 1);
         assert_eq!(cfg.statement_count(), 4);

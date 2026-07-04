@@ -177,3 +177,39 @@ struts list with single quotes inside double quotes
       (attribute_name)
       (quoted_value_double
         (attribute_fragment)))))
+
+================================================================================
+nested taglib tag inside an attribute value
+================================================================================
+<a href="<wp:action path="/x.action" />">go</a>
+--------------------------------------------------------------------------------
+
+(document
+  (start_tag
+    (tag_name)
+    (attribute
+      (attribute_name)
+      (quoted_value_double
+        (self_closing_tag
+          (tag_name)
+          (attribute
+            (attribute_name)
+            (quoted_value_double
+              (attribute_fragment)))))))
+  (text)
+  (end_tag
+    (tag_name)))
+
+================================================================================
+scriptlet expression inside an attribute value
+================================================================================
+<input value="<%= dflt %>"/>
+--------------------------------------------------------------------------------
+
+(document
+  (self_closing_tag
+    (tag_name)
+    (attribute
+      (attribute_name)
+      (quoted_value_double
+        (jsp_expression)))))

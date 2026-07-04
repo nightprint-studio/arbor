@@ -11,10 +11,10 @@
    *
    * Tool windows (IntelliJ New UI):
    *   • LEFT rail top     — Project (tree), Structure (symbols), Dependencies — left side panels.
-   *   • LEFT rail bottom  — the bottom-dock toggles (Terminal, Problems). Docs &
+   *   • LEFT rail bottom  — the bottom-dock toggles (Build, Problems, TODO, Terminal). Docs &
    *                         Settings live in the titlebar's right cluster.
-   *   • RIGHT rail        — Maven (top), Services/Run (bottom) — mock tool panels.
-   *   • BOTTOM dock       — Problems + Terminal, tabbed (reuses Corvus's terminal).
+   *   • RIGHT rail        — Maven (top); Services + the Forms toggle (bottom).
+   *   • BOTTOM dock       — Build · Problems · TODO · Forms · Terminal, tabbed.
    * Find-in-project is a modal (Ctrl+Shift+F / palette), not a rail tool.
    */
   import { onMount } from 'svelte';
@@ -22,6 +22,7 @@
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info,
     Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck,
+    TextCursorInput,
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -166,7 +167,10 @@
   const rightTop = $derived<ActivityRailItem[]>([
     { id: 'maven', tooltip: 'Maven', shortcut: 'Alt+8', icon: Hammer, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') },
   ]);
+  // Forms drives the BOTTOM dock (wide, horizontal data), not a side panel — its toggle sits
+  // in the right rail's bottom cluster; the active state mirrors the dock's open tab.
   const rightBottom = $derived<ActivityRailItem[]>([
+    { id: 'forms', tooltip: 'Forms', shortcut: 'Alt+3', icon: TextCursorInput, active: bennuUiStore.bottomPanel === 'forms', onclick: () => bennuUiStore.toggleBottom('forms') },
     { id: 'services', tooltip: 'Services', shortcut: 'Alt+9', icon: Server, active: bennuUiStore.rightPanel === 'services', onclick: () => bennuUiStore.toggleRight('services') },
   ]);
 
@@ -180,6 +184,7 @@
   const ICONS: Record<string, IconComponent> = {
     'folder-tree': FolderTree as unknown as IconComponent,
     'list-tree': ListTree as unknown as IconComponent,
+    'list': TextCursorInput as unknown as IconComponent,
     'library': Library as unknown as IconComponent,
     'search': Search as unknown as IconComponent,
     'hash': Hash as unknown as IconComponent,
@@ -255,6 +260,7 @@
     const viewItems = [
       { id: 'project',   title: 'Toggle Project',   icon: 'folder-tree', shortcut: 'Alt+1', action: () => run(() => bennuUiStore.toggleLeft('project')), when: true },
       { id: 'structure', title: 'Toggle Structure', icon: 'list-tree',   shortcut: 'Alt+2', action: () => run(() => bennuUiStore.toggleLeft('structure')), when: true },
+      { id: 'forms',     title: 'Toggle Forms',     icon: 'list',        shortcut: 'Alt+3', action: () => run(() => bennuUiStore.toggleBottom('forms')), when: true },
       { id: 'dependencies', title: 'Dependencies',  icon: 'library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: true },
       { id: 'problems',  title: 'Toggle Problems',  icon: 'alert',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
       { id: 'todos',     title: 'Toggle TODO',      icon: 'todo',        shortcut: 'Alt+7', action: () => run(() => bennuUiStore.toggleBottom('todos')), when: true },
@@ -353,6 +359,7 @@
       }
       if (e.key === '1') { e.preventDefault(); bennuUiStore.toggleLeft('project'); return; }
       if (e.key === '2') { e.preventDefault(); bennuUiStore.toggleLeft('structure'); return; }
+      if (e.key === '3') { e.preventDefault(); bennuUiStore.toggleBottom('forms'); return; }
       if (e.key.toLowerCase() === 'n') { e.preventDefault(); bennuUiStore.toggleLeft('dependencies'); return; }
       if (e.key === '6') { e.preventDefault(); bennuUiStore.toggleBottom('problems'); return; }
       if (e.key === '7') { e.preventDefault(); bennuUiStore.toggleBottom('todos'); return; }

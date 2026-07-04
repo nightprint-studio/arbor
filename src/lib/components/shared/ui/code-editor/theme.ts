@@ -114,6 +114,15 @@ export const codeEditorTheme = EditorView.theme(
     '.cm-matchingBracket': {
       outline: '1px solid var(--accent-strong, var(--accent))', borderRadius: '2px',
     },
+    // Ctrl/Cmd-hover go-to affordance: the token a click would navigate is underlined and
+    // the pointer becomes a hand (the mouse is over this span while Ctrl is held).
+    '.cm-goto-link': {
+      textDecoration: 'underline',
+      textUnderlineOffset: '2px',
+      textDecorationColor: 'var(--accent)',
+      color: 'var(--accent)',
+      cursor: 'pointer',
+    },
     '.cm-tooltip': {
       backgroundColor: 'var(--bg-elevated)', color: 'var(--text-primary)',
       border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)',

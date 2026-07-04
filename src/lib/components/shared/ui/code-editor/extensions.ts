@@ -18,9 +18,9 @@
 import {
   EditorView, lineNumbers, keymap, hoverTooltip,
   highlightActiveLine, highlightActiveLineGutter, drawSelection,
-  ViewPlugin, type PluginValue, type ViewUpdate,
+  ViewPlugin, Decoration, type DecorationSet, type PluginValue, type ViewUpdate,
 } from '@codemirror/view';
-import { EditorState, type Extension, type Text } from '@codemirror/state';
+import { EditorState, StateField, StateEffect, type Extension, type Text } from '@codemirror/state';
 import { history, defaultKeymap, historyKeymap, indentWithTab, deleteLine } from '@codemirror/commands';
 import { bracketMatching, indentOnInput, foldKeymap, foldGutter, codeFolding } from '@codemirror/language';
 import { lintGutter, lintKeymap } from '@codemirror/lint';
@@ -244,9 +244,91 @@ export function createCodeEditorExtensions(
         return false;
       },
     }));
+    // The Ctrl/Cmd-hover affordance: underline + pointer-cursor the token a click would
+    // navigate, so the user sees WHERE go-to will land (IntelliJ / VS Code).
+    exts.push(...ctrlHoverLink());
   }
 
   return { extensions: exts, getTree };
+}
+
+// ── Ctrl/Cmd-hover link affordance ──────────────────────────────────────────────
+//
+// While Ctrl/Cmd is held, the reference-like token under the mouse is underlined and the
+// cursor becomes a pointer (the mark's CSS sets `cursor: pointer`, and the mouse is over
+// the marked span). Optimistic (any reference-like token, like VS Code) — the actual
+// resolution still happens on click. No tree needed, so it works before the grammar loads.
+
+const gotoLinkMark = Decoration.mark({ class: 'cm-goto-link' });
+const setGotoLink = StateEffect.define<{ from: number; to: number } | null>();
+
+const gotoLinkField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) {
+      if (e.is(setGotoLink)) {
+        deco = e.value ? Decoration.set([gotoLinkMark.range(e.value.from, e.value.to)]) : Decoration.none;
+      }
+    }
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+/** The link range currently held in the field (to change-guard the mousemove dispatch). */
+function currentGotoLink(view: EditorView): { from: number; to: number } | null {
+  let found: { from: number; to: number } | null = null;
+  view.state.field(gotoLinkField).between(0, view.state.doc.length, (from, to) => {
+    found = { from, to };
+    return false;
+  });
+  return found;
+}
+
+function ctrlHoverLink(): Extension {
+  // A window keyup clears the link when Ctrl/Cmd is released without moving the mouse
+  // (mousemove alone would leave a stale underline until the next move).
+  const keyupPlugin = ViewPlugin.fromClass(
+    class {
+      onKeyUp: (e: KeyboardEvent) => void;
+      constructor(readonly view: EditorView) {
+        this.onKeyUp = (e) => {
+          if ((e.key === 'Control' || e.key === 'Meta') && currentGotoLink(view)) {
+            view.dispatch({ effects: setGotoLink.of(null) });
+          }
+        };
+        window.addEventListener('keyup', this.onKeyUp);
+      }
+      destroy() {
+        window.removeEventListener('keyup', this.onKeyUp);
+      }
+    },
+  );
+
+  const events = EditorView.domEventHandlers({
+    mousemove(event, view) {
+      const active = event.ctrlKey || event.metaKey;
+      let range: { from: number; to: number } | null = null;
+      if (active) {
+        const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+        if (pos != null) range = refRangeAt(view.state.doc, pos);
+      }
+      const cur = currentGotoLink(view);
+      // Only dispatch when the highlighted token actually changes (not once per pixel).
+      if ((range?.from ?? -1) === (cur?.from ?? -1) && (range?.to ?? -1) === (cur?.to ?? -1)) {
+        return false;
+      }
+      view.dispatch({ effects: setGotoLink.of(range) });
+      return false;
+    },
+    mouseleave(_event, view) {
+      if (currentGotoLink(view)) view.dispatch({ effects: setGotoLink.of(null) });
+      return false;
+    },
+  });
+
+  return [gotoLinkField, keyupPlugin, events];
 }
 
 /** Characters that make up a "reference-like" token (identifiers, plus the path /
@@ -279,11 +361,37 @@ export function refTextAt(doc: Text, offset: number): string | null {
   return tok.length ? tok : null;
 }
 
+/** The document range of the reference-like token at UTF-16 `offset`, or null — the range
+ *  form of {@link refTextAt}, used to underline the token under a Ctrl-hover. */
+export function refRangeAt(doc: Text, offset: number): { from: number; to: number } | null {
+  const clamped = Math.max(0, Math.min(offset, doc.length));
+  const line = doc.lineAt(clamped);
+  const text = line.text;
+  const rel = clamped - line.from;
+
+  const quoted = quotedRangeAround(text, rel);
+  if (quoted) {
+    return quoted.to > quoted.from ? { from: line.from + quoted.from, to: line.from + quoted.to } : null;
+  }
+  let start = rel;
+  let end = rel;
+  while (start > 0 && REF_CHAR.test(text[start - 1])) start--;
+  while (end < text.length && REF_CHAR.test(text[end])) end++;
+  return end > start ? { from: line.from + start, to: line.from + end } : null;
+}
+
 /** If position `rel` (a column into `text`) falls within a single-line quoted string,
  *  return the string's inner contents; else null. Scans quotes left-to-right so an
  *  even count before `rel` means "outside", odd means "inside". Handles both quote
  *  styles independently (the first-opened wins). */
 function quotedStringAround(text: string, rel: number): string | null {
+  const r = quotedRangeAround(text, rel);
+  return r ? text.slice(r.from, r.to) : null;
+}
+
+/** The inner range (`[open+1, close)`) of the single-line quoted string covering column
+ *  `rel`, or null. Shared by {@link quotedStringAround} (text) and {@link refRangeAt} (range). */
+function quotedRangeAround(text: string, rel: number): { from: number; to: number } | null {
   for (const q of ['"', "'"]) {
     let i = 0;
     while (i < text.length) {
@@ -292,7 +400,7 @@ function quotedStringAround(text: string, rel: number): string | null {
       const close = text.indexOf(q, open + 1);
       if (close === -1) break;
       // Inside (or on either quote) of this pair?
-      if (rel >= open && rel <= close) return text.slice(open + 1, close);
+      if (rel >= open && rel <= close) return { from: open + 1, to: close };
       i = close + 1;
     }
   }

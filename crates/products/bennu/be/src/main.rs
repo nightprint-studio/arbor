@@ -60,10 +60,14 @@ mod inherited;
 // Validation-file modal context: `bennu_validation_context` — the action class + its
 // writable bean properties + already-validated fields for a `<Action>-validation.xml`.
 mod validation;
-// Form analysis (form → action → fields inspector): `bennu_form_analysis` — for a JSP, each
-// `<form>` correlated with its resolved action class's writable properties + validation rules
-// (which fields bind, which are validated).
+// Form analysis (form → parameters inspector): `bennu_form_analysis` — for a JSP, every
+// relevant `<form>` (own, or on a fragment it includes, or on a page that includes it) with its
+// complete include-expanded parameter set correlated against the action class (which fields
+// bind, which are validated, and where each parameter comes from).
 mod forms;
+// JSP variable navigation: `bennu_jsp_nav` — go-to-declaration + find-usages for a page-scoped
+// JSP variable (`<c:set var>` / `<s:set var>` / … + `${var}` / `%{var}` references), single-file.
+mod jsp_nav;
 // Index inspector: `bennu_index_stats` — a cheap snapshot of the per-project index (symbol
 // + config counts, JDK level, build-ready flag) for an inspector panel.
 mod index_stats;

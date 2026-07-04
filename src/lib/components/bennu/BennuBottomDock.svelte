@@ -9,7 +9,7 @@
    * The Problems body reuses `BennuProblemsPanel` (header hidden); the Terminal body
    * reuses the generic Corvus `TerminalInstance` via `BennuTerminalView`.
    */
-  import { AlertTriangle, TerminalSquare, Plus, Hammer, Square, Trash2, ListTodo, RefreshCw } from 'lucide-svelte';
+  import { AlertTriangle, TerminalSquare, Plus, Hammer, Square, Trash2, ListTodo, RefreshCw, TextCursorInput } from 'lucide-svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -17,6 +17,7 @@
   import BennuTerminalView from './BennuTerminalView.svelte';
   import BennuBuildPanel from './BennuBuildPanel.svelte';
   import BennuTodoPanel from './BennuTodoPanel.svelte';
+  import BennuFormsPanel from './BennuFormsPanel.svelte';
   import { bennuUiStore, type BottomPanel } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
 
@@ -26,11 +27,13 @@
     { id: 'build', label: 'Build', icon: Hammer, iconSize: 13 },
     { id: 'problems', label: 'Problems', icon: AlertTriangle, iconSize: 13 },
     { id: 'todos', label: 'TODO', icon: ListTodo, iconSize: 13 },
+    { id: 'forms', label: 'Forms', icon: TextCursorInput, iconSize: 13 },
     { id: 'terminal', label: 'Terminal', icon: TerminalSquare, iconSize: 13 },
   ];
 
   let terminalView = $state<{ openTerminal: () => void } | null>(null);
   let todoView = $state<{ refresh: () => void } | null>(null);
+  let formsView = $state<{ refresh: () => void; canRefresh: () => boolean } | null>(null);
 </script>
 
 <div class="dock">
@@ -65,6 +68,17 @@
           use:tooltip={'Refresh'}
           aria-label="Refresh TODOs"
           onclick={() => todoView?.refresh()}
+        >
+          <RefreshCw size={13} />
+        </button>
+      {:else if active === 'forms'}
+        <button
+          class="ps-btn"
+          type="button"
+          use:tooltip={'Refresh'}
+          aria-label="Refresh forms"
+          disabled={!formsView?.canRefresh()}
+          onclick={() => formsView?.refresh()}
         >
           <RefreshCw size={13} />
         </button>
@@ -106,6 +120,13 @@
     <div class="dock-section" class:hidden={active !== 'todos'}>
       <BennuTodoPanel bind:this={todoView} />
     </div>
+    <!-- Forms is active-file-scoped + re-analysed on every switch (no session state to keep),
+         so mount it only while its tab is showing — don't burn the include-graph walk when hidden. -->
+    {#if active === 'forms'}
+      <div class="dock-section">
+        <BennuFormsPanel bind:this={formsView} hideHeader />
+      </div>
+    {/if}
     <div class="dock-section" class:hidden={active !== 'terminal'}>
       <BennuTerminalView bind:this={terminalView} />
     </div>

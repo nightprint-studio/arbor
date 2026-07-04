@@ -48,6 +48,23 @@ function isBinaryPath(path: string): boolean {
   return BINARY_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
 }
 
+/** Canonical form of a file/dir path used as a tab key + `activeFilePath` + BE argument.
+ *  Forward slashes only: Windows accepts them for every FS op, and the BE keys files by
+ *  forward-slash paths (JSP include targets, the class index, the form-analysis include
+ *  graph), while the OS file picker + project tree hand us native `\`. Normalizing at the
+ *  store boundary means a file opened via ANY caller keys the SAME tab (no duplicates) and
+ *  the active path matches the BE's string-keyed lookups. Drive-letter case is left as-is
+ *  (Windows FS is case-insensitive; the BE compares paths component-wise). */
+function canonPath(p: string): string {
+  return p.replace(/\\/g, '/');
+}
+
+/** A project-tree node with every `path` in the subtree canonicalized (so tree selection —
+ *  `selectedId` vs a node's id — matches the canonical `activeFilePath`). */
+function canonTree(node: TreeNode): TreeNode {
+  return { ...node, path: canonPath(node.path), children: node.children.map(canonTree) };
+}
+
 /** Debounce (ms) for the live re-index `bennu_did_change` on editor edits — long
  *  enough that a burst of keystrokes coalesces into one BE patch, short enough that
  *  completion/definition reflect an edit almost immediately. Never blocks typing
@@ -124,8 +141,8 @@ function createProjectStore() {
   }
 
   function applyProject(info: ProjectInfo, nextTree: TreeNode | null, demo: boolean) {
-    project = info;
-    tree = nextTree;
+    project = { ...info, root: canonPath(info.root) };
+    tree = nextTree ? canonTree(nextTree) : null;
     isDemo = demo;
     rememberRecent(info.root);
     // Reset the open-file model for the new project.
@@ -197,7 +214,7 @@ function createProjectStore() {
         // opening lag. A stale tree from a superseded open is dropped by the root guard.
         applyProject(info, null, false);
         void ipcProjectTree(info.root)
-          .then((t) => { if (project?.root === info.root) tree = t; })
+          .then((t) => { if (project?.root === canonPath(info.root)) tree = canonTree(t); })
           .catch(() => { /* leave the tree empty — the project still opened */ });
       } catch (err) {
         // MOCK — bennu-be not attached: fall back to the demo so opening the
@@ -214,6 +231,11 @@ function createProjectStore() {
      *  Binary files are refused with a toast (opening one would choke the UTF-8 read
      *  — a `.xcf` once froze the window). */
     async openFile(path: string) {
+      // Canonicalize (forward slashes) so a file opened via different callers — the project
+      // tree (native `\`), a JSP include go-to or the class index (BE forward-slash) — keys
+      // the SAME tab instead of a duplicate, and the active path matches the BE's
+      // forward-slash file keys (e.g. the form-analysis include graph).
+      path = canonPath(path);
       if (isBinaryPath(path)) {
         toastStore.show(`Can't open ${path.split(/[\\/]/).pop()} — binary file`, 'info');
         return;

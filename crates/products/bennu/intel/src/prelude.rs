@@ -18,6 +18,10 @@ pub use bennu_proto::prelude::{CompletionItem, Diagnostic};
 pub use crate::config::{
     action_qname, ingest_config_graph, ActionTarget, ActionVerdict, ConfigResolver,
 };
+
+// Spring stereotype-bean policy: the annotation-declared beans (`@Service`/`@Component`/…) the
+// config resolver consults as a C1 fallback, plus the project-scan collector the be build calls.
+pub use crate::spring_beans::{collect_annotation_beans, stereotype_bean, AnnotationBean};
 // MyBatis go-to / outline wire types, re-exported so the be-layer maps them without
 // depending on `bennu_web` directly.
 pub use bennu_web::prelude::{StatementKind, StatementRecord, StatementTarget};

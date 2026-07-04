@@ -28,6 +28,9 @@
     definition as ipcDefinition, references as ipcReferences,
     actionUsages as ipcActionUsages,
     declaration as ipcDeclaration,
+    jspNav as ipcJspNav,
+    jspIncludeTarget as ipcJspIncludeTarget,
+    beanClass as ipcBeanClass,
     renameApply as ipcRenameApply, type RenameEdit,
   } from '$lib/ipc/bennu/nav';
   import { applyByteEdits } from './rename-apply';
@@ -57,6 +60,7 @@
     getValue: () => string;
     openSearch: () => void;
     scrollToLineCol: (line: number, col?: number) => void;
+    scrollToByteOffset: (byteOffset: number) => void;
     coordsAtCaret: () => { x: number; y: number } | null;
     coordsAtByteOffset: (byteOffset: number) => { x: number; y: number } | null;
     setCaretAtCoords: (x: number, y: number) => boolean;
@@ -106,6 +110,15 @@
     // Read `nonce` so a repeat jump to the same line re-fires.
     void t.nonce;
     editorComp?.scrollToLineCol(t.line, 1);
+  });
+
+  // ── Goto-by-byte-offset relay: the Forms tool window requests a jump to a `<form>`
+  //    tag / field-name byte span; move the caret there and reveal it. ──
+  $effect(() => {
+    const t = bennuUiStore.gotoOffsetTarget;
+    if (!t) return;
+    void t.nonce; // repeat jump to the same offset re-fires
+    editorComp?.scrollToByteOffset(t.offset);
   });
 
   // ── Edits → store ────────────────────────────────────────────────────────────
@@ -332,19 +345,30 @@
     if (!activePath) return;
     bennuRefactorStore.startUsages(anchor, word);
     try {
+      // JSP/XML: the Java reference index is meaningless here. Resolve a page-scoped JSP
+      // variable first (a `<c:set var>`/`${var}` under the caret → all its references),
+      // then fall back to a Struts action reference (`action="…"` → every JSP that uses it).
+      if (!isJavaFile) {
+        const nav = await ipcJspNav(activePath, source, offset).catch(() => null);
+        if (nav && nav.usages.length) {
+          bennuRefactorStore.setUsages(nav.label, nav.usages);
+          return;
+        }
+        if (ref) {
+          const av = await ipcActionUsages(activePath, ref).catch(() => null);
+          if (av && av.usages.length) {
+            bennuRefactorStore.setUsages(av.target_label, av.usages);
+            return;
+          }
+        }
+        bennuRefactorStore.setUsages(nav?.label ?? null, nav?.usages ?? []);
+        return;
+      }
+
       const res = await ipcReferences(activePath, source, offset);
       if (res && res.usages.length) {
         bennuRefactorStore.setUsages(res.target_label, res.usages);
         return;
-      }
-      // No Java-symbol usages — try a Struts action reference (a JSP `action="…"`): list
-      // every JSP that references it. `ref` is the reference token under the caret.
-      if (ref) {
-        const av = await ipcActionUsages(activePath, ref).catch(() => null);
-        if (av && av.usages.length) {
-          bennuRefactorStore.setUsages(av.target_label, av.usages);
-          return;
-        }
       }
       bennuRefactorStore.setUsages(res?.target_label ?? null, res?.usages ?? []);
     } catch {
@@ -379,10 +403,15 @@
    *  wins, so a stale result never yanks the editor to the wrong file. */
   let gotoDefSeq = 0;
 
-  /** Open a resolved target file and scroll to its top (the definition site). The
-   *  goto relay drives the scroll after the cross-file open settles. */
-  function openDefinitionFile(path: string) {
-    void projectStore.openFile(path).then(() => bennuUiStore.requestGoto(1));
+  /** Open a resolved target file and scroll to the definition site. When a byte `offset` is
+   *  known (the `<action>` element in the config fragment) we jump there so go-to lands on
+   *  the declaration line, not the top of the file; else we scroll to the top. The goto relay
+   *  drives the scroll after the cross-file open settles. */
+  function openDefinitionFile(path: string, offset?: number) {
+    void projectStore.openFile(path).then(() => {
+      if (offset && offset > 0) bennuUiStore.requestGotoOffset(offset);
+      else bennuUiStore.requestGoto(1);
+    });
   }
 
   /** Normalize two paths for identity comparison (forward slashes, case-fold for the
@@ -422,20 +451,80 @@
     return true;
   }
 
+  /** Try JSP **page-scoped variable** go-to for the caret at `offset` — a `<c:set var>` /
+   *  `<s:set var>` / `<c:forEach var>` declaration or an `${var}` / `%{var}` reference.
+   *  Resolves via `bennu_jsp_nav`; everything is in THIS file (JSP variables are
+   *  page-scoped), so we just move the caret to the declaration — no cross-file open, no
+   *  project index needed. If the caret is already ON the declaration, jumping is a no-op, so
+   *  fall back to find-usages (IntelliJ behaviour). Returns true when it handled the gesture. */
+  async function tryGoToJspVar(offset: number): Promise<boolean> {
+    const path = activePath;
+    if (!path || !editorComp || isJavaFile) return false;
+    const source = editorComp.getValue();
+    const nav = await ipcJspNav(path, source, offset).catch(() => null);
+    if (!nav || !nav.declaration) return false;
+    const d = nav.declaration;
+    // Already on the declaration's own name span → show usages instead of a no-op jump.
+    if (offset >= d.start && offset < d.end) {
+      await runFindUsages(source, offset, editorComp.coordsAtByteOffset(offset), null);
+      return true;
+    }
+    editorComp.scrollToLineCol(d.line, d.col);
+    return true;
+  }
+
+  /** Try JSP **include / view reference** go-to for the token under the caret — a path in a
+   *  `<%@ include file>` directive, `<jsp:include page>`, `<s:include value>`, `<c:import url>`,
+   *  … pointing at another JSP view/fragment. Resolves via `bennu_jsp_include_target` (absolute
+   *  paths against the webapp root, relative against the JSP's own dir) and opens the referenced
+   *  file. Only runs for non-`.java` buffers; a computed / external / non-existent path resolves
+   *  to `null` and this returns false so the action resolver gets its turn. */
+  async function tryGoToJspInclude(ref: string): Promise<boolean> {
+    const path = activePath;
+    if (!path || isJavaFile || !ref) return false;
+    const target = await ipcJspIncludeTarget(path, ref).catch(() => null);
+    if (!target) return false;
+    await projectStore.openFile(target);
+    bennuUiStore.requestGoto(1);
+    return true;
+  }
+
   /** Try to resolve `word` to a project CLASS declaration — an instant, offline fallback
-   *  (from the FE class index) used when the BE resolver is cold. Matches by exact simple
-   *  name, then by an FQCN ending in `.word`, and jumps to the declaring file + line.
-   *  Returns true when it jumped. */
+   *  (from the FE class index). Accepts a **simple name** (`FooAction`) or a dotted **FQCN**
+   *  (`com.x.FooAction`, as a struts/spring `class="…"` carries): a simple name matches by
+   *  `simple` then by an FQCN ending in `.word`; an FQCN matches exactly then by its last
+   *  segment. Jumps to the declaring file + line. Returns true when it jumped. */
   async function tryGoToClassDeclaration(word: string): Promise<boolean> {
     const root = projectStore.project?.root;
-    if (!root || !word || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(word)) return false;
+    if (!root || !word) return false;
+    const isFqcn = /^[A-Za-z_$][A-Za-z0-9_$.]*$/.test(word) && word.includes('.');
+    const isSimple = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(word);
+    if (!isFqcn && !isSimple) return false;
     const classes = await bennuIndexStore.classesForRoot(root).catch(() => null);
     if (!classes) return false;
-    const hit = classes.find((c) => c.simple === word) ?? classes.find((c) => c.fqcn.endsWith('.' + word));
+    const last = word.split('.').pop() ?? word;
+    const hit = isFqcn
+      ? (classes.find((c) => c.fqcn === word) ?? classes.find((c) => c.simple === last))
+      : (classes.find((c) => c.simple === word) ?? classes.find((c) => c.fqcn.endsWith('.' + word)));
     if (!hit) return false;
     await projectStore.openFile(hit.file);
     bennuUiStore.requestGoto(hit.line);
     return true;
+  }
+
+  /** Try go-to on a **config XML** (struts/spring/tiles `.xml`) reference under the caret —
+   *  a `class="…"` value that is either an FQCN (handled by {@link tryGoToClassDeclaration})
+   *  or a Spring **bean id**. Resolves the bean id to its impl FQCN via `bennu_bean_class`,
+   *  then opens that class. Returns true when it jumped. Only meaningful in an `.xml` file. */
+  async function tryGoToXmlClass(ref: string): Promise<boolean> {
+    const path = activePath;
+    if (!path || !ref || !path.toLowerCase().endsWith('.xml')) return false;
+    // A dotted FQCN opens directly from the class index.
+    if (await tryGoToClassDeclaration(ref)) return true;
+    // Otherwise treat it as a Spring bean id → resolve to its impl class, then open it.
+    const fqcn = await ipcBeanClass(path, ref).catch(() => null);
+    if (fqcn) return tryGoToClassDeclaration(fqcn);
+    return false;
   }
 
   /** Resolve + navigate to the declaration of the symbol / `action` under the caret/click.
@@ -449,6 +538,16 @@
     // 1. BE go-to-declaration — any Java symbol (class/method/field/local) — when we have
     //    a byte offset to classify at. Authoritative + precise (jumps to the exact line).
     if (offset != null && (await tryGoToDeclarationBE(offset, action))) return;
+    // 1b. JSP page-scoped variable (a `<c:set var>`/`${var}` under the caret) — single-file,
+    //     resolved off the buffer with no project index (only runs for non-`.java` files).
+    if (offset != null && (await tryGoToJspVar(offset))) return;
+    // 1c. JSP include / view reference (a `<%@ include file>` / `<jsp:include page>` /
+    //     `<s:include value>` path under the caret) — a `.jsp`/`.jspf` path is unambiguous, so
+    //     resolve it before the Struts-action ref (they're disjoint). Non-`.java` files only.
+    if (action && (await tryGoToJspInclude(action))) return;
+    // 1d. Config XML (`struts.xml`/`spring-*.xml`/`tiles.xml`): a `class="…"` value — an FQCN
+    //     or a Spring bean id — go to the Java class it names.
+    if (action && (await tryGoToXmlClass(action))) return;
     // 2. Instant offline class-index fallback (types) when the BE resolver is cold.
     if (action) {
       if (await tryGoToClassDeclaration(action)) return;
@@ -470,10 +569,14 @@
       return;
     }
     // Prefer the config fragment (where the <action> is declared); fall back to the
-    // resolved view JSP. Both are file paths we can open.
-    const target = res.config_file || res.view_jsp;
-    if (target) {
-      openDefinitionFile(target);
+    // resolved view JSP. Both are file paths we can open. When jumping to the config
+    // fragment, land on the `<action>` element (`config_offset`), not the top of the file.
+    if (res.config_file) {
+      openDefinitionFile(res.config_file, res.config_offset);
+      return;
+    }
+    if (res.view_jsp) {
+      openDefinitionFile(res.view_jsp);
       return;
     }
     // Only a class FQCN resolved — try to open that class from the index; else report it.

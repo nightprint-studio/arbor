@@ -49,8 +49,11 @@ export interface NormalizedTooltipOptions {
   className?: string;
 }
 
-export function normalizeOptions(input: TooltipInput): NormalizedTooltipOptions {
-  const raw: TooltipOptions = typeof input === 'string' ? { content: input } : input;
+export function normalizeOptions(input: TooltipInput | null | undefined): NormalizedTooltipOptions {
+  // `use:tooltip={cond ? '…' : undefined}` is a common idiom — a falsy input must be a no-op
+  // (empty content → never shown), NOT a crash. Guard here so every call site is safe.
+  const raw: TooltipOptions =
+    typeof input === 'string' ? { content: input } : (input ?? { content: '' });
   let shortcut: string[] | undefined;
   if (typeof raw.shortcut === 'string') {
     shortcut = raw.shortcut.split('+').map((s) => s.trim()).filter(Boolean);
@@ -58,7 +61,7 @@ export function normalizeOptions(input: TooltipInput): NormalizedTooltipOptions 
     shortcut = raw.shortcut.filter(Boolean);
   }
   return {
-    content: raw.content,
+    content: raw.content ?? '',
     description: raw.description,
     shortcut,
     placement: raw.placement ?? 'auto',

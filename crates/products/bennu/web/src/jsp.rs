@@ -66,9 +66,11 @@ pub struct JspParse {
     pub taglibs: Vec<JspTaglib>,
 }
 
-/// The Struts/HTML tag local-names (after any `prefix:`) that carry an `action="…"` we
-/// treat as an action reference. Matched case-insensitively.
-const ACTION_TAGS: &[&str] = &["form", "url", "a", "submit"];
+/// The Struts/HTML tag local-names (after any `prefix:`) that carry an action reference.
+/// `form`/`url`/`a`/`submit` carry `action=`/`href=`; `action` is the dedicated action tag —
+/// Entando `<wp:action path="…">` (URL generator) or Struts `<s:action name="…">` (executor).
+/// Matched case-insensitively.
+const ACTION_TAGS: &[&str] = &["form", "url", "a", "submit", "action"];
 
 /// Scan a JSP `source` string for action references + taglib directives.
 ///
@@ -190,6 +192,16 @@ fn scan_tag(source: &str, open: usize) -> Option<(usize, Vec<JspActionRef>)> {
         // reference; ordinary links are ignored.
         push_action_ref(&mut refs, raw, vstart, vend, true);
     }
+    // The dedicated action tag: Entando `<wp:action path="/x.action">` / Struts
+    // `<s:action name="foo">`. The action reference is the `path=` / `name=` value.
+    if name == "action" {
+        if let Some((raw, vstart, vend)) = attr_value(source, after, close, "path") {
+            push_action_ref(&mut refs, raw, vstart, vend, false);
+        }
+        if let Some((raw, vstart, vend)) = attr_value(source, after, close, "name") {
+            push_action_ref(&mut refs, raw, vstart, vend, false);
+        }
+    }
 
     Some((close + 1, refs))
 }
@@ -274,6 +286,13 @@ pub(crate) fn attr_value(
 fn push_action_ref(out: &mut Vec<JspActionRef>, raw: String, start: usize, end: usize, href_mode: bool) {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
+        return;
+    }
+    // A `<` in the value means a nested taglib leaked into it — e.g. the linear scan of
+    // `action="<wp:action path='…'/>"` captures `<wp:action path=` as the outer `action`
+    // value (the real ref is the inner `<wp:action>`'s own `path=`, scanned as its own tag).
+    // Never treat such a fragment as an action key.
+    if trimmed.contains('<') {
         return;
     }
     let computed = is_computed(trimmed);
@@ -568,6 +587,32 @@ mod tests {
             let stored = parse_jsp(&src).action_refs.into_iter().next().unwrap().name;
             assert_eq!(normalize_action_ref(raw), Some(stored), "raw = {raw}");
         }
+    }
+
+    #[test]
+    fn entando_wp_action_and_struts_s_action_are_refs() {
+        // Standalone `<wp:action path="/x.action">` (Entando URL generator) and
+        // `<s:action name="foo">` (Struts executor) are action references.
+        let src = r#"<wp:action path="/ExtStr2/do/FrontEnd/DatiImpr/processPage.action" />
+            <s:action name="listCategories"/>"#;
+        let names: Vec<String> = parse_jsp(src).action_refs.into_iter().map(|r| r.name).collect();
+        assert!(
+            names.iter().any(|n| n == "/ExtStr2/do/FrontEnd/DatiImpr/processPage"),
+            "names = {names:?}"
+        );
+        assert!(names.iter().any(|n| n == "listCategories"), "names = {names:?}");
+    }
+
+    #[test]
+    fn nested_taglib_in_attribute_does_not_leak_bogus_ref() {
+        // `action="<wp:action path="…"/>"`: the linear scan of the outer `action` captures the
+        // leaked `<wp:action path=` fragment — the `<` guard drops it (no bogus action ref).
+        let src = r#"<form action="<wp:action path="/x/y.action" />" method="post">z</form>"#;
+        let refs = parse_jsp(src).action_refs;
+        assert!(
+            !refs.iter().any(|r| r.name.contains('<') || r.raw.contains('<')),
+            "leaked nested-tag ref: {refs:?}"
+        );
     }
 
     #[test]

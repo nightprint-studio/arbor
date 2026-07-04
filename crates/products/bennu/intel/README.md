@@ -45,12 +45,22 @@ Two impl slots:
 
 - **`config`** — ingests the `bennu-web` config-graph into the index and resolves the
   load-bearing chains off it:
-  - `ingest_config_graph(&graph, index_dir)` assigns `u32` ids to the string-keyed
-    action/bean records (`Source::StrutsAction` / `SpringBean` symbols) and writes the
-    resolvable edges to the relation store, returning a `ConfigResolver`.
+  - `ingest_config_graph(&graph, index_dir, annotation_beans)` assigns `u32` ids to the
+    string-keyed action/bean records (`Source::StrutsAction` / `SpringBean` symbols) and
+    writes the resolvable edges to the relation store, returning a `ConfigResolver`. The
+    `annotation_beans` (from `spring_beans::collect_annotation_beans`) seed a **separate**
+    name→bean map (Option B — the pure-XML `graph.beans` stays untouched) for the C1
+    fallback below.
   - `ConfigResolver::resolve_action_class(action)` — the **C1 chain**: action → Spring
     bean-id → real FQCN, over the ingested `ActionToClass` edge (+ the Spring parent
-    chain for a class-less bean).
+    chain for a class-less bean). When no XML `<bean>` names the id, it falls back to the
+    annotation-declared beans (`@Service`/`@Component`/…) so annotation-based apps resolve
+    the class too. `resolve_bean(name)` / `annotation_bean_count()` expose that map.
+
+- **`spring_beans`** — the stereotype-bean policy: `collect_annotation_beans(sources)`
+  scans the project's Java for `@Component`/`@Service`/`@Repository`/`@Controller` (+ the
+  meta-stereotypes and JSR-330 markers) and reproduces the bean each declares — its name
+  (explicit `value`, else the decapitalized simple name) and impl FQCN.
   - `ConfigResolver::resolve_action_view(action)` — action → `<result type=tiles>` →
     Tiles def → JSP.
   - `ConfigResolver::diagnose_action(action)` → `ActionVerdict::{Exists, Missing,

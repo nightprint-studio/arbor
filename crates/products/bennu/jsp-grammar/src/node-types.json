@@ -138,7 +138,31 @@
           "named": true
         },
         {
+          "type": "end_tag",
+          "named": true
+        },
+        {
+          "type": "jsp_comment",
+          "named": true
+        },
+        {
+          "type": "jsp_expression",
+          "named": true
+        },
+        {
+          "type": "jsp_scriptlet",
+          "named": true
+        },
+        {
           "type": "ognl_expression",
+          "named": true
+        },
+        {
+          "type": "self_closing_tag",
+          "named": true
+        },
+        {
+          "type": "start_tag",
           "named": true
         }
       ]
@@ -161,7 +185,31 @@
           "named": true
         },
         {
+          "type": "end_tag",
+          "named": true
+        },
+        {
+          "type": "jsp_comment",
+          "named": true
+        },
+        {
+          "type": "jsp_expression",
+          "named": true
+        },
+        {
+          "type": "jsp_scriptlet",
+          "named": true
+        },
+        {
           "type": "ognl_expression",
+          "named": true
+        },
+        {
+          "type": "self_closing_tag",
+          "named": true
+        },
+        {
+          "type": "start_tag",
           "named": true
         }
       ]

@@ -27,6 +27,7 @@
 
 use std::collections::HashMap;
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
@@ -34,20 +35,21 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use arbor_ipc::prelude::EventSink;
 use bennu_index::prelude::Symbol;
 use bennu_intel::prelude::{
-    build_project_index_from_sources, file_records_from_source, ingest_config_graph,
-    read_java_sources, ActionVerdict, CompletionItem, ConfigResolver, DeclarationLocation,
-    HoverInfo as IntelHoverInfo, InheritedMember as IntelInheritedMember, IntelProvider,
-    NativeJavaProvider, NonCompliantSource, Position, ProjectSources, ReferencesResult,
-    RenameEngine, RenamePlan,
+    build_project_index_from_sources, collect_annotation_beans, file_records_from_source,
+    ingest_config_graph, read_java_sources, ActionVerdict, CompletionItem, ConfigResolver,
+    DeclarationLocation, HoverInfo as IntelHoverInfo, InheritedMember as IntelInheritedMember,
+    IntelProvider, NativeJavaProvider, NonCompliantSource, Position, ProjectSources,
+    ReferencesResult, RenameEngine, RenamePlan,
 };
 use bennu_project::prelude::source_encoding_label;
 use bennu_proto::prelude::{
     ClassEntry, DeclarationTarget, EncodingIssue, HoverInfo, IndexEntry, IndexStats,
     InheritedMember, InheritedSource, JdkStatus, UsageHit, ValidationContext,
 };
+use bennu_web::prelude::{file_stamp, IncludeGraph, IncludeGraphCache};
 use serde_json::json;
 
-use crate::web_discovery::discover_web_inputs;
+use crate::web_discovery::{discover_jsp_files, discover_web_inputs};
 
 /// The BE→FE index-progress topic. Payload:
 /// `{ "root": <string>, "phase": <string>, "state": "start" | "end" }`, where `phase` is
@@ -73,6 +75,58 @@ fn index_base_for(root: &str) -> PathBuf {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     arbor_core::prelude::bennu_data_dir().join("index").join(format!("{hash:016x}"))
+}
+
+/// A stable, filesystem-safe FNV-1a hash of an absolute root — the per-root cache dir name.
+fn root_hash(root: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in root.as_bytes() {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// The on-disk include-graph cache file for `root`:
+/// `bennu_data_dir()/include-graph/<hash-of-root>.json`. A small JSON (per-file edge lists) that
+/// warm-starts the form analysis across app restarts — a corrupt/missing file just means a cold
+/// (full) rebuild, never an error.
+fn include_cache_path(root: &str) -> PathBuf {
+    arbor_core::prelude::bennu_data_dir()
+        .join("include-graph")
+        .join(format!("{}.json", root_hash(root)))
+}
+
+/// Load the persisted include-graph cache for `root`, rebuilding its derived graph. `None` on a
+/// missing / unreadable / stale-format file (→ the caller starts cold).
+fn load_include_cache(root: &str) -> Option<IncludeGraphCache> {
+    let bytes = std::fs::read(include_cache_path(root)).ok()?;
+    let mut cache: IncludeGraphCache = serde_json::from_slice(&bytes).ok()?;
+    cache.rebuild_after_load();
+    Some(cache)
+}
+
+/// Persist the include-graph cache for `root` (best-effort — a write failure is non-fatal, the
+/// in-memory cache still serves this session).
+fn save_include_cache(root: &str, cache: &IncludeGraphCache) {
+    let path = include_cache_path(root);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(bytes) = serde_json::to_vec(cache) {
+        let _ = std::fs::write(path, bytes);
+    }
+}
+
+/// The current JSP set of `root` as `(path, mtime, size)` triples (a full discovery walk + stat).
+fn jsp_stamps(root: &str) -> Vec<(PathBuf, u64, u64)> {
+    discover_jsp_files(Path::new(root))
+        .into_iter()
+        .map(|p| {
+            let (m, s) = file_stamp(&p);
+            (p, m, s)
+        })
+        .collect()
 }
 
 /// The generation subdir `<base>/g<NNN>` (zero-padded) that build number `gen` persists
@@ -178,6 +232,15 @@ struct ProjectSlot {
 /// The process-wide index service (one per `bennu-be`).
 pub struct IndexService {
     slots: Mutex<HashMap<PathBuf, Arc<ProjectSlot>>>,
+    /// Per-project include-graph cache (keyed by forward-slashed root) for the form analysis —
+    /// avoids re-parsing every JSP on each tab switch. Loaded from disk on first use, refreshed
+    /// incrementally, persisted back. Behind an inner `Mutex` so a build holds the lock without
+    /// blocking OTHER projects' caches.
+    include_caches: Mutex<HashMap<String, Arc<Mutex<IncludeGraphCache>>>>,
+    /// Roots that already got a full include-graph freshness pass THIS process run — the first
+    /// analysis per root does a full sync (a warm disk cache may be stale after external edits),
+    /// subsequent ones only refresh the focus file.
+    include_synced: Mutex<HashSet<String>>,
 }
 
 /// Resolve the source encoding label to index a project at `root` in: a per-project config
@@ -198,7 +261,52 @@ static SERVICE: OnceLock<IndexService> = OnceLock::new();
 impl IndexService {
     /// The global service, created on first use.
     pub fn global() -> &'static IndexService {
-        SERVICE.get_or_init(|| IndexService { slots: Mutex::new(HashMap::new()) })
+        SERVICE.get_or_init(|| IndexService {
+            slots: Mutex::new(HashMap::new()),
+            include_caches: Mutex::new(HashMap::new()),
+            include_synced: Mutex::new(HashSet::new()),
+        })
+    }
+
+    /// The include graph for the project at `root`, served from the incremental cache. Cheap on
+    /// the common per-tab path: the cache is built once (a full walk on the FIRST call per root
+    /// this run, warm-started from disk), then only `focus`'s edges are refreshed on later calls.
+    /// `force_full` (the Refresh button) triggers a full freshness pass — the way a newly-added
+    /// file or a newly-added parent include is picked up. Returns a snapshot clone (so the
+    /// analysis reads files without holding the cache lock).
+    pub fn include_graph(&self, root: &str, focus: &str, force_full: bool) -> IncludeGraph {
+        let cell = {
+            let mut caches = self.include_caches.lock().unwrap();
+            caches
+                .entry(root.to_string())
+                .or_insert_with(|| {
+                    // Warm-start from the persisted cache if present, else start cold.
+                    Arc::new(Mutex::new(load_include_cache(root).unwrap_or_default()))
+                })
+                .clone()
+        };
+
+        // First analysis for this root this run → force a full sync even off a warm disk cache
+        // (the project may have changed externally since it was written).
+        let first_this_run = self.include_synced.lock().unwrap().insert(root.to_string());
+        let want_full = force_full || first_this_run;
+
+        let mut cache = cell.lock().unwrap();
+        let mut changed = false;
+        if want_full || cache.is_empty() {
+            changed = cache.sync(&jsp_stamps(root));
+        } else {
+            let (m, s) = file_stamp(Path::new(focus));
+            if cache.refresh_file(Path::new(focus), m, s) {
+                cache.commit();
+                changed = true;
+            }
+        }
+        let graph = cache.graph().clone();
+        if changed {
+            save_include_cache(root, &cache);
+        }
+        graph
     }
 
     /// Kick off (or restart) the index build for `root` at JDK `jdk_version`, decoding sources
@@ -313,8 +421,12 @@ impl IndexService {
                 let slot = slot.clone();
                 let sink = sink.clone();
                 let root_str = root_str.clone();
+                // Share the already-read `.java` sources with the config build so the
+                // annotation-bean collection reuses them (no third disk walk). Cloned because
+                // the rename-engine build below also borrows `sources` concurrently.
+                let sources = sources.clone();
                 std::thread::spawn(move || {
-                    build_config_graph(&slot, &root_path, &index_dir, &sink, &root_str);
+                    build_config_graph(&slot, &root_path, &index_dir, &sources, &sink, &root_str);
                 })
             };
 
@@ -431,9 +543,18 @@ impl IndexService {
         let target = cfg.action_class_ref(action_qname)?;
         Some(ActionDefinition {
             config_file: target.config_file,
+            config_offset: target.config_offset,
             class_fqcn: target.class_fqcn,
             view_jsp: target.view_jsp,
         })
+    }
+
+    /// Resolve a Spring **bean id** (a struts `<action class="beanId">` / spring `<… ref>`)
+    /// to its implementation class FQCN, over the owning project's config resolver — for
+    /// go-to on a config XML. `None` when no project owns the file, its config isn't built,
+    /// or the id names no known bean.
+    pub fn bean_class(&self, file: &str, bean_id: &str) -> Option<String> {
+        self.config_for_file(file)?.resolve_bean_class(bean_id)
     }
 
     /// Resolve a MyBatis mapper interface **method** to the `<select|insert|update|
@@ -761,6 +882,14 @@ impl IndexService {
             .collect()
     }
 
+    /// The root (forward-slashed) of the OPEN project owning `file` (longest-prefix match),
+    /// or `None` when no project is open at a prefix of `file`. Lets a handler that needs the
+    /// project's JSP set (e.g. the include-aware form tree) reuse the exact root the index was
+    /// opened at, rather than re-deriving it from the filesystem.
+    pub fn root_for_file(&self, file: &str) -> Option<String> {
+        self.slot_for_file(file).map(|s| norm_path(&s.root))
+    }
+
     /// The config resolver of the project owning `file`, if built.
     fn config_for_file(&self, file: &str) -> Option<Arc<ConfigResolver>> {
         let slot = self.slot_for_file(file)?;
@@ -848,7 +977,12 @@ impl IndexService {
         // Config `config-*` files are read back into OWNED memory (no lingering mmap), so
         // re-ingesting into the current gen dir is safe to overwrite. Snapshot the path.
         let index_dir = slot.index_dir.read().unwrap_or_else(|p| p.into_inner()).clone();
-        match ingest_config_graph(&graph, &index_dir) {
+        // Re-collect annotation-declared beans so a `.java` that added/removed a `@Service`
+        // since the last full build is reflected on this config rebuild. Costs one source
+        // walk (bounded), acceptable off the keystroke path (this is a config-XML edit).
+        let ProjectSources { sources, .. } = read_java_sources(&slot.root, &slot.encoding_label);
+        let annotation_beans = collect_annotation_beans(&sources);
+        match ingest_config_graph(&graph, &index_dir, &annotation_beans) {
             Ok(cfg) => {
                 *slot.config.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(cfg));
             }
@@ -932,6 +1066,7 @@ fn build_config_graph(
     slot: &Arc<ProjectSlot>,
     root: &Path,
     index_dir: &Path,
+    sources: &[(PathBuf, String)],
     sink: &Arc<dyn EventSink>,
     root_str: &str,
 ) {
@@ -951,14 +1086,18 @@ fn build_config_graph(
             report.unresolved_includes.len()
         );
     }
-    match ingest_config_graph(&graph, index_dir) {
+    // Annotation-declared Spring beans (`@Service`/`@Component`/…) from the already-read Java
+    // sources — the Option-B C1 fallback map. Reuses `sources` (no third disk walk).
+    let annotation_beans = collect_annotation_beans(sources);
+    match ingest_config_graph(&graph, index_dir, &annotation_beans) {
         Ok(cfg) => {
             let (a, b, r) = (cfg.action_count(), cfg.bean_count(), cfg.relation_count());
             let (i, v) = (cfg.interceptor_count(), cfg.validation_count());
             let (m, s) = (cfg.mapper_count(), cfg.statement_count());
+            let ab = cfg.annotation_bean_count();
             *slot.config.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(cfg));
             eprintln!(
-                "bennu-be: config graph live for {} ({a} actions, {b} beans, {i} interceptors, {v} validations, {m} mappers, {s} statements, {r} edges)",
+                "bennu-be: config graph live for {} ({a} actions, {b} beans, {ab} annotation beans, {i} interceptors, {v} validations, {m} mappers, {s} statements, {r} edges)",
                 root.display()
             );
         }
@@ -1344,7 +1483,8 @@ fn action_ref_matches(ref_name: &str, needle: &str) -> bool {
 
 /// 1-based line + column and the trimmed line text for a byte `off` in `src` (the
 /// find-usages preview). Clamps `off` to a char boundary so a multi-byte source is safe.
-fn line_col_preview(src: &str, off: usize) -> (usize, usize, String) {
+/// `pub(crate)` so the JSP-nav handler ([`crate::jsp_nav`]) builds usage previews the same way.
+pub(crate) fn line_col_preview(src: &str, off: usize) -> (usize, usize, String) {
     let mut off = off.min(src.len());
     while off > 0 && !src.is_char_boundary(off) {
         off -= 1;
@@ -1388,6 +1528,8 @@ fn rel_kind_label(kind: bennu_web::prelude::RelKind) -> &'static str {
 pub struct ActionDefinition {
     /// The struts config fragment the `<action>` is declared in.
     pub config_file: String,
+    /// Byte offset of the `<action>` element in `config_file` (go-to lands on the declaration).
+    pub config_offset: usize,
     /// The resolved implementation class FQCN (the C1 chain), if resolvable.
     pub class_fqcn: Option<String>,
     /// The resolved view JSP (the Tiles chain), if resolvable.
@@ -1592,7 +1734,7 @@ mod tests {
             mapper_files: vec![],
         };
         let (graph, _report) = build_web_graph(&inputs);
-        let cfg = ingest_config_graph(&graph, &dir).unwrap();
+        let cfg = ingest_config_graph(&graph, &dir, &[]).unwrap();
 
         // beans: primary = id, secondary = class FQCN, file = the config fragment.
         let beans_e = config_entries_of(&cfg, "beans");

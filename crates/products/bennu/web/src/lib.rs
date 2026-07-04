@@ -42,10 +42,15 @@
 //! Workspace convention: call sites reach this crate's surface through
 //! `bennu_web::prelude::...`.
 
+pub mod form_expand;
 pub mod forms;
 pub mod graph;
+pub mod include_cache;
+pub mod include_graph;
 pub mod interceptors;
 pub mod jsp;
+pub mod jsp_includes;
+pub mod jsp_vars;
 pub mod model;
 pub mod mybatis;
 pub mod prelude;
