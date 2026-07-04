@@ -56,6 +56,7 @@
   import BennuAboutModal from './BennuAboutModal.svelte';
   import BennuGenerateModal from './BennuGenerateModal.svelte';
   import BennuValidationModal from './BennuValidationModal.svelte';
+  import BennuWorkspaceManagerModal from './BennuWorkspaceManagerModal.svelte';
   import BennuIntentionsOverlay from './BennuIntentionsOverlay.svelte';
   import BennuRunConfigModal from './BennuRunConfigModal.svelte';
   import BennuRenameModal from './BennuRenameModal.svelte';
@@ -65,6 +66,7 @@
   import BennuFileStructureModal from './BennuFileStructureModal.svelte';
   import type { GenerateMode } from './bennu-intentions';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { workspacesStore } from '$lib/stores/bennu/workspaces.svelte';
   import { isJavaFile, supportsCodeNav } from './file-kind';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
@@ -80,6 +82,10 @@
     themeStore.init();
     void appearanceStore.loadConfig();
     void animStore.loadConfig();
+    // Reopen the last workspace (its projects + tabs) where the user left off — no-op on a fresh
+    // install / when the BE is absent. Driven by the workspace store (owns the named-workspace
+    // set). Kicks off the index build via the effect below.
+    void workspacesStore.restore();
     // Subscribe to the build/run + index-progress event streams for this window;
     // detach on unmount.
     let detachRun: (() => void) | undefined;
@@ -137,6 +143,8 @@
     openRename: () => void;
     findUsages: () => void;
     insertAtCursor: (text: string) => void;
+    getSelectedText: () => string;
+    checkMojibake: () => void;
     navBack: () => void;
     navForward: () => void;
   } | null>(null);
@@ -235,9 +243,9 @@
       { id: 'gotodef', title: 'Go to declaration', icon: 'target', shortcut: 'Ctrl+B',
         action: () => run(() => editor?.goToDefinition()), when: canNav },
       { id: 'gotoclass', title: 'Go to class…', icon: 'box', shortcut: 'Ctrl+N',
-        action: () => run(() => bennuUiStore.openNav('class')), when: !!projectStore.project },
+        action: () => run(() => bennuUiStore.openNav('class', editor?.getSelectedText() ?? '')), when: !!projectStore.project },
       { id: 'gotofile', title: 'Go to file…', icon: 'file', shortcut: 'Ctrl+Shift+N',
-        action: () => run(() => bennuUiStore.openNav('file')), when: !!projectStore.project },
+        action: () => run(() => bennuUiStore.openNav('file', editor?.getSelectedText() ?? '')), when: !!projectStore.project },
       { id: 'filestructure', title: 'File structure…', icon: 'list-tree', shortcut: 'Ctrl+F12',
         action: () => run(() => bennuUiStore.openFileStructure()), when: canNav },
       { id: 'usages', title: 'Find usages', icon: 'search', shortcut: 'Alt+F7',
@@ -249,13 +257,15 @@
       { id: 'find', title: 'Find in file', icon: 'search', shortcut: 'Ctrl+F',
         action: () => run(() => editor?.openSearch()), when: !!projectStore.activeFilePath },
       { id: 'findproj', title: 'Find in project', icon: 'search', shortcut: 'Ctrl+Shift+F',
-        action: () => run(() => bennuUiStore.openFind()), when: true },
+        action: () => run(() => bennuUiStore.openFind(editor?.getSelectedText() ?? '')), when: true },
       { id: 'reveal', title: 'Select opened file in tree', icon: 'folder-tree',
         action: () => run(() => bennuUiStore.revealActiveInTree()), when: !!projectStore.activeFilePath },
       { id: 'generate', title: 'Generate…', icon: 'wand', shortcut: 'Alt+Insert',
         action: () => run(() => bennuUiStore.openGenerate()), when: isJava },
       { id: 'intentions', title: 'Show intentions', icon: 'bulb', shortcut: 'Alt+Enter',
         action: () => run(() => editor?.openIntentions()), when: isJava },
+      { id: 'mojibake', title: 'Check file for mojibake', icon: 'shield',
+        action: () => run(() => void editor?.checkMojibake()), when: !!path },
       { id: 'newvalidator', title: 'New Struts validator…', icon: 'shield',
         action: () => run(() => bennuUiStore.openValidationCreator()),
         when: projectStore.activeFilePath?.toLowerCase().endsWith('-validation.xml') ?? false },
@@ -295,7 +305,21 @@
       { id: 'runcfg', title: 'Edit run configuration…', icon: 'sliders',
         action: () => run(() => bennuUiStore.openRunConfig()), when: !!projectStore.project },
     ];
+    // Workspace switch entries — one per non-active workspace (keyboard-first switching), only
+    // when there's more than one. Manage / New live in the Application group below.
+    const workspaceItems = workspacesStore.hasMany
+      ? workspacesStore.workspaces
+          .filter((w) => w.id !== workspacesStore.activeId)
+          .map((w) => ({
+            id: `wss:${w.id}`, title: `Switch to ${w.name || 'Workspace'}`, icon: 'folder-tree',
+            shortcut: undefined as string | undefined,
+            action: () => run(() => void workspacesStore.switchTo(w.id)), when: true,
+          }))
+      : [];
     const appItems = [
+      { id: 'workspaces', title: 'Manage workspaces…', icon: 'folder-tree', action: () => run(() => bennuUiStore.openWorkspaceManager()), when: true },
+      { id: 'newworkspace', title: 'New workspace…', icon: 'folder-tree',
+        action: () => run(async () => { await workspacesStore.create('New workspace'); bennuUiStore.openWorkspaceManager(); }), when: true },
       { id: 'projectcfg', title: 'Project Configuration…', icon: 'sliders', action: () => run(() => bennuUiStore.openProjectConfig()), when: !!projectStore.project },
       { id: 'indexinspector', title: 'Index inspector…', icon: 'box', action: () => run(() => bennuUiStore.openIndexInspector()), when: !!projectStore.project },
       { id: 'reindex', title: 'Rebuild index', icon: 'refresh-cw',
@@ -312,6 +336,7 @@
     const ed = pack(editorItems); if (ed.length) out.push({ id: 'editor', label: 'Editor', items: ed });
     const rn = pack(runItems);    if (rn.length) out.push({ id: 'run', label: 'Run', items: rn });
     const vw = pack(viewItems);   if (vw.length) out.push({ id: 'view', label: 'View', items: vw });
+    const ws = pack(workspaceItems); if (ws.length) out.push({ id: 'workspaces', label: 'Workspaces', items: ws });
     const ap = pack(appItems);    if (ap.length) out.push({ id: 'app', label: 'Application', items: ap });
     return out;
   });
@@ -330,7 +355,8 @@
     if (mod && !e.altKey && e.key.toLowerCase() === 'n') {
       if (!projectStore.project) return;
       e.preventDefault();
-      bennuUiStore.openNav(e.shiftKey ? 'file' : 'class');
+      // Seed the navigator from the editor selection (IntelliJ) — a highlighted word.
+      bennuUiStore.openNav(e.shiftKey ? 'file' : 'class', editor?.getSelectedText() ?? '');
       return;
     }
 
@@ -356,7 +382,10 @@
     }
 
     // Find in project (Ctrl+Shift+F) — a modal, replacing the old Search rail.
-    if (mod && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); bennuUiStore.openFind(); return; }
+    if (mod && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); bennuUiStore.openFind(editor?.getSelectedText() ?? ''); return; }
+
+    // Workspace manager (Ctrl+Shift+W) — create / switch / manage named workspaces.
+    if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'w') { e.preventDefault(); bennuUiStore.openWorkspaceManager(); return; }
 
     // File Structure popup (Ctrl+F12, IntelliJ) — a searchable quick-outline of the
     // active file (methods/fields for Java, element names for XML/JSP/HTML).
@@ -524,6 +553,10 @@
     onClose={() => bennuUiStore.closeValidationCreator()}
     onInsert={(text) => { editor?.insertAtCursor(text); editor?.focusEditor(); }}
   />
+{/if}
+
+{#if bennuUiStore.workspaceManagerOpen}
+  <BennuWorkspaceManagerModal onClose={() => bennuUiStore.closeWorkspaceManager()} />
 {/if}
 
 <!-- Alt+Enter intentions popup. Owns its own visibility via bennuIntentionsStore;

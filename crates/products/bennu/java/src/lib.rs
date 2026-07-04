@@ -21,6 +21,7 @@
 //! `bennu_java::prelude::...`.
 
 pub mod infer;
+pub mod log_param;
 pub mod prelude;
 pub mod seam;
 pub mod symbols;

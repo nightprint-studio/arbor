@@ -48,7 +48,8 @@
   <kbd>F</kbd> opens <strong>Find in project</strong> — a backend-powered search across the whole
   project with <strong>Match case</strong>, <strong>Whole word</strong> and <strong>Regex</strong>
   toggles, grouping hits by file with the match highlighted; ↑/↓ move the selection and
-  <kbd>Enter</kbd> opens the hit.
+  <kbd>Enter</kbd> opens the hit. If a word is <strong>selected</strong> in the editor, it
+  pre-fills the search field (both here and in Find-in-file).
 </p>
 
 <h2>Go to class / file</h2>
@@ -56,7 +57,16 @@
   <kbd>Ctrl</kbd> + <kbd>N</kbd> opens <strong>Go to Class</strong> and
   <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> opens <strong>Go to File</strong> — a filterable
   quick-open. Type part of a name, ↑/↓ to move, <kbd>Enter</kbd> to open; a class jumps straight to
-  its declaration line.
+  its declaration line. A word selected in the editor pre-fills the filter.
+</p>
+
+<h2>Mojibake check</h2>
+<p>
+  <strong>Check file for mojibake</strong> (Command Palette) scans the open file for text that was
+  UTF-8 but got read as Windows-1252 — the classic <code>Ã©</code> for <code>é</code> or
+  <code>â€™</code> for <code>'</code>. Each hit is squiggled with a one-click
+  <strong>Replace with «…»</strong> quick-fix, and a summary tells you how many were found.
+  Detection is exact (a table of real corruption sequences), so clean accented text is never flagged.
 </p>
 
 <h2>Find usages</h2>
@@ -113,6 +123,13 @@
   keyboard-driven list of the context actions available there (↑/↓ to move, <kbd>Enter</kbd> to
   apply, <kbd>Esc</kbd> to dismiss). It's the entry point to the generator flows and, as the
   language service grows, to quick-fixes like adding a missing import or surrounding a block.
+</p>
+<p>
+  One quick-fix already lives here: with the caret inside a logging call whose message is built by
+  string concatenation — <code>logger.info("user " + id + " logged in")</code> — the popup offers
+  <strong>Replace concatenation with parameterized logging</strong>, rewriting it to the form the
+  logging APIs prefer: <code>logger.info("user &lbrace;&rbrace; logged in", id)</code>. A trailing
+  exception argument is kept last.
 </p>
 
 <h2>Rename</h2>

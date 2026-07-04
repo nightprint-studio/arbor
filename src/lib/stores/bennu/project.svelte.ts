@@ -25,6 +25,11 @@ import {
 } from '$lib/ipc/bennu';
 // Live re-index — kept in its own IPC file to avoid racing edits on index.ts.
 import { didChange as ipcDidChange } from '$lib/ipc/bennu/nav';
+// Workspace store owns the SET of named workspaces + persistence; this store is the live runtime
+// of the ACTIVE workspace only. It reports its session snapshot up on every change (see
+// `persistWorkspace`). Circular import is safe: neither store touches the other at construction.
+import { workspacesStore } from './workspaces.svelte';
+import type { ProjectSession } from '$lib/ipc/bennu/config';
 import type { ProjectInfo, TreeNode } from '$lib/types/bennu';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 // MOCK — remove when bennu-be serves real data.
@@ -87,6 +92,22 @@ function createProjectStore() {
   let activeFilePath = $state<string | null>(null);
   let openFilePaths = $state<string[]>([]);
 
+  // ── Workspace (N projects) ────────────────────────────────────────────────────
+  // The flat `project`/`tree`/`openFilePaths`/`activeFilePath` above are the ACTIVE project's
+  // live, reactive view. The other workspace projects live stashed in `sessions` (plain map —
+  // inactive projects don't need reactivity); switching is stash-current + load-target, so it's
+  // instant with no reopen. `sources`/`encodings` stay global (absolute-path keyed), so a file
+  // opened from another project ("foreign") caches the same way and never duplicates.
+  interface StashedSession {
+    info: ProjectInfo;
+    tree: TreeNode | null;
+    openFilePaths: string[];
+    activeFilePath: string | null;
+  }
+  const sessions = new Map<string, StashedSession>();
+  // The workspace member roots (canonical), in switch order. Always includes the active root.
+  let workspaceRoots = $state<string[]>([]);
+
   // Live re-index — one pending debounce timer per edited path. On each edit we
   // reset the path's timer; when it fires we hand the BE the current full text via
   // `bennu_did_change` so it patches the index. Demo paths never fire (no BE).
@@ -116,6 +137,52 @@ function createProjectStore() {
     const existing = reindexTimers.get(path);
     if (existing !== undefined) clearTimeout(existing);
     reindexTimers.set(path, setTimeout(() => reindexNow(path), REINDEX_DEBOUNCE_MS));
+  }
+
+  /** Build the active workspace's session snapshot from the live flat state (active project) +
+   *  the stashed sessions (the other members). Pure — used both to persist and to flush the live
+   *  state into the workspace store before a workspace switch. Empty for the demo / no project. */
+  function snapshotSession(): { active_project: string; projects: ProjectSession[] } {
+    const activeRoot = project?.root;
+    if (!activeRoot || isDemo) return { active_project: '', projects: [] };
+    // The ACTIVE root comes from the live flat state, the rest from their stashed sessions.
+    // `workspaceRoots` always includes the active root.
+    const roots = workspaceRoots.includes(activeRoot) ? workspaceRoots : [activeRoot];
+    const projects = roots.map((r) => {
+      if (r === activeRoot) {
+        return { root: r, open_files: openFilePaths, active_file: activeFilePath ?? '' };
+      }
+      const s = sessions.get(r);
+      return { root: r, open_files: s?.openFilePaths ?? [], active_file: s?.activeFilePath ?? '' };
+    });
+    return { active_project: activeRoot, projects };
+  }
+
+  // Persist the active workspace's session (open tabs + active tab per project) debounced, so the
+  // next launch restores it. Routes THROUGH the workspace store (which owns the named-workspace
+  // list + the `workspace.toml` write). Never persists the demo or a null project; a burst of tab
+  // opens/closes coalesces into one write.
+  let persistTimer: ReturnType<typeof setTimeout> | undefined;
+  function persistWorkspace() {
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => {
+      if (!project || isDemo) return;
+      workspacesStore.saveActiveSession(snapshotSession());
+    }, 300);
+  }
+
+  /** Open a file as the active tab (loads source + encoding if needed), refusing binaries.
+   *  The persistence-free core, shared by the public {@link openFile} (which persists after)
+   *  and boot-time restore (which persists once at the end). */
+  async function openFileInternal(path: string) {
+    path = canonPath(path);
+    if (isBinaryPath(path)) {
+      toastStore.show(`Can't open ${path.split(/[\\/]/).pop()} — binary file`, 'info');
+      return;
+    }
+    await ensureLoaded(path);
+    activeFilePath = path;
+    if (!openFilePaths.includes(path)) openFilePaths = [...openFilePaths, path];
   }
 
   /** Read a file's source + encoding into the cache if not already present. The
@@ -160,6 +227,36 @@ function createProjectStore() {
     applyProject(DEMO_PROJECT, DEMO_TREE, true);
   }
 
+  /** Stash the active project's live state into `sessions` (so a later switch restores it). */
+  function stashActive() {
+    if (project) {
+      sessions.set(project.root, { info: project, tree, openFilePaths, activeFilePath });
+    }
+  }
+
+  /** Load a stashed session into the flat (active) state. Sources stay in the global cache, so
+   *  the active file's text is fetched lazily by the caller if not already present. */
+  function loadSession(s: StashedSession) {
+    project = s.info;
+    tree = s.tree;
+    openFilePaths = s.openFilePaths;
+    activeFilePath = s.activeFilePath;
+    isDemo = false;
+  }
+
+  /** Fetch `root`'s file tree in the background, updating BOTH the stashed session and — when it's
+   *  the active project — the live `tree`. The root guard drops a stale tree from a superseded open. */
+  function loadTreeInto(root: string) {
+    void ipcProjectTree(root)
+      .then((t) => {
+        const ct = canonTree(t);
+        const s = sessions.get(root);
+        if (s) s.tree = ct;
+        if (project?.root === root) tree = ct;
+      })
+      .catch(() => { /* leave the tree empty — the project still opened */ });
+  }
+
   /** Ensure `path`'s source is loaded, then return it (''), for consumers (rename
    *  apply) that need a file's current text whether or not a tab is open. */
   async function loadText(path: string): Promise<string> {
@@ -193,6 +290,24 @@ function createProjectStore() {
     get isDemo()         { return isDemo; },
     /** Recently-opened project roots (most recent first). */
     get recentProjects() { return recentProjects; },
+    /** The workspace member projects for the switcher: `{ root, name }` in switch order. */
+    get workspaceProjects(): { root: string; name: string }[] {
+      return workspaceRoots.map((r) => {
+        const info = r === project?.root ? project : sessions.get(r)?.info;
+        return { root: r, name: info?.name ?? (r.split('/').pop() || r) };
+      });
+    },
+    /** True when the workspace holds more than one project (drives showing the switcher UI). */
+    get hasWorkspace(): boolean { return workspaceRoots.length > 1; },
+    /** True when `path` isn't under the active project's root — a "foreign" tab (opened from
+     *  another workspace project), which the tab strip badges (mirrors Corvus). */
+    isForeign(path: string): boolean {
+      const root = project?.root;
+      if (!root) return false;
+      const p = canonPath(path).toLowerCase();
+      const r = root.toLowerCase();
+      return !(p === r || p.startsWith(r.endsWith('/') ? r : `${r}/`));
+    },
     /** Encoding of the active file (defaults to `UTF-8`). */
     get activeEncoding() { return activeFilePath ? (encodings.get(activeFilePath) ?? 'UTF-8') : null; },
     /** Cached source of the active file (or '' when none / not yet loaded). */
@@ -203,19 +318,20 @@ function createProjectStore() {
     /** Decoded encoding for `path` (defaults to `UTF-8`). */
     encodingOf(path: string): string { return encodings.get(path) ?? 'UTF-8'; },
 
-    /** Open a project folder: resolve the manifest + file tree (no file opened).
-     *  Tries real IPC; on backend-absent failure, falls back to the demo project
-     *  so the shell stays populated. MOCK — drop the catch when bennu-be is live. */
+    /** Open a project as a **new single-project workspace** (replaces the current one, dropping
+     *  the other members). Use {@link addProject} to add to the existing workspace instead.
+     *  Tries real IPC; on backend-absent failure, falls back to the demo project so the shell
+     *  stays populated. MOCK — drop the catch when bennu-be is live. */
     async openProject(dir: string) {
       try {
         const info = await ipcOpenProject(dir);
-        // Show the project shell immediately, then load the (potentially large,
-        // fully-recursive) file tree in the background — awaiting it here is what made
-        // opening lag. A stale tree from a superseded open is dropped by the root guard.
-        applyProject(info, null, false);
-        void ipcProjectTree(info.root)
-          .then((t) => { if (project?.root === canonPath(info.root)) tree = canonTree(t); })
-          .catch(() => { /* leave the tree empty — the project still opened */ });
+        // Show the project shell immediately, then load the (potentially large) tree in the
+        // background — awaiting it here is what made opening lag.
+        applyProject(info, null, false); // resets the flat state + source cache
+        sessions.clear();                // a fresh workspace: drop the previous members
+        workspaceRoots = [project!.root];
+        loadTreeInto(project!.root);
+        persistWorkspace();
       } catch (err) {
         // MOCK — bennu-be not attached: fall back to the demo so opening the
         // window still shows a populated tree. Remove when the BE serves data.
@@ -224,8 +340,119 @@ function createProjectStore() {
       }
     },
 
+    /** Add a project to the current workspace and switch to it (keeping the existing members).
+     *  The current project's tabs are stashed; the new project opens with an empty tab set. */
+    async addProject(dir: string) {
+      let info;
+      try {
+        info = await ipcOpenProject(dir);
+      } catch {
+        return; // BE absent / not a project — no-op (openProject owns the demo fallback)
+      }
+      const root = canonPath(info.root);
+      // Already a member → just switch to it.
+      if (workspaceRoots.includes(root)) { void this.switchProject(root); return; }
+      stashActive();
+      const canonInfo: ProjectInfo = { ...info, root };
+      sessions.set(root, { info: canonInfo, tree: null, openFilePaths: [], activeFilePath: null });
+      loadSession(sessions.get(root)!);
+      workspaceRoots = [...workspaceRoots, root];
+      rememberRecent(root);
+      loadTreeInto(root);
+      persistWorkspace();
+    },
+
+    /** Switch the active project to `root` (an existing workspace member). Instant — the target's
+     *  state is already in memory; only the active file's source is (lazily) ensured. No-op when
+     *  `root` is already active or isn't a member. */
+    async switchProject(root: string) {
+      root = canonPath(root);
+      if (project?.root === root) return;
+      const s = sessions.get(root);
+      if (!s) return;
+      stashActive();
+      loadSession(s);
+      if (activeFilePath) await ensureLoaded(activeFilePath);
+      persistWorkspace();
+    },
+
+    /** Remove `root` from the workspace (dropping its stashed session). If it was active, switch
+     *  to another member (or clear when it was the last). */
+    closeProject(root: string) {
+      root = canonPath(root);
+      if (!workspaceRoots.includes(root)) return;
+      const wasActive = project?.root === root;
+      sessions.delete(root);
+      workspaceRoots = workspaceRoots.filter((r) => r !== root);
+      if (wasActive) {
+        const next = workspaceRoots[0];
+        if (next && sessions.has(next)) {
+          loadSession(sessions.get(next)!);
+          if (activeFilePath) void ensureLoaded(activeFilePath);
+        } else {
+          project = null; tree = null; openFilePaths = []; activeFilePath = null;
+        }
+      }
+      persistWorkspace();
+    },
+
     /** MOCK — explicitly load the built-in demo project. Remove with the mock. */
     loadDemo() { loadDemoProject(); },
+
+    /** The active workspace's session snapshot (open tabs per member project). The workspace store
+     *  calls this to flush the live state into a workspace before switching to another. */
+    snapshotSession,
+
+    /** Clear the active view entirely (no project / tabs) — used when the workspace store activates
+     *  a freshly-created empty workspace. Persistence-free; the store owns the write. */
+    clearAll() {
+      sessions.clear();
+      workspaceRoots = [];
+      project = null;
+      tree = null;
+      openFilePaths = [];
+      activeFilePath = null;
+      isDemo = false;
+      for (const t of reindexTimers.values()) clearTimeout(t);
+      reindexTimers.clear();
+    },
+
+    /** Load a whole workspace's projects into the live runtime — the boot-restore / workspace-switch
+     *  entry point (driven by the workspace store, which owns the persisted set). Opens each
+     *  project's manifest, stashes a session per project, then activates `active` (or the first that
+     *  opened) and loads its active file. A vanished project is skipped; nothing opened leaves the
+     *  window empty (no demo fallback, no error). Persistence-free — the store persists after. */
+    async loadWorkspace(projects: ProjectSession[], active: string) {
+      sessions.clear();
+      workspaceRoots = [];
+      project = null;
+      tree = null;
+      openFilePaths = [];
+      activeFilePath = null;
+      isDemo = false;
+      for (const p of projects) {
+        let info;
+        // eslint-disable-next-line no-await-in-loop
+        try { info = await ipcOpenProject(p.root); } catch { continue; } // a project that's gone
+        const root = canonPath(info.root);
+        sessions.set(root, {
+          info: { ...info, root },
+          tree: null,
+          openFilePaths: p.open_files.map(canonPath),
+          activeFilePath: p.active_file ? canonPath(p.active_file) : null,
+        });
+        workspaceRoots = [...workspaceRoots, root];
+        rememberRecent(root);
+        loadTreeInto(root);
+      }
+      if (!workspaceRoots.length) return; // nothing opened (all gone / BE down)
+      // Activate the remembered active project (or the first that opened), then load its active file.
+      const wantActive = canonPath(active);
+      const target = workspaceRoots.includes(wantActive) ? wantActive : workspaceRoots[0];
+      loadSession(sessions.get(target)!);
+      if (!activeFilePath && openFilePaths.length) activeFilePath = openFilePaths[0];
+      if (activeFilePath) await ensureLoaded(activeFilePath);
+    },
 
     /** Open a file as the active editor tab (loads its source + encoding if needed).
      *  Binary files are refused with a toast (opening one would choke the UTF-8 read
@@ -234,15 +461,10 @@ function createProjectStore() {
       // Canonicalize (forward slashes) so a file opened via different callers — the project
       // tree (native `\`), a JSP include go-to or the class index (BE forward-slash) — keys
       // the SAME tab instead of a duplicate, and the active path matches the BE's
-      // forward-slash file keys (e.g. the form-analysis include graph).
-      path = canonPath(path);
-      if (isBinaryPath(path)) {
-        toastStore.show(`Can't open ${path.split(/[\\/]/).pop()} — binary file`, 'info');
-        return;
-      }
-      await ensureLoaded(path);
-      activeFilePath = path;
-      if (!openFilePaths.includes(path)) openFilePaths = [...openFilePaths, path];
+      // forward-slash file keys (e.g. the form-analysis include graph). The open logic lives
+      // in `openFileInternal` (shared with boot restore); this wrapper persists the session.
+      await openFileInternal(path);
+      persistWorkspace();
     },
 
     /** Close a tab; pick a neighbour as active. */
@@ -254,7 +476,9 @@ function createProjectStore() {
         activeFilePath = openFilePaths.length
           ? openFilePaths[Math.min(idx, openFilePaths.length - 1)]
           : null;
+        if (activeFilePath) void ensureLoaded(activeFilePath); // a restored neighbour may be lazy
       }
+      persistWorkspace();
     },
 
     /** Close every tab except `path` — it becomes the active one (so the surviving
@@ -264,12 +488,15 @@ function createProjectStore() {
       if (!openFilePaths.includes(path)) return;
       openFilePaths = [path];
       activeFilePath = path;
+      void ensureLoaded(path);
+      persistWorkspace();
     },
 
     /** Close all open tabs. */
     closeAll() {
       openFilePaths = [];
       activeFilePath = null;
+      persistWorkspace();
     },
 
     /** Close every tab to the right of `path` (keeps `path` and everything before it).
@@ -281,12 +508,20 @@ function createProjectStore() {
       const kept = openFilePaths.slice(0, idx + 1);
       if (kept.length === openFilePaths.length) return; // nothing to the right
       openFilePaths = kept;
-      if (activeFilePath && !kept.includes(activeFilePath)) activeFilePath = path;
+      if (activeFilePath && !kept.includes(activeFilePath)) {
+        activeFilePath = path;
+        void ensureLoaded(path);
+      }
+      persistWorkspace();
     },
 
-    /** Set the active tab (must already be open). */
-    setActive(path: string) {
-      if (openFilePaths.includes(path)) activeFilePath = path;
+    /** Set the active tab (must already be open). Ensures its source is loaded — a tab restored
+     *  from the workspace, or a foreign file, may not be cached yet — then persists. */
+    async setActive(path: string) {
+      if (!openFilePaths.includes(path)) return;
+      activeFilePath = path;
+      await ensureLoaded(path);
+      persistWorkspace();
     },
 
     /** Update the cached source (editor edits route here) and schedule a debounced

@@ -121,12 +121,13 @@ export function indexStats(root: string): Promise<IndexStats> {
 export function findInFiles(
   root: string,
   query: string,
-  opts: { regex: boolean; caseSensitive: boolean; wholeWord: boolean },
+  opts: { regex: boolean; caseSensitive: boolean; wholeWord: boolean; extraRoots?: string[] },
   searchId: string,
 ): Promise<void> {
   return bennu('bennu_find_in_files', {
     args: {
       root,
+      extra_roots: opts.extraRoots ?? [],
       query,
       regex: opts.regex,
       case_sensitive: opts.caseSensitive,

@@ -245,6 +245,23 @@
     scrollToOffset(b2u(byteOffset));
   }
 
+  /** Replace the buffer range `[startByte, endByte)` (UTF-8 byte offsets, as backend edits report
+   *  them) with `text`, then place the caret at the end of the insertion and focus. Byte offsets
+   *  are mapped through `makeByteToU16` against the live buffer. The dispatch emits a normal doc
+   *  change, so the host's controlled-value sync + live re-index pick it up. No-op when unmounted. */
+  export function replaceByteRange(startByte: number, endByte: number, text: string) {
+    if (!view) return;
+    const b2u = makeByteToU16(view.state.doc.toString());
+    const len = view.state.doc.length;
+    const from = Math.max(0, Math.min(b2u(startByte), len));
+    const to = Math.max(from, Math.min(b2u(endByte), len));
+    view.dispatch({
+      changes: { from, to, insert: text },
+      selection: { anchor: from + text.length },
+    });
+    view.focus();
+  }
+
   export function scrollToLineCol(line: number, col = 1) {
     if (!view) return;
     const doc = view.state.doc;
@@ -333,6 +350,14 @@
   export function refAtCaret(): string | null {
     if (!view) return null;
     return refTextAt(view.state.doc, view.state.selection.main.head);
+  }
+
+  /** The current selection's text, or '' when nothing is selected — to seed a search /
+   *  navigator field from what the user highlighted (IntelliJ / VS Code). */
+  export function getSelectionText(): string {
+    if (!view) return '';
+    const s = view.state.selection.main;
+    return view.state.sliceDoc(s.from, s.to);
   }
 
   /** Copy the current selection to the clipboard (no-op when nothing is selected). */

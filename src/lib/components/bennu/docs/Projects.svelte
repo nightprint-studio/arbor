@@ -6,6 +6,30 @@
   the domain frameworks the code relies on.
 </p>
 
+<h2>Workspaces</h2>
+<p>
+  A <strong>workspace</strong> is a named, colored group of projects you can switch between as a
+  unit. Hold several projects in one workspace and keep several workspaces side by side — the same
+  project may belong to more than one. Each workspace remembers its own open tabs, so switching
+  reopens exactly where you left off.
+</p>
+<p>
+  The <strong>project dropdown</strong> in the titlebar drives everything: at the top it switches
+  between the projects inside the current workspace; below, the <strong>Workspaces</strong> section
+  switches between workspaces; and <strong>Add project to workspace…</strong> pulls another project
+  into the current one. Every project keeps its tabs, tree and index in memory, so switching — a
+  project or a whole workspace — never reopens anything. A file opened from a different project of
+  the workspace stays in the current tab strip, <strong>badged with its owning project</strong>.
+</p>
+<p>
+  The <strong>workspace manager</strong> (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd>, or
+  <em>Manage workspaces…</em> in the dropdown) is where you create, rename, recolor and delete
+  workspaces and add or remove their member projects. <strong>Open project</strong>
+  (<kbd>Ctrl</kbd> + <kbd>O</kbd>) resets the active workspace to a single project; the whole set is
+  remembered and reopened on the next launch. <strong>Find in project</strong> gains a scope toggle
+  to search the active project only or the <strong>entire workspace</strong>.
+</p>
+
 <h2>The JDK</h2>
 <p>
   The footer shows the resolved Java language level and where it came from — usually

@@ -72,6 +72,12 @@ mod jsp_nav;
 // id → the Java interface method, `namespace` → the interface, `<include refid>` → its `<sql>`,
 // a `resultMap="…"` → its `<resultMap>`).
 mod mybatis_nav;
+// Mojibake check: `bennu_mojibake_check` — find UTF-8-decoded-as-Cp1252 corruption (`Ã©` → `é`,
+// `â€™` → `'`) in a file, with the corrected character for a one-click fix.
+mod mojibake;
+// Logging quick-fix: `bennu_log_param` — parameterize a `logger.info("x " + v)` string-concat
+// message into `logger.info("x {}", v)` (the SLF4J/Log4j preferred form).
+mod log_param;
 // Index inspector: `bennu_index_stats` — a cheap snapshot of the per-project index (symbol
 // + config counts, JDK level, build-ready flag) for an inspector panel.
 mod index_stats;

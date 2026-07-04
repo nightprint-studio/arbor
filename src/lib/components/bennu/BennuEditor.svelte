@@ -13,6 +13,7 @@
   import {
     Hash, FileCode2, MapPin, Scissors, Copy, ClipboardPaste, Target, SearchCode,
     PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed, ShieldCheck, Plus, BookOpen,
+    Braces,
   } from 'lucide-svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -38,6 +39,8 @@
   import { applyByteEdits } from './rename-apply';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { spellcheck as ipcSpellcheck, type SpellHit } from '$lib/ipc/bennu/spell';
+  import { mojibakeCheck as ipcMojibakeCheck } from '$lib/ipc/bennu/mojibake';
+  import { logParam as ipcLogParam } from '$lib/ipc/bennu/log-param';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
   import type { EditorDiagnostic, EditorViewSnapshot } from '$lib/components/shared/ui/code-editor';
   import type { EditorView } from '@codemirror/view';
@@ -46,7 +49,7 @@
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import { bennuNavStore } from '$lib/stores/bennu/nav-history.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
-  import { collectIntentions, type GenerateMode } from './bennu-intentions';
+  import { collectIntentions, type GenerateMode, type IntentionItem } from './bennu-intentions';
   import { javaOutline } from './java-outline';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 
@@ -61,9 +64,11 @@
   type EditorController = {
     focus: () => void;
     getValue: () => string;
+    getSelectionText: () => string;
     openSearch: () => void;
     scrollToLineCol: (line: number, col?: number) => void;
     scrollToByteOffset: (byteOffset: number) => void;
+    replaceByteRange: (startByte: number, endByte: number, text: string) => void;
     coordsAtCaret: () => { x: number; y: number } | null;
     coordsAtByteOffset: (byteOffset: number) => { x: number; y: number } | null;
     setCaretAtCoords: (x: number, y: number) => boolean;
@@ -94,8 +99,34 @@
     return path.split(/[\\/]/).pop() ?? path;
   }
 
+  /** The workspace project a path belongs to (longest-prefix root match), or undefined when
+   *  it's outside every workspace project — for badging a "foreign" tab with its owner. */
+  function owningName(path: string): string | undefined {
+    const canon = path.replace(/\\/g, '/').toLowerCase();
+    let best: { root: string; name: string } | undefined;
+    for (const p of projectStore.workspaceProjects) {
+      const r = p.root.toLowerCase();
+      if (canon === r || canon.startsWith(r.endsWith('/') ? r : `${r}/`)) {
+        if (!best || p.root.length > best.root.length) best = p;
+      }
+    }
+    return best?.name;
+  }
+
+  // A tab whose file isn't under the active project's root is "foreign" (opened from another
+  // workspace project): badge it with the owning project's name so it's clear where it lives.
   const tabs = $derived<TabItem[]>(
-    openPaths.map((p) => ({ id: p, label: baseName(p), icon: FileCode2, iconSize: 13, title: p })),
+    openPaths.map((p) => {
+      const foreign = projectStore.isForeign(p);
+      return {
+        id: p,
+        label: baseName(p),
+        icon: FileCode2,
+        iconSize: 13,
+        title: foreign ? `${p}  ·  from ${owningName(p) ?? 'another project'}` : p,
+        badge: foreign ? (owningName(p) ?? 'ext') : undefined,
+      };
+    }),
   );
 
   // ── Caret position (footer, via the UI store) ────────────────────────────────
@@ -193,7 +224,11 @@
   // the project and dictionaries are installed. Each misspelled word carries quick-fix
   // actions: replace-with-suggestion + add-to-dictionary (project / global).
   let spellDiags = $state<EditorDiagnostic[]>([]);
-  const allDiags = $derived([...diags, ...spellDiags]);
+  // Mojibake squiggles are an on-demand check (palette command), not auto-run — populated by
+  // `checkMojibake()`, cleared when the active file changes so they never leak across files.
+  let mojibakeDiags = $state<EditorDiagnostic[]>([]);
+  const allDiags = $derived([...diags, ...spellDiags, ...mojibakeDiags]);
+  $effect(() => { void activePath; mojibakeDiags = []; });
 
   function spellDiagOf(h: SpellHit, root: string): EditorDiagnostic {
     const actions = h.suggestions.slice(0, 4).map((s) => ({
@@ -241,22 +276,76 @@
   /** Open the editor's in-buffer search panel (Ctrl+F when the pane is focused). */
   export function openSearch() { editorComp?.openSearch(); }
   export function focusEditor() { editorComp?.focus(); }
+  /** The editor's current selection text ('' when nothing selected) — used by the window to
+   *  seed Find-in-project / Go-to navigator fields from what the user highlighted. */
+  export function getSelectedText(): string { return editorComp?.getSelectionText() ?? ''; }
+
+  /** Palette "Check file for mojibake": scan the active buffer for UTF-8-as-Cp1252 corruption
+   *  (`Ã©` → `é`, `â€™` → `'`) and surface each hit as a warning squiggle with a one-click
+   *  replace, plus a summary toast. One-shot (recomputed each run); cleared on file switch. */
+  export async function checkMojibake() {
+    const path = activePath;
+    if (!path || !editorComp) return;
+    const src = editorComp.getValue();
+    let hits: Awaited<ReturnType<typeof ipcMojibakeCheck>> = [];
+    try { hits = await ipcMojibakeCheck(path, src); } catch { hits = []; }
+    if (projectStore.activeFilePath !== path) return; // file switched mid-scan → drop
+    mojibakeDiags = hits.map((h) => ({
+      from: h.start,
+      to: h.end,
+      severity: 'warning' as const,
+      message: `Likely mojibake: “${h.bad}” should be “${h.fix}”`,
+      actions: [{
+        name: `Replace with “${h.fix}”`,
+        apply: (view: EditorView, from: number, to: number) =>
+          view.dispatch({ changes: { from, to, insert: h.fix } }),
+      }],
+    }));
+    toastStore.show(
+      hits.length
+        ? `${hits.length} mojibake sequence${hits.length === 1 ? '' : 's'} found`
+        : 'No mojibake found',
+      hits.length ? 'warning' : 'success',
+    );
+  }
 
   // ── Intentions (Alt+Enter) ────────────────────────────────────────────────────
   /** Collect the context actions at the caret and open the intentions popup
    *  anchored there. No-op (with a toast) when no file is open or the caret has no
    *  anchor. The two "Generate…" items route through `onGenerate`. */
-  export function openIntentions() {
+  export async function openIntentions() {
     if (!activePath || !editorComp) return;
+    const path = activePath;
     const anchor = editorComp.coordsAtCaret();
-    const items = collectIntentions(
-      {
-        src: projectStore.sourceOf(activePath),
-        wordUnderCaret: editorComp.wordAtCaret(),
-        outline: javaOutline(projectStore.sourceOf(activePath)),
-      },
-      { onGenerate: (mode) => onGenerate?.(mode) },
-    );
+    // Context-aware BE intention (first real one): if the caret is inside a logging call whose
+    // message is built by string concatenation, offer "parameterize" — a single Rust-backed edit.
+    const dynamic: IntentionItem[] = [];
+    if (isJavaFileOf(path)) {
+      const src = editorComp.getValue();
+      const offset = editorComp.caretByteOffset();
+      try {
+        const lp = await ipcLogParam(path, src, offset);
+        if (lp && projectStore.activeFilePath === path) {
+          dynamic.push({
+            id: 'log-parameterize',
+            label: 'Replace concatenation with parameterized logging',
+            icon: Braces,
+            run: () => editorComp?.replaceByteRange(lp.start, lp.end, lp.replacement),
+          });
+        }
+      } catch { /* BE absent — skip the dynamic intention */ }
+    }
+    const items = [
+      ...dynamic,
+      ...collectIntentions(
+        {
+          src: projectStore.sourceOf(path),
+          wordUnderCaret: editorComp.wordAtCaret(),
+          outline: javaOutline(projectStore.sourceOf(path)),
+        },
+        { onGenerate: (mode) => onGenerate?.(mode) },
+      ),
+    ];
     if (!items.length) {
       toastStore.show('No context actions here', 'info');
       return;

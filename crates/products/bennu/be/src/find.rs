@@ -76,8 +76,12 @@ const EVT_FIND_PROGRESS: &str = "arbor://bennu/find-progress";
 /// Args for [`bennu_find_in_files`].
 #[derive(Deserialize)]
 pub struct FindInFilesArgs {
-    /// Absolute path to the project root to scan.
+    /// Absolute path to the (active) project root to scan.
     pub root: String,
+    /// Additional project roots to scan too (the other workspace projects, when the search is
+    /// scoped to the whole workspace). Empty for a single-project / active-project-only search.
+    #[serde(default)]
+    pub extra_roots: Vec<String>,
     /// The text (or, in `regex` fallback mode, the substring) to find.
     pub query: String,
     /// Regex mode. NOTE: the `regex` crate isn't a dependency, so this falls back to a
@@ -186,6 +190,7 @@ fn bennu_find_in_files(ctx: &BennuState, args: FindInFilesArgs) -> Result<(), St
 
     let matcher = Matcher::new(&args);
     let root = args.root.clone();
+    let extra_roots = args.extra_roots.clone();
     let search_id = args.search_id.clone();
     let query = args.query.clone();
 
@@ -197,6 +202,13 @@ fn bennu_find_in_files(ctx: &BennuState, args: FindInFilesArgs) -> Result<(), St
         .spawn(move || {
             let mut batch = BatchSink::new(sink.clone(), search_id.clone());
             scan_dir(Path::new(&root), &matcher, &mut batch);
+            // Workspace scope: scan the other projects too (same stream / cap / search_id).
+            for r in &extra_roots {
+                if batch.is_full() {
+                    break;
+                }
+                scan_dir(Path::new(r), &matcher, &mut batch);
+            }
             let capped = batch.capped;
             batch.finish(); // flush any trailing hits before the terminal event
             if capped {
@@ -345,6 +357,7 @@ mod tests {
     fn args(query: &str, regex: bool, case_sensitive: bool, whole_word: bool) -> FindInFilesArgs {
         FindInFilesArgs {
             root: String::new(),
+            extra_roots: Vec::new(),
             query: query.to_string(),
             regex,
             case_sensitive,

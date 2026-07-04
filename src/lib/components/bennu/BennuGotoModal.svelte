@@ -27,7 +27,9 @@
   // file to open, and an optional line to jump to.
   interface Row { primary: string; secondary: string; file: string; line: number | null; cls: boolean; }
 
-  let query = $state('');
+  // Seed from the editor selection when opened with one highlighted (bennuUiStore.navInitial),
+  // else empty. Read once at mount — the value is set right before the modal opens.
+  let query = $state(bennuUiStore.navInitial);
   let active = $state(0);
 
   // ── Class source (fetched once on open) ─────────────────────────────────────

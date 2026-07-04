@@ -6,7 +6,9 @@
 //! back into it. `_state` is unused — the path is self-resolved — but the handler
 //! signature requires the ctx.
 
-use bennu_core::config::{load, save, BennuConfig};
+use bennu_core::config::{
+    load, load_workspaces, save, save_workspaces, BennuConfig, BennuWorkspaces,
+};
 use bennu_core::prelude::BennuState;
 
 /// Read the typed product bennu config (defaults on a missing/corrupt file).
@@ -24,4 +26,19 @@ fn set_bennu_config(_state: &BennuState, config: BennuConfig) -> Result<(), Stri
         config.jdk_paths.iter().map(std::path::PathBuf::from).collect(),
     );
     save(&config)
+}
+
+/// Read the persisted **workspace store** (every named workspace + which is active + each
+/// project's session). Empty store on a missing/corrupt file — the window then opens with nothing
+/// restored. A pre-named-workspaces file is migrated on read (see `load_workspaces`).
+#[arbor_rpc::handler]
+fn get_bennu_workspaces(_state: &BennuState) -> Result<BennuWorkspaces, String> {
+    Ok(load_workspaces())
+}
+
+/// Persist the **workspace store** (the FE writes it debounced on tab/project/switch/CRUD changes)
+/// so the next launch reopens the active workspace where the user left off.
+#[arbor_rpc::handler]
+fn set_bennu_workspaces(_state: &BennuState, workspaces: BennuWorkspaces) -> Result<(), String> {
+    save_workspaces(&workspaces)
 }

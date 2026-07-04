@@ -38,6 +38,10 @@ function createBennuUiStore() {
   let paletteOpen = $state(false);
   // Find-in-project modal (Ctrl+Shift+F).
   let findOpen = $state(false);
+  // Initial query seeded into the Find / Go-to fields when opened from a selection
+  // (Ctrl+Shift+F / Ctrl+N / Ctrl+Shift+N with a word highlighted). '' → open empty.
+  let findInitial = $state('');
+  let navInitial = $state('');
 
   // Per-project configuration modal (JDK / encoding / roots / modules).
   let projectConfigOpen = $state(false);
@@ -59,6 +63,8 @@ function createBennuUiStore() {
   let generateMode = $state<GenerateMode>('getters-setters');
   // "New validator" modal (opened from the Struts-validation-file editor toolbar).
   let validationCreatorOpen = $state(false);
+  // Workspace manager modal (create / rename / recolor / delete workspaces, manage members).
+  let workspaceManagerOpen = $state(false);
   // The intentions overlay (Alt+Enter) owns its own visibility in
   // `bennuIntentionsStore`; the window mounts it unconditionally. No flag needed
   // here — the openers below delegate to that store.
@@ -102,12 +108,17 @@ function createBennuUiStore() {
     get runConfigOpen() { return runConfigOpen; },
     get navOpen()      { return navOpen; },
     get navMode()      { return navMode; },
+    /** Query to pre-fill the Find-in-project field with (from a selection), or ''. */
+    get findInitial()  { return findInitial; },
+    /** Query to pre-fill the Go-to navigator field with (from a selection), or ''. */
+    get navInitial()   { return navInitial; },
     get indexInspectorOpen() { return indexInspectorOpen; },
     get fileStructureOpen() { return fileStructureOpen; },
     get aboutOpen()    { return aboutOpen; },
     get generateOpen() { return generateOpen; },
     get generateMode() { return generateMode; },
     get validationCreatorOpen() { return validationCreatorOpen; },
+    get workspaceManagerOpen() { return workspaceManagerOpen; },
     get gotoTarget()   { return gotoTarget; },
     get gotoOffsetTarget() { return gotoOffsetTarget; },
     get revealNonce()  { return revealNonce; },
@@ -132,15 +143,17 @@ function createBennuUiStore() {
     closeDocs()     { docsOpen = false; },
     togglePalette() { paletteOpen = !paletteOpen; },
     closePalette()  { paletteOpen = false; },
-    openFind()      { findOpen = true; },
+    /** Open Find-in-project, optionally pre-filling the query (e.g. the editor selection). */
+    openFind(initial = '')      { findInitial = initial; findOpen = true; },
     closeFind()     { findOpen = false; },
 
     openProjectConfig()  { projectConfigOpen = true; },
     closeProjectConfig() { projectConfigOpen = false; },
     openRunConfig()      { runConfigOpen = true; },
     closeRunConfig()     { runConfigOpen = false; },
-    /** Open the Go-to navigator in `mode` ('class' | 'file'). */
-    openNav(mode: 'class' | 'file') { navMode = mode; navOpen = true; },
+    /** Open the Go-to navigator in `mode` ('class' | 'file'), optionally pre-filling the
+     *  query (e.g. the editor selection). */
+    openNav(mode: 'class' | 'file', initial = '') { navMode = mode; navInitial = initial; navOpen = true; },
     closeNav()           { navOpen = false; },
     openIndexInspector() { indexInspectorOpen = true; },
     closeIndexInspector() { indexInspectorOpen = false; },
@@ -159,6 +172,9 @@ function createBennuUiStore() {
     /** Open the "New validator" modal (from the validation-file editor toolbar). */
     openValidationCreator()  { validationCreatorOpen = true; },
     closeValidationCreator() { validationCreatorOpen = false; },
+    /** Open / close the workspace manager modal. */
+    openWorkspaceManager()  { workspaceManagerOpen = true; },
+    closeWorkspaceManager() { workspaceManagerOpen = false; },
 
     /** Ask the editor to scroll to a 1-based line (a panel → editor relay). */
     requestGoto(line: number) {

@@ -15,7 +15,7 @@
    * (Modal owns Esc). Rows are grouped by file. The matched substring is emphasised
    * with a <mark>-like span. Replace is intentionally out of scope (no affordance).
    */
-  import { Search, FileCode2 } from 'lucide-svelte';
+  import { Search, FileCode2, FolderTree } from 'lucide-svelte';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -29,10 +29,14 @@
 
   let { onClose }: { onClose: () => void } = $props();
 
-  let query = $state('');
+  // Seed from the editor selection when opened with one highlighted (bennuUiStore.findInitial),
+  // else empty. Read once at mount — the value is set right before the modal opens.
+  let query = $state(bennuUiStore.findInitial);
   let regex = $state(false);
   let caseSensitive = $state(false);
   let wholeWord = $state(false);
+  // Search scope in a multi-project workspace: the active project only, or every member.
+  let scope = $state<'project' | 'workspace'>('project');
 
   let hits = $state<FindHit[]>([]);
   let loading = $state(false);
@@ -80,7 +84,12 @@
     }
     loading = true;
     errored = false;
-    findInFiles(root, q, { regex, caseSensitive, wholeWord }, id).catch(() => {
+    // Workspace scope: also scan the OTHER member projects (the BE streams them into the same
+    // search). Active-project scope leaves `extraRoots` empty.
+    const extraRoots = scope === 'workspace'
+      ? projectStore.workspaceProjects.map((p) => p.root).filter((r) => r !== root)
+      : [];
+    findInFiles(root, q, { regex, caseSensitive, wholeWord, extraRoots }, id).catch(() => {
       if (id !== currentId) return;
       // BE absent / rejected query (e.g. bad regex) → graceful empty state.
       hits = [];
@@ -92,7 +101,7 @@
   // Re-run on any input change (query text or a toggle), debounced.
   $effect(() => {
     // Touch the deps so the effect re-arms on each change.
-    void query; void regex; void caseSensitive; void wholeWord; void projectStore.project;
+    void query; void regex; void caseSensitive; void wholeWord; void scope; void projectStore.project;
     if (debounceTimer !== undefined) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(runSearch, 250);
     return () => { if (debounceTimer !== undefined) clearTimeout(debounceTimer); };
@@ -218,6 +227,19 @@
           title="Regular expression"
           onclick={() => (regex = !regex)}
         >.*</button>
+        {#if projectStore.hasWorkspace}
+          <button
+            type="button"
+            class="ff-tgl"
+            class:on={scope === 'workspace'}
+            aria-pressed={scope === 'workspace'}
+            aria-label="Search scope"
+            title={scope === 'workspace'
+              ? 'Scope: whole workspace (click to search the active project only)'
+              : 'Scope: active project (click to search the whole workspace)'}
+            onclick={() => (scope = scope === 'workspace' ? 'project' : 'workspace')}
+          ><FolderTree size={13} /></button>
+        {/if}
       </div>
     </div>
 

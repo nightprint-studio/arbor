@@ -16,3 +16,6 @@ pub use crate::symbols::{
 
 // The resolver seam the type-walk consumes + the member shapes it resolves against.
 pub use crate::seam::{ClassMembers, Member, MemberKind, TypeRef, TypeResolver, Visibility};
+
+// The "parameterize a logging call" quick-fix transform (Alt+Enter intention).
+pub use crate::log_param::{parameterize_log_call, LogParamRewrite};

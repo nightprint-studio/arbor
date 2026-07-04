@@ -16,8 +16,9 @@
    * hover/open, Monogram + name + chevron). Run/Debug/More are UI stubs (toast).
    */
   import {
-    ChevronDown, FolderOpen, LogOut, Settings, Keyboard, FlaskConical, FileCode2,
+    ChevronDown, FolderOpen, FolderPlus, LogOut, Settings, Keyboard, FlaskConical, FileCode2,
     Play, Bug, MoreVertical, Palette, SlidersHorizontal, Info, Hammer, Square, TriangleAlert,
+    Layers, Plus,
   } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
@@ -30,6 +31,7 @@
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { workspacesStore, wsColorVar } from '$lib/stores/bennu/workspaces.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
@@ -37,6 +39,8 @@
   import ThemeEditorModal from '$lib/components/shared/ThemeEditorModal.svelte';
 
   let pickerOpen = $state(false);
+  // Whether the folder picker opens a NEW workspace (replace) or ADDS a project to the current one.
+  let pickerMode = $state<'open' | 'add'>('open');
   let themeEditorOpen = $state(false);
 
   // Run/Build are wired to bennu-be (build.rs); Debug isn't implemented yet (a
@@ -74,7 +78,7 @@
 
   // Ctrl+O (window keybinding) → open the folder picker hosted here.
   $effect(() => {
-    function open() { pickerOpen = true; }
+    function open() { openPicker('open'); }
     window.addEventListener('bennu:open-project', open);
     return () => window.removeEventListener('bennu:open-project', open);
   });
@@ -86,15 +90,31 @@
 
   const projectName = $derived(projectStore.project?.name ?? 'No project');
 
-  async function openProject(dir: string) {
-    pickerOpen = false;
+  /** Open `dir` as a new single-project workspace (replaces the current one). */
+  async function openProjectDirect(dir: string) {
     try { await projectStore.openProject(dir); } catch { /* mock fallback already applied */ }
+  }
+
+  /** Folder-picker confirm — either replace the workspace (`open`) or add a project to it (`add`). */
+  async function confirmPicker(dir: string) {
+    pickerOpen = false;
+    if (pickerMode === 'add') { await projectStore.addProject(dir); return; }
+    await openProjectDirect(dir);
+  }
+
+  function openPicker(mode: 'open' | 'add') { pickerMode = mode; pickerOpen = true; }
+
+  /** Create a fresh empty workspace and open the manager so the user can add projects to it. */
+  async function newWorkspace() {
+    await workspacesStore.create('New workspace');
+    bennuUiStore.openWorkspaceManager();
   }
 
   // ── Hamburger (file / project actions) ────────────────────────────────────────
   const hamburgerMenu = $derived<DropdownItem[]>([
     { kind: 'separator', label: 'Project' },
-    { kind: 'item', id: 'open',  label: 'Open project…', icon: FolderOpen, shortcut: 'Ctrl+O', onclick: () => { pickerOpen = true; } },
+    { kind: 'item', id: 'open',  label: 'Open project…', icon: FolderOpen, shortcut: 'Ctrl+O', onclick: () => openPicker('open') },
+    { kind: 'item', id: 'addproj', label: 'Add project to workspace…', icon: FolderPlus, disabled: !hasProject, onclick: () => openPicker('add') },
     { kind: 'item', id: 'projectcfg', label: 'Project Configuration…', icon: SlidersHorizontal, disabled: !hasProject, onclick: () => bennuUiStore.openProjectConfig() },
     // MOCK — remove the "Load demo project" entry when bennu-be serves real data.
     { kind: 'item', id: 'demo',  label: 'Load demo project', icon: FlaskConical, onclick: () => projectStore.loadDemo() },
@@ -132,20 +152,47 @@
     { kind: 'submenu', id: 'theme', label: 'Theme', icon: Palette, items: themeItems },
   ]);
 
-  // ── Project fast-swap (recents + open) ────────────────────────────────────────
+  // ── Project fast-swap: projects in the active workspace, then workspace switch, then recents ──
   const projectItems = $derived<DropdownItem[]>([
+    // Projects IN the active workspace — click to switch (instant, state is already in memory).
+    ...(projectStore.hasWorkspace
+      ? [
+          { kind: 'separator' as const, label: workspacesStore.activeName || 'Workspace' },
+          ...projectStore.workspaceProjects.map((p) => ({
+            kind: 'item' as const, id: `ws:${p.root}`, label: p.name, subtitle: p.root,
+            icon: FileCode2, active: p.root === projectStore.project?.root,
+            onclick: () => void projectStore.switchProject(p.root),
+          })),
+          { kind: 'separator' as const },
+        ]
+      : []),
+    { kind: 'item' as const, id: '__add', label: 'Add project to workspace…', icon: FolderPlus, disabled: !hasProject, onclick: () => openPicker('add') },
+    // Named workspaces — switch the whole active project set. Only when there's more than one.
+    ...(workspacesStore.hasMany
+      ? [
+          { kind: 'separator' as const, label: 'Workspaces' },
+          ...workspacesStore.workspaces.map((w) => ({
+            kind: 'item' as const, id: `wsw:${w.id}`, label: w.name || 'Workspace',
+            subtitle: `${w.projects.length} ${w.projects.length === 1 ? 'project' : 'projects'}`,
+            icon: Layers, active: w.id === workspacesStore.activeId,
+            onclick: () => void workspacesStore.switchTo(w.id),
+          })),
+        ]
+      : []),
+    { kind: 'item' as const, id: '__newws', label: 'New workspace…', icon: Plus, onclick: () => void newWorkspace() },
+    { kind: 'item' as const, id: '__mgws', label: 'Manage workspaces…', icon: Layers, onclick: () => bennuUiStore.openWorkspaceManager() },
     ...(projectStore.recentProjects.length
       ? [
           { kind: 'separator' as const, label: 'Recent' },
           ...projectStore.recentProjects.map((path) => ({
             kind: 'item' as const, id: path, label: basename(path), subtitle: path,
             icon: FileCode2, active: path === projectStore.project?.root,
-            onclick: () => void openProject(path),
+            onclick: () => void openProjectDirect(path),
           })),
-          { kind: 'separator' as const },
         ]
       : []),
-    { kind: 'item' as const, id: '__open', label: 'Open project…', icon: FolderOpen, shortcut: 'Ctrl+O', onclick: () => { pickerOpen = true; } },
+    { kind: 'separator' as const },
+    { kind: 'item' as const, id: '__open', label: 'Open project…', icon: FolderOpen, shortcut: 'Ctrl+O', onclick: () => openPicker('open') },
   ]);
 </script>
 
@@ -165,8 +212,8 @@
   {#snippet leading()}
     <Dropdown items={projectItems} position="fixed" direction="down" width="280px">
       {#snippet trigger({ open, toggle })}
-        <button class="btb-project" class:open onclick={toggle} use:tooltip={'Switch project'} aria-haspopup="menu" aria-expanded={open}>
-          <Monogram name={projectName} size={22} />
+        <button class="btb-project" class:open onclick={toggle} use:tooltip={workspacesStore.active ? `Workspace: ${workspacesStore.activeName} — switch project / workspace` : 'Switch project'} aria-haspopup="menu" aria-expanded={open}>
+          <Monogram name={projectName} size={22} color={workspacesStore.active ? wsColorVar(workspacesStore.active.color_idx) : undefined} />
           <span class="btb-project-name">{projectName}</span>
           {#if projectStore.isDemo}<span class="btb-demo">demo</span>{/if}
           <ChevronDown size={12} class="btb-project-chev" />
@@ -236,8 +283,8 @@
 {#if pickerOpen}
   <FileExplorerModal
     mode="folder"
-    title="Open Java project"
-    onConfirm={openProject}
+    title={pickerMode === 'add' ? 'Add project to workspace' : 'Open Java project'}
+    onConfirm={confirmPicker}
     onCancel={() => (pickerOpen = false)}
     onClose={() => (pickerOpen = false)}
   />

@@ -50,6 +50,7 @@
 <ul>
   <li><kbd>Ctrl</kbd> + <kbd>K</kbd> — command palette</li>
   <li><kbd>Ctrl</kbd> + <kbd>O</kbd> — open project</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd> — manage workspaces</li>
   <li><kbd>Ctrl</kbd> + <kbd>,</kbd> — settings</li>
   <li><kbd>F1</kbd> — documentation</li>
 </ul>
