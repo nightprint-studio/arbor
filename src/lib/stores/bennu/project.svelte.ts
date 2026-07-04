@@ -18,6 +18,7 @@
 
 import { SvelteMap } from 'svelte/reactivity';
 import {
+  moveToPackage as ipcMoveToPackage,
   openProject as ipcOpenProject,
   projectTree as ipcProjectTree,
   readFile as ipcReadFile,
@@ -472,6 +473,28 @@ function createProjectStore() {
       // in `openFileInternal` (shared with boot restore); this wrapper persists the session.
       await openFileInternal(path);
       persistWorkspace();
+    },
+
+    /** Move the file at `path` into the folder matching the `package` it declares (the filesystem
+     *  alternative to the change-package edit). Saves the buffer first, moves it on disk, then
+     *  re-points the tab + refreshes the tree to the new location. Returns the new path, or throws
+     *  with a message the caller can surface. */
+    async moveFileToPackage(path: string): Promise<string> {
+      const source = sources.get(path) ?? (await loadText(path));
+      // Persist the buffer so the on-disk move carries the current text.
+      await saveText(path, source);
+      const res = await ipcMoveToPackage(path, source);
+      const newPath = canonPath(res.new_path);
+      // Carry the cached source/encoding to the new key so the reopened tab is instant.
+      sources.set(newPath, source);
+      const enc = encodings.get(path);
+      if (enc) encodings.set(newPath, enc);
+      // Re-point the tab: drop the old path, open the new one, refresh the tree to show the move.
+      openFilePaths = openFilePaths.filter((p) => p !== path);
+      await openFileInternal(newPath);
+      if (project?.root && !isDemo) loadTreeInto(project.root);
+      persistWorkspace();
+      return newPath;
     },
 
     /** Close a tab; pick a neighbour as active. */

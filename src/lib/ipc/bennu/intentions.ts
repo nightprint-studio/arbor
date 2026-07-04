@@ -19,6 +19,9 @@ export interface IntentionOffer {
   /** End byte offset (exclusive). */
   end: number;
   replacement: string;
+  /** A non-edit action the editor dispatches instead of applying the range edit
+   *  (`"move-to-package"`). Absent for a plain edit. */
+  action?: string;
 }
 
 /** Every intention applicable at byte `offset` in `source` (empty when none fit).

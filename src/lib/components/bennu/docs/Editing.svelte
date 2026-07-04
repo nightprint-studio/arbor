@@ -58,6 +58,74 @@
   go-to-definition track your changes without reopening the project.
 </p>
 
+<h2>Validation</h2>
+<p>
+  Java files are checked <strong>as you type</strong>, without compiling. Errors show as red
+  squiggles, warnings as yellow, and everything is also listed in the Problems panel:
+</p>
+<ul>
+  <li><strong>Syntax errors</strong> — a malformed statement, a missing <code>;</code> or brace.</li>
+  <li><strong>Not a statement</strong> — an expression Java won't accept as a statement, e.g.
+    <code>list.clear;</code> (you forgot the call <code>()</code>) or <code>1 + 1;</code>.</li>
+  <li><strong>Unknown method or field</strong> — a call or field access that doesn't exist on the
+    receiver's type (found by inferring the receiver, so <code>s.lenght()</code> on a
+    <code>String</code> is caught).</li>
+  <li><strong>Wrong argument count</strong> — a method call or <code>new</code> whose number of
+    arguments matches no overload (varargs are understood).</li>
+  <li><strong>Wrong argument type</strong> — an argument that can't be passed to the parameter
+    (<code>foo(1)</code> where <code>foo</code> takes a <code>String</code>). Checked only when a
+    single overload is unambiguous, to avoid false positives.</li>
+  <li><strong>Unresolved import</strong> — an <code>import</code> of a type that doesn't exist (a
+    typo or a removed class). Needs the project classpath to be complete.</li>
+  <li><strong>Unresolved type</strong> — a type name that doesn't resolve to any class (a typo'd
+    class name in a declaration, <code>extends</code>, generics or <code>catch</code>).</li>
+  <li><strong>Type incompatibility</strong> — an impossible cast (<code>(String) anInteger</code>),
+    and an assignment or <code>return</code> whose value isn't of the declared type — including
+    <code>String</code>/number mixups like <code>int x = "1";</code> or <code>int y = "1" + 1;</code>.
+    Reference types are compared only between concrete classes, so it never second-guesses interface
+    or generic code (boxing and widening are allowed).</li>
+  <li><strong>Missing / wrong return</strong> — a non-<code>void</code> method that can finish without
+    returning, a value returned from a <code>void</code> method or constructor, or a bare
+    <code>return;</code> where a value is required.</li>
+  <li><strong>Inheritance errors</strong> — extending a <code>final</code> class, a
+    <code>record</code>, an <code>enum</code> or an interface; implementing a non-interface; a
+    concrete class that leaves an inherited <code>abstract</code> method unimplemented.</li>
+  <li><strong>Constructors</strong> — two methods or two constructors with the same signature, and a
+    subclass constructor that must call <code>super(…)</code> because its superclass has no no-arg
+    constructor.</li>
+  <li><strong>Switch</strong> — a <code>switch</code> on a type it doesn't accept
+    (<code>long</code>/<code>float</code>/<code>double</code>/<code>boolean</code>), and a
+    <code>switch</code> <em>expression</em> arm that doesn't <code>yield</code> a value.</li>
+  <li><strong>Lambdas</strong> — a lambda whose parameter count doesn't match its target functional
+    interface (or a target that isn't a functional interface).</li>
+  <li><strong>Declaration &amp; modifier errors</strong> — an <code>abstract</code> method in a
+    concrete class, a <code>default</code> method outside an interface, illegal modifier
+    combinations, a <code>record</code> that can't be abstract or declares instance fields, an
+    <code>enum</code> constant that needs a constructor, and more.</li>
+  <li><strong>Misplaced annotations</strong> — e.g. <code>@Override</code> on a field.</li>
+  <li><strong>Lambda captures</strong> — modifying a captured local inside a lambda.</li>
+  <li><strong>File name &amp; package</strong> — a <code>public</code> class whose name doesn't match
+    the file, or a <code>package</code> that doesn't match the file's folder. Two
+    <kbd>Alt</kbd>+<kbd>Enter</kbd> fixes are offered: <em>set the package</em> to match the folder,
+    or <em>move the file</em> into the folder matching its declared package. The special
+    <code>package-info.java</code> and <code>module-info.java</code> files are held to their
+    restricted shape.</li>
+  <li><strong>Java version</strong> — a feature newer than the project's target level (records,
+    sealed types, <code>var</code>, text blocks, switch arrows, lambdas, …). A <code>var</code>
+    back-ported by Lombok (imported from <code>lombok</code>) is allowed below Java 10.</li>
+  <li><strong>Imports</strong> — unused or duplicate imports.</li>
+</ul>
+<p>
+  The resolver-backed checks (unknown members, argument count, unresolved types, type
+  compatibility, inheritance and lambda targets) lean on the standard library and dependencies, so
+  they run once a JDK is available and stay silent about anything they can't resolve with certainty —
+  they never report a false error.
+</p>
+<p>
+  It's a best-effort check, so it complements <strong>Build</strong> (which runs the real compiler)
+  rather than replacing it — more type checks arrive as the semantic engine grows.
+</p>
+
 <h2>Find</h2>
 <p>
   <kbd>Ctrl</kbd> + <kbd>F</kbd> searches the current file. <kbd>Ctrl</kbd> + <kbd>Shift</kbd> +

@@ -61,6 +61,8 @@ pub fn synthesize(
                     return_type: ret,
                     params: Vec::new(),
                     is_static: false,
+                    is_abstract: false,
+                    is_default: false,
                     visibility: Visibility::Public,
                     raw_signature: format!("{} {}()", f.type_text, name),
                 });
@@ -76,6 +78,8 @@ pub fn synthesize(
                     return_type: TypeRef::simple("void"),
                     params: vec![param],
                     is_static: false,
+                    is_abstract: false,
+                    is_default: false,
                     visibility: Visibility::Public,
                     raw_signature: format!("void {}({})", name, f.type_text),
                 });
@@ -94,6 +98,8 @@ pub fn synthesize(
                 return_type: TypeRef::simple(logger_binary),
                 params: Vec::new(),
                 is_static: true,
+                is_abstract: false,
+                is_default: false,
                 visibility: Visibility::Private,
                 raw_signature: format!("{logger_binary} log"),
             });

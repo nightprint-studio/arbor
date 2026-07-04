@@ -27,8 +27,9 @@ stack plus a homegrown Signature decoder.
 
 - **Shared-seam member index** (`members.rs`) — the structured view Bennu's parser
   and completion consume: `TypeRef` (a binary name + its generic `type_args`),
-  `Member` (name / kind / return type / params / static / visibility / raw
-  signature), `ClassMembers` (superclass + interfaces + methods + fields), and the
+  `Member` (name / kind / return type / params / static / **abstract** / **default** /
+  visibility / raw signature), `ClassMembers` (superclass + interfaces + methods +
+  fields + `ClassFlags`: interface / abstract / final / enum / record / sealed), and the
   `MemberIndex` trait (`members_of(binary_name)`). Generics stay **structured**, not
   rendered: `List.iterator()` decodes to `Iterator<E>` and `Optional.map(...)` to
   `Optional<U>`, with type variables surfaced as bare-name `TypeRef`s (`E`, `T`, `K`,

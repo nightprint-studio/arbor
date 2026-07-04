@@ -13,7 +13,7 @@
   import {
     Hash, FileCode2, MapPin, Scissors, Copy, ClipboardPaste, Target, SearchCode,
     PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed, ShieldCheck, Plus, BookOpen,
-    Braces, ArrowLeftRight,
+    Braces, ArrowLeftRight, Package, FolderInput,
   } from 'lucide-svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -212,13 +212,25 @@
     const path = activePath;
     void bennuIndexStore.buildRevision; // re-run when the index (config graph) rebuilds
     if (!path) { diags = []; return; }
+    // Java files validate the LIVE buffer (syntax errors + unused imports) — track the source so
+    // the check re-runs on edit, debounced so a burst of keystrokes coalesces. JSP checks read the
+    // file on the backend, so they don't depend on the buffer.
+    const isJava = /\.java$/i.test(path);
+    const src = isJava ? projectStore.sourceOf(path) : undefined;
     let cancelled = false;
-    void ipcDiagnostics(path)
-      .then((ds) => {
-        if (cancelled) return;
-        diags = ds.map((d) => ({ from: d.start, to: d.end, severity: d.severity, message: d.message }));
-      })
-      .catch(() => { if (!cancelled) diags = []; });
+    const run = () => {
+      void ipcDiagnostics(path, src)
+        .then((ds) => {
+          if (cancelled) return;
+          diags = ds.map((d) => ({ from: d.start, to: d.end, severity: d.severity, message: d.message }));
+        })
+        .catch(() => { if (!cancelled) diags = []; });
+    };
+    if (isJava) {
+      const t = setTimeout(run, 300);
+      return () => { cancelled = true; clearTimeout(t); };
+    }
+    run();
     return () => { cancelled = true; };
   });
 
@@ -337,7 +349,20 @@
   function intentionIcon(id: string) {
     if (id === 'log-parameterize') return Braces;
     if (id === 'np-equals') return ArrowLeftRight;
+    if (id === 'change-package') return Package;
+    if (id === 'move-to-package') return FolderInput;
     return Wand2; // the simplification family (isEmpty / boolean / negated comparison)
+  }
+
+  /** Move the file into the folder matching its declared package (the `move-to-package` intention).
+   *  Delegates to the store (save → move → re-point tab → refresh tree) and reports the outcome. */
+  async function moveFileToPackage(path: string) {
+    try {
+      const newPath = await projectStore.moveFileToPackage(path);
+      toastStore.show(`Moved to ${newPath}`, 'success');
+    } catch (e) {
+      toastStore.show(`Couldn't move file: ${e}`, 'error');
+    }
   }
 
   export async function openIntentions() {
@@ -358,7 +383,11 @@
             id: o.id,
             label: o.label,
             icon: intentionIcon(o.id),
-            run: () => editorComp?.replaceByteRange(o.start, o.end, o.replacement),
+            // A non-edit action (a filesystem move) is dispatched by the store; a plain edit
+            // applies the byte-range replacement in place.
+            run: o.action === 'move-to-package'
+              ? () => void moveFileToPackage(path)
+              : () => editorComp?.replaceByteRange(o.start, o.end, o.replacement),
           });
         }
       }

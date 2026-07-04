@@ -56,9 +56,28 @@ pub struct Member {
     /// Parameter types (methods only; empty for fields).
     pub params: Vec<TypeRef>,
     pub is_static: bool,
+    /// An abstract method (`ACC_ABSTRACT`) — no body; a concrete subclass must implement it.
+    #[serde(default)]
+    pub is_abstract: bool,
+    /// An interface `default` method — a concrete method that satisfies the interface contract.
+    #[serde(default)]
+    pub is_default: bool,
     pub visibility: Visibility,
     /// A readable, best-available signature rendering (for completion `detail`).
     pub raw_signature: String,
+}
+
+/// Class-level access flags the checks need (extend-final / extend-record / implement-abstract).
+/// Mirrors `bennu_classpath::ClassFlags`; `bennu-intel` copies it across the seam boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ClassFlags {
+    pub is_interface: bool,
+    pub is_abstract: bool,
+    pub is_final: bool,
+    pub is_enum: bool,
+    pub is_annotation: bool,
+    pub is_record: bool,
+    pub is_sealed: bool,
 }
 
 /// The resolved members of a class, plus its supertype links so the walk can pick up
@@ -71,6 +90,9 @@ pub struct ClassMembers {
     pub interfaces: Vec<String>,
     pub methods: Vec<Member>,
     pub fields: Vec<Member>,
+    /// Class-level access flags. `#[serde(default)]` so a pre-existing persisted index still loads.
+    #[serde(default)]
+    pub flags: ClassFlags,
 }
 
 /// The resolver the inference walk consumes. Provided by the caller — in the real

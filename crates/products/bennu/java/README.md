@@ -19,6 +19,13 @@ fn extract_symbols(source: &str) -> FileSymbols
 // Static type of the expression immediately LEFT of the `.` at `byte_offset`.
 fn infer_receiver_type(source: &str, byte_offset: usize, resolver: &dyn TypeResolver)
     -> Option<TypeRef>
+// Static type of a WHOLE expression spanning [start, end) — an assigned / returned / cast value.
+// Now types literals (String / int / long / double / char / boolean) and string concatenation
+// (`"x" + n` → String), so the checks can catch String↔primitive mismatches.
+// `_at` variants (reuse a parsed root + extracted symbols) exist for both — validation MUST use them
+// (per-site re-parsing was quadratic).
+fn infer_expression_type(source: &str, start: usize, end: usize, resolver: &dyn TypeResolver)
+    -> Option<TypeRef>
 
 // New-file scaffolding: infer a Java package from a target dir + render initial content.
 fn infer_package(dir: &Path) -> Option<String>          // ".../src/main/java/com/x" -> "com.x"
@@ -41,8 +48,9 @@ trait TypeResolver {
     fn members_of(&self, binary_name: &str) -> Option<ClassMembers>;                    // "java/util/ArrayList"
     fn resolve_simple_name(&self, name: &str, imports: &[Import]) -> Option<String>;
 }
-struct ClassMembers { superclass: Option<String>, interfaces: Vec<String>, methods: Vec<Member>, fields: Vec<Member> }
-struct Member { name, kind: MemberKind, return_type: TypeRef, params: Vec<TypeRef>, is_static, visibility, raw_signature }
+struct ClassMembers { superclass: Option<String>, interfaces: Vec<String>, methods: Vec<Member>, fields: Vec<Member>, flags: ClassFlags }
+struct Member { name, kind: MemberKind, return_type: TypeRef, params: Vec<TypeRef>, is_static, is_abstract, is_default, visibility, raw_signature }
+struct ClassFlags { is_interface, is_abstract, is_final, is_enum, is_annotation, is_record, is_sealed }  // decoded from bytecode
 ```
 
 `TypeRef` / `ClassMembers` / `Member` are a minimal, local copy of the shared Bennu

@@ -843,6 +843,7 @@ dependencies = [
  "arbor-ipc",
  "arbor-process-ext",
  "arbor-rpc",
+ "bennu-check",
  "bennu-classpath",
  "bennu-core",
  "bennu-index",
@@ -861,11 +862,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bennu-check"
+version = "0.3.0"
+dependencies = [
+ "bennu-java",
+ "bennu-proto",
+ "tree-sitter",
+ "tree-sitter-java",
+]
+
+[[package]]
 name = "bennu-classpath"
 version = "0.3.0"
 dependencies = [
  "cafebabe",
  "jimage-rs",
+ "serde",
  "zip 2.4.2",
 ]
 
@@ -895,6 +907,7 @@ dependencies = [
 name = "bennu-intel"
 version = "0.3.0"
 dependencies = [
+ "bennu-check",
  "bennu-classpath",
  "bennu-index",
  "bennu-java",

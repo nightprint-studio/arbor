@@ -56,6 +56,7 @@ mod tests {
                         m("charAt", tr("char")),
                     ],
                     fields: vec![],
+                    flags: Default::default(),
                 },
             );
 
@@ -71,6 +72,7 @@ mod tests {
                         m("size", tr("int")),
                     ],
                     fields: vec![],
+                    flags: Default::default(),
                 },
             );
 
@@ -82,6 +84,7 @@ mod tests {
                     interfaces: vec![],
                     methods: vec![m("next", TypeRef::simple("E"))],
                     fields: vec![],
+                    flags: Default::default(),
                 },
             );
 
@@ -93,6 +96,7 @@ mod tests {
                     interfaces: vec![],
                     methods: vec![m("get", TypeRef::simple("V"))],
                     fields: vec![],
+                    flags: Default::default(),
                 },
             );
 
@@ -104,6 +108,7 @@ mod tests {
                     interfaces: vec![],
                     methods: vec![m("getName", tr("java/lang/String"))],
                     fields: vec![],
+                    flags: Default::default(),
                 },
             );
 
@@ -143,6 +148,8 @@ mod tests {
             return_type: ret,
             params: vec![],
             is_static: false,
+            is_abstract: false,
+            is_default: false,
             visibility: Visibility::Public,
             raw_signature: String::new(),
         }

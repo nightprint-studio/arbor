@@ -1095,13 +1095,21 @@ mod tests {
                         return_type: TypeRef { binary_name: String::new(), type_args: vec![] },
                         params: vec![],
                         is_static: m.is_static,
+                        is_abstract: false,
+                        is_default: false,
                         visibility: Visibility::Public,
                         raw_signature: String::new(),
                     })
                     .collect();
                 project.insert(
                     binary,
-                    ClassMembers { superclass: None, interfaces: vec![], methods, fields: vec![] },
+                    ClassMembers {
+                        superclass: None,
+                        interfaces: vec![],
+                        methods,
+                        fields: vec![],
+                        flags: Default::default(),
+                    },
                 );
             }
         }

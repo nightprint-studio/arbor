@@ -403,6 +403,13 @@ fn build_class_members(
                 .map(|p| type_text_to_ref(&p.type_text, imports, project_types))
                 .collect(),
             is_static: m.is_static,
+            // The source symbol model doesn't yet carry method `abstract`/`default` or the class
+            // kind, so project-type members default to concrete. Effect: the extend-final /
+            // implement-abstract checks fire against JDK/library supertypes (flags decoded from
+            // bytecode) but not yet against project supertypes — a conservative miss, never a false
+            // positive. Enriching `TypeDecl`/`MethodDecl` is the follow-up.
+            is_abstract: false,
+            is_default: false,
             visibility: m.visibility,
             raw_signature: render_method(m),
         })
@@ -417,6 +424,8 @@ fn build_class_members(
             return_type: type_text_to_ref(&f.type_text, imports, project_types),
             params: Vec::new(),
             is_static: f.is_static,
+            is_abstract: false,
+            is_default: false,
             visibility: f.visibility,
             raw_signature: format!("{} {}", f.type_text, f.name),
         })
@@ -431,7 +440,7 @@ fn build_class_members(
     methods.extend(synth.methods);
     fields.extend(synth.fields);
 
-    ClassMembers { superclass, interfaces, methods, fields }
+    ClassMembers { superclass, interfaces, methods, fields, flags: Default::default() }
 }
 
 /// Resolve a supertype simple name to a binary name (generics stripped).

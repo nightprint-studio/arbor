@@ -10,8 +10,8 @@ pub use crate::meta::{parse_class_meta, ClassMeta, MemberMeta};
 // The shared-seam structured member index: TypeRef / Member / ClassMembers /
 // MemberIndex, plus the ClassSource→MemberIndex adapter.
 pub use crate::members::{
-    parse_class_members, ClassMembers, Member, MemberIndex, MemberKind, SourceMemberIndex, TypeRef,
-    Visibility,
+    parse_class_members, ClassFlags, ClassMembers, Member, MemberIndex, MemberKind,
+    SourceMemberIndex, TypeRef, Visibility,
 };
 
 // JDK bootclasspath resolution by language level, the chained multi-source, the JDK-home

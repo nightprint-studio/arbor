@@ -36,6 +36,18 @@ export interface Toast {
 function createToastStore() {
   let toasts = $state<Toast[]>([]);
   let counter = 0;
+  /** Per-toast auto-dismiss timers, cancelled on manual dismiss so a late timer
+   *  can't remove a different toast (ids never repeat, but tracking keeps the
+   *  store leak-free and lets `duration <= 0` mean "sticky, no auto-dismiss"). */
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function cancelTimer(id: string): void {
+    const t = timers.get(id);
+    if (t !== undefined) {
+      clearTimeout(t);
+      timers.delete(id);
+    }
+  }
 
   function show(
     message: string,
@@ -45,11 +57,19 @@ function createToastStore() {
   ): string {
     const id = `toast-${++counter}`;
     toasts.push({ id, kind, message, duration, addedAt: Date.now(), action });
-    setTimeout(() => dismiss(id), duration);
+    // A non-positive duration is a sticky toast (dismissed only by the user or a
+    // click action) — don't schedule an immediate auto-dismiss.
+    if (duration > 0) {
+      timers.set(id, setTimeout(() => {
+        timers.delete(id);
+        dismiss(id);
+      }, duration));
+    }
     return id;
   }
 
   function dismiss(id: string) {
+    cancelTimer(id);
     const idx = toasts.findIndex(t => t.id === id);
     if (idx !== -1) toasts.splice(idx, 1);
   }

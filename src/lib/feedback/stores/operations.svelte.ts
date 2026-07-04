@@ -47,10 +47,19 @@ const AUTO_DISMISS_ERR_MS = 14_000;
 
 function createOperationsStore() {
   let operations = $state<Operation[]>([]);
-  /** Set of op ids the user has manually dismissed — auto-dismiss timers
-   *  check this so an in-flight timer doesn't try to remove an already-gone
-   *  entry (no-op anyway, but avoids reactive churn). */
-  const dismissedIds = new Set<string>();
+  /** Per-op auto-dismiss timers, so a retry (`start` with the same id), a second
+   *  `finish`, or a manual `dismiss` can CANCEL the pending timer instead of
+   *  letting a stale one fire later and yank the wrong (re-created) card. This
+   *  replaces the old wall-clock guard, which was timing-fragile. */
+  const dismissTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function cancelTimer(id: string): void {
+    const t = dismissTimers.get(id);
+    if (t !== undefined) {
+      clearTimeout(t);
+      dismissTimers.delete(id);
+    }
+  }
 
   function start(op: {
     id:        string;
@@ -60,6 +69,9 @@ function createOperationsStore() {
     current?:  string | null;
     target?:   string | null;
   }): void {
+    // A restart of the same id cancels any auto-dismiss still pending from a
+    // previous run, so the fresh card can't be removed by a ghost timer.
+    cancelTimer(op.id);
     // Replace any previous op with the same id (e.g. retry of the same
     // pull) — keeps the overlay deterministic instead of stacking ghosts.
     operations = [
@@ -68,25 +80,30 @@ function createOperationsStore() {
         id:        op.id,
         title:     op.title,
         subtitle:  op.subtitle ?? null,
-        steps:     op.steps,
-        current:   op.current ?? op.steps[0]?.key ?? null,
+        steps:     op.steps ?? [],
+        current:   op.current ?? op.steps?.[0]?.key ?? null,
         done:      false,
         error:     null,
         startedAt: Date.now(),
         target:    op.target ?? null,
       },
     ];
-    dismissedIds.delete(op.id);
   }
 
   function update(id: string, partial: Partial<Operation>): void {
     const idx = operations.findIndex(o => o.id === id);
     if (idx < 0) return;
-    operations[idx] = { ...operations[idx], ...partial };
+    // Reassign the whole array so the keyed `{#each}` sees the change reliably
+    // (index mutation on the $state proxy is reactive, but a fresh array is the
+    // least surprising and matches start/dismiss).
+    const next = [...operations];
+    next[idx] = { ...next[idx], ...partial };
+    operations = next;
   }
 
   /** Update a single step (matched by key) inside an operation.  Useful when
-   *  per-step `status` / `detail` arrives as discrete events. */
+   *  per-step `status` / `detail` arrives as discrete events. A no-op when the
+   *  op or the step is unknown (an out-of-order event is dropped, never throws). */
   function updateStep(id: string, stepKey: string, partial: Partial<OperationStep>): void {
     const idx = operations.findIndex(o => o.id === id);
     if (idx < 0) return;
@@ -95,7 +112,9 @@ function createOperationsStore() {
     if (sIdx < 0) return;
     const newSteps = [...op.steps];
     newSteps[sIdx] = { ...newSteps[sIdx], ...partial };
-    operations[idx] = { ...op, steps: newSteps };
+    const next = [...operations];
+    next[idx] = { ...op, steps: newSteps };
+    operations = next;
   }
 
   function finish(
@@ -104,33 +123,35 @@ function createOperationsStore() {
   ): void {
     const idx = operations.findIndex(o => o.id === id);
     if (idx < 0) return;
-    operations[idx] = {
-      ...operations[idx],
+    const next = [...operations];
+    next[idx] = {
+      ...next[idx],
       done:       true,
       current:    null,
       summary:    opts.summary ?? null,
       error:      opts.error ?? null,
       finishedAt: Date.now(),
     };
-    // Schedule auto-dismiss.  A subsequent finish() on the same id resets
-    // both done state and the timer below — but cancelling the previous
-    // timer would require tracking it; a stale timer is harmless because
-    // dismiss() is a no-op once the entry has been replaced.
+    operations = next;
+    // Schedule (or reschedule) auto-dismiss — cancelling any prior timer for
+    // this id first, so a second finish() doesn't leave two timers racing.
+    cancelTimer(id);
     const delay = opts.error ? AUTO_DISMISS_ERR_MS : AUTO_DISMISS_OK_MS;
-    setTimeout(() => {
-      const cur = operations.find(o => o.id === id);
-      if (cur && cur.done && cur.finishedAt && Date.now() - cur.finishedAt >= delay - 50) {
-        dismiss(id);
-      }
-    }, delay);
+    dismissTimers.set(id, setTimeout(() => {
+      dismissTimers.delete(id);
+      dismiss(id);
+    }, delay));
   }
 
   function dismiss(id: string): void {
-    dismissedIds.add(id);
+    cancelTimer(id);
     operations = operations.filter(o => o.id !== id);
   }
 
   function clearFinished(): void {
+    for (const o of operations) {
+      if (o.done) cancelTimer(o.id);
+    }
     operations = operations.filter(o => !o.done);
   }
 

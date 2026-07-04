@@ -14,7 +14,7 @@ use std::path::Path;
 use bennu_core::prelude::BennuState;
 use bennu_proto::prelude::{FileContents, ProjectInfo, TreeNode, WriteResult};
 use bennu_project::prelude::{build_tree, open_project, read_file, write_file, OpenOptions};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::index_service::IndexService;
 
@@ -138,4 +138,49 @@ fn bennu_write_file(_ctx: &BennuState, args: WriteFileArgs) -> Result<WriteResul
         override_label,
     )
     .map_err(Into::into)
+}
+
+/// Args for [`bennu_move_to_package`].
+#[derive(Deserialize)]
+pub struct MoveToPackageArgs {
+    /// Absolute path of the `.java` file to move.
+    pub file: String,
+    /// The buffer text — its declared `package` determines the destination folder.
+    pub source: String,
+}
+
+/// Where the file ended up after moving it to match its declared package.
+#[derive(Serialize)]
+pub struct MoveResult {
+    /// The new absolute path.
+    pub new_path: String,
+}
+
+/// Move a `.java` file into the folder that matches the `package` it declares — the filesystem
+/// counterpart of the `change-package` quick-fix (which instead rewrites the declaration). The
+/// destination is the file's source root (`src/main/java` …) joined with the declared package path.
+///
+/// The caller must save the buffer first: this renames the on-disk file as-is. Errors (never panics)
+/// when the source root can't be determined, the file is already in place, or a file already exists
+/// at the destination.
+#[arbor_rpc::handler]
+fn bennu_move_to_package(_ctx: &BennuState, args: MoveToPackageArgs) -> Result<MoveResult, String> {
+    let src_path = Path::new(&args.file);
+    let parent = src_path.parent().ok_or("file has no parent directory")?;
+    let package = bennu_java::prelude::extract_symbols(&args.source).package.unwrap_or_default();
+    let target_dir = bennu_java::prelude::package_dir(parent, &package)
+        .ok_or("cannot determine the project source root for this file")?;
+    let file_name = src_path.file_name().ok_or("file has no name")?;
+    let target = target_dir.join(file_name);
+
+    if target == src_path {
+        return Err("The file is already in the folder matching its package".to_string());
+    }
+    if target.exists() {
+        return Err(format!("A file already exists at {}", target.display()));
+    }
+    std::fs::create_dir_all(&target_dir).map_err(|e| format!("create target dir: {e}"))?;
+    std::fs::rename(src_path, &target).map_err(|e| format!("move file: {e}"))?;
+
+    Ok(MoveResult { new_path: target.to_string_lossy().replace('\\', "/") })
 }

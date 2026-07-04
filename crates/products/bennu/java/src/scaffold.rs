@@ -3,7 +3,7 @@
 //! `(file_name, content)` out, so package inference + templates are unit-tested here (no fs, no
 //! Tauri). The BE handler just writes what this returns.
 
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 /// The kinds of file the "New…" tree menu can scaffold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +58,60 @@ pub fn infer_package(dir: &Path) -> Option<String> {
         }
     }
     None
+}
+
+/// The **source root** directory that `dir` lives under — the ancestor ending in `src/main/java`
+/// (etc.), computed with the SAME root-selection as [`infer_package`], so the two agree on where the
+/// package path begins. `None` when `dir` isn't under a recognized source root.
+///
+/// The returned path is rebuilt from `dir`'s own components, so it preserves the drive prefix / root
+/// / separators of the input.
+pub fn source_root_of(dir: &Path) -> Option<PathBuf> {
+    let segs: Vec<&str> = dir
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(s) => s.to_str(),
+            _ => None,
+        })
+        .collect();
+    // Mirror `infer_package`: first root (most specific) with a subsequence wins; `end` is the count
+    // of leading Normal segments belonging to the source root (the package starts there).
+    let mut end = None;
+    for root in SOURCE_ROOTS {
+        if let Some(e) = last_subsequence_end(&segs, root) {
+            end = Some(e);
+            break;
+        }
+    }
+    let end = end?;
+    // Rebuild the path up to the `end`-th Normal component (inclusive of prefix/root parts).
+    let mut out = PathBuf::new();
+    let mut normals = 0;
+    for c in dir.components() {
+        if normals >= end {
+            break;
+        }
+        if let Component::Normal(_) = c {
+            normals += 1;
+        }
+        out.push(c.as_os_str());
+    }
+    Some(out)
+}
+
+/// The directory a file declaring `package` should live in, given its current directory `dir` (used
+/// to locate the source root). `None` when `dir` isn't under a source root. An empty `package` (the
+/// default package) maps to the source root itself.
+pub fn package_dir(dir: &Path, package: &str) -> Option<PathBuf> {
+    let root = source_root_of(dir)?;
+    if package.is_empty() {
+        return Some(root);
+    }
+    let mut out = root;
+    for seg in package.split('.') {
+        out.push(seg);
+    }
+    Some(out)
 }
 
 /// Index just past the last contiguous occurrence of `needle` in `hay`, or `None`.
@@ -176,6 +230,29 @@ mod tests {
     fn infer_package_none_at_source_root_or_no_root() {
         assert_eq!(infer_package(&p("/x/src/main/java")), None); // default package
         assert_eq!(infer_package(&p("/x/random/dir")), None); // no source root
+    }
+
+    #[test]
+    fn source_root_of_strips_the_package_path() {
+        assert_eq!(source_root_of(&p("/proj/src/main/java/com/acme/web")), Some(p("/proj/src/main/java")));
+        assert_eq!(source_root_of(&p("/x/src/com/acme")), Some(p("/x/src")));
+        // At the source root already (default package) → the root itself.
+        assert_eq!(source_root_of(&p("/x/src/main/java")), Some(p("/x/src/main/java")));
+        // No source root → None.
+        assert_eq!(source_root_of(&p("/x/random/dir")), None);
+    }
+
+    #[test]
+    fn package_dir_targets_the_declared_package() {
+        // A file currently in `com/acme/web` but declaring `com.acme.model` → move under model.
+        assert_eq!(
+            package_dir(&p("/proj/src/main/java/com/acme/web"), "com.acme.model"),
+            Some(p("/proj/src/main/java/com/acme/model"))
+        );
+        // Default (empty) package → the source root.
+        assert_eq!(package_dir(&p("/proj/src/main/java/com/x"), ""), Some(p("/proj/src/main/java")));
+        // No source root → can't compute.
+        assert_eq!(package_dir(&p("/nope/here"), "com.x"), None);
     }
 
     #[test]

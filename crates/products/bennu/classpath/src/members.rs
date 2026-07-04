@@ -18,6 +18,7 @@
 use cafebabe::attributes::{AttributeData, AttributeInfo};
 use cafebabe::descriptors::{FieldDescriptor, FieldType, ReturnDescriptor};
 use cafebabe::{parse_class, ClassFile, FieldInfo, MethodInfo};
+use serde::{Deserialize, Serialize};
 
 use crate::sig::{ClassType, TypeArg, TypeSig};
 
@@ -34,7 +35,7 @@ use crate::sig::{ClassType, TypeArg, TypeSig};
 ///   type arguments (generics carry-through).
 /// - **Primitive / void / array**: `binary_name` is a readable token (`"int"`,
 ///   `"void"`, `"java/util/List[]"`); these are terminal (no members to resolve).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TypeRef {
     /// Binary name with slashes (`java/util/List`), a type-variable name (`E`), or a
     /// primitive/void/array token.
@@ -51,14 +52,14 @@ impl TypeRef {
 }
 
 /// Whether a [`Member`] is a method or a field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MemberKind {
     Method,
     Field,
 }
 
 /// Java member visibility, decoded from the access flags.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Visibility {
     Public,
     Protected,
@@ -68,7 +69,7 @@ pub enum Visibility {
 }
 
 /// One resolved method or field.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Member {
     /// The member's simple name (`iterator`, `size`, `MAX_VALUE`).
     pub name: String,
@@ -79,6 +80,14 @@ pub struct Member {
     /// Parameter types, in order. Always empty for fields.
     pub params: Vec<TypeRef>,
     pub is_static: bool,
+    /// `ACC_ABSTRACT` — an abstract method (no body). Always `false` for fields. Lets a consumer
+    /// tell which supertype methods a concrete class must implement.
+    #[serde(default)]
+    pub is_abstract: bool,
+    /// An interface `default` method (a concrete instance method declared in an interface). `false`
+    /// for everything else. Distinguishes a satisfied interface method from an abstract one.
+    #[serde(default)]
+    pub is_default: bool,
     pub visibility: Visibility,
     /// The raw source string this member was decoded from: the generic `Signature`
     /// attribute when present, else the erased JVM descriptor. Kept verbatim so a
@@ -86,9 +95,25 @@ pub struct Member {
     pub raw_signature: String,
 }
 
+/// Class-level access flags a checker needs (extend-final / extend-record / implement-abstract),
+/// decoded from `ClassAccessFlags` + the `Record`/`PermittedSubclasses` attributes. A single struct
+/// so [`ClassMembers`] grows by one field, not six.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ClassFlags {
+    pub is_interface: bool,
+    pub is_abstract: bool,
+    pub is_final: bool,
+    pub is_enum: bool,
+    pub is_annotation: bool,
+    /// A `record` (has a `Record` attribute — records are implicitly final and un-extendable).
+    pub is_record: bool,
+    /// A `sealed` class/interface (has a `PermittedSubclasses` attribute).
+    pub is_sealed: bool,
+}
+
 /// A class's resolvable surface: its supertypes (for inherited-member walking) and
 /// its declared members.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClassMembers {
     /// Superclass binary name with slashes (`java/lang/Object`), or `None` for
     /// `java/lang/Object` / interfaces without an explicit superclass in the file.
@@ -97,6 +122,10 @@ pub struct ClassMembers {
     pub interfaces: Vec<String>,
     pub methods: Vec<Member>,
     pub fields: Vec<Member>,
+    /// Class-level access flags (interface / abstract / final / record / sealed / …). `#[serde(default)]`
+    /// so an index persisted before this field existed still deserializes (flags all `false`).
+    #[serde(default)]
+    pub flags: ClassFlags,
 }
 
 /// Look up a class's [`ClassMembers`] by binary name (`java/util/ArrayList`).
@@ -158,10 +187,34 @@ pub fn parse_class_members(bytes: &[u8]) -> Result<ClassMembers, String> {
     let superclass = parsed.super_class.as_ref().map(|c| c.to_string());
     let interfaces = parsed.interfaces.iter().map(|i| i.to_string()).collect();
 
-    let methods = parsed.methods.iter().map(decode_method).collect();
+    let flags = decode_class_flags(&parsed);
+    let methods = parsed
+        .methods
+        .iter()
+        .map(|m| decode_method(m, flags.is_interface))
+        .collect();
     let fields = parsed.fields.iter().map(decode_field).collect();
 
-    Ok(ClassMembers { superclass, interfaces, methods, fields })
+    Ok(ClassMembers { superclass, interfaces, methods, fields, flags })
+}
+
+/// Decode the class-level flags a checker needs. `record`/`sealed` come from attributes (there is no
+/// `ACC_RECORD`); the rest are access-flag bits.
+fn decode_class_flags(parsed: &ClassFile) -> ClassFlags {
+    use cafebabe::ClassAccessFlags as F;
+    let af = parsed.access_flags;
+    let is_record = parsed.attributes.iter().any(|a| matches!(a.data, AttributeData::Record(_)));
+    let is_sealed =
+        parsed.attributes.iter().any(|a| matches!(a.data, AttributeData::PermittedSubclasses(_)));
+    ClassFlags {
+        is_interface: af.contains(F::INTERFACE),
+        is_abstract: af.contains(F::ABSTRACT),
+        is_final: af.contains(F::FINAL),
+        is_enum: af.contains(F::ENUM),
+        is_annotation: af.contains(F::ANNOTATION),
+        is_record,
+        is_sealed,
+    }
 }
 
 /// Pull the raw `Signature` attribute string out of a cafebabe attribute list.
@@ -198,9 +251,14 @@ fn field_visibility(flags: cafebabe::FieldAccessFlags) -> Visibility {
     }
 }
 
-fn decode_method(m: &MethodInfo) -> Member {
-    let is_static = m.access_flags.contains(cafebabe::MethodAccessFlags::STATIC);
+fn decode_method(m: &MethodInfo, class_is_interface: bool) -> Member {
+    use cafebabe::MethodAccessFlags as MF;
+    let is_static = m.access_flags.contains(MF::STATIC);
+    let is_abstract = m.access_flags.contains(MF::ABSTRACT);
     let visibility = method_visibility(m.access_flags);
+    // A concrete instance method inside an interface is a `default` method (JLS §9.4). `<clinit>`
+    // (the static initialiser) is neither, but it's static so already excluded.
+    let is_default = class_is_interface && !is_abstract && !is_static;
 
     // Prefer the generic Signature; fall back to the erased descriptor.
     if let Some(raw) = signature_attr(&m.attributes) {
@@ -211,6 +269,8 @@ fn decode_method(m: &MethodInfo) -> Member {
                 return_type: type_ref_from_sig(&ms.result),
                 params: ms.params.iter().map(type_ref_from_sig).collect(),
                 is_static,
+                is_abstract,
+                is_default,
                 visibility,
                 raw_signature: raw.to_string(),
             };
@@ -224,6 +284,8 @@ fn decode_method(m: &MethodInfo) -> Member {
         return_type,
         params,
         is_static,
+        is_abstract,
+        is_default,
         visibility,
         raw_signature: raw,
     }
@@ -241,6 +303,8 @@ fn decode_field(f: &FieldInfo) -> Member {
                 return_type: type_ref_from_sig(&ts),
                 params: Vec::new(),
                 is_static,
+                is_abstract: false,
+                is_default: false,
                 visibility,
                 raw_signature: raw.to_string(),
             };
@@ -253,6 +317,8 @@ fn decode_field(f: &FieldInfo) -> Member {
         return_type: type_ref_from_descriptor(&f.descriptor),
         params: Vec::new(),
         is_static,
+        is_abstract: false,
+        is_default: false,
         visibility,
         raw_signature: raw,
     }

@@ -23,6 +23,9 @@ bennu-classpath = { path = "../classpath" }
 # The code-intel query engine (extracted): `IndexResolver` + member-access `completion`. intel's
 # provider / rename / hover / find-usages all resolve against it (one-way dependency).
 bennu-query = { path = "../query" }
+# AST + resolver-backed validation (syntax/statements/declarations/unknown-members): the provider's
+# `validate` runs it against its own resolver.
+bennu-check = { path = "../check" }
 # The web-config graph (Struts/Spring/Tiles): the native provider ingests its
 # string-keyed records into the index (as `Source::StrutsAction`/`SpringBean` symbols +
 # edges) and resolves the C1 chain (action → bean-id → FQCN) + the view chain off it.

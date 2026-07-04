@@ -1,0 +1,19 @@
+[package]
+name         = "bennu-check"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu code validation — AST-level Java diagnostics WITHOUT compiling (no Maven/javac). Pure tree-sitter-java scans that flag syntax errors and unused imports; the seam a resolver-backed unresolved-symbol pass plugs into next. Emits the wire `Diagnostic` (byte offsets) the Problems panel already renders. Leaf crate: no resolver, exhaustively unit-testable."
+
+[dependencies]
+# The wire diagnostic shape (byte offsets) the be layer forwards unchanged.
+bennu-proto = { path = "../proto" }
+# Type inference + the `TypeResolver` seam for the resolver-backed checks (unknown-member on an
+# inferred receiver). The pure-AST checks don't use it; `check_file` stays resolver-free.
+bennu-java = { path = "../java" }
+# Java grammar + runtime for the AST scans. Pinned to the workspace-shared tree-sitter 0.25
+# (native `links` lib — one version workspace-wide) with tree-sitter-java 0.23.
+tree-sitter      = "0.25"
+tree-sitter-java = "0.23"

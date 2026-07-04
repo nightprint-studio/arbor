@@ -37,6 +37,8 @@ bennu-intel = { path = "../intel" }
 # The code-intel query engine: the resolver + completion + inherited-members domain types the
 # index service maps to the wire (`InheritedMember`).
 bennu-query = { path = "../query" }
+# AST-level Java validation (syntax errors + unused imports) over the live buffer — no compile.
+bennu-check = { path = "../check" }
 # The mmap'd symbol index: the `IndexBuilder` the index service holds on each project slot
 # so a single-file edit patches just the changed file's records in — no whole-project walk.
 bennu-index = { path = "../index" }

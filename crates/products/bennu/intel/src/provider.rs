@@ -5,7 +5,7 @@
 //! so `bennu-be` can wire the seam now and later waves fill the native engine in
 //! (and, post-MVP, the LSP client).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use bennu_index::prelude::SymbolKind;
 use bennu_proto::prelude::{CompletionItem, Diagnostic};
@@ -163,10 +163,15 @@ impl NativeJavaProvider {
     /// the JDK for `jdk_version` (`"1.8"` / `"8"` / `"21"` / …), and seed the project's
     /// own declared simple names. `Err` when the index can't be opened or the JDK isn't
     /// installed — the caller then serves the empty provider.
+    ///
+    /// `jdk_index_path` (when `Some`) makes the JDK member index **persistent**: it loads the
+    /// shared, cross-session memo from that path and writes warmed classes back, so a JDK class is
+    /// parsed from bytecode at most once ever. The be layer keys the path by the resolved JDK.
     pub fn for_project(
         index_dir: &Path,
         jdk_version: &str,
         project_simple_names: &[(String, String)],
+        jdk_index_path: Option<PathBuf>,
     ) -> Result<Self, String> {
         use bennu_classpath::prelude::resolve_jdk_classpath;
         use bennu_index::prelude::PersistedIndex;
@@ -174,12 +179,39 @@ impl NativeJavaProvider {
         let blob = index_dir.join("symbols.blob");
         let fst = index_dir.join("names.fst");
         let project = PersistedIndex::open(&blob, &fst).map_err(|e| e.to_string())?;
-        let jdk = JdkMemberIndex::new(resolve_jdk_classpath(jdk_version)?);
+        let source = resolve_jdk_classpath(jdk_version)?;
+        let jdk = match jdk_index_path {
+            Some(path) => JdkMemberIndex::persistent(source, path),
+            None => JdkMemberIndex::new(source),
+        };
         let mut resolver = IndexResolver::new(project, jdk);
         for (simple, binary) in project_simple_names {
             resolver.add_simple_hint(simple, binary);
         }
         Ok(Self::with_resolver(resolver))
+    }
+
+    /// Persist the JDK member index's memo now (best-effort; no-op for the empty provider or an
+    /// in-memory index). Called at a checkpoint so a session's warmed JDK classes survive.
+    pub fn flush_jdk_index(&self) {
+        if let Some(resolver) = &self.resolver {
+            resolver.jdk_index().flush();
+        }
+    }
+
+    /// Validate a Java `source` (AST checks always; the resolver-backed unknown-member check when a
+    /// resolver is built + a JDK is available). `ctx` carries the file location + target Java version
+    /// the be layer computed. Runs against THIS provider's own resolver.
+    pub fn validate(
+        &self,
+        source: &str,
+        ctx: &bennu_check::prelude::FileContext,
+        jdk_available: bool,
+    ) -> Vec<Diagnostic> {
+        match &self.resolver {
+            Some(resolver) => bennu_check::prelude::check_file_resolved(source, ctx, resolver, jdk_available),
+            None => bennu_check::prelude::check_file(source, ctx),
+        }
     }
 
     /// Apply one edited `file`'s freshly-extracted [`Symbol`](bennu_index::prelude::Symbol)

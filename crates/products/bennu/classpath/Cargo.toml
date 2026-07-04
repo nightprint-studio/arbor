@@ -17,3 +17,6 @@ zip = "2"
 # mono-maintainer — flagged in docs §4 as the one genuinely risky adopt; kept behind
 # the `ClassSource` trait so it can be vendored or swapped for `ristretto` later.
 jimage-rs = "0.0.4"
+# Serialize the decoded member shapes (`ClassMembers` & co.) so a consumer can persist a
+# JDK member index to disk (the shared, cross-session JDK index in `bennu-query`).
+serde = { workspace = true }

@@ -72,15 +72,35 @@ function createNotificationsStore() {
   // never marked fresh, so reopening the app doesn't dump the whole archive
   // back into view.
   let freshIds = $state(new Set<string>());
+  /** Per-notification "transient window" timers, cancelled when the
+   *  notification is dismissed / cleared so a late timer can't churn the
+   *  reactive set for an id that's already gone. */
+  const freshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  function markFresh(id: string) {
-    freshIds = new Set(freshIds).add(id);
-    setTimeout(() => {
-      if (!freshIds.has(id)) return;
+  function cancelFreshTimer(id: string) {
+    const t = freshTimers.get(id);
+    if (t !== undefined) {
+      clearTimeout(t);
+      freshTimers.delete(id);
+    }
+  }
+
+  function clearFresh(id: string) {
+    cancelFreshTimer(id);
+    if (freshIds.has(id)) {
       const next = new Set(freshIds);
       next.delete(id);
       freshIds = next;
-    }, TRANSIENT_MS);
+    }
+  }
+
+  function markFresh(id: string) {
+    cancelFreshTimer(id);
+    freshIds = new Set(freshIds).add(id);
+    freshTimers.set(id, setTimeout(() => {
+      freshTimers.delete(id);
+      clearFresh(id);
+    }, TRANSIENT_MS));
   }
 
   function persist() {
@@ -110,15 +130,13 @@ function createNotificationsStore() {
 
   function dismiss(id: string) {
     notifications = notifications.filter(n => n.id !== id);
-    if (freshIds.has(id)) {
-      const next = new Set(freshIds);
-      next.delete(id);
-      freshIds = next;
-    }
+    clearFresh(id);
     persist();
   }
 
   function clearAll() {
+    for (const t of freshTimers.values()) clearTimeout(t);
+    freshTimers.clear();
     notifications = [];
     freshIds = new Set();
     persist();

@@ -48,6 +48,13 @@ export function writeFile(root: string, file: string, text: string): Promise<Wri
   return bennu('bennu_write_file', { args: { root, file, text } });
 }
 
+/** Move a `.java` file into the folder matching the `package` it declares (the filesystem
+ *  alternative to the change-package edit). Returns the new absolute path. Save the buffer first —
+ *  this renames the on-disk file. Wire: `bennu_move_to_package` — `{ file, source }`. */
+export function moveToPackage(file: string, source: string): Promise<{ new_path: string }> {
+  return bennu('bennu_move_to_package', { args: { file, source } });
+}
+
 /** Re-detect the domain capabilities (Spike-D bitset) for the open project. Wire:
  *  `bennu_capabilities` — `CapabilitiesArgs { root }`. */
 export function capabilities(root: string): Promise<CapabilitySet> {
@@ -61,10 +68,11 @@ export function completion(file: string, offset: number): Promise<CompletionItem
   return bennu('bennu_completion', { args: { file, offset } });
 }
 
-/** Diagnostics for a file (Phase 0 backend returns `[]`). Wire: `bennu_diagnostics`
- *  — `DiagnosticsArgs { file }`. */
-export function diagnostics(file: string): Promise<Diagnostic[]> {
-  return bennu('bennu_diagnostics', { args: { file } });
+/** Diagnostics for a file. For a Java file, pass the live buffer `source` to get AST-level
+ *  validation (syntax errors + unused imports) without compiling; for a JSP the backend checks
+ *  action/include references itself. Wire: `bennu_diagnostics` — `DiagnosticsArgs { file, source? }`. */
+export function diagnostics(file: string, source?: string): Promise<Diagnostic[]> {
+  return bennu('bennu_diagnostics', { args: { file, source } });
 }
 
 /** Compile the project: `mvn -q -o compile` (offline, project JDK) with a `javac`

@@ -1,0 +1,485 @@
+//! Reference-type compatibility diagnostics, driven by the nominal type walk:
+//!
+//!   * **cast** — `(T) expr` where `T` and the value's type are unrelated concrete classes
+//!     (`(String) anInteger`): the JLS "inconvertible types" error;
+//!   * **assignment** — `T x = expr;` / `T f = expr;` where the value's type is not a subtype of `T`;
+//!   * **return** — `return expr;` where the value's type is not a subtype of the method's return type.
+//!
+//! Extremely conservative (docs: never a false positive):
+//!   * only when BOTH sides are **concrete classes** the resolver knows — if either is an interface,
+//!     a type variable, an array, or a primitive, we skip (an interface value could implement the
+//!     other side through an un-modelled path; primitives have widening/boxing rules we don't model);
+//!   * the value side's hierarchy must be **fully resolvable** — an un-indexed base could establish
+//!     the relation;
+//!   * only value expressions the nominal walk can type (a name, a call, a field, a `new`, a cast) —
+//!     a literal (`1`, `"x"`, `null`) yields no type and is skipped, dodging boxing/widening entirely.
+
+use bennu_java::prelude::{extract_symbols, infer_expression_type_at, FileSymbols, TypeResolver};
+use bennu_proto::prelude::Diagnostic;
+use tree_sitter::{Node, Parser};
+
+use crate::members::simple_name;
+use crate::resolve::type_binary;
+use crate::walk::{hierarchy_fully_known, reaches};
+
+/// Parse `source` and flag cast / assignment / return type mismatches.
+pub fn type_compat_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
+    let mut parser = Parser::new();
+    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(source, None) else {
+        return Vec::new();
+    };
+    let symbols = extract_symbols(source);
+    type_compat_errors_in(tree.root_node(), source, &symbols, resolver)
+}
+
+/// Tree-driven core: reuses the caller's `root` + `symbols` and the tree-reusing inference (no
+/// re-parse per cast/assignment/return).
+pub fn type_compat_errors_in(
+    root: Node,
+    source: &str,
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> Vec<Diagnostic> {
+    let bytes = source.as_bytes();
+    let mut out = Vec::new();
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        let mut c = n.walk();
+        for ch in n.named_children(&mut c) {
+            stack.push(ch);
+        }
+        match n.kind() {
+            "cast_expression" => check_cast(n, &root, source, bytes, symbols, resolver, &mut out),
+            "local_variable_declaration" | "field_declaration" => {
+                check_declaration(n, &root, source, bytes, symbols, resolver, &mut out)
+            }
+            "return_statement" => check_return(n, &root, source, bytes, symbols, resolver, &mut out),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn check_cast(
+    n: Node,
+    root: &Node,
+    source: &str,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    out: &mut Vec<Diagnostic>,
+) {
+    let Some(ty_node) = n.child_by_field_name("type") else { return };
+    let Some(val) = n.child_by_field_name("value") else { return };
+    let Ok(type_text) = ty_node.utf8_text(bytes) else { return };
+    let Some(value_ty) = infer_expression_type_at(root, source, symbols, val.start_byte(), val.end_byte(), resolver)
+    else {
+        return;
+    };
+    // A String ↔ primitive cast is always illegal (the concrete-class path below skips primitives).
+    if let Some((s, t)) = string_primitive_pair(type_text, &value_ty.binary_name, symbols, resolver) {
+        out.push(err(format!("Inconvertible types: cannot cast `{s}` to `{t}`"), ty_node));
+        return;
+    }
+    let Some(target) = concrete_class(type_text, symbols, resolver) else { return };
+    let Some(source_ty) = concrete_binary(value_ty.binary_name, resolver) else { return };
+    // Both concrete classes, both hierarchies known: a cast is legal only up or down the chain.
+    if !hierarchy_fully_known(resolver, &source_ty) || !hierarchy_fully_known(resolver, &target) {
+        return;
+    }
+    if !reaches(resolver, &source_ty, &target) && !reaches(resolver, &target, &source_ty) {
+        out.push(err(
+            format!(
+                "Inconvertible types: cannot cast `{}` to `{}`",
+                simple_name(&source_ty),
+                simple_name(&target)
+            ),
+            ty_node,
+        ));
+    }
+}
+
+fn check_declaration(
+    n: Node,
+    root: &Node,
+    source: &str,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    out: &mut Vec<Diagnostic>,
+) {
+    let Some(ty_node) = n.child_by_field_name("type") else { return };
+    let Ok(type_text) = ty_node.utf8_text(bytes) else { return };
+    if type_text == "var" {
+        return; // inferred — nothing declared to violate
+    }
+    let mut c = n.walk();
+    for d in n.named_children(&mut c) {
+        if d.kind() != "variable_declarator" {
+            continue;
+        }
+        let Some(val) = d.child_by_field_name("value") else { continue };
+        assign_check(root, source, symbols, type_text, val, resolver, "assigned to", out);
+    }
+}
+
+fn check_return(
+    n: Node,
+    root: &Node,
+    source: &str,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    out: &mut Vec<Diagnostic>,
+) {
+    let Some(val) = first_value_child(n) else { return };
+    let Some(method) = enclosing_method(n) else { return };
+    let Some(ret) = method.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok()) else {
+        return;
+    };
+    assign_check(root, source, symbols, ret, val, resolver, "returned as", out);
+}
+
+/// Flag a value that can't be assigned/returned as `target_text` under any conversion we model.
+#[allow(clippy::too_many_arguments)]
+fn assign_check(
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    target_text: &str,
+    val: Node,
+    resolver: &dyn TypeResolver,
+    verb: &str,
+    out: &mut Vec<Diagnostic>,
+) {
+    let Some(value_ty) = infer_expression_type_at(root, source, symbols, val.start_byte(), val.end_byte(), resolver)
+    else {
+        return;
+    };
+    if let Some((s, t)) = definite_assign_mismatch(&value_ty.binary_name, target_text, symbols, resolver) {
+        out.push(err(format!("Incompatible types: `{s}` cannot be {verb} `{t}`"), val));
+    }
+}
+
+/// A definite assignment/return mismatch: `(value_display, target_display)` when `value_binary` can't
+/// become `target_text`, or `None` when compatible or uncertain (never a false positive). Covers the
+/// String ↔ primitive cases (which the concrete-class path skips) plus two unrelated concrete classes.
+fn definite_assign_mismatch(
+    value_binary: &str,
+    target_text: &str,
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> Option<(String, String)> {
+    // String ↔ primitive, either direction.
+    if let Some(pair) = string_primitive_pair(target_text, value_binary, symbols, resolver) {
+        return Some(pair);
+    }
+    // A primitive value → a reference target is boxing (Object / Number / the box …) — modelled as
+    // always OK here (only the String case above is a definite error). And a primitive TARGET with a
+    // non-String value is widening/boxing → skip.
+    if is_primitive(value_binary) || primitive_keyword(target_text).is_some() {
+        return None;
+    }
+    // Two reference concrete classes: assignment allows only widening (value is-a target).
+    let target = concrete_class(target_text, symbols, resolver)?;
+    if target == "java/lang/Object" {
+        return None;
+    }
+    let source_ty = concrete_binary(value_binary.to_string(), resolver)?;
+    if !hierarchy_fully_known(resolver, &source_ty) {
+        return None;
+    }
+    (!reaches(resolver, &source_ty, &target))
+        .then(|| (simple_name(&source_ty).to_string(), simple_name(&target).to_string()))
+}
+
+/// When `target_text` and `value_binary` are a String/primitive pair (either direction) — an
+/// inter-conversion Java never allows — return the two for the diagnostic; else `None`.
+fn string_primitive_pair(
+    target_text: &str,
+    value_binary: &str,
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> Option<(String, String)> {
+    if let Some(p) = primitive_keyword(target_text) {
+        if value_binary == "java/lang/String" {
+            return Some(("String".to_string(), p.to_string()));
+        }
+    }
+    if is_primitive(value_binary)
+        && type_binary(target_text, symbols, resolver).as_deref() == Some("java/lang/String")
+    {
+        return Some((value_binary.to_string(), "String".to_string()));
+    }
+    None
+}
+
+/// The primitive keyword `text` names, if any (`int`, `long`, …). Used to catch String↔primitive.
+fn primitive_keyword(text: &str) -> Option<&'static str> {
+    match text.trim() {
+        "int" => Some("int"),
+        "long" => Some("long"),
+        "short" => Some("short"),
+        "byte" => Some("byte"),
+        "char" => Some("char"),
+        "boolean" => Some("boolean"),
+        "float" => Some("float"),
+        "double" => Some("double"),
+        _ => None,
+    }
+}
+
+/// Resolve a **written** type name (source text: `Foo`, `com.acme.Foo`) to a concrete-class binary
+/// name, or `None` when it isn't one we can reason about.
+fn concrete_class(text: &str, symbols: &FileSymbols, resolver: &dyn TypeResolver) -> Option<String> {
+    let binary = type_binary(text, symbols, resolver)?;
+    concrete_binary(binary, resolver)
+}
+
+/// Validate an already-resolved **binary** name as a concrete class: not an interface, type variable,
+/// array, primitive, or unknown.
+fn concrete_binary(binary: String, resolver: &dyn TypeResolver) -> Option<String> {
+    if is_type_var(&binary) || binary.ends_with("[]") || is_primitive(&binary) {
+        return None;
+    }
+    let cm = resolver.members_of(&binary)?;
+    if cm.flags.is_interface {
+        return None;
+    }
+    Some(binary)
+}
+
+fn is_type_var(binary: &str) -> bool {
+    binary.len() == 1 && binary.chars().all(|c| c.is_ascii_uppercase())
+}
+
+fn is_primitive(binary: &str) -> bool {
+    matches!(
+        binary,
+        "int" | "long" | "short" | "byte" | "char" | "boolean" | "float" | "double" | "void"
+    )
+}
+
+/// The first non-comment named child of a `return_statement` (the returned value), or `None` for a
+/// bare `return;`.
+fn first_value_child(ret: Node) -> Option<Node> {
+    let mut c = ret.walk();
+    for n in ret.named_children(&mut c) {
+        if !matches!(n.kind(), "line_comment" | "block_comment") {
+            return Some(n);
+        }
+    }
+    None
+}
+
+/// The nearest enclosing `method_declaration`, stopping at a `lambda_expression` (a `return` inside a
+/// lambda targets the lambda, not the method) — in which case there's nothing to check here.
+fn enclosing_method(n: Node) -> Option<Node> {
+    let mut cur = n.parent();
+    while let Some(p) = cur {
+        match p.kind() {
+            "lambda_expression" => return None,
+            "method_declaration" => return Some(p),
+            _ => cur = p.parent(),
+        }
+    }
+    None
+}
+
+fn err(message: String, node: Node) -> Diagnostic {
+    Diagnostic { message, severity: "error".to_string(), start: node.start_byte(), end: node.end_byte() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bennu_java::prelude::{ClassFlags, ClassMembers, Import, Member, TypeRef};
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    struct MapResolver {
+        members: HashMap<String, ClassMembers>,
+        simple: HashMap<String, String>,
+    }
+
+    impl TypeResolver for MapResolver {
+        fn members_of(&self, binary: &str) -> Option<Arc<ClassMembers>> {
+            self.members.get(binary).cloned().map(Arc::new)
+        }
+        fn resolve_simple_name(&self, name: &str, _imports: &[Import]) -> Option<String> {
+            self.simple.get(name).cloned()
+        }
+    }
+
+    fn getter(name: &str, ret: &str) -> Member {
+        Member {
+            name: name.to_string(),
+            kind: bennu_java::prelude::MemberKind::Method,
+            return_type: TypeRef::simple(ret.to_string()),
+            params: Vec::new(),
+            is_static: false,
+            is_abstract: false,
+            is_default: false,
+            visibility: bennu_java::prelude::Visibility::Public,
+            raw_signature: name.to_string(),
+        }
+    }
+
+    fn cls(superclass: Option<&str>, methods: Vec<Member>) -> ClassMembers {
+        ClassMembers {
+            superclass: superclass.map(str::to_string),
+            interfaces: Vec::new(),
+            methods,
+            fields: Vec::new(),
+            flags: ClassFlags::default(),
+        }
+    }
+
+    /// Object; Animal; Dog extends Animal; Cat extends Animal; unrelated Widget.
+    /// `Provider` with `animal()->Animal`, `dog()->Dog`, `widget()->Widget`.
+    fn resolver() -> MapResolver {
+        let mut members = HashMap::new();
+        members.insert("java/lang/Object".to_string(), cls(None, vec![]));
+        members.insert("com/acme/Animal".to_string(), cls(Some("java/lang/Object"), vec![]));
+        members.insert("com/acme/Dog".to_string(), cls(Some("com/acme/Animal"), vec![]));
+        members.insert("com/acme/Cat".to_string(), cls(Some("com/acme/Animal"), vec![]));
+        members.insert("com/acme/Widget".to_string(), cls(Some("java/lang/Object"), vec![]));
+        members.insert(
+            "com/acme/Provider".to_string(),
+            cls(
+                Some("java/lang/Object"),
+                vec![
+                    getter("animal", "com/acme/Animal"),
+                    getter("dog", "com/acme/Dog"),
+                    getter("widget", "com/acme/Widget"),
+                ],
+            ),
+        );
+        members.insert("java/lang/String".to_string(), cls(Some("java/lang/Object"), vec![]));
+        let simple = [
+            ("Object", "java/lang/Object"),
+            ("Animal", "com/acme/Animal"),
+            ("Dog", "com/acme/Dog"),
+            ("Cat", "com/acme/Cat"),
+            ("Widget", "com/acme/Widget"),
+            ("Provider", "com/acme/Provider"),
+            ("String", "java/lang/String"),
+        ]
+        .into_iter()
+        .map(|(s, b)| (s.to_string(), b.to_string()))
+        .collect();
+        MapResolver { members, simple }
+    }
+
+    fn diags(body: &str) -> Vec<String> {
+        let src = format!("class C {{ Provider p; void m() {{ {body} }} }}");
+        type_compat_errors(&src, &resolver()).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn upcast_assignment_is_ok() {
+        // Dog is-an Animal.
+        assert!(diags("Animal a = p.dog();").is_empty());
+    }
+
+    #[test]
+    fn unrelated_assignment_is_flagged() {
+        let d = diags("Widget w = p.dog();");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("Dog") && d[0].contains("Widget"), "{d:?}");
+    }
+
+    #[test]
+    fn downcast_assignment_without_cast_is_flagged() {
+        // Animal is not a Dog without a cast.
+        let d = diags("Dog x = p.animal();");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("assigned to"), "{d:?}");
+    }
+
+    #[test]
+    fn assign_to_object_is_ok() {
+        assert!(diags("Object o = p.dog();").is_empty());
+    }
+
+    #[test]
+    fn valid_downcast_is_ok() {
+        // (Dog) animal — legal downcast.
+        assert!(diags("Dog d = (Dog) p.animal();").is_empty());
+    }
+
+    #[test]
+    fn inconvertible_cast_is_flagged() {
+        let d = diags("Widget w = (Widget) p.dog();");
+        assert!(d.iter().any(|m| m.contains("Inconvertible") && m.contains("Dog") && m.contains("Widget")), "{d:?}");
+    }
+
+    #[test]
+    fn return_wrong_type_is_flagged() {
+        let src = "class C { Provider p; Widget m() { return p.dog(); } }";
+        let d: Vec<String> = type_compat_errors(src, &resolver()).into_iter().map(|x| x.message).collect();
+        assert!(d.iter().any(|m| m.contains("returned as") && m.contains("Dog")), "{d:?}");
+    }
+
+    #[test]
+    fn return_subtype_is_ok() {
+        let src = "class C { Provider p; Animal m() { return p.dog(); } }";
+        assert!(type_compat_errors(src, &resolver()).is_empty());
+    }
+
+    #[test]
+    fn literal_and_unknown_values_are_skipped() {
+        assert!(diags("Dog d = null; int n = 1 + 2;").is_empty());
+    }
+
+    // ── String ↔ primitive (literal / expression typing) ───────────────────────
+
+    #[test]
+    fn string_literal_to_int_is_flagged() {
+        let d = diags("int x = \"1\";");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("String") && d[0].contains("int"), "{d:?}");
+    }
+
+    #[test]
+    fn string_concat_to_int_is_flagged() {
+        // `"1" + 1` is String concatenation → assigning it to int is an error.
+        let d = diags("int ciao = \"1\" + 1;");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("String") && d[0].contains("int"), "{d:?}");
+    }
+
+    #[test]
+    fn int_literal_to_string_is_flagged() {
+        let d = diags("String s = 1;");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("int") && d[0].contains("String"), "{d:?}");
+    }
+
+    #[test]
+    fn matching_string_and_int_are_ok() {
+        assert!(diags("String s = \"ok\"; int n = 1; int m = 1 + 2;").is_empty());
+    }
+
+    #[test]
+    fn numeric_widening_and_boxing_are_not_flagged() {
+        // int → long (widening) and int → Object (boxing) are legal → no error.
+        assert!(diags("long l = 1; Object o = 1;").is_empty());
+    }
+
+    #[test]
+    fn string_to_int_cast_is_flagged() {
+        let d = diags("int x = (int) \"nope\";");
+        assert!(d.iter().any(|m| m.contains("Inconvertible") && m.contains("String")), "{d:?}");
+    }
+
+    #[test]
+    fn return_string_from_int_method_is_flagged() {
+        let src = "class C { int m() { return \"x\"; } }";
+        let d: Vec<String> = type_compat_errors(src, &resolver()).into_iter().map(|x| x.message).collect();
+        assert!(d.iter().any(|m| m.contains("returned as") && m.contains("String")), "{d:?}");
+    }
+}

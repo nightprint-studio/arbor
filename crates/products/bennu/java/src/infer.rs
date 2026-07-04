@@ -54,6 +54,42 @@ pub fn infer_receiver_type(
     infer_receiver_type_at(&tree.root_node(), &buf, &symbols, off, resolver)
 }
 
+/// Infer the static type of the **whole expression** spanning `[start, end)` (an assigned value, a
+/// returned value, a cast operand) — not the receiver before a dot. Reuses the same nominal walk as
+/// [`infer_receiver_type`]; returns `None` for anything Phase-1 can't type (a literal, an unknown
+/// name, a construct outside scope). Re-parses `source`, so callers on a hot path should prefer the
+/// tree-reusing internals.
+pub fn infer_expression_type(
+    source: &str,
+    start: usize,
+    end: usize,
+    resolver: &dyn TypeResolver,
+) -> Option<TypeRef> {
+    let mut parser = Parser::new();
+    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
+    let tree = parser.parse(source, None)?;
+    let symbols = crate::symbols::extract_symbols(source);
+    infer_expression_type_at(&tree.root_node(), source, &symbols, start, end, resolver)
+}
+
+/// Like [`infer_expression_type`] but reusing an ALREADY-parsed `root` + ALREADY-extracted
+/// `symbols` — the hot path for validation, which types many expressions in one file and must not
+/// re-parse per site (that made a large file's checks quadratic and pegged the CPU).
+pub fn infer_expression_type_at(
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    start: usize,
+    end: usize,
+    resolver: &dyn TypeResolver,
+) -> Option<TypeRef> {
+    let node = root.named_descendant_for_byte_range(start, end)?;
+    let bytes = source.as_bytes();
+    let ctx = Ctx { bytes, resolver, symbols };
+    let enclosing = enclosing_type_fqn(&node, bytes, symbols);
+    ctx.infer_expr(&node, enclosing.as_deref())
+}
+
 /// Infer the receiver type at `byte_offset` reusing an ALREADY-parsed `root` and
 /// ALREADY-extracted `symbols` over `source` — the hot path for the reference-index walk.
 ///
@@ -119,8 +155,45 @@ impl Ctx<'_> {
             // Raw-array element access is out of Phase-1 scope (only generics
             // carry-through, handled at method-invocation).
             "array_access" => None,
+            // Literals — typed just enough for the assignment / argument checks to catch a
+            // `String` ↔ primitive mismatch (`int x = "1";`, `foo(1)` where `foo` wants a String).
+            "string_literal" | "text_block" => Some(TypeRef::simple("java/lang/String")),
+            "character_literal" => Some(TypeRef::simple("char")),
+            "true" | "false" => Some(TypeRef::simple("boolean")),
+            "decimal_integer_literal" | "hex_integer_literal" | "octal_integer_literal"
+            | "binary_integer_literal" => {
+                let t = node_text(node, self.bytes).unwrap_or_default();
+                let is_long = t.ends_with('l') || t.ends_with('L');
+                Some(TypeRef::simple(if is_long { "long" } else { "int" }))
+            }
+            "decimal_floating_point_literal" | "hex_floating_point_literal" => {
+                let t = node_text(node, self.bytes).unwrap_or_default();
+                let is_float = t.ends_with('f') || t.ends_with('F');
+                Some(TypeRef::simple(if is_float { "float" } else { "double" }))
+            }
+            // `null` is the bottom of the reference lattice — assignable to any reference; leave it
+            // untyped so no check asserts anything about it.
+            "null_literal" => None,
+            // Only string concatenation needs typing (`"x" + n` → String); arithmetic stays untyped
+            // (the checks skip primitives, so we avoid any widening/promotion guesswork).
+            "binary_expression" => self.infer_binary(node, enclosing),
             _ => None,
         }
+    }
+
+    /// Type a `+` binary expression as `String` when either operand is a `String` (concatenation);
+    /// everything else is left untyped.
+    fn infer_binary(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
+        let op = node.child_by_field_name("operator").and_then(|o| node_text(&o, self.bytes));
+        if op.as_deref() != Some("+") {
+            return None;
+        }
+        let is_string = |field: &str| {
+            node.child_by_field_name(field)
+                .and_then(|n| self.infer_expr(&n, enclosing))
+                .is_some_and(|t| t.binary_name == "java/lang/String")
+        };
+        (is_string("left") || is_string("right")).then(|| TypeRef::simple("java/lang/String"))
     }
 
     /// A bare identifier: resolve as local var / parameter first (walking up scopes),

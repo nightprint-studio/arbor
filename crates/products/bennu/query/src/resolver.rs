@@ -17,8 +17,8 @@ use std::sync::{Arc, RwLock};
 use bennu_classpath::prelude::MemberIndex as CpMemberIndex;
 use bennu_index::prelude::{PersistedIndex, Symbol, SymbolKind};
 use bennu_java::prelude::{
-    ClassMembers as JClassMembers, Import, Member as JMember, MemberKind as JMemberKind,
-    TypeRef as JTypeRef, TypeResolver, Visibility as JVisibility,
+    ClassFlags as JClassFlags, ClassMembers as JClassMembers, Import, Member as JMember,
+    MemberKind as JMemberKind, TypeRef as JTypeRef, TypeResolver, Visibility as JVisibility,
 };
 
 /// A [`TypeResolver`] composing the persisted project index and a JDK `MemberIndex`,
@@ -98,6 +98,11 @@ impl<M: CpMemberIndex> IndexResolver<M> {
     /// The persisted project index (for the completion query's prefix search).
     pub fn project(&self) -> &PersistedIndex {
         &self.project
+    }
+
+    /// The JDK member index (e.g. to flush its persistent memo at a checkpoint).
+    pub fn jdk_index(&self) -> &M {
+        &self.jdk
     }
 
     /// Every project member (`Method` / `Field`) symbol in the persisted index, deduped
@@ -232,7 +237,31 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
                 return Some(sym.fqn.clone());
             }
         }
-        self.simple_hints.get(name).cloned()
+        if let Some(hint) = self.simple_hints.get(name) {
+            return Some(hint.clone());
+        }
+        // Fall through to the JDK / library bytecode: `java.lang` is implicitly imported, and a
+        // non-static star import (`import pkg.*;`) can supply the type. Probe the member index —
+        // fast now (the resolver's per-name memo + the persistent JDK memo). A hit means the type
+        // genuinely EXISTS, so `None` here is a real "cannot resolve" — the definitive answer the
+        // validator's unresolved-type check needs. Skipped in `project_only` mode (the reference /
+        // rename engine never resolves JDK receivers, so decoding bytecode for them is waste).
+        if self.project_only {
+            return None;
+        }
+        let java_lang = format!("java/lang/{name}");
+        if self.jdk.members_of(&java_lang).is_some() {
+            return Some(java_lang);
+        }
+        for imp in imports {
+            if imp.star && !imp.static_ {
+                let candidate = format!("{}/{name}", imp.path.replace('.', "/"));
+                if self.jdk.members_of(&candidate).is_some() {
+                    return Some(candidate);
+                }
+            }
+        }
+        None
     }
 }
 
@@ -244,6 +273,19 @@ pub fn convert_members(cp: &bennu_classpath::prelude::ClassMembers) -> JClassMem
         interfaces: cp.interfaces.clone(),
         methods: cp.methods.iter().map(convert_member).collect(),
         fields: cp.fields.iter().map(convert_member).collect(),
+        flags: convert_flags(&cp.flags),
+    }
+}
+
+fn convert_flags(f: &bennu_classpath::prelude::ClassFlags) -> JClassFlags {
+    JClassFlags {
+        is_interface: f.is_interface,
+        is_abstract: f.is_abstract,
+        is_final: f.is_final,
+        is_enum: f.is_enum,
+        is_annotation: f.is_annotation,
+        is_record: f.is_record,
+        is_sealed: f.is_sealed,
     }
 }
 
@@ -257,6 +299,8 @@ fn convert_member(m: &bennu_classpath::prelude::Member) -> JMember {
         return_type: convert_typeref(&m.return_type),
         params: m.params.iter().map(convert_typeref).collect(),
         is_static: m.is_static,
+        is_abstract: m.is_abstract,
+        is_default: m.is_default,
         visibility: match m.visibility {
             bennu_classpath::prelude::Visibility::Public => JVisibility::Public,
             bennu_classpath::prelude::Visibility::Protected => JVisibility::Protected,
@@ -310,6 +354,71 @@ mod tests {
         }
     }
 
+    /// A JDK stub that resolves a couple of well-known bytecode types (NOT in `COMMON_SIMPLE`), so
+    /// the `resolve_simple_name` bytecode fall-through (java.lang + star imports) can be tested.
+    struct FakeJdk;
+    impl CpMemberIndex for FakeJdk {
+        fn members_of(&self, binary_name: &str) -> Option<CpClassMembers> {
+            matches!(binary_name, "java/lang/Runnable" | "java/util/LinkedHashMap").then(|| {
+                CpClassMembers {
+                    superclass: None,
+                    interfaces: Vec::new(),
+                    methods: Vec::new(),
+                    fields: Vec::new(),
+                    flags: Default::default(),
+                }
+            })
+        }
+    }
+
+    /// A resolver with an EMPTY project index over a given JDK stub — for the simple-name
+    /// resolution fall-through tests (no project types, so the JDK probe is what answers).
+    fn empty_resolver_with_jdk<M: CpMemberIndex>(jdk: M) -> IndexResolver<M> {
+        let dir = std::env::temp_dir().join(format!(
+            "bennu-jdkprobe-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut b = IndexBuilder::new(&dir);
+        b.persist().unwrap(); // empty index → project.get always misses
+        let project = PersistedIndex::open(b.blob_path(), b.fst_path()).unwrap();
+        IndexResolver::new(project, jdk)
+    }
+
+    #[test]
+    fn resolves_java_lang_type_via_bytecode_probe() {
+        let r = empty_resolver_with_jdk(FakeJdk);
+        // `Runnable` isn't in COMMON_SIMPLE → only the java.lang bytecode probe resolves it.
+        assert_eq!(r.resolve_simple_name("Runnable", &[]).as_deref(), Some("java/lang/Runnable"));
+        // A genuinely unknown name → None. This is the DEFINITIVE answer the validator relies on.
+        assert!(r.resolve_simple_name("Nope", &[]).is_none());
+    }
+
+    #[test]
+    fn resolves_type_via_non_static_star_import() {
+        let r = empty_resolver_with_jdk(FakeJdk);
+        let imports = vec![Import { path: "java.util".into(), star: true, static_: false }];
+        assert_eq!(
+            r.resolve_simple_name("LinkedHashMap", &imports).as_deref(),
+            Some("java/util/LinkedHashMap"),
+        );
+        // Without the star import, java.util.LinkedHashMap isn't implicitly available → None.
+        assert!(r.resolve_simple_name("LinkedHashMap", &[]).is_none());
+        // A STATIC star import doesn't bind a type name → still None.
+        let static_star = vec![Import { path: "java.util".into(), star: true, static_: true }];
+        assert!(r.resolve_simple_name("LinkedHashMap", &static_star).is_none());
+    }
+
+    #[test]
+    fn project_only_skips_the_jdk_probe() {
+        let r = empty_resolver_with_jdk(FakeJdk).project_only();
+        // The reference/rename engine never resolves JDK receivers — even a real java.lang type
+        // must not resolve here (it's wasted bytecode decoding for a use-site we can't rename).
+        assert!(r.resolve_simple_name("Runnable", &[]).is_none());
+    }
+
     /// A class `Symbol` carrying a members-JSON, reachable under its binary name.
     fn class_symbol(simple: &str, binary: &str, members_json: &str) -> Symbol {
         Symbol {
@@ -343,9 +452,12 @@ mod tests {
                 return_type: JTypeRef { binary_name: "int".into(), type_args: Vec::new() },
                 params: Vec::new(),
                 is_static: false,
+                is_abstract: false,
+                is_default: false,
                 visibility: JVisibility::Public,
                 raw_signature: format!("int {field}"),
             }],
+            flags: Default::default(),
         })
         .unwrap()
     }

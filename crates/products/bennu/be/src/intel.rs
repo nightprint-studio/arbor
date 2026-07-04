@@ -24,7 +24,7 @@
 //! incremental (only the changed file is re-parsed — no whole-project walk).
 
 use bennu_core::prelude::BennuState;
-use bennu_intel::prelude::{ActionVerdict, CompletionItem, IntelProvider, NativeJavaProvider};
+use bennu_intel::prelude::{ActionVerdict, CompletionItem};
 use bennu_proto::prelude::{Diagnostic, UsagesResult};
 use serde::{Deserialize, Serialize};
 
@@ -63,9 +63,13 @@ pub struct ActionRef {
 pub struct DiagnosticsArgs {
     /// Absolute path to the file to diagnose.
     pub file: String,
+    /// The current (possibly-unsaved) buffer text. For a Java file it drives the AST-level
+    /// validation (`bennu-check`); absent → no Java diagnostics (the on-disk file may be stale).
+    #[serde(default)]
+    pub source: Option<String>,
     /// JSP action references extracted from the file by the FE. When present, each is
     /// checked for existence conservatively (exists / missing / inconclusive). Absent /
-    /// empty for a plain Java file (→ the empty stub for now).
+    /// empty for a plain Java file (→ the AST validator).
     #[serde(default)]
     pub actions: Vec<ActionRef>,
 }
@@ -92,8 +96,17 @@ fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Dia
             .map(|r| ActionRef { qualified_name: r.name, start: r.start, end: r.end })
             .collect()
     } else {
-        let provider = NativeJavaProvider::new();
-        return provider.diagnostics(&args.file).map_err(|e| e.to_string());
+        // A Java file → AST-level validation (syntax errors + unused imports) over the live buffer,
+        // no compile needed. Other file types have no diagnostics here.
+        if is_java_file(&args.file) {
+            if let Some(source) = &args.source {
+                // Route through the owning project's provider so the resolver-backed checks
+                // (unknown members via type inference) run when the index is built; falls back to
+                // the pure AST checks otherwise.
+                return Ok(IndexService::global().validate_java(&args.file, source));
+            }
+        }
+        return Ok(Vec::new());
     };
 
     let svc = IndexService::global();
@@ -132,6 +145,11 @@ fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Dia
 fn is_jsp_file(file: &str) -> bool {
     let f = file.to_ascii_lowercase();
     f.ends_with(".jsp") || f.ends_with(".jspf") || f.ends_with(".tag") || f.ends_with(".tagx")
+}
+
+/// True when `file` is a Java source (case-insensitive `.java`).
+fn is_java_file(file: &str) -> bool {
+    file.to_ascii_lowercase().ends_with(".java")
 }
 
 /// Args for [`bennu_definition`].

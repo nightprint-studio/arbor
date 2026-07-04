@@ -253,6 +253,8 @@ mod tests {
             return_type: TypeRef::simple(ret.to_string()),
             params: Vec::new(),
             is_static: false,
+            is_abstract: false,
+            is_default: false,
             visibility: vis,
             raw_signature: format!("{ret} {name}()"),
         }
@@ -265,6 +267,8 @@ mod tests {
             return_type: TypeRef::simple(ty.to_string()),
             params: Vec::new(),
             is_static: false,
+            is_abstract: false,
+            is_default: false,
             visibility: vis,
             raw_signature: format!("{ty} {name}"),
         }
@@ -290,6 +294,7 @@ mod tests {
                 interfaces: Vec::new(),
                 methods: vec![method("greet", "java/lang/String", Visibility::Public)],
                 fields: Vec::new(),
+                flags: Default::default(),
             },
         );
         members.insert(
@@ -299,6 +304,7 @@ mod tests {
                 interfaces: Vec::new(),
                 methods: vec![method("own", "int", Visibility::Public)],
                 fields: Vec::new(),
+                flags: Default::default(),
             },
         );
         // `java/lang/Object` is a JDK type: NOT in `members` (no ClassMembers) → its members
@@ -336,6 +342,7 @@ mod tests {
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: Vec::new(),
+                flags: Default::default(),
             },
         );
         members.insert(
@@ -345,6 +352,7 @@ mod tests {
                 interfaces: Vec::new(),
                 methods: vec![method("size", "int", Visibility::Public)],
                 fields: Vec::new(),
+                flags: Default::default(),
             },
         );
         let resolver = MapResolver { members, simple: HashMap::new() };
@@ -370,6 +378,7 @@ mod tests {
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: Vec::new(),
+                flags: Default::default(),
             },
         );
         members.insert(
@@ -379,6 +388,7 @@ mod tests {
                 interfaces: Vec::new(),
                 methods: vec![method("run", "void", Visibility::Protected)],
                 fields: Vec::new(),
+                flags: Default::default(),
             },
         );
         members.insert(
@@ -388,6 +398,7 @@ mod tests {
                 interfaces: Vec::new(),
                 methods: vec![method("run", "void", Visibility::Public)],
                 fields: Vec::new(),
+                flags: Default::default(),
             },
         );
         let resolver = MapResolver { members, simple: HashMap::new() };
@@ -418,6 +429,7 @@ mod tests {
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: Vec::new(),
+                flags: Default::default(),
             },
         );
         members.insert(
@@ -427,6 +439,7 @@ mod tests {
                 interfaces: Vec::new(),
                 methods: vec![method("zeta", "void", Visibility::Public), method("alpha", "void", Visibility::Public)],
                 fields: vec![field("count", "int", Visibility::Protected)],
+                flags: Default::default(),
             },
         );
         let resolver = MapResolver { members, simple: HashMap::new() };

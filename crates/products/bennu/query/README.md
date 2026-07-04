@@ -8,7 +8,11 @@ of `bennu-intel` so it depends only on the base crates.
 1. the **persisted project index** (`bennu-index`) — `.java`-declared types, with an in-memory
    overlay for files edited since the last full build;
 2. the **JDK / library bytecode index** (`bennu-classpath`, wrapped `Send + Sync` in
-   `JdkMemberIndex`) — resolved live.
+   `JdkMemberIndex`). `JdkMemberIndex` is a **persistent lazy** index: it memoizes every lookup
+   (hits *and* definitive misses) and, when built with `persistent(source, path)`, loads/saves that
+   memo to a JSON file **keyed by the resolved JDK** — so a JDK class is parsed from bytecode at
+   most once ever, shared across projects and sessions (the be layer keys the path under
+   `bennu_data_dir()/jdk-index/`). `new(source)` is the in-memory-only variant.
 
 `completion(source, byte_offset, &resolver)` is the member-access query: infer the receiver type at
 the `.`, walk its members (super + interfaces), filter by the typed prefix, return
@@ -26,7 +30,7 @@ resolver walk.
 
 ```rust
 struct IndexResolver<M: MemberIndex>       // impls bennu_java::TypeResolver
-struct JdkMemberIndex                       // Send + Sync JDK member source
+struct JdkMemberIndex                       // Send + Sync, persistent lazy JDK member index
 struct PlanFile { path, source }            // a project source file (whole-project query input)
 struct InheritedMember / InheritedSource    // the inherited-members result shape
 fn convert_members(&CpClassMembers) -> JClassMembers

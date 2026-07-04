@@ -137,7 +137,14 @@ impl BlobWriter {
 
     /// Write the blob to `blob_path` and the fst map to `fst_path`. Keys are sorted
     /// and de-duplicated (keep-first) as fst requires.
+    ///
+    /// Ensures the target directory exists first: the store owns its files, so it can't assume the
+    /// caller created (and kept) the parent — a concurrent generation GC could have removed it,
+    /// which surfaced as `os error 3` (path not found) during index persist.
     pub fn finish(mut self, blob_path: &Path, fst_path: &Path) -> Result<(), StoreError> {
+        for dir in [blob_path.parent(), fst_path.parent()].into_iter().flatten() {
+            std::fs::create_dir_all(dir).map_err(|e| StoreError::Io(e.to_string()))?;
+        }
         {
             let mut f =
                 BufWriter::new(File::create(blob_path).map_err(|e| StoreError::Io(e.to_string()))?);

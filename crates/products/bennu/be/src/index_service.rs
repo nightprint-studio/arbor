@@ -77,6 +77,23 @@ fn index_base_for(root: &str) -> PathBuf {
     arbor_core::prelude::bennu_data_dir().join("index").join(format!("{hash:016x}"))
 }
 
+/// The **shared, cross-session** JDK member-index path for `jdk_version`:
+/// `bennu_data_dir()/jdk-index/<major>-<hash-of-home>.json`. Keyed by the RESOLVED JDK (home +
+/// major) — not the requested version — so every project that resolves to the same JDK reuses one
+/// memo, and two different JDKs never share (a cached miss is only valid for its own JDK). `None`
+/// when no JDK resolves (the index then stays in-memory, re-parsing as today).
+fn jdk_index_path(jdk_version: &str) -> Option<PathBuf> {
+    let status = bennu_classpath::prelude::jdk_status(jdk_version);
+    let home = status.resolved_home?;
+    let major = status.resolved_major.unwrap_or(0);
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in home.to_string_lossy().as_bytes() {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    Some(arbor_core::prelude::bennu_data_dir().join("jdk-index").join(format!("{major}-{hash:016x}.json")))
+}
+
 /// A stable, filesystem-safe FNV-1a hash of an absolute root — the per-root cache dir name.
 fn root_hash(root: &str) -> String {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -158,17 +175,19 @@ fn next_gen(base: &Path) -> u64 {
     max.map_or(0, |m| m + 1)
 }
 
-/// Best-effort delete every gen subdir under `base` except `keep`. A delete that fails
-/// because the OS still has the file mapped (another live provider, or a not-yet-dropped
-/// `Arc` on this process) is non-fatal — the dir is left for the next open's GC. Logged
-/// once per stuck dir (debug-level) so a persistent leak is visible without spamming.
+/// Best-effort delete every gen subdir under `base` **strictly older** than `keep`. Newer gens
+/// (`>= keep`) are left alone: gen numbers are monotonic, so a higher one is a CONCURRENT open's
+/// in-progress build — deleting it would pull the directory out from under that build's persist
+/// (the reported `os error 3`). A delete that fails because the OS still has the file mapped
+/// (another live provider, or a not-yet-dropped `Arc`) is non-fatal — the dir is left for the next
+/// open's GC.
 fn gc_old_gens(base: &Path, keep: u64) {
     let Ok(rd) = std::fs::read_dir(base) else { return };
     for e in rd.flatten() {
         let name = e.file_name();
         let Some(n) = name.to_str().and_then(parse_gen) else { continue };
-        if n == keep {
-            continue;
+        if n >= keep {
+            continue; // the current gen, or a newer concurrent build's — never GC it
         }
         let p = e.path();
         if std::fs::remove_dir_all(&p).is_err() {
@@ -399,8 +418,10 @@ impl IndexService {
             );
             emit_progress(&sink, &root_str, "project", "end");
 
-            // Build the index-backed provider and swap it in.
-            match NativeJavaProvider::for_project(&index_dir, &jdk_version, &pairs) {
+            // Build the index-backed provider and swap it in. The JDK member index is persistent
+            // (shared across projects/sessions, keyed by the resolved JDK), so JDK classes are
+            // parsed from bytecode at most once ever.
+            match NativeJavaProvider::for_project(&index_dir, &jdk_version, &pairs, jdk_index_path(&jdk_version)) {
                 Ok(p) => {
                     *slot.provider.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(p);
                     // NB: completion is live here, but the index is NOT fully built yet — the
@@ -531,6 +552,37 @@ impl IndexService {
         };
         let at = Position { file: file.to_string(), offset };
         provider.completion(&at).unwrap_or_default()
+    }
+
+    /// Validate a Java `file` over its owning project's provider (AST checks + the resolver-backed
+    /// unknown-member check when the index is built). `source` is the live buffer. Falls back to the
+    /// pure AST checks when no project owns the file / its index isn't built yet.
+    pub fn validate_java(&self, file: &str, source: &str) -> Vec<bennu_proto::prelude::Diagnostic> {
+        let path = Path::new(file);
+        let file_stem = path.file_stem().and_then(|s| s.to_str()).map(str::to_string);
+        // Expected package from the file's location under its source root (`src/main/java/...`).
+        let expected_package = path.parent().and_then(bennu_java::prelude::infer_package);
+
+        let Some(slot) = self.slot_for_file(file) else {
+            // No owning project: still run every source-only check (no target version to gate on).
+            let ctx = bennu_check::prelude::FileContext {
+                file_stem,
+                expected_package,
+                java_major: None,
+            };
+            return bennu_check::prelude::check_file(source, &ctx);
+        };
+        let status = bennu_classpath::prelude::jdk_status(&slot.jdk_version);
+        let ctx = bennu_check::prelude::FileContext {
+            file_stem,
+            expected_package,
+            java_major: status.requested_major,
+        };
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.validate(source, &ctx, status.any_installed)
     }
 
     /// Resolve a JSP form/link action reference to its go-to-definition target (the C1
@@ -1630,6 +1682,25 @@ mod tests {
         assert!(!gen_dir(&base, 1).exists(), "g001 removed");
         assert!(gen_dir(&base, 2).exists(), "current gen kept");
         assert!(base.join("keepme").exists(), "non-gen sibling untouched");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn gc_old_gens_preserves_newer_concurrent_gen() {
+        // A concurrent open holds a HIGHER gen (its build is in progress). GC'ing for the older
+        // build must NOT delete it — else that build's persist hits `os error 3`.
+        let base = std::env::temp_dir()
+            .join(format!("bennu-gcnewer-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&base);
+        for g in [3u64, 4, 5] {
+            std::fs::create_dir_all(gen_dir(&base, g)).unwrap();
+        }
+        // The older build (gen 4) GCs: gen 3 goes, gen 4 (its own) stays, gen 5 (a newer
+        // concurrent build) is preserved.
+        gc_old_gens(&base, 4);
+        assert!(!gen_dir(&base, 3).exists(), "strictly-older gen removed");
+        assert!(gen_dir(&base, 4).exists(), "own gen kept");
+        assert!(gen_dir(&base, 5).exists(), "newer concurrent gen preserved");
         let _ = std::fs::remove_dir_all(&base);
     }
 
