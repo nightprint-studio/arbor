@@ -76,6 +76,63 @@ fn resolves_import(dotted: &str, resolver: &dyn TypeResolver) -> bool {
     false
 }
 
+/// Flag a **redundant wildcard import** — `import java.lang.*;` (always implicitly imported) or
+/// `import <own package>.*;` (the file's own package is implicitly in scope). A `warning`; purely
+/// syntactic (the file's own package is read straight off the tree), so it needs no resolver and can
+/// never be a false positive. `static` wildcards are left alone (`import static X.*;` genuinely pulls
+/// members in). Only wildcard imports are considered here — a redundant *single-type* import can't be
+/// told apart from a nested-type import without resolution, so it's deliberately not flagged.
+pub fn redundant_imports(root: Node, source: &str) -> Vec<Diagnostic> {
+    let bytes = source.as_bytes();
+    let own_package = file_package(root, bytes);
+    let mut out = Vec::new();
+    let mut c = root.walk();
+    for child in root.children(&mut c) {
+        if child.kind() != "import_declaration" {
+            continue;
+        }
+        let Ok(text) = child.utf8_text(bytes) else { continue };
+        // Only non-static wildcard imports.
+        if text.contains("static") || !text.trim_end_matches(';').trim_end().ends_with('*') {
+            continue;
+        }
+        let Some(name_node) = dotted_name(child) else { continue };
+        let Ok(package) = name_node.utf8_text(bytes) else { continue };
+        let reason = if package == "java.lang" {
+            Some("`java.lang` is imported implicitly")
+        } else if own_package.as_deref() == Some(package) {
+            Some("types in the same package are in scope implicitly")
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            out.push(Diagnostic {
+                message: format!("Redundant import `{package}.*` — {reason}"),
+                severity: "warning".to_string(),
+                start: child.start_byte(),
+                end: child.end_byte(),
+            });
+        }
+    }
+    out
+}
+
+/// The file's declared `package …;`, if any (dotted, as written).
+fn file_package(root: Node, bytes: &[u8]) -> Option<String> {
+    let mut c = root.walk();
+    for child in root.children(&mut c) {
+        if child.kind() == "package_declaration" {
+            let mut cc = child.walk();
+            for part in child.named_children(&mut cc) {
+                if matches!(part.kind(), "scoped_identifier" | "identifier") {
+                    return part.utf8_text(bytes).ok().map(str::to_string);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Flag a `import a.b.C;` that repeats an import already declared above it (a `warning`). Matched by
 /// the exact import text (`static` and wildcard forms included), so only true duplicates are flagged.
 pub fn duplicate_imports(root: Node, source: &str) -> Vec<Diagnostic> {
@@ -357,5 +414,45 @@ mod tests {
     fn distinct_imports_are_not_duplicates() {
         let src = "package a;\nimport java.util.List;\nimport java.util.Map;\nclass Foo {}\n";
         assert_eq!(dups(src), 0);
+    }
+
+    fn redundant(src: &str) -> Vec<String> {
+        let tree = parse(src);
+        redundant_imports(tree.root_node(), src).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn java_lang_wildcard_is_redundant() {
+        let d = redundant("package a;\nimport java.lang.*;\nclass Foo {}\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("java.lang"), "{d:?}");
+    }
+
+    #[test]
+    fn own_package_wildcard_is_redundant() {
+        let d = redundant("package com.acme.web;\nimport com.acme.web.*;\nclass Foo {}\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("same package"), "{d:?}");
+    }
+
+    #[test]
+    fn other_wildcard_is_not_redundant() {
+        // A genuine wildcard into another package — never flagged (no package oracle to refute it).
+        let src = "package com.acme.web;\nimport java.util.*;\nimport com.other.*;\nclass Foo {}\n";
+        assert!(redundant(src).is_empty(), "{:?}", redundant(src));
+    }
+
+    #[test]
+    fn static_wildcard_is_not_redundant() {
+        // `import static java.lang.Math.*;` pulls members in — not redundant.
+        let src = "package a;\nimport static java.lang.Math.*;\nclass Foo {}\n";
+        assert!(redundant(src).is_empty());
+    }
+
+    #[test]
+    fn java_lang_subpackage_wildcard_is_not_redundant() {
+        // `java.lang.reflect` is NOT implicitly imported — only `java.lang` itself is.
+        let src = "package a;\nimport java.lang.reflect.*;\nclass Foo {}\n";
+        assert!(redundant(src).is_empty());
     }
 }

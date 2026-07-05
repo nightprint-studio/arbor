@@ -36,6 +36,15 @@ pub struct BennuConfig {
     pub default_encoding: String,
     /// Editor indentation width in spaces (the whitespace normalizer / display).
     pub indent_width: u32,
+    /// The build the split-button runs by default (and on Ctrl+F9): `"mvn"` (Maven compile) or
+    /// `"validate"` (whole-project validation without compiling). Empty is treated as `"mvn"`.
+    pub preferred_build_type: String,
+    /// Whether to warm up the whole-project **validation cache** in the background right after a
+    /// project finishes indexing, so the first explicit "Validate (no compile)" is instant (and the
+    /// resolved data it computes is ready for navigation features). `true` by default; turn it off
+    /// to avoid the one-shot background CPU on every open. The `#[serde(default)]` container fills a
+    /// missing key from this struct's `Default` (→ `true`), so existing config files opt in.
+    pub validate_on_open: bool,
     /// Extra JDK install directories to search, on top of `JAVA_HOME` +
     /// `C:/Program Files/Java/*`. For a JDK installed somewhere non-standard (a portable
     /// SDK, an IDE-bundled JDK, `/usr/lib/jvm/…`), so the index can still resolve the
@@ -54,6 +63,8 @@ impl Default for BennuConfig {
         Self {
             default_encoding: "UTF-8".to_string(),
             indent_width: 4,
+            preferred_build_type: "mvn".to_string(),
+            validate_on_open: true,
             jdk_paths: Vec::new(),
             jdk_overrides: BTreeMap::new(),
             encoding_overrides: BTreeMap::new(),

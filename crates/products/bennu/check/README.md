@@ -20,12 +20,16 @@ exhaustively unit-tested here, including with real type inference.
 | `special_file_errors` | `error` | the restricted grammar of `package-info.java` (only a package declaration + its annotations) and `module-info.java` (only a module declaration). Keyed off `file_stem`. |
 | `return_statement_errors` | `error` | a value returned from a `void` method / constructor, or a bare `return;` in a non-`void` method. Attributed to the nearest method — a `return` inside a lambda is judged against the lambda. |
 | `duplicate_signatures` | `error` | two methods or two constructors in the same type with the same name and parameter types. Exact text match (generics kept) so a legal overload is never flagged. |
+| `redeclaration_errors` | `error` | the same name declared twice where Java forbids it — two fields in a type, two parameters of a method/constructor/lambda, two locals in one block, or two types with the same name in one scope. Exact-name, same-scope, so a legal same-name in a disjoint sibling scope (two `for` loops each declaring `i`) or a local shadowing a field is never flagged. |
+| `unreachable_code` | `error` | a statement directly after an unconditional `return`/`throw`/`break`/`continue` in the same block. Conservative — a terminator nested in an `if` doesn't kill the following code; only the first unreachable statement per block is reported. |
 | `switch_yield_errors` | `error` | a `switch` **expression** arm (a block or colon group) that can complete without producing a value (`yield`/`throw`). Only in value positions. |
 | `switch_selector_errors` | `error` | a `switch` on a `long` / `float` / `double` / `boolean` — types `switch` doesn't accept. Purely syntactic (declared type / literal), so no resolver needed. |
+| `final_reassignment_errors` | `error` | reassigning a `final` local or field that **already has an initializer** (`final int x = 1; x = 2;`, `this.f = …` on a `final` field with an initializer). Conservative — a `final` *without* an initializer (assigned once later, possibly across `if`/`else`) is never flagged; a shadowed local name is skipped; only unambiguous `this.field` field targets are considered. |
 | `package_mismatch` | `error` | the declared `package …;` doesn't match the file's location under its source root (needs `expected_package`, inferred from the path). The `change_package` helper produces the "set package to …" quick-fix edit. |
 | `version_errors` | `error` | a language feature used below the project's target Java version — records (16), sealed types (17), `var` (10), text blocks (15), switch arrows (14), lambdas / method references (8), try-with-resources (7), multi-catch (7), default/private interface methods (8/9). Needs `java_major`. A `var` is *not* flagged when the file imports Lombok's `var`/`val` (back-ported below 10). |
 | `unused_imports` | `warning` | a single-type import whose name never appears elsewhere (identifiers *or* comments). `static`/wildcard skipped. |
 | `duplicate_imports` | `warning` | a repeated identical import. |
+| `redundant_imports` | `warning` | a redundant **wildcard** import — `import java.lang.*;` (implicitly imported) or `import <own package>.*;` (same package already in scope). Purely syntactic (own package read off the tree), so no resolver and never a false positive; `static` wildcards and single-type imports are left alone. |
 
 `check_file` takes a `FileContext { file_stem, expected_package, java_major }` — each `None` field
 just skips its check, so a scratch buffer still gets every source-only diagnostic.
@@ -50,12 +54,17 @@ only when `jdk_available`.
 | `missing_abstract_impls` | `error` | a concrete class that leaves an inherited abstract method unimplemented. Requires the whole hierarchy known; `Object` methods never count; `sealed` supertypes are not consulted. |
 | `functional_errors` | `error` | a lambda whose parameter count doesn't match its target functional interface's single abstract method, or whose target interface isn't functional. Only for explicit targets (`T x = …`, `return …`, `(T) …`) against a known interface. |
 | `super_constructor_errors` | `error` | a subclass constructor that doesn't chain (`super(...)`/`this(...)`) when the superclass has no no-arg constructor (or a subclass with no constructor at all). Runs only when the superclass's constructors are indexed (bytecode) — a conservative miss otherwise. |
+| `final_override_errors` | `error` | a method that overrides a `final` supertype method (`final` methods can't be overridden). Matched by name **and** erased parameter types (a legal overload is never flagged), and only when every parameter type resolves. Fires against `final` methods of JDK/library supertypes (incl. `java.lang.Object`'s `final` `wait`/`getClass`/…) and project supertypes. |
 
 `ClassFlags` (interface / abstract / final / enum / record / sealed) and the per-member
-`is_abstract` / `is_default` are decoded from bytecode by `bennu-classpath` and carried across the
-seam. **Library / JDK** supertypes therefore drive the inheritance / functional checks fully; a
-**project-source** supertype carries default flags until the symbol model grows a type-kind, so those
-checks are a conservative miss (never a false positive) against project supertypes.
+`is_abstract` / `is_default` / `is_final` come from **two** sources, unified across the seam: `bennu-classpath`
+decodes them from **bytecode** (JDK / library types), and `bennu-intel`'s java-index derives them from
+the **source symbol model** (`TypeKind` + the `abstract`/`final`/`sealed` modifiers + bodyless
+interface methods) for **project** types. So the inheritance / implement-abstract / functional checks
+now fire against project supertypes too — `class X extends ProjectFinal {}`,
+`class Y implements ProjectIface {}` with an unimplemented method — not only bytecode ones. The
+`missing_abstract_impls` guard still requires the **whole** hierarchy known, so a project type whose
+own supertype is un-indexed stays a conservative miss (never a false positive).
 
 ```rust
 use bennu_check::prelude::*;
@@ -71,7 +80,8 @@ parse. All API is re-exported from `bennu_check::prelude`.
 
 ## Roadmap
 
-Remaining depth (see `docs/bennu-indexing-validation-analysis.md`): argument-**type** checking (not
-just arity), method-reference resolution, and populating `ClassFlags` / method `is_abstract` for
-**project-source** types (needs a type-kind on the symbol model) so the inheritance / functional /
-implement-abstract checks fire against project supertypes too, not only bytecode ones.
+Remaining depth (see `docs/bennu-indexing-validation-analysis.md`): method-reference resolution;
+generic type-parameter arity / bound checking; and a whole-classpath
+**package index** so a wildcard `import a.b.*;` can be flagged when the package genuinely doesn't
+exist (today only the *redundant* wildcard cases are flagged — there's no cheap package enumeration
+over the jimage / jars).

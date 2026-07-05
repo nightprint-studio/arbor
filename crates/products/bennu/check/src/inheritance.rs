@@ -35,24 +35,21 @@ use crate::walk::{for_each_supertype, hierarchy_fully_known};
 /// Parse `source` and flag illegal `extends` / `implements` clauses.
 pub fn inheritance_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
     let symbols = extract_symbols(source);
-    with_parse(source, |root| inheritance_errors_in(root, source, &symbols, resolver))
+    with_parse(source, |root| {
+        inheritance_errors_in(&crate::check::collect_nodes(root), source, &symbols, resolver)
+    })
 }
 
-/// Tree-driven core: reuses the caller's `symbols`.
+/// Tree-driven core: iterates the shared `nodes` + reuses the caller's `symbols`.
 pub fn inheritance_errors_in(
-    root: Node,
+    nodes: &[Node],
     source: &str,
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         match n.kind() {
             "class_declaration" | "enum_declaration" | "record_declaration" => {
                 check_class_supertypes(n, bytes, symbols, resolver, &mut out);
@@ -125,12 +122,14 @@ fn check_class_supertypes(
 /// Parse `source` and flag concrete classes that don't implement an inherited abstract method.
 pub fn missing_abstract_impls(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
     let symbols = extract_symbols(source);
-    with_parse(source, |root| missing_abstract_impls_in(root, source, &symbols, resolver))
+    with_parse(source, |root| {
+        missing_abstract_impls_in(&crate::check::collect_nodes(root), source, &symbols, resolver)
+    })
 }
 
-/// Tree-driven core: reuses the caller's `symbols`.
+/// Tree-driven core: iterates the shared `nodes` + reuses the caller's `symbols`.
 pub fn missing_abstract_impls_in(
-    root: Node,
+    nodes: &[Node],
     source: &str,
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
@@ -138,12 +137,7 @@ pub fn missing_abstract_impls_in(
     let bytes = source.as_bytes();
     let object_methods = object_method_names(resolver);
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         if n.kind() == "class_declaration" && !is_abstract(n, bytes) {
             check_missing_impls(n, bytes, symbols, resolver, &object_methods, &mut out);
         }
@@ -358,7 +352,7 @@ fn with_parse(source: &str, f: impl FnOnce(Node) -> Vec<Diagnostic>) -> Vec<Diag
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bennu_java::prelude::{ClassFlags, Import, TypeRef, Visibility};
+    use bennu_java::prelude::{ClassFlags, Import, TypeRef};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -377,17 +371,7 @@ mod tests {
     }
 
     fn abstract_method(name: &str) -> Member {
-        Member {
-            name: name.to_string(),
-            kind: MemberKind::Method,
-            return_type: TypeRef::simple("void"),
-            params: Vec::new(),
-            is_static: false,
-            is_abstract: true,
-            is_default: false,
-            visibility: Visibility::Public,
-            raw_signature: name.to_string(),
-        }
+        Member::method(name, TypeRef::simple("void"), Vec::new()).abstract_()
     }
 
     fn cm(flags: ClassFlags, superclass: Option<&str>, ifaces: &[&str], methods: Vec<Member>) -> ClassMembers {

@@ -36,12 +36,13 @@ pub fn functional_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagn
         return Vec::new();
     };
     let symbols = extract_symbols(source);
-    functional_errors_in(tree.root_node(), source, &symbols, resolver)
+    let nodes = crate::check::collect_nodes(tree.root_node());
+    functional_errors_in(&nodes, source, &symbols, resolver)
 }
 
-/// Tree-driven core: reuses the caller's `symbols`.
+/// Tree-driven core: iterates the shared `nodes` + reuses the caller's `symbols`.
 pub fn functional_errors_in(
-    root: Node,
+    nodes: &[Node],
     source: &str,
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
@@ -49,12 +50,7 @@ pub fn functional_errors_in(
     let bytes = source.as_bytes();
     let objects = object_method_names(resolver);
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         if n.kind() == "lambda_expression" {
             check_lambda(n, bytes, symbols, resolver, &objects, &mut out);
         }
@@ -210,7 +206,7 @@ fn err(message: String, node: Node) -> Diagnostic {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bennu_java::prelude::{ClassFlags, ClassMembers, Import, Member, TypeRef, Visibility};
+    use bennu_java::prelude::{ClassFlags, ClassMembers, Import, Member, TypeRef};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -229,16 +225,12 @@ mod tests {
     }
 
     fn m(name: &str, params: usize, is_abstract: bool) -> Member {
-        Member {
-            name: name.to_string(),
-            kind: MemberKind::Method,
-            return_type: TypeRef::simple("void"),
-            params: (0..params).map(|_| TypeRef::simple("java/lang/Object")).collect(),
-            is_static: false,
-            is_abstract,
-            is_default: false,
-            visibility: Visibility::Public,
-            raw_signature: name.to_string(),
+        let params = (0..params).map(|_| TypeRef::simple("java/lang/Object")).collect();
+        let m = Member::method(name, TypeRef::simple("void"), params);
+        if is_abstract {
+            m.abstract_()
+        } else {
+            m
         }
     }
 

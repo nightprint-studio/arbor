@@ -25,6 +25,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
+  import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { diagnostics as ipcDiagnostics } from '$lib/ipc/bennu';
   import {
     definition as ipcDefinition, references as ipcReferences,
@@ -223,6 +224,9 @@
         .then((ds) => {
           if (cancelled) return;
           diags = ds.map((d) => ({ from: d.start, to: d.end, severity: d.severity, message: d.message }));
+          // Publish to the shared store so the Problems panel's active-file section updates live as
+          // you edit (and this file's project-wide entry stays correct after you switch away).
+          bennuDiagnosticsStore.setActiveFileDiagnostics(path, ds);
         })
         .catch(() => { if (!cancelled) diags = []; });
     };

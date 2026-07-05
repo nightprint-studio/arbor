@@ -142,17 +142,7 @@ mod tests {
         TypeRef { binary_name: bn.into(), type_args: args }
     }
     fn m(name: &str, ret: TypeRef) -> Member {
-        Member {
-            name: name.into(),
-            kind: MemberKind::Method,
-            return_type: ret,
-            params: vec![],
-            is_static: false,
-            is_abstract: false,
-            is_default: false,
-            visibility: Visibility::Public,
-            raw_signature: String::new(),
-        }
+        Member::method(name, ret, vec![]).sig(String::new())
     }
 
     /// Byte offset just after the LAST `.` in `src`.

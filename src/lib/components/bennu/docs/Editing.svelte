@@ -93,6 +93,15 @@
   <li><strong>Constructors</strong> — two methods or two constructors with the same signature, and a
     subclass constructor that must call <code>super(…)</code> because its superclass has no no-arg
     constructor.</li>
+  <li><strong>Final</strong> — reassigning a <code>final</code> variable or field that already has an
+    initial value, and overriding a <code>final</code> method inherited from a superclass. A
+    <code>final</code> field left uninitialized (then assigned once, e.g. across <code>if</code>/<code>else</code>
+    branches) is allowed.</li>
+  <li><strong>Duplicate declarations</strong> — two fields, two method/constructor parameters, two
+    local variables in one block, or two types with the same name in one scope (in addition to two
+    methods/constructors with the same signature).</li>
+  <li><strong>Unreachable code</strong> — a statement that can never run because the line before it
+    always <code>return</code>s, <code>throw</code>s, <code>break</code>s or <code>continue</code>s.</li>
   <li><strong>Switch</strong> — a <code>switch</code> on a type it doesn't accept
     (<code>long</code>/<code>float</code>/<code>double</code>/<code>boolean</code>), and a
     <code>switch</code> <em>expression</em> arm that doesn't <code>yield</code> a value.</li>
@@ -113,7 +122,8 @@
   <li><strong>Java version</strong> — a feature newer than the project's target level (records,
     sealed types, <code>var</code>, text blocks, switch arrows, lambdas, …). A <code>var</code>
     back-ported by Lombok (imported from <code>lombok</code>) is allowed below Java 10.</li>
-  <li><strong>Imports</strong> — unused or duplicate imports.</li>
+  <li><strong>Imports</strong> — unused or duplicate imports, and a redundant wildcard import
+    (<code>import java.lang.*;</code> or a wildcard on the file's own package, both already in scope).</li>
 </ul>
 <p>
   The resolver-backed checks (unknown members, argument count, unresolved types, type
@@ -124,6 +134,32 @@
 <p>
   It's a best-effort check, so it complements <strong>Build</strong> (which runs the real compiler)
   rather than replacing it — more type checks arrive as the semantic engine grows.
+</p>
+<p>
+  These checks normally run on the file you're editing, but you can run them over the <strong>whole
+  project</strong> at once: the <strong>Build</strong> button is a split-button — open its chevron and
+  pick <em>Validate (no compile)</em> (or make it the default so <kbd>Ctrl</kbd> + <kbd>F9</kbd> runs
+  it). It validates every <code>.java</code> file without invoking a compiler and reports timing
+  statistics — total time, average per file and the slowest file (with a fast/normal/slow verdict) —
+  in the Build tool window, while every problem it finds appears in the <strong>Problems</strong>
+  panel grouped by file. A build and a validation can't run at the same time.
+</p>
+<p>
+  Validation runs across CPU cores, and each file's result is cached against the exact project types
+  it depends on — so re-validating an unchanged project is instant, and after an edit only the
+  changed file (and anything whose types it touched) is re-checked. The cache is warmed up in the
+  background right after a project finishes indexing, so the first validation is already instant;
+  turn that off under <strong>Settings → Java → Validate project on open</strong> to skip the
+  background work.
+</p>
+<p>
+  The <strong>Problems</strong> panel updates live for the file you're editing: as you fix a
+  problem it disappears, and a newly-introduced one shows up — no need to re-run the whole-project
+  validation to see the effect. That file's entry stays correct across the panel even after you
+  switch to another file. Once you've run <em>Validate (no compile)</em> once, <strong>saving</strong>
+  a file also silently refreshes the whole panel, so a fix that resolves an error in a
+  <em>different</em> file (one that used what you changed) clears there too — again without re-running
+  validation by hand.
 </p>
 
 <h2>Find</h2>

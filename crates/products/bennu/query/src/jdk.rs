@@ -17,12 +17,20 @@
 //! goes through the `Mutex`.
 //!
 //! ### Persistence
-//! `persistent(source, path)` loads the memo from `path` (JSON `binary_name -> Option<ClassMembers>`)
-//! and, once `FLUSH_EVERY` fresh entries accumulate, writes it back atomically (temp + rename) —
-//! the write is done **outside** the lock (on a cloned snapshot) so a flush never stalls a
+//! `persistent(source, path)` loads the memo from `path` (JSON `binary_name -> ClassMembers`) and,
+//! once `FLUSH_EVERY` fresh **resolved** classes accumulate, writes it back atomically (temp +
+//! rename) — the write is done **outside** the lock (on a cloned snapshot) so a flush never stalls a
 //! concurrent `members_of`. `new(source)` is the in-memory-only variant (no path, no flush) used by
 //! the empty / `project_only` resolvers. The path is chosen by the caller (the be layer) and keyed
-//! by the resolved JDK — two JDKs never share a memo, so a cached miss is always valid for its JDK.
+//! by the resolved JDK — two JDKs never share a memo.
+//!
+//! **Only resolved JDK classes are persisted, never misses.** A miss is memoized in-memory (so the
+//! source is never re-touched within a session), but it's almost always a project DEPENDENCY type
+//! that isn't on the unindexed classpath — not a JDK class. Persisting misses bloated the shared,
+//! cross-session JDK file without bound and made every flush re-serialize a growing map: O(K²) disk
+//! churn in the number of distinct types K seen, which is why per-file validation slowed down over a
+//! large legacy project. Filtering the snapshot to resolved classes keeps the file bounded to the
+//! (finite) JDK surface a project touches, so flushes stop once the JDK is warm.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -92,7 +100,7 @@ impl JdkMemberIndex {
                 return;
             }
             g.unsaved = 0;
-            g.memo.clone()
+            positive_snapshot(&g.memo)
         };
         write_memo(path, &snapshot);
     }
@@ -112,12 +120,21 @@ impl MemberIndex for JdkMemberIndex {
             }
 
             let parsed = g.source.members_of(binary_name);
+            let resolved = parsed.is_some();
             g.memo.insert(binary_name.to_string(), parsed.clone());
-            g.unsaved += 1;
 
-            let snap = if self.path.is_some() && g.unsaved >= FLUSH_EVERY {
-                g.unsaved = 0;
-                Some(g.memo.clone())
+            // Only a RESOLVED JDK class drives persistence. A miss is memoized in-memory but is
+            // (overwhelmingly) a dependency type, not JDK — persisting misses grew the shared file
+            // without bound and made each flush re-serialize a growing map (O(K²) disk churn, the
+            // per-file slowdown). So misses never count toward the flush threshold nor reach disk.
+            let snap = if resolved {
+                g.unsaved += 1;
+                if self.path.is_some() && g.unsaved >= FLUSH_EVERY {
+                    g.unsaved = 0;
+                    Some(positive_snapshot(&g.memo))
+                } else {
+                    None
+                }
             } else {
                 None
             };
@@ -138,6 +155,19 @@ fn load_memo(path: &Path) -> HashMap<String, Option<ClassMembers>> {
         Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
         Err(_) => HashMap::new(),
     }
+}
+
+/// The persistable subset of the memo: only resolved JDK classes. Definitive misses are kept
+/// in-memory (so the source is never re-touched within a session) but never written — they're
+/// overwhelmingly dependency types that don't belong in the shared JDK cache and would grow it
+/// without bound, making every flush O(memo). Filtering here bounds the file to the JDK surface.
+fn positive_snapshot(
+    memo: &HashMap<String, Option<ClassMembers>>,
+) -> HashMap<String, Option<ClassMembers>> {
+    memo.iter()
+        .filter(|(_, v)| v.is_some())
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
 }
 
 /// Write the memo atomically (temp file + rename), best-effort: a failed write just means the next
@@ -207,6 +237,7 @@ mod tests {
                     is_static: false,
                     is_abstract: false,
                     is_default: false,
+                    is_final: false,
                     visibility: Visibility::Public,
                     raw_signature: "int bar()".to_string(),
                 }],

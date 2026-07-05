@@ -27,7 +27,7 @@ use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use arbor_ipc::prelude::EventSink;
@@ -55,6 +55,36 @@ const EVT_RUN_OUTPUT: &str = "arbor://bennu/run-output";
 /// The run process exited — carries the exit code.
 const EVT_RUN_EXIT: &str = "arbor://bennu/run-exit";
 
+// ── single-run guard (build + project validation) ───────────────────────────────
+
+/// `true` while a build or a project validation is running. Both acquire the same guard so only
+/// **one** compile/validation runs at a time — two `mvn` processes (or a build racing a validation)
+/// on the same tree would thrash `target/` and the index.
+static BUILD_BUSY: AtomicBool = AtomicBool::new(false);
+
+/// RAII lock over [`BUILD_BUSY`]. [`acquire`](BuildGuard::acquire) returns `None` when one is already
+/// held; the flag is released on drop (so an early return / panic can't leave it stuck).
+pub(crate) struct BuildGuard;
+
+impl BuildGuard {
+    /// Take the single-run lock, or `None` if a build/validation is already in progress.
+    pub(crate) fn acquire() -> Option<Self> {
+        BUILD_BUSY
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| BuildGuard)
+    }
+}
+
+impl Drop for BuildGuard {
+    fn drop(&mut self) {
+        BUILD_BUSY.store(false, Ordering::Release);
+    }
+}
+
+/// The message returned when a concurrent build/validation is refused.
+pub(crate) const BUSY_MSG: &str = "A build or validation is already running";
+
 // ── bennu_build ────────────────────────────────────────────────────────────────
 
 /// Args for [`bennu_build`].
@@ -71,6 +101,8 @@ pub struct BuildArgs {
 /// (which is reserved for "no compiler could run at all").
 #[arbor_rpc::handler]
 fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String> {
+    // Refuse to start a second build/validation while one is running (only one at a time).
+    let _guard = BuildGuard::acquire().ok_or_else(|| BUSY_MSG.to_string())?;
     let sink = ctx.event_sink();
     let root = PathBuf::from(&args.root);
     let java_home = resolve_java_home(&args.root);

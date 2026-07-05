@@ -11,17 +11,18 @@ use tree_sitter::Node;
 
 /// Every feature-below-target-version error in `root`.
 pub fn version_errors(root: Node, source: &str, java_major: u32) -> Vec<Diagnostic> {
+    version_errors_nodes(root, &crate::check::collect_nodes(root), source, java_major)
+}
+
+/// Slice-driven core (shared pre-collected node list — one traversal across all pure-AST checks).
+/// `root` is still taken for the one-shot Lombok-`var`-import pre-scan.
+pub fn version_errors_nodes(root: Node, nodes: &[Node], source: &str, java_major: u32) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     // Lombok's `var` (and `val`) back-port local type inference to pre-10 via an annotation
     // processor, so a `var` is legal on Java 8 when the file imports it. Detect the import once.
     let lombok_var = has_lombok_var_import(root, bytes);
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         if let Some((feature, min)) = feature_at(n, bytes) {
             // `var` provided by Lombok compiles below Java 10 — don't flag it.
             if lombok_var && feature.starts_with("`var`") {
@@ -61,8 +62,9 @@ fn feature_at(n: Node, bytes: &[u8]) -> Option<(&'static str, u32)> {
         "try_with_resources_statement" => Some(("Try-with-resources", 7)),
         // `var x = …` local type inference.
         "local_variable_declaration" => is_var(n, bytes).then_some(("`var` local variables", 10)),
-        // A sealed / non-sealed type.
-        "class_declaration" | "interface_declaration" | "enum_declaration" | "record_declaration"
+        // A sealed / non-sealed type. (`record_declaration` is handled above — records are final,
+        // never sealed — so it's intentionally not repeated here.)
+        "class_declaration" | "interface_declaration" | "enum_declaration"
             if has_sealed_modifier(n, bytes) || has_permits(n) =>
         {
             Some(("Sealed types", 17))

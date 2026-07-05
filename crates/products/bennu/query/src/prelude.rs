@@ -8,7 +8,12 @@ pub use crate::completion::completion;
 
 // The resolver + the `Send + Sync` JDK member-index wrapper it composes.
 pub use crate::jdk::JdkMemberIndex;
-pub use crate::resolver::{convert_members, IndexResolver};
+pub use crate::resolver::{convert_members, IndexResolver, ProjectView};
+
+// Per-file dependency recording for the incremental validation cache: a recording scope
+// (`record`) captures every project type a validation reads (`RecordedDeps`), so the cache can
+// tell when a cached diagnostic list is still valid. `fnv1a` is the shared members-JSON hash.
+pub use crate::dep_record::{fnv1a, record, RecordedDeps};
 
 // The project source file (path + text) whole-project queries take.
 pub use crate::source::PlanFile;

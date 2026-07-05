@@ -1097,6 +1097,7 @@ mod tests {
                         is_static: m.is_static,
                         is_abstract: false,
                         is_default: false,
+                        is_final: m.is_final,
                         visibility: Visibility::Public,
                         raw_signature: String::new(),
                     })

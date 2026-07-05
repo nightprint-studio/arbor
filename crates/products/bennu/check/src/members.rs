@@ -11,11 +11,9 @@
 //!   * the member walk treats an unknown supertype as "might declare it" (returns `true`), so an
 //!     un-indexed base class never causes a wrong "cannot resolve".
 
-use bennu_java::prelude::{infer_receiver_type_at, FileSymbols, MemberKind, TypeResolver};
+use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::{Node, Parser};
-
-use crate::walk::hierarchy_has;
 
 /// Parse `source` and flag calls to non-existent methods on their inferred receiver types.
 pub fn unknown_members(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
@@ -27,32 +25,32 @@ pub fn unknown_members(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnos
         return Vec::new();
     };
     let symbols = bennu_java::prelude::extract_symbols(source);
-    unknown_members_in(tree.root_node(), source, &symbols, resolver)
+    let root = tree.root_node();
+    let nodes = crate::check::collect_nodes(root);
+    unknown_members_in(root, &nodes, source, &symbols, resolver, &InferCache::new())
 }
 
-/// The tree-driven core: reuses the caller's parsed `root` + extracted `symbols` (so validation
-/// parses the file ONCE, not once per call site).
+/// The tree-driven core: iterates the caller's pre-collected `nodes` (one shared DFS) and reuses
+/// `root` (for inference) + `symbols` + the shared per-file inference `cache`.
 pub fn unknown_members_in(
     root: Node,
+    nodes: &[Node],
     source: &str,
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         if n.kind() == "method_invocation" {
-            check_call(n, &root, source, bytes, symbols, resolver, &mut out);
+            check_call(n, &root, source, bytes, symbols, resolver, cache, &mut out);
         }
     }
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check_call(
     n: Node,
     root: &Node,
@@ -60,32 +58,30 @@ fn check_call(
     bytes: &[u8],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
     out: &mut Vec<Diagnostic>,
 ) {
     // Only `receiver.method(...)` — a bare `foo()` has no `object` field.
-    if n.child_by_field_name("object").is_none() {
-        return;
-    }
+    let Some(obj) = n.child_by_field_name("object") else { return };
     let Some(name) = n.child_by_field_name("name") else { return };
     if name.has_error() {
         return;
     }
     let Ok(method) = name.utf8_text(bytes) else { return };
 
-    // Infer the receiver's static type (at the method-name position, just past the `.`).
-    let Some(ty) = infer_receiver_type_at(root, source, symbols, name.start_byte(), resolver) else {
+    // Infer the receiver's static type from the already-located `object` node (no descendant search).
+    let Some(ty) = infer_node_type_cached(root, source, symbols, &obj, resolver, cache) else {
         return;
     };
     if ty.binary_name.is_empty() {
         return;
     }
-    // We can only assert a method is ABSENT when we actually know the receiver type's members.
-    if resolver.members_of(&ty.binary_name).is_none() {
-        return;
-    }
-    let has = hierarchy_has(resolver, &ty.binary_name, &|cm| {
-        cm.methods.iter().any(|m| m.name == method && m.kind == MemberKind::Method)
-    });
+    // Shared, memoized hierarchy walk (see `InferCache::resolve_methods`): one traversal per
+    // `(receiver type, method)` feeds this check + arity + argument-type, across every call site.
+    let res = cache.resolve_methods(resolver, &ty.binary_name, method);
+    // Conservative: a match anywhere in the hierarchy, OR an incomplete hierarchy (an unknown
+    // supertype — including the receiver type itself being unknown — might declare the method).
+    let has = !res.candidates.is_empty() || !res.complete;
     if !has {
         out.push(Diagnostic {
             message: format!("Cannot resolve method `{method}` in `{}`", simple_name(&ty.binary_name)),
@@ -103,7 +99,7 @@ pub(crate) fn simple_name(binary: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bennu_java::prelude::{ClassMembers, Import, Member, TypeRef, Visibility};
+    use bennu_java::prelude::{ClassMembers, Import, Member, TypeRef};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -124,17 +120,7 @@ mod tests {
     }
 
     fn method(name: &str, ret: &str) -> Member {
-        Member {
-            name: name.to_string(),
-            kind: MemberKind::Method,
-            return_type: TypeRef::simple(ret.to_string()),
-            params: Vec::new(),
-            is_static: false,
-            is_abstract: false,
-            is_default: false,
-            visibility: Visibility::Public,
-            raw_signature: format!("{ret} {name}()"),
-        }
+        Member::method(name, TypeRef::simple(ret.to_string()), Vec::new()).sig(format!("{ret} {name}()"))
     }
 
     /// String (super Object) with length/toUpperCase/trim; Object with toString/equals; List<E> with

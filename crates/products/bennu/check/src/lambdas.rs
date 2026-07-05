@@ -14,14 +14,14 @@ use tree_sitter::Node;
 
 /// All "modifies a captured local" errors in `root`.
 pub fn lambda_capture_errors(root: Node, source: &str) -> Vec<Diagnostic> {
+    lambda_capture_errors_nodes(&crate::check::collect_nodes(root), source)
+}
+
+/// Slice-driven core (shared pre-collected node list — one traversal across all pure-AST checks).
+pub fn lambda_capture_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         if n.kind() != "lambda_expression" {
             continue;
         }

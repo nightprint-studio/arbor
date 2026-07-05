@@ -18,7 +18,8 @@
 import { bennu } from '../rpc';
 import type {
   ProjectInfo, TreeNode, ReadFileResult, CapabilitySet, CompletionItem, Diagnostic,
-  BuildResult, RunHandle, WriteResult, ClassEntry, TodoItem, IndexStats,
+  BuildResult, ProjectValidationResult, RunHandle, WriteResult, ClassEntry, TodoItem, IndexStats,
+  FileDiagnostics,
 } from '$lib/types/bennu';
 
 /** Open a Java project folder: resolve the build model (modules / JDK) + capabilities.
@@ -81,6 +82,23 @@ export function diagnostics(file: string, source?: string): Promise<Diagnostic[]
  *  `bennu_build` — `BuildArgs { root }`. */
 export function build(root: string): Promise<BuildResult> {
   return bennu('bennu_build', { args: { root } });
+}
+
+/** Validate the WHOLE project without compiling: walk every `.java`, run the editor's per-file
+ *  validation over all of them, and return timing stats (total / average / slowest file) + the
+ *  diagnostics grouped by file. Progress streams as `arbor://bennu/validate-progress`, ending with
+ *  `arbor://bennu/validate-done`. Shares the Maven build's single-run guard (one at a time). Wire:
+ *  `bennu_validate_project` — `ValidateProjectArgs { root }`. */
+export function validateProject(root: string): Promise<ProjectValidationResult> {
+  return bennu('bennu_validate_project', { args: { root } });
+}
+
+/** SILENT whole-project re-validation for the live Problems panel (the on-save refresh): no build
+ *  guard, no progress events, no stats — just the diagnostics grouped by file, cheap thanks to the
+ *  incremental cache. `null` when the project's index isn't ready yet (leave the panel as-is). Wire:
+ *  `bennu_project_diagnostics` — `ValidateProjectArgs { root }`. */
+export function projectDiagnostics(root: string): Promise<FileDiagnostics[] | null> {
+  return bennu('bennu_project_diagnostics', { args: { root } });
 }
 
 /** Launch `java -cp <target/classes:deps> <mainClass> <args…>`, streaming stdout/stderr

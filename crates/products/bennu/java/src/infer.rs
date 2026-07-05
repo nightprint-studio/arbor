@@ -12,11 +12,138 @@
 //! reassignment, conditional/ternary narrowing, raw-array element inference, static
 //! member access on bare type names, wildcard/bound modelling.
 
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
+
 use tree_sitter::{Node, Parser};
 
-use crate::seam::{TypeRef, TypeResolver};
+use crate::seam::{Member, MemberKind, TypeRef, TypeResolver};
 use crate::symbols::{node_text, FileSymbols};
 use crate::typeparse::{parse_type_text, SimpleTypeRef};
+
+/// How a local variable is typed, captured once when its scope is scanned.
+enum LocalTy {
+    /// An explicit declared type text (`Foo`, `Map<String,Object>`).
+    Declared(String),
+    /// `var x = <init>` — infer from the initializer's byte range (re-descended lazily).
+    VarInit(usize, usize),
+}
+
+/// One local declaration in a scope: where the declaration statement starts + how it's typed.
+struct LocalDecl {
+    start: usize,
+    ty: LocalTy,
+}
+
+/// A per-file inference cache. Validation types **thousands** of sites across a dozen checks, and
+/// each site's inference walks up scopes resolving locals — without caching that's quadratic in a
+/// big method (the 2.8k-line class that took seconds). This memoizes:
+///   * receiver-type results by caret offset, and whole-expression results by byte range — so the
+///     unknown-member / arity / argument-type / cast checks that all infer the *same* site pay once;
+///   * each scope's local declarations, so resolving a local is a map lookup, not a re-scan.
+///
+/// Create ONE per file and thread `&InferCache` through the checks. Purely a speed-up: every cached
+/// value equals what a fresh computation would return (keyed by position over a fixed tree), so
+/// results are unchanged.
+#[derive(Default)]
+pub struct InferCache {
+    receiver: RefCell<HashMap<usize, Option<TypeRef>>>,
+    expr: RefCell<HashMap<(usize, usize), Option<TypeRef>>>,
+    /// scope node id → (name → its declarations, in source order).
+    scope_locals: RefCell<HashMap<usize, Rc<HashMap<String, Vec<LocalDecl>>>>>,
+    /// `binary "\0" method` → the methods of that name reachable through the type's hierarchy.
+    methods: RefCell<HashMap<String, Rc<MethodResolution>>>,
+    /// written type text (`ResultSet`, `Map<String,Object>`) → its resolved `TypeRef`. A local's type
+    /// is resolved once per file, not once per receiver occurrence: a DAO uses `Connection conn` /
+    /// `PreparedStatement stat` / `ResultSet res` at hundreds of call sites, and resolving the same
+    /// text through the resolver (imports + `resolve_simple_name`'s project/star-import probing) each
+    /// time was pure repeat work.
+    type_text: RefCell<HashMap<String, Option<TypeRef>>>,
+}
+
+impl InferCache {
+    /// A fresh, empty cache for one file.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Resolve — and memoize — every method named `name` reachable from `binary` (the type itself +
+    /// its supertypes), together with whether the WHOLE hierarchy was resolvable. The unknown-method,
+    /// arity and argument-type checks each need exactly this per call site, and the answer depends only
+    /// on `(binary, name)` — so one walk here replaces a separate hierarchy traversal in every check
+    /// for every one of the thousands of call sites (a DAO's `stat.setString(..)` called 400× resolves
+    /// once, not 400× × 3 checks). Walking a real JDBC interface's deep hierarchy per call was the
+    /// dominant cost on a call-heavy legacy class.
+    pub fn resolve_methods(
+        &self,
+        resolver: &dyn TypeResolver,
+        binary: &str,
+        name: &str,
+    ) -> Rc<MethodResolution> {
+        let mut key = String::with_capacity(binary.len() + 1 + name.len());
+        key.push_str(binary);
+        key.push('\0');
+        key.push_str(name);
+        if let Some(hit) = self.methods.borrow().get(&key) {
+            return hit.clone();
+        }
+        let resolved = Rc::new(walk_methods(resolver, binary, name));
+        self.methods.borrow_mut().insert(key, resolved.clone());
+        resolved
+    }
+}
+
+/// The methods named `name` reachable from a type's hierarchy, plus whether that hierarchy was fully
+/// known. Returned (memoized) by [`InferCache::resolve_methods`] and consumed by the resolver-backed
+/// checks — see its docs.
+pub struct MethodResolution {
+    /// Every `Member` (kind `Method`) named `name` found in the known hierarchy — the overload set the
+    /// arity / argument checks post-process (param counts, checkable signatures). Order is the walk
+    /// order; duplicates across override/inherit are kept (callers dedupe as needed).
+    pub candidates: Vec<Member>,
+    /// True iff every class in the hierarchy resolved (no `members_of` gap and no depth blow-out). A
+    /// `false` means the checks must stay conservative — an unknown supertype might declare/overload
+    /// the method, so a "does not exist" / "no such arity" assertion would risk a false positive.
+    pub complete: bool,
+}
+
+/// A real class hierarchy is shallow; exceeding this many visited nodes means we bail CONSERVATIVELY
+/// (`complete = false`) rather than loop on a pathological / cyclic graph.
+const MAX_HIER_NODES: usize = 256;
+
+/// Collect every `Member` (kind Method) named `name` across `binary` + its supertypes in one walk,
+/// tracking whether the whole hierarchy resolved. Shared by [`InferCache::resolve_methods`].
+fn walk_methods(resolver: &dyn TypeResolver, binary: &str, name: &str) -> MethodResolution {
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut stack = vec![binary.to_string()];
+    let mut candidates: Vec<Member> = Vec::new();
+    let mut complete = true;
+    while let Some(bn) = stack.pop() {
+        if visited.len() > MAX_HIER_NODES {
+            complete = false;
+            break;
+        }
+        if !visited.insert(bn.clone()) {
+            continue;
+        }
+        match resolver.members_of(&bn) {
+            None => complete = false, // unknown class → hierarchy incomplete (conservative)
+            Some(cm) => {
+                for m in &cm.methods {
+                    if m.name == name && m.kind == MemberKind::Method {
+                        candidates.push(m.clone());
+                    }
+                }
+                if let Some(sc) = &cm.superclass {
+                    stack.push(sc.clone());
+                }
+                stack.extend(cm.interfaces.iter().cloned());
+            }
+        }
+    }
+    MethodResolution { candidates, complete }
+}
 
 /// Infer the static type of the expression immediately LEFT of the `.` at
 /// `byte_offset`. Returns `None` when we can't resolve it under Phase-1 rules.
@@ -83,11 +210,57 @@ pub fn infer_expression_type_at(
     end: usize,
     resolver: &dyn TypeResolver,
 ) -> Option<TypeRef> {
-    let node = root.named_descendant_for_byte_range(start, end)?;
+    infer_expression_type_cached(root, source, symbols, start, end, resolver, &InferCache::new())
+}
+
+/// [`infer_expression_type_at`] backed by a shared per-file [`InferCache`] — the hot path for
+/// validation, so the same expression isn't re-inferred by every check and scope-local resolution
+/// isn't quadratic.
+pub fn infer_expression_type_cached(
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    start: usize,
+    end: usize,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+) -> Option<TypeRef> {
+    if let Some(hit) = cache.expr.borrow().get(&(start, end)) {
+        return hit.clone();
+    }
     let bytes = source.as_bytes();
-    let ctx = Ctx { bytes, resolver, symbols };
-    let enclosing = enclosing_type_fqn(&node, bytes, symbols);
-    ctx.infer_expr(&node, enclosing.as_deref())
+    let result = root.named_descendant_for_byte_range(start, end).and_then(|node| {
+        let ctx = Ctx { root: *root, bytes, resolver, symbols, cache };
+        let enclosing = enclosing_type_fqn(&node, bytes, symbols);
+        ctx.infer_expr(&node, enclosing.as_deref())
+    });
+    cache.expr.borrow_mut().insert((start, end), result.clone());
+    result
+}
+
+/// Infer the type of an **already-located** node — the caller found it during its own tree walk, so
+/// this skips the `descendant_for_byte_range` search that [`infer_expression_type_cached`] /
+/// [`infer_receiver_type_cached`] do (that search is O(siblings) per site — the remaining quadratic
+/// on a huge flat method). Memoized by the node's byte range in the shared [`InferCache`]. The
+/// validation checks, which already hold the receiver / value node, use this.
+pub fn infer_node_type_cached(
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    node: &Node,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+) -> Option<TypeRef> {
+    let key = (node.start_byte(), node.end_byte());
+    if let Some(hit) = cache.expr.borrow().get(&key) {
+        return hit.clone();
+    }
+    let bytes = source.as_bytes();
+    let ctx = Ctx { root: *root, bytes, resolver, symbols, cache };
+    let enclosing = enclosing_type_fqn(node, bytes, symbols);
+    let result = ctx.infer_expr(node, enclosing.as_deref());
+    cache.expr.borrow_mut().insert(key, result.clone());
+    result
 }
 
 /// Infer the receiver type at `byte_offset` reusing an ALREADY-parsed `root` and
@@ -106,18 +279,41 @@ pub fn infer_receiver_type_at(
     byte_offset: usize,
     resolver: &dyn TypeResolver,
 ) -> Option<TypeRef> {
-    let bytes = source.as_bytes();
-    let receiver = find_receiver(root, byte_offset)?;
-    let ctx = Ctx { bytes, resolver, symbols };
-    let enclosing = enclosing_type_fqn(&receiver, bytes, symbols);
-    ctx.infer_expr(&receiver, enclosing.as_deref())
+    infer_receiver_type_cached(root, source, symbols, byte_offset, resolver, &InferCache::new())
 }
 
-/// Shared inference context.
+/// [`infer_receiver_type_at`] backed by a shared per-file [`InferCache`] — the hot path for
+/// validation and the reference-index walk, which query the receiver type at every `obj.member` site
+/// and must not re-scan scopes per site.
+pub fn infer_receiver_type_cached(
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    byte_offset: usize,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+) -> Option<TypeRef> {
+    if let Some(hit) = cache.receiver.borrow().get(&byte_offset) {
+        return hit.clone();
+    }
+    let bytes = source.as_bytes();
+    let result = find_receiver(root, byte_offset).and_then(|receiver| {
+        let ctx = Ctx { root: *root, bytes, resolver, symbols, cache };
+        let enclosing = enclosing_type_fqn(&receiver, bytes, symbols);
+        ctx.infer_expr(&receiver, enclosing.as_deref())
+    });
+    cache.receiver.borrow_mut().insert(byte_offset, result.clone());
+    result
+}
+
+/// Shared inference context. `root` is the file's parse tree root (to re-descend for `var`
+/// initializers); `cache` memoizes results + per-scope locals.
 struct Ctx<'a> {
+    root: Node<'a>,
     bytes: &'a [u8],
     resolver: &'a dyn TypeResolver,
     symbols: &'a FileSymbols,
+    cache: &'a InferCache,
 }
 
 impl Ctx<'_> {
@@ -347,74 +543,105 @@ impl Ctx<'_> {
     // ---- local scope resolution ----
 
     /// Resolve `name` as a local variable or method parameter visible at `use_node`.
-    /// Walks ancestors, scanning each block/method for a matching declaration that
-    /// precedes the use.
+    /// Walks ancestors, checking parameters + each scope's (cached) local declarations for a match
+    /// that precedes the use.
     fn resolve_local(&self, use_node: &Node, name: &str) -> Option<TypeRef> {
         let use_start = use_node.start_byte();
         let mut scope = use_node.parent();
         while let Some(s) = scope {
-            // method / lambda / constructor parameters
-            if let Some(params) = s.child_by_field_name("parameters") {
-                let mut pw = params.walk();
-                for p in params.named_children(&mut pw) {
-                    if p.kind() == "formal_parameter" || p.kind() == "spread_parameter" {
-                        if let Some(pn) =
-                            p.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes))
-                        {
-                            if pn == name {
-                                let t = p
-                                    .child_by_field_name("type")
-                                    .and_then(|n| node_text(&n, self.bytes))?;
-                                return self.resolve_type_text(&t);
-                            }
-                        }
-                    }
+            // method / lambda / constructor parameters. Only these scopes HAVE a `parameters` field;
+            // gating here avoids an O(children) `child_by_field_name` scan on every block / if / try /
+            // catch ancestor (a huge method body has hundreds of statements, scanned per identifier).
+            if matches!(s.kind(), "method_declaration" | "constructor_declaration" | "lambda_expression") {
+                if let Some(tr) = self.param_type(&s, name) {
+                    return Some(tr);
                 }
             }
-            // local variable declarations directly in this scope, before the use.
-            if let Some(tr) = self.scan_locals(&s, name, use_start) {
-                return Some(tr);
+            // local variable declarations directly in this scope, before the use (last one wins,
+            // matching the previous in-order scan).
+            let locals = self.scope_locals(&s);
+            if let Some(decls) = locals.get(name) {
+                if let Some(decl) = decls.iter().rev().find(|d| d.start < use_start) {
+                    return self.resolve_local_ty(&decl.ty);
+                }
             }
             scope = s.parent();
         }
         None
     }
 
-    /// Scan direct children of `scope` for `local_variable_declaration`s of `name`
-    /// that start before `use_start`.
-    fn scan_locals(&self, scope: &Node, name: &str, use_start: usize) -> Option<TypeRef> {
-        let mut cw = scope.walk();
-        let mut found: Option<TypeRef> = None;
-        for c in scope.named_children(&mut cw) {
-            if c.start_byte() >= use_start {
-                break;
+    /// A parameter of `scope` named `name`, resolved to its declared type (`None` if `scope` has no
+    /// parameter list, or none matches). Parameters are few, so this stays a direct scan.
+    fn param_type(&self, scope: &Node, name: &str) -> Option<TypeRef> {
+        let params = scope.child_by_field_name("parameters")?;
+        let mut pw = params.walk();
+        for p in params.named_children(&mut pw) {
+            if !matches!(p.kind(), "formal_parameter" | "spread_parameter") {
+                continue;
             }
-            if c.kind() == "local_variable_declaration" {
-                let ty = c.child_by_field_name("type").and_then(|n| node_text(&n, self.bytes));
-                let mut dw = c.walk();
-                for d in c.named_children(&mut dw) {
-                    if d.kind() == "variable_declarator" {
-                        if let Some(vn) =
-                            d.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes))
-                        {
-                            if vn == name {
-                                if let Some(t) = &ty {
-                                    if t == "var" {
-                                        // `var x = ...`: infer from the initializer.
-                                        if let Some(init) = d.child_by_field_name("value") {
-                                            found = self.infer_expr(&init, None);
-                                        }
-                                    } else {
-                                        found = self.resolve_type_text(t);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            let matches = p
+                .child_by_field_name("name")
+                .and_then(|n| node_text(&n, self.bytes))
+                .is_some_and(|pn| pn == name);
+            if matches {
+                let t = p.child_by_field_name("type").and_then(|n| node_text(&n, self.bytes))?;
+                return self.resolve_type_text(&t);
             }
         }
-        found
+        None
+    }
+
+    /// The local declarations directly in `scope` (name → its declarations in source order), built
+    /// once and cached by scope node id. This is what makes local resolution non-quadratic: without
+    /// it, every identifier use re-scanned the whole enclosing scope.
+    fn scope_locals(&self, scope: &Node) -> Rc<HashMap<String, Vec<LocalDecl>>> {
+        let id = scope.id();
+        if let Some(m) = self.cache.scope_locals.borrow().get(&id) {
+            return m.clone();
+        }
+        let mut map: HashMap<String, Vec<LocalDecl>> = HashMap::new();
+        let mut cw = scope.walk();
+        for c in scope.named_children(&mut cw) {
+            if c.kind() != "local_variable_declaration" {
+                continue;
+            }
+            let type_text = c.child_by_field_name("type").and_then(|n| node_text(&n, self.bytes));
+            let start = c.start_byte();
+            let mut dw = c.walk();
+            for d in c.named_children(&mut dw) {
+                if d.kind() != "variable_declarator" {
+                    continue;
+                }
+                let Some(vn) = d.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes))
+                else {
+                    continue;
+                };
+                let ty = match type_text.as_deref() {
+                    Some("var") => match d.child_by_field_name("value") {
+                        Some(init) => LocalTy::VarInit(init.start_byte(), init.end_byte()),
+                        None => continue,
+                    },
+                    Some(t) => LocalTy::Declared(t.to_string()),
+                    None => continue,
+                };
+                map.entry(vn).or_default().push(LocalDecl { start, ty });
+            }
+        }
+        let rc = Rc::new(map);
+        self.cache.scope_locals.borrow_mut().insert(id, rc.clone());
+        rc
+    }
+
+    /// Resolve a cached local's type — a declared type text, or a `var` initializer re-descended
+    /// from the tree by its byte range.
+    fn resolve_local_ty(&self, ty: &LocalTy) -> Option<TypeRef> {
+        match ty {
+            LocalTy::Declared(t) => self.resolve_type_text(t),
+            LocalTy::VarInit(start, end) => {
+                let init = self.root.named_descendant_for_byte_range(*start, *end)?;
+                self.infer_expr(&init, None)
+            }
+        }
     }
 
     // ---- type text -> TypeRef ----
@@ -422,8 +649,12 @@ impl Ctx<'_> {
     /// Resolve a written type text (`Map<String,Object>`, `HttpServletRequest`) to a
     /// `TypeRef` with binary names, using imports + the resolver.
     fn resolve_type_text(&self, text: &str) -> Option<TypeRef> {
-        let parsed = parse_type_text(text)?;
-        Some(self.to_binary_ref(&parsed))
+        if let Some(hit) = self.cache.type_text.borrow().get(text) {
+            return hit.clone();
+        }
+        let result = parse_type_text(text).map(|parsed| self.to_binary_ref(&parsed));
+        self.cache.type_text.borrow_mut().insert(text.to_string(), result.clone());
+        result
     }
 
     /// Map a parsed (simple-name) type tree to binary names via imports/resolver.

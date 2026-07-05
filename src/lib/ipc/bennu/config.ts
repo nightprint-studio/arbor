@@ -15,6 +15,12 @@ export interface BennuConfig {
   default_encoding: string;
   /** Editor indentation width in spaces. */
   indent_width: number;
+  /** The build the split-button runs by default (and on Ctrl+F9): `'mvn'` (Maven compile) or
+   *  `'validate'` (whole-project validation without compiling). */
+  preferred_build_type: string;
+  /** Warm up the whole-project validation cache in the background right after indexing, so the
+   *  first "Validate (no compile)" is instant. `true` by default; off avoids the background CPU. */
+  validate_on_open: boolean;
   /** Extra JDK install directories to search, on top of `JAVA_HOME` + the standard roots. */
   jdk_paths: string[];
   /** Per-project JDK override, keyed by absolute project-root path → Java version. */

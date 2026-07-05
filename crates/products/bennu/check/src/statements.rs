@@ -27,14 +27,14 @@ fn is_statement_expression(kind: &str) -> bool {
 
 /// Flag every `expression_statement` whose expression isn't a legal statement expression.
 pub fn invalid_statements(root: Node, source: &str) -> Vec<Diagnostic> {
+    invalid_statements_nodes(&crate::check::collect_nodes(root), source)
+}
+
+/// Slice-driven core (shared pre-collected node list — one traversal across all pure-AST checks).
+pub fn invalid_statements_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         if n.kind() != "expression_statement" {
             continue;
         }

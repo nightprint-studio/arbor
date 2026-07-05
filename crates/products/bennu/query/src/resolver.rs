@@ -14,6 +14,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use crate::dep_record;
 use bennu_classpath::prelude::MemberIndex as CpMemberIndex;
 use bennu_index::prelude::{PersistedIndex, Symbol, SymbolKind};
 use bennu_java::prelude::{
@@ -120,6 +121,53 @@ impl<M: CpMemberIndex> IndexResolver<M> {
             .collect()
     }
 
+    /// The project-only resolved members-JSON for `binary` (an edited-file overlay override wins,
+    /// else the persisted project record). `None` when `binary` isn't a PROJECT type — the JDK /
+    /// library bytecode is **never** consulted here. This is the mutable surface the diagnostic
+    /// cache fingerprints: two validations of a file agree iff this string is unchanged for every
+    /// project type the file read.
+    fn project_members_json(&self, binary: &str) -> Option<String> {
+        {
+            let ov = self.overlay.read().unwrap_or_else(|p| p.into_inner());
+            if let Some(json) = ov.members.get(binary) {
+                return Some(json.clone());
+            }
+        }
+        let sym = self.project.get(binary)?;
+        (!sym.members_json.is_empty()).then_some(sym.members_json)
+    }
+
+    /// A stable hash of `binary`'s project members-JSON, or `None` when it isn't a project type —
+    /// the per-dependency fingerprint the diagnostic cache stores and re-checks. Mirrors exactly
+    /// the project branch of [`members_of`](TypeResolver::members_of) (overlay → persisted, no
+    /// JDK), so a recorded dependency and its freshness check read the same source of truth.
+    pub fn dep_signature(&self, binary: &str) -> Option<u64> {
+        self.project_members_json(binary).map(|j| dep_record::fnv1a(j.as_bytes()))
+    }
+
+    /// The project binary a bare `simple` name resolves to (an overlay-added type wins, else a
+    /// persisted project type of that simple name). `None` when no PROJECT type has that simple
+    /// name. Mirrors the project branch of
+    /// [`resolve_simple_name`](TypeResolver::resolve_simple_name) (minus imports / JDK), so a
+    /// recorded "simple hit" and its freshness check agree by construction.
+    pub fn project_simple(&self, simple: &str) -> Option<String> {
+        {
+            let ov = self.overlay.read().unwrap_or_else(|p| p.into_inner());
+            if let Some(binary) = ov.simple.get(simple) {
+                return Some(binary.clone());
+            }
+        }
+        let sym = self.project.get(simple)?;
+        (!sym.fqn.is_empty()).then_some(sym.fqn)
+    }
+
+    /// Whether `key` names a PROJECT type — as a binary name OR a simple name. The diagnostic
+    /// cache's negative-dependency check: a recorded miss on `key` stays valid only while this is
+    /// `false` (a project type appearing under that name invalidates the cached file).
+    pub fn project_contains(&self, key: &str) -> bool {
+        self.dep_signature(key).is_some() || self.project_simple(key).is_some()
+    }
+
     /// Apply one edited `file`'s freshly-extracted [`Symbol`] records to the in-memory
     /// overlay — **no disk write**. The overlay shadows the persisted mmap so completion
     /// on the edited file reflects the edit immediately, while the (memory-mapped)
@@ -199,6 +247,13 @@ impl<M: CpMemberIndex> IndexResolver<M> {
 
 impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
     fn members_of(&self, binary_name: &str) -> Option<Arc<JClassMembers>> {
+        // Record this file's dependency on the project type `binary_name` when a validation
+        // recording scope is active — present → its members hash, absent → a negative dep. Done
+        // here (not in `compute_members`) so a memo hit still records the dependency, and gated by
+        // the cheap `recording()` flag so it's a no-op on the (hot) reference-walk path.
+        if dep_record::recording() {
+            dep_record::note_type(binary_name, self.dep_signature(binary_name));
+        }
         // Memo hit (incl. a cached negative) — skips the JSON parse / bytecode read AND the
         // deep clone: on a hit we hand back a clone of the shared `Arc` (a refcount bump),
         // not a copy of every method/field. This is what makes the reference walk tractable.
@@ -224,18 +279,34 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
                 return Some(imp.path.replace('.', "/"));
             }
         }
+        // From here on we probe the PROJECT for `name`: record the outcome (hit / miss) for the
+        // diagnostic cache when recording. An import-bound name (above) is project-independent, so
+        // it was deliberately not recorded. A miss recorded here means "a project type appearing
+        // under this name must invalidate the file" (the negative dependency).
+        let recording = dep_record::recording();
         // An edited file's own (possibly renamed/added) type overrides the stale mmap.
         {
             let ov = self.overlay.read().unwrap_or_else(|p| p.into_inner());
             if let Some(binary) = ov.simple.get(name) {
+                if recording {
+                    dep_record::note_simple_hit(name, binary);
+                }
                 return Some(binary.clone());
             }
         }
         // Then a project type of that simple name, then the common-JDK table.
         if let Some(sym) = self.project.get(name) {
             if !sym.fqn.is_empty() {
+                if recording {
+                    dep_record::note_simple_hit(name, &sym.fqn);
+                }
                 return Some(sym.fqn.clone());
             }
+        }
+        // The project has no type named `name` → a negative dependency (a future project type of
+        // this name would resolve here first, shadowing the JDK fall-through below).
+        if recording {
+            dep_record::note_simple_miss(name);
         }
         if let Some(hint) = self.simple_hints.get(name) {
             return Some(hint.clone());
@@ -262,6 +333,31 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
             }
         }
         None
+    }
+}
+
+/// The read-only view of the mutable project surface the diagnostic cache checks a file's
+/// recorded dependencies against. Implemented by [`IndexResolver`]; mockable in tests so the
+/// cache's freshness logic is unit-testable without a live index. Every method is project-only
+/// (never the JDK / library bytecode — those are guarded by the cache's classpath epoch).
+pub trait ProjectView {
+    /// A stable hash of `binary`'s project members-JSON, or `None` when it isn't a project type.
+    fn dep_signature(&self, binary: &str) -> Option<u64>;
+    /// The project binary a bare `simple` name resolves to, or `None` when no project type has it.
+    fn project_simple(&self, simple: &str) -> Option<String>;
+    /// Whether `key` names a project type as a binary OR a simple name.
+    fn project_contains(&self, key: &str) -> bool;
+}
+
+impl<M: CpMemberIndex> ProjectView for IndexResolver<M> {
+    fn dep_signature(&self, binary: &str) -> Option<u64> {
+        IndexResolver::dep_signature(self, binary)
+    }
+    fn project_simple(&self, simple: &str) -> Option<String> {
+        IndexResolver::project_simple(self, simple)
+    }
+    fn project_contains(&self, key: &str) -> bool {
+        IndexResolver::project_contains(self, key)
     }
 }
 
@@ -301,6 +397,7 @@ fn convert_member(m: &bennu_classpath::prelude::Member) -> JMember {
         is_static: m.is_static,
         is_abstract: m.is_abstract,
         is_default: m.is_default,
+        is_final: m.is_final,
         visibility: match m.visibility {
             bennu_classpath::prelude::Visibility::Public => JVisibility::Public,
             bennu_classpath::prelude::Visibility::Protected => JVisibility::Protected,
@@ -454,6 +551,7 @@ mod tests {
                 is_static: false,
                 is_abstract: false,
                 is_default: false,
+                is_final: false,
                 visibility: JVisibility::Public,
                 raw_signature: format!("int {field}"),
             }],
@@ -600,5 +698,73 @@ mod tests {
         // Delete (empty records) drops the file's overlay contributions.
         r.apply_file_patch("src/Order.java", &[]);
         assert!(r.members_of("com/acme/Order2").is_none(), "deleted file's overlay cleared");
+    }
+
+    // ── project-view queries (the diagnostic cache's freshness source of truth) ──────────────
+
+    #[test]
+    fn project_queries_distinguish_project_types_from_absent() {
+        let r = resolver_with("com/acme/Order", "Order", &members_json_with_field("f"));
+        // A project type: dep_signature is Some, project_simple maps the bare name, contains true.
+        assert!(r.dep_signature("com/acme/Order").is_some());
+        assert_eq!(r.project_simple("Order").as_deref(), Some("com/acme/Order"));
+        assert!(r.project_contains("com/acme/Order"));
+        assert!(r.project_contains("Order"));
+        // An absent type: all None / false.
+        assert!(r.dep_signature("com/acme/Ghost").is_none());
+        assert!(r.project_simple("Ghost").is_none());
+        assert!(!r.project_contains("Ghost"));
+    }
+
+    #[test]
+    fn dep_signature_tracks_member_changes_and_is_stable() {
+        let r = resolver_with("com/acme/Order", "Order", &members_json_with_field("f"));
+        let sig1 = r.dep_signature("com/acme/Order").expect("project type");
+        // Same content → same signature (stable).
+        assert_eq!(r.dep_signature("com/acme/Order"), Some(sig1));
+        // An overlay edit that changes the members → the signature changes (the cache would then
+        // re-validate any file depending on Order).
+        r.apply_file_patch(
+            "src/Order.java",
+            &[class_symbol("Order", "com/acme/Order", &members_json_with_field("g"))],
+        );
+        let sig2 = r.dep_signature("com/acme/Order").expect("still a project type");
+        assert_ne!(sig1, sig2, "changed members ⇒ changed dependency signature");
+    }
+
+    #[test]
+    fn recording_captures_members_hit_and_miss() {
+        let r = resolver_with("com/acme/Order", "Order", &members_json_with_field("f"));
+        let (_out, deps) = crate::dep_record::record(|| {
+            // A hit on a project type, and a miss on an absent one.
+            let _ = r.members_of("com/acme/Order");
+            let _ = r.members_of("com/acme/Ghost");
+        });
+        assert_eq!(
+            deps.members.get("com/acme/Order").copied(),
+            r.dep_signature("com/acme/Order"),
+            "recorded members hash matches the live dep_signature",
+        );
+        assert!(deps.misses.contains("com/acme/Ghost"), "absent type recorded as a negative dep");
+    }
+
+    #[test]
+    fn recording_captures_simple_hits_and_negative_deps() {
+        let r = resolver_with("com/acme/Order", "Order", &members_json_with_field("f"));
+        let (_out, deps) = crate::dep_record::record(|| {
+            // Resolves to a project type → simple hit.
+            assert_eq!(r.resolve_simple_name("Order", &[]).as_deref(), Some("com/acme/Order"));
+            // No project type named `Widget` → a negative dep (adding one later must invalidate).
+            assert!(r.resolve_simple_name("Widget", &[]).is_none());
+        });
+        assert_eq!(deps.simple_hits.get("Order").map(String::as_str), Some("com/acme/Order"));
+        assert!(deps.misses.contains("Widget"));
+        // An import-bound name is project-independent → NOT recorded (neither hit nor miss).
+        let (_o2, deps2) = crate::dep_record::record(|| {
+            let imports = vec![Import { path: "com.other.Order".into(), star: false, static_: false }];
+            let _ = r.resolve_simple_name("Order", &imports);
+        });
+        assert!(deps2.simple_hits.is_empty(), "import-bound name not recorded as a project hit");
+        assert!(deps2.misses.is_empty(), "import-bound name not recorded as a miss");
     }
 }

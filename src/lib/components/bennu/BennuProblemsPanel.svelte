@@ -5,8 +5,8 @@
    *     standard library) or when a fallback JDK stands in for the level the project targets.
    *   • **Encoding** — the source files whose bytes weren't valid in the project's declared
    *     encoding (recovered + indexed, but flagged); click one to open it.
-   *   • **<active file>** — the diagnostics for the open file (from `bennu_diagnostics`);
-   *     click one to jump to its line.
+   *   • **<active file>** — the open file's diagnostics from the editor's LIVE buffer validation
+   *     (shared via `bennuDiagnosticsStore`), so this updates as you type / fix; click to jump.
    *
    * Each section is collapsible. The count in the header is every row across sections.
    */
@@ -22,7 +22,6 @@
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
-  import { diagnostics as ipcDiagnostics } from '$lib/ipc/bennu';
   import type { Diagnostic } from '$lib/types/bennu';
 
   // The bottom dock owns the header (tab switcher), so hide PanelShell's own.
@@ -30,17 +29,16 @@
 
   const activePath = $derived(projectStore.activeFilePath);
 
-  // ── Active-file diagnostics (existing wiring) ────────────────────────────────
-  let diags = $state<Diagnostic[]>([]);
-  $effect(() => {
-    const path = activePath;
-    if (!path) { diags = []; return; }
-    let cancelled = false;
-    void ipcDiagnostics(path)
-      .then((ds) => { if (!cancelled) diags = ds; })
-      .catch(() => { if (!cancelled) diags = []; });
-    return () => { cancelled = true; };
-  });
+  // ── Active-file diagnostics — the editor's LIVE buffer validation, shared via the store, so this
+  // section updates as you type / fix a problem (no manual "Validate project" re-run). Only shown
+  // when the store's diagnostics are for the current file (a stale push for an old file is ignored).
+  const diags = $derived(
+    activePath
+    && bennuDiagnosticsStore.activeFile
+    && norm(bennuDiagnosticsStore.activeFile) === norm(activePath)
+      ? bennuDiagnosticsStore.activeFileDiagnostics
+      : [],
+  );
 
   type Severity = Diagnostic['severity'];
   interface Row {
@@ -62,6 +60,11 @@
 
   function baseName(path: string): string {
     return path.split(/[\\/]/).pop() ?? path;
+  }
+
+  /** Normalise a path to forward slashes for comparison (BE emits `/`, the FE may hold `\`). */
+  function norm(path: string): string {
+    return path.replace(/\\/g, '/');
   }
 
   // Map a UTF-8 byte offset to a 1-based line for the jump (cheap; the editor re-centres).
@@ -117,7 +120,7 @@
       });
     }
 
-    // Active-file diagnostics
+    // Active-file diagnostics (live buffer — authoritative for the open file).
     if (activePath && diags.length) {
       out.push({
         id: 'file', label: baseName(activePath), icon: FileCode2,
@@ -128,6 +131,24 @@
           detail: `@${d.start}`,
           copy: d.message,
           onClick: () => bennuUiStore.requestGoto(lineOfOffset(d.start)),
+        })),
+      });
+    }
+
+    // Whole-project validation results, one section per file. The active file is skipped — its live
+    // section above is more up-to-date (reflects unsaved edits).
+    const activeNorm = activePath ? norm(activePath) : null;
+    for (const fd of bennuDiagnosticsStore.projectDiagnostics) {
+      if (norm(fd.file) === activeNorm) continue;
+      out.push({
+        id: `proj:${fd.file}`, label: baseName(fd.file), icon: FileCode2,
+        severity: fd.diagnostics.some((d) => d.severity === 'error') ? 'error' : 'warning',
+        rows: fd.diagnostics.map((d, i) => ({
+          id: `proj:${fd.file}:${i}`, severity: d.severity,
+          label: d.message,
+          title: fd.file,
+          copy: d.message,
+          onClick: () => void projectStore.openFile(fd.file).then(() => bennuUiStore.requestGotoOffset(d.start)),
         })),
       });
     }

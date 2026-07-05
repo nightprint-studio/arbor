@@ -18,7 +18,9 @@
   import {
     FolderOpen, FolderPlus, LogOut, Settings, Keyboard, FlaskConical,
     Play, Bug, MoreVertical, Palette, SlidersHorizontal, Info, Hammer, Square, TriangleAlert,
+    ListChecks, ChevronDown,
   } from 'lucide-svelte';
+  import type { BuildType } from '$lib/stores/bennu/run.svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
@@ -58,15 +60,37 @@
       if (!ran) bennuUiStore.openRunConfig();
     });
   }
-  /** Compile the project (`mvn`/`javac`), streaming to the Build dock. */
+  /** Run the preferred build type (Maven compile or whole-project validation) — the split-button
+   *  main action + Ctrl+F9. */
   function buildProject() {
     const root = projectStore.project?.root;
-    if (root) void bennuRunStore.build(root);
+    if (root) void bennuRunStore.runPreferred(root);
   }
+  /** Pick a build type from the split dropdown: make it the default AND run it now. */
+  function selectBuild(type: BuildType) {
+    const root = projectStore.project?.root;
+    void bennuRunStore.setPreferredBuildType(type);
+    if (!root) return;
+    if (type === 'validate') void bennuRunStore.validateProject(root);
+    else void bennuRunStore.build(root);
+  }
+
+  // The active build type drives the main button's icon + label.
+  const buildType = $derived(bennuRunStore.preferredBuildType);
+  const buildLabel = $derived(
+    buildType === 'validate' ? 'Validate project (no compile)' : 'Build project (Maven)',
+  );
+  // The split dropdown: choose (and run) a build type.
+  const buildMenu = $derived<DropdownItem[]>([
+    { kind: 'separator', label: 'Build with' },
+    { kind: 'item', id: 'mvn',      label: 'Maven build',           icon: Hammer,     disabled: busy, onclick: () => selectBuild('mvn') },
+    { kind: 'item', id: 'validate', label: 'Validate (no compile)', icon: ListChecks, disabled: busy, onclick: () => selectBuild('validate') },
+  ]);
 
   const runMenu = $derived<DropdownItem[]>([
     { kind: 'item', id: 'run',     label: 'Run',             icon: Play,   shortcut: 'Shift+F10', disabled: busy, onclick: runProject },
-    { kind: 'item', id: 'build',   label: 'Build project',   icon: Hammer, shortcut: 'Ctrl+F9',   disabled: busy, onclick: buildProject },
+    { kind: 'item', id: 'build',   label: buildLabel,        icon: buildType === 'validate' ? ListChecks : Hammer, shortcut: 'Ctrl+F9', disabled: busy, onclick: buildProject },
+    { kind: 'item', id: 'validate', label: 'Validate project', icon: ListChecks, disabled: busy, onclick: () => selectBuild('validate') },
     { kind: 'item', id: 'stop',    label: 'Stop',            icon: Square, disabled: !bennuRunStore.running, onclick: () => void bennuRunStore.stop() },
     { kind: 'separator' },
     { kind: 'item', id: 'debug',   label: 'Debug…',          icon: Bug,  onclick: () => notImplemented('Debug') },
@@ -172,14 +196,25 @@
     {/if}
     <div class="btb-run" role="group" aria-label="Run controls">
       <button
-        class="btb-run-btn"
+        class="btb-run-btn btb-build-main"
         onclick={buildProject}
         disabled={!hasProject || busy}
-        use:tooltip={{ content: 'Build project', shortcut: 'Ctrl+F9' }}
-        aria-label="Build project"
+        use:tooltip={{ content: buildLabel, shortcut: 'Ctrl+F9' }}
+        aria-label={buildLabel}
       >
-        <Hammer size={16} />
+        {#if buildType === 'validate'}
+          <ListChecks size={16} />
+        {:else}
+          <Hammer size={16} />
+        {/if}
       </button>
+      <Dropdown items={buildMenu} position="fixed" direction="down" width="220px">
+        {#snippet trigger({ open, toggle })}
+          <button class="btb-run-btn btb-build-caret" class:open onclick={toggle} disabled={!hasProject} use:tooltip={'Choose build type'} aria-label="Choose build type" aria-haspopup="menu" aria-expanded={open}>
+            <ChevronDown size={12} />
+          </button>
+        {/snippet}
+      </Dropdown>
       <button
         class="btb-run-btn btb-run-primary"
         onclick={runProject}
@@ -264,4 +299,11 @@
   .btb-run-btn:disabled { opacity: 0.4; cursor: default; }
   .btb-run-primary:not(:disabled) { color: var(--success); }
   .btb-run-primary:hover:not(:disabled) { background: var(--success-subtle); color: var(--success); }
+  /* Split build control: the caret reads as attached to the Build button (tight pair, then a little
+     breathing room before Run). */
+  .btb-build-main { border-top-right-radius: 0; border-bottom-right-radius: 0; padding-right: 0; }
+  .btb-build-caret {
+    width: 16px; border-top-left-radius: 0; border-bottom-left-radius: 0;
+    margin-right: 3px; color: var(--text-tertiary);
+  }
 </style>

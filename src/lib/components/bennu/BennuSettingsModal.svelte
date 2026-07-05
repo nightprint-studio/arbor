@@ -65,6 +65,14 @@
     void commitJdkPaths((cfg?.jdk_paths ?? []).filter((x) => x !== p));
   }
 
+  // ── Validate-project-on-open (real bennu config, default on) ──────────────────
+  const validateOnOpen = $derived(cfg?.validate_on_open ?? true);
+  async function commitValidateOnOpen(v: boolean) {
+    if (!cfg) return;
+    cfg = { ...cfg, validate_on_open: v };
+    await setBennuConfig(cfg).catch(() => {});
+  }
+
   const groups: SettingsNavGroup[] = [
     { label: 'Editor', items: [
       { id: 'editor',     label: 'Editor',     icon: TextCursorInput },
@@ -328,6 +336,9 @@
           </FormRow>
           <FormRow label="Rebuild index on open" description="Re-scan symbols each time a project opens (slower open, fresher completion).">
             <Toggle checked={s.rebuildIndexOnOpen} onchange={(v) => s.setRebuildIndexOnOpen(v)} ariaLabel="Rebuild index on open" />
+          </FormRow>
+          <FormRow label="Validate project on open" description="After indexing, validate the whole project in the background so the first ‘Validate (no compile)’ is instant. Uses a little CPU on open.">
+            <Toggle checked={validateOnOpen} onchange={(v) => commitValidateOnOpen(v)} ariaLabel="Validate project on open" />
           </FormRow>
           <FormRow label="Excluded directories" description="Comma-separated folder names skipped by the indexer.">
             <Input value={s.excludedDirs} placeholder="target, .git"

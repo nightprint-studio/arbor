@@ -63,6 +63,7 @@ pub fn synthesize(
                     is_static: false,
                     is_abstract: false,
                     is_default: false,
+                    is_final: false,
                     visibility: Visibility::Public,
                     raw_signature: format!("{} {}()", f.type_text, name),
                 });
@@ -80,6 +81,7 @@ pub fn synthesize(
                     is_static: false,
                     is_abstract: false,
                     is_default: false,
+                    is_final: false,
                     visibility: Visibility::Public,
                     raw_signature: format!("void {}({})", name, f.type_text),
                 });
@@ -100,6 +102,7 @@ pub fn synthesize(
                 is_static: true,
                 is_abstract: false,
                 is_default: false,
+                is_final: true,
                 visibility: Visibility::Private,
                 raw_signature: format!("{logger_binary} log"),
             });
@@ -200,6 +203,10 @@ mod tests {
         TypeDecl {
             name: "Order".to_string(),
             fqn: "shop.Order".to_string(),
+            kind: bennu_java::prelude::TypeKind::Class,
+            is_abstract: false,
+            is_final: false,
+            is_sealed: false,
             methods: Vec::new(),
             fields,
             extends: None,

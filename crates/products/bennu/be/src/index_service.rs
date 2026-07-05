@@ -43,8 +43,9 @@ use bennu_intel::prelude::{
 use bennu_query::prelude::InheritedMember as IntelInheritedMember;
 use bennu_project::prelude::source_encoding_label;
 use bennu_proto::prelude::{
-    ClassEntry, DeclarationTarget, EncodingIssue, HoverInfo, IndexEntry, IndexStats,
-    InheritedMember, InheritedSource, JdkStatus, UsageHit, ValidationContext,
+    ClassEntry, DeclarationTarget, EncodingIssue, FileDiagnostics, FileValidationStat, HoverInfo,
+    IndexEntry, IndexStats, InheritedMember, InheritedSource, JdkStatus, UsageHit,
+    ValidationContext,
 };
 use bennu_web::prelude::{file_stamp, IncludeGraph, IncludeGraphCache};
 use serde_json::json;
@@ -472,6 +473,17 @@ impl IndexService {
             // terminal "ready" event.
             slot.ready.store(true, Ordering::Relaxed);
             emit_progress(&sink, &root_str, "ready", "end");
+
+            // Warm up the whole-project VALIDATION cache in the background (opt-in, default on), so
+            // the first explicit "Validate (no compile)" is instant and the resolved data it
+            // computes is ready for navigation features. Reuses the already-read `sources` (no
+            // second disk pass), runs on this same background thread AFTER the index is ready (never
+            // delaying completion), and only when a resolver exists (else there's nothing to cache).
+            // Parallel but a background citizen (leaves ~2 cores free). Emits no FE events — it's a
+            // silent warm-up, not a user-triggered validation.
+            if bennu_core::config::load().validate_on_open {
+                warm_up_validation_cache(&root_str, &sources);
+            }
             // Diagnostic (idle-CPU investigation): confirms the build thread reaches its end
             // and exits. If bennu-be still burns CPU after this line logs, the spinner is NOT
             // this thread (look to a dependency / a thread it left behind).
@@ -493,10 +505,11 @@ impl IndexService {
         };
         if let Some((jdk, encoding_label)) = opened_with {
             // A manual rebuild is authoritative: drop the incremental reference cache so the
-            // reopen re-walks every file from scratch (not just the changed ones).
-            bennu_intel::prelude::clear_ref_cache(&bennu_intel::prelude::ref_cache_path(
-                &index_base_for(root),
-            ));
+            // reopen re-walks every file from scratch (not just the changed ones), and the
+            // diagnostic cache so a fresh full validation runs (the classpath may have changed).
+            let base = index_base_for(root);
+            bennu_intel::prelude::clear_ref_cache(&bennu_intel::prelude::ref_cache_path(&base));
+            bennu_intel::prelude::clear_diag_cache(&bennu_intel::prelude::diag_cache_path(&base));
             self.open(root, &jdk, &encoding_label, sink);
         }
     }
@@ -583,6 +596,166 @@ impl IndexService {
             Arc::clone(&g)
         };
         provider.validate(source, &ctx, status.any_installed)
+    }
+
+    /// Validate every file in `files` (`(path, source)`) for a WHOLE-PROJECT run, in PARALLEL,
+    /// consulting the read-only diagnostic `cache`. Each file is either served from the cache (its
+    /// recorded project dependencies re-checked against the live resolver — own bytes unchanged,
+    /// every project type it read still has the same members, every bare name still resolves the
+    /// same, every absent name still absent) or re-validated while recording fresh dependencies.
+    /// The caller folds the results back into the cache (`deps` is `Some` only for a re-validated
+    /// file). Returns one [`BatchResult`] per input file, in input order.
+    ///
+    /// Parallel is safe here: the pass is read-only over the cache + the `Arc`-shared resolver
+    /// (whose internals are `RwLock`-guarded) and dependency recording is thread-local, so each
+    /// worker records its own file with no shared state. The work-stealing pool leaves ~2 cores
+    /// free for the interactive path (completion / go-to), so a background warm-up never pegs the
+    /// machine. When no resolver is built for the project, files are validated pure-AST and nothing
+    /// is cached.
+    pub fn validate_project_batch(
+        &self,
+        root: &str,
+        files: &[(PathBuf, String)],
+        cache: &bennu_intel::prelude::DiagCache,
+        on_progress: &(dyn Fn(usize, usize) + Sync),
+    ) -> Vec<BatchResult> {
+        let slot = {
+            let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            slots.get(&PathBuf::from(root)).map(Arc::clone)
+        };
+        let (provider, jdk_available, requested_major) = match slot {
+            Some(slot) => {
+                let status = bennu_classpath::prelude::jdk_status(&slot.jdk_version);
+                let provider = {
+                    let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+                    Arc::clone(&g)
+                };
+                (provider, status.any_installed, status.requested_major)
+            }
+            // No project owns this root — validate pure-AST over an empty provider, no caching.
+            None => (Arc::new(NativeJavaProvider::new()), false, None),
+        };
+        validate_files_parallel(&provider, jdk_available, requested_major, files, cache, on_progress)
+    }
+
+    /// Whether the project at `root` has a built resolver (so the diagnostic cache can check
+    /// freshness). The background warm-up skips validation until this is true — validating pure-AST
+    /// with nothing to cache would be wasted work on every open.
+    pub fn has_resolver(&self, root: &str) -> bool {
+        let slot = {
+            let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            slots.get(&PathBuf::from(root)).map(Arc::clone)
+        };
+        let Some(slot) = slot else { return false };
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.project_view().is_some()
+    }
+
+    /// Run a whole-project validation for `root` (decoding sources in `label`): read every source,
+    /// validate in parallel against the persisted diagnostic cache, refill + prune + persist the
+    /// cache, and fold the per-file results into a [`RunOutcome`] (grouped diagnostics + per-file
+    /// stats + aggregate counts, all UNcapped — the caller applies its own caps). `on_progress` is
+    /// invoked with the running count as workers advance (a no-op for a silent run). The single
+    /// place both the explicit "Validate (no compile)" and the silent on-save refresh share.
+    pub fn validate_project_collect(
+        &self,
+        root: &str,
+        label: &str,
+        on_progress: &(dyn Fn(usize, usize) + Sync),
+    ) -> RunOutcome {
+        let sources = read_java_sources(Path::new(root), label).sources;
+        let mut cache = self.diag_cache_load(root);
+        let run = std::time::Instant::now();
+        let results = self.validate_project_batch(root, &sources, &cache, on_progress);
+        let wall_ms = run.elapsed().as_millis() as u64;
+
+        let validated = results.len();
+        let mut diagnostics: Vec<FileDiagnostics> = Vec::new();
+        let mut stats: Vec<FileValidationStat> = Vec::with_capacity(validated);
+        let mut sum_ms = 0u64;
+        let mut max_ms = 0u64;
+        let mut max_file: Option<String> = None;
+        let mut error_count = 0usize;
+        let mut warning_count = 0usize;
+        let mut cached_hits = 0usize;
+        let mut seen: HashSet<String> = HashSet::with_capacity(validated);
+
+        for r in results {
+            seen.insert(r.file.clone());
+            if r.hit {
+                cached_hits += 1;
+            }
+            sum_ms += r.ms;
+            if r.ms > max_ms {
+                max_ms = r.ms;
+                max_file = Some(r.file.clone());
+            }
+            let errors = r.diags.iter().filter(|d| d.severity == "error").count();
+            let warnings = r.diags.iter().filter(|d| d.severity == "warning").count();
+            error_count += errors;
+            warning_count += warnings;
+            stats.push(FileValidationStat { file: r.file.clone(), ms: r.ms, errors, warnings });
+            if let Some(deps) = r.deps {
+                cache.put(&r.file, deps, r.diags.clone());
+            }
+            if !r.diags.is_empty() {
+                diagnostics.push(FileDiagnostics { file: r.file, diagnostics: r.diags });
+            }
+        }
+        cache.files.retain(|k, _| seen.contains(k));
+        self.diag_cache_save(root, &cache);
+
+        RunOutcome {
+            diagnostics,
+            stats,
+            wall_ms,
+            sum_ms,
+            error_count,
+            warning_count,
+            validated,
+            cached_hits,
+            max_ms,
+            max_file,
+        }
+    }
+
+    /// Load the persisted diagnostic cache for the project at `root`, keyed to the current
+    /// classpath/JDK epoch (a change drops it wholesale). Empty when none is on disk. The
+    /// whole-project validation loads it once, serves + fills it, then
+    /// [`diag_cache_save`](Self::diag_cache_save)s it.
+    pub fn diag_cache_load(&self, root: &str) -> bennu_intel::prelude::DiagCache {
+        let base = index_base_for(root);
+        let epoch = self.diag_epoch(root);
+        bennu_intel::prelude::DiagCache::load_or_new(
+            &bennu_intel::prelude::diag_cache_path(&base),
+            epoch,
+        )
+    }
+
+    /// Persist the diagnostic `cache` for the project at `root` (best-effort).
+    pub fn diag_cache_save(&self, root: &str, cache: &bennu_intel::prelude::DiagCache) {
+        let base = index_base_for(root);
+        bennu_intel::prelude::save_diag_cache(&bennu_intel::prelude::diag_cache_path(&base), cache);
+    }
+
+    /// The classpath/JDK epoch for the project at `root` — a hash of the JDK level it was opened at
+    /// plus the resolved classpath file's bytes. A JDK switch or a dependency-set change (a new
+    /// `target/bennu-classpath.txt`) changes it, dropping the diagnostic cache so nothing computed
+    /// against the old classpath is ever served. Within a session (fixed classpath) it's stable, so
+    /// the per-file project-dependency fingerprint carries the incrementality.
+    fn diag_epoch(&self, root: &str) -> u64 {
+        let jdk = {
+            let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            slots.get(&PathBuf::from(root)).map(|s| s.jdk_version.clone()).unwrap_or_default()
+        };
+        let cp_file = Path::new(root).join("target").join("bennu-classpath.txt");
+        let cp = std::fs::read(&cp_file).unwrap_or_default();
+        let mut seed = format!("{jdk}\0");
+        seed.push_str(&String::from_utf8_lossy(&cp));
+        bennu_intel::prelude::source_hash(&seed)
     }
 
     /// Resolve a JSP form/link action reference to its go-to-definition target (the C1
@@ -1056,6 +1229,119 @@ impl IndexService {
         }
         best.cloned()
     }
+}
+
+/// One file's result from [`IndexService::validate_project_batch`] — the diagnostics to report
+/// plus the cache bookkeeping the caller folds back in.
+pub struct BatchResult {
+    /// The forward-slashed file key.
+    pub file: String,
+    /// The diagnostics (served from the cache, or freshly computed).
+    pub diags: Vec<bennu_proto::prelude::Diagnostic>,
+    /// The recorded dependencies to STORE for this file — `Some` only when it was (re)validated;
+    /// `None` on a cache hit (nothing to store) or when there's no resolver (uncacheable).
+    pub deps: Option<bennu_intel::prelude::FileDeps>,
+    /// Whether this file was served from the cache (no re-validation).
+    pub hit: bool,
+    /// The file's own validation time in ms (0 on a cache hit) — for the "slowest files" table.
+    pub ms: u64,
+}
+
+/// The folded outcome of a whole-project validation ([`IndexService::validate_project_collect`]).
+/// Everything is UNcapped — each handler applies its own payload caps (slowest-N stats, first-N
+/// diagnostic files).
+pub struct RunOutcome {
+    /// Files that have diagnostics, in walk order (uncapped).
+    pub diagnostics: Vec<FileDiagnostics>,
+    /// Per-file timing stats, in walk order (uncapped; the handler sorts + caps for the table).
+    pub stats: Vec<FileValidationStat>,
+    /// Real wall-clock of the (parallel) run, in ms.
+    pub wall_ms: u64,
+    /// Sum of per-file processing times, in ms (for the mean-per-file metric).
+    pub sum_ms: u64,
+    pub error_count: usize,
+    pub warning_count: usize,
+    pub validated: usize,
+    pub cached_hits: usize,
+    pub max_ms: u64,
+    pub max_file: Option<String>,
+}
+
+/// Validate `files` in parallel against `provider`, consulting the read-only `cache`. Pure/
+/// read-only over the cache + the `Arc`-shared resolver (recording is thread-local per worker), so
+/// it parallelizes safely; the pool leaves ~2 cores free for the interactive path. `on_progress` is
+/// called (from a worker) with the running count every so often.
+fn validate_files_parallel(
+    provider: &NativeJavaProvider,
+    jdk_available: bool,
+    requested_major: Option<u32>,
+    files: &[(PathBuf, String)],
+    cache: &bennu_intel::prelude::DiagCache,
+    on_progress: &(dyn Fn(usize, usize) + Sync),
+) -> Vec<BatchResult> {
+    let total = files.len();
+    let counter = AtomicUsize::new(0);
+    bennu_intel::prelude::parallel_map(files, |(path, source)| {
+        let file = norm_path(path);
+        let ctx = bennu_check::prelude::FileContext {
+            file_stem: path.file_stem().and_then(|s| s.to_str()).map(str::to_string),
+            expected_package: path.parent().and_then(bennu_java::prelude::infer_package),
+            java_major: requested_major,
+        };
+        let own = bennu_intel::prelude::source_hash(source);
+        // A still-fresh cached entry (the `view` borrow ends when the diags are cloned out).
+        let cached = provider
+            .project_view()
+            .and_then(|view| cache.get_fresh(&file, own, view).map(<[_]>::to_vec));
+        let result = match cached {
+            Some(diags) => BatchResult { file, diags, deps: None, hit: true, ms: 0 },
+            None => {
+                let t = std::time::Instant::now();
+                let (diags, recorded) = provider.validate_recording(source, &ctx, jdk_available);
+                let ms = t.elapsed().as_millis() as u64;
+                // Store deps only when a resolver exists to check freshness against next time.
+                let deps = provider
+                    .project_view()
+                    .is_some()
+                    .then(|| bennu_intel::prelude::FileDeps::from_recorded(own, &recorded));
+                BatchResult { file, diags, deps, hit: false, ms }
+            }
+        };
+        let done = counter.fetch_add(1, Ordering::Relaxed) + 1;
+        if done % 64 == 0 || done == total {
+            on_progress(done, total);
+        }
+        result
+    })
+}
+
+/// Background warm-up of the whole-project validation cache after an index build (opt-in via
+/// `validate_on_open`). Loads the persisted cache, validates every file in parallel to fill the
+/// misses, prunes entries for deleted files, and persists it — so the first explicit "Validate
+/// (no compile)" is a near-instant all-cache-hit. Skips silently when the project has no resolver
+/// yet (nothing to cache against). Emits no FE events (a silent warm-up); logged for diagnostics.
+fn warm_up_validation_cache(root: &str, sources: &[(PathBuf, String)]) {
+    let svc = IndexService::global();
+    if !svc.has_resolver(root) {
+        return; // pre-index / no JDK — validating pure-AST with nothing to cache would be waste
+    }
+    let mut cache = svc.diag_cache_load(root);
+    let results = svc.validate_project_batch(root, sources, &cache, &|_done: usize, _total: usize| {});
+    let mut seen = HashSet::with_capacity(results.len());
+    let mut filled = 0usize;
+    for r in results {
+        seen.insert(r.file.clone());
+        if let Some(deps) = r.deps {
+            cache.put(&r.file, deps, r.diags);
+            filled += 1;
+        }
+    }
+    cache.files.retain(|k, _| seen.contains(k));
+    svc.diag_cache_save(root, &cache);
+    eprintln!(
+        "bennu-be: validation cache warmed for {root} ({filled} validated, {} total cached)",
+        seen.len()
+    );
 }
 
 /// Build + swap in the rename engine for `slot`: reuse the already-read `.java` `sources`

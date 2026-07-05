@@ -103,6 +103,10 @@ mod tests {
         TypeDecl {
             name: name.to_string(),
             fqn: fqn.to_string(),
+            kind: bennu_java::prelude::TypeKind::Class,
+            is_abstract: false,
+            is_final: false,
+            is_sealed: false,
             methods: Vec::new(),
             fields: Vec::new(),
             extends: None,

@@ -658,6 +658,58 @@ pub struct BuildResult {
     pub diagnostics: Vec<BuildDiagnostic>,
 }
 
+/// Per-file timing + diagnostic counts from a project-wide validation
+/// (`bennu_validate_project`). One entry per `.java` file validated.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileValidationStat {
+    /// Absolute path (forward slashes) of the validated file.
+    pub file: String,
+    /// Milliseconds spent validating this file.
+    pub ms: u64,
+    /// Number of `error`-severity diagnostics found.
+    pub errors: usize,
+    /// Number of `warning`-severity diagnostics found.
+    pub warnings: usize,
+}
+
+/// The diagnostics of one file, so the Problems panel can show a project-wide list after a
+/// validation run (byte offsets over that file's on-disk content).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileDiagnostics {
+    /// Absolute path (forward slashes) of the file.
+    pub file: String,
+    /// The diagnostics found in it (non-empty — clean files are omitted).
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Result of `bennu_validate_project` — the "validation without compiling" over the whole project,
+/// with timing statistics (the compile-time proxy the user asked to see). The aggregate counts cover
+/// **every** file; `files` is capped to the slowest few (for a stats table) while `diagnostics`
+/// carries every file that has at least one diagnostic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProjectValidationResult {
+    /// Total `.java` files validated.
+    pub total_files: usize,
+    /// Total wall-clock milliseconds across all files.
+    pub total_ms: u64,
+    /// Mean milliseconds per file.
+    pub avg_ms: f64,
+    /// Slowest single-file time.
+    pub max_ms: u64,
+    /// The file that took [`max_ms`](Self::max_ms), if any.
+    pub max_file: Option<String>,
+    /// Total diagnostics across the project.
+    pub total_diagnostics: usize,
+    /// Total `error`-severity diagnostics.
+    pub error_count: usize,
+    /// Total `warning`-severity diagnostics.
+    pub warning_count: usize,
+    /// Per-file stats for the slowest files (sorted slowest first, capped), for a stats table.
+    pub files: Vec<FileValidationStat>,
+    /// Every file that has diagnostics, with its diagnostics (for the Problems panel).
+    pub diagnostics: Vec<FileDiagnostics>,
+}
+
 /// Result of `bennu_run` — the id of the launched run, used to correlate the
 /// `arbor://bennu/run-output` / `arbor://bennu/run-exit` event stream and to
 /// `bennu_cancel_run`.

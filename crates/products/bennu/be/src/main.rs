@@ -124,6 +124,11 @@ mod find;
 // cwd + env) / `bennu_cancel_run`. Makes the Run/Debug buttons real + re-indexes
 // target/classes.
 mod build;
+// Project-wide "validation without compiling": `bennu_validate_project` — walks every `.java`,
+// runs the editor's per-file validation over all of them, and returns timing stats (the compile-time
+// proxy) + diagnostics. Shares `build`'s single-run guard so a validation and a Maven build can't run
+// concurrently.
+mod validate_project;
 // Run configurations (per-repo `[bennu.run]` in `<repo>/.arbor/config.toml`):
 // `bennu_get_run_config` / `bennu_set_run_config` — the IntelliJ-style named run targets
 // the FE's run-configuration editor persists (filesystem, not localStorage).

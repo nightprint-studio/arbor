@@ -214,6 +214,36 @@ impl NativeJavaProvider {
         }
     }
 
+    /// Validate `source` while RECORDING the project types the validation reads — the fingerprint
+    /// inputs the incremental diagnostic cache stores. Returns the diagnostics paired with the
+    /// recorded dependencies. On the empty (pre-index) provider it runs the pure-AST checks and
+    /// records nothing (the caller then skips caching, since there's no resolver to check
+    /// freshness against).
+    pub fn validate_recording(
+        &self,
+        source: &str,
+        ctx: &bennu_check::prelude::FileContext,
+        jdk_available: bool,
+    ) -> (Vec<Diagnostic>, bennu_query::prelude::RecordedDeps) {
+        match &self.resolver {
+            Some(resolver) => bennu_query::prelude::record(|| {
+                bennu_check::prelude::check_file_resolved(source, ctx, resolver, jdk_available)
+            }),
+            None => (
+                bennu_check::prelude::check_file(source, ctx),
+                bennu_query::prelude::RecordedDeps::default(),
+            ),
+        }
+    }
+
+    /// The read-only project view for the diagnostic cache's freshness check, or `None` on the
+    /// empty (pre-index) provider (the caller then can't cache — it just validates fresh).
+    pub fn project_view(&self) -> Option<&(dyn bennu_query::prelude::ProjectView + '_)> {
+        self.resolver
+            .as_ref()
+            .map(|r| r as &dyn bennu_query::prelude::ProjectView)
+    }
+
     /// Apply one edited `file`'s freshly-extracted [`Symbol`](bennu_index::prelude::Symbol)
     /// records to the resolver's **in-memory overlay** — no disk write, no JDK re-resolve,
     /// no new provider. Completion on the edited file reflects the edit immediately while

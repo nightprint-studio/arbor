@@ -20,10 +20,18 @@
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { SvelteMap } from 'svelte/reactivity';
-import { build as ipcBuild, run as ipcRun, cancelRun as ipcCancelRun } from '$lib/ipc/bennu';
-import type { BuildResult, BuildDiagnostic } from '$lib/types/bennu';
+import {
+  build as ipcBuild, validateProject as ipcValidateProject, run as ipcRun,
+  cancelRun as ipcCancelRun,
+} from '$lib/ipc/bennu';
+import { getBennuConfig, setBennuConfig } from '$lib/ipc/bennu/config';
+import type { BuildResult, BuildDiagnostic, ProjectValidationResult } from '$lib/types/bennu';
 import { bennuUiStore } from './ui.svelte';
+import { bennuDiagnosticsStore } from './diagnostics.svelte';
 import { bennuRunConfigStore, splitArgs } from './run-config.svelte';
+
+/** The two build kinds the split-button offers. */
+export type BuildType = 'mvn' | 'validate';
 
 /** One streamed log line + which channel it came from (drives colouring). */
 export interface RunLogLine {
@@ -35,6 +43,15 @@ export interface RunLogLine {
 // Cap the retained log so a chatty build/run can't grow the buffer unbounded.
 const MAX_LINES = 3000;
 
+/** Render a millisecond duration compactly (`340ms` / `1.2s` / `1m 05s`). */
+export function formatMs(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  return `${m}m ${String(Math.round(s % 60)).padStart(2, '0')}s`;
+}
+
 function createBennuRunStore() {
   let building = $state(false);
   let running = $state(false);
@@ -43,6 +60,13 @@ function createBennuRunStore() {
   let ok = $state<boolean | null>(null);
   let diagnostics = $state<BuildDiagnostic[]>([]);
   let lines = $state<RunLogLine[]>([]);
+
+  // Whole-project validation (the split-button's `validate` build type).
+  let validating = $state(false);
+  let validationResult = $state<ProjectValidationResult | null>(null);
+  let validateProgress = $state<{ done: number; total: number } | null>(null);
+  // Which build the split-button runs by default (and Ctrl+F9). Loaded from bennu config on attach.
+  let preferredBuildType = $state<BuildType>('mvn');
 
   // The live run's correlation id (null when nothing is running). Not reactive —
   // only the event handlers + stop() read it.
@@ -65,9 +89,22 @@ function createBennuRunStore() {
   async function attach(): Promise<UnlistenFn> {
     if (attached) return detach;
     attached = true;
+    // Load the preferred build type once (filesystem config, per rule 11 — not localStorage).
+    getBennuConfig()
+      .then((cfg) => {
+        preferredBuildType = cfg.preferred_build_type === 'validate' ? 'validate' : 'mvn';
+      })
+      .catch(() => {
+        /* missing/corrupt config → keep the default */
+      });
     const add = (f: UnlistenFn) => unlisteners.push(f);
     add(
       await listen<{ text: string }>('arbor://bennu/build-output', (e) => push(e.payload.text, 'out')),
+    );
+    add(
+      await listen<{ done: number; total: number }>('arbor://bennu/validate-progress', (e) => {
+        validateProgress = { done: e.payload.done, total: e.payload.total };
+      }),
     );
     add(
       await listen<{ run_id: string; stream: string; text: string }>(
@@ -124,6 +161,61 @@ function createBennuRunStore() {
       return null;
     } finally {
       building = false;
+    }
+  }
+
+  /** Validate the WHOLE project without compiling (the `validate` build type): stream progress,
+   *  collect timing stats + diagnostics. Opens the Build dock. No-op while already busy. Shares the
+   *  BE single-run guard with the Maven build, so a concurrent start is refused there too. */
+  async function validateProject(root: string): Promise<ProjectValidationResult | null> {
+    if (building || validating) return null;
+    validating = true;
+    validationResult = null;
+    validateProgress = { done: 0, total: 0 };
+    lines = [];
+    bennuDiagnosticsStore.clearProjectDiagnostics();
+    bennuUiStore.showBottom('build');
+    push(`Validating ${root} (no compile)…`, 'meta');
+    try {
+      const res = await ipcValidateProject(root);
+      validationResult = res;
+      // Route the per-file diagnostics to the Problems panel (where problems belong).
+      bennuDiagnosticsStore.setProjectDiagnostics(res.diagnostics);
+      push(
+        `Validated ${res.total_files} file(s) in ${formatMs(res.total_ms)} — ` +
+          `${res.error_count} error(s), ${res.warning_count} warning(s). ` +
+          `avg ${res.avg_ms.toFixed(1)}ms, max ${res.max_ms}ms` +
+          (res.max_file ? ` (${res.max_file.split('/').pop()})` : ''),
+        res.error_count > 0 ? 'err' : 'meta',
+      );
+      return res;
+    } catch (e) {
+      push(`Validation error: ${e instanceof Error ? e.message : String(e)}`, 'err');
+      return null;
+    } finally {
+      validating = false;
+      validateProgress = null;
+    }
+  }
+
+  /** Persist the preferred build type (filesystem config) and update the reactive state. Merges into
+   *  the existing config so the other bennu settings are preserved. */
+  async function setPreferredBuildType(type: BuildType): Promise<void> {
+    preferredBuildType = type;
+    try {
+      const cfg = await getBennuConfig();
+      await setBennuConfig({ ...cfg, preferred_build_type: type });
+    } catch {
+      /* best-effort persistence — the in-memory choice still applies this session */
+    }
+  }
+
+  /** Run the preferred build type for `root` (the split-button main action + Ctrl+F9). */
+  async function runPreferred(root: string): Promise<void> {
+    if (preferredBuildType === 'validate') {
+      await validateProject(root);
+    } else {
+      await build(root);
     }
   }
 
@@ -185,12 +277,16 @@ function createBennuRunStore() {
   return {
     get building() { return building; },
     get running() { return running; },
-    /** Busy = a build or run is in flight (drives disabling the ▶ button). */
-    get active() { return building || running; },
+    get validating() { return validating; },
+    /** Busy = a build, validation or run is in flight (drives disabling the build/▶ buttons). */
+    get active() { return building || running || validating; },
     get tool() { return tool; },
     get ok() { return ok; },
     get diagnostics() { return diagnostics; },
     get lines() { return lines; },
+    get validationResult() { return validationResult; },
+    get validateProgress() { return validateProgress; },
+    get preferredBuildType() { return preferredBuildType; },
 
     /** The remembered main class for `root`, or null. */
     mainClassFor(root: string): string | null {
@@ -199,6 +295,9 @@ function createBennuRunStore() {
 
     attach,
     build,
+    validateProject,
+    runPreferred,
+    setPreferredBuildType,
     run,
     runActive,
     stop,
@@ -208,6 +307,7 @@ function createBennuRunStore() {
       diagnostics = [];
       ok = null;
       tool = '';
+      validationResult = null;
     },
   };
 }

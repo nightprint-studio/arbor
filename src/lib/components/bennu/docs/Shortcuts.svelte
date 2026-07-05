@@ -41,10 +41,10 @@
 
 <h2>Build &amp; run</h2>
 <ul>
-  <li><kbd>Ctrl</kbd> + <kbd>F9</kbd> — <strong>build</strong> the project (compile via Maven, <code>javac</code> fallback)</li>
+  <li><kbd>Ctrl</kbd> + <kbd>F9</kbd> — <strong>build</strong> the project — runs the type chosen on the Build split-button: a Maven compile (<code>javac</code> fallback), or a whole-project <strong>validation without compiling</strong></li>
   <li><kbd>Shift</kbd> + <kbd>F10</kbd> — <strong>run</strong> (builds first, then launches the main class)</li>
 </ul>
-<p>Output streams to the <strong>Build</strong> tool window; compiler problems there are clickable and jump to the offending line. The main class is set once per project from the run configuration (▷ menu → <em>Edit configurations…</em>).</p>
+<p>The <strong>Build</strong> button is a split-button: click it to run the current type, or open its chevron to pick <em>Maven build</em> or <em>Validate (no compile)</em> — the choice is remembered and becomes what <kbd>Ctrl</kbd> + <kbd>F9</kbd> runs. Validation checks every <code>.java</code> file with the editor's diagnostics, reports timing statistics (total, average, slowest file) in the Build tool window, and lists every problem it finds in the <strong>Problems</strong> panel, grouped by file. Only one build or validation runs at a time. Output streams to the <strong>Build</strong> tool window; problems there are clickable and jump to the offending line. The main class is set once per project from the run configuration (▷ menu → <em>Edit configurations…</em>).</p>
 
 <h2>Window</h2>
 <ul>

@@ -16,6 +16,7 @@
 //! `bennu_query::prelude::...`.
 
 pub mod completion;
+pub mod dep_record;
 pub mod inherited;
 pub mod jdk;
 pub mod prelude;

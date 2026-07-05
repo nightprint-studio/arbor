@@ -29,24 +29,20 @@ pub fn super_constructor_errors(source: &str, resolver: &dyn TypeResolver) -> Ve
         return Vec::new();
     };
     let symbols = extract_symbols(source);
-    super_constructor_errors_in(tree.root_node(), source, &symbols, resolver)
+    let nodes = crate::check::collect_nodes(tree.root_node());
+    super_constructor_errors_in(&nodes, source, &symbols, resolver)
 }
 
-/// Tree-driven core: reuses the caller's `symbols`.
+/// Tree-driven core: iterates the shared `nodes` + reuses the caller's `symbols`.
 pub fn super_constructor_errors_in(
-    root: Node,
+    nodes: &[Node],
     source: &str,
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         if n.kind() == "class_declaration" {
             check_class(n, bytes, symbols, resolver, &mut out);
         }
@@ -150,7 +146,7 @@ fn err(message: String, node: Node) -> Diagnostic {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bennu_java::prelude::{ClassFlags, ClassMembers, Import, Member, TypeRef, Visibility};
+    use bennu_java::prelude::{ClassFlags, ClassMembers, Import, Member, TypeRef};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -168,17 +164,8 @@ mod tests {
     }
 
     fn ctor(params: usize) -> Member {
-        Member {
-            name: "<init>".to_string(),
-            kind: MemberKind::Method,
-            return_type: TypeRef::simple("void"),
-            params: (0..params).map(|_| TypeRef::simple("int")).collect(),
-            is_static: false,
-            is_abstract: false,
-            is_default: false,
-            visibility: Visibility::Public,
-            raw_signature: "<init>".to_string(),
-        }
+        let params = (0..params).map(|_| TypeRef::simple("int")).collect();
+        Member::method("<init>", TypeRef::simple("void"), params)
     }
 
     fn cls(ctors: Vec<Member>) -> ClassMembers {

@@ -34,14 +34,14 @@ pub fn switch_selector_errors(source: &str) -> Vec<Diagnostic> {
 
 /// Tree-driven core.
 pub fn switch_selector_errors_in(root: Node, source: &str) -> Vec<Diagnostic> {
+    switch_selector_errors_nodes(&crate::check::collect_nodes(root), source)
+}
+
+/// Slice-driven core (shared pre-collected node list — one traversal across all pure-AST checks).
+pub fn switch_selector_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         if n.kind() == "switch_expression" {
             if let Some(cond) = n.child_by_field_name("condition") {
                 if let Some(ty) = selector_primitive(cond, bytes) {
@@ -153,14 +153,14 @@ pub fn switch_yield_errors(source: &str) -> Vec<Diagnostic> {
 }
 
 /// Tree-driven core.
-pub fn switch_yield_errors_in(root: Node, _source: &str) -> Vec<Diagnostic> {
+pub fn switch_yield_errors_in(root: Node, source: &str) -> Vec<Diagnostic> {
+    switch_yield_errors_nodes(&crate::check::collect_nodes(root), source)
+}
+
+/// Slice-driven core (shared pre-collected node list — one traversal across all pure-AST checks).
+pub fn switch_yield_errors_nodes(nodes: &[Node], _source: &str) -> Vec<Diagnostic> {
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         if n.kind() == "switch_expression" && is_value_context(n) && !n.has_error() {
             check_arms(n, &mut out);
         }

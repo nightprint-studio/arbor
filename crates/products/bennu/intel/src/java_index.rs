@@ -17,7 +17,8 @@ use std::path::{Path, PathBuf};
 
 use bennu_index::prelude::{IndexBuilder, IndexRecord, Source, Symbol, SymbolKind};
 use bennu_java::prelude::{
-    extract_symbols, ClassMembers, FileSymbols, Import, Member, MemberKind, MethodDecl, TypeDecl,
+    extract_symbols, ClassFlags, ClassMembers, FileSymbols, Import, Member, MemberKind, MethodDecl,
+    TypeDecl, TypeKind,
 };
 use bennu_project::prelude::{decode_for_index, source_encoding_label, IndexDecode};
 
@@ -207,8 +208,10 @@ fn parse_sources_parallel(sources: &[(PathBuf, String)]) -> Vec<(PathBuf, FileSy
 /// on one straggler thread while the others sit idle. Falls back to a serial map for a small
 /// input (the thread spawn isn't worth it) or a single core.
 ///
-/// `pub(crate)` so the reference-index walk ([`crate::refs`]) can parallelize over files too.
-pub(crate) fn parallel_map<T, R, F>(items: &[T], f: F) -> Vec<R>
+/// `pub` so the reference-index walk ([`crate::refs`]) and the be layer's parallel whole-project
+/// validation can share this one work-stealing primitive (it deliberately leaves ~2 cores free for
+/// the interactive path — the right "don't peg the machine" default for a background sweep).
+pub fn parallel_map<T, R, F>(items: &[T], f: F) -> Vec<R>
 where
     T: Sync,
     R: Send,
@@ -403,13 +406,13 @@ fn build_class_members(
                 .map(|p| type_text_to_ref(&p.type_text, imports, project_types))
                 .collect(),
             is_static: m.is_static,
-            // The source symbol model doesn't yet carry method `abstract`/`default` or the class
-            // kind, so project-type members default to concrete. Effect: the extend-final /
-            // implement-abstract checks fire against JDK/library supertypes (flags decoded from
-            // bytecode) but not yet against project supertypes — a conservative miss, never a false
-            // positive. Enriching `TypeDecl`/`MethodDecl` is the follow-up.
-            is_abstract: false,
-            is_default: false,
+            // Carried from the source symbol model (an explicit `abstract` modifier or a bodyless
+            // interface method → abstract; an interface `default` method → default). This lets the
+            // extend-final / implement-abstract / functional-interface checks fire against
+            // **project** supertypes too, not just bytecode ones.
+            is_abstract: m.is_abstract,
+            is_default: m.is_default,
+            is_final: m.is_final,
             visibility: m.visibility,
             raw_signature: render_method(m),
         })
@@ -426,6 +429,7 @@ fn build_class_members(
             is_static: f.is_static,
             is_abstract: false,
             is_default: false,
+            is_final: f.is_final,
             visibility: f.visibility,
             raw_signature: format!("{} {}", f.type_text, f.name),
         })
@@ -440,7 +444,24 @@ fn build_class_members(
     methods.extend(synth.methods);
     fields.extend(synth.fields);
 
-    ClassMembers { superclass, interfaces, methods, fields, flags: Default::default() }
+    ClassMembers { superclass, interfaces, methods, fields, flags: class_flags(td) }
+}
+
+/// Map a source [`TypeDecl`] to the seam [`ClassFlags`] the inheritance / implement-abstract checks
+/// read — the project-source counterpart to the bytecode-decoded flags. Interfaces + annotation
+/// types are `is_interface` (and implicitly abstract); enums / records set their own bit (the
+/// checks treat those as un-extendable directly, so no need to also force `is_final`).
+fn class_flags(td: &TypeDecl) -> ClassFlags {
+    let is_interface = matches!(td.kind, TypeKind::Interface | TypeKind::Annotation);
+    ClassFlags {
+        is_interface,
+        is_abstract: is_interface || td.is_abstract,
+        is_final: td.is_final,
+        is_enum: matches!(td.kind, TypeKind::Enum),
+        is_annotation: matches!(td.kind, TypeKind::Annotation),
+        is_record: matches!(td.kind, TypeKind::Record),
+        is_sealed: td.is_sealed,
+    }
 }
 
 /// Resolve a supertype simple name to a binary name (generics stripped).
@@ -588,6 +609,25 @@ mod tests {
         let items: Vec<usize> = (0..5).collect();
         let out = parallel_map(&items, |x| x + 1);
         assert_eq!(out, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn project_type_flags_and_abstract_methods_are_carried() {
+        // An abstract project interface with a bodyless method → the resolved ClassMembers must
+        // carry `is_interface` and an abstract method, so the implement-abstract check fires against
+        // project supertypes (not only bytecode ones).
+        let fs = extract_symbols("package p;\npublic interface Repo { void save(); }\n");
+        let td = fs.types.iter().find(|t| t.name == "Repo").unwrap();
+        let cm = build_class_members(td, &fs.imports, &BTreeMap::new());
+        assert!(cm.flags.is_interface, "interface flag carried");
+        assert!(cm.flags.is_abstract, "interface is implicitly abstract");
+        let save = cm.methods.iter().find(|m| m.name == "save").unwrap();
+        assert!(save.is_abstract, "bodyless interface method carried as abstract");
+
+        // A `final` class → is_final; a plain class → no flags.
+        let ff = extract_symbols("package p;\npublic final class Utils {}\n");
+        let ftd = ff.types.iter().find(|t| t.name == "Utils").unwrap();
+        assert!(build_class_members(ftd, &ff.imports, &BTreeMap::new()).flags.is_final);
     }
 
     #[test]

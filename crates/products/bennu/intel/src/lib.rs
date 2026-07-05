@@ -20,6 +20,7 @@
 //! `bennu_intel::prelude::...`.
 
 pub mod config;
+pub mod diag_cache;
 pub mod java_index;
 // Internal: Lombok generated-member synthesis, an implementation detail of index-building
 // (java_index). Not part of the public surface, so it stays a private module (no prelude entry).

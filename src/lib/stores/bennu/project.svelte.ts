@@ -23,9 +23,12 @@ import {
   projectTree as ipcProjectTree,
   readFile as ipcReadFile,
   writeFile as ipcWriteFile,
+  projectDiagnostics as ipcProjectDiagnostics,
 } from '$lib/ipc/bennu';
 // Live re-index — kept in its own IPC file to avoid racing edits on index.ts.
 import { didChange as ipcDidChange } from '$lib/ipc/bennu/nav';
+// The Problems store — a save triggers a silent cross-file re-validation that refreshes it.
+import { bennuDiagnosticsStore } from './diagnostics.svelte';
 // Workspace store owns the SET of named workspaces + persistence; this store is the live runtime
 // of the ACTIVE workspace only. It reports its session snapshot up on every change (see
 // `persistWorkspace`). Circular import is safe: neither store touches the other at construction.
@@ -138,6 +141,36 @@ function createProjectStore() {
     const existing = reindexTimers.get(path);
     if (existing !== undefined) clearTimeout(existing);
     reindexTimers.set(path, setTimeout(() => reindexNow(path), REINDEX_DEBOUNCE_MS));
+  }
+
+  // ── Live Problems panel: a SILENT cross-file re-validation after a save ───────────────────────
+  // Saving a file can change diagnostics in OTHER files (a fixed/added method resolves elsewhere).
+  // A save schedules a debounced, silent whole-project re-validation (cheap — the incremental cache
+  // makes it near-instant) whose grouped diagnostics refresh the Problems panel, so cross-file
+  // effects show without the user re-running "Validate". The debounce also lets the save's live
+  // index patch land first, so dependents resolve against the new members.
+  let problemsRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  let problemsRefreshToken = 0;
+  const PROBLEMS_REFRESH_DEBOUNCE_MS = 600;
+  function scheduleProblemsRefresh() {
+    const root = project?.root;
+    if (!root || isDemo) return;
+    // Only once the user has opted into the project-wide view (ran "Validate" at least once) — a
+    // save shouldn't flood the panel unasked on a project with thousands of dependency problems.
+    if (!bennuDiagnosticsStore.armed) return;
+    if (problemsRefreshTimer !== undefined) clearTimeout(problemsRefreshTimer);
+    problemsRefreshTimer = setTimeout(() => {
+      if (project?.root !== root) return; // switched project during the debounce
+      const mine = ++problemsRefreshToken;
+      void ipcProjectDiagnostics(root)
+        .then((list) => {
+          // Ignore a superseded response or one for a project no longer active. `null` = index not
+          // ready → leave the panel untouched.
+          if (mine !== problemsRefreshToken || project?.root !== root) return;
+          if (list) bennuDiagnosticsStore.refreshProjectDiagnostics(list);
+        })
+        .catch(() => { /* BE absent — leave the panel as-is */ });
+    }, PROBLEMS_REFRESH_DEBOUNCE_MS);
   }
 
   /** Build the active workspace's session snapshot from the live flat state (active project) +
@@ -279,6 +312,9 @@ function createProjectStore() {
       }
     }
     reindexNow(path);
+    // Refresh the Problems panel project-wide (silent, debounced) so cross-file effects of this
+    // save appear without a manual "Validate".
+    scheduleProblemsRefresh();
   }
 
   return {

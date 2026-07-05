@@ -37,6 +37,18 @@ pub use crate::refs::{
 // index" (a clean full walk); the engine's `for_project` loads / saves it internally.
 pub use crate::refcache::{cache_path as ref_cache_path, clear as clear_ref_cache};
 
+// Persisted, dependency-aware DIAGNOSTIC cache: makes re-validating an unchanged project (or the
+// unchanged part of an edited one) instant. The be layer's whole-project validation loads it,
+// serves fresh entries, stores fresh ones, and persists it; it's cleared on a manual "Rebuild
+// index" like the reference cache.
+pub use crate::diag_cache::{
+    cache_path as diag_cache_path, clear as clear_diag_cache, load as load_diag_cache,
+    save as save_diag_cache, source_hash, CacheEntry, DiagCache, FileDeps,
+};
+// Re-surfaced from bennu-query so the be layer reaches recording through the intel prelude it
+// already imports (the provider's `validate_recording` returns these).
+pub use bennu_query::prelude::{ProjectView, RecordedDeps};
+
 // RENAME planning + apply (docs §5 #10-12): best-effort, preview-first, config-aware.
 // Plus go-to-declaration (`resolve_declaration` + `DeclarationLocation`), which reuses the
 // same caret classifier + decl-site name-span finders.
@@ -61,6 +73,6 @@ pub use crate::spell::{
 // no facade re-export).
 pub use crate::java_index::{
     build_project_index, build_project_index_from_sources, collect_java, file_records_from_source,
-    project_type_map, read_java_sources, read_source_for_index, ClassDecl, NonCompliantSource,
-    ProjectBuild, ProjectSources,
+    parallel_map, project_type_map, read_java_sources, read_source_for_index, ClassDecl,
+    NonCompliantSource, ProjectBuild, ProjectSources,
 };

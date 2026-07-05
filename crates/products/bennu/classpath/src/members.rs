@@ -88,6 +88,10 @@ pub struct Member {
     /// for everything else. Distinguishes a satisfied interface method from an abstract one.
     #[serde(default)]
     pub is_default: bool,
+    /// `ACC_FINAL` — a `final` method (can't be overridden) or `final` field (can't be reassigned).
+    /// Lets a consumer flag an illegal override / reassignment.
+    #[serde(default)]
+    pub is_final: bool,
     pub visibility: Visibility,
     /// The raw source string this member was decoded from: the generic `Signature`
     /// attribute when present, else the erased JVM descriptor. Kept verbatim so a
@@ -255,6 +259,7 @@ fn decode_method(m: &MethodInfo, class_is_interface: bool) -> Member {
     use cafebabe::MethodAccessFlags as MF;
     let is_static = m.access_flags.contains(MF::STATIC);
     let is_abstract = m.access_flags.contains(MF::ABSTRACT);
+    let is_final = m.access_flags.contains(MF::FINAL);
     let visibility = method_visibility(m.access_flags);
     // A concrete instance method inside an interface is a `default` method (JLS §9.4). `<clinit>`
     // (the static initialiser) is neither, but it's static so already excluded.
@@ -271,6 +276,7 @@ fn decode_method(m: &MethodInfo, class_is_interface: bool) -> Member {
                 is_static,
                 is_abstract,
                 is_default,
+                is_final,
                 visibility,
                 raw_signature: raw.to_string(),
             };
@@ -286,6 +292,7 @@ fn decode_method(m: &MethodInfo, class_is_interface: bool) -> Member {
         is_static,
         is_abstract,
         is_default,
+        is_final,
         visibility,
         raw_signature: raw,
     }
@@ -293,6 +300,7 @@ fn decode_method(m: &MethodInfo, class_is_interface: bool) -> Member {
 
 fn decode_field(f: &FieldInfo) -> Member {
     let is_static = f.access_flags.contains(cafebabe::FieldAccessFlags::STATIC);
+    let is_final = f.access_flags.contains(cafebabe::FieldAccessFlags::FINAL);
     let visibility = field_visibility(f.access_flags);
 
     if let Some(raw) = signature_attr(&f.attributes) {
@@ -305,6 +313,7 @@ fn decode_field(f: &FieldInfo) -> Member {
                 is_static,
                 is_abstract: false,
                 is_default: false,
+                is_final,
                 visibility,
                 raw_signature: raw.to_string(),
             };
@@ -319,6 +328,7 @@ fn decode_field(f: &FieldInfo) -> Member {
         is_static,
         is_abstract: false,
         is_default: false,
+        is_final,
         visibility,
         raw_signature: raw,
     }

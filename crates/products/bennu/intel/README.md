@@ -91,6 +91,17 @@ Two impl slots:
   walk on any structural type change. So the first open pays the O(N) walk once and later
   opens are near-instant. The manual "Rebuild index" deletes the cache (`clear`) for a clean
   full walk.
+- **`diag_cache`** — the persisted, dependency-aware cache of per-file **validation
+  diagnostics** (same shape/location discipline as `refcache`). Each entry stores the file's
+  own content hash plus the PRECISE project dependencies its validation recorded
+  (`bennu_query`'s `RecordedDeps`): the types whose members it read, the bare names it
+  resolved to a project type, and the names it probed and found **absent**. An entry is reused
+  only while all four still hold against the live resolver (`ProjectView`), so a re-validation
+  of an unchanged project (or the unchanged part of an edited one) is instant and can never
+  serve a stale diagnostic — the recorded set is a superset of everything validation reads
+  from the mutable project surface. A classpath/JDK `epoch` in the header drops the whole cache
+  when the classpath changes; "Rebuild index" clears it (`clear`). The be layer's whole-project
+  "Validate (no compile)" loads it, serves + fills it, prunes deleted files, and persists it.
 - **go-to-declaration** (Ctrl+Click / Ctrl+B) — `resolve_declaration(...)` (and
   `RenameEngine::declaration(file, source, offset)`) reuse the same caret classifier +
   decl-site name-span finders (`find_member_name_span` here; the type-name finder

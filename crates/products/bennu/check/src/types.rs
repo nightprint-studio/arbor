@@ -39,12 +39,13 @@ pub fn unresolved_types(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagno
         return Vec::new();
     };
     let symbols = extract_symbols(source);
-    unresolved_types_in(tree.root_node(), source, &symbols, resolver)
+    let nodes = crate::check::collect_nodes(tree.root_node());
+    unresolved_types_in(&nodes, source, &symbols, resolver)
 }
 
-/// Tree-driven core: reuses the caller's `symbols` (no re-extraction per validation pass).
+/// Tree-driven core: iterates the shared `nodes` + reuses the caller's `symbols`.
 pub fn unresolved_types_in(
-    root: Node,
+    nodes: &[Node],
     source: &str,
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
@@ -53,15 +54,10 @@ pub fn unresolved_types_in(
 
     // Names that are always resolvable in this file: declared types (incl. nested) + type params.
     let mut known: HashSet<String> = symbols.types.iter().map(|t| t.name.clone()).collect();
-    collect_type_params(root, bytes, &mut known);
+    collect_type_params(nodes, bytes, &mut known);
 
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         if n.kind() != "type_identifier" {
             continue;
         }
@@ -89,13 +85,8 @@ pub fn unresolved_types_in(
 /// Gather every type-parameter name declared anywhere in the file (`<T>`, `<K, V>`, `<T extends X>`).
 /// Collected file-wide (not per-scope) — over-including is conservative: a name that's a type
 /// parameter somewhere is never flagged as an unresolved type.
-fn collect_type_params(root: Node, bytes: &[u8], out: &mut HashSet<String>) {
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+fn collect_type_params(nodes: &[Node], bytes: &[u8], out: &mut HashSet<String>) {
+    for &n in nodes {
         if n.kind() == "type_parameter" {
             // The param name is the first `type_identifier` child.
             let mut tc = n.walk();

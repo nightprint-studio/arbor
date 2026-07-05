@@ -26,17 +26,18 @@ pub fn duplicate_signatures(source: &str) -> Vec<Diagnostic> {
 
 /// Tree-driven core.
 pub fn duplicate_signatures_in(root: Node, source: &str) -> Vec<Diagnostic> {
+    duplicate_signatures_nodes(&crate::check::collect_nodes(root), source)
+}
+
+/// Slice-driven core (shared pre-collected node list — one traversal across all pure-AST checks). The
+/// pre-order of the slice matches the old DFS, so the first-seen-wins dedup keys identically.
+pub fn duplicate_signatures_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     // Key: (enclosing body node id, member kind + name, parameter type texts). First-seen node kept;
     // a second insertion is a duplicate.
     let mut seen: HashMap<(usize, String, Vec<String>), ()> = HashMap::new();
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         let (kind_name, name_node) = match n.kind() {
             "method_declaration" => {
                 let Some(name) = n.child_by_field_name("name") else { continue };

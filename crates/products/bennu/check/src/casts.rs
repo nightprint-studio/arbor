@@ -14,7 +14,7 @@
 //!   * only value expressions the nominal walk can type (a name, a call, a field, a `new`, a cast) —
 //!     a literal (`1`, `"x"`, `null`) yields no type and is skipped, dodging boxing/widening entirely.
 
-use bennu_java::prelude::{extract_symbols, infer_expression_type_at, FileSymbols, TypeResolver};
+use bennu_java::prelude::{extract_symbols, infer_node_type_cached, FileSymbols, InferCache, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::{Node, Parser};
 
@@ -32,37 +32,36 @@ pub fn type_compat_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diag
         return Vec::new();
     };
     let symbols = extract_symbols(source);
-    type_compat_errors_in(tree.root_node(), source, &symbols, resolver)
+    let root = tree.root_node();
+    let nodes = crate::check::collect_nodes(root);
+    type_compat_errors_in(root, &nodes, source, &symbols, resolver, &InferCache::new())
 }
 
-/// Tree-driven core: reuses the caller's `root` + `symbols` and the tree-reusing inference (no
-/// re-parse per cast/assignment/return).
+/// Tree-driven core: iterates the shared `nodes` + reuses `root` + `symbols` + inference `cache`.
 pub fn type_compat_errors_in(
     root: Node,
+    nodes: &[Node],
     source: &str,
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         match n.kind() {
-            "cast_expression" => check_cast(n, &root, source, bytes, symbols, resolver, &mut out),
+            "cast_expression" => check_cast(n, &root, source, bytes, symbols, resolver, cache, &mut out),
             "local_variable_declaration" | "field_declaration" => {
-                check_declaration(n, &root, source, bytes, symbols, resolver, &mut out)
+                check_declaration(n, &root, source, bytes, symbols, resolver, cache, &mut out)
             }
-            "return_statement" => check_return(n, &root, source, bytes, symbols, resolver, &mut out),
+            "return_statement" => check_return(n, &root, source, bytes, symbols, resolver, cache, &mut out),
             _ => {}
         }
     }
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check_cast(
     n: Node,
     root: &Node,
@@ -70,12 +69,13 @@ fn check_cast(
     bytes: &[u8],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
     out: &mut Vec<Diagnostic>,
 ) {
     let Some(ty_node) = n.child_by_field_name("type") else { return };
     let Some(val) = n.child_by_field_name("value") else { return };
     let Ok(type_text) = ty_node.utf8_text(bytes) else { return };
-    let Some(value_ty) = infer_expression_type_at(root, source, symbols, val.start_byte(), val.end_byte(), resolver)
+    let Some(value_ty) = infer_node_type_cached(root, source, symbols, &val, resolver, cache)
     else {
         return;
     };
@@ -102,6 +102,7 @@ fn check_cast(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check_declaration(
     n: Node,
     root: &Node,
@@ -109,6 +110,7 @@ fn check_declaration(
     bytes: &[u8],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
     out: &mut Vec<Diagnostic>,
 ) {
     let Some(ty_node) = n.child_by_field_name("type") else { return };
@@ -122,10 +124,11 @@ fn check_declaration(
             continue;
         }
         let Some(val) = d.child_by_field_name("value") else { continue };
-        assign_check(root, source, symbols, type_text, val, resolver, "assigned to", out);
+        assign_check(root, source, symbols, type_text, val, resolver, cache, "assigned to", out);
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check_return(
     n: Node,
     root: &Node,
@@ -133,6 +136,7 @@ fn check_return(
     bytes: &[u8],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
     out: &mut Vec<Diagnostic>,
 ) {
     let Some(val) = first_value_child(n) else { return };
@@ -140,7 +144,7 @@ fn check_return(
     let Some(ret) = method.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok()) else {
         return;
     };
-    assign_check(root, source, symbols, ret, val, resolver, "returned as", out);
+    assign_check(root, source, symbols, ret, val, resolver, cache, "returned as", out);
 }
 
 /// Flag a value that can't be assigned/returned as `target_text` under any conversion we model.
@@ -152,10 +156,11 @@ fn assign_check(
     target_text: &str,
     val: Node,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
     verb: &str,
     out: &mut Vec<Diagnostic>,
 ) {
-    let Some(value_ty) = infer_expression_type_at(root, source, symbols, val.start_byte(), val.end_byte(), resolver)
+    let Some(value_ty) = infer_node_type_cached(root, source, symbols, &val, resolver, cache)
     else {
         return;
     };
@@ -315,17 +320,7 @@ mod tests {
     }
 
     fn getter(name: &str, ret: &str) -> Member {
-        Member {
-            name: name.to_string(),
-            kind: bennu_java::prelude::MemberKind::Method,
-            return_type: TypeRef::simple(ret.to_string()),
-            params: Vec::new(),
-            is_static: false,
-            is_abstract: false,
-            is_default: false,
-            visibility: bennu_java::prelude::Visibility::Public,
-            raw_signature: name.to_string(),
-        }
+        Member::method(name, TypeRef::simple(ret.to_string()), Vec::new())
     }
 
     fn cls(superclass: Option<&str>, methods: Vec<Member>) -> ClassMembers {

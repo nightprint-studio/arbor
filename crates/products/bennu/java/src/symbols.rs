@@ -10,6 +10,22 @@ use tree_sitter::{Node, Parser};
 
 use crate::seam::Visibility;
 
+/// What kind of type a [`TypeDecl`] declares. Drives the class-level flags the
+/// inheritance / implement-abstract checks read for **project-source** supertypes
+/// (`interface`/`enum`/`record` legality) — the bytecode side gets the same from
+/// [`ClassFlags`](crate::seam::ClassFlags). `#[default]` = `Class` so a pre-existing
+/// persisted symbol (before this field) still deserializes as a plain class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum TypeKind {
+    #[default]
+    Class,
+    Interface,
+    Enum,
+    Record,
+    /// An `@interface` — an annotation type (an interface at the bytecode level).
+    Annotation,
+}
+
 /// A single import. `star` marks `import a.b.*;`; `static_` marks `import static`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Import {
@@ -85,6 +101,18 @@ pub struct MethodDecl {
     pub is_static: bool,
     /// The declared access level (`public`/`protected`/`private`, else package-private).
     pub visibility: Visibility,
+    /// An abstract method — an explicit `abstract` modifier, or a bodyless interface method
+    /// (implicitly abstract). A concrete subclass must implement it. `#[serde(default)]` for
+    /// backward-compatible deserialization of a pre-existing persisted symbol.
+    #[serde(default)]
+    pub is_abstract: bool,
+    /// An interface `default` method (a concrete instance method inside an interface) — satisfies
+    /// the interface contract, so a subclass need not implement it.
+    #[serde(default)]
+    pub is_default: bool,
+    /// A `final` method — cannot be overridden by a subclass.
+    #[serde(default)]
+    pub is_final: bool,
 }
 
 /// A type declaration (class / interface / enum).
@@ -93,6 +121,20 @@ pub struct TypeDecl {
     pub name: String,
     /// Fully-qualified name (`package.Outer.Inner` when nested).
     pub fqn: String,
+    /// What the declaration is (class / interface / enum / record / annotation). `#[serde(default)]`
+    /// = `Class` for a pre-existing persisted symbol. Feeds the project-source class-level flags.
+    #[serde(default)]
+    pub kind: TypeKind,
+    /// An `abstract` class (has the `abstract` modifier). Interfaces are abstract by definition —
+    /// that's derived from `kind`, not stored here.
+    #[serde(default)]
+    pub is_abstract: bool,
+    /// A `final` class — cannot be extended.
+    #[serde(default)]
+    pub is_final: bool,
+    /// A `sealed` class/interface (a `permits` list restricts its subtypes).
+    #[serde(default)]
+    pub is_sealed: bool,
     pub methods: Vec<MethodDecl>,
     pub fields: Vec<FieldDecl>,
     /// The `extends` clause type text, if any.
@@ -206,6 +248,18 @@ fn collect_type(
         (None, None) => name.clone(),
     };
 
+    let kind = match node.kind() {
+        "interface_declaration" => TypeKind::Interface,
+        "enum_declaration" => TypeKind::Enum,
+        "record_declaration" => TypeKind::Record,
+        "annotation_type_declaration" => TypeKind::Annotation,
+        _ => TypeKind::Class,
+    };
+    let is_interface = matches!(kind, TypeKind::Interface | TypeKind::Annotation);
+    let is_abstract = has_modifier(node, bytes, "abstract");
+    let is_final = has_modifier(node, bytes, "final");
+    let is_sealed = has_modifier(node, bytes, "sealed");
+
     let mut extends = None;
     let mut implements = Vec::new();
     if let Some(sc) = node.child_by_field_name("superclass") {
@@ -231,7 +285,7 @@ fn collect_type(
         for m in body.named_children(&mut bw) {
             match m.kind() {
                 "method_declaration" => {
-                    if let Some(md) = parse_method(&m, bytes) {
+                    if let Some(md) = parse_method(&m, bytes, is_interface) {
                         methods.push(md);
                     }
                 }
@@ -254,7 +308,19 @@ fn collect_type(
     }
 
     let annotations = collect_annotations(node, bytes);
-    out.push(TypeDecl { name, fqn, methods, fields, extends, implements, annotations });
+    out.push(TypeDecl {
+        name,
+        fqn,
+        kind,
+        is_abstract,
+        is_final,
+        is_sealed,
+        methods,
+        fields,
+        extends,
+        implements,
+        annotations,
+    });
 }
 
 /// Collect a declaration's annotations from its `modifiers` node. A `marker_annotation`
@@ -328,8 +394,9 @@ fn string_literal_text(literal: &Node, bytes: &[u8]) -> Option<String> {
     Some(raw.trim_matches('"').to_string())
 }
 
-/// Extract a method_declaration.
-fn parse_method(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
+/// Extract a method_declaration. `enclosing_is_interface` lets a bodyless method be recognised as
+/// implicitly abstract (an interface method with no `default`/`static` body).
+fn parse_method(node: &Node, bytes: &[u8], enclosing_is_interface: bool) -> Option<MethodDecl> {
     let name = node.child_by_field_name("name").and_then(|n| node_text(&n, bytes))?;
     let return_type_text = node
         .child_by_field_name("type")
@@ -337,6 +404,18 @@ fn parse_method(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
         .unwrap_or_else(|| "void".to_string());
     let is_static = has_modifier(node, bytes, "static");
     let visibility = parse_visibility(node, bytes);
+    let is_default = has_modifier(node, bytes, "default");
+    // Abstract = an explicit `abstract` modifier, OR an interface method with no body that isn't
+    // `static`/`default`/`native` (implicitly abstract, JLS §9.4). Requiring "no body" keeps a class
+    // concrete method — which always has a body — from ever being mis-marked abstract (never a false
+    // positive for the implement-abstract check that reads this).
+    let has_body = node.child_by_field_name("body").is_some();
+    let is_abstract = has_modifier(node, bytes, "abstract")
+        || (enclosing_is_interface
+            && !has_body
+            && !is_static
+            && !is_default
+            && !has_modifier(node, bytes, "native"));
 
     let mut params = Vec::new();
     if let Some(pl) = node.child_by_field_name("parameters") {
@@ -356,7 +435,17 @@ fn parse_method(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
         }
     }
 
-    Some(MethodDecl { name, return_type_text, params, is_static, visibility })
+    let is_final = has_modifier(node, bytes, "final");
+    Some(MethodDecl {
+        name,
+        return_type_text,
+        params,
+        is_static,
+        visibility,
+        is_abstract,
+        is_default,
+        is_final,
+    })
 }
 
 /// Extract the (possibly multiple) fields of a field_declaration (`int a, b, c;`).
@@ -508,5 +597,46 @@ mod tests {
         let f = &fs.types[0].fields[0];
         assert!(f.has_annotation("Qualifier"));
         assert_eq!(f.annotations[0].value.as_deref(), Some("db"));
+    }
+
+    fn one_type(src: &str) -> TypeDecl {
+        extract_symbols(src).types.into_iter().next().expect("one type")
+    }
+
+    #[test]
+    fn type_kind_is_detected() {
+        assert_eq!(one_type("class C {}").kind, TypeKind::Class);
+        assert_eq!(one_type("interface I {}").kind, TypeKind::Interface);
+        assert_eq!(one_type("enum E { A }").kind, TypeKind::Enum);
+        assert_eq!(one_type("record R(int x) {}").kind, TypeKind::Record);
+        assert_eq!(one_type("@interface A {}").kind, TypeKind::Annotation);
+    }
+
+    #[test]
+    fn class_modifiers_are_captured() {
+        let t = one_type("abstract class C {}");
+        assert!(t.is_abstract && !t.is_final);
+        let f = one_type("final class C {}");
+        assert!(f.is_final && !f.is_abstract);
+    }
+
+    #[test]
+    fn interface_method_is_implicitly_abstract() {
+        // A bodyless interface method is abstract; a `default` one is not; a `static` one is not.
+        let t = one_type("interface I { void run(); default void ok() {} static void s() {} }");
+        let run = t.methods.iter().find(|m| m.name == "run").unwrap();
+        assert!(run.is_abstract && !run.is_default, "bodyless interface method is abstract");
+        let ok = t.methods.iter().find(|m| m.name == "ok").unwrap();
+        assert!(!ok.is_abstract && ok.is_default, "default method is not abstract");
+        let s = t.methods.iter().find(|m| m.name == "s").unwrap();
+        assert!(!s.is_abstract && !s.is_default, "static interface method is neither");
+    }
+
+    #[test]
+    fn class_abstract_method_is_abstract() {
+        let t = one_type("abstract class C { abstract void run(); void done() {} }");
+        assert!(t.methods.iter().find(|m| m.name == "run").unwrap().is_abstract);
+        // A concrete class method (with a body) is never marked abstract.
+        assert!(!t.methods.iter().find(|m| m.name == "done").unwrap().is_abstract);
     }
 }

@@ -7,7 +7,7 @@
 //! `Integer.MAX_VALUE`), a package/type prefix (`java.util.List`), an array's pseudo-`length`, or an
 //! unknown receiver type all yield no inferred value type, so they're skipped, never mis-flagged.
 
-use bennu_java::prelude::{infer_receiver_type_at, FileSymbols, MemberKind, TypeResolver};
+use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, MemberKind, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::{Node, Parser};
 
@@ -24,31 +24,31 @@ pub fn unknown_fields(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnost
         return Vec::new();
     };
     let symbols = bennu_java::prelude::extract_symbols(source);
-    unknown_fields_in(tree.root_node(), source, &symbols, resolver)
+    let root = tree.root_node();
+    let nodes = crate::check::collect_nodes(root);
+    unknown_fields_in(root, &nodes, source, &symbols, resolver, &InferCache::new())
 }
 
-/// The tree-driven core: reuses the caller's `root` + `symbols` (one parse per file, not per site).
+/// The tree-driven core: iterates the shared `nodes` + reuses `root` + `symbols` + inference `cache`.
 pub fn unknown_fields_in(
     root: Node,
+    nodes: &[Node],
     source: &str,
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         if n.kind() == "field_access" {
-            check_access(n, &root, source, bytes, symbols, resolver, &mut out);
+            check_access(n, &root, source, bytes, symbols, resolver, cache, &mut out);
         }
     }
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check_access(
     n: Node,
     root: &Node,
@@ -56,8 +56,10 @@ fn check_access(
     bytes: &[u8],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
     out: &mut Vec<Diagnostic>,
 ) {
+    let Some(obj) = n.child_by_field_name("object") else { return };
     let Some(field) = n.child_by_field_name("field") else { return };
     if field.has_error() {
         return;
@@ -69,8 +71,8 @@ fn check_access(
         return;
     }
 
-    // Infer the receiver (`object`) type at the field-name position.
-    let Some(ty) = infer_receiver_type_at(root, source, symbols, field.start_byte(), resolver) else {
+    // Infer the receiver (`object`) type from the already-located node (no descendant search).
+    let Some(ty) = infer_node_type_cached(root, source, symbols, &obj, resolver, cache) else {
         return;
     };
     if ty.binary_name.is_empty() {
@@ -96,7 +98,7 @@ fn check_access(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bennu_java::prelude::{ClassMembers, Import, Member, TypeRef, Visibility};
+    use bennu_java::prelude::{ClassMembers, Import, Member, TypeRef};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -115,17 +117,7 @@ mod tests {
     }
 
     fn field(name: &str, ty: &str) -> Member {
-        Member {
-            name: name.to_string(),
-            kind: MemberKind::Field,
-            return_type: TypeRef::simple(ty.to_string()),
-            params: Vec::new(),
-            is_static: false,
-            is_abstract: false,
-            is_default: false,
-            visibility: Visibility::Public,
-            raw_signature: format!("{ty} {name}"),
-        }
+        Member::field(name, TypeRef::simple(ty.to_string())).sig(format!("{ty} {name}"))
     }
 
     /// A `Point { int x; int y; }` extending `Base { Object tag; }`, plus a generic `Box<T> { T value; }`.

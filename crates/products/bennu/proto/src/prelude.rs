@@ -7,10 +7,12 @@
 
 pub use crate::contract::{
     BuildDiagnostic, BuildResult, CapabilityHit, CapabilitySet, ClassEntry, CompletionItem,
-    DeclarationTarget, Diagnostic, EncodingIssue, EnvVar, FileContents, FindHit, FormAnalysis,
+    DeclarationTarget, Diagnostic, EncodingIssue, EnvVar, FileContents, FileDiagnostics,
+    FileValidationStat, FindHit, FormAnalysis,
     FormFieldInfo, FormInfo, HoverInfo, IndexEntry, IndexStats,
     JdkStatus, JspNav,
-    InheritedMember, InheritedSource, JdkInfo, MainClassEntry, ProjectInfo, RenameEdit,
-    RenameFileEdits, RenamePreview, RunConfig, RunConfigSet, RunHandle, SpellHit, SpellStatus,
+    InheritedMember, InheritedSource, JdkInfo, MainClassEntry, ProjectInfo, ProjectValidationResult,
+    RenameEdit, RenameFileEdits, RenamePreview, RunConfig, RunConfigSet, RunHandle, SpellHit,
+    SpellStatus,
     TodoItem, TreeNode, UsageHit, UsagesResult, ValidationContext, WriteResult,
 };

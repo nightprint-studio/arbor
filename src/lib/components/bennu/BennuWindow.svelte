@@ -22,7 +22,7 @@
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info,
     Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck,
-    TextCursorInput,
+    TextCursorInput, ListChecks,
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -122,9 +122,15 @@
   });
 
   // ── Build / Run triggers (mirror the titlebar; shared by keybindings + palette) ─
+  /** Ctrl+F9 / palette Build — runs the preferred build type (Maven compile or validation). */
   function triggerBuild() {
     const root = projectStore.project?.root;
-    if (root) void bennuRunStore.build(root);
+    if (root) void bennuRunStore.runPreferred(root);
+  }
+  /** Palette "Validate project" — the whole-project validation without compiling. */
+  function triggerValidate() {
+    const root = projectStore.project?.root;
+    if (root) void bennuRunStore.validateProject(root);
   }
   function triggerRun() {
     const root = projectStore.project?.root;
@@ -214,6 +220,7 @@
     'alert': AlertTriangle as unknown as IconComponent,
     'terminal': TerminalSquare as unknown as IconComponent,
     'hammer': Hammer as unknown as IconComponent,
+    'list-checks': ListChecks as unknown as IconComponent,
     'play': Play as unknown as IconComponent,
     'todo': ListTodo as unknown as IconComponent,
     'box': Box as unknown as IconComponent,
@@ -301,6 +308,8 @@
     const runItems = [
       { id: 'build', title: 'Build project', icon: 'hammer', shortcut: 'Ctrl+F9',
         action: () => run(triggerBuild), when: !!projectStore.project && !bennuRunStore.active },
+      { id: 'validate', title: 'Validate project (no compile)', icon: 'list-checks',
+        action: () => run(triggerValidate), when: !!projectStore.project && !bennuRunStore.active },
       { id: 'run', title: 'Run', icon: 'play', shortcut: 'Shift+F10',
         action: () => run(triggerRun), when: !!projectStore.project && !bennuRunStore.active },
       { id: 'stoprun', title: 'Stop', icon: 'hammer',

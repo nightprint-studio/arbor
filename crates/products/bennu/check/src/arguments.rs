@@ -12,12 +12,12 @@
 //!     two unrelated concrete classes (the argument isn't a subtype of the parameter). Boxing,
 //!     widening, interfaces, generics and `null` are all treated as OK.
 
-use bennu_java::prelude::{infer_expression_type_at, infer_receiver_type_at, FileSymbols, MemberKind, Member, TypeRef, TypeResolver};
+use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, Member, TypeRef, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::{Node, Parser};
 
 use crate::members::simple_name;
-use crate::walk::{for_each_supertype, hierarchy_fully_known, reaches};
+use crate::walk::{hierarchy_fully_known, reaches};
 
 /// Parse `source` and flag arguments of the wrong type.
 pub fn argument_type_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
@@ -29,31 +29,31 @@ pub fn argument_type_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Di
         return Vec::new();
     };
     let symbols = bennu_java::prelude::extract_symbols(source);
-    argument_type_errors_in(tree.root_node(), source, &symbols, resolver)
+    let root = tree.root_node();
+    let nodes = crate::check::collect_nodes(root);
+    argument_type_errors_in(root, &nodes, source, &symbols, resolver, &InferCache::new())
 }
 
-/// Tree-driven core: reuses the caller's `root` + `symbols`.
+/// Tree-driven core: iterates the shared `nodes` + reuses `root` + `symbols` + inference `cache`.
 pub fn argument_type_errors_in(
     root: Node,
+    nodes: &[Node],
     source: &str,
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         if n.kind() == "method_invocation" {
-            check_call(n, &root, source, bytes, symbols, resolver, &mut out);
+            check_call(n, &root, source, bytes, symbols, resolver, cache, &mut out);
         }
     }
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check_call(
     n: Node,
     root: &Node,
@@ -61,33 +61,45 @@ fn check_call(
     bytes: &[u8],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
     out: &mut Vec<Diagnostic>,
 ) {
-    if n.child_by_field_name("object").is_none() {
-        return; // only `receiver.method(...)`, like arity/members
-    }
+    // only `receiver.method(...)`, like arity/members
+    let Some(obj) = n.child_by_field_name("object") else { return };
     let Some(name) = n.child_by_field_name("name") else { return };
     let Some(arg_list) = n.child_by_field_name("arguments") else { return };
     if name.has_error() || arg_list.has_error() {
         return;
     }
     let Ok(method) = name.utf8_text(bytes) else { return };
-    let Some(ty) = infer_receiver_type_at(root, source, symbols, name.start_byte(), resolver) else {
+    let Some(ty) = infer_node_type_cached(root, source, symbols, &obj, resolver, cache) else {
         return;
     };
-    if ty.binary_name.is_empty() || !hierarchy_fully_known(resolver, &ty.binary_name) {
+    if ty.binary_name.is_empty() {
+        return;
+    }
+    // Shared memoized hierarchy walk (see `InferCache::resolve_methods`): `complete` is the
+    // hierarchy-fully-known gate, and the candidates are the overload set (one walk per call site).
+    let res = cache.resolve_methods(resolver, &ty.binary_name, method);
+    if !res.complete {
         return;
     }
     let args: Vec<Node> = named_args(arg_list);
+    let argc = args.len();
 
     // Candidate overloads: same name + arity, not varargs, not generic. If exactly one distinct
     // signature survives, we know which parameters the arguments bind to.
-    let sigs = candidate_signatures(resolver, &ty.binary_name, method, args.len());
+    let mut sigs: Vec<Vec<TypeRef>> = Vec::new();
+    for m in &res.candidates {
+        if m.params.len() == argc && checkable(m) && !sigs.contains(&m.params) {
+            sigs.push(m.params.clone());
+        }
+    }
     let [params] = sigs.as_slice() else { return };
 
     for (i, arg) in args.iter().enumerate() {
         let Some(param) = params.get(i) else { break };
-        let Some(arg_ty) = infer_expression_type_at(root, source, symbols, arg.start_byte(), arg.end_byte(), resolver)
+        let Some(arg_ty) = infer_node_type_cached(root, source, symbols, arg, resolver, cache)
         else {
             continue;
         };
@@ -103,28 +115,6 @@ fn check_call(
             });
         }
     }
-}
-
-/// Distinct parameter-type lists of the overloads of `name` with `argc` parameters that we can check
-/// (non-varargs, non-generic). Deduped so an inherited/overridden identical signature counts once.
-fn candidate_signatures(
-    resolver: &dyn TypeResolver,
-    binary: &str,
-    name: &str,
-    argc: usize,
-) -> Vec<Vec<TypeRef>> {
-    let mut sigs: Vec<Vec<TypeRef>> = Vec::new();
-    for_each_supertype(resolver, binary, &mut |_bn, cm| {
-        for m in &cm.methods {
-            if m.name == name && m.kind == MemberKind::Method && m.params.len() == argc && checkable(m) {
-                let params = m.params.clone();
-                if !sigs.contains(&params) {
-                    sigs.push(params);
-                }
-            }
-        }
-    });
-    sigs
 }
 
 /// A method whose parameters we can type-check: none is a type variable (generic) or an array
@@ -188,7 +178,7 @@ fn is_type_var(binary: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bennu_java::prelude::{ClassFlags, ClassMembers, Import, Visibility};
+    use bennu_java::prelude::{ClassFlags, ClassMembers, Import};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -206,17 +196,8 @@ mod tests {
     }
 
     fn method(name: &str, params: &[&str]) -> Member {
-        Member {
-            name: name.to_string(),
-            kind: MemberKind::Method,
-            return_type: TypeRef::simple("void"),
-            params: params.iter().map(|p| TypeRef::simple(p.to_string())).collect(),
-            is_static: false,
-            is_abstract: false,
-            is_default: false,
-            visibility: Visibility::Public,
-            raw_signature: name.to_string(),
-        }
+        let params = params.iter().map(|p| TypeRef::simple(p.to_string())).collect();
+        Member::method(name, TypeRef::simple("void"), params)
     }
 
     fn cls(methods: Vec<Member>) -> ClassMembers {

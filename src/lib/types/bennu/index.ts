@@ -141,6 +141,40 @@ export interface BuildResult {
   diagnostics: BuildDiagnostic[];
 }
 
+/** Per-file timing + counts from a project-wide validation (`bennu_validate_project`). */
+export interface FileValidationStat {
+  /** Absolute path (forward slashes) of the validated file. */
+  file: string;
+  /** Milliseconds spent validating it. */
+  ms: number;
+  /** Number of `error`-severity diagnostics. */
+  errors: number;
+  /** Number of `warning`-severity diagnostics. */
+  warnings: number;
+}
+
+/** The diagnostics of one file (byte offsets over its on-disk content). */
+export interface FileDiagnostics {
+  file: string;
+  diagnostics: Diagnostic[];
+}
+
+/** Result of `bennu_validate_project` — the whole-project "validation without compiling" with
+ *  timing statistics (the compile-time proxy) + diagnostics grouped by file. Aggregates cover every
+ *  file; `files` is the slowest-first, capped detail table. */
+export interface ProjectValidationResult {
+  total_files: number;
+  total_ms: number;
+  avg_ms: number;
+  max_ms: number;
+  max_file: string | null;
+  total_diagnostics: number;
+  error_count: number;
+  warning_count: number;
+  files: FileValidationStat[];
+  diagnostics: FileDiagnostics[];
+}
+
 /** Result of `bennu_run`: the id correlating the `arbor://bennu/run-output` /
  *  `arbor://bennu/run-exit` event stream, plus the resolved main class. */
 export interface RunHandle {

@@ -62,9 +62,83 @@ pub struct Member {
     /// An interface `default` method — a concrete method that satisfies the interface contract.
     #[serde(default)]
     pub is_default: bool,
+    /// A `final` method (can't be overridden) or `final` field (can't be reassigned).
+    #[serde(default)]
+    pub is_final: bool,
     pub visibility: Visibility,
     /// A readable, best-available signature rendering (for completion `detail`).
     pub raw_signature: String,
+}
+
+impl Member {
+    /// A public, non-static instance **method** with every flag defaulted (`raw_signature` = the
+    /// bare name). Chain the fluent setters to adjust. Centralises construction so growing the struct
+    /// touches this one spot instead of every call site.
+    pub fn method(name: impl Into<String>, return_type: TypeRef, params: Vec<TypeRef>) -> Self {
+        let name = name.into();
+        let raw_signature = name.clone();
+        Self {
+            name,
+            kind: MemberKind::Method,
+            return_type,
+            params,
+            is_static: false,
+            is_abstract: false,
+            is_default: false,
+            is_final: false,
+            visibility: Visibility::Public,
+            raw_signature,
+        }
+    }
+
+    /// A public, non-static **field** of type `ty`, every flag defaulted.
+    pub fn field(name: impl Into<String>, ty: TypeRef) -> Self {
+        let name = name.into();
+        let raw_signature = name.clone();
+        Self {
+            name,
+            kind: MemberKind::Field,
+            return_type: ty,
+            params: Vec::new(),
+            is_static: false,
+            is_abstract: false,
+            is_default: false,
+            is_final: false,
+            visibility: Visibility::Public,
+            raw_signature,
+        }
+    }
+
+    /// Mark `static`.
+    pub fn stat(mut self) -> Self {
+        self.is_static = true;
+        self
+    }
+    /// Mark `abstract`.
+    pub fn abstract_(mut self) -> Self {
+        self.is_abstract = true;
+        self
+    }
+    /// Mark an interface `default` method.
+    pub fn default_(mut self) -> Self {
+        self.is_default = true;
+        self
+    }
+    /// Mark `final`.
+    pub fn final_(mut self) -> Self {
+        self.is_final = true;
+        self
+    }
+    /// Set the visibility.
+    pub fn vis(mut self, visibility: Visibility) -> Self {
+        self.visibility = visibility;
+        self
+    }
+    /// Set the rendered signature (completion `detail`).
+    pub fn sig(mut self, raw_signature: impl Into<String>) -> Self {
+        self.raw_signature = raw_signature.into();
+        self
+    }
 }
 
 /// Class-level access flags the checks need (extend-final / extend-record / implement-abstract).

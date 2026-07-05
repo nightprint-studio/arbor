@@ -18,6 +18,15 @@ of `bennu-intel` so it depends only on the base crates.
 the `.`, walk its members (super + interfaces), filter by the typed prefix, return
 `Vec<CompletionItem>`.
 
+`dep_record` powers the **incremental validation cache**: a `record(|| …)` scope captures every
+project type a validation reads through the resolver (`members_of` / `resolve_simple_name` are the
+single choke point) — types whose members were read, bare names that resolved to a project type,
+and names probed and found *absent* (negative deps). The `ProjectView` trait (impl'd by
+`IndexResolver`, via `dep_signature` / `project_simple` / `project_contains`) re-checks those
+recorded deps against the live project, so `bennu-intel`'s diagnostic cache can tell — with no false
+positives — when a cached diagnostic list is still valid. Recording is a thread-local, gated by a
+cheap flag, so it's a no-op on the hot completion / reference-walk paths.
+
 `inherited_members(&resolver, java_files, file, type_name, line)` collects a type's SUPERCLASS +
 INTERFACES members (recursively, deduping overrides) — the Structure panel's lazy "Inherited"
 bucket. It reuses the same `members_of` supertype walk as completion, one level up from the type's
@@ -33,6 +42,9 @@ struct IndexResolver<M: MemberIndex>       // impls bennu_java::TypeResolver
 struct JdkMemberIndex                       // Send + Sync, persistent lazy JDK member index
 struct PlanFile { path, source }            // a project source file (whole-project query input)
 struct InheritedMember / InheritedSource    // the inherited-members result shape
+trait ProjectView                           // read-only project view for cache freshness checks
+struct RecordedDeps                          // project deps captured during a validation
+fn record(f) -> (R, RecordedDeps)            // run `f` capturing the project types it reads
 fn convert_members(&CpClassMembers) -> JClassMembers
 fn completion(source: &str, byte_offset: usize, resolver: &IndexResolver<M>) -> Vec<CompletionItem>
 fn inherited_members(resolver, java_files: &[PlanFile], file, type_name, line) -> Vec<InheritedMember>

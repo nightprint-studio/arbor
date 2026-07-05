@@ -12,9 +12,13 @@ inference.
 // Structural model of one file.
 fn extract_symbols(source: &str) -> FileSymbols
 //   FileSymbols { package, imports, types }
-//   TypeDecl    { name, fqn, methods, fields, extends, implements }
-//   MethodDecl  { name, return_type_text, params, is_static }
-//   FieldDecl   { name, type_text, is_static }
+//   TypeDecl    { name, fqn, kind, is_abstract, is_final, is_sealed, methods, fields, extends, implements }
+//   TypeKind    = Class | Interface | Enum | Record | Annotation
+//   MethodDecl  { name, return_type_text, params, is_static, is_abstract, is_default, is_final }
+//   FieldDecl   { name, type_text, is_static, is_final }
+// `kind` + the class modifiers + method `is_abstract`/`is_default` (a bodyless interface method is
+// implicitly abstract) are what `bennu-intel` maps into the seam `ClassFlags`/`Member` flags for
+// PROJECT types, so the inheritance / implement-abstract checks fire against project supertypes too.
 
 // Static type of the expression immediately LEFT of the `.` at `byte_offset`.
 fn infer_receiver_type(source: &str, byte_offset: usize, resolver: &dyn TypeResolver)
@@ -24,6 +28,13 @@ fn infer_receiver_type(source: &str, byte_offset: usize, resolver: &dyn TypeReso
 // (`"x" + n` → String), so the checks can catch String↔primitive mismatches.
 // `_at` variants (reuse a parsed root + extracted symbols) exist for both — validation MUST use them
 // (per-site re-parsing was quadratic).
+//
+// For the HOT path (validation over a whole file), use the `InferCache`-backed variants:
+//   fn infer_node_type_cached(root, source, symbols, node, resolver, &InferCache) -> Option<TypeRef>
+//   fn infer_receiver_type_cached(...) / infer_expression_type_cached(...)
+// One `InferCache` per file memoizes each site's result AND each scope's locals, so a dozen checks
+// that infer the same sites pay once and local resolution isn't a per-site re-scan. `infer_node_*`
+// takes an ALREADY-located node (the check found it while walking), skipping the descendant search.
 fn infer_expression_type(source: &str, start: usize, end: usize, resolver: &dyn TypeResolver)
     -> Option<TypeRef>
 
@@ -49,7 +60,7 @@ trait TypeResolver {
     fn resolve_simple_name(&self, name: &str, imports: &[Import]) -> Option<String>;
 }
 struct ClassMembers { superclass: Option<String>, interfaces: Vec<String>, methods: Vec<Member>, fields: Vec<Member>, flags: ClassFlags }
-struct Member { name, kind: MemberKind, return_type: TypeRef, params: Vec<TypeRef>, is_static, is_abstract, is_default, visibility, raw_signature }
+struct Member { name, kind: MemberKind, return_type: TypeRef, params: Vec<TypeRef>, is_static, is_abstract, is_default, is_final, visibility, raw_signature }
 struct ClassFlags { is_interface, is_abstract, is_final, is_enum, is_annotation, is_record, is_sealed }  // decoded from bytecode
 ```
 

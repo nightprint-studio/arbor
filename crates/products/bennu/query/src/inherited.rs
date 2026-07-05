@@ -247,31 +247,13 @@ mod tests {
     use std::collections::HashMap;
 
     fn method(name: &str, ret: &str, vis: Visibility) -> Member {
-        Member {
-            name: name.to_string(),
-            kind: MemberKind::Method,
-            return_type: TypeRef::simple(ret.to_string()),
-            params: Vec::new(),
-            is_static: false,
-            is_abstract: false,
-            is_default: false,
-            visibility: vis,
-            raw_signature: format!("{ret} {name}()"),
-        }
+        Member::method(name, TypeRef::simple(ret.to_string()), Vec::new())
+            .vis(vis)
+            .sig(format!("{ret} {name}()"))
     }
 
     fn field(name: &str, ty: &str, vis: Visibility) -> Member {
-        Member {
-            name: name.to_string(),
-            kind: MemberKind::Field,
-            return_type: TypeRef::simple(ty.to_string()),
-            params: Vec::new(),
-            is_static: false,
-            is_abstract: false,
-            is_default: false,
-            visibility: vis,
-            raw_signature: format!("{ty} {name}"),
-        }
+        Member::field(name, TypeRef::simple(ty.to_string())).vis(vis).sig(format!("{ty} {name}"))
     }
 
     fn plan_file(path: &str, source: &str) -> PlanFile {

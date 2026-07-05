@@ -20,13 +20,13 @@ import {
   highlightActiveLine, highlightActiveLineGutter, drawSelection,
   ViewPlugin, Decoration, type DecorationSet, type PluginValue, type ViewUpdate,
 } from '@codemirror/view';
-import { EditorState, StateField, StateEffect, type Extension, type Text } from '@codemirror/state';
+import { EditorState, StateField, StateEffect, Prec, type Extension, type Text } from '@codemirror/state';
 import { history, defaultKeymap, historyKeymap, indentWithTab, deleteLine } from '@codemirror/commands';
 import { bracketMatching, indentOnInput, foldKeymap, foldGutter, codeFolding } from '@codemirror/language';
 import { lintGutter, lintKeymap } from '@codemirror/lint';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import {
-  autocompletion, completionKeymap, startCompletion,
+  autocompletion, completionKeymap, startCompletion, acceptCompletion,
   closeBrackets, closeBracketsKeymap,
 } from '@codemirror/autocomplete';
 
@@ -184,6 +184,16 @@ export function createCodeEditorExtensions(
   const completionSource = lang.intel?.completion;
   if (completionSource && !opts.readOnly) {
     exts.push(autocompletion({ override: [completionSource], defaultKeymap: false }));
+    // The completion keymap MUST win over `defaultKeymap` while the popup is open, or
+    // `defaultKeymap`'s Enter (insert newline) fires first and the accepted item is never
+    // inserted. `Prec.highest` puts it above the base keymap regardless of push order; each
+    // binding no-ops (returns false) when the popup is closed, so Enter/Tab fall through to
+    // newline / indent normally. `Tab` is added to accept too (IntelliJ muscle memory).
+    exts.push(
+      Prec.highest(
+        keymap.of([{ key: 'Tab', run: acceptCompletion }, ...completionKeymap]),
+      ),
+    );
     // Member-access trigger: CodeMirror's `activateOnTyping` only auto-opens the popup
     // on identifier characters, so a bare `receiver.` never queries the source. Fire
     // completion explicitly right after a `.` is typed (the source's dot branch returns
@@ -217,7 +227,7 @@ export function createCodeEditorExtensions(
       // Before the default keymap so Backspace deletes an empty auto-inserted pair.
       ...closeBracketsKeymap,
       ...defaultKeymap, ...historyKeymap, ...lintKeymap, ...foldKeymap,
-      ...(completionSource && !opts.readOnly ? completionKeymap : []),
+      // (completion keymap is installed at Prec.highest above so it beats defaultKeymap's Enter)
       ...searchKeymapNoOpen, indentWithTab,
     ]),
     EditorState.readOnly.of(!!opts.readOnly),

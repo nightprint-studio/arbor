@@ -12,13 +12,12 @@
 //!     the seam), so a varargs call is never mis-flagged.
 
 use bennu_java::prelude::{
-    extract_symbols, infer_receiver_type_at, FileSymbols, MemberKind, TypeResolver,
+    extract_symbols, infer_node_type_cached, FileSymbols, InferCache, MemberKind, TypeResolver,
 };
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::{Node, Parser};
 
 use crate::members::simple_name;
-use crate::walk::{for_each_supertype, hierarchy_fully_known};
 
 /// One overload's arity shape: its parameter count and whether the last parameter is an array
 /// (hence *maybe* varargs).
@@ -49,26 +48,25 @@ pub fn arity_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic
         return Vec::new();
     };
     let symbols = extract_symbols(source);
-    arity_errors_in(tree.root_node(), source, &symbols, resolver)
+    let root = tree.root_node();
+    let nodes = crate::check::collect_nodes(root);
+    arity_errors_in(root, &nodes, source, &symbols, resolver, &InferCache::new())
 }
 
-/// Tree-driven core: reuses the caller's `root` + `symbols` (one parse per file, not per site).
+/// Tree-driven core: iterates the shared `nodes` + reuses `root` + `symbols` + inference `cache`.
 pub fn arity_errors_in(
     root: Node,
+    nodes: &[Node],
     source: &str,
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut c = n.walk();
-        for ch in n.named_children(&mut c) {
-            stack.push(ch);
-        }
+    for &n in nodes {
         match n.kind() {
-            "method_invocation" => check_call(n, &root, source, bytes, symbols, resolver, &mut out),
+            "method_invocation" => check_call(n, &root, source, bytes, symbols, resolver, cache, &mut out),
             "object_creation_expression" => check_new(n, source, bytes, symbols, resolver, &mut out),
             _ => {}
         }
@@ -76,6 +74,7 @@ pub fn arity_errors_in(
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check_call(
     n: Node,
     root: &Node,
@@ -83,30 +82,34 @@ fn check_call(
     bytes: &[u8],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
     out: &mut Vec<Diagnostic>,
 ) {
     // Only `receiver.method(...)` — a bare `foo()` resolves against `this`, whose source type the
     // resolver may not fully carry (arity would be unreliable). Aligns with `members`.
-    if n.child_by_field_name("object").is_none() {
-        return;
-    }
+    let Some(obj) = n.child_by_field_name("object") else { return };
     let Some(name) = n.child_by_field_name("name") else { return };
     let Some(args) = n.child_by_field_name("arguments") else { return };
     if name.has_error() || args.has_error() {
         return;
     }
     let Ok(method) = name.utf8_text(bytes) else { return };
-    let Some(ty) = infer_receiver_type_at(root, source, symbols, name.start_byte(), resolver) else {
+    let Some(ty) = infer_node_type_cached(root, source, symbols, &obj, resolver, cache) else {
         return;
     };
-    if ty.binary_name.is_empty() || !hierarchy_fully_known(resolver, &ty.binary_name) {
+    if ty.binary_name.is_empty() {
         return;
     }
-
-    let sigs = method_overloads(resolver, &ty.binary_name, method);
-    if sigs.is_empty() {
+    // Shared memoized hierarchy walk (see `InferCache::resolve_methods`) — `complete` is the
+    // hierarchy-fully-known gate, the candidates are the overload set (no separate walk per call).
+    let res = cache.resolve_methods(resolver, &ty.binary_name, method);
+    if !res.complete {
+        return;
+    }
+    if res.candidates.is_empty() {
         return; // unknown method → members.rs handles it
     }
+    let sigs: Vec<Sig> = res.candidates.iter().map(sig_of).collect();
     let argc = arg_count(args);
     if !sigs.iter().any(|s| s.accepts(argc)) {
         out.push(Diagnostic {
@@ -172,19 +175,6 @@ fn check_new(
     }
 }
 
-/// Collect the arity shapes of every method named `name` reachable from `binary` (walking supertypes).
-fn method_overloads(resolver: &dyn TypeResolver, binary: &str, name: &str) -> Vec<Sig> {
-    let mut sigs = Vec::new();
-    for_each_supertype(resolver, binary, &mut |_bn, cm| {
-        for m in &cm.methods {
-            if m.name == name && m.kind == MemberKind::Method {
-                sigs.push(sig_of(m));
-            }
-        }
-    });
-    sigs
-}
-
 fn sig_of(m: &bennu_java::prelude::Member) -> Sig {
     Sig {
         params: m.params.len(),
@@ -212,7 +202,7 @@ fn plural(n: usize) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bennu_java::prelude::{ClassMembers, Import, Member, TypeRef, Visibility};
+    use bennu_java::prelude::{ClassMembers, Import, Member, TypeRef};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -231,17 +221,8 @@ mod tests {
     }
 
     fn method(name: &str, params: &[&str]) -> Member {
-        Member {
-            name: name.to_string(),
-            kind: MemberKind::Method,
-            return_type: TypeRef::simple("void"),
-            params: params.iter().map(|p| TypeRef::simple(p.to_string())).collect(),
-            is_static: false,
-            is_abstract: false,
-            is_default: false,
-            visibility: Visibility::Public,
-            raw_signature: name.to_string(),
-        }
+        let params = params.iter().map(|p| TypeRef::simple(p.to_string())).collect();
+        Member::method(name, TypeRef::simple("void"), params)
     }
 
     /// `Svc` with `run()`, `add(int)`, `add(int,int)`, `varargs(String...)`; ctor `Svc(int)`.
