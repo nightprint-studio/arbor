@@ -555,7 +555,7 @@ impl IndexService {
     /// Serve completion at `file`:`offset` from the owning project's provider (matched
     /// by longest root prefix). Returns `[]` when no project owns the file, or its
     /// index is still building.
-    pub fn completion(&self, file: &str, offset: usize) -> Vec<CompletionItem> {
+    pub fn completion(&self, file: &str, offset: usize, source: Option<&str>) -> Vec<CompletionItem> {
         let Some(slot) = self.slot_for_file(file) else {
             return Vec::new();
         };
@@ -564,7 +564,7 @@ impl IndexService {
             Arc::clone(&g)
         };
         let at = Position { file: file.to_string(), offset };
-        provider.completion(&at).unwrap_or_default()
+        provider.completion(&at, source).unwrap_or_default()
     }
 
     /// Validate a Java `file` over its owning project's provider (AST checks + the resolver-backed

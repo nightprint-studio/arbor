@@ -415,6 +415,9 @@ fn build_class_members(
             is_final: m.is_final,
             visibility: m.visibility,
             raw_signature: render_method(m),
+            // Resolve each written `throws` type to a binary name (imports + project types), so a
+            // call site can check an unhandled/undeclared checked exception against a project method.
+            throws: m.throws.iter().map(|t| resolve_binary(t, imports, project_types)).collect(),
         })
         .collect();
 
@@ -432,6 +435,7 @@ fn build_class_members(
             is_final: f.is_final,
             visibility: f.visibility,
             raw_signature: format!("{} {}", f.type_text, f.name),
+            throws: Vec::new(),
         })
         .collect();
 

@@ -24,6 +24,7 @@ pub use crate::statements::invalid_statements;
 pub use crate::switches::{switch_selector_errors, switch_yield_errors};
 pub use crate::syntax::syntax_errors;
 pub use crate::types::unresolved_types;
+pub use crate::undefined_var::undefined_var;
 pub use crate::version::version_errors;
 
 // The wire diagnostic the checks emit, re-exported so a consumer reaches it through this prelude.

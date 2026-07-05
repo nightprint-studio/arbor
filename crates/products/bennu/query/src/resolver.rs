@@ -405,6 +405,7 @@ fn convert_member(m: &bennu_classpath::prelude::Member) -> JMember {
             bennu_classpath::prelude::Visibility::Package => JVisibility::Package,
         },
         raw_signature: m.raw_signature.clone(),
+        throws: m.throws.clone(),
     }
 }
 
@@ -554,6 +555,7 @@ mod tests {
                 is_final: false,
                 visibility: JVisibility::Public,
                 raw_signature: format!("int {field}"),
+                throws: Vec::new(),
             }],
             flags: Default::default(),
         })

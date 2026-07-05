@@ -97,6 +97,13 @@ pub struct Member {
     /// attribute when present, else the erased JVM descriptor. Kept verbatim so a
     /// consumer can render a precise detail line or re-decode if needed.
     pub raw_signature: String,
+    /// The checked exceptions this method declares it `throws` — binary names with slashes
+    /// (`java/io/IOException`), decoded from the `Exceptions` attribute. Empty for fields and for a
+    /// method with no `throws` clause. Lets a consumer flag an unhandled/undeclared checked exception
+    /// at a call site. `#[serde(default)]` so an index persisted before this field existed still
+    /// deserializes (empty).
+    #[serde(default)]
+    pub throws: Vec<String>,
 }
 
 /// Class-level access flags a checker needs (extend-final / extend-record / implement-abstract),
@@ -231,6 +238,18 @@ fn signature_attr<'a>(attrs: &'a [AttributeInfo]) -> Option<&'a str> {
     })
 }
 
+/// The declared checked exceptions from a method's `Exceptions` attribute — binary/internal names
+/// with slashes (`java/io/IOException`), or empty when the attribute is absent (no `throws` clause).
+fn exceptions_attr(attrs: &[AttributeInfo]) -> Vec<String> {
+    attrs
+        .iter()
+        .find_map(|a| match &a.data {
+            AttributeData::Exceptions(list) => Some(list.iter().map(|c| c.to_string()).collect()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
 fn method_visibility(flags: cafebabe::MethodAccessFlags) -> Visibility {
     if flags.contains(cafebabe::MethodAccessFlags::PUBLIC) {
         Visibility::Public
@@ -264,6 +283,8 @@ fn decode_method(m: &MethodInfo, class_is_interface: bool) -> Member {
     // A concrete instance method inside an interface is a `default` method (JLS §9.4). `<clinit>`
     // (the static initialiser) is neither, but it's static so already excluded.
     let is_default = class_is_interface && !is_abstract && !is_static;
+    // Declared checked exceptions (`Exceptions` attribute) — independent of the Signature/erased path.
+    let throws = exceptions_attr(&m.attributes);
 
     // Prefer the generic Signature; fall back to the erased descriptor.
     if let Some(raw) = signature_attr(&m.attributes) {
@@ -279,6 +300,7 @@ fn decode_method(m: &MethodInfo, class_is_interface: bool) -> Member {
                 is_final,
                 visibility,
                 raw_signature: raw.to_string(),
+                throws: throws.clone(),
             };
         }
     }
@@ -295,6 +317,7 @@ fn decode_method(m: &MethodInfo, class_is_interface: bool) -> Member {
         is_final,
         visibility,
         raw_signature: raw,
+        throws,
     }
 }
 
@@ -316,6 +339,7 @@ fn decode_field(f: &FieldInfo) -> Member {
                 is_final,
                 visibility,
                 raw_signature: raw.to_string(),
+                throws: Vec::new(),
             };
         }
     }
@@ -331,6 +355,7 @@ fn decode_field(f: &FieldInfo) -> Member {
         is_final,
         visibility,
         raw_signature: raw,
+        throws: Vec::new(),
     }
 }
 
@@ -575,5 +600,35 @@ mod tests {
         assert_eq!(max.visibility, Visibility::Public);
         assert_eq!(max.return_type.binary_name, "int");
         assert_eq!(max.kind, MemberKind::Field);
+    }
+
+    #[test]
+    fn throws_clause_is_decoded() {
+        let src = resolve_jdk_classpath("1.8")
+            .or_else(|_| resolve_jdk_classpath("21"))
+            .ok();
+        let Some(src) = src else {
+            eprintln!("SKIP throws_clause_is_decoded: no JDK installed");
+            return;
+        };
+        let idx = SourceMemberIndex::new(src);
+
+        // `Thread.sleep(long)` declares `throws InterruptedException` (Exceptions attribute).
+        let thread = idx.members_of("java/lang/Thread").unwrap();
+        let sleep = thread
+            .methods
+            .iter()
+            .find(|m| m.name == "sleep" && m.params.len() == 1)
+            .expect("Thread.sleep(long)");
+        assert!(
+            sleep.throws.iter().any(|t| t == "java/lang/InterruptedException"),
+            "Thread.sleep should declare InterruptedException, got {:?}",
+            sleep.throws
+        );
+
+        // A method with no `throws` clause has an empty list (e.g. String.length()).
+        let string = idx.members_of("java/lang/String").unwrap();
+        let length = string.methods.iter().find(|m| m.name == "length").unwrap();
+        assert!(length.throws.is_empty(), "String.length throws nothing, got {:?}", length.throws);
     }
 }

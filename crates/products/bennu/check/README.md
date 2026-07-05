@@ -27,6 +27,12 @@ exhaustively unit-tested here, including with real type inference.
 | `final_reassignment_errors` | `error` | reassigning a `final` local or field that **already has an initializer** (`final int x = 1; x = 2;`, `this.f = …` on a `final` field with an initializer). Conservative — a `final` *without* an initializer (assigned once later, possibly across `if`/`else`) is never flagged; a shadowed local name is skipped; only unambiguous `this.field` field targets are considered. |
 | `package_mismatch` | `error` | the declared `package …;` doesn't match the file's location under its source root (needs `expected_package`, inferred from the path). The `change_package` helper produces the "set package to …" quick-fix edit. |
 | `version_errors` | `error` | a language feature used below the project's target Java version — records (16), sealed types (17), `var` (10), text blocks (15), switch arrows (14), lambdas / method references (8), try-with-resources (7), multi-catch (7), default/private interface methods (8/9). Needs `java_major`. A `var` is *not* flagged when the file imports Lombok's `var`/`val` (back-ported below 10). |
+| `ctor_check_errors` | `warning` | a `method_declaration` named exactly like its enclosing class/enum — an intended constructor written with a return type, which Java silently accepts as an ordinary method. Only class/enum; a real (return-typeless) constructor parses as a different node so never matches. (The "explicit constructor call must be first / can't be both `this()` and `super()`" cases are left to `syntax_errors` — the grammar rejects a misplaced chain call as an `ERROR`.) |
+| `generics_syntax_errors` | `error` | syntactic generics misuse: generic array creation (`new List<String>[]`), instantiating a type parameter (`new T()`), generics in an `instanceof` (a concrete `List<String>`, not an unbounded `?`) or a `catch` type, and `this`/`super` in a `static` context. Scoped type-parameter set gathered from enclosing declarations; anonymous/nested-type carve-outs keep `this`/`super` sound. |
+| `erasure_clash_errors` | `error` | two overloads in one type that are distinct in source but identical after generic type erasure (`f(List<String>)` vs `f(List<Integer>)`). Erases by stripping type arguments (keeps primitives/arrays); a bare single type-variable parameter is skipped (bound unknowable); byte-identical signatures are left to `duplicate_signatures`. |
+| `iface_dup_errors` | `error` | the same interface listed twice in one `implements`/`extends` clause — by erased simple name, so `List<String>, List<Integer>` (different type arguments) and a plain `Foo, Foo` both flag. No resolver — purely the written list. |
+| `switch_flow_warnings` | `warning` | colon-style `switch` **fall-through** (a non-empty, non-last `case` group whose last statement plainly slides into the next label) and a `return`/`break`/`continue` inside `finally` that discards a pending exception/result. Both conservative — stacked empty labels, arrow switches, and jumps targeting a construct nested in the `finally` are never flagged. |
+| `expr_lint_warnings` | `warning` | self-assignment (`x = x`, `this.x = this.x`), a constant integer division/modulo by zero, a stray empty statement (`;` as a block statement), and comparing strings with `==`/`!=` (a `String` literal on either side — reference, not contents). |
 | `unused_imports` | `warning` | a single-type import whose name never appears elsewhere (identifiers *or* comments). `static`/wildcard skipped. |
 | `duplicate_imports` | `warning` | a repeated identical import. |
 | `redundant_imports` | `warning` | a redundant **wildcard** import — `import java.lang.*;` (implicitly imported) or `import <own package>.*;` (same package already in scope). Purely syntactic (own package read off the tree), so no resolver and never a false positive; `static` wildcards and single-type imports are left alone. |
@@ -55,6 +61,10 @@ only when `jdk_available`.
 | `functional_errors` | `error` | a lambda whose parameter count doesn't match its target functional interface's single abstract method, or whose target interface isn't functional. Only for explicit targets (`T x = …`, `return …`, `(T) …`) against a known interface. |
 | `super_constructor_errors` | `error` | a subclass constructor that doesn't chain (`super(...)`/`this(...)`) when the superclass has no no-arg constructor (or a subclass with no constructor at all). Runs only when the superclass's constructors are indexed (bytecode) — a conservative miss otherwise. |
 | `final_override_errors` | `error` | a method that overrides a `final` supertype method (`final` methods can't be overridden). Matched by name **and** erased parameter types (a legal overload is never flagged), and only when every parameter type resolves. Fires against `final` methods of JDK/library supertypes (incl. `java.lang.Object`'s `final` `wait`/`getClass`/…) and project supertypes. |
+| `inherit_cycle_errors` | `error` | cyclic inheritance — a type that transitively `extends`/`implements` itself. Flags only when every link on the path back is a resolvable type and the walk closes on the exact starting binary (never inferred through an unknown link). Plus an `@Override` whose method name exists nowhere in a **fully-known** supertype hierarchy (the clear signature-typo case; a name match of any arity is treated as "might override" and left alone). |
+| `super_method_errors` | `error` | a `super.method()` whose name exists nowhere in the enclosing class's superclass/interface hierarchy. Name-only match (overloads/generics never trigger it); requires the whole super-hierarchy known and skips qualified `Outer.super` and anonymous-class receivers. |
+| `exception_errors` | `error` | an unreachable `catch` (a type `==`/subtype of a clause above), a multi-`catch` listing a type with its supertype, and a try-with-resources whose resource type definitively isn't `AutoCloseable`/`Closeable`. Subtype verdicts require the subtype's whole hierarchy known (an unknown link → skip), so an unresolved exception/resource is never flagged. |
+| `enum_switch_errors` | `error` | a `switch` **expression** over an enum with no `default` that leaves some constant uncovered (names the missing ones). Statement-form switches are legal and never flagged; the enum type must fully resolve (`is_enum`) and its constants be completely enumerable, else skip. |
 
 `ClassFlags` (interface / abstract / final / enum / record / sealed) and the per-member
 `is_abstract` / `is_default` / `is_final` come from **two** sources, unified across the seam: `bennu-classpath`
@@ -80,8 +90,21 @@ parse. All API is re-exported from `bennu_check::prelude`.
 
 ## Roadmap
 
-Remaining depth (see `docs/bennu-indexing-validation-analysis.md`): method-reference resolution;
-generic type-parameter arity / bound checking; and a whole-classpath
-**package index** so a wildcard `import a.b.*;` can be flagged when the package genuinely doesn't
-exist (today only the *redundant* wildcard cases are flagged — there's no cheap package enumeration
-over the jimage / jars).
+Remaining depth (see `docs/bennu-indexing-validation-analysis.md`):
+
+- **Checked exceptions** — an uncaught/undeclared checked exception, a `catch` of a checked type the
+  `try` can't throw, and `throws`-widening in an override. These need the method `Throws` attribute
+  decoded from bytecode (the seam `Member` doesn't carry it yet) before they can be done without false
+  positives; the narrow "a directly-`throw`n checked type not handled here" case is feasible from the
+  source alone and is the natural first step.
+- **Method-reference resolution** (`Type::method` binds to a real, compatible member) and **generic
+  type-parameter arity / bound** checking.
+- Accessing an **instance member from a `static` context**, and primitive **narrowing without a cast**
+  / constant overflow.
+- A whole-classpath **package index** so a wildcard `import a.b.*;` can be flagged when the package
+  genuinely doesn't exist (today only the *redundant* wildcard cases are flagged — there's no cheap
+  package enumeration over the jimage / jars).
+
+Deliberately **not** attempted (would risk false positives without deeper flow/inference than the
+conservative walk affords): full **definite-assignment** ("variable used before assigned"), **raw-type
+/ unchecked** warnings, and **autoboxing** NPE hints.

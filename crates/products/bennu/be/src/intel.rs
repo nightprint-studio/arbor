@@ -37,13 +37,18 @@ pub struct CompletionArgs {
     pub file: String,
     /// Byte offset of the caret in the file.
     pub offset: usize,
+    /// The live (possibly-unsaved) buffer text. The `offset` is in ITS coordinates — the `.` the
+    /// user just typed to trigger completion is unsaved, so the BE must parse this text, not the
+    /// stale on-disk file. Absent → the BE falls back to reading the file from disk.
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 /// Completion candidates at a position — served from the owning project's built index
 /// (empty while the index is still building, per the async lifecycle).
 #[arbor_rpc::handler]
 fn bennu_completion(_ctx: &BennuState, args: CompletionArgs) -> Result<Vec<CompletionItem>, String> {
-    Ok(IndexService::global().completion(&args.file, args.offset))
+    Ok(IndexService::global().completion(&args.file, args.offset, args.source.as_deref()))
 }
 
 /// One JSP action reference to check for existence: its qualified name plus the byte

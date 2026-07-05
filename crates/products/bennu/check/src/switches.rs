@@ -205,7 +205,7 @@ fn check_arms(switch: Node, out: &mut Vec<Diagnostic>) {
 
 /// Whether `switch` sits where a value is required (its result is used). Kept to unmistakable
 /// expression positions so a plain statement `switch` is never mistaken for one.
-fn is_value_context(switch: Node) -> bool {
+pub(crate) fn is_value_context(switch: Node) -> bool {
     let Some(p) = switch.parent() else { return false };
     match p.kind() {
         "variable_declarator" => p.child_by_field_name("value") == Some(switch),

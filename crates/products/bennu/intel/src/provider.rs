@@ -95,8 +95,15 @@ pub struct Position {
 /// diagnostics / rename / format / symbols) is declared now so the seam is complete;
 /// Phase-0 impls stub the semantic ones and return empty for the list-shaped ones.
 pub trait IntelProvider: Send + Sync {
-    /// Completion candidates at a position (docs §5 #4). Phase-0 native impl → `[]`.
-    fn completion(&self, at: &Position) -> Result<Vec<CompletionItem>, IntelError>;
+    /// Completion candidates at a position (docs §5 #4). `source` is the live editor buffer when the
+    /// caller has it — the caret `offset` is in ITS coordinates (the just-typed, unsaved `.` lives
+    /// only there), so completion MUST parse that text, not the stale on-disk file. `None` falls back
+    /// to reading the file from disk (a programmatic query with no buffer). Phase-0 native impl → `[]`.
+    fn completion(
+        &self,
+        at: &Position,
+        source: Option<&str>,
+    ) -> Result<Vec<CompletionItem>, IntelError>;
 
     /// Hover documentation / type at a position.
     fn hover(&self, at: &Position) -> Result<Option<String>, IntelError>;
@@ -281,21 +288,36 @@ impl NativeJavaProvider {
 }
 
 impl IntelProvider for NativeJavaProvider {
-    fn completion(&self, at: &Position) -> Result<Vec<CompletionItem>, IntelError> {
+    fn completion(
+        &self,
+        at: &Position,
+        source: Option<&str>,
+    ) -> Result<Vec<CompletionItem>, IntelError> {
         // No index yet (pre-open / still building) → benign empty, not an error.
         let Some(resolver) = &self.resolver else {
             return Ok(Vec::new());
         };
-        // Read the file the caret is in, decoded tolerantly so completion still works in a
-        // non-UTF-8 legacy source; a true IO error is a benign empty answer (the FE already
-        // has the buffer). This is the live caret file with no project label to hand, so the
-        // best-effort UTF-8-first decode (recovering via Windows-1252) is enough here.
-        let Some(decoded) =
-            crate::java_index::read_source_for_index(std::path::Path::new(&at.file), "UTF-8")
-        else {
-            return Ok(Vec::new());
+        // Prefer the live buffer the caller hands in: the caret `offset` is in the editor's
+        // coordinates, and the `.` the user just typed to trigger completion is unsaved — it exists
+        // ONLY in that buffer. Parsing the on-disk file at a live offset would land mid-token and the
+        // receiver before the dot would never be found (empty completions after every edit). Fall
+        // back to a tolerant disk read (UTF-8-first, recovering via Windows-1252) only when no buffer
+        // is supplied — a programmatic query with nothing open.
+        let disk;
+        let text: &str = match source {
+            Some(src) => src,
+            None => {
+                let Some(decoded) = crate::java_index::read_source_for_index(
+                    std::path::Path::new(&at.file),
+                    "UTF-8",
+                ) else {
+                    return Ok(Vec::new());
+                };
+                disk = decoded.text;
+                &disk
+            }
         };
-        Ok(bennu_query::prelude::completion(&decoded.text, at.offset, resolver))
+        Ok(bennu_query::prelude::completion(text, at.offset, resolver))
     }
 
     fn hover(&self, _at: &Position) -> Result<Option<String>, IntelError> {
@@ -348,7 +370,11 @@ impl LspClientProvider {
 }
 
 impl IntelProvider for LspClientProvider {
-    fn completion(&self, _at: &Position) -> Result<Vec<CompletionItem>, IntelError> {
+    fn completion(
+        &self,
+        _at: &Position,
+        _source: Option<&str>,
+    ) -> Result<Vec<CompletionItem>, IntelError> {
         Err(IntelError::Unimplemented("lsp completion"))
     }
 

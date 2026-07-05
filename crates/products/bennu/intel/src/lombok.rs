@@ -66,6 +66,7 @@ pub fn synthesize(
                     is_final: false,
                     visibility: Visibility::Public,
                     raw_signature: format!("{} {}()", f.type_text, name),
+                    throws: Vec::new(),
                 });
             }
         }
@@ -84,6 +85,7 @@ pub fn synthesize(
                     is_final: false,
                     visibility: Visibility::Public,
                     raw_signature: format!("void {}({})", name, f.type_text),
+                    throws: Vec::new(),
                 });
             }
         }
@@ -105,6 +107,7 @@ pub fn synthesize(
                 is_final: true,
                 visibility: Visibility::Private,
                 raw_signature: format!("{logger_binary} log"),
+                throws: Vec::new(),
             });
         }
     }

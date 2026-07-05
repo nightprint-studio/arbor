@@ -62,11 +62,12 @@ export function capabilities(root: string): Promise<CapabilitySet> {
   return bennu('bennu_capabilities', { args: { root } });
 }
 
-/** Completion candidates at a source offset (UTF-8 byte offset). Wire:
- *  `bennu_completion` — `CompletionArgs { file, offset }`. Returns `[]` until the
- *  language service is ready. */
-export function completion(file: string, offset: number): Promise<CompletionItem[]> {
-  return bennu('bennu_completion', { args: { file, offset } });
+/** Completion candidates at a source offset (UTF-8 byte offset). Pass the live buffer `source`: the
+ *  `offset` is in its coordinates and the just-typed `.` that triggers member completion is unsaved,
+ *  so the backend must parse this text, not the stale on-disk file. Wire: `bennu_completion` —
+ *  `CompletionArgs { file, offset, source }`. Returns `[]` until the language service is ready. */
+export function completion(file: string, offset: number, source: string): Promise<CompletionItem[]> {
+  return bennu('bennu_completion', { args: { file, offset, source } });
 }
 
 /** Diagnostics for a file. For a Java file, pass the live buffer `source` to get AST-level

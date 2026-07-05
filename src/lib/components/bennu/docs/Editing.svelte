@@ -124,6 +124,31 @@
     back-ported by Lombok (imported from <code>lombok</code>) is allowed below Java 10.</li>
   <li><strong>Imports</strong> — unused or duplicate imports, and a redundant wildcard import
     (<code>import java.lang.*;</code> or a wildcard on the file's own package, both already in scope).</li>
+  <li><strong>Generics (syntax)</strong> — generic array creation (<code>new List&lt;String&gt;[]</code>),
+    instantiating a type parameter (<code>new T()</code>), generics in an <code>instanceof</code>
+    (<code>x instanceof List&lt;String&gt;</code>) or a <code>catch</code> type, and <code>this</code>/<code>super</code>
+    used in a <code>static</code> context.</li>
+  <li><strong>Erasure clash</strong> — two overloads that look distinct but collide after generic
+    type erasure (<code>f(List&lt;String&gt;)</code> and <code>f(List&lt;Integer&gt;)</code>).</li>
+  <li><strong>Duplicate interface</strong> — the same interface listed twice in an
+    <code>implements</code>/<code>extends</code> clause, or once with two different type arguments.</li>
+  <li><strong>Cyclic inheritance</strong> — a type that transitively extends or implements itself.</li>
+  <li><strong>@Override overrides nothing</strong> — a method marked <code>@Override</code> whose name
+    exists nowhere in its (fully known) supertype hierarchy — usually a signature typo.</li>
+  <li><strong>super.method()</strong> — a <code>super.foo()</code> call whose method doesn't exist
+    anywhere in the superclass hierarchy.</li>
+  <li><strong>Exception handling</strong> — an unreachable <code>catch</code> (a type already caught
+    by a clause above), a multi-<code>catch</code> that lists a type together with its supertype, and
+    a try-with-resources whose resource type isn't <code>AutoCloseable</code>.</li>
+  <li><strong>Enum switch exhaustiveness</strong> — a <code>switch</code> <em>expression</em> over an
+    enum that doesn't cover every constant and has no <code>default</code> (it names the missing ones).</li>
+  <li><strong>Constructor lookalike</strong> — a method named exactly like its class (a constructor
+    written with a return type by mistake, which Java silently treats as an ordinary method).</li>
+  <li><strong>Warnings</strong> — assigning a variable to itself, a constant division or modulo by
+    zero, comparing strings with <code>==</code> (reference, not contents), <code>switch</code>
+    fall-through (a colon-style <code>case</code> without <code>break</code>), a
+    <code>return</code>/<code>break</code>/<code>continue</code> inside <code>finally</code> (it
+    discards a pending exception or result), and a stray empty statement (<code>;</code>).</li>
 </ul>
 <p>
   The resolver-backed checks (unknown members, argument count, unresolved types, type

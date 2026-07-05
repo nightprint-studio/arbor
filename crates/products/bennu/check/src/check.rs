@@ -82,9 +82,22 @@ pub fn check_file_in(
     out.extend(crate::declarations::declaration_errors_nodes(nodes, source));
     out.extend(crate::annotations::annotation_errors_nodes(nodes, source));
     out.extend(crate::lambdas::lambda_capture_errors_nodes(nodes, source));
+    out.extend(crate::ctor_checks::ctor_check_errors_nodes(nodes, source));
+    out.extend(crate::expr_lint::expr_lint_warnings_nodes(nodes, source));
+    out.extend(crate::switch_flow::switch_flow_warnings_nodes(nodes, source));
+    out.extend(crate::generics_syntax::generics_syntax_errors_nodes(nodes, source));
+    out.extend(crate::erasure_clash::erasure_clash_errors_nodes(nodes, source));
+    out.extend(crate::iface_dup::iface_dup_errors_nodes(nodes, source));
+    out.extend(crate::init_checks::init_check_errors_nodes(nodes, source));
+    out.extend(crate::func_iface::func_iface_errors_nodes(nodes, source));
+    out.extend(crate::switch_dup::switch_dup_errors_nodes(nodes, source));
+    out.extend(crate::ctor_recursion::ctor_recursion_errors_nodes(nodes, source));
+    out.extend(crate::method_body::method_body_errors_nodes(nodes, source));
+    out.extend(crate::record_ctor::record_ctor_errors_nodes(nodes, source));
     out.extend(crate::imports::unused_imports(root, source));
     out.extend(crate::imports::duplicate_imports(root, source));
     out.extend(crate::imports::redundant_imports(root, source));
+    out.extend(crate::import_clash::import_clash_errors(root, source));
     if let Some(stem) = &ctx.file_stem {
         out.extend(crate::naming::class_name_matches_file(root, source, stem));
         out.extend(crate::special_files::special_file_errors(root, source, stem));
@@ -174,12 +187,25 @@ pub fn check_file_resolved(
         timed!("arity", crate::arity::arity_errors_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("argument_type", crate::arguments::argument_type_errors_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("unresolved_types", crate::types::unresolved_types_in(&nodes, source, &symbols, resolver));
+        timed!("undefined_var", crate::undefined_var::undefined_var_errors_in(root, &nodes, source, &symbols, resolver));
         timed!("inheritance", crate::inheritance::inheritance_errors_in(&nodes, source, &symbols, resolver));
         timed!("missing_abstract", crate::inheritance::missing_abstract_impls_in(&nodes, source, &symbols, resolver));
         timed!("type_compat", crate::casts::type_compat_errors_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("functional", crate::functional::functional_errors_in(&nodes, source, &symbols, resolver));
         timed!("super_constructor", crate::constructors::super_constructor_errors_in(&nodes, source, &symbols, resolver));
         timed!("final_override", crate::finals::final_override_errors_in(&nodes, source, &symbols, resolver));
+        timed!("inherit_cycle", crate::inherit_cycle::inherit_cycle_errors_in(&nodes, source, &symbols, resolver));
+        timed!("exceptions", crate::exceptions::exception_errors_in(&nodes, source, &symbols, resolver));
+        timed!("enum_switch", crate::enum_switch::enum_switch_errors_in(root, &nodes, source, &symbols, resolver, &cache));
+        timed!("super_method", crate::super_method::super_method_errors_in(root, &nodes, source, &symbols, resolver, &cache));
+        timed!("condition_type", crate::condition_type::condition_type_errors_in(root, &nodes, source, &symbols, resolver, &cache));
+        timed!("type_use", crate::type_use::type_use_errors_in(root, &nodes, source, &symbols, resolver, &cache));
+        timed!("narrowing", crate::narrowing::narrowing_errors_in(root, &nodes, source, &symbols, resolver, &cache));
+        timed!("checked_throw", crate::checked_throw::checked_throw_errors_in(&nodes, source, &symbols, resolver));
+        timed!("checked_call", crate::checked_call::checked_call_errors_in(root, &nodes, source, &symbols, resolver, &cache));
+        timed!("throws_widen", crate::throws_widen::throws_widen_errors_in(&nodes, source, &symbols, resolver));
+        timed!("static_access", crate::static_access::static_access_errors_in(root, &nodes, source, &symbols, resolver));
+        timed!("visibility", crate::visibility::visibility_errors_in(root, &nodes, source, &symbols, resolver, &cache));
     }
     if let Some(t) = t_total {
         log_profile(ctx, t.elapsed(), &times);

@@ -113,6 +113,11 @@ pub struct MethodDecl {
     /// A `final` method — cannot be overridden by a subclass.
     #[serde(default)]
     pub is_final: bool,
+    /// The declared `throws` clause, as written type texts (`IOException`, `java.sql.SQLException`).
+    /// Resolved to binary names when the class members are built. Empty when there's no `throws`.
+    /// `#[serde(default)]` for backward-compatible deserialization of a pre-existing persisted symbol.
+    #[serde(default)]
+    pub throws: Vec<String>,
 }
 
 /// A type declaration (class / interface / enum).
@@ -436,6 +441,20 @@ fn parse_method(node: &Node, bytes: &[u8], enclosing_is_interface: bool) -> Opti
     }
 
     let is_final = has_modifier(node, bytes, "final");
+    // The `throws` clause: a `throws` child node whose named children are the exception type nodes.
+    // Kept as written text; resolved to binary names when the class members are built.
+    let mut throws = Vec::new();
+    let mut mw = node.walk();
+    for ch in node.children(&mut mw) {
+        if ch.kind() == "throws" {
+            let mut tw = ch.walk();
+            for t in ch.named_children(&mut tw) {
+                if let Some(txt) = node_text(&t, bytes) {
+                    throws.push(txt);
+                }
+            }
+        }
+    }
     Some(MethodDecl {
         name,
         return_type_text,
@@ -445,6 +464,7 @@ fn parse_method(node: &Node, bytes: &[u8], enclosing_is_interface: bool) -> Opti
         is_abstract,
         is_default,
         is_final,
+        throws,
     })
 }
 

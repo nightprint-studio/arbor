@@ -310,7 +310,7 @@ const javaCompletionSource: CompletionSource = async (
   const seq = ++completionSeq;
   let items: Awaited<ReturnType<typeof ipcCompletion>>;
   try {
-    items = await ipcCompletion(path, byteOffset);
+    items = await ipcCompletion(path, byteOffset, src);
   } catch {
     items = []; // BE absent / not indexed yet — fall back to keywords + buffer words.
   }

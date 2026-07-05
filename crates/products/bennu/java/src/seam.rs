@@ -68,6 +68,12 @@ pub struct Member {
     pub visibility: Visibility,
     /// A readable, best-available signature rendering (for completion `detail`).
     pub raw_signature: String,
+    /// The checked exceptions a method declares it `throws` (binary names with slashes). Empty for
+    /// fields and for methods with no `throws` clause. From bytecode's `Exceptions` attribute (JDK /
+    /// library methods) or the source `throws` clause (project methods). `#[serde(default)]` so an
+    /// index persisted before this field existed still deserializes (empty).
+    #[serde(default)]
+    pub throws: Vec<String>,
 }
 
 impl Member {
@@ -88,6 +94,7 @@ impl Member {
             is_final: false,
             visibility: Visibility::Public,
             raw_signature,
+            throws: Vec::new(),
         }
     }
 
@@ -106,6 +113,7 @@ impl Member {
             is_final: false,
             visibility: Visibility::Public,
             raw_signature,
+            throws: Vec::new(),
         }
     }
 
@@ -137,6 +145,11 @@ impl Member {
     /// Set the rendered signature (completion `detail`).
     pub fn sig(mut self, raw_signature: impl Into<String>) -> Self {
         self.raw_signature = raw_signature.into();
+        self
+    }
+    /// Set the declared checked exceptions (binary names).
+    pub fn throws(mut self, throws: Vec<String>) -> Self {
+        self.throws = throws;
         self
     }
 }
