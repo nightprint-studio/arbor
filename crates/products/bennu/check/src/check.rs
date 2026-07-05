@@ -94,6 +94,8 @@ pub fn check_file_in(
     out.extend(crate::ctor_recursion::ctor_recursion_errors_nodes(nodes, source));
     out.extend(crate::method_body::method_body_errors_nodes(nodes, source));
     out.extend(crate::record_ctor::record_ctor_errors_nodes(nodes, source));
+    out.extend(crate::var_target::var_target_errors_nodes(nodes, source));
+    out.extend(crate::capture::capture_errors_nodes(nodes, source));
     out.extend(crate::imports::unused_imports(root, source));
     out.extend(crate::imports::duplicate_imports(root, source));
     out.extend(crate::imports::redundant_imports(root, source));
@@ -194,6 +196,7 @@ pub fn check_file_resolved(
         timed!("functional", crate::functional::functional_errors_in(&nodes, source, &symbols, resolver));
         timed!("super_constructor", crate::constructors::super_constructor_errors_in(&nodes, source, &symbols, resolver));
         timed!("final_override", crate::finals::final_override_errors_in(&nodes, source, &symbols, resolver));
+        timed!("override_return", crate::override_return::override_return_errors_in(&nodes, source, &symbols, resolver));
         timed!("inherit_cycle", crate::inherit_cycle::inherit_cycle_errors_in(&nodes, source, &symbols, resolver));
         timed!("exceptions", crate::exceptions::exception_errors_in(&nodes, source, &symbols, resolver));
         timed!("enum_switch", crate::enum_switch::enum_switch_errors_in(root, &nodes, source, &symbols, resolver, &cache));

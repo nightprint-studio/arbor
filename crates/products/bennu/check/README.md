@@ -36,6 +36,8 @@ exhaustively unit-tested here, including with real type inference.
 | `unused_imports` | `warning` | a single-type import whose name never appears elsewhere (identifiers *or* comments). `static`/wildcard skipped. |
 | `duplicate_imports` | `warning` | a repeated identical import. |
 | `redundant_imports` | `warning` | a redundant **wildcard** import — `import java.lang.*;` (implicitly imported) or `import <own package>.*;` (same package already in scope). Purely syntactic (own package read off the tree), so no resolver and never a false positive; `static` wildcards and single-type imports are left alone. |
+| `var_target_errors` | `error` | a `var` local whose initializer has no type of its own — a lambda, a method/constructor reference, an array initializer (`var xs = {1,2};`), or the `null` literal. Only the direct value (a cast supplies a target, so `var r = (Runnable) () -> {}` is fine); non-`var` declarations untouched. |
+| `capture_errors` | `error` | a local captured by a lambda **or** an anonymous/inner class and then reassigned in its declaring method (`int c = 0; Runnable r = () -> use(c); c = 5;`) — not effectively final. Complements `lambda_capture_errors` (mutation *inside* a lambda). Conservative like the `final` check: only a local WITH an initializer, declared once, reassigned outside any closure, and actually captured — so a definite-assignment-safe local is never flagged. |
 
 `check_file` takes a `FileContext { file_stem, expected_package, java_major }` — each `None` field
 just skips its check, so a scratch buffer still gets every source-only diagnostic.
@@ -61,6 +63,7 @@ only when `jdk_available`.
 | `functional_errors` | `error` | a lambda whose parameter count doesn't match its target functional interface's single abstract method, or whose target interface isn't functional. Only for explicit targets (`T x = …`, `return …`, `(T) …`) against a known interface. |
 | `super_constructor_errors` | `error` | a subclass constructor that doesn't chain (`super(...)`/`this(...)`) when the superclass has no no-arg constructor (or a subclass with no constructor at all). Runs only when the superclass's constructors are indexed (bytecode) — a conservative miss otherwise. |
 | `final_override_errors` | `error` | a method that overrides a `final` supertype method (`final` methods can't be overridden). Matched by name **and** erased parameter types (a legal overload is never flagged), and only when every parameter type resolves. Fires against `final` methods of JDK/library supertypes (incl. `java.lang.Object`'s `final` `wait`/`getClass`/…) and project supertypes. |
+| `override_return_errors` | `error` | an override whose return type isn't covariant — `String get()` overriding `Number get()`. Matched by name **and** erased parameter types (a real override, never an overload); flags only when BOTH return types are concrete reference classes over fully-known hierarchies and the overriding one is NOT a subtype of the overridden one. Generics erased to a shared bound, primitive/`void` returns, and un-indexed supertypes are skipped. Complements `inherit_cycle_errors`' `@Override`-overrides-nothing, which deliberately leaves a name match alone. |
 | `inherit_cycle_errors` | `error` | cyclic inheritance — a type that transitively `extends`/`implements` itself. Flags only when every link on the path back is a resolvable type and the walk closes on the exact starting binary (never inferred through an unknown link). Plus an `@Override` whose method name exists nowhere in a **fully-known** supertype hierarchy (the clear signature-typo case; a name match of any arity is treated as "might override" and left alone). |
 | `super_method_errors` | `error` | a `super.method()` whose name exists nowhere in the enclosing class's superclass/interface hierarchy. Name-only match (overloads/generics never trigger it); requires the whole super-hierarchy known and skips qualified `Outer.super` and anonymous-class receivers. |
 | `exception_errors` | `error` | an unreachable `catch` (a type `==`/subtype of a clause above), a multi-`catch` listing a type with its supertype, and a try-with-resources whose resource type definitively isn't `AutoCloseable`/`Closeable`. Subtype verdicts require the subtype's whole hierarchy known (an unknown link → skip), so an unresolved exception/resource is never flagged. |
@@ -92,19 +95,24 @@ parse. All API is re-exported from `bennu_check::prelude`.
 
 Remaining depth (see `docs/bennu-indexing-validation-analysis.md`):
 
-- **Checked exceptions** — an uncaught/undeclared checked exception, a `catch` of a checked type the
-  `try` can't throw, and `throws`-widening in an override. These need the method `Throws` attribute
-  decoded from bytecode (the seam `Member` doesn't carry it yet) before they can be done without false
-  positives; the narrow "a directly-`throw`n checked type not handled here" case is feasible from the
-  source alone and is the natural first step.
 - **Method-reference resolution** (`Type::method` binds to a real, compatible member) and **generic
-  type-parameter arity / bound** checking.
-- Accessing an **instance member from a `static` context**, and primitive **narrowing without a cast**
-  / constant overflow.
+  type-parameter arity / bound** checking (`GenericsPlayground<String>` where `<T extends Number>`, an
+  explicit `<Integer>` type argument that conflicts with the actual argument, PECS `add` on a `?
+  extends` list, and inference over incompatible bounds).
+- **Overload-resolution ambiguity** (`combo(null, null)` matching two signatures equally, an ambiguous
+  `null`/lambda across varargs overloads) — needs full applicability + most-specific ranking, so it's
+  deferred rather than approximated.
+- **Sealed `permits` enforcement** — a subclass not listed in a `sealed` supertype's `permits` clause
+  (the inheritance checks currently skip `sealed` supertypes to avoid mis-reporting a legal subclass).
+- **Missing required annotation element** (`@RequiresReview` used without its no-default `reviewer`) —
+  needs the annotation type's element/default set resolved.
 - A whole-classpath **package index** so a wildcard `import a.b.*;` can be flagged when the package
-  genuinely doesn't exist (today only the *redundant* wildcard cases are flagged — there's no cheap
-  package enumeration over the jimage / jars).
+  genuinely doesn't exist, or a name is ambiguous across two on-demand imports (today only the
+  *redundant* wildcard cases are flagged — there's no cheap package enumeration over the jimage / jars).
 
 Deliberately **not** attempted (would risk false positives without deeper flow/inference than the
-conservative walk affords): full **definite-assignment** ("variable used before assigned"), **raw-type
-/ unchecked** warnings, and **autoboxing** NPE hints.
+conservative walk affords): full **definite-assignment** ("variable used before assigned"; the
+effectively-final check only covers the definitely-illegal initialized-then-reassigned case), **raw-type
+/ unchecked** warnings, and **autoboxing** NPE hints. Errors that live only in **Lombok-generated** code
+(a `@NoArgsConstructor` that can't initialize a `final` field, a `@Builder` clashing with an explicit
+constructor) are validated after expansion by `bennu-intel`, not here.

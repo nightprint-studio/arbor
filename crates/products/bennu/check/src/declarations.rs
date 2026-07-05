@@ -259,6 +259,13 @@ mod tests {
     }
 
     #[test]
+    fn abstract_final_method_is_flagged() {
+        // `abstract final void m();` — the two modifiers are mutually exclusive on a method.
+        let e = errs("abstract class C { abstract final void m(); }");
+        assert!(e.iter().any(|m| m.contains("abstract and final")), "{e:?}");
+    }
+
+    #[test]
     fn two_visibility_modifiers_flagged() {
         let e = errs("class C { public private void m() {} }");
         assert!(e.iter().any(|m| m.contains("only one of")), "{e:?}");
