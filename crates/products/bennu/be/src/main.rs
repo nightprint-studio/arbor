@@ -68,6 +68,11 @@ mod forms;
 // JSP variable navigation: `bennu_jsp_nav` — go-to-declaration + find-usages for a page-scoped
 // JSP variable (`<c:set var>` / `<s:set var>` / … + `${var}` / `%{var}` references), single-file.
 mod jsp_nav;
+// Action-property navigation + linting: `bennu_action_property_target` (go-to from a JSP form field
+// / OGNL root, or a `*-validation.xml` `<field>`, to the action class's `get/set/is` accessor) and
+// `bennu_action_property_lint` (a field that matches NO property of the resolved action → warning).
+mod action_props;
+mod action_props_nav;
 // MyBatis mapper-XML navigation: `bennu_mybatis_nav` — go-to from inside a mapper (a statement
 // id → the Java interface method, `namespace` → the interface, `<include refid>` → its `<sql>`,
 // a `resultMap="…"` → its `<resultMap>`).
@@ -124,6 +129,10 @@ mod find;
 // cwd + env) / `bennu_cancel_run`. Makes the Run/Debug buttons real + re-indexes
 // target/classes.
 mod build;
+// Dependency-classpath sourcing for the index: resolve a Maven project's `~/.m2` dep jars (cached
+// across sessions by pom mtime) into a `ClassSource`, so validation/completion resolve library
+// types (Spring, servlet, …), not just the JDK + project. Non-fatal — degrades to JDK-only.
+mod dep_classpath;
 // Project-wide "validation without compiling": `bennu_validate_project` — walks every `.java`,
 // runs the editor's per-file validation over all of them, and returns timing stats (the compile-time
 // proxy) + diagnostics. Shares `build`'s single-run guard so a validation and a Maven build can't run

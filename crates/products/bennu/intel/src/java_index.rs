@@ -188,7 +188,15 @@ fn read_sources_parallel(paths: &[PathBuf], encoding_label: &str) -> ProjectSour
 /// logged, so the sole remaining skip is visible rather than silent.
 pub fn read_source_for_index(path: &Path, encoding_label: &str) -> Option<IndexDecode> {
     match std::fs::read(path) {
-        Ok(bytes) => Some(decode_for_index(&bytes, encoding_label)),
+        Ok(bytes) => {
+            // Normalize to LF so every index / validation byte offset agrees with the editor's LF
+            // document (the interactive read `bennu_read_file` normalizes identically). Without this,
+            // go-to targets and whole-project diagnostics on a CRLF file drift down by one position
+            // per preceding line.
+            let mut d = decode_for_index(&bytes, encoding_label);
+            d.text = bennu_project::prelude::normalize_newlines(&d.text);
+            Some(d)
+        }
         Err(e) => {
             eprintln!("bennu-intel: skipping unreadable source {}: {e}", path.display());
             None
@@ -468,7 +476,17 @@ fn class_flags(td: &TypeDecl) -> ClassFlags {
     }
 }
 
-/// Resolve a supertype simple name to a binary name (generics stripped).
+/// Resolve a supertype / throws simple name to a binary name (generics stripped).
+///
+/// Resolution order mirrors Java name lookup: a fully-qualified name wins; then a project type of
+/// that simple name; then an explicit import; then — crucially — the **implicit `java.lang.*`
+/// import** (JLS §7.3), so a bare `Exception` / `RuntimeException` / `Runnable` resolves to its
+/// `java/lang/…` binary instead of an unresolved bare word. Without that last step a PROJECT
+/// method's `throws Exception` was stored as the raw `"Exception"` — never equal to the
+/// fully-resolved `java/lang/Exception` a call/override site resolves to, so the checked-exception
+/// and override-widening checks compared a resolved binary against an unresolved word and misfired
+/// (a false "overridden method does not permit `Exception`"). Only a KNOWN java.lang name is mapped,
+/// so a genuine typo stays raw (unresolvable) rather than being coerced to a fake `java/lang/Typo`.
 fn resolve_binary(
     simple: &str,
     imports: &[Import],
@@ -486,7 +504,78 @@ fn resolve_binary(
             return imp.path.replace('.', "/");
         }
     }
+    // `java.lang` is implicitly imported: a bare name that's a known java.lang type resolves there.
+    if is_java_lang_implicit(base) {
+        return format!("java/lang/{base}");
+    }
     base.to_string()
+}
+
+/// Whether `name` is a public top-level `java.lang` type — implicitly imported (JLS §7.3), so a bare
+/// use of it in a project's `extends` / `implements` / `throws` resolves to `java/lang/<name>`. Kept
+/// to the ubiquitous exception hierarchy + the common interfaces/classes a project subclasses,
+/// implements, or throws (the cases `resolve_binary` feeds). Deliberately a curated set, not every
+/// java.lang class: a name NOT here stays raw (unresolvable) rather than risk mapping a typo /
+/// same-package type to a fake `java/lang/…` binary. The resolver-backed checks additionally SKIP on
+/// any still-unresolved throws entry, so a name this set happens to miss can never cause a false
+/// positive — it only means that one check stays silent for it.
+fn is_java_lang_implicit(name: &str) -> bool {
+    matches!(
+        name,
+        // Throwable roots + the exception/error hierarchy (the `throws` case).
+        "Throwable"
+            | "Exception"
+            | "Error"
+            | "RuntimeException"
+            | "InterruptedException"
+            | "ClassNotFoundException"
+            | "CloneNotSupportedException"
+            | "NoSuchMethodException"
+            | "NoSuchFieldException"
+            | "IllegalAccessException"
+            | "InstantiationException"
+            | "ReflectiveOperationException"
+            | "NullPointerException"
+            | "IllegalArgumentException"
+            | "IllegalStateException"
+            | "IndexOutOfBoundsException"
+            | "ArrayIndexOutOfBoundsException"
+            | "StringIndexOutOfBoundsException"
+            | "ClassCastException"
+            | "NumberFormatException"
+            | "UnsupportedOperationException"
+            | "ArithmeticException"
+            | "NegativeArraySizeException"
+            | "ArrayStoreException"
+            | "SecurityException"
+            | "IllegalMonitorStateException"
+            | "IllegalThreadStateException"
+            | "EnumConstantNotPresentException"
+            | "TypeNotPresentException"
+            | "AssertionError"
+            | "StackOverflowError"
+            | "OutOfMemoryError"
+            | "NoClassDefFoundError"
+            | "ExceptionInInitializerError"
+            | "VirtualMachineError"
+            | "LinkageError"
+            // Common interfaces/classes a project extends / implements.
+            | "Object"
+            | "Runnable"
+            | "Comparable"
+            | "Iterable"
+            | "Cloneable"
+            | "CharSequence"
+            | "Appendable"
+            | "AutoCloseable"
+            | "Readable"
+            | "Thread"
+            | "Number"
+            | "Enum"
+            | "Record"
+            | "String"
+            | "ThreadLocal"
+    )
 }
 
 fn render_method(m: &MethodDecl) -> String {
@@ -632,6 +721,39 @@ mod tests {
         let ff = extract_symbols("package p;\npublic final class Utils {}\n");
         let ftd = ff.types.iter().find(|t| t.name == "Utils").unwrap();
         assert!(build_class_members(ftd, &ff.imports, &BTreeMap::new()).flags.is_final);
+    }
+
+    #[test]
+    fn implicit_java_lang_throws_and_super_resolve_to_binaries() {
+        // A project method's bare `throws Exception` must resolve to `java/lang/Exception` (java.lang
+        // is implicitly imported) — NOT stay the raw word `Exception`. Otherwise the override-widening
+        // / checked-exception checks compare a resolved `java/lang/Exception` against `Exception` and
+        // misfire ("overridden method does not permit Exception") on perfectly legal code.
+        let fs = extract_symbols(
+            "package p;\npublic class Base { public void init() throws Exception {} }\n",
+        );
+        let td = fs.types.iter().find(|t| t.name == "Base").unwrap();
+        let cm = build_class_members(td, &fs.imports, &BTreeMap::new());
+        let init = cm.methods.iter().find(|m| m.name == "init").unwrap();
+        assert_eq!(init.throws, vec!["java/lang/Exception".to_string()], "{:?}", init.throws);
+
+        // A bare `extends RuntimeException` / `implements Runnable` resolve to their java.lang binary.
+        let ex = extract_symbols("package p;\npublic class Boom extends RuntimeException {}\n");
+        let etd = ex.types.iter().find(|t| t.name == "Boom").unwrap();
+        let ecm = build_class_members(etd, &ex.imports, &BTreeMap::new());
+        assert_eq!(ecm.superclass.as_deref(), Some("java/lang/RuntimeException"));
+
+        let rn = extract_symbols("package p;\npublic class Job implements Runnable { public void run() {} }\n");
+        let rtd = rn.types.iter().find(|t| t.name == "Job").unwrap();
+        let rcm = build_class_members(rtd, &rn.imports, &BTreeMap::new());
+        assert!(rcm.interfaces.iter().any(|i| i == "java/lang/Runnable"), "{:?}", rcm.interfaces);
+
+        // A genuinely unknown bare name is NOT coerced to a fake `java/lang/…` — it stays raw so the
+        // checks treat it as unresolved (SKIP), never as a real java.lang type.
+        let tp = extract_symbols("package p;\npublic class C { public void m() throws Wibble {} }\n");
+        let ctd = tp.types.iter().find(|t| t.name == "C").unwrap();
+        let ccm = build_class_members(ctd, &tp.imports, &BTreeMap::new());
+        assert_eq!(ccm.methods[0].throws, vec!["Wibble".to_string()], "unknown stays raw");
     }
 
     #[test]

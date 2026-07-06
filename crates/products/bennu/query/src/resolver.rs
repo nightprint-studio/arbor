@@ -230,7 +230,33 @@ impl<M: CpMemberIndex> IndexResolver<M> {
         // 1) project source type — its resolved members are baked into the record.
         if let Some(sym) = self.project.get(binary_name) {
             if !sym.members_json.is_empty() {
-                if let Ok(cm) = serde_json::from_str::<JClassMembers>(&sym.members_json) {
+                if let Ok(mut cm) = serde_json::from_str::<JClassMembers>(&sym.members_json) {
+                    // Every reference type ultimately extends `java.lang.Object`. A project class
+                    // written WITHOUT an explicit `extends` has no recorded superclass, so the member
+                    // walk would miss Object's base methods (`getClass`/`equals`/`hashCode`/`toString`/
+                    // `wait`/`notify`/…) — flagging `x.getClass()` as unresolved — and cast/assignability
+                    // checks would judge the type "unrelated" to Object. Synthesize the implicit
+                    // superclass the source omitted (interfaces have none; an enum/record carries its
+                    // own root). Only when unset, and never for Object itself.
+                    // Only for the full resolver (validation/completion): the project-only reference/
+                    // rename engine never resolves JDK types, so a synthesized Object ancestor would
+                    // just be an unresolvable link on every walk — leave its hierarchy as declared.
+                    if !self.project_only && cm.superclass.is_none() && binary_name != "java/lang/Object" {
+                        // Mirror the bytecode convention: in a `.class` the `super_class` of a plain
+                        // class, an interface, AND an annotation is `java/lang/Object`; an enum's is
+                        // `java/lang/Enum`, a record's is `java/lang/Record`. (An interface reference
+                        // can legally call Object's public methods — JLS §9.2.)
+                        cm.superclass = Some(
+                            if cm.flags.is_enum {
+                                "java/lang/Enum"
+                            } else if cm.flags.is_record {
+                                "java/lang/Record"
+                            } else {
+                                "java/lang/Object"
+                            }
+                            .to_string(),
+                        );
+                    }
                     return Some(cm);
                 }
             }
@@ -270,6 +296,12 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
             .unwrap_or_else(|p| p.into_inner())
             .insert(binary_name.to_string(), computed.clone());
         computed
+    }
+
+    fn is_project_type(&self, binary_name: &str) -> bool {
+        // The project source index knows its own declared types; anything else is JDK/dependency
+        // bytecode, whose visibility we deliberately don't police (see the trait doc).
+        self.project_contains(binary_name)
     }
 
     fn resolve_simple_name(&self, name: &str, imports: &[Import]) -> Option<String> {
@@ -479,7 +511,7 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let mut b = IndexBuilder::new(&dir);
+        let b = IndexBuilder::new(&dir);
         b.persist().unwrap(); // empty index → project.get always misses
         let project = PersistedIndex::open(b.blob_path(), b.fst_path()).unwrap();
         IndexResolver::new(project, jdk)

@@ -39,8 +39,11 @@ exhaustively unit-tested here, including with real type inference.
 | `var_target_errors` | `error` | a `var` local whose initializer has no type of its own — a lambda, a method/constructor reference, an array initializer (`var xs = {1,2};`), or the `null` literal. Only the direct value (a cast supplies a target, so `var r = (Runnable) () -> {}` is fine); non-`var` declarations untouched. |
 | `capture_errors` | `error` | a local captured by a lambda **or** an anonymous/inner class and then reassigned in its declaring method (`int c = 0; Runnable r = () -> use(c); c = 5;`) — not effectively final. Complements `lambda_capture_errors` (mutation *inside* a lambda). Conservative like the `final` check: only a local WITH an initializer, declared once, reassigned outside any closure, and actually captured — so a definite-assignment-safe local is never flagged. |
 
-`check_file` takes a `FileContext { file_stem, expected_package, java_major }` — each `None` field
-just skips its check, so a scratch buffer still gets every source-only diagnostic.
+`check_file` takes a `FileContext { file_stem, expected_package, java_major, classpath_complete }` —
+each `None` field just skips its check, so a scratch buffer still gets every source-only diagnostic.
+`classpath_complete` (default `false`) tells the unresolved-import check whether the dependency jars
+were resolved: when `false` it adjudicates only `java.*` imports (the JDK-authoritative namespace), so
+an unindexed `javax.*` / library import is never a false "cannot resolve".
 
 ## Resolver-backed checks (`check_file_resolved`, runs type inference)
 
@@ -51,13 +54,14 @@ only when `jdk_available`.
 
 | Check | Emits | What |
 |---|---|---|
-| `unresolved_imports` | `error` | a single-type `import a.b.C;` whose type the resolver can't find (a typo / removed class). `static`/wildcard skipped; nested types tried as `a/b/Outer$Inner`. Depends on a complete classpath. |
+| `unresolved_imports` | `error` | a single-type `import a.b.C;` whose type the resolver can't find (a typo / removed class). `static`/wildcard skipped; nested types tried as `a/b/Outer$Inner`. Only `java.*` is checked unless `classpath_complete` — a `javax.*`/library import can't be judged missing without the dependency jars (never a false positive). |
 | `unknown_members` | `error` | a call `receiver.method(...)` whose `method` doesn't exist on the receiver's **inferred** type (walking supertypes). |
 | `unknown_fields` | `error` | a `receiver.field` access whose `field` doesn't exist on the inferred type. Skips array `length`, static qualifiers, package/type prefixes. |
 | `arity_errors` | `error` | a `recv.method(args)` / `new Foo(args)` whose argument count matches no overload (varargs-aware — a trailing array is treated as possibly-varargs). Silent when the method is *missing* (that's `unknown_members`). |
 | `argument_type_errors` | `error` | an argument whose type can't bind to the parameter (`foo(1)` where `foo(String)`). Only when exactly one non-varargs, non-generic overload matches by arity; flags a definite mismatch only (String↔primitive, or unrelated concrete classes). |
 | `unresolved_types` | `error` | a simple type name in a type position (`Fooo x;`, `extends Barr`, `List<Bazz>`, `catch (Quxx e)`) the resolver can't resolve. Excludes in-scope type parameters, same-file types, `var`, and `java.lang`. |
-| `type_compat_errors` | `error` | an inconvertible cast (`(String) anInteger`), and an assignment / `return` whose value's type is incompatible with the declared type — including a `String` ↔ primitive mismatch (`int x = "1";`, `int y = "1" + 1;`, `String s = 1;`), driven by literal + string-concatenation typing. Reference-to-reference is flagged only between unrelated concrete classes over a fully-known hierarchy; boxing / widening / interfaces / generics are left alone. |
+| `type_compat_errors` | `error` | an inconvertible cast (`(String) anInteger`), and an assignment / `return` whose value's type is incompatible with the declared type — including a `String` ↔ primitive mismatch (`int x = "1";`, `int y = "1" + 1;`, `String s = 1;`), driven by literal + string-concatenation typing. Reference-to-reference is flagged only between unrelated concrete classes over a fully-known hierarchy; boxing / widening / interfaces / generics are left alone. `java/lang/Object` on either side of a cast/assignment is skipped (universal supertype; also an erased-generic value). A **chained** method call (`a.b().c()`) value is skipped: shallow generic substitution can mis-type a chain (`list.stream().map(X::getId).max(..).orElse(null)` → the element type, not the mapped result), so it's left to the compiler. |
+| `visibility_errors` | `error` | a `receiver.member` (or `Type.staticMember`) reaching a member the site can't see: a `private` member accessed from outside its declaring **top-level** type (an outer class and its nested types share one nest → never flagged between them), or a package-private member from another package. Extremely conservative — only over a fully-known hierarchy, an unambiguous single declaration, `Public`/`Protected` never flagged, and **only on the project's own types** (JDK and dependency-jar members are exempt: their real accessibility — generated accessors, split packages, module rules — isn't decidable from bytecode). |
 | `inheritance_errors` | `error` | an illegal `extends`/`implements`: a class extending a `final` type / record / enum / interface, a class implementing a non-interface, an interface extending a non-interface. Uses the class-level `ClassFlags` decoded from bytecode. |
 | `missing_abstract_impls` | `error` | a concrete class that leaves an inherited abstract method unimplemented. Requires the whole hierarchy known; `Object` methods never count; `sealed` supertypes are not consulted. |
 | `functional_errors` | `error` | a lambda whose parameter count doesn't match its target functional interface's single abstract method, or whose target interface isn't functional. Only for explicit targets (`T x = …`, `return …`, `(T) …`) against a known interface. |

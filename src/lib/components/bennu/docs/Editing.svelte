@@ -350,6 +350,44 @@
   same way — a computed or <code>http(s)://</code> reference never is. Inline
   <code>&lt;script&gt;</code> and <code>&lt;style&gt;</code> blocks are highlighted as JavaScript and CSS.
 </p>
+<p>
+  While editing a JSP, the editor toolbar shows an <strong>Insert tag</strong> menu that drops a
+  ready-made JSTL / Struts snippet at the caret — <code>&lt;c:set&gt;</code>, <code>&lt;s:set&gt;</code>,
+  <code>&lt;s:property&gt;</code>, <code>&lt;s:iterator&gt;</code>, <code>&lt;c:forEach&gt;</code>,
+  <code>&lt;s:if&gt;</code> / <code>&lt;c:if&gt;</code>, <code>&lt;s:url&gt;</code>, <code>&lt;s:text&gt;</code> and
+  <code>&lt;s:textfield&gt;</code> — with placeholder attributes you overtype.
+</p>
+<p>
+  A <strong>form field</strong> in a JSP — the <code>name="…"</code> of an <code>&lt;s:textfield&gt;</code>,
+  <code>&lt;input&gt;</code>, <code>&lt;s:select&gt;</code>, … inside a form — is understood as a property of
+  the form's <strong>action class</strong>. <kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click)
+  on it jumps to the matching <code>get</code>/<code>set</code>/<code>is</code> accessor in the action
+  Java; and a field whose name is <strong>not</strong> a property of the action gets a
+  <strong>warning squiggle</strong> (a likely typo — “this parameter doesn't exist on the action”).
+  The check only fires when the action resolves to a project class whose properties are known, so an
+  unresolved action never produces a false warning. The same works from a
+  <code>&lt;field name="…"&gt;</code> inside a <code>*-validation.xml</code> — go-to jumps to the
+  bound action's property, and an unknown field name is flagged the same way. Properties inherited
+  from a project <code>BaseAction</code> are resolved up the <code>extends</code> chain, so they are
+  never mis-flagged.
+</p>
+<p>
+  For a <strong>view JSP</strong> with no form — just OGNL (<code>%&lbrace;customer&rbrace;</code>,
+  <code>&lt;s:property value="…"/&gt;</code>) — the editor works out which action renders it from the
+  Struts result mappings (the reverse of action → view). When exactly one action maps to the page it's
+  used automatically; when several do (or you want to override), an <strong>action picker</strong> in
+  the toolbar lets you pin one, remembered per file. The bound action drives <kbd>Ctrl</kbd> +
+  <kbd>B</kbd> on an OGNL root and its “unknown property” warning. Only plain
+  <code>%&lbrace;…&rbrace;</code> value-stack roots are checked — EL <code>$&lbrace;…&rbrace;</code>
+  scoped attributes and <code>#</code>-prefixed context / iterator variables are left alone.
+</p>
+<p>
+  This follows <strong>includes</strong>: an included fragment (<code>.jspf</code>) that a view page
+  pulls in has no action of its own, so it <strong>inherits</strong> the action(s) of the page(s) that
+  include it (transitively). So the picker, the go-to and the “unknown property” warning all work on a
+  child fragment too — its fields (even those that belong to a form declared in the parent page) and
+  its OGNL are checked against the parent view's action.
+</p>
 
 <h2>MyBatis mappers</h2>
 <p>

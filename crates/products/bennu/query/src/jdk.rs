@@ -240,6 +240,7 @@ mod tests {
                     is_final: false,
                     visibility: Visibility::Public,
                     raw_signature: "int bar()".to_string(),
+                    throws: Vec::new(),
                 }],
                 fields: vec![],
                 flags: Default::default(),

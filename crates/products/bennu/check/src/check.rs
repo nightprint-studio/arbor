@@ -41,6 +41,15 @@ pub struct FileContext {
     /// The project's target major Java version (`8` for `1.8`) — drives the version-gated feature
     /// checks. `None` skips them.
     pub java_major: Option<u32>,
+    /// Whether the project's dependency classpath is **known-complete** — the Maven/library jars were
+    /// resolved, so a library import that DOESN'T resolve is a genuine "cannot resolve", not a gap in
+    /// our knowledge. When `false` (no `pom` / Maven not resolved / dependency indexing off) the
+    /// resolver only knows the JDK + project, so a `javax.*` / `org.*` / any non-`java.*` import that
+    /// fails to resolve is very likely a real library type we simply didn't index — flagging it would
+    /// be a false positive. The unresolved-import check therefore adjudicates only `java.*` (always
+    /// JDK-authoritative) unless this is `true`. `#[default]` = `false` (conservative: assume we can't
+    /// see the whole classpath).
+    pub classpath_complete: bool,
 }
 
 /// Validate one Java `source` with the no-resolver checks and return the merged diagnostics, ordered
@@ -183,7 +192,7 @@ pub fn check_file_resolved(
                 out.extend(__r);
             }};
         }
-        timed!("unresolved_imports", crate::imports::unresolved_imports(root, source, resolver));
+        timed!("unresolved_imports", crate::imports::unresolved_imports(root, source, resolver, ctx.classpath_complete));
         timed!("unknown_members", crate::members::unknown_members_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("unknown_fields", crate::fields::unknown_fields_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("arity", crate::arity::arity_errors_in(root, &nodes, source, &symbols, resolver, &cache));
@@ -296,6 +305,28 @@ mod tests {
     #[test]
     fn empty_source_is_safe() {
         assert!(check_file("", &FileContext::default()).is_empty());
+    }
+
+    #[test]
+    fn diagnostic_spans_are_true_utf8_byte_offsets_past_multibyte_chars() {
+        // REGRESSION GUARD for "diagnostics on the wrong line / portion". A comment with accented
+        // (multi-byte UTF-8) text precedes an unused import: `caffè` is 6 chars but 7 bytes (`è` = 2
+        // bytes), so a check that mistakenly emitted CHAR or UTF-16 offsets would land the span one
+        // position early. The span MUST be a true UTF-8 byte range, so slicing the source bytes by
+        // [start,end) yields exactly the flagged `import …;` — the FE then maps those bytes onto the
+        // editor's UTF-16 positions (`makeByteToU16`) and the squiggle lands precisely.
+        let src = "// caffè macchiato\nimport java.util.List;\nclass Foo {}\n";
+        let diags = check_file(src, &FileContext::default());
+        let unused = diags
+            .iter()
+            .find(|d| d.severity == "warning" && d.message.contains("List"))
+            .expect("the unused import must be flagged");
+        let slice = &src.as_bytes()[unused.start..unused.end];
+        assert_eq!(
+            std::str::from_utf8(slice).unwrap(),
+            "import java.util.List;",
+            "the span must be a true byte range covering exactly the import (not shifted by the multi-byte è)",
+        );
     }
 
     #[test]

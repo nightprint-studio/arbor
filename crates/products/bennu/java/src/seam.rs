@@ -198,4 +198,16 @@ pub trait TypeResolver {
     /// imports for disambiguation. `None` when unresolvable.
     fn resolve_simple_name(&self, name: &str, imports: &[crate::symbols::Import])
         -> Option<String>;
+
+    /// Whether `binary_name` names a type declared in the PROJECT'S OWN sources (not the JDK and not
+    /// a dependency jar). Defaults to `true` — a resolver that can't tell provenance (a test mock)
+    /// treats every type as project. The real index overrides it. Used by accessibility checks
+    /// (`visibility`) to police member visibility ONLY on the user's own code: a library type's true
+    /// accessibility (compiler-generated accessors, split-package legacy frameworks, module rules) is
+    /// as unmodellable from bytecode as the JDK's, so a package-private-looking dependency member is
+    /// routinely reachable in ways an AST + member index can't see — flagging it would be a false
+    /// positive. (Dependency indexing newly surfaced these; before it, such types didn't resolve.)
+    fn is_project_type(&self, _binary_name: &str) -> bool {
+        true
+    }
 }

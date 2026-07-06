@@ -24,7 +24,7 @@ pub use crate::jdk::{
 // Dependency-jar sourcing from ~/.m2 via Maven's build-classpath (cached by pom
 // mtime), layered behind the JDK through the same MultiSource.
 pub use crate::maven::{
-    resolve_maven_classpath, MavenClasspath, MavenClasspathCache, MavenResolveOpts,
+    resolve_maven_classpath, source_from_jars, MavenClasspath, MavenClasspathCache, MavenResolveOpts,
 };
 
 // The container abstraction + its three impls.

@@ -217,6 +217,21 @@ pub fn resolve_maven_classpath(
     Ok(MavenClasspath { jars, unresolved, mvn_ok })
 }
 
+/// Open a list of dependency jar paths as one [`MultiSource`], skipping any that fail to open (a
+/// corrupt/unsupported jar must not sink the whole tier — same policy as [`MavenClasspath::jar_sources`]).
+/// For a caller (e.g. the index service) that already knows the resolved jar paths — from a persisted
+/// classpath cache — and wants a ready [`ClassSource`](crate::source::ClassSource) without re-running
+/// Maven.
+pub fn source_from_jars(jars: &[PathBuf]) -> MultiSource {
+    let mut sources: Vec<Box<dyn ClassSource>> = Vec::new();
+    for jar in jars {
+        if let Ok(src) = JarSource::open(jar) {
+            sources.push(Box::new(src));
+        }
+    }
+    MultiSource::new(sources)
+}
+
 /// Split a build-classpath string into existing jars vs non-existent entries.
 fn split_classpath(raw: &str) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let mut jars = Vec::new();

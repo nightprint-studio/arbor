@@ -81,6 +81,67 @@ export function declaration(
   return bennu('bennu_declaration', { args: { file, source, offset } });
 }
 
+/** Go-to from a JSP form field / OGNL root (a `<s:textfield name="…">` etc.), or a
+ *  `*-validation.xml` `<field name="…">`, under the caret to the **action class's** `get`/`set`/`is`
+ *  accessor for that property. `source` is the live buffer. `null` when the caret isn't on a
+ *  resolvable field, or the action / property doesn't resolve to a project class.
+ *  Wire: `bennu_action_property_target` — `{ file, source, offset }`. */
+export function actionPropertyTarget(
+  file: string,
+  source: string,
+  offset: number,
+): Promise<DeclarationTarget | null> {
+  return bennu('bennu_action_property_target', { args: { file, source, offset } });
+}
+
+/** A single "unknown property on action" lint hit — a JSP field / validation `<field>` whose root
+ *  property name matches no bean property of the resolved action class. Byte offsets into the buffer. */
+export interface PropertyLintHit {
+  start: number;
+  end: number;
+  /** The offending property name. */
+  name: string;
+  /** The action class simple-name it was checked against. */
+  action: string;
+}
+
+/** Lint the JSP form fields / validation `<field>`s in `source` against the resolved action class's
+ *  bean properties — a warning per field whose name exists nowhere on the action. Empty when the
+ *  action / its properties can't be resolved (never a false positive).
+ *  Wire: `bennu_action_property_lint` — `{ file, source }`. */
+export function actionPropertyLint(file: string, source: string): Promise<PropertyLintHit[]> {
+  return bennu('bennu_action_property_lint', { args: { file, source } });
+}
+
+/** One candidate Struts action a JSP view could be bound to (from the reverse view→action lookup). */
+export interface JspActionOption {
+  /** Action qualified-name (`/do/Cat/viewTree`) — the stored binding value. */
+  qname: string;
+  class_fqcn: string | null;
+  /** Class simple-name (or qname tail) for the dropdown label. */
+  simple: string;
+}
+
+/** The action-binding state for a JSP view — candidates, the pinned action, and the effective one
+ *  actually used for OGNL go-to / linting. */
+export interface JspActionBinding {
+  candidates: JspActionOption[];
+  bound: string | null;
+  effective: string | null;
+}
+
+/** The reverse view→action candidates + current binding for the JSP `file` (the action picker).
+ *  Wire: `bennu_jsp_actions` — `{ file }`. */
+export function jspActions(file: string): Promise<JspActionBinding> {
+  return bennu('bennu_jsp_actions', { args: { file } });
+}
+
+/** Pin (or, with `action === null`, clear) which action a JSP view's OGNL is checked/navigated
+ *  against; persisted in the bennu config. Wire: `bennu_set_jsp_action` — `{ file, action? }`. */
+export function setJspAction(file: string, action: string | null): Promise<boolean> {
+  return bennu('bennu_set_jsp_action', { args: { file, action } });
+}
+
 /** Live-edit re-index: hand the BE the edited file's full text so it patches the
  *  persisted index (completion / definition then reflect the edit without reopening
  *  the project). `text === null` signals the file was deleted. Returns `true` when a

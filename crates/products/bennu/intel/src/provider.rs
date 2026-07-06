@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use bennu_index::prelude::SymbolKind;
 use bennu_proto::prelude::{CompletionItem, Diagnostic};
 
-use bennu_query::prelude::{IndexResolver, JdkMemberIndex};
+use bennu_classpath::prelude::ClassSource;
+use bennu_query::prelude::{ClasspathIndex, IndexResolver, JdkMemberIndex};
 
 /// One project member (method / field) enumerated from the built symbol index, for the
 /// index inspector's "members" list. A be-agnostic view: the be layer maps this onto its
@@ -141,9 +142,10 @@ pub trait IntelProvider: Send + Sync {
 /// benign empty list — never an error — so the FE degrades gracefully.
 #[derive(Default)]
 pub struct NativeJavaProvider {
-    /// The completion resolver: `Some` once a project index is built + the JDK is
-    /// resolved; `None` for the empty (pre-index) provider.
-    resolver: Option<IndexResolver<JdkMemberIndex>>,
+    /// The completion resolver: `Some` once a project index is built + the classpath (JDK, plus the
+    /// project's dependency jars when resolvable) is available; `None` for the empty (pre-index)
+    /// provider.
+    resolver: Option<IndexResolver<ClasspathIndex>>,
 }
 
 impl std::fmt::Debug for NativeJavaProvider {
@@ -160,9 +162,9 @@ impl NativeJavaProvider {
         Self::default()
     }
 
-    /// Construct a provider backed by a resolver over a built project index + the JDK
-    /// member index — the Phase-1 completion path.
-    pub fn with_resolver(resolver: IndexResolver<JdkMemberIndex>) -> Self {
+    /// Construct a provider backed by a resolver over a built project index + the classpath
+    /// (JDK + optional dependency) member index — the Phase-1 completion path.
+    pub fn with_resolver(resolver: IndexResolver<ClasspathIndex>) -> Self {
         Self { resolver: Some(resolver) }
     }
 
@@ -174,11 +176,17 @@ impl NativeJavaProvider {
     /// `jdk_index_path` (when `Some`) makes the JDK member index **persistent**: it loads the
     /// shared, cross-session memo from that path and writes warmed classes back, so a JDK class is
     /// parsed from bytecode at most once ever. The be layer keys the path by the resolved JDK.
+    ///
+    /// `deps` (when `Some`) adds the project's **dependency tier**: a `(dep-jars source, per-project
+    /// memo path)` pair the be layer resolves from Maven's `~/.m2` classpath. With it, member /
+    /// argument / cast / inheritance checks resolve **library** types (Spring, servlet, Hibernate, …)
+    /// too, not just the JDK + project. `None` degrades to JDK + project, exactly as before.
     pub fn for_project(
         index_dir: &Path,
         jdk_version: &str,
         project_simple_names: &[(String, String)],
         jdk_index_path: Option<PathBuf>,
+        deps: Option<(Box<dyn ClassSource>, PathBuf)>,
     ) -> Result<Self, String> {
         use bennu_classpath::prelude::resolve_jdk_classpath;
         use bennu_index::prelude::PersistedIndex;
@@ -191,15 +199,22 @@ impl NativeJavaProvider {
             Some(path) => JdkMemberIndex::persistent(source, path),
             None => JdkMemberIndex::new(source),
         };
-        let mut resolver = IndexResolver::new(project, jdk);
+        let classpath = match deps {
+            Some((dep_source, dep_memo_path)) => {
+                ClasspathIndex::with_deps(jdk, dep_source, dep_memo_path)
+            }
+            None => ClasspathIndex::jdk_only(jdk),
+        };
+        let mut resolver = IndexResolver::new(project, classpath);
         for (simple, binary) in project_simple_names {
             resolver.add_simple_hint(simple, binary);
         }
         Ok(Self::with_resolver(resolver))
     }
 
-    /// Persist the JDK member index's memo now (best-effort; no-op for the empty provider or an
-    /// in-memory index). Called at a checkpoint so a session's warmed JDK classes survive.
+    /// Persist the classpath member index's memos now (best-effort; no-op for the empty provider or
+    /// an in-memory index). Flushes BOTH tiers — the shared JDK memo and, when present, the
+    /// per-project dependency memo — so a session's warmed JDK **and** library classes survive.
     pub fn flush_jdk_index(&self) {
         if let Some(resolver) = &self.resolver {
             resolver.jdk_index().flush();

@@ -57,6 +57,36 @@ pub fn decode(bytes: &[u8], label: &str) -> (String, String) {
     (text.into_owned(), label.to_string())
 }
 
+/// Normalize line endings to a single **LF** (`\r\n` → `\n`, and a lone `\r` → `\n`).
+///
+/// EVERY byte offset Bennu produces (tree-sitter spans, the symbol index, diagnostics) is a
+/// UTF-8 byte offset into the text it analysed. The editor is CodeMirror, which stores its
+/// document with LF line separators — it strips `\r` when it splits the input, so a byte
+/// offset computed against the CRLF file lands one position too far for every preceding line,
+/// and diagnostics/go-to drift DOWNWARD proportionally to the line number (the "wrong line /
+/// wrong portion" bug on Windows files). Normalizing the analysed text to LF at the read
+/// boundary makes every offset agree with the editor's coordinate space. The file's real
+/// on-disk EOL is preserved on save ([`restore_crlf`] in the write path).
+pub fn normalize_newlines(text: &str) -> String {
+    if !text.contains('\r') {
+        return text.to_string(); // already LF (the common case) — no allocation churn beyond the copy
+    }
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// Whether a file's raw `bytes` use **CRLF** line endings (any `\r\n` present) — so the write
+/// path can restore them after the buffer was normalized to LF on read.
+pub fn has_crlf(bytes: &[u8]) -> bool {
+    bytes.windows(2).any(|w| w == b"\r\n")
+}
+
+/// Re-expand an LF buffer to **CRLF** (`\n` → `\r\n`), the inverse of [`normalize_newlines`]
+/// for a file whose on-disk EOL is CRLF. Idempotent on already-CRLF text: it first collapses
+/// any `\r\n` back to `\n` so a mixed/already-expanded buffer doesn't become `\r\r\n`.
+pub fn restore_crlf(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\n', "\r\n")
+}
+
 /// Outcome of an INDEXING decode ([`decode_for_index`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexDecode {
@@ -236,5 +266,31 @@ mod tests {
         let (bytes, label) = encode("class Foo {}", "UTF-8");
         assert_eq!(bytes, b"class Foo {}");
         assert_eq!(label, "UTF-8");
+    }
+
+    #[test]
+    fn normalize_newlines_collapses_crlf_and_cr_to_lf() {
+        assert_eq!(normalize_newlines("a\r\nb\r\nc"), "a\nb\nc");
+        assert_eq!(normalize_newlines("a\rb"), "a\nb"); // lone CR (classic Mac)
+        assert_eq!(normalize_newlines("a\nb"), "a\nb"); // already LF — unchanged
+        assert_eq!(normalize_newlines(""), "");
+    }
+
+    #[test]
+    fn has_crlf_detects_windows_line_endings() {
+        assert!(has_crlf(b"import a;\r\nimport b;\r\n"));
+        assert!(!has_crlf(b"import a;\nimport b;\n"));
+        assert!(!has_crlf(b"no newline"));
+    }
+
+    #[test]
+    fn restore_crlf_is_the_inverse_and_idempotent() {
+        // LF → CRLF.
+        assert_eq!(restore_crlf("a\nb\nc"), "a\r\nb\r\nc");
+        // Idempotent: an already-CRLF buffer doesn't become `\r\r\n`.
+        assert_eq!(restore_crlf("a\r\nb"), "a\r\nb");
+        // Full round-trip: a CRLF file normalized to LF and restored is byte-identical.
+        let crlf = "line1\r\nline2\r\nline3";
+        assert_eq!(restore_crlf(&normalize_newlines(crlf)), crlf);
     }
 }

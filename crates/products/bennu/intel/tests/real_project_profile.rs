@@ -46,7 +46,7 @@ fn profile_real_project() {
 
     // ── build the real provider (project index + JDK bytecode resolver) ───────────────────────
     let t = Instant::now();
-    let provider = NativeJavaProvider::for_project(&index_dir, &jdk_version, &pairs, None)
+    let provider = NativeJavaProvider::for_project(&index_dir, &jdk_version, &pairs, None, None)
         .expect("provider (is the JDK resolvable?)");
     eprintln!("built provider in {:?}", t.elapsed());
 
@@ -55,7 +55,7 @@ fn profile_real_project() {
     let run = Instant::now();
     for (path, src) in &sources {
         let file_stem = path.file_stem().and_then(|s| s.to_str()).map(str::to_string);
-        let ctx = FileContext { file_stem, expected_package: None, java_major: Some(5) };
+        let ctx = FileContext { file_stem, expected_package: None, java_major: Some(5), classpath_complete: false };
         let t = Instant::now();
         let diags = provider.validate(src, &ctx, true);
         let ms = t.elapsed().as_millis();
@@ -101,7 +101,7 @@ fn profile_diag_cache() {
     let built = build_project_index_from_sources(&sources, &index_dir);
     built.builder.persist().expect("persist index");
     let pairs: Vec<(String, String)> = built.type_map.into_iter().collect();
-    let provider = NativeJavaProvider::for_project(&index_dir, &jdk_version, &pairs, None)
+    let provider = NativeJavaProvider::for_project(&index_dir, &jdk_version, &pairs, None, None)
         .expect("provider (is the JDK resolvable?)");
 
     // One validation pass over `sources`, consulting + filling `cache` the way the be layer's
@@ -116,6 +116,7 @@ fn profile_diag_cache() {
                 file_stem: path.file_stem().and_then(|s| s.to_str()).map(str::to_string),
                 expected_package: None,
                 java_major: Some(5),
+                classpath_complete: false,
             };
             let own = source_hash(src);
             if let Some(view) = provider.project_view() {
@@ -146,6 +147,7 @@ fn profile_diag_cache() {
             file_stem: path.file_stem().and_then(|s| s.to_str()).map(str::to_string),
             expected_package: None,
             java_major: Some(5),
+            classpath_complete: false,
         };
         let own = source_hash(src);
         let (diags, recorded) = provider.validate_recording(src, &ctx, true);

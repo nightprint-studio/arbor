@@ -27,8 +27,10 @@ import type { ClassEntry } from '$lib/types/bennu';
 const OP_ID = 'bennu-index';
 const PHASES: { key: string; label: string }[] = [
   { key: 'project', label: 'Project sources' },
+  { key: 'dependencies', label: 'Dependencies' },
   { key: 'references', label: 'References index' },
   { key: 'config', label: 'Config graph' },
+  { key: 'validation', label: 'Validation warm-up' },
 ];
 function phaseLabel(key: string): string {
   return PHASES.find((p) => p.key === key)?.label ?? key;
@@ -65,19 +67,14 @@ function createBennuIndexStore() {
   // The active safety-net poll timer + a token so a new project open cancels the old.
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let pollToken = 0;
-  // Fallback-completion tracking: `ready` is the primary signal, but if it never flips
-  // (older BE that doesn't set it, or a root-mismatch on the stats lookup) we finish
-  // when the type count stops growing, or after a hard cap — so the footer never
-  // sticks on "Indexing".
-  let lastPollTypes = -1;
-  let stableCount = 0;
+  // Hard-cap counter for the poll's last-resort finish: `ready` (event or `index_stats.ready`) is
+  // the primary signal; the cap only rescues a BE that emits NOTHING at all (see `sawEvent`).
   let pollCount = 0;
-  // Set once ANY index-progress event has arrived. The poll's stop heuristics (type count
-  // stopped growing / hard poll cap) are a fallback for a BE that emits no events — with a
-  // live event stream they must NOT fire, or a legitimately long references phase (the O(N)
-  // reference walk, minutes on a big project) gets cut short and its step never shows. When
-  // events flow, only a real `ready` (the terminal event, or `index_stats.ready` = fully
-  // built) finishes the card.
+  // Set once ANY index-progress event has arrived. The poll's hard-cap fallback is only for a BE
+  // that emits no events — with a live event stream it must NOT fire, or a legitimately long
+  // references phase (the O(N) reference walk, minutes on a big project) gets cut short and its step
+  // never shows. When events flow, only a real `ready` (the terminal event, or `index_stats.ready` =
+  // fully built) finishes the card.
   let sawEvent = false;
 
   function startJob(root: string) {
@@ -131,12 +128,16 @@ function createBennuIndexStore() {
     refProgress = null;
     startJob(root);
     pollToken += 1;
-    lastPollTypes = -1;
-    stableCount = 0;
     pollCount = 0;
     sawEvent = false;
     stopPoll();
-    pollOnce(root, pollToken);
+    // DELAY the first poll (don't fire it synchronously): re-opening an already-indexed project
+    // leaves the BE's previous slot with `ready = true` until its fresh `open` resets it, and an
+    // immediate poll could read that STALE `ready` and finish the card within milliseconds — the
+    // "the step completes the moment I open it" bug. A short delay lets the fresh build reset
+    // `ready = false` (and start emitting events) before we trust the stats.
+    const token = pollToken;
+    pollTimer = setTimeout(() => pollOnce(root, token), 1500);
   }
 
   function pollOnce(root: string, token: number) {
@@ -149,14 +150,15 @@ function createBennuIndexStore() {
           return;
         }
         pollCount += 1;
-        // Type count stopped growing (index likely done) → treat as ready. ONLY when no
-        // events are arriving: with a live event stream the References-index phase (the
-        // minutes-long reference walk) keeps the card open until its real `ready`, and the
-        // type count plateaus long before then (it's fixed at the end of the project phase),
-        // so this heuristic would otherwise close the card mid-walk.
-        if (s.types > 0 && s.types === lastPollTypes) stableCount += 1; else stableCount = 0;
-        lastPollTypes = s.types;
-        if (!sawEvent && (stableCount >= 3 || pollCount >= 40)) {
+        // `s.ready` (checked above) is the AUTHORITATIVE completion — the BE sets it only at the
+        // very end (after the reference walk + config graph), and we read it every poll, so a missed
+        // `ready` EVENT still finishes the card correctly. We deliberately do NOT finish on a "type
+        // count stopped growing" heuristic: the count is fixed at the end of the PROJECT phase, long
+        // before the (minutes-long) reference walk, so that heuristic flipped every step to "done"
+        // prematurely whenever the event stream was missed. The only remaining fallback is a hard cap
+        // for a BE that emits NOTHING at all (the listener never attached) — never reached once any
+        // event has arrived, so a legitimately long walk is safe.
+        if (!sawEvent && pollCount >= 40) {
           markReady(root);
           return;
         }

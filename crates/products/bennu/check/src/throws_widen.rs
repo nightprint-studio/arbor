@@ -144,6 +144,18 @@ fn check_method_widening(
     }
     let super_throws = first; // the single, agreed-upon permitted set.
 
+    // SAFETY NET (docs: NEVER a false positive). Every `y` in the permitted set must RESOLVE to a
+    // known type — otherwise `reaches(x, y)` can only ever be `false` for it (an unresolvable `y` has
+    // no hierarchy to match), so a `y` we can't resolve would silently drop out of the permitted set
+    // and could turn a legal override into a phantom "does not permit". This bites when a PROJECT
+    // super method's `throws` didn't fully resolve (e.g. an implicit-java.lang or oddly-imported type
+    // the index couldn't bind): the sub's declared throw resolves fully, the super's doesn't, and they
+    // never match. If ANY permitted entry is unresolvable we can't compute the permitted set reliably
+    // → SKIP the whole method rather than risk a false positive.
+    if super_throws.iter().any(|y| !is_binary_resolvable(y, resolver)) {
+        return;
+    }
+
     // For each CHECKED exception the sub declares that is permitted by NO super-throws entry → flag it.
     for (x_bin, x_node) in &declared {
         // Only checked exceptions can widen the contract; unchecked (RuntimeException/Error subtypes)
@@ -273,6 +285,13 @@ fn text(node: Node, bytes: &[u8]) -> Option<String> {
 /// The simple (last) segment of a binary name (`java/sql/SQLException` → `SQLException`).
 fn simple_name(binary: &str) -> &str {
     binary.rsplit(['/', '$']).next().unwrap_or(binary)
+}
+
+/// Whether `binary` names a type the resolver can actually resolve (its members are known). A raw,
+/// unresolved throws word (e.g. a project super's `"Exception"` that the index left unbound) has no
+/// members → `false` → the permitted-set guard SKIPs rather than mis-flag.
+fn is_binary_resolvable(binary: &str, resolver: &dyn TypeResolver) -> bool {
+    resolver.members_of(binary).is_some()
 }
 
 fn err(message: String, node: Node) -> Diagnostic {
@@ -502,6 +521,28 @@ mod tests {
         // A static method of the same name doesn't override → SKIP.
         assert!(
             widens("class Sub extends Base { static void run() throws SQLException {} }").is_empty()
+        );
+    }
+
+    #[test]
+    fn super_throws_with_an_unresolvable_entry_is_not_flagged() {
+        // THE regression: a PROJECT super method whose `throws` didn't fully resolve — its permitted
+        // set is the raw word `"Exception"` (no such binary in the index), while the sub's declared
+        // `throws Exception` resolves fully to `java/lang/Exception`. They never match, so a naive
+        // check would flag "does not permit Exception" on perfectly legal code. The permitted-set
+        // resolvability guard must SKIP instead (never a false positive).
+        let base = ClassMembers {
+            superclass: Some("java/lang/Object".to_string()),
+            interfaces: Vec::new(),
+            // Unresolved throws entry: `"Exception"` is NOT a key in the mock resolver's members.
+            methods: vec![run_throwing(&["Exception"])],
+            fields: Vec::new(),
+            flags: ClassFlags::default(),
+        };
+        let r = resolver_with(base);
+        assert!(
+            widens_with("class Sub extends Base { void run() throws Exception {} }", &r).is_empty(),
+            "an unresolvable permitted entry ⇒ SKIP, never flag",
         );
     }
 

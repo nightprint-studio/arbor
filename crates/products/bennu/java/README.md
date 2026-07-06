@@ -58,6 +58,7 @@ struct TypeRef { binary_name: String, type_args: Vec<TypeRef> }   // carries gen
 trait TypeResolver {
     fn members_of(&self, binary_name: &str) -> Option<ClassMembers>;                    // "java/util/ArrayList"
     fn resolve_simple_name(&self, name: &str, imports: &[Import]) -> Option<String>;
+    fn is_project_type(&self, binary_name: &str) -> bool { true }                        // project source vs JDK/dep jar
 }
 struct ClassMembers { superclass: Option<String>, interfaces: Vec<String>, methods: Vec<Member>, fields: Vec<Member>, flags: ClassFlags }
 struct Member { name, kind: MemberKind, return_type: TypeRef, params: Vec<TypeRef>, is_static, is_abstract, is_default, is_final, visibility, raw_signature }

@@ -196,6 +196,9 @@ async fn bennu_download_dictionaries(
     let client = arbor_core::prelude::client();
     let sink = ctx.event_sink();
     let mut any_ok = false;
+    // First failure reason, surfaced to the FE when NOTHING downloads — so the user sees *why*
+    // (offline, blocked URL, HTTP status) instead of a silent no-op.
+    let mut first_err: Option<String> = None;
 
     for (lang, file, url) in DICT_SOURCES {
         match download_file(&client, url).await {
@@ -203,6 +206,7 @@ async fn bennu_download_dictionaries(
                 let path = dict_dir.join(file);
                 if let Err(e) = tokio::fs::write(&path, &bytes).await {
                     eprintln!("bennu-be: write {file}: {e}");
+                    first_err.get_or_insert_with(|| format!("write {file}: {e}"));
                     sink.emit(EVT_DICT_PROGRESS, json!({ "lang": lang, "file": file, "done": false }));
                     continue;
                 }
@@ -211,9 +215,19 @@ async fn bennu_download_dictionaries(
             }
             Err(e) => {
                 eprintln!("bennu-be: download {url}: {e}");
+                first_err.get_or_insert_with(|| format!("{file}: {e}"));
                 sink.emit(EVT_DICT_PROGRESS, json!({ "lang": lang, "file": file, "done": false }));
             }
         }
+    }
+
+    // Nothing landed → return the failure so the FE can tell the user (a silent `Ok` here is exactly
+    // why "clicking Download did nothing"). A partial success still returns Ok with the fresh status.
+    if !any_ok {
+        return Err(format!(
+            "Could not download the dictionaries — {}. Check your internet connection or a proxy/firewall.",
+            first_err.as_deref().unwrap_or("no source reachable")
+        ));
     }
 
     // Reload the engine so the next spellcheck reflects the new files. Parsing the dicts is

@@ -383,6 +383,7 @@ mod integration {
             file_stem: Some(stem.to_string()),
             expected_package: None,
             java_major: Some(8),
+            classpath_complete: false,
         };
         let (diags, recorded) = record(|| check_file_resolved(src, &ctx, resolver, true));
         (diags, FileDeps::from_recorded(source_hash(src), &recorded))

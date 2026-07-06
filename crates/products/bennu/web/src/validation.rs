@@ -22,12 +22,19 @@ pub use crate::validation_author::{
     AuthoredMessage, AuthoredValidator,
 };
 
-/// Parse a single `<Action>-validation.xml` `file`. Returns `None` when the file name is
+/// Parse a single `<Action>-validation.xml` `file` off disk. Returns `None` when the file name is
 /// not a validation file, the file can't be read, or it doesn't parse (skip-and-continue).
 pub fn parse_file(file: &Path) -> Option<ValidationRecord> {
-    let (action_class, alias) = split_validation_filename(file)?;
     let text = std::fs::read_to_string(file).ok()?;
-    let doc = xml::parse(&text)?;
+    parse_text(file, &text)
+}
+
+/// Parse validation `text` as the content of `file` — the file NAME still drives the action-class
+/// binding (the `<Class>-validation.xml` convention), but the offsets come from `text`. Lets a caller
+/// parse the LIVE editor buffer (unsaved edits) so a go-to / lint lands on the right bytes.
+pub fn parse_text(file: &Path, text: &str) -> Option<ValidationRecord> {
+    let (action_class, alias) = split_validation_filename(file)?;
+    let doc = xml::parse(text)?;
     let root = doc.root_element();
 
     let mut fields = Vec::new();

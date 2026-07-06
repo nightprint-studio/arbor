@@ -272,6 +272,38 @@ impl ConfigResolver {
         resolve_action_view(&self.graph, &key)
     }
 
+    /// The actions whose resolved result **view** is the JSP at `jsp_file` — the REVERSE of
+    /// [`resolve_action_view`]. For a view-only JSP (OGNL, no `<form>`) this is how we discover which
+    /// action's properties the page reads. `jsp_file` is the absolute path being edited; an action's
+    /// view (`/WEB-INF/x/y.jsp`) matches when it's a segment-aligned suffix of it. Returns
+    /// `(action_qname, class_fqcn?)` de-duplicated by qname, in graph order. O(actions) — the caller
+    /// fetches it per JSP (dropdown / lint), not per keystroke.
+    pub fn actions_for_view(&self, jsp_file: &str) -> Vec<(String, Option<String>)> {
+        let needle = jsp_file.replace('\\', "/");
+        let mut out: Vec<(String, Option<String>)> = Vec::new();
+        // Iterate RESULTS (not just tiles-resolved views): a result is either a `<result type="tiles">`
+        // (resolve through the Tiles chain) or a DIRECT dispatcher `<result>/WEB-INF/x.jsp</result>`
+        // whose target IS the JSP — the common legacy shape `resolve_action_view` deliberately skips.
+        for r in &self.graph.results {
+            let qname = &r.action_qualified_name;
+            if out.iter().any(|(q, _)| q == qname) {
+                continue; // this action already matched via one of its other results
+            }
+            let view: Option<String> = if r.result_type == "tiles" {
+                self.resolve_action_view(qname)
+            } else if is_jsp_path(&r.target) {
+                Some(r.target.clone())
+            } else {
+                None // a chain / redirect / redirectAction target is another action, not a view
+            };
+            let Some(view) = view else { continue };
+            if view_path_matches(&needle, &view) {
+                out.push((qname.clone(), self.resolve_action_class(qname)));
+            }
+        }
+        out
+    }
+
     /// The conservative "action inesistente" diagnostic (docs §8). NEVER returns
     /// [`ActionVerdict::Missing`] when a wildcard pattern or a computed/OGNL path could
     /// match the reference. Stays STRICT (no unambiguous-suffix guessing like the go-to
@@ -513,6 +545,21 @@ impl ConfigResolver {
     }
 }
 
+/// Whether `view` (a webapp-relative JSP path like `/WEB-INF/x/y.jsp`) is a segment-aligned suffix
+/// of the absolute `file` path (both forward-slashed). The `/`-anchored compare avoids a false match
+/// where one path's tail is a substring of the other (`…/tree.jsp` vs `…/subtree.jsp`).
+fn view_path_matches(file: &str, view: &str) -> bool {
+    let v = view.trim_start_matches('/');
+    !v.is_empty() && (file == v || file.ends_with(&format!("/{v}")))
+}
+
+/// Whether `target` looks like a JSP page path (a direct dispatcher result), vs a Tiles def name or
+/// an action reference (a `chain`/`redirect` target). Case-insensitive on the extension.
+fn is_jsp_path(target: &str) -> bool {
+    let t = target.to_ascii_lowercase();
+    t.ends_with(".jsp") || t.ends_with(".jspf") || t.ends_with(".jspx")
+}
+
 /// A resolved go-to-definition target for a JSP action reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionTarget {
@@ -632,6 +679,88 @@ mod tests {
         // the persisted edge store re-opens and yields the action's out-edges.
         let reader = ConfigResolver::open_edges(&dir).unwrap();
         assert!(reader.node_count() >= 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn view_path_and_jsp_predicates() {
+        // Segment-aligned suffix match (the reverse-lookup path compare).
+        assert!(view_path_matches("c:/p/webapp/WEB-INF/cat/tree.jsp", "/WEB-INF/cat/tree.jsp"));
+        assert!(view_path_matches("c:/p/webapp/WEB-INF/cat/tree.jsp", "WEB-INF/cat/tree.jsp"));
+        // `tree.jsp` must NOT match `subtree.jsp` (the `/`-anchor guards the substring trap).
+        assert!(!view_path_matches("c:/p/webapp/WEB-INF/cat/subtree.jsp", "/WEB-INF/cat/tree.jsp"));
+        assert!(!view_path_matches("c:/p/x.jsp", ""));
+        // JSP-path recognition (direct dispatcher result vs a Tiles def name / action ref).
+        assert!(is_jsp_path("/WEB-INF/x.jsp"));
+        assert!(is_jsp_path("a/b.JSPF"));
+        assert!(!is_jsp_path("admin.Cat.viewTree")); // a Tiles def name
+        assert!(!is_jsp_path("/do/Other")); // a chain target (another action)
+    }
+
+    /// The reverse view→action lookup resolves BOTH a Tiles-mapped result AND a DIRECT
+    /// `<result>/WEB-INF/x.jsp</result>` dispatcher result (the common legacy shape that
+    /// `resolve_action_view` deliberately skips — the "no dropdown" bug).
+    #[test]
+    fn actions_for_view_covers_tiles_and_direct_results() {
+        use bennu_web::prelude::{build_web_graph, WebInputs};
+
+        let dir = std::env::temp_dir().join(format!("bennu-cfg-rev-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let struts = dir.join("s.xml");
+        std::fs::write(
+            &struts,
+            r#"<struts><package name="p" namespace="/do" extends="d">
+                <action name="viewTree" class="catAction"><result type="tiles">tree.def</result></action>
+                <action name="list" class="listAction"><result>/WEB-INF/list.jsp</result></action>
+              </package></struts>"#,
+        )
+        .unwrap();
+        let beans = dir.join("b.xml");
+        std::fs::write(
+            &beans,
+            r#"<beans>
+                <bean id="catAction" class="com.x.CatAction"/>
+                <bean id="listAction" class="com.x.ListAction"/>
+              </beans>"#,
+        )
+        .unwrap();
+        let tiles = dir.join("t.xml");
+        std::fs::write(
+            &tiles,
+            r#"<tiles-definitions>
+                <definition name="tree.def" template="/WEB-INF/cat/tree.jsp"/>
+              </tiles-definitions>"#,
+        )
+        .unwrap();
+
+        let inputs = WebInputs {
+            struts_roots: vec![struts],
+            resource_roots: vec![],
+            spring_files: vec![beans],
+            tiles_files: vec![tiles],
+            validation_files: vec![],
+            mapper_files: vec![],
+        };
+        let (graph, _r) = build_web_graph(&inputs);
+        let cfg = ingest_config_graph(&graph, &dir, &[]).unwrap();
+
+        // Tiles-resolved view → its action + class.
+        let tiles_hit = cfg.actions_for_view("C:/proj/webapp/WEB-INF/cat/tree.jsp");
+        assert!(
+            tiles_hit.iter().any(|(q, c)| q == "/do/viewTree" && c.as_deref() == Some("com.x.CatAction")),
+            "tiles reverse-lookup: {tiles_hit:?}"
+        );
+        // DIRECT dispatcher result → its action + class (the fixed case).
+        let direct_hit = cfg.actions_for_view("C:/proj/webapp/WEB-INF/list.jsp");
+        assert!(
+            direct_hit.iter().any(|(q, c)| q == "/do/list" && c.as_deref() == Some("com.x.ListAction")),
+            "direct reverse-lookup: {direct_hit:?}"
+        );
+        // A JSP that no action renders → no candidates.
+        assert!(cfg.actions_for_view("C:/proj/webapp/WEB-INF/nope.jsp").is_empty());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

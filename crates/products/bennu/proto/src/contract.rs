@@ -375,6 +375,44 @@ pub struct ValidationContext {
     pub existing_fields: Vec<String>,
 }
 
+/// One candidate Struts action a JSP view could be bound to (the action picker dropdown), from the
+/// reverse view→action lookup. `simple` is the class simple-name for display.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JspActionOption {
+    /// The action qualified-name (`/do/Cat/viewTree`) — the stored binding value.
+    pub qname: String,
+    /// The resolved implementation class FQCN, when known.
+    pub class_fqcn: Option<String>,
+    /// The class simple-name (or the qname's tail) for the dropdown label.
+    pub simple: String,
+}
+
+/// Result of `bennu_jsp_actions` — the action-binding state for a JSP view: the reverse-lookup
+/// `candidates`, the user's pinned `bound` action (if any), and the `effective` action actually used
+/// for OGNL go-to / linting (the pin, else the sole candidate, else none → OGNL is not checked).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JspActionBinding {
+    pub candidates: Vec<JspActionOption>,
+    pub bound: Option<String>,
+    pub effective: Option<String>,
+}
+
+/// One "unknown property on action" lint hit — a JSP form field / OGNL root, or a
+/// `*-validation.xml` `<field name>`, whose name matches NO bean property of the resolved action
+/// class. Rendered as a **warning** squiggle over `[start, end)`. Only produced when the action AND
+/// its property set are fully resolved (never a false positive on an unresolved class).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PropertyLintHit {
+    /// Byte offset of the field/property NAME in the edited buffer (start of the squiggle).
+    pub start: usize,
+    /// End byte offset (exclusive).
+    pub end: usize,
+    /// The offending property name (for the message).
+    pub name: String,
+    /// The resolved action class simple-name the property was checked against (for the message).
+    pub action: String,
+}
+
 // ── index stats (index inspector) ─────────────────────────────────────────────
 
 /// Result of `bennu_index_stats` — a cheap snapshot of the per-project index for the

@@ -1293,6 +1293,7 @@ mod tests {
                             is_final: m.is_final,
                             visibility: Visibility::Public,
                             raw_signature: String::new(),
+                            throws: Vec::new(),
                         })
                         .collect();
                     let fields = td
@@ -1315,6 +1316,7 @@ mod tests {
                             is_final: f.is_final,
                             visibility: Visibility::Public,
                             raw_signature: String::new(),
+                            throws: Vec::new(),
                         })
                         .collect();
                     project.insert(

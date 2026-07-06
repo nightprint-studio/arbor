@@ -169,7 +169,7 @@ fn profile_big_interceptor() {
             eprintln!("    {:<32} {ms:>7.2} ms  ({n} diags)", $name);
         }};
     }
-    resolved!("unresolved_imports", _c, bennu_check::imports::unresolved_imports(root, &src, &resolver));
+    resolved!("unresolved_imports", _c, bennu_check::imports::unresolved_imports(root, &src, &resolver, true));
     resolved!("unknown_members_in", c, bennu_check::members::unknown_members_in(root, &nodes, &src, &symbols, &resolver, &c));
     resolved!("unknown_fields_in", c, bennu_check::fields::unknown_fields_in(root, &nodes, &src, &symbols, &resolver, &c));
     resolved!("arity_errors_in", c, bennu_check::arity::arity_errors_in(root, &nodes, &src, &symbols, &resolver, &c));

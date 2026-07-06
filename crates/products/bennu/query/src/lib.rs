@@ -15,6 +15,7 @@
 //! Workspace convention: call sites reach this crate's surface through
 //! `bennu_query::prelude::...`.
 
+pub mod classpath_index;
 pub mod completion;
 pub mod dep_record;
 pub mod inherited;

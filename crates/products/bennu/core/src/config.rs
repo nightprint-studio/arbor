@@ -56,6 +56,12 @@ pub struct BennuConfig {
     /// Per-project (or per-file) encoding override, keyed by absolute path → encoding
     /// label (e.g. `"Cp1252"`). Present entries win over the pom-declared encoding.
     pub encoding_overrides: BTreeMap<String, String>,
+    /// Explicit **JSP → Struts action** binding, keyed by absolute (forward-slashed) JSP path →
+    /// action qualified-name. For a view-only JSP (OGNL, no `<form>`) that maps to several actions
+    /// — or none the reverse-lookup can see — the user pins which action the page's properties are
+    /// checked/navigated against. Empty (the common case) → the binding is auto-resolved from the
+    /// page's forms + the single reverse-lookup candidate.
+    pub jsp_action_bindings: BTreeMap<String, String>,
 }
 
 impl Default for BennuConfig {
@@ -68,6 +74,7 @@ impl Default for BennuConfig {
             jdk_paths: Vec::new(),
             jdk_overrides: BTreeMap::new(),
             encoding_overrides: BTreeMap::new(),
+            jsp_action_bindings: BTreeMap::new(),
         }
     }
 }

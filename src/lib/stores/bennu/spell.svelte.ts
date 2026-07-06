@@ -14,6 +14,7 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { SvelteSet } from 'svelte/reactivity';
 import { spellStatus as ipcStatus, downloadDictionaries as ipcDownload, dictAdd as ipcDictAdd, type SpellStatus } from '$lib/ipc/bennu/spell';
+import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 
 function createBennuSpellStore() {
   // Per-project enable (opt-in). Session-only; keyed by project root.
@@ -65,7 +66,9 @@ function createBennuSpellStore() {
       try { status = await ipcStatus(); } catch { status = { installed: false, languages: [] }; }
     },
 
-    /** Download the EN + IT dictionaries (job-like; progress via events). */
+    /** Download the EN + IT dictionaries (job-like; progress via events). Surfaces a failure as a
+     *  toast — the BE now returns an error when NOTHING downloads (offline / blocked URL), instead of
+     *  a silent no-op that looked like the button did nothing. */
     async download() {
       if (downloading) return;
       downloading = true;
@@ -73,8 +76,9 @@ function createBennuSpellStore() {
       try {
         status = await ipcDownload();
         revision += 1;
-      } catch {
-        /* HTTP unavailable / failed — status stays as-is */
+        if (status?.installed) toastStore.show('Spell-check dictionaries installed.', 'success');
+      } catch (e) {
+        toastStore.show(`Dictionary download failed — ${e instanceof Error ? e.message : String(e)}`, 'error');
       } finally {
         downloading = false;
         progress = null;

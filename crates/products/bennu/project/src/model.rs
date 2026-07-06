@@ -70,7 +70,9 @@ pub fn read_file(
     let bytes = std::fs::read(file).map_err(|e| ProjectError::Io(e.to_string()))?;
     let label = resolve_encoding_label(project_root, default_encoding, encoding_override);
     let (text, applied) = encoding::decode(&bytes, &label);
-    Ok(FileContents { text, encoding: applied })
+    // Normalize to LF so every downstream byte offset (validation, go-to) agrees with the editor's
+    // LF document; the on-disk CRLF is restored on save (see `write_file`).
+    Ok(FileContents { text: encoding::normalize_newlines(&text), encoding: applied })
 }
 
 /// Write `text` to `file`, encoded in the project's resolved encoding — the round-trip
@@ -86,7 +88,12 @@ pub fn write_file(
     encoding_override: Option<&str>,
 ) -> Result<WriteResult, ProjectError> {
     let label = resolve_encoding_label(project_root, default_encoding, encoding_override);
-    let (bytes, applied) = encoding::encode(text, &label);
+    // Preserve the file's on-disk line endings: the buffer is LF (normalized on read + CodeMirror's
+    // own LF document), but if the existing file is CRLF we re-expand so a save doesn't silently
+    // rewrite every line ending (a noisy diff on a Windows/legacy codebase). A new file stays LF.
+    let restore = std::fs::read(file).map(|b| encoding::has_crlf(&b)).unwrap_or(false);
+    let to_write = if restore { encoding::restore_crlf(text) } else { text.to_string() };
+    let (bytes, applied) = encoding::encode(&to_write, &label);
     std::fs::write(file, &bytes).map_err(|e| ProjectError::Io(e.to_string()))?;
     Ok(WriteResult { encoding: applied })
 }
@@ -110,5 +117,37 @@ fn resolve_encoding_label(
                 .map(|xml| encoding::project_encoding_label(&pom::parse(&xml), default_encoding))
                 .unwrap_or_else(|| default_encoding.to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_normalizes_crlf_and_write_preserves_it() {
+        let dir = std::env::temp_dir().join(format!("bennu-eol-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Foo.java");
+        // A CRLF file on disk (the Windows/legacy norm).
+        std::fs::write(&file, b"class Foo {\r\n  int x;\r\n}\r\n").unwrap();
+
+        // read_file hands the FE an LF buffer (so byte offsets match the editor's LF document).
+        let read = read_file(&dir, &file, "UTF-8", None).unwrap();
+        assert_eq!(read.text, "class Foo {\n  int x;\n}\n", "read must normalize CRLF → LF");
+
+        // Saving the (edited) LF buffer must restore the file's on-disk CRLF, not rewrite every EOL.
+        write_file(&dir, &file, "class Foo {\n  int y;\n}\n", "UTF-8", None).unwrap();
+        let on_disk = std::fs::read(&file).unwrap();
+        assert_eq!(on_disk, b"class Foo {\r\n  int y;\r\n}\r\n", "write must preserve CRLF on disk");
+
+        // A genuinely LF file stays LF through a save (no spurious CRLF introduced).
+        let lf = dir.join("Bar.java");
+        std::fs::write(&lf, b"class Bar {\n}\n").unwrap();
+        write_file(&dir, &lf, "class Bar {\n  int z;\n}\n", "UTF-8", None).unwrap();
+        assert_eq!(std::fs::read(&lf).unwrap(), b"class Bar {\n  int z;\n}\n", "LF file stays LF");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

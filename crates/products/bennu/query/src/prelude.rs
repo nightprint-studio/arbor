@@ -6,7 +6,10 @@
 // Member-access completion (the SEAM's `completion(pos)`).
 pub use crate::completion::completion;
 
-// The resolver + the `Send + Sync` JDK member-index wrapper it composes.
+// The resolver + the `Send + Sync` JDK member-index wrapper it composes, plus the two-tier
+// classpath index (JDK + optional per-project dependency tier) the completion/validation resolver
+// runs over.
+pub use crate::classpath_index::ClasspathIndex;
 pub use crate::jdk::JdkMemberIndex;
 pub use crate::resolver::{convert_members, IndexResolver, ProjectView};
 

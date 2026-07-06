@@ -21,7 +21,10 @@
   import { CodeEditor } from '$lib/components/shared/ui/code-editor';
   import { tooltip } from '$lib/actions/tooltip';
   import { languageForPath } from './languages';
-  import { isJavaFile as isJavaFileOf, supportsCodeNav } from './file-kind';
+  import { isJavaFile as isJavaFileOf, isJspFile as isJspFileOf, supportsCodeNav } from './file-kind';
+  import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
+  import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
+  import { ChevronDown } from 'lucide-svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
@@ -35,6 +38,9 @@
     jspIncludeTarget as ipcJspIncludeTarget,
     beanClass as ipcBeanClass,
     mybatisNav as ipcMybatisNav,
+    actionPropertyTarget as ipcActionPropertyTarget,
+    actionPropertyLint as ipcActionPropertyLint,
+    jspActions as ipcJspActions, setJspAction as ipcSetJspAction, type JspActionBinding,
     renameApply as ipcRenameApply, type RenameEdit,
   } from '$lib/ipc/bennu/nav';
   import { applyByteEdits } from './rename-apply';
@@ -246,8 +252,83 @@
   // Mojibake squiggles are an on-demand check (palette command), not auto-run — populated by
   // `checkMojibake()`, cleared when the active file changes so they never leak across files.
   let mojibakeDiags = $state<EditorDiagnostic[]>([]);
-  const allDiags = $derived([...diags, ...spellDiags, ...mojibakeDiags]);
+  // "Unknown property on action" warnings for a JSP form field / OGNL root or a
+  // `*-validation.xml` `<field>` whose name isn't a property of the resolved action class. Runs
+  // against the LIVE buffer (offsets match the editor), debounced, only on JSP / validation files;
+  // re-runs when the index (config graph) rebuilds so the action resolves once it's ready.
+  let propertyDiags = $state<EditorDiagnostic[]>([]);
+  const allDiags = $derived([...diags, ...spellDiags, ...mojibakeDiags, ...propertyDiags]);
   $effect(() => { void activePath; mojibakeDiags = []; });
+
+  // Action binding for a JSP view (the reverse view→action picker). Fetched when a JSP is open;
+  // `bindingRev` bumps after the user pins/clears an action so the lint + this both re-run.
+  let jspBinding = $state<JspActionBinding | null>(null);
+  let bindingRev = $state(0);
+  $effect(() => {
+    const path = activePath;
+    void bennuIndexStore.buildRevision;
+    void bindingRev;
+    if (!path || !isJspFileOf(path)) { jspBinding = null; return; }
+    let cancelled = false;
+    void ipcJspActions(path).then((b) => { if (!cancelled) jspBinding = b; }).catch(() => { if (!cancelled) jspBinding = null; });
+    return () => { cancelled = true; };
+  });
+  /** Pin (qname) or clear (null) the JSP's bound action, then re-fetch + re-lint. */
+  async function selectJspAction(qname: string | null) {
+    const path = activePath;
+    if (!path) return;
+    await ipcSetJspAction(path, qname).catch(() => {});
+    bindingRev += 1;
+  }
+  // The toolbar label for the action picker (the effective action's simple name, or a prompt).
+  const jspActionLabel: string | null = $derived.by(() => {
+    const b = jspBinding;
+    if (!b || !b.candidates.length) return null;
+    if (!b.effective) return 'Pick action';
+    const opt = b.candidates.find((c) => c.qname === b.effective);
+    return opt ? opt.simple : (b.effective.split('/').pop() ?? b.effective);
+  });
+  // The picker menu: each reverse-lookup candidate (pin it), plus "Auto" to clear the pin. A pinned
+  // action shows a check; the sole auto-resolved candidate is effective without a pin.
+  const jspActionMenu: DropdownItem[] = $derived.by(() => {
+    const b = jspBinding;
+    if (!b || !b.candidates.length) return [];
+    const items: DropdownItem[] = [{ kind: 'separator', label: 'Check OGNL against action' }];
+    for (const c of b.candidates) {
+      items.push({
+        kind: 'item', id: c.qname, label: c.simple, active: b.effective === c.qname,
+        onclick: () => void selectJspAction(c.qname),
+      });
+    }
+    items.push({ kind: 'separator' });
+    items.push({ kind: 'item', id: '__auto', label: 'Auto (clear pin)', active: !b.bound, onclick: () => void selectJspAction(null) });
+    return items;
+  });
+
+  $effect(() => {
+    const path = activePath;
+    void bennuIndexStore.buildRevision;
+    void bindingRev;
+    if (!path || isJavaFile) { propertyDiags = []; return; }
+    const isValidation = path.toLowerCase().endsWith('-validation.xml');
+    if (!isJspFileOf(path) && !isValidation) { propertyDiags = []; return; }
+    const src = projectStore.sourceOf(path);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void ipcActionPropertyLint(path, src)
+        .then((hits) => {
+          if (cancelled) return;
+          propertyDiags = hits.map((h) => ({
+            from: h.start,
+            to: h.end,
+            severity: 'warning' as const,
+            message: `“${h.name}” is not a property of action ${h.action}`,
+          }));
+        })
+        .catch(() => { if (!cancelled) propertyDiags = []; });
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
 
   function spellDiagOf(h: SpellHit, root: string): EditorDiagnostic {
     const actions = h.suggestions.slice(0, 4).map((s) => ({
@@ -666,6 +747,21 @@
     return true;
   }
 
+  /** Try go-to from a JSP form field / OGNL root (a `<s:textfield name="…">` etc.), or a
+   *  `*-validation.xml` `<field name="…">`, under the caret to the **action class's** accessor for
+   *  that property. Resolves via `bennu_action_property_target` (the form's action → class → its
+   *  `get`/`set`/`is` for the property). Non-`.java` buffers only; `null` (→ false) when the caret
+   *  isn't on a resolvable field so the include / action resolvers get their turn. */
+  async function tryGoToActionProperty(offset: number): Promise<boolean> {
+    const path = activePath;
+    if (!path || !editorComp || isJavaFile) return false;
+    const source = editorComp.getValue();
+    const t = await ipcActionPropertyTarget(path, source, offset).catch(() => null);
+    if (!t) return false;
+    openDefinitionFile(t.file, t.start);
+    return true;
+  }
+
   /** Try JSP **include / view reference** go-to for the token under the caret — a path in a
    *  `<%@ include file>` directive, `<jsp:include page>`, `<s:include value>`, `<c:import url>`,
    *  … pointing at another JSP view/fragment. Resolves via `bennu_jsp_include_target` (absolute
@@ -758,6 +854,9 @@
     // 1b. JSP page-scoped variable (a `<c:set var>`/`${var}` under the caret) — single-file,
     //     resolved off the buffer with no project index (only runs for non-`.java` files).
     if (offset != null && (await tryGoToJspVar(offset))) return;
+    // 1b-bis. JSP form field / OGNL root, or a validation `<field name>`, → the action class's
+    //     property accessor (its `get`/`set`/`is`). Non-`.java` files; a page var (above) wins first.
+    if (offset != null && (await tryGoToActionProperty(offset))) return;
     // 1c. JSP include / view reference (a `<%@ include file>` / `<jsp:include page>` /
     //     `<s:include value>` path under the caret) — a `.jsp`/`.jspf` path is unambiguous, so
     //     resolve it before the Struts-action ref (they're disjoint). Non-`.java` files only.
@@ -830,6 +929,29 @@
   /** Generate (constructors/getters/setters) is Java-only — its source scan is a Java
    *  outline, meaningless (and historically a freeze risk) on a `.jsp`/XML file. */
   const isJavaFile = $derived(isJavaFileOf(activePath));
+  const isJspFile = $derived(isJspFileOf(activePath));
+
+  // JSP/JSTL/Struts tag snippets for the editor toolbar's "Insert tag" menu. Each inserts at the
+  // caret via the shared `insertAtCursor`; `$0`-free plain text keeps it grammar-agnostic (the
+  // placeholders are ordinary text the user overtypes). Kept declarative so adding a tag is one line.
+  const JSP_SNIPPETS: { id: string; label: string; text: string }[] = [
+    { id: 'c-set',     label: '<c:set>',     text: '<c:set var="name" value="${value}" />' },
+    { id: 's-set',     label: '<s:set>',     text: '<s:set var="name" value="%{value}" />' },
+    { id: 's-property', label: '<s:property>', text: '<s:property value="%{value}" />' },
+    { id: 's-iterator', label: '<s:iterator>', text: '<s:iterator value="%{list}" var="item">\n  \n</s:iterator>' },
+    { id: 'c-foreach', label: '<c:forEach>', text: '<c:forEach var="item" items="${list}">\n  \n</c:forEach>' },
+    { id: 's-if',      label: '<s:if>',      text: '<s:if test="%{condition}">\n  \n</s:if>' },
+    { id: 'c-if',      label: '<c:if>',      text: '<c:if test="${condition}">\n  \n</c:if>' },
+    { id: 's-url',     label: '<s:url>',     text: '<s:url var="url" action="actionName" />' },
+    { id: 's-text',    label: '<s:text>',    text: '<s:text name="key" />' },
+    { id: 's-textfield', label: '<s:textfield>', text: '<s:textfield name="field" label="Label" />' },
+  ];
+  const snippetMenu = $derived<DropdownItem[]>([
+    { kind: 'separator', label: 'Insert tag' },
+    ...JSP_SNIPPETS.map((s) => ({
+      kind: 'item' as const, id: s.id, label: s.label, onclick: () => insertAtCursor(s.text),
+    })),
+  ]);
   /** Files that support semantic navigation (go-to declaration / find usages / rename).
    *  On anything else (plain text, markdown, properties, …) those actions are hidden from
    *  the context menu AND their shortcuts no-op — not offered where they can't resolve. */
@@ -974,6 +1096,28 @@
           <button class="ed-tbtn" use:tooltip={'Create or open the Struts validation file for this action class'} onclick={createValidationFile}>
             <ShieldCheck size={12} /> Validation
           </button>
+          <span class="ed-tsep"></span>
+        {:else if isJspFile}
+          <!-- On a view JSP mapped from one or more actions: pick which action its OGNL is checked /
+               navigated against (drives the "unknown property" lint + go-to for %{…} references). -->
+          {#if jspActionLabel}
+            <Dropdown items={jspActionMenu} position="fixed" direction="down" width="240px">
+              {#snippet trigger({ open, toggle })}
+                <button class="ed-tbtn" class:active={open} onclick={toggle} use:tooltip={'Bind this view to a Struts action (for OGNL property checks / go-to)'} aria-haspopup="menu" aria-expanded={open}>
+                  <Target size={12} /> {jspActionLabel} <ChevronDown size={11} />
+                </button>
+              {/snippet}
+            </Dropdown>
+            <span class="ed-tsep"></span>
+          {/if}
+          <!-- On a JSP: an "Insert tag" menu that drops JSTL/Struts snippets at the caret. -->
+          <Dropdown items={snippetMenu} position="fixed" direction="down" width="200px">
+            {#snippet trigger({ open, toggle })}
+              <button class="ed-tbtn" class:active={open} onclick={toggle} use:tooltip={'Insert a JSTL / Struts tag at the caret'} aria-haspopup="menu" aria-expanded={open}>
+                <Braces size={12} /> Insert tag <ChevronDown size={11} />
+              </button>
+            {/snippet}
+          </Dropdown>
           <span class="ed-tsep"></span>
         {/if}
         <button class="ed-tool" use:tooltip={{ content: 'Go to line', shortcut: 'Ctrl+G' }} aria-label="Go to line" onclick={openGoto}><Hash size={13} /></button>

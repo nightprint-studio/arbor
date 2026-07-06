@@ -294,11 +294,18 @@ fn collect_type(
                         methods.push(md);
                     }
                 }
+                // Constructors are indexed as `<init>` members (like bytecode) so the super-constructor,
+                // unhandled-exception-from-`new`, and constructor-arity checks work on project types.
+                "constructor_declaration" => {
+                    if let Some(md) = parse_constructor(&m, bytes) {
+                        methods.push(md);
+                    }
+                }
                 // `constant_declaration` is an interface's `int MAX = 100;` — same shape as a
                 // field (type + declarators), just a different node kind, so index it as a field
                 // so a bare / qualified constant reference resolves like any other field.
                 "field_declaration" | "constant_declaration" => {
-                    parse_field(&m, bytes, &mut fields);
+                    parse_field(&m, bytes, is_interface, &mut fields);
                 }
                 "class_declaration"
                 | "interface_declaration"
@@ -408,7 +415,7 @@ fn parse_method(node: &Node, bytes: &[u8], enclosing_is_interface: bool) -> Opti
         .and_then(|n| node_text(&n, bytes))
         .unwrap_or_else(|| "void".to_string());
     let is_static = has_modifier(node, bytes, "static");
-    let visibility = parse_visibility(node, bytes);
+    let visibility = parse_visibility(node, bytes, enclosing_is_interface);
     let is_default = has_modifier(node, bytes, "default");
     // Abstract = an explicit `abstract` modifier, OR an interface method with no body that isn't
     // `static`/`default`/`native` (implicitly abstract, JLS §9.4). Requiring "no body" keeps a class
@@ -422,6 +429,25 @@ fn parse_method(node: &Node, bytes: &[u8], enclosing_is_interface: bool) -> Opti
             && !is_default
             && !has_modifier(node, bytes, "native"));
 
+    let params = parse_params(node, bytes);
+    let is_final = has_modifier(node, bytes, "final");
+    let throws = parse_throws(node, bytes);
+    Some(MethodDecl {
+        name,
+        return_type_text,
+        params,
+        is_static,
+        visibility,
+        is_abstract,
+        is_default,
+        is_final,
+        throws,
+    })
+}
+
+/// The `(name, type)` parameters of a method/constructor `parameters` list. Shared by
+/// [`parse_method`] and [`parse_constructor`].
+fn parse_params(node: &Node, bytes: &[u8]) -> Vec<ParamDecl> {
     let mut params = Vec::new();
     if let Some(pl) = node.child_by_field_name("parameters") {
         let mut pw = pl.walk();
@@ -439,10 +465,12 @@ fn parse_method(node: &Node, bytes: &[u8], enclosing_is_interface: bool) -> Opti
             }
         }
     }
+    params
+}
 
-    let is_final = has_modifier(node, bytes, "final");
-    // The `throws` clause: a `throws` child node whose named children are the exception type nodes.
-    // Kept as written text; resolved to binary names when the class members are built.
+/// The `throws` clause exception type names (written text; resolved to binary names when the class
+/// members are built). Shared by [`parse_method`] and [`parse_constructor`].
+fn parse_throws(node: &Node, bytes: &[u8]) -> Vec<String> {
     let mut throws = Vec::new();
     let mut mw = node.walk();
     for ch in node.children(&mut mw) {
@@ -455,28 +483,40 @@ fn parse_method(node: &Node, bytes: &[u8], enclosing_is_interface: bool) -> Opti
             }
         }
     }
+    throws
+}
+
+/// Extract a `constructor_declaration` as an `<init>` pseudo-method — mirroring the `<init>` members
+/// decoded from bytecode for library types — so the resolver-backed checks that key off constructors
+/// (super-constructor chaining, unhandled checked exception from `new T(...)`, constructor arity) see
+/// a PROJECT type's constructors too. The name is the JVM `<init>`; the return type is unused. A
+/// constructor is never static/abstract/default/final for our purposes.
+fn parse_constructor(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
+    node.child_by_field_name("name")?; // a real declaration names its class
     Some(MethodDecl {
-        name,
-        return_type_text,
-        params,
-        is_static,
-        visibility,
-        is_abstract,
-        is_default,
-        is_final,
-        throws,
+        name: "<init>".to_string(),
+        return_type_text: "void".to_string(),
+        params: parse_params(node, bytes),
+        is_static: false,
+        visibility: parse_visibility(node, bytes, false),
+        is_abstract: false,
+        is_default: false,
+        is_final: false,
+        throws: parse_throws(node, bytes),
     })
 }
 
-/// Extract the (possibly multiple) fields of a field_declaration (`int a, b, c;`).
-fn parse_field(node: &Node, bytes: &[u8], out: &mut Vec<FieldDecl>) {
+/// Extract the (possibly multiple) fields of a field_declaration (`int a, b, c;`). `in_interface`
+/// marks an interface's `constant_declaration` (`int MAX = 100;`) — implicitly `public static final`,
+/// so its visibility is public, not the class-default package-private.
+fn parse_field(node: &Node, bytes: &[u8], in_interface: bool, out: &mut Vec<FieldDecl>) {
     let Some(type_text) = node.child_by_field_name("type").and_then(|n| node_text(&n, bytes))
     else {
         return;
     };
     let is_static = has_modifier(node, bytes, "static");
     let is_final = has_modifier(node, bytes, "final");
-    let visibility = parse_visibility(node, bytes);
+    let visibility = parse_visibility(node, bytes, in_interface);
     let annotations = collect_annotations(node, bytes);
     let mut cw = node.walk();
     for c in node.named_children(&mut cw) {
@@ -496,15 +536,20 @@ fn parse_field(node: &Node, bytes: &[u8], out: &mut Vec<FieldDecl>) {
 }
 
 /// The declared access level of a member from its `modifiers` node. Java's default (no explicit
-/// `public`/`protected`/`private`) is package-private. (Interface members are implicitly public;
-/// we do not special-case that here — the enclosing-kind context isn't threaded to this helper.)
-fn parse_visibility(node: &Node, bytes: &[u8]) -> Visibility {
+/// `public`/`protected`/`private`) is package-private for a CLASS/ENUM member — but **implicitly
+/// public** for an INTERFACE/`@interface` member (a method or a constant), JLS §9.3/§9.4. Passing
+/// `in_interface` is what keeps a cross-package call to a project interface method from being a false
+/// "not public" error (before, a modifier-less interface method read as package-private). An explicit
+/// `private` (a Java 9+ private interface method) is still honoured — it's checked first.
+fn parse_visibility(node: &Node, bytes: &[u8], in_interface: bool) -> Visibility {
     if has_modifier(node, bytes, "public") {
         Visibility::Public
     } else if has_modifier(node, bytes, "protected") {
         Visibility::Protected
     } else if has_modifier(node, bytes, "private") {
         Visibility::Private
+    } else if in_interface {
+        Visibility::Public
     } else {
         Visibility::Package
     }
@@ -621,6 +666,51 @@ mod tests {
 
     fn one_type(src: &str) -> TypeDecl {
         extract_symbols(src).types.into_iter().next().expect("one type")
+    }
+
+    #[test]
+    fn interface_method_without_modifier_is_public() {
+        // Interface members are implicitly public (JLS §9.4) — NOT package-private.
+        let t = one_type("interface I { String get(); }");
+        assert_eq!(t.methods[0].visibility, Visibility::Public, "{:?}", t.methods[0]);
+    }
+
+    #[test]
+    fn interface_constant_is_public() {
+        let t = one_type("interface I { int MAX = 100; }");
+        assert_eq!(t.fields[0].visibility, Visibility::Public, "{:?}", t.fields[0]);
+    }
+
+    #[test]
+    fn private_interface_method_stays_private() {
+        // A Java 9+ `private` interface helper keeps its explicit visibility.
+        let t = one_type("interface I { private void helper() {} }");
+        assert_eq!(t.methods[0].visibility, Visibility::Private, "{:?}", t.methods[0]);
+    }
+
+    #[test]
+    fn class_method_without_modifier_is_package() {
+        // The class default is unchanged: no modifier → package-private.
+        let t = one_type("class C { void m() {} }");
+        assert_eq!(t.methods[0].visibility, Visibility::Package, "{:?}", t.methods[0]);
+    }
+
+    #[test]
+    fn constructor_is_indexed_as_init() {
+        // A `constructor_declaration` is captured as an `<init>` member (with its param arity) so the
+        // super-constructor / new-arity / new-exception checks can reason about project constructors.
+        let t = one_type("class C { C(int x) {} void m() {} }");
+        let inits: Vec<_> = t.methods.iter().filter(|m| m.name == "<init>").collect();
+        assert_eq!(inits.len(), 1, "{:?}", t.methods);
+        assert_eq!(inits[0].params.len(), 1, "{:?}", inits[0]);
+        assert!(t.methods.iter().any(|m| m.name == "m"), "the normal method is still there");
+    }
+
+    #[test]
+    fn constructor_throws_are_captured() {
+        let t = one_type("class C { C() throws java.io.IOException {} }");
+        let init = t.methods.iter().find(|m| m.name == "<init>").expect("<init>");
+        assert!(init.throws.iter().any(|x| x.contains("IOException")), "{:?}", init.throws);
     }
 
     #[test]

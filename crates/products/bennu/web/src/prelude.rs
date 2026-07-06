@@ -23,7 +23,8 @@ pub use crate::graph::{
 // folds interceptors into the struts include-graph walk).
 pub use crate::interceptors::{parse_file as parse_interceptors, InterceptorParse};
 pub use crate::validation::{
-    parse_file as parse_validation, split_validation_filename, validation_file_for_class,
+    parse_file as parse_validation, parse_text as parse_validation_text, split_validation_filename,
+    validation_file_for_class,
 };
 
 // Pure authoring of `*-validation.xml` (create skeleton / a `<field>` chain / append) + the

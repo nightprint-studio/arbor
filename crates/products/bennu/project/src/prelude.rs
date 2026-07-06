@@ -6,8 +6,8 @@
 
 pub use crate::capability::detect as detect_capabilities;
 pub use crate::encoding::{
-    decode as decode_bytes, decode_for_index, encode as encode_text, project_encoding_label,
-    source_encoding_label, IndexDecode,
+    decode as decode_bytes, decode_for_index, encode as encode_text, has_crlf, normalize_newlines,
+    project_encoding_label, restore_crlf, source_encoding_label, IndexDecode,
 };
 pub use crate::error::ProjectError;
 pub use crate::jdk::detect as detect_jdk;

@@ -86,6 +86,13 @@ fn check_cast(
     }
     let Some(target) = concrete_class(type_text, symbols, resolver) else { return };
     let Some(source_ty) = concrete_binary(value_ty.binary_name, resolver) else { return };
+    // `java/lang/Object` is the universal supertype: `(Foo) anObject` and `(Object) foo` are always
+    // legal casts (only ever checked at runtime), so skip either direction. This also dodges a project
+    // class whose implicit `extends Object` isn't recorded in the index — the hierarchy walk would
+    // otherwise judge it "unrelated" to Object and wrongly flag `(That) obj`.
+    if source_ty == "java/lang/Object" || target == "java/lang/Object" {
+        return;
+    }
     // Both concrete classes, both hierarchies known: a cast is legal only up or down the chain.
     if !hierarchy_fully_known(resolver, &source_ty) || !hierarchy_fully_known(resolver, &target) {
         return;
@@ -160,6 +167,17 @@ fn assign_check(
     verb: &str,
     out: &mut Vec<Diagnostic>,
 ) {
+    // A CHAINED method call (`a.b().c()`) is where our shallow generic substitution
+    // (`infer.rs::substitute_generics`) is known-unreliable: it maps a callee's return type variable
+    // to the RECEIVER's element type even when that variable is actually bound by an ARGUMENT. E.g.
+    // `list.stream().map(X::getId).max(..).orElse(null)` — `map`'s result type comes from `X::getId`,
+    // not the stream element, so the chain mis-infers as the element type (`X`) instead of `Long`.
+    // Hard-flagging a type mismatch off that guess would be a false positive (the crate's cardinal
+    // rule forbids it), so we SKIP the compat check for chained calls — a genuine mismatch inside a
+    // chain is left to the real compiler. Single calls (`p.dog()`) and plain names stay checked.
+    if is_chained_call(&val) {
+        return;
+    }
     let Some(value_ty) = infer_node_type_cached(root, source, symbols, &val, resolver, cache)
     else {
         return;
@@ -186,6 +204,13 @@ fn definite_assign_mismatch(
     // always OK here (only the String case above is a definite error). And a primitive TARGET with a
     // non-String value is widening/boxing → skip.
     if is_primitive(value_binary) || primitive_keyword(target_text).is_some() {
+        return None;
+    }
+    // An `Object`-typed value assigns/returns to ANY reference target: Object is the universal
+    // supertype, and an `Object` here is very often an erased generic whose real type is a subtype
+    // (`list.get(i)` on a raw `List`, `map.get(k)`, reflection). Never a definite mismatch — every
+    // type IS-A Object. Mirrors the cast rule.
+    if value_binary == "java/lang/Object" {
         return None;
     }
     // Two reference concrete classes: assignment allows only widening (value is-a target).
@@ -280,6 +305,15 @@ fn first_value_child(ret: Node) -> Option<Node> {
     None
 }
 
+/// Whether `val` is a method call whose receiver is itself a method call (`a.b().c()`) — a chained
+/// invocation. Our shallow generic substitution can yield a confident-but-wrong type through a chain
+/// (an argument-bound type variable mis-bound to the receiver's element type — the `Stream.map`/
+/// `Optional.orElse` case), so we never hard-flag a compat error off a chained value.
+fn is_chained_call(val: &Node) -> bool {
+    val.kind() == "method_invocation"
+        && val.child_by_field_name("object").is_some_and(|o| o.kind() == "method_invocation")
+}
+
 /// The nearest enclosing `method_declaration`, stopping at a `lambda_expression` (a `return` inside a
 /// lambda targets the lambda, not the method) — in which case there's nothing to check here.
 fn enclosing_method(n: Node) -> Option<Node> {
@@ -339,7 +373,12 @@ mod tests {
         let mut members = HashMap::new();
         members.insert("java/lang/Object".to_string(), cls(None, vec![]));
         members.insert("com/acme/Animal".to_string(), cls(Some("java/lang/Object"), vec![]));
-        members.insert("com/acme/Dog".to_string(), cls(Some("com/acme/Animal"), vec![]));
+        // Dog carries a `cat() -> Cat` method so a CHAINED call (`p.dog().cat()`) can be inferred to a
+        // concrete type in the chained-call-skip test (proving the skip, not an inference miss).
+        members.insert(
+            "com/acme/Dog".to_string(),
+            cls(Some("com/acme/Animal"), vec![getter("cat", "com/acme/Cat")]),
+        );
         members.insert("com/acme/Cat".to_string(), cls(Some("com/acme/Animal"), vec![]));
         members.insert("com/acme/Widget".to_string(), cls(Some("java/lang/Object"), vec![]));
         members.insert(
@@ -350,10 +389,16 @@ mod tests {
                     getter("animal", "com/acme/Animal"),
                     getter("dog", "com/acme/Dog"),
                     getter("widget", "com/acme/Widget"),
+                    // `obj() -> Object` feeds the "Object is universally castable/assignable" tests.
+                    getter("obj", "java/lang/Object"),
                 ],
             ),
         );
         members.insert("java/lang/String".to_string(), cls(Some("java/lang/Object"), vec![]));
+        // `Orphan` has NO superclass recorded (superclass = None) — stands in for a project class whose
+        // implicit `extends Object` the index didn't capture, so its hierarchy walk never reaches
+        // Object. Casting an `Object` to it must still be legal.
+        members.insert("com/acme/Orphan".to_string(), cls(None, vec![]));
         let simple = [
             ("Object", "java/lang/Object"),
             ("Animal", "com/acme/Animal"),
@@ -361,6 +406,7 @@ mod tests {
             ("Cat", "com/acme/Cat"),
             ("Widget", "com/acme/Widget"),
             ("Provider", "com/acme/Provider"),
+            ("Orphan", "com/acme/Orphan"),
             ("String", "java/lang/String"),
         ]
         .into_iter()
@@ -423,6 +469,39 @@ mod tests {
     fn return_subtype_is_ok() {
         let src = "class C { Provider p; Animal m() { return p.dog(); } }";
         assert!(type_compat_errors(src, &resolver()).is_empty());
+    }
+
+    #[test]
+    fn chained_call_return_is_not_flagged() {
+        // `p.dog().cat()` is a CHAINED call: even though Cat isn't a Widget, our shallow generic
+        // substitution can't be trusted through a chain (the Stream.map/Optional.orElse mis-typing
+        // class), so we never hard-flag it — left to the compiler. The single-call form IS still
+        // flagged (see `return_wrong_type_is_flagged`), so this proves the chain-only skip.
+        let src = "class C { Provider p; Widget m() { return p.dog().cat(); } }";
+        let d: Vec<String> =
+            type_compat_errors(src, &resolver()).into_iter().map(|x| x.message).collect();
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn chained_call_assignment_is_not_flagged() {
+        // Same guard on an assignment: `Widget w = p.dog().cat();` must not be hard-flagged.
+        assert!(diags("Widget w = p.dog().cat();").is_empty());
+    }
+
+    #[test]
+    fn assigning_an_object_value_to_a_class_is_not_flagged() {
+        // `Object` is the universal supertype (and often an erased generic) → assigning it to a more
+        // specific type is never a definite mismatch. `p.obj()` returns Object.
+        assert!(diags("Widget w = p.obj();").is_empty(), "{:?}", diags("Widget w = p.obj();"));
+    }
+
+    #[test]
+    fn casting_an_object_value_to_a_class_is_not_flagged() {
+        // `(Orphan) obj` — Orphan has no recorded Object ancestor (a project class missing its implicit
+        // `extends Object`), so without the Object special-case the walk would judge them unrelated and
+        // flag the cast. Casting from Object is always legal.
+        assert!(diags("Orphan o = (Orphan) p.obj();").is_empty(), "{:?}", diags("Orphan o = (Orphan) p.obj();"));
     }
 
     #[test]

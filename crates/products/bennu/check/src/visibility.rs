@@ -19,6 +19,9 @@
 //!     (static receiver) → SKIP;
 //!   * receiver type is a JDK/library type (`java/…`, `javax/…`, …) → SKIP (we don't police JDK
 //!     visibility — too many nuances: module exports, `@jdk.internal`, etc.);
+//!   * receiver type — or the member's declaring type — is NOT a project-source type (a dependency
+//!     jar) → SKIP: a library member's true accessibility (generated accessors, split-package legacy
+//!     frameworks) is as unmodellable from bytecode as the JDK's. We police only the user's own code;
 //!   * the member doesn't resolve UNAMBIGUOUSLY to exactly one declaration across a FULLY-KNOWN
 //!     hierarchy → SKIP (an unknown supertype might declare a public one that shadows it);
 //!   * the resolved member is `Public` or `Protected` → never flagged (protected subclass rules are
@@ -97,6 +100,13 @@ fn check_access(
     if is_jdk_type(&recv_binary) {
         return;
     }
+    // Only police the PROJECT'S OWN types: a dependency-jar receiver's accessibility (generated
+    // accessors, split-package legacy frameworks) isn't soundly decidable from bytecode — same reason
+    // as the JDK. Cheap early skip; the declaring-type guard below also covers a project subclass that
+    // inherits a member from a dependency base.
+    if !resolver.is_project_type(&recv_binary) {
+        return;
+    }
 
     // The hierarchy must be FULLY known: an unknown supertype could declare a public member that
     // shadows the one we found, so any gap means we can't be sure the access is illegal → SKIP.
@@ -112,15 +122,27 @@ fn check_access(
         return; // absent, or ambiguous → SKIP (absence is the unknown-member check's job, not ours)
     };
 
+    // The member's true OWNER must be a project type: a member inherited from a dependency/JDK base
+    // (reached through a project receiver) has accessibility we don't model → SKIP (mirrors the JDK
+    // and dependency-receiver guards above).
+    if !resolver.is_project_type(&declaring_binary) {
+        return;
+    }
+
+    // The OUTERMOST type enclosing the access (lexical, authoritative). Used by BOTH visibility cases
+    // to decide "same top-level type" — a class and all its nested types form one nest that shares
+    // private access AND, trivially, one package.
+    let access_top = enclosing_top_level_binary(n, bytes, symbols);
+
     match member.visibility {
         Visibility::Private => {
-            // CASE 1: legal iff the access is lexically inside the declaring member's TOP-LEVEL type.
-            let declaring_top = top_level_binary(&declaring_binary);
-            let Some(access_top) = enclosing_top_level_binary(n, bytes, symbols) else {
+            // CASE 1: legal iff the access sits inside the declaring member's TOP-LEVEL type (the JLS
+            // same-nest rule: an outer class and its nested types touch each other's privates).
+            let Some(access_top) = access_top else {
                 return; // can't identify the enclosing top-level type → SKIP
             };
-            if access_top == declaring_top {
-                return; // same top-level type (possibly a nested class touching the outer's privates) → legal
+            if in_same_nest(&access_top, &declaring_binary) {
+                return; // same top-level type (outer ↔ nested private access) → legal
             }
             out.push(Diagnostic {
                 message: format!(
@@ -133,6 +155,11 @@ fn check_access(
             });
         }
         Visibility::Package => {
+            // Same top-level type ⇒ same package ⇒ always legal — settle it before the package compare,
+            // which mis-derives a NESTED type's package (its binary uses `/` for nesting too).
+            if access_top.as_deref().is_some_and(|t| in_same_nest(t, &declaring_binary)) {
+                return;
+            }
             // CASE 2: legal iff the accessing file's package equals the declaring type's package.
             // Both must be KNOWN; either unknown → SKIP.
             let Some(access_pkg) = symbols.package.as_deref() else {
@@ -202,10 +229,12 @@ fn receiver_type_binary(
 }
 
 /// Find the member `name` (a method when `is_method`, else a field) across `binary`'s fully-known
-/// hierarchy, returning `(declaring_binary, member)` iff it resolves to EXACTLY ONE declaration.
-/// `None` when absent OR ambiguous (two matches) — either way the caller SKIPs. Requiring uniqueness
-/// is the conservative core: if the same name is declared at two levels with different visibility
-/// (an override widening access), we can't soundly pick which one the call binds to → SKIP.
+/// hierarchy, returning `(declaring_binary, member)` iff it resolves to exactly ONE declaring TYPE.
+/// Within that type, overloads of `name` collapse to their MOST VISIBLE representative (a call binds
+/// to one overload by argument types, which we don't resolve — so if any overload is accessible we
+/// must not flag). `None` when absent OR the name is declared in TWO different supertypes (an
+/// override / hide) — either way the caller SKIPs. Requiring a unique declaring type is the
+/// conservative core: across levels we can't soundly pick which declaration the call binds to.
 fn resolve_unique_member(
     resolver: &dyn TypeResolver,
     binary: &str,
@@ -216,19 +245,27 @@ fn resolve_unique_member(
     let mut ambiguous = false;
     for_each_supertype(resolver, binary, &mut |bn, cm| {
         let list = if is_method { &cm.methods } else { &cm.fields };
-        // An explicit loop, never `.find`/`.any` on the members slice per the visibility of overloads:
-        // we want to know if MORE than one supertype declares the name (any overload set at one level
-        // counts once — same declaring type, so still unambiguous for a private/package decision).
-        let mut declared_here = false;
+        // The MOST VISIBLE overload of `name` in THIS type is the representative. A call binds to
+        // exactly ONE overload (chosen by argument types, which we don't resolve), so picking the
+        // most-visible one is the only sound choice: if ANY overload is accessible (public/protected),
+        // the call might bind to it, and we must NOT flag. (The old code took the FIRST-declared
+        // overload and assumed a shared visibility — wrong: `private foo(int)` + `public foo(String)`
+        // made `x.foo("s")` a false "private access".) Fields have no overloads, so this is just it.
+        let mut best: Option<&Member> = None;
         for m in list {
             if m.name == name {
-                declared_here = true;
-                // Keep the FIRST-seen member of this declaring type (overloads share visibility scope
-                // for our purposes — a private overload set is private; we only branch on visibility).
-                if found.is_none() {
-                    found = Some((bn.to_string(), m.clone()));
-                }
-                break;
+                best = match best {
+                    Some(prev) if visibility_rank(prev.visibility) >= visibility_rank(m.visibility) => {
+                        Some(prev)
+                    }
+                    _ => Some(m),
+                };
+            }
+        }
+        let declared_here = best.is_some();
+        if let Some(m) = best {
+            if found.is_none() {
+                found = Some((bn.to_string(), m.clone()));
             }
         }
         // The SAME name declared in a DIFFERENT supertype (an override / hide) makes the binding
@@ -255,6 +292,32 @@ fn is_jdk_type(binary: &str) -> bool {
         "org/omg/", "org/ietf/",
     ];
     PREFIXES.iter().any(|p| binary.starts_with(p))
+}
+
+/// Higher = more visible (`Public` 3 → `Private` 0). Used to pick the most-visible overload of a
+/// name as the accessibility representative: a call binds to one overload by its argument types
+/// (which this check doesn't resolve), so only the most-visible one is a sound basis for a verdict —
+/// if any overload is accessible, we must not flag.
+fn visibility_rank(v: Visibility) -> u8 {
+    match v {
+        Visibility::Public => 3,
+        Visibility::Protected => 2,
+        Visibility::Package => 1,
+        Visibility::Private => 0,
+    }
+}
+
+/// Whether the member's declaring type belongs to the SAME top-level type as `access_top` (the
+/// outermost type enclosing the access) — the JLS "nest" that shares private access. True when the
+/// declaring binary IS `access_top` or is a type nested inside it. Bytecode spells nesting with `$`
+/// (`Outer$Inner`); a PROJECT source type's binary comes from its dotted FQN, so nesting shows up as
+/// `/` (`com/acme/Outer/Inner`) — indistinguishable from a package boundary. Accepting the `/` form
+/// can therefore only ever SKIP a real error (a false negative), never invent one — the correct bias
+/// for this never-false-positive check, and the fix for the outer-class-touches-nested-private case.
+fn in_same_nest(access_top: &str, declaring_binary: &str) -> bool {
+    declaring_binary == access_top
+        || declaring_binary.starts_with(&format!("{access_top}$"))
+        || declaring_binary.starts_with(&format!("{access_top}/"))
 }
 
 /// The TOP-LEVEL binary name of a (possibly nested) declaring type: everything before the first `$`.
@@ -332,6 +395,11 @@ mod tests {
         fn resolve_simple_name(&self, name: &str, _imports: &[Import]) -> Option<String> {
             self.simple.get(name).cloned()
         }
+        // Everything under `com/dep/` stands in for a DEPENDENCY jar type (not project source); the
+        // rest is treated as the user's own project code. Lets the tests exercise the exemption.
+        fn is_project_type(&self, binary: &str) -> bool {
+            !binary.starts_with("com/dep/")
+        }
     }
 
     fn field(name: &str, ty: &str, vis: Visibility) -> Member {
@@ -360,13 +428,44 @@ mod tests {
             ClassMembers {
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
-                methods: vec![method("private_method", Visibility::Private)],
+                methods: vec![
+                    method("private_method", Visibility::Private),
+                    // `overloaded` has BOTH a private and a public overload — a call binds to one by
+                    // argument types, so the most-visible (public) representative must win.
+                    method("overloaded", Visibility::Private),
+                    method("overloaded", Visibility::Public),
+                ],
                 fields: vec![
                     field("secret_value", "int", Visibility::Private),
                     field("package_value", "int", Visibility::Package),
                     field("prot_value", "int", Visibility::Protected),
                     field("ok", "int", Visibility::Public),
                 ],
+                flags: Default::default(),
+            },
+        );
+        // A DEPENDENCY-jar type (under `com/dep/`) with a package-private field — must never be
+        // flagged, even from another package, because we don't police library visibility.
+        members.insert(
+            "com/dep/LibClass".to_string(),
+            ClassMembers {
+                superclass: Some("java/lang/Object".to_string()),
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: vec![field("lib_secret", "int", Visibility::Package)],
+                flags: Default::default(),
+            },
+        );
+        // A NESTED project type: `Outer.Inner` → binary `com/acme/access/Outer/Inner` (dotted FQN →
+        // slash, so nesting looks like a package segment). Its `private` field is legally reachable
+        // from the enclosing `Outer` (same nest) — the case the `$`-only top-level split used to miss.
+        members.insert(
+            "com/acme/access/Outer/Inner".to_string(),
+            ClassMembers {
+                superclass: Some("java/lang/Object".to_string()),
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: vec![field("secret", "int", Visibility::Private)],
                 flags: Default::default(),
             },
         );
@@ -383,6 +482,8 @@ mod tests {
         );
         let simple = [
             ("OtherPackageClass", "com/acme/other/OtherPackageClass"),
+            ("LibClass", "com/dep/LibClass"),
+            ("Inner", "com/acme/access/Outer/Inner"),
             ("String", "java/lang/String"),
             ("Object", "java/lang/Object"),
         ]
@@ -438,6 +539,14 @@ mod tests {
     }
 
     #[test]
+    fn overloaded_method_with_a_public_overload_is_not_flagged() {
+        // `overloaded` has a private AND a public overload; the call binds to one by argument types
+        // (not resolved here), so the most-visible overload is the representative → never flagged.
+        let d = diags(&access("other.overloaded();"));
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
     fn public_field_is_not_flagged() {
         assert!(diags(&access("int a = other.ok;")).is_empty());
     }
@@ -468,6 +577,24 @@ mod tests {
     fn unresolvable_receiver_is_not_flagged() {
         // `mystery`'s type is unknown to the resolver → inference yields nothing → SKIP.
         let src = "package com.acme.access;\nclass A { void m(Unknown mystery) { Object o = mystery.secret_value; } }";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
+    }
+
+    #[test]
+    fn outer_accessing_nested_private_is_not_flagged() {
+        // A class and its nested types share one nest → the outer legally reads the nested type's
+        // `private` field. The nested project binary uses `/` for nesting (`.../Outer/Inner`), which
+        // the same-nest check now recognises (the `$`-only split used to make this a false positive).
+        let src = "package com.acme.access;\nclass Outer { static class Inner { private int secret; } int m(Inner i) { return i.secret; } }";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
+    }
+
+    #[test]
+    fn dependency_receiver_is_not_flagged() {
+        // `LibClass` (a `com/dep/` dependency type) has a package-private field, accessed from another
+        // package. A real cross-package access, but we don't police LIBRARY visibility → SKIP. This is
+        // the false positive dependency indexing surfaced on legacy Struts/Entando types.
+        let src = "package com.acme.access;\nclass A { void m(com.dep.LibClass lib) { int x = lib.lib_secret; } }";
         assert!(diags(src).is_empty(), "{:?}", diags(src));
     }
 

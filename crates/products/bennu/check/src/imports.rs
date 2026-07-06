@@ -20,7 +20,20 @@ use tree_sitter::Node;
 /// the JDK/classpath is available; `static` and wildcard imports are skipped (not one resolvable
 /// type). Conservative on nested types: `a.b.Outer.Inner` is tried as `a/b/Outer/Inner`,
 /// `a/b/Outer$Inner`, … so a valid inner-class import is never mis-flagged.
-pub fn unresolved_imports(root: Node, source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
+///
+/// `classpath_complete` gates the NON-`java.*` namespaces (docs: NEVER a false positive). A `java.*`
+/// import is always adjudicated — the JDK tier is authoritative for it, so an unresolvable `java.*`
+/// import is a genuine typo. But a `javax.*` / `org.*` / library import that fails to resolve is only
+/// a real error when we KNOW the whole classpath: with the dependency jars unresolved (no `pom`,
+/// Maven not run, indexing off) the resolver sees only JDK + project, so such an import is almost
+/// certainly a real library type we simply didn't index — flagging it would be a false positive.
+/// When `classpath_complete` is `false`, only `java.*` imports are checked.
+pub fn unresolved_imports(
+    root: Node,
+    source: &str,
+    resolver: &dyn TypeResolver,
+    classpath_complete: bool,
+) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
     let mut c = root.walk();
@@ -35,6 +48,11 @@ pub fn unresolved_imports(root: Node, source: &str, resolver: &dyn TypeResolver)
         }
         let Some(name_node) = dotted_name(child) else { continue };
         let Ok(dotted) = name_node.utf8_text(bytes) else { continue };
+        // Only adjudicate non-`java.*` imports when the classpath is known-complete (else a real
+        // library type we didn't index would be mis-flagged). `java.*` is always JDK-authoritative.
+        if !classpath_complete && !is_java_core_import(dotted) {
+            continue;
+        }
         if !resolves_import(dotted, resolver) {
             out.push(Diagnostic {
                 message: format!("Cannot resolve import `{dotted}`"),
@@ -45,6 +63,14 @@ pub fn unresolved_imports(root: Node, source: &str, resolver: &dyn TypeResolver)
         }
     }
     out
+}
+
+/// Whether `dotted` is a `java.*` import — the one namespace the JDK tier is guaranteed to cover, so
+/// an unresolvable one is a real typo even without a complete dependency classpath. Note `javax.*` is
+/// deliberately EXCLUDED: much of `javax` (servlet, persistence, validation, …) ships as external
+/// dependencies, not the JDK, so a `javax.*` import can only be adjudicated with a complete classpath.
+fn is_java_core_import(dotted: &str) -> bool {
+    dotted == "java" || dotted.starts_with("java.")
 }
 
 /// The dotted type path node of an import (`scoped_identifier` / `identifier`).
@@ -324,10 +350,19 @@ mod tests {
         }
     }
 
+    /// Adjudicate imports with a KNOWN-COMPLETE classpath (the default for these focused tests).
     fn unresolved(src: &str, known: &[&str]) -> Vec<String> {
+        unresolved_cp(src, known, true)
+    }
+
+    /// Adjudicate imports with an explicit classpath-completeness flag.
+    fn unresolved_cp(src: &str, known: &[&str], complete: bool) -> Vec<String> {
         let tree = parse(src);
         let idx = Idx(known.iter().map(|s| s.to_string()).collect());
-        unresolved_imports(tree.root_node(), src, &idx).into_iter().map(|d| d.message).collect()
+        unresolved_imports(tree.root_node(), src, &idx, complete)
+            .into_iter()
+            .map(|d| d.message)
+            .collect()
     }
 
     #[test]
@@ -340,6 +375,31 @@ mod tests {
         let d = unresolved("import com.acme.Nope;\nclass C {}", &["java/util/List"]);
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(d[0].contains("com.acme.Nope"), "{d:?}");
+    }
+
+    #[test]
+    fn incomplete_classpath_skips_non_java_imports_but_flags_java() {
+        // Classpath NOT complete (deps unresolved): a `javax.*` / library import that we can't resolve
+        // is very likely a real type we just didn't index → must NOT be flagged (the FP the user hit).
+        let jx = "import javax.servlet.http.HttpServletRequest;\nclass C {}";
+        assert!(unresolved_cp(jx, &[], false).is_empty(), "javax skipped when classpath incomplete");
+        let org = "import org.springframework.stereotype.Service;\nclass C {}";
+        assert!(unresolved_cp(org, &[], false).is_empty(), "library import skipped when incomplete");
+        // But a `java.*` import is JDK-authoritative even without deps → a bad one is still flagged.
+        let bad_java = "import java.util.Lst;\nclass C {}";
+        let d = unresolved_cp(bad_java, &["java/util/List"], false);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("java.util.Lst"), "{d:?}");
+        // A GOOD java.* import still resolves (not flagged).
+        assert!(unresolved_cp("import java.util.List;\nclass C {}", &["java/util/List"], false).is_empty());
+    }
+
+    #[test]
+    fn complete_classpath_flags_unresolvable_library_import() {
+        // With the classpath known-complete, an unresolvable library import IS a real error.
+        let d = unresolved_cp("import javax.servlet.Nope;\nclass C {}", &[], true);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("javax.servlet.Nope"), "{d:?}");
     }
 
     #[test]

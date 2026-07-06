@@ -238,6 +238,12 @@ struct ProjectSlot {
     /// off-thread on open alongside the provider. `None` until built. Drives
     /// `bennu_rename_plan` / `bennu_rename_apply` (docs §5 #10-12) + `bennu_hover`.
     rename: RwLock<Option<Arc<RenameEngine>>>,
+    /// The dependency jars the resolver actually loaded for this project (absolute paths,
+    /// forward slashes) — the index's own dependency tier, NOT the Build's `target/` artifact.
+    /// Set on each build when Maven dep resolution succeeds (empty for a dep-less project or a
+    /// failed resolve). Read by the index inspector's Jars stat/list so the count reflects what
+    /// completion/validation resolve against, independent of whether `mvn` re-ran this session.
+    dep_jars: RwLock<Vec<String>>,
     /// Cached project-symbol counts from the last full build (0 until the build lands),
     /// surfaced by `bennu_index_stats` without re-walking the project.
     types: AtomicUsize,
@@ -261,6 +267,14 @@ pub struct IndexService {
     /// analysis per root does a full sync (a warm disk cache may be stale after external edits),
     /// subsequent ones only refresh the focus file.
     include_synced: Mutex<HashSet<String>>,
+    /// Monotonic per-root **build generation** for SUPERSESSION. Each [`open`](Self::open) bumps the
+    /// root's counter and hands the build thread its own gen; a thread that finds a NEWER gen has
+    /// started for the same root bails — it stops the (expensive) remaining work AND suppresses its
+    /// terminal `ready` event. Without this, a rebuild launched while a prior build is still warming
+    /// up lets the OLD thread's stale `ready` close the NEW build's progress card early, leaving the
+    /// new warm-up running unnotified ("card done but CPU still at ~70%"). Separate from the on-disk
+    /// `g<NNN>` gen dir counter (which is filesystem-collision-safe across process restarts).
+    build_gen: Mutex<HashMap<PathBuf, u64>>,
 }
 
 /// Resolve the source encoding label to index a project at `root` in: a per-project config
@@ -285,6 +299,7 @@ impl IndexService {
             slots: Mutex::new(HashMap::new()),
             include_caches: Mutex::new(HashMap::new()),
             include_synced: Mutex::new(HashSet::new()),
+            build_gen: Mutex::new(HashMap::new()),
         })
     }
 
@@ -359,12 +374,24 @@ impl IndexService {
             provider: RwLock::new(Arc::new(NativeJavaProvider::new())),
             config: RwLock::new(None),
             rename: RwLock::new(None),
+            dep_jars: RwLock::new(Vec::new()),
             types: AtomicUsize::new(0),
             members: AtomicUsize::new(0),
             ready: AtomicBool::new(false),
         });
         self.slots.lock().unwrap_or_else(|p| p.into_inner()).insert(root_path.clone(), slot.clone());
 
+        // Claim a fresh build generation for this root: a later `open` (a rebuild, or a re-open)
+        // bumps it again, and THIS thread bails the moment it sees a newer gen — so a superseded
+        // build never burns CPU behind the newer one nor emits a stale terminal `ready`.
+        let my_gen = {
+            let mut g = self.build_gen.lock().unwrap_or_else(|p| p.into_inner());
+            let n = g.entry(root_path.clone()).or_insert(0);
+            *n += 1;
+            *n
+        };
+
+        let svc: &'static IndexService = self;
         let jdk_version = jdk_version.to_string();
         let encoding_label = encoding_label.to_string();
         let root_str = root.to_string();
@@ -419,10 +446,44 @@ impl IndexService {
             );
             emit_progress(&sink, &root_str, "project", "end");
 
+            // A newer build (a rebuild / re-open) already superseded this one → stop NOW: skip the
+            // Maven resolve, the provider build, the O(N) reference walk, and the warm-up entirely,
+            // so a stale thread never burns CPU behind the newer build nor emits the terminal `ready`
+            // that would close the new build's progress card early.
+            if svc.superseded(&root_path, my_gen) {
+                eprintln!(
+                    "bennu-be: build gen {my_gen} for {} superseded — bailing after project phase",
+                    root_path.display()
+                );
+                return;
+            }
+
+            // Resolve the project's dependency jars (Maven `~/.m2`, cached across sessions by pom
+            // mtime) so validation + completion resolve LIBRARY types (Spring, servlet, Hibernate,
+            // Struts, …), not just the JDK + project. Non-fatal and lazy: a dep-less project, a
+            // missing `mvn`, or a resolve failure yields `None` and the provider degrades to JDK +
+            // project. The decoded members are memoized to a per-project file; the jar list itself is
+            // disk-cached, so `mvn dependency:build-classpath` runs at most once per pom.
+            emit_progress(&sink, &root_str, "dependencies", "start");
+            let deps = crate::dep_classpath::resolve_dep_classpath(&root_path, &jdk_version).map(|d| {
+                eprintln!(
+                    "bennu-be: dependency classpath resolved for {} ({} jars)",
+                    root_path.display(),
+                    d.jars.len()
+                );
+                // Record the resolved jars on the slot so the index inspector's Jars count reflects
+                // what the resolver loaded — independent of whether `mvn` re-ran (the jar list is
+                // disk-cached, so a cached open skips mvn but still indexes the same jars).
+                *slot.dep_jars.write().unwrap_or_else(|p| p.into_inner()) = d.jars;
+                (d.source, d.memo_path)
+            });
+            emit_progress(&sink, &root_str, "dependencies", "end");
+
             // Build the index-backed provider and swap it in. The JDK member index is persistent
             // (shared across projects/sessions, keyed by the resolved JDK), so JDK classes are
-            // parsed from bytecode at most once ever.
-            match NativeJavaProvider::for_project(&index_dir, &jdk_version, &pairs, jdk_index_path(&jdk_version)) {
+            // parsed from bytecode at most once ever; the dependency tier (when present) is memoized
+            // per-project.
+            match NativeJavaProvider::for_project(&index_dir, &jdk_version, &pairs, jdk_index_path(&jdk_version), deps) {
                 Ok(p) => {
                     *slot.provider.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(p);
                     // NB: completion is live here, but the index is NOT fully built yet — the
@@ -468,27 +529,63 @@ impl IndexService {
             // still-mapped dir is left for the next open's GC (non-fatal on Windows).
             gc_old_gens(&index_base, gen);
 
-            // Provider is live + engines built → the index is fully built. Flip `ready`
-            // (drives `index_stats.ready` → the FE poll's safety-net finish) THEN emit the
-            // terminal "ready" event.
+            // Warm up the whole-project VALIDATION cache (opt-in, default on) BEFORE marking the
+            // index "ready", as its OWN visible "validation" phase. With the dependency tier this
+            // decodes library bytecode across the WHOLE project — real, CPU-heavy work — so if it ran
+            // silently AFTER `ready` (as it used to) the progress card would finish while the CPU was
+            // still pegged at ~70% ("the card says done but the machine is still working"). Gating
+            // `ready` on it keeps the card open until the work is genuinely finished. Completion /
+            // navigation are ALREADY live (they don't depend on `ready`), so this holds only the
+            // CARD open, never the editor. Reuses the already-read `sources` (no second disk pass);
+            // a background citizen (leaves ~2 cores free); skipped when no resolver.
+            // A rebuild landed during the reference walk → bail before the (heaviest) warm-up and
+            // before the terminal `ready`, so the superseded thread neither pegs the CPU on a
+            // throwaway whole-project validation nor closes the new build's card.
+            if svc.superseded(&root_path, my_gen) {
+                eprintln!(
+                    "bennu-be: build gen {my_gen} for {} superseded — bailing before warm-up",
+                    root_path.display()
+                );
+                return;
+            }
+
+            if bennu_core::config::load().validate_on_open {
+                emit_progress(&sink, &root_str, "validation", "start");
+                warm_up_validation_cache(&root_str, &sources);
+                emit_progress(&sink, &root_str, "validation", "end");
+            }
+
+            // A rebuild could have landed DURING the warm-up (minutes on a big project) — re-check so
+            // the stale terminal `ready` is suppressed even then. The new build owns the card now.
+            if svc.superseded(&root_path, my_gen) {
+                eprintln!(
+                    "bennu-be: build gen {my_gen} for {} superseded during warm-up — suppressing ready",
+                    root_path.display()
+                );
+                return;
+            }
+
+            // Everything (index + engines + warm-up) is done → flip `ready` (drives
+            // `index_stats.ready` → the FE poll's safety-net finish) THEN emit the terminal "ready".
             slot.ready.store(true, Ordering::Relaxed);
             emit_progress(&sink, &root_str, "ready", "end");
-
-            // Warm up the whole-project VALIDATION cache in the background (opt-in, default on), so
-            // the first explicit "Validate (no compile)" is instant and the resolved data it
-            // computes is ready for navigation features. Reuses the already-read `sources` (no
-            // second disk pass), runs on this same background thread AFTER the index is ready (never
-            // delaying completion), and only when a resolver exists (else there's nothing to cache).
-            // Parallel but a background citizen (leaves ~2 cores free). Emits no FE events — it's a
-            // silent warm-up, not a user-triggered validation.
-            if bennu_core::config::load().validate_on_open {
-                warm_up_validation_cache(&root_str, &sources);
-            }
             // Diagnostic (idle-CPU investigation): confirms the build thread reaches its end
             // and exits. If bennu-be still burns CPU after this line logs, the spinner is NOT
             // this thread (look to a dependency / a thread it left behind).
             eprintln!("bennu-be: index build thread exiting for {}", root_path.display());
         });
+    }
+
+    /// Whether a NEWER build has been started for `root` since the caller's build began (`my_gen`) —
+    /// the bail signal for a superseded build thread. Bailing stops the remaining (expensive) work
+    /// and, crucially, suppresses the terminal `ready` event, so an old thread finishing after a
+    /// rebuild can't close the new build's progress card (leaving its warm-up running unnotified).
+    fn superseded(&self, root: &Path, my_gen: u64) -> bool {
+        self.build_gen
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(root)
+            .is_some_and(|&g| g != my_gen)
     }
 
     /// Rebuild the index for an already-open project (by root), reusing the JDK level it
@@ -582,6 +679,7 @@ impl IndexService {
                 file_stem,
                 expected_package,
                 java_major: None,
+                classpath_complete: false,
             };
             return bennu_check::prelude::check_file(source, &ctx);
         };
@@ -590,6 +688,9 @@ impl IndexService {
             file_stem,
             expected_package,
             java_major: status.requested_major,
+            // The dependency classpath is known-complete only when Maven resolved its jars (recorded
+            // on the slot). Absent → the unresolved-import check adjudicates only `java.*`.
+            classpath_complete: !slot.dep_jars.read().unwrap_or_else(|p| p.into_inner()).is_empty(),
         };
         let provider = {
             let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
@@ -623,19 +724,21 @@ impl IndexService {
             let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
             slots.get(&PathBuf::from(root)).map(Arc::clone)
         };
-        let (provider, jdk_available, requested_major) = match slot {
+        let (provider, jdk_available, classpath_complete, requested_major) = match slot {
             Some(slot) => {
                 let status = bennu_classpath::prelude::jdk_status(&slot.jdk_version);
                 let provider = {
                     let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
                     Arc::clone(&g)
                 };
-                (provider, status.any_installed, status.requested_major)
+                // Deps known-complete only when Maven resolved jars (recorded on the slot).
+                let complete = !slot.dep_jars.read().unwrap_or_else(|p| p.into_inner()).is_empty();
+                (provider, status.any_installed, complete, status.requested_major)
             }
             // No project owns this root — validate pure-AST over an empty provider, no caching.
-            None => (Arc::new(NativeJavaProvider::new()), false, None),
+            None => (Arc::new(NativeJavaProvider::new()), false, false, None),
         };
-        validate_files_parallel(&provider, jdk_available, requested_major, files, cache, on_progress)
+        validate_files_parallel(&provider, jdk_available, classpath_complete, requested_major, files, cache, on_progress)
     }
 
     /// Whether the project at `root` has a built resolver (so the diagnostic cache can check
@@ -742,19 +845,32 @@ impl IndexService {
     }
 
     /// The classpath/JDK epoch for the project at `root` — a hash of the JDK level it was opened at
-    /// plus the resolved classpath file's bytes. A JDK switch or a dependency-set change (a new
-    /// `target/bennu-classpath.txt`) changes it, dropping the diagnostic cache so nothing computed
-    /// against the old classpath is ever served. Within a session (fixed classpath) it's stable, so
-    /// the per-file project-dependency fingerprint carries the incrementality.
+    /// plus the **resolved dependency jar set** (sorted, so order-independent). A JDK switch or a
+    /// dependency-set change bumps it, dropping the diagnostic cache so nothing computed against the
+    /// old classpath is ever served; an UNCHANGED project (same JDK + same jars) keeps the SAME epoch
+    /// across sessions, so the persisted cache survives every restart and the warm-up is genuinely
+    /// incremental (it re-validates only files whose own bytes / project deps changed, not the whole
+    /// project on every open). Deriving the epoch from the actually-resolved jar set — cached across
+    /// sessions by pom mtime — instead of a `target/bennu-classpath.txt` that a build could rewrite
+    /// (or that may not exist) is what makes it stable: a volatile/absent file used to flip the epoch
+    /// on some opens, dropping the whole cache and forcing a full cold re-warm every startup.
     fn diag_epoch(&self, root: &str) -> u64 {
-        let jdk = {
+        let (jdk, mut jars) = {
             let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
-            slots.get(&PathBuf::from(root)).map(|s| s.jdk_version.clone()).unwrap_or_default()
+            match slots.get(&PathBuf::from(root)) {
+                Some(s) => (
+                    s.jdk_version.clone(),
+                    s.dep_jars.read().unwrap_or_else(|p| p.into_inner()).clone(),
+                ),
+                None => (String::new(), Vec::new()),
+            }
         };
-        let cp_file = Path::new(root).join("target").join("bennu-classpath.txt");
-        let cp = std::fs::read(&cp_file).unwrap_or_default();
+        jars.sort_unstable(); // order-independent: the jar SET, not the resolve order, defines the epoch
         let mut seed = format!("{jdk}\0");
-        seed.push_str(&String::from_utf8_lossy(&cp));
+        for j in &jars {
+            seed.push_str(j);
+            seed.push('\0');
+        }
         bennu_intel::prelude::source_hash(&seed)
     }
 
@@ -896,6 +1012,31 @@ impl IndexService {
             .unwrap_or_default();
 
         (class_fqcn, config_file, writable, validated)
+    }
+
+    /// Candidate Struts actions a JSP's OGNL binds to, for the action picker + linting. Two sources,
+    /// unioned (deduped by action qname):
+    ///   * **direct** — actions whose result view IS this JSP ([`ConfigResolver::actions_for_view`]);
+    ///   * **inherited** — this JSP may be an included **fragment**; its effective action(s) are those
+    ///     of the page(s) that include it (transitively), so we walk the include graph's REVERSE edges
+    ///     and add each including page's actions. A child (`.jspf`) thus gets its parent view's action.
+    /// Empty when no project/config owns `file`.
+    pub fn jsp_action_candidates(&self, file: &str) -> Vec<(String, Option<String>)> {
+        let Some(cfg) = self.config_for_file(file) else {
+            return Vec::new();
+        };
+        let mut out: Vec<(String, Option<String>)> = Vec::new();
+        merge_candidates(&mut out, cfg.actions_for_view(file));
+        if let Some(root) = self.root_for_file(file) {
+            let graph = self.include_graph(&root, file, false);
+            let related = bennu_web::prelude::related_files(&graph, &file.replace('\\', "/"), 200);
+            for rf in related.files {
+                if matches!(rf.relation, bennu_web::prelude::IncludeRelation::IncludedBy) {
+                    merge_candidates(&mut out, cfg.actions_for_view(&rf.file));
+                }
+            }
+        }
+        out
     }
 
     /// Find-usages for a Struts action: every JSP `action="…"` reference to `action_qname`
@@ -1041,10 +1182,14 @@ impl IndexService {
             types: slot.types.load(Ordering::Relaxed),
             members: slot.members.load(Ordering::Relaxed),
             jdk_version: slot.jdk_version.clone(),
-            // Cheap: count the dep jars from the cached `target/bennu-classpath.txt` that a
-            // prior build/run wrote — no `mvn` shell-out here. 0 when the file is absent
-            // (no build-classpath has run yet).
-            jar_count: cached_jar_count(&slot.root),
+            // The dependency jars the INDEX resolver loaded (its own tier) — reflects what
+            // completion/validation resolve against, independent of whether `mvn` re-ran this
+            // session. Falls back to the Build's cached `target/bennu-classpath.txt` when the index
+            // has no dep tier yet (still building, or dep resolution off/failed) — never a shell-out.
+            jar_count: {
+                let n = slot.dep_jars.read().unwrap_or_else(|p| p.into_inner()).len();
+                if n > 0 { n } else { cached_jar_count(&slot.root) }
+            },
             actions,
             beans,
             relations,
@@ -1068,7 +1213,15 @@ impl IndexService {
         };
         match kind {
             "members" => self.member_entries(&slot),
-            "jars" => jar_entries(&slot.root),
+            "jars" => {
+                // The resolver's own dep jars when present, else the Build's `target/` classpath.
+                let g = slot.dep_jars.read().unwrap_or_else(|p| p.into_inner());
+                if g.is_empty() {
+                    jar_entries(&slot.root)
+                } else {
+                    g.iter().filter_map(|e| jar_entry_of(e)).collect()
+                }
+            }
             "jdk" => jdk_entries(&slot),
             "beans" | "actions" | "relations" => config_entries(&slot, kind),
             _ => Vec::new(),
@@ -1274,6 +1427,7 @@ pub struct RunOutcome {
 fn validate_files_parallel(
     provider: &NativeJavaProvider,
     jdk_available: bool,
+    classpath_complete: bool,
     requested_major: Option<u32>,
     files: &[(PathBuf, String)],
     cache: &bennu_intel::prelude::DiagCache,
@@ -1287,6 +1441,7 @@ fn validate_files_parallel(
             file_stem: path.file_stem().and_then(|s| s.to_str()).map(str::to_string),
             expected_package: path.parent().and_then(bennu_java::prelude::infer_package),
             java_major: requested_major,
+            classpath_complete,
         };
         let own = bennu_intel::prelude::source_hash(source);
         // A still-fresh cached entry (the `view` borrow ends when the diags are cloned out).
@@ -1643,22 +1798,19 @@ fn jar_entries(root: &Path) -> Vec<IndexEntry> {
     let Ok(raw) = std::fs::read_to_string(&cp_file) else {
         return Vec::new();
     };
-    split_classpath_entries(&raw)
-        .into_iter()
-        .filter_map(|e| {
-            let p = Path::new(&e);
-            if !e.to_ascii_lowercase().ends_with(".jar") || !p.is_file() {
-                return None;
-            }
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or(&e).to_string();
-            Some(IndexEntry {
-                primary: name,
-                secondary: e.replace('\\', "/"),
-                file: None,
-                line: None,
-            })
-        })
-        .collect()
+    split_classpath_entries(&raw).into_iter().filter_map(|e| jar_entry_of(&e)).collect()
+}
+
+/// One inspector [`IndexEntry`] for a jar `path` — `Some` only for an existing `.jar` on disk.
+/// Primary = filename, secondary = abs path (forward slashes); a jar has no openable project
+/// source site. Shared by the resolver-jars list and the `target/`-classpath fallback.
+fn jar_entry_of(path: &str) -> Option<IndexEntry> {
+    let p = Path::new(path);
+    if !path.to_ascii_lowercase().ends_with(".jar") || !p.is_file() {
+        return None;
+    }
+    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or(path).to_string();
+    Some(IndexEntry { primary: name, secondary: path.replace('\\', "/"), file: None, line: None })
 }
 
 /// The resolved-JDK summary for the index inspector: a single [`IndexEntry`] naming the
@@ -1835,9 +1987,22 @@ pub(crate) fn line_col_preview(src: &str, off: usize) -> (usize, usize, String) 
     (line, col, src[line_start..line_end].trim().to_string())
 }
 
+/// Append every `(qname, fqcn)` from `more` into `out`, skipping actions already present (dedup by
+/// qname) — so the direct + inherited (include-graph) candidate sets union cleanly, in discovery order.
+fn merge_candidates(
+    out: &mut Vec<(String, Option<String>)>,
+    more: Vec<(String, Option<String>)>,
+) {
+    for c in more {
+        if !out.iter().any(|(q, _)| q == &c.0) {
+            out.push(c);
+        }
+    }
+}
+
 /// The JavaBeans property name for an accessor suffix: lowercase the first letter, UNLESS
 /// the first two letters are both upper-case (`setURL` → `URL`, not `uRL`).
-fn bean_property_name(suffix: &str) -> String {
+pub(crate) fn bean_property_name(suffix: &str) -> String {
     let mut chars = suffix.chars();
     let Some(first) = chars.next() else { return String::new() };
     if suffix.chars().nth(1).is_some_and(|c| c.is_uppercase()) {
