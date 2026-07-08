@@ -282,6 +282,7 @@ fn flag_unhandled(
                 simple_name(binary)
             ),
             severity: "error".to_string(),
+            code: String::new(),
             start: anchor.start_byte(),
             end: anchor.end_byte(),
         });
@@ -314,6 +315,7 @@ mod tests {
     /// A type body with the given superclass/interfaces + methods.
     fn cm(superclass: Option<&str>, methods: Vec<Member>) -> ClassMembers {
         ClassMembers {
+            type_params: Vec::new(),
             superclass: superclass.map(str::to_string),
             interfaces: Vec::new(),
             methods,

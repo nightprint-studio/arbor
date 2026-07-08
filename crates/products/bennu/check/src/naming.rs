@@ -35,6 +35,7 @@ pub fn class_name_matches_file(root: Node, source: &str, file_stem: &str) -> Vec
             out.push(Diagnostic {
                 message: format!("Public type `{name}` must be declared in a file named `{name}.java`"),
                 severity: "error".to_string(),
+                code: String::new(),
                 start: name_node.start_byte(),
                 end: name_node.end_byte(),
             });

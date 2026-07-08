@@ -139,7 +139,7 @@ fn err(message: String, node: Node, bytes: &[u8]) -> Diagnostic {
         .position(|&b| b == b'\n')
         .map(|nl| start + nl)
         .unwrap_or(node.end_byte());
-    Diagnostic { message, severity: "error".to_string(), start, end }
+    Diagnostic { message, severity: "error".to_string(), code: String::new(), start, end }
 }
 
 #[cfg(test)]

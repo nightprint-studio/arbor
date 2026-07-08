@@ -124,6 +124,7 @@ fn err(node: Node, message: impl Into<String>) -> Diagnostic {
     Diagnostic {
         message: message.into(),
         severity: "error".to_string(),
+        code: String::new(),
         start: node.start_byte(),
         end: node.end_byte(),
     }

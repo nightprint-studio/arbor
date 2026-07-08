@@ -58,6 +58,7 @@ fn error_diag(n: Node, bytes: &[u8]) -> Diagnostic {
     Diagnostic {
         message: "Syntax error".to_string(),
         severity: "error".to_string(),
+        code: String::new(),
         start,
         end,
     }
@@ -71,6 +72,7 @@ fn missing_diag(n: Node) -> Diagnostic {
     Diagnostic {
         message: format!("Missing `{kind}`"),
         severity: "error".to_string(),
+        code: String::new(),
         start,
         end: start, // zero-width — the FE widens the marker to one glyph
     }

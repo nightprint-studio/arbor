@@ -41,6 +41,15 @@ pub trait ClassSource {
             None => Ok(None),
         }
     }
+
+    /// Enumerate the **binary class names** (`java/util/List`, slash form, no `.class`) this source
+    /// holds — the raw list behind the class-name index that powers "Import class". Inner classes and
+    /// `module-info`/`package-info` are NOT filtered here (the index normalises); this just lists what
+    /// the container has. Default empty: a source that can't (or needn't) enumerate returns nothing;
+    /// the JDK containers and dependency jars override it.
+    fn class_names(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 // ── DirSource ────────────────────────────────────────────────────────────────
@@ -115,6 +124,18 @@ impl ClassSource for JarSource {
         };
         result
     }
+
+    fn class_names(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut archive = self.archive.borrow_mut();
+        for i in 0..archive.len() {
+            let Ok(entry) = archive.by_index(i) else { continue };
+            if let Some(binary) = entry.name().strip_suffix(".class") {
+                out.push(binary.to_string());
+            }
+        }
+        out
+    }
 }
 
 // ── JimageSource ─────────────────────────────────────────────────────────────
@@ -157,5 +178,26 @@ impl ClassSource for JimageSource {
             }
         }
         Ok(None)
+    }
+
+    fn class_names(&self) -> Vec<String> {
+        // Every `.class` resource across ALL modules (a project can reference java.sql / java.xml /
+        // … too, not just java.base). `ResourceName` splits the path into parent + base; rebuild the
+        // slash-form binary name and keep only class resources.
+        let mut out = Vec::new();
+        for rn in self.image.resource_names_iter() {
+            let Ok(name) = rn else { continue };
+            if name.extension.as_ref() != "class" {
+                continue;
+            }
+            let parent = name.parent.as_ref();
+            let base = name.base.as_ref();
+            if parent.is_empty() {
+                out.push(base.to_string());
+            } else {
+                out.push(format!("{parent}/{base}"));
+            }
+        }
+        out
     }
 }

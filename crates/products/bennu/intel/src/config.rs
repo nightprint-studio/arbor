@@ -310,9 +310,16 @@ impl ConfigResolver {
     /// path): only a trailing `.action`/`.do`/query the editor may pass verbatim is stripped
     /// before the exact check, so a genuinely-dangling absolute ref is still `Missing`.
     pub fn diagnose_action(&self, action_qname: &str) -> ActionVerdict {
-        // Suffix/query-normalize the raw ref (never the suffix-guess) for the exact check.
+        // Suffix/query-normalize the raw ref for the wildcard check below.
         let norm = normalize_action_ref(action_qname).unwrap_or_else(|| action_qname.to_string());
-        if self.action_ids.contains_key(action_qname) || self.action_ids.contains_key(&norm) {
+        // EXISTS iff the tolerant go-to resolution binds it (docs: NEVER a false positive). Being
+        // STRICTER than go-to here was the bug: an Entando `/ExtStr2/do/…/prevQC.action` URL that
+        // Ctrl+B resolves fine (the `/ExtStr2` servlet prefix dropped, `.action` stripped) was flagged
+        // "action does not exist". `canonical_action_key` covers exact + normalized + servlet-prefix
+        // suffix + unique-trailing-name, so anything go-to can reach is `Exists` here too. Its loosest
+        // step (unique trailing name) can only cause a false NEGATIVE (a dangling ref slipping through),
+        // never a false positive — the correct trade for a squiggle.
+        if self.canonical_action_key(action_qname).is_some() {
             return ActionVerdict::Exists;
         }
         // Could a wildcard action's pattern match this reference (within its namespace)?
@@ -853,10 +860,17 @@ mod tests {
         assert_eq!(cfg.resolve_bean_class("categoryAction").as_deref(), Some("com.x.CategoryAction"));
         assert_eq!(cfg.resolve_bean_class("nope").as_deref(), None);
 
-        // diagnose_action stays strict but suffix-tolerant: the concrete action (with a raw
-        // `.action`) is Exists; a dangling absolute ref is Missing.
+        // diagnose_action is now as tolerant as go-to: the concrete action (with a raw `.action`)
+        // is Exists; a dangling absolute ref is Missing.
         assert_eq!(cfg.diagnose_action("/do/Cat/viewTree.action"), ActionVerdict::Exists);
         assert_eq!(cfg.diagnose_action("/do/Cat/ghost"), ActionVerdict::Missing);
+        // REGRESSION: an Entando `/ExtStr2`-prefixed URL that go-to resolves must NOT be a false
+        // "action does not exist" — being stricter than go-to here was the bug.
+        assert_eq!(
+            cfg.diagnose_action("/ExtStr2/do/Cat/viewTree.action"),
+            ActionVerdict::Exists,
+            "a servlet-prefixed URL that Ctrl+B resolves must not be flagged Missing",
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

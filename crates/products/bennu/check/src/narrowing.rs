@@ -186,15 +186,13 @@ fn narrowing_check(
         return;
     }
 
-    out.push(Diagnostic {
-        message: format!(
+    out.push(crate::check_id::CheckId::LossyConversion.at(
+        val,
+        format!(
             "Incompatible types: possible lossy conversion from `{}` to `{}`",
             source_ty.binary_name, target_display
         ),
-        severity: "error".to_string(),
-        start: val.start_byte(),
-        end: val.end_byte(),
-    });
+    ));
 }
 
 /// Numeric rank of a primitive. `char` gets a distinct axis marker so it never silently widens/narrows
@@ -395,6 +393,7 @@ mod tests {
 
     fn cls(superclass: Option<&str>, methods: Vec<Member>, fields: Vec<Member>) -> ClassMembers {
         ClassMembers {
+            type_params: Vec::new(),
             superclass: superclass.map(str::to_string),
             interfaces: Vec::new(),
             methods,

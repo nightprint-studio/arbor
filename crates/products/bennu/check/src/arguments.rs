@@ -12,7 +12,7 @@
 //!     two unrelated concrete classes (the argument isn't a subtype of the parameter). Boxing,
 //!     widening, interfaces, generics and `null` are all treated as OK.
 
-use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, Member, TypeRef, TypeResolver};
+use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, TypeRef, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::{Node, Parser};
 
@@ -87,15 +87,26 @@ fn check_call(
     let args: Vec<Node> = named_args(arg_list);
     let argc = args.len();
 
-    // Candidate overloads: same name + arity, not varargs, not generic. If exactly one distinct
-    // signature survives, we know which parameters the arguments bind to.
-    let mut sigs: Vec<Vec<TypeRef>> = Vec::new();
+    // Every overload of matching ARITY, deduped by parameter list — INCLUDING the ones we can't
+    // type-check (varargs / generic). A non-checkable arity match MUST still count: if the call could
+    // bind to it, judging the args against a *different*, single checkable overload is unsound. E.g.
+    // `setRecipients(String, Addresses[])` + `setRecipients(String, String)`: passing an `Addresses[]`
+    // as the 2nd arg binds to the array overload, so we must NOT flag it against `String`. Two arity-2
+    // candidates → ambiguous → skip. (Before, the array overload was dropped as non-checkable, leaving
+    // the `String` one as the lone signature → false positive.)
+    let mut sigs: Vec<&Vec<TypeRef>> = Vec::new();
     for m in &res.candidates {
-        if m.params.len() == argc && checkable(m) && !sigs.contains(&m.params) {
-            sigs.push(m.params.clone());
+        if m.params.len() == argc && !sigs.iter().any(|p| **p == m.params) {
+            sigs.push(&m.params);
         }
     }
+    // Exactly one overload of this arity, and it must be fully type-checkable (no varargs / generic
+    // parameter) for us to bind the arguments to it with certainty. Otherwise → skip.
     let [params] = sigs.as_slice() else { return };
+    let params: &Vec<TypeRef> = params;
+    if !params_checkable(params) {
+        return;
+    }
 
     for (i, arg) in args.iter().enumerate() {
         let Some(param) = params.get(i) else { break };
@@ -110,6 +121,7 @@ fn check_call(
                     i + 1
                 ),
                 severity: "error".to_string(),
+                code: String::new(),
                 start: arg.start_byte(),
                 end: arg.end_byte(),
             });
@@ -117,10 +129,10 @@ fn check_call(
     }
 }
 
-/// A method whose parameters we can type-check: none is a type variable (generic) or an array
-/// (possible varargs / element inference we don't model).
-fn checkable(m: &Member) -> bool {
-    m.params.iter().all(|p| !is_type_var(&p.binary_name) && !p.binary_name.ends_with("[]"))
+/// A parameter list we can type-check: none is a type variable (generic) or an array (possible
+/// varargs / element inference we don't model).
+fn params_checkable(params: &[TypeRef]) -> bool {
+    params.iter().all(|p| !is_type_var(&p.binary_name) && !p.binary_name.ends_with("[]"))
 }
 
 /// A definite argument/parameter mismatch, or `None` when compatible / uncertain.
@@ -178,7 +190,7 @@ fn is_type_var(binary: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bennu_java::prelude::{ClassFlags, ClassMembers, Import};
+    use bennu_java::prelude::{ClassFlags, ClassMembers, Import, Member};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -202,6 +214,7 @@ mod tests {
 
     fn cls(methods: Vec<Member>) -> ClassMembers {
         ClassMembers {
+            type_params: Vec::new(),
             superclass: Some("java/lang/Object".to_string()),
             interfaces: Vec::new(),
             methods,
@@ -229,6 +242,11 @@ mod tests {
                 method("overloaded", &["int"]),
                 method("overloaded", &["java/lang/String"]),
                 method("animal", &[]), // returns Animal below via return_type override
+                // Two arity-2 overloads, ONE with an array param (non-checkable): a call must not be
+                // judged against the lone checkable `(String, String)` — mirrors the reported
+                // `setRecipients(String, Addresses[])` + `setRecipients(String, String)` case.
+                method("recip", &["java/lang/String", "com/acme/Widget[]"]),
+                method("recip", &["java/lang/String", "java/lang/String"]),
             ]),
         );
         // Give Svc providers returning types, for building args.
@@ -293,6 +311,16 @@ mod tests {
         // `overloaded` has two distinct 1-arg signatures → we don't guess which binds.
         assert!(diags("s.overloaded(1);").is_empty());
         assert!(diags("s.overloaded(\"x\");").is_empty());
+    }
+
+    #[test]
+    fn overload_with_array_param_sibling_is_skipped() {
+        // `recip` has `(String, Widget[])` and `(String, String)`. Passing a non-array `Widget` as the
+        // 2nd arg would, before the fix, be judged against the lone checkable `(String, String)` and
+        // flagged Widget↔String — but the call could bind to the array overload, so we must skip.
+        assert!(diags("s.recip(\"a\", s.widget());").is_empty());
+        // And a genuinely correct call still passes.
+        assert!(diags("s.recip(\"a\", \"b\");").is_empty());
     }
 
     #[test]

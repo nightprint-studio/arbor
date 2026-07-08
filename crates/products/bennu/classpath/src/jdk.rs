@@ -62,6 +62,15 @@ impl ClassSource for MultiSource {
         }
         Ok(None)
     }
+
+    fn class_names(&self) -> Vec<String> {
+        // Union across every chained source (rt.jar + resources + ext, or the single jimage).
+        let mut out = Vec::new();
+        for s in &self.sources {
+            out.extend(s.class_names());
+        }
+        out
+    }
 }
 
 /// Build a [`ClassSource`] for the JDK bootclasspath matching `version`
@@ -206,9 +215,11 @@ pub fn find_jdk_home(version: &str) -> Option<PathBuf> {
     find_jdk_for(major)
 }
 
-/// JDK 8: rt.jar + resources.jar + every ext jar, chained. `jre/lib/*` on a JDK (the
-/// JRE nested inside the JDK); a bare JRE has the same layout without the `jre/`
-/// level, so we probe both.
+/// JDK 8: every boot jar in `jre/lib/` (rt.jar first, then jce.jar / jsse.jar / charsets.jar /
+/// resources.jar / …) plus every `jre/lib/ext/` jar, chained. The JDK-8 platform is split across
+/// several jars, not just rt.jar — `javax.crypto` (jce.jar) / `javax.net.ssl` (jsse.jar) would be
+/// missed otherwise. `jre/lib/*` on a JDK (the JRE nested inside the JDK); a bare JRE has the same
+/// layout without the `jre/` level, so we probe both.
 fn resolve_jdk8(home: &Path) -> Result<Box<dyn ClassSource>, String> {
     let lib = if home.join("jre/lib/rt.jar").is_file() {
         home.join("jre/lib")
@@ -222,34 +233,36 @@ fn resolve_jdk8(home: &Path) -> Result<Box<dyn ClassSource>, String> {
     }
 
     let mut sources: Vec<Box<dyn ClassSource>> = Vec::new();
+    // rt.jar first — it holds the vast majority of the platform and is the hottest probe.
     sources.push(Box::new(JarSource::open(&rt)?));
-
-    // resources.jar is part of the boot set; include it when present (harmless if it
-    // has no classes).
-    let resources = lib.join("resources.jar");
-    if resources.is_file() {
-        sources.push(Box::new(JarSource::open(&resources)?));
-    }
-
-    // Extension jars (charsets, locales, nashorn, …). Sorted for a deterministic
-    // probe order.
-    let ext = lib.join("ext");
-    if let Ok(entries) = fs::read_dir(&ext) {
-        let mut ext_jars: Vec<PathBuf> = entries
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.extension().map(|x| x == "jar").unwrap_or(false))
-            .collect();
-        ext_jars.sort();
-        for jar in ext_jars {
-            // A broken ext jar shouldn't sink the whole classpath; skip it.
-            if let Ok(src) = JarSource::open(&jar) {
-                sources.push(Box::new(src));
-            }
-        }
-    }
+    // Then EVERY OTHER boot jar in `jre/lib/`. JDK 8 splits the platform across several jars, not just
+    // rt.jar: `javax.crypto` lives in `jce.jar`, `javax.net.ssl` in `jsse.jar`, extra charsets in
+    // `charsets.jar`, plus `resources.jar` / `sunrsasign.jar` / `jfr.jar`. Loading only rt.jar
+    // (+resources) missed them, so those `javax.*` types didn't resolve even though `java.*` did.
+    push_jars_in(&lib, "rt.jar", &mut sources);
+    // Extension jars (nashorn, localedata, …).
+    push_jars_in(&lib.join("ext"), "", &mut sources);
 
     Ok(Box::new(MultiSource::new(sources)))
+}
+
+/// Open every `.jar` directly in `dir` (non-recursive, sorted for a deterministic order), skipping the
+/// file named `skip` (already opened) and any broken jar. No-op when `dir` isn't a directory.
+fn push_jars_in(dir: &Path, skip: &str, sources: &mut Vec<Box<dyn ClassSource>>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    let mut jars: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x == "jar").unwrap_or(false))
+        .filter(|p| p.file_name().and_then(|n| n.to_str()) != Some(skip))
+        .collect();
+    jars.sort();
+    for jar in jars {
+        // A broken jar shouldn't sink the whole classpath; skip it.
+        if let Ok(src) = JarSource::open(&jar) {
+            sources.push(Box::new(src));
+        }
+    }
 }
 
 /// JDK 9+: the `lib/modules` jimage. Probes a broad set of core modules so common

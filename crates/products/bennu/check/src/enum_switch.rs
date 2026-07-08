@@ -129,16 +129,14 @@ fn check_switch(
         return;
     }
 
-    out.push(Diagnostic {
-        message: format!(
+    out.push(crate::check_id::CheckId::NonExhaustiveEnumSwitch.at(
+        switch,
+        format!(
             "Switch expression does not cover all enum constants (missing: {}) \
              — add the missing cases or a `default`",
             missing.join(", ")
         ),
-        severity: "error".to_string(),
-        start: switch.start_byte(),
-        end: switch.end_byte(),
-    });
+    ));
 }
 
 /// The enum's constant names: the static fields whose declared type is the enum itself. That is how
@@ -233,6 +231,7 @@ mod tests {
 
     fn enum_cls(binary: &str, constants: &[&str]) -> ClassMembers {
         ClassMembers {
+            type_params: Vec::new(),
             superclass: Some("java/lang/Enum".to_string()),
             interfaces: Vec::new(),
             methods: Vec::new(),
@@ -243,6 +242,7 @@ mod tests {
 
     fn plain_cls() -> ClassMembers {
         ClassMembers {
+            type_params: Vec::new(),
             superclass: Some("java/lang/Object".to_string()),
             interfaces: Vec::new(),
             methods: Vec::new(),

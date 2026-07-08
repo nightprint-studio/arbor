@@ -281,6 +281,7 @@ fn err(message: String, node: Node) -> Diagnostic {
     Diagnostic {
         message,
         severity: "error".to_string(),
+        code: String::new(),
         start: node.start_byte(),
         end: node.end_byte(),
     }
@@ -327,6 +328,7 @@ mod tests {
         flags: ClassFlags,
     ) -> ClassMembers {
         ClassMembers {
+            type_params: Vec::new(),
             superclass: superclass.map(str::to_string),
             interfaces: ifaces.iter().map(|s| s.to_string()).collect(),
             methods,

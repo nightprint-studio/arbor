@@ -144,17 +144,30 @@ pub struct CompletionItem {
     pub kind: String,
     /// Optional right-aligned detail (a signature, a type).
     pub detail: Option<String>,
+    /// When set, the fully-qualified name to **auto-import** on accept (a type-name completion whose
+    /// simple name resolves to a SINGLE importable class). The FE, when auto-import is enabled, adds
+    /// the `import` line alongside inserting the label. `None` for member completions and ambiguous
+    /// names. `#[serde(default)]` so an older payload without the field still deserializes.
+    #[serde(default)]
+    pub auto_import: Option<String>,
 }
 
 /// A single diagnostic returned by `bennu_diagnostics`. Phase 0 returns an empty
 /// list; the shape is frozen now so the FE binds against it. Byte offsets, not
 /// line/col — the FE maps them against the buffer it already has.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Diagnostic {
     /// The message shown to the user.
     pub message: String,
     /// Severity: `"error"` | `"warning"` | `"info"` | `"hint"`.
     pub severity: String,
+    /// Stable machine identifier for the KIND of diagnostic (a kebab-case slug like
+    /// `"unknown-member"` / `"wrong-type-argument-count"`), from the emitting check's `CheckId`. Lets
+    /// the FE/settings group, suppress or re-severity a rule and lets quick-fixes key off the kind.
+    /// Empty for diagnostics not yet migrated to the typed catalog. `#[serde(default)]` so an old wire
+    /// payload (no `code`) still deserializes.
+    #[serde(default)]
+    pub code: String,
     /// Start byte offset in the file.
     pub start: usize,
     /// End byte offset (exclusive) in the file.

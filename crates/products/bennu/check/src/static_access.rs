@@ -232,6 +232,7 @@ fn check_reference(
     out.push(Diagnostic {
         message: format!("Non-static member `{name}` cannot be referenced from a static context"),
         severity: "error".to_string(),
+        code: String::new(),
         start: name_node.start_byte(),
         end: name_node.end_byte(),
     });
@@ -604,6 +605,7 @@ mod tests {
         members.insert(
             "java/lang/Object".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: None,
                 interfaces: Vec::new(),
                 methods: Vec::new(),
@@ -614,6 +616,7 @@ mod tests {
         members.insert(
             "com/acme/C".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
                 methods: vec![

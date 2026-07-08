@@ -58,8 +58,9 @@ only when `jdk_available`.
 | `unknown_members` | `error` | a call `receiver.method(...)` whose `method` doesn't exist on the receiver's **inferred** type (walking supertypes). |
 | `unknown_fields` | `error` | a `receiver.field` access whose `field` doesn't exist on the inferred type. Skips array `length`, static qualifiers, package/type prefixes. |
 | `arity_errors` | `error` | a `recv.method(args)` / `new Foo(args)` whose argument count matches no overload (varargs-aware — a trailing array is treated as possibly-varargs). Silent when the method is *missing* (that's `unknown_members`). |
-| `argument_type_errors` | `error` | an argument whose type can't bind to the parameter (`foo(1)` where `foo(String)`). Only when exactly one non-varargs, non-generic overload matches by arity; flags a definite mismatch only (String↔primitive, or unrelated concrete classes). |
+| `argument_type_errors` | `error` | an argument whose type can't bind to the parameter (`foo(1)` where `foo(String)`). Only when exactly one overload matches by argument count — a sibling overload of the same arity (even a varargs/array or generic one we can't type-check) means we can't tell which binds, so we skip — and that lone overload is non-varargs, non-generic; flags a definite mismatch only (String↔primitive, or unrelated concrete classes). |
 | `unresolved_types` | `error` | a simple type name in a type position (`Fooo x;`, `extends Barr`, `List<Bazz>`, `catch (Quxx e)`) the resolver can't resolve. Excludes in-scope type parameters, same-file types, `var`, and `java.lang`. |
+| `type_arg_arity_errors` | `error` | a `Base<A, B, …>` whose type-argument count ≠ the number of type parameters `Base` declares (`List<A, B>`, `Map<String>`) — using the seam's `type_params` (bytecode generic signature for library/JDK types, the `<T, …>` clause for project types). Flags only when the base resolves AND its `type_params` is non-empty (exact arity known); the diamond `<>`, wildcards, raw types, an unresolved base and a scoped/nested-generic base are skipped, so never a false positive. |
 | `type_compat_errors` | `error` | an inconvertible cast (`(String) anInteger`), and an assignment / `return` whose value's type is incompatible with the declared type — including a `String` ↔ primitive mismatch (`int x = "1";`, `int y = "1" + 1;`, `String s = 1;`), driven by literal + string-concatenation typing. Reference-to-reference is flagged only between unrelated concrete classes over a fully-known hierarchy; boxing / widening / interfaces / generics are left alone. `java/lang/Object` on either side of a cast/assignment is skipped (universal supertype; also an erased-generic value). A **chained** method call (`a.b().c()`) value is skipped: shallow generic substitution can mis-type a chain (`list.stream().map(X::getId).max(..).orElse(null)` → the element type, not the mapped result), so it's left to the compiler. |
 | `visibility_errors` | `error` | a `receiver.member` (or `Type.staticMember`) reaching a member the site can't see: a `private` member accessed from outside its declaring **top-level** type (an outer class and its nested types share one nest → never flagged between them), or a package-private member from another package. Extremely conservative — only over a fully-known hierarchy, an unambiguous single declaration, `Public`/`Protected` never flagged, and **only on the project's own types** (JDK and dependency-jar members are exempt: their real accessibility — generated accessors, split packages, module rules — isn't decidable from bytecode). |
 | `inheritance_errors` | `error` | an illegal `extends`/`implements`: a class extending a `final` type / record / enum / interface, a class implementing a non-interface, an interface extending a non-interface. Uses the class-level `ClassFlags` decoded from bytecode. |
@@ -94,6 +95,33 @@ for d in check_file(source, &FileContext::default()) {
 `check_file` parses once, runs every pure-AST check, and returns the diagnostics ordered by position
 (capped at `MAX_DIAGNOSTICS`); `check_file_resolved` adds the resolver-backed checks over one shared
 parse. All API is re-exported from `bennu_check::prelude`.
+
+## Incremental validation (out-of-code-block)
+
+`check_file_resolved_incremental(source, ctx, resolver, jdk, resolver_rev, &mut IncrementalCache)`
+([`incremental`]) is a drop-in for `check_file_resolved` that re-runs the **expensive per-expression**
+resolver checks only over the method/constructor **body** whose text changed, replaying cached
+diagnostics (rebased) for the unchanged ones — so re-validating a big class while you type inside one
+method stays cheap. The cheap checks (all pure-AST + the declaration-oriented resolver checks) always
+run fresh, and the expensive checks run over a true **partition** of the nodes (each top body + the
+structural remainder), so the result is a byte-for-byte-equivalent multiset to a full run. A body is
+reused only when the file's `structural_hash` (signatures/fields/imports), the caller's `resolver_rev`
+(project re-index / another file edited), and the body's own text hash all match. The equivalence is
+pinned by the `incremental` tests — a fresh run, and every run after a body/signature/field/rev/add
+edit, must reproduce `check_file_resolved`. Wired live in `bennu-be`'s `validate_java` (the resolved
+tier); the whole-project run stays a plain full pass.
+
+## Diagnostic kinds (`CheckId`)
+
+Every `Diagnostic` carries a stable `code` — a kebab-case kind slug (`"unknown-member"`,
+`"wrong-type-argument-count"`, …) from the [`CheckId`] catalog (`check_id`), the way IntelliJ's
+`JavaErrorKinds` names every error. A check emits `CheckId::UnknownMember.at(node, msg)` /
+`CheckId::X.span(start, end, msg)` and the `code` + default `severity` come from the catalog, so a
+check can't disagree with itself and the wording/severity for a kind lives in ONE place. This is what
+lets the FE / settings group, suppress or re-severity a rule by kind and lets a future quick-fix
+registry key off the kind instead of matching message text. Migration to the catalog is **incremental**
+— diagnostics not yet moved over carry an empty `code` (still valid); the resolver-backed
+member/type/arity kinds are migrated first.
 
 ## Roadmap
 

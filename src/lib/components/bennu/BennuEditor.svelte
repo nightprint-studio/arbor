@@ -13,7 +13,7 @@
   import {
     Hash, FileCode2, MapPin, Scissors, Copy, ClipboardPaste, Target, SearchCode,
     PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed, ShieldCheck, Plus, BookOpen,
-    Braces, ArrowLeftRight, Package, FolderInput,
+    Braces, ArrowLeftRight, Package, FolderInput, CircleAlert, TriangleAlert, Check,
   } from 'lucide-svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -40,6 +40,9 @@
     mybatisNav as ipcMybatisNav,
     actionPropertyTarget as ipcActionPropertyTarget,
     actionPropertyLint as ipcActionPropertyLint,
+    strutsResultTarget as ipcStrutsResultTarget,
+    strutsResultLint as ipcStrutsResultLint,
+    decompiledSource as ipcDecompiledSource,
     jspActions as ipcJspActions, setJspAction as ipcSetJspAction, type JspActionBinding,
     renameApply as ipcRenameApply, type RenameEdit,
   } from '$lib/ipc/bennu/nav';
@@ -219,28 +222,46 @@
     const path = activePath;
     void bennuIndexStore.buildRevision; // re-run when the index (config graph) rebuilds
     if (!path) { diags = []; return; }
-    // Java files validate the LIVE buffer (syntax errors + unused imports) — track the source so
-    // the check re-runs on edit, debounced so a burst of keystrokes coalesces. JSP checks read the
-    // file on the backend, so they don't depend on the buffer.
+    // Java files validate the LIVE buffer — track the source so the check re-runs on edit,
+    // debounced so a burst of keystrokes coalesces. JSP checks read the file on the backend, so
+    // they don't depend on the buffer.
     const isJava = /\.java$/i.test(path);
     const src = isJava ? projectStore.sourceOf(path) : undefined;
     let cancelled = false;
-    const run = () => {
-      void ipcDiagnostics(path, src)
+    let fullDone = false;
+    // The FULL (resolver-backed) pass — the authoritative set: drives the editor squiggles AND the
+    // shared Problems-panel store (so the active-file section updates live and stays correct after
+    // you switch away).
+    const runFull = () => {
+      void ipcDiagnostics(path, src, true)
         .then((ds) => {
           if (cancelled) return;
+          fullDone = true;
           diags = ds.map((d) => ({ from: d.start, to: d.end, severity: d.severity, message: d.message }));
-          // Publish to the shared store so the Problems panel's active-file section updates live as
-          // you edit (and this file's project-wide entry stays correct after you switch away).
           bennuDiagnosticsStore.setActiveFileDiagnostics(path, ds);
         })
         .catch(() => { if (!cancelled) diags = []; });
     };
     if (isJava) {
-      const t = setTimeout(run, 300);
-      return () => { cancelled = true; clearTimeout(t); };
+      // Two-tier validation (IntelliJ's fast-syntax-then-semantic model) so a big file stays
+      // responsive while typing: a FAST pure-AST pass (syntax / structure / unused imports) paints
+      // squiggles almost immediately (~120ms), then the FULL resolver-backed pass (unknown members,
+      // types, inheritance — the ~0.7s one on a large class) replaces it with the complete set
+      // (~600ms idle). The full set is a superset, so it simply supersedes; the fast pass touches
+      // ONLY the editor (not the Problems store) so the panel never shows a briefly-incomplete set,
+      // and `fullDone` stops a late fast response from clobbering an already-applied full set.
+      const tFast = setTimeout(() => {
+        void ipcDiagnostics(path, src, false)
+          .then((ds) => {
+            if (cancelled || fullDone) return;
+            diags = ds.map((d) => ({ from: d.start, to: d.end, severity: d.severity, message: d.message }));
+          })
+          .catch(() => {});
+      }, 120);
+      const tFull = setTimeout(runFull, 600);
+      return () => { cancelled = true; clearTimeout(tFast); clearTimeout(tFull); };
     }
-    run();
+    runFull();
     return () => { cancelled = true; };
   });
 
@@ -257,7 +278,19 @@
   // against the LIVE buffer (offsets match the editor), debounced, only on JSP / validation files;
   // re-runs when the index (config graph) rebuilds so the action resolves once it's ready.
   let propertyDiags = $state<EditorDiagnostic[]>([]);
-  const allDiags = $derived([...diags, ...spellDiags, ...mojibakeDiags, ...propertyDiags]);
+  // "JSP not found" / "not a property of action" on a Struts config XML's `<result>` targets (live
+  // buffer, debounced, re-run on index rebuild).
+  let strutsDiags = $state<EditorDiagnostic[]>([]);
+  const allDiags = $derived([...diags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags]);
+  // Error / warning counts for the editor's top-right status badge (IntelliJ-style).
+  const diagCounts = $derived.by(() => {
+    let errors = 0, warnings = 0;
+    for (const d of allDiags) {
+      if (d.severity === 'error') errors++;
+      else if (d.severity === 'warning') warnings++;
+    }
+    return { errors, warnings };
+  });
   $effect(() => { void activePath; mojibakeDiags = []; });
 
   // Action binding for a JSP view (the reverse view→action picker). Fetched when a JSP is open;
@@ -326,6 +359,32 @@
           }));
         })
         .catch(() => { if (!cancelled) propertyDiags = []; });
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
+  // Struts config XML: lint the `<result>` targets (JSP-not-found + OGNL-not-a-property). Only on a
+  // non-validation `.xml` (validation.xml is covered by the property lint above).
+  $effect(() => {
+    const path = activePath;
+    void bennuIndexStore.buildRevision;
+    const isXml = !!path && path.toLowerCase().endsWith('.xml');
+    const isValidation = !!path && path.toLowerCase().endsWith('-validation.xml');
+    if (!path || !isXml || isValidation) { strutsDiags = []; return; }
+    const src = projectStore.sourceOf(path);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void ipcStrutsResultLint(path, src)
+        .then((hits) => {
+          if (cancelled) return;
+          strutsDiags = hits.map((d) => ({
+            from: d.start,
+            to: d.end,
+            severity: d.severity as EditorDiagnostic['severity'],
+            message: d.message,
+          }));
+        })
+        .catch(() => { if (!cancelled) strutsDiags = []; });
     }, 350);
     return () => { cancelled = true; clearTimeout(t); };
   });
@@ -762,6 +821,30 @@
     return true;
   }
 
+  /** Try **Struts `<result>`** go-to for the caret in a config XML — a JSP path (`/WEB-INF/x.jsp`)
+   *  opens that JSP; an OGNL/EL root (`${prop}`) jumps to the owning action's property accessor.
+   *  Resolves via `bennu_struts_result_target`; a non-result token resolves to null → false. */
+  async function tryGoToStrutsResult(offset: number): Promise<boolean> {
+    const path = activePath;
+    if (!path || !editorComp || !path.toLowerCase().endsWith('.xml')) return false;
+    const t = await ipcStrutsResultTarget(path, editorComp.getValue(), offset).catch(() => null);
+    if (!t) return false;
+    openDefinitionFile(t.file, t.start);
+    return true;
+  }
+
+  /** Last-resort go-to into a **library/JDK type** — a class/interface with no project source. The
+   *  backend generates a signature-only Java stub from the class's bytecode (with a "decompiled"
+   *  header) and this opens it. `name` is the type name under the caret (simple or FQCN). */
+  async function tryGoToDecompiled(name: string): Promise<boolean> {
+    const path = activePath;
+    if (!path || !editorComp || !name) return false;
+    const loc = await ipcDecompiledSource(path, editorComp.getValue(), name).catch(() => null);
+    if (!loc) return false;
+    openDefinitionFile(loc.file, loc.offset);
+    return true;
+  }
+
   /** Try JSP **include / view reference** go-to for the token under the caret — a path in a
    *  `<%@ include file>` directive, `<jsp:include page>`, `<s:include value>`, `<c:import url>`,
    *  … pointing at another JSP view/fragment. Resolves via `bennu_jsp_include_target` (absolute
@@ -865,12 +948,17 @@
     //     the interface, an `<include refid>` → its `<sql>`, a `resultMap="…"` → its
     //     `<resultMap>`. Offset-classified (needs no ref token); a non-mapper XML is a no-op.
     if (offset != null && (await tryGoToMybatis(offset))) return;
+    // 1c-ter. Struts config XML: a `<result>` body — a JSP path (open it) or an OGNL `${prop}` (jump
+    //     to the owning action's property). Offset-classified; a non-result token is a no-op.
+    if (offset != null && (await tryGoToStrutsResult(offset))) return;
     // 1d. Config XML (`struts.xml`/`spring-*.xml`/`tiles.xml`): a `class="…"` value — an FQCN
     //     or a Spring bean id — go to the Java class it names.
     if (action && (await tryGoToXmlClass(action))) return;
     // 2. Instant offline class-index fallback (types) when the BE resolver is cold.
     if (action) {
       if (await tryGoToClassDeclaration(action)) return;
+      // A library/JDK type with no project source → its decompiled-from-bytecode stub.
+      if (await tryGoToDecompiled(action)) return;
     } else {
       if (!silent) toastStore.show('Nothing to go to here', 'info');
       return;
@@ -878,7 +966,10 @@
     const seq = ++gotoDefSeq;
     let res;
     try {
-      res = await ipcDefinition(path, action);
+      // Pass the live JSP buffer + caret so the BE can fold an enclosing `<s:url namespace="…">`
+      // onto a relative `action` when the bare name alone is ambiguous.
+      const jspSrc = isJspFileOf(path) ? projectStore.sourceOf(path) : undefined;
+      res = await ipcDefinition(path, action, jspSrc, offset);
     } catch {
       if (!silent && seq === gotoDefSeq) toastStore.show('Go to declaration unavailable', 'info');
       return;
@@ -899,9 +990,11 @@
       openDefinitionFile(res.view_jsp);
       return;
     }
-    // Only a class FQCN resolved — try to open that class from the index; else report it.
+    // Only a class FQCN resolved — try to open that class from the index, then its decompiled stub;
+    // else report it.
     if (res.class_fqcn) {
       if (await tryGoToClassDeclaration(res.class_fqcn)) return;
+      if (await tryGoToDecompiled(res.class_fqcn)) return;
       if (!silent) toastStore.show(`Maps to ${res.class_fqcn}`, 'info');
       return;
     }
@@ -1135,7 +1228,10 @@
           language={editorLanguage}
           diagnostics={allDiags}
           rulerColumn={bennuSettingsStore.rightMargin}
-          minimap={bennuSettingsStore.minimap}
+          minimap={false}
+          scrollbarOverview={bennuSettingsStore.minimap}
+          indentGuides={bennuSettingsStore.indentGuides}
+          stickyScroll={bennuSettingsStore.stickyScroll}
           emmet={emmetEnabled}
           tabSize={bennuSettingsStore.tabSize}
           indentUnit={bennuSettingsStore.indentStyle === 'tabs' ? '\t' : ' '.repeat(bennuSettingsStore.tabSize)}
@@ -1146,6 +1242,23 @@
           onGoto={onEditorGoto}
         />
       {/key}
+      <!-- IntelliJ-style file health badge, pinned top-right over the editor. -->
+      {#if isJavaFile}
+        <div class="ed-health" class:clean={diagCounts.errors === 0 && diagCounts.warnings === 0}
+             use:tooltip={diagCounts.errors === 0 && diagCounts.warnings === 0
+               ? 'No problems in this file'
+               : `${diagCounts.errors} error${diagCounts.errors === 1 ? '' : 's'}, ${diagCounts.warnings} warning${diagCounts.warnings === 1 ? '' : 's'}`}>
+          {#if diagCounts.errors > 0}
+            <span class="ed-health-item err"><CircleAlert size={13} /> {diagCounts.errors}</span>
+          {/if}
+          {#if diagCounts.warnings > 0}
+            <span class="ed-health-item warn"><TriangleAlert size={13} /> {diagCounts.warnings}</span>
+          {/if}
+          {#if diagCounts.errors === 0 && diagCounts.warnings === 0}
+            <span class="ed-health-item ok"><Check size={13} /></span>
+          {/if}
+        </div>
+      {/if}
     </div>
   {:else}
     <div class="ed-empty">
@@ -1254,8 +1367,30 @@
   .ed-tbtn.primary:hover { filter: brightness(1.08); }
   .ed-tsep { width: 1px; height: 16px; background: var(--border-subtle); margin: 0 3px; }
 
-  .ed-editor-wrap { flex: 1; display: flex; min-width: 0; min-height: 0; }
+  .ed-editor-wrap { flex: 1; display: flex; min-width: 0; min-height: 0; position: relative; }
   .ed-editor-wrap > :global(.code-editor) { flex: 1; min-width: 0; min-height: 0; }
+
+  /* IntelliJ-style file-health badge, pinned top-right over the editor (offset past the
+     right-edge overview strip). */
+  .ed-health {
+    position: absolute;
+    top: 4px;
+    right: 20px;
+    z-index: 7;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm, 4px);
+    background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    pointer-events: auto;
+  }
+  .ed-health-item { display: inline-flex; align-items: center; gap: 3px; }
+  .ed-health-item.err { color: var(--danger); }
+  .ed-health-item.warn { color: var(--warning); }
+  .ed-health-item.ok { color: var(--success); }
 
   .ed-empty { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
 

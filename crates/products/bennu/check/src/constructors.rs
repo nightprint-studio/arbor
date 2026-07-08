@@ -140,7 +140,7 @@ fn superclass_text(class: Node, bytes: &[u8]) -> Option<String> {
 }
 
 fn err(message: String, node: Node) -> Diagnostic {
-    Diagnostic { message, severity: "error".to_string(), start: node.start_byte(), end: node.end_byte() }
+    Diagnostic { message, severity: "error".to_string(), code: String::new(), start: node.start_byte(), end: node.end_byte() }
 }
 
 #[cfg(test)]
@@ -170,6 +170,7 @@ mod tests {
 
     fn cls(ctors: Vec<Member>) -> ClassMembers {
         ClassMembers {
+            type_params: Vec::new(),
             superclass: Some("java/lang/Object".to_string()),
             interfaces: Vec::new(),
             methods: ctors,

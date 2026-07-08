@@ -402,6 +402,7 @@ pub fn convert_members(cp: &bennu_classpath::prelude::ClassMembers) -> JClassMem
         methods: cp.methods.iter().map(convert_member).collect(),
         fields: cp.fields.iter().map(convert_member).collect(),
         flags: convert_flags(&cp.flags),
+        type_params: cp.type_params.clone(),
     }
 }
 
@@ -491,6 +492,7 @@ mod tests {
         fn members_of(&self, binary_name: &str) -> Option<CpClassMembers> {
             matches!(binary_name, "java/lang/Runnable" | "java/util/LinkedHashMap").then(|| {
                 CpClassMembers {
+                    type_params: Vec::new(),
                     superclass: None,
                     interfaces: Vec::new(),
                     methods: Vec::new(),
@@ -573,6 +575,7 @@ mod tests {
     /// a distinguishable `ClassMembers`.
     fn members_json_with_field(field: &str) -> String {
         serde_json::to_string(&JClassMembers {
+            type_params: Vec::new(),
             superclass: None,
             interfaces: Vec::new(),
             methods: Vec::new(),

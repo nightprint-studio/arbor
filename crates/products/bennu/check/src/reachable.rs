@@ -52,6 +52,7 @@ fn check_block(block: Node, out: &mut Vec<Diagnostic>) {
             out.push(Diagnostic {
                 message: "Unreachable statement".to_string(),
                 severity: "error".to_string(),
+                code: String::new(),
                 start: stmt.start_byte(),
                 end: stmt.end_byte(),
             });

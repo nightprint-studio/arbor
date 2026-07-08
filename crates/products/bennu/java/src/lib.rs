@@ -20,11 +20,13 @@
 //! Workspace convention: call sites reach this crate's surface through
 //! `bennu_java::prelude::...`.
 
+pub mod import_hint;
 pub mod infer;
 pub mod prelude;
 pub mod scaffold;
 pub mod seam;
 pub mod spans;
+pub mod static_import;
 pub mod symbols;
 pub mod typeparse;
 
@@ -47,6 +49,7 @@ mod tests {
             r.classes.insert(
                 "java/lang/String".into(),
                 ClassMembers {
+                    type_params: Vec::new(),
                     superclass: Some("java/lang/Object".into()),
                     interfaces: vec![],
                     methods: vec![
@@ -64,6 +67,7 @@ mod tests {
             r.classes.insert(
                 "java/util/List".into(),
                 ClassMembers {
+                    type_params: vec!["E".into()],
                     superclass: None,
                     interfaces: vec!["java/util/Collection".into()],
                     methods: vec![
@@ -80,6 +84,7 @@ mod tests {
             r.classes.insert(
                 "java/util/Iterator".into(),
                 ClassMembers {
+                    type_params: vec!["E".into()],
                     superclass: None,
                     interfaces: vec![],
                     methods: vec![m("next", TypeRef::simple("E"))],
@@ -92,9 +97,25 @@ mod tests {
             r.classes.insert(
                 "java/util/Map".into(),
                 ClassMembers {
+                    type_params: vec!["K".into(), "V".into()],
                     superclass: None,
                     interfaces: vec![],
                     methods: vec![m("get", TypeRef::simple("V"))],
+                    fields: vec![],
+                    flags: Default::default(),
+                },
+            );
+
+            // A generic pair with NON-conventional parameter names: Pair<X, Y> — left() -> X,
+            // right() -> Y. Proves the exact positional substitution (from the declared type-param
+            // list), which the naming-convention heuristic alone can't do for `X`/`Y`.
+            r.classes.insert(
+                "com/acme/Pair".into(),
+                ClassMembers {
+                    type_params: vec!["X".into(), "Y".into()],
+                    superclass: Some("java/lang/Object".into()),
+                    interfaces: vec![],
+                    methods: vec![m("left", TypeRef::simple("X")), m("right", TypeRef::simple("Y"))],
                     fields: vec![],
                     flags: Default::default(),
                 },
@@ -104,6 +125,7 @@ mod tests {
             r.classes.insert(
                 "com/acme/Customer".into(),
                 ClassMembers {
+                    type_params: Vec::new(),
                     superclass: Some("java/lang/Object".into()),
                     interfaces: vec![],
                     methods: vec![m("getName", tr("java/lang/String"))],
@@ -118,6 +140,7 @@ mod tests {
                 ("Map", "java/util/Map"),
                 ("Iterator", "java/util/Iterator"),
                 ("Customer", "com/acme/Customer"),
+                ("Pair", "com/acme/Pair"),
                 ("Object", "java/lang/Object"),
             ] {
                 r.simple.insert(s.into(), b.into());
@@ -198,8 +221,38 @@ mod tests {
     }
 
     #[test]
+    fn pair_second_type_param_by_declared_position() {
+        // `Pair<X, Y>.right() -> Y` with NON-conventional param names: only the declared type-param
+        // list (`["X","Y"]`) resolves `right()` to the 2nd argument. The naming heuristic can't.
+        let src = r#"package com.acme; class Foo { void run() { Pair<Customer, String> p = null; p.right(). } }"#;
+        assert_eq!(infer(src).binary_name, "java/lang/String");
+    }
+
+    #[test]
+    fn pair_first_type_param_by_declared_position() {
+        // `Pair<X, Y>.left() -> X` → the 1st argument (Customer).
+        let src = r#"package com.acme; class Foo { void run() { Pair<Customer, String> p = null; p.left(). } }"#;
+        assert_eq!(infer(src).binary_name, "com/acme/Customer");
+    }
+
+    #[test]
     fn this_field_access() {
         let src = r#"package com.acme; class Foo { private Customer bar; void run() { this.bar. } }"#;
+        assert_eq!(infer(src).binary_name, "com/acme/Customer");
+    }
+
+    #[test]
+    fn try_with_resources_var_infers_from_initializer() {
+        // `try (var c = seed)` — a `var` resource is a local visible in the try body; its type is
+        // inferred from the initializer, so `c.` resolves. (Regression: resources weren't scanned.)
+        let src = r#"package com.acme; class Foo { void run(Customer seed) { try (var c = seed) { c. } } }"#;
+        assert_eq!(infer(src).binary_name, "com/acme/Customer");
+    }
+
+    #[test]
+    fn try_with_resources_typed_resource_resolves() {
+        // A conventionally-typed resource is visible too.
+        let src = r#"package com.acme; class Foo { void run() { try (Customer c = null) { c. } } }"#;
         assert_eq!(infer(src).binary_name, "com/acme/Customer");
     }
 

@@ -23,7 +23,7 @@ pub struct SpringParse {
 /// no beans yields nothing). `<bean>` may be namespaced (`beans:bean`) — we match on the
 /// local name.
 pub fn parse_file(file: &Path, out: &mut SpringParse) {
-    let text = match std::fs::read_to_string(file) {
+    let text = match crate::io::read_to_string_lf(file) {
         Ok(t) => t,
         Err(_) => return,
     };

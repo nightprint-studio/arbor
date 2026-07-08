@@ -8,10 +8,12 @@
 //! The gate is therefore extreme. Two layers:
 //!
 //! WHOLE-FILE guards (any → produce NOTHING for the file):
-//!   * ANY `import static …` (single or wildcard) — a static import can supply an arbitrary bare
-//!     name into every scope, and we don't model which. One static import poisons the whole file.
 //!   * a parse error anywhere near where we'd flag (`has_error` on the tree root) — a broken buffer
 //!     mis-shapes the CST and could make a legal name look bare.
+//!   * an `import static X.*;` whose owner `X` (or a supertype) is un-indexed — a wildcard from an
+//!     unknown type could supply ANY bare name, so we can't soundly flag anything. A SPECIFIC
+//!     `import static X.foo;` and a wildcard whose owner IS fully known are modelled precisely (see
+//!     RESOLUTION 6) rather than poisoning the file.
 //!
 //! PER-IDENTIFIER guards (any failing → SKIP that identifier):
 //!   * it must be a genuine *value* reference — an `identifier` node in a primary-expression
@@ -30,13 +32,17 @@
 //!   4. an enum constant of the enclosing type;
 //!   5. a keyword (`this`/`super`/`true`/`false`/`null`) — these aren't `identifier` nodes anyway,
 //!      but we guard defensively.
+//!   6. a bare name supplied by an `import static …` — a specific member (`import static X.foo;` → `foo`),
+//!      or any member of a fully-known wildcard owner (`import static X.*;`).
 //!
-//! Only when the name matches none of 1–5, the hierarchy is fully known, there are no static imports,
-//! and there's no intervening nested class / lambda, do we flag `Cannot resolve symbol `x``.
+//! Only when the name matches none of 1–6, the hierarchy is fully known, no unresolved static wildcard
+//! is present, and there's no intervening nested class / lambda, do we flag `Cannot resolve symbol `x``.
 
 use std::collections::HashSet;
 
-use bennu_java::prelude::{extract_symbols, FileSymbols, MemberKind, TypeResolver};
+use bennu_java::prelude::{
+    extract_symbols, static_import_targets, FileSymbols, MemberKind, TypeResolver,
+};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::{Node, Parser};
 
@@ -87,15 +93,7 @@ pub fn undefined_var_errors_in(
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
 
-    // ── WHOLE-FILE guard 1: any static import poisons the file. ──────────────────────────────────
-    // A `import static X.foo;` or `import static X.*;` can bind an arbitrary bare name (`foo`) into
-    // every method body. We don't model static-import members, so a name we'd call "undefined" might
-    // be exactly such an import. One static import → we cannot soundly flag ANYTHING in the file.
-    if symbols.imports.iter().any(|i| i.static_) {
-        return Vec::new();
-    }
-
-    // ── WHOLE-FILE guard 2: a parse error anywhere → the CST is untrustworthy. ────────────────────
+    // ── WHOLE-FILE guard: a parse error anywhere → the CST is untrustworthy. ──────────────────────
     // `has_error` on the root reports an ERROR node anywhere in the tree. A broken buffer can nest or
     // re-shape nodes so a legal name looks like a bare value reference (or hide a declaration we'd
     // need to see it). Rather than reason about "near where we'd flag", we bail on any file error —
@@ -136,6 +134,34 @@ pub fn undefined_var_errors_in(
     // not carry them depending on the index, so we read them straight from the CST to be safe.
     let mut enum_constants: HashSet<String> = HashSet::new();
     collect_enum_constants(top.node, bytes, &mut enum_constants);
+
+    // ── Bare names supplied by `import static …` ─────────────────────────────────────────────────
+    // A static import binds an owner's static members into the bare namespace, so such a name is NOT
+    // undefined. We model this precisely instead of poisoning the whole file:
+    //   * a SPECIFIC `import static X.foo;` declares the bare name `foo` (whether or not X resolves).
+    //   * a WILDCARD `import static X.*;` supplies EVERY member of X's hierarchy — but only if that
+    //     hierarchy is fully known; if X (or a supertype) is un-indexed it could supply ANY name, so
+    //     we bail on the whole file (the old conservative behaviour, now scoped to just this case).
+    // Over-inclusion is safe here (it only ever SUPPRESSES a diagnostic), so a wildcard collects every
+    // member name (instance ones too) rather than filtering to statics.
+    let mut static_import_names: HashSet<String> = HashSet::new();
+    for t in static_import_targets(&symbols.imports) {
+        match t.member {
+            Some(m) => {
+                static_import_names.insert(m);
+            }
+            None => {
+                if !hierarchy_fully_known(resolver, &t.owner_binary) {
+                    return Vec::new(); // unresolved wildcard owner → can't rule out any name
+                }
+                for_each_supertype(resolver, &t.owner_binary, &mut |_bn, cm| {
+                    for member in cm.methods.iter().chain(cm.fields.iter()) {
+                        static_import_names.insert(member.name.clone());
+                    }
+                });
+            }
+        }
+    }
 
     let mut out = Vec::new();
     for &n in nodes {
@@ -182,12 +208,18 @@ pub fn undefined_var_errors_in(
         if type_binary(name, symbols, resolver).is_some() {
             continue;
         }
+        // RESOLUTION 6: a bare name brought in by an `import static …` (a specific member, or a member
+        // of a fully-known wildcard owner). Precomputed in `static_import_names`.
+        if static_import_names.contains(name) {
+            continue;
+        }
 
-        // Matched NONE of 1–5, hierarchy fully known, no static imports, no intervening nested
-        // class / lambda → the name genuinely resolves to nothing here.
+        // Matched NONE of 1–6, hierarchy fully known, no unresolved static wildcard, no intervening
+        // nested class / lambda → the name genuinely resolves to nothing here.
         out.push(Diagnostic {
             message: format!("Cannot resolve symbol `{name}`"),
             severity: "error".to_string(),
+            code: String::new(),
             start: n.start_byte(),
             end: n.end_byte(),
         });
@@ -296,6 +328,11 @@ fn is_judgeable_value_ident(ident: Node, top: Node) -> bool {
         // BARE call `foo()` (no `object`) would leave an identifier here, and that's the `name` slot,
         // already skipped. So any identifier directly under a `method_invocation` is skipped.
         "method_invocation" => return false,
+        // A method reference `Type::method` / `expr::method` / `Type::new`. The RHS is the referenced
+        // method NAME (owned by method-ref resolution, never a bare variable); the LHS is a
+        // type-or-value qualifier with the same ambiguity as `field_access`. Skip both slots — else
+        // `Long::sum` / `Objects::nonNull` wrongly flag `sum` / `nonNull` as an undefined symbol.
+        "method_reference" => return false,
         // Declaration NAME slots — the identifier introduces a binding, not references one.
         "formal_parameter"
         | "spread_parameter"
@@ -591,6 +628,7 @@ mod tests {
         members.insert(
             "java/lang/Object".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: None,
                 interfaces: Vec::new(),
                 methods: Vec::new(),
@@ -601,6 +639,7 @@ mod tests {
         members.insert(
             "com/acme/Base".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
@@ -611,6 +650,7 @@ mod tests {
         members.insert(
             "com/acme/C".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("com/acme/Base".to_string()),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
@@ -621,10 +661,28 @@ mod tests {
         members.insert(
             "com/acme/Helper".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: vec![field("CONST", "int")],
+                flags: Default::default(),
+            },
+        );
+        // `java.lang.Math` — a static-import owner with a static field `PI` and method `sqrt`, so the
+        // wildcard `import static java.lang.Math.*;` can be modelled precisely (Math + Object known).
+        members.insert(
+            "java/lang/Math".to_string(),
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: Some("java/lang/Object".to_string()),
+                interfaces: Vec::new(),
+                methods: vec![Member::method(
+                    "sqrt",
+                    TypeRef::simple("double"),
+                    vec![TypeRef::simple("double")],
+                )],
+                fields: vec![field("PI", "double")],
                 flags: Default::default(),
             },
         );
@@ -728,23 +786,53 @@ mod tests {
     }
 
     #[test]
-    fn static_import_poisons_whole_file() {
-        // A single static import can supply any bare name → the whole file is skipped, even a name
-        // that would otherwise clearly be undefined.
-        let src = "package com.acme;\nimport static java.lang.Math.PI;\nclass C extends Base { int count; void m() { System.out.println(totallyUndefined); } }";
-        assert!(diags_with(src, &resolver()).is_empty(), "{:?}", diags_with(src, &resolver()));
+    fn specific_static_import_is_precise_not_a_poison() {
+        // A SPECIFIC `import static X.PI;` declares the bare name `PI` (so it isn't undefined), but it
+        // no longer poisons the file — a genuinely undefined name is still flagged.
+        let src = "package com.acme;\nimport static java.lang.Math.PI;\n\
+                   class C extends Base { int count; void m() { double x = PI; System.out.println(totallyUndefined); } }";
+        let d = diags_with(src, &resolver());
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("totallyUndefined"), "{d:?}");
+        assert!(!d.iter().any(|m| m.contains("`PI`")), "the imported member PI is resolved: {d:?}");
     }
 
     #[test]
-    fn static_wildcard_import_poisons_whole_file() {
-        let src = "package com.acme;\nimport static java.lang.Math.*;\nclass C extends Base { int count; void m() { System.out.println(sqrtish); } }";
-        assert!(diags_with(src, &resolver()).is_empty());
+    fn wildcard_static_import_from_known_owner_is_precise() {
+        // `import static Math.*;` supplies Math's members (`PI`) → not undefined; a non-member
+        // (`sqrtish`) IS flagged, because Math's hierarchy is fully known.
+        let src = "package com.acme;\nimport static java.lang.Math.*;\n\
+                   class C extends Base { int count; void m() { double x = PI; System.out.println(sqrtish); } }";
+        let d = diags_with(src, &resolver());
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("sqrtish"), "{d:?}");
+        assert!(!d.iter().any(|m| m.contains("`PI`")), "PI is a Math member: {d:?}");
+    }
+
+    #[test]
+    fn wildcard_static_import_from_unknown_owner_still_skips_file() {
+        // A wildcard whose owner isn't indexed could supply ANY bare name → we can't soundly flag
+        // anything, so the whole file is skipped (the conservative fallback, now scoped to this case).
+        let src = "package com.acme;\nimport static com.unknown.Lib.*;\n\
+                   class C extends Base { int count; void m() { System.out.println(whateverName); } }";
+        assert!(diags_with(src, &resolver()).is_empty(), "{:?}", diags_with(src, &resolver()));
     }
 
     #[test]
     fn method_name_is_not_flagged() {
         // A bare call `foo()` — the `name` slot is a method, handled by the members check, not here.
         assert!(diags("foo();").is_empty());
+    }
+
+    #[test]
+    fn method_reference_name_is_not_flagged() {
+        // The name after `::` is a referenced method, not a bare variable — never flag it even though
+        // it resolves to nothing in local scope. Regression for `Long::sum` / `Objects::nonNull`.
+        assert!(diags("Runnable r = System::gc;").is_empty(), "{:?}", diags("Runnable r = System::gc;"));
+        let src = "java.util.List<Long> xs = null; xs.stream().reduce(Long::sum);";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
+        let obj = "java.util.List<String> ys = null; ys.stream().filter(java.util.Objects::nonNull);";
+        assert!(diags(obj).is_empty(), "{:?}", diags(obj));
     }
 
     #[test]
@@ -796,6 +884,7 @@ mod tests {
         r.members.insert(
             "com/acme/Color".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
                 methods: Vec::new(),

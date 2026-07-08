@@ -82,6 +82,12 @@
     themeStore.init();
     void appearanceStore.loadConfig();
     void animStore.loadConfig();
+    // Hydrate the config-backed editor toggles (autosave / auto-import) from the persisted config.
+    void bennuSettingsStore.loadConfig();
+    // Autosave on frame deactivation (the window loses OS focus) — IntelliJ-style. Guarded by the
+    // setting; saves whatever has unsaved edits. `blur` on the window fires when you switch apps.
+    const onWindowBlur = () => { if (bennuSettingsStore.autosave) void projectStore.saveAllDirty(); };
+    window.addEventListener('blur', onWindowBlur);
     // Reopen the last workspace (its projects + tabs) where the user left off — no-op on a fresh
     // install / when the BE is absent. Driven by the workspace store (owns the named-workspace
     // set). Kicks off the index build via the effect below.
@@ -96,7 +102,10 @@
     void bennuSpellStore.attach().then((d) => { detachSpell = d; });
     // Anti-white-flash: reveal this window once the first real frame is painted.
     requestAnimationFrame(() => requestAnimationFrame(() => void signalWindowReady().catch(() => {})));
-    return () => { detachRun?.(); detachIndex?.(); detachSpell?.(); bennuIndexStore.reset(); };
+    return () => {
+      window.removeEventListener('blur', onWindowBlur);
+      detachRun?.(); detachIndex?.(); detachSpell?.(); bennuIndexStore.reset();
+    };
   });
 
   // When a real (non-demo) project opens, kick off the indexing status + job. The BE

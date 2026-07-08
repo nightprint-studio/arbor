@@ -45,6 +45,7 @@ pub fn missing_return_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
             out.push(Diagnostic {
                 message: format!("Missing return statement (method must return `{ty}`)"),
                 severity: "error".to_string(),
+                code: String::new(),
                 start: ret.start_byte(),
                 end: ret.end_byte(),
             });
@@ -110,6 +111,7 @@ fn check_returns(body: Node, is_void: bool, is_ctor: bool, ret_ty: &str, out: &m
             out.push(Diagnostic {
                 message: format!("Cannot return a value from {where_}"),
                 severity: "error".to_string(),
+                code: String::new(),
                 start: r.start_byte(),
                 end: r.end_byte(),
             });
@@ -117,6 +119,7 @@ fn check_returns(body: Node, is_void: bool, is_ctor: bool, ret_ty: &str, out: &m
             out.push(Diagnostic {
                 message: format!("Missing return value (method must return `{ret_ty}`)"),
                 severity: "error".to_string(),
+                code: String::new(),
                 start: r.start_byte(),
                 end: r.end_byte(),
             });

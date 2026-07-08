@@ -9,6 +9,9 @@ pub use crate::provider::{
     Position, ProjectMember, TextEdit,
 };
 
+// The class-name index behind the "Import class" intention (simple name → importable FQNs).
+pub use crate::class_names::ClassNameIndex;
+
 // The wire types the provider produces, re-exported so a consumer (bennu-be) reaches
 // them through the intel prelude it already imports.
 pub use bennu_proto::prelude::{CompletionItem, Diagnostic};

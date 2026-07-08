@@ -227,6 +227,7 @@ mod tests {
         memo.insert(
             "com/acme/Foo".to_string(),
             Some(ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: vec![],
                 methods: vec![Member {

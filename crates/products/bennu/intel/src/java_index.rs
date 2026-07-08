@@ -456,7 +456,14 @@ fn build_class_members(
     methods.extend(synth.methods);
     fields.extend(synth.fields);
 
-    ClassMembers { superclass, interfaces, methods, fields, flags: class_flags(td) }
+    ClassMembers {
+        superclass,
+        interfaces,
+        methods,
+        fields,
+        flags: class_flags(td),
+        type_params: td.type_params.clone(),
+    }
 }
 
 /// Map a source [`TypeDecl`] to the seam [`ClassFlags`] the inheritance / implement-abstract checks

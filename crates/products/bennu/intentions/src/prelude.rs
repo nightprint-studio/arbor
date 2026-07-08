@@ -7,6 +7,7 @@
 pub use crate::intentions::{intentions_at, Offer};
 
 // The individual transforms (also usable directly / from tests).
+pub use crate::import_class::insert_import_edit;
 pub use crate::log_param::{parameterize_log_call, LogParamRewrite};
 pub use crate::np_equals::{np_safe_equals, EqualsSwap};
 pub use crate::simplify::{

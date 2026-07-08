@@ -48,10 +48,18 @@
   const jdkPaths = $derived(cfg?.jdk_paths ?? []);
   const jdkReport = $derived(bennuDiagnosticsStore.jdk);
 
-  async function commitJdkPaths(paths: string[]) {
-    if (!cfg) return;
-    cfg = { ...cfg, jdk_paths: paths };
+  /** Persist a partial config change with a fresh read-modify-write, so a field another writer owns
+   *  (autosave / auto-import via the settings store, build type via the run store) is never clobbered
+   *  by this modal's stale snapshot. Updates the local `cfg` to the written result. */
+  async function saveConfigPatch(patch: Partial<BennuConfig>) {
+    const cur = await getBennuConfig().catch(() => null);
+    if (!cur) return;
+    cfg = { ...cur, ...patch };
     await setBennuConfig(cfg).catch(() => {});
+  }
+
+  async function commitJdkPaths(paths: string[]) {
+    await saveConfigPatch({ jdk_paths: paths });
     // Re-fetch the JDK status so the titlebar / Problems / this card reflect the new paths.
     const root = projectStore.project?.root;
     if (root) void bennuDiagnosticsStore.refresh(root);
@@ -68,9 +76,7 @@
   // ── Validate-project-on-open (real bennu config, default on) ──────────────────
   const validateOnOpen = $derived(cfg?.validate_on_open ?? true);
   async function commitValidateOnOpen(v: boolean) {
-    if (!cfg) return;
-    cfg = { ...cfg, validate_on_open: v };
-    await setBennuConfig(cfg).catch(() => {});
+    await saveConfigPatch({ validate_on_open: v });
   }
 
   const groups: SettingsNavGroup[] = [
@@ -210,14 +216,23 @@
             <NumberStepper value={s.fontSize} min={8} max={32} narrow suffix="px"
                            onchange={(v) => s.setFontSize(v)} ariaLabel="Editor font size" />
           </FormRow>
+          <FormRow label="Autosave" description="Write a modified file to disk automatically — after a short idle, when you switch tabs, and when the window loses focus. Off saves only on Ctrl+S.">
+            <Toggle checked={s.autosave} onchange={(v) => s.setAutosave(v)} ariaLabel="Autosave" />
+          </FormRow>
           <FormRow label="Show line numbers" description="Gutter line numbers on the left margin.">
             <Toggle checked={s.showLineNumbers} onchange={(v) => s.setShowLineNumbers(v)} ariaLabel="Show line numbers" />
           </FormRow>
           <FormRow label="Highlight current line" description="Tint the line the caret sits on.">
             <Toggle checked={s.highlightCurrentLine} onchange={(v) => s.setHighlightCurrentLine(v)} ariaLabel="Highlight current line" />
           </FormRow>
-          <FormRow label="Minimap" description="A scrollable overview of the whole file in the right gutter.">
-            <Toggle checked={s.minimap} onchange={(v) => s.setMinimap(v)} ariaLabel="Show minimap" />
+          <FormRow label="Scrollbar overview" description="Mark errors/warnings on the right-edge strip and preview the file on hover (replaces the scrollbar). Applies on the next file opened.">
+            <Toggle checked={s.minimap} onchange={(v) => s.setMinimap(v)} ariaLabel="Scrollbar overview" />
+          </FormRow>
+          <FormRow label="Indentation guides" description="Faint vertical lines per indent level; the block the caret is in is brightened. Applies on the next file opened.">
+            <Toggle checked={s.indentGuides} onchange={(v) => s.setIndentGuides(v)} ariaLabel="Indentation guides" />
+          </FormRow>
+          <FormRow label="Sticky scroll" description="Pin the enclosing class and method signatures to the top while scrolling. Applies on the next file opened.">
+            <Toggle checked={s.stickyScroll} onchange={(v) => s.setStickyScroll(v)} ariaLabel="Sticky scroll" />
           </FormRow>
           <FormRow label="Word wrap" description="Wrap long lines to the viewport instead of scrolling horizontally.">
             <Toggle checked={s.wordWrap} onchange={(v) => s.setWordWrap(v)} ariaLabel="Word wrap" />

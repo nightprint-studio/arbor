@@ -63,6 +63,31 @@ pub mod validation_author;
 pub mod validator_catalog;
 pub mod xml;
 
+/// Filesystem read that normalizes line endings to **LF** — every byte offset this crate emits
+/// (JSP action-ref spans, `<action>`/`<field>`/statement declaration offsets for go-to) must be in
+/// the same coordinate space as the editor, and CodeMirror stores its document with LF separators.
+/// Reading a CRLF file verbatim would make each offset land one position too far per preceding line,
+/// so a squiggle / go-to on a Windows file drifts downward. Normalizing here fixes it at the source
+/// for every parser. Mirrors `bennu_project::prelude::normalize_newlines` (kept local to avoid a
+/// crate dependency for three lines of string surgery).
+pub(crate) mod io {
+    use std::path::Path;
+
+    /// Read `path` to a `String` with line endings normalized to LF (`\r\n` / lone `\r` → `\n`).
+    /// Same error surface as [`std::fs::read_to_string`].
+    pub(crate) fn read_to_string_lf(path: &Path) -> std::io::Result<String> {
+        std::fs::read_to_string(path).map(|s| normalize_newlines(&s))
+    }
+
+    /// Collapse CRLF / lone-CR to LF. No allocation beyond the copy when the text is already LF.
+    pub(crate) fn normalize_newlines(text: &str) -> String {
+        if !text.contains('\r') {
+            return text.to_string();
+        }
+        text.replace("\r\n", "\n").replace('\r', "\n")
+    }
+}
+
 /// Tiny filesystem helpers for the module unit tests (write inline XML fixtures to a
 /// scratch dir). Compiled only under `cfg(test)`.
 #[cfg(test)]

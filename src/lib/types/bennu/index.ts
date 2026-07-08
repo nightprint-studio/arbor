@@ -99,6 +99,10 @@ export interface CompletionItem {
   kind: string;
   /** Optional signature / type detail shown right of the label. */
   detail?: string;
+  /** For a type-name completion whose simple name resolves to a SINGLE class: the fully-qualified
+   *  name to auto-import on accept (when the auto-import setting is on). Absent for member
+   *  completions and ambiguous names. */
+  auto_import?: string;
 }
 
 /** Severity of a {@link Diagnostic}. */
@@ -109,6 +113,9 @@ export type DiagnosticSeverity = 'error' | 'warning' | 'info' | 'hint';
 export interface Diagnostic {
   message: string;
   severity: DiagnosticSeverity;
+  /** Stable kind slug from the emitting check's `CheckId` (e.g. `"unknown-member"`), for grouping,
+   *  suppression or quick-fixes keyed by kind. Empty for diagnostics not yet on the typed catalog. */
+  code?: string;
   start: number;
   end: number;
 }

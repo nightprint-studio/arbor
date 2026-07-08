@@ -93,7 +93,7 @@ pub fn parse_jsp_includes(source: &str) -> Vec<JspInclude> {
 /// Convenience: read `path` and [`parse_jsp_includes`] it. A read error yields an empty
 /// vec (skip-and-continue — one unreadable JSP never aborts a scan).
 pub fn parse_jsp_includes_file(path: &Path) -> Vec<JspInclude> {
-    match std::fs::read_to_string(path) {
+    match crate::io::read_to_string_lf(path) {
         Ok(text) => parse_jsp_includes(&text),
         Err(_) => Vec::new(),
     }
@@ -152,7 +152,7 @@ pub fn unresolved_includes(jsp_path: &Path, source: &str) -> Vec<JspInclude> {
 
 /// [`unresolved_includes`] reading `jsp_path` from disk. Empty when the file can't be read.
 pub fn unresolved_includes_file(jsp_path: &Path) -> Vec<JspInclude> {
-    match std::fs::read_to_string(jsp_path) {
+    match crate::io::read_to_string_lf(jsp_path) {
         Ok(text) => unresolved_includes(jsp_path, &text),
         Err(_) => Vec::new(),
     }

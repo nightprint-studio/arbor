@@ -14,6 +14,8 @@
  * localStorage for any of these (rule 11).
  */
 
+import { getBennuConfig, setBennuConfig } from '$lib/ipc/bennu/config';
+
 /** How the editor turns a Tab press into whitespace. */
 export type IndentStyle = 'spaces' | 'tabs';
 
@@ -37,10 +39,18 @@ export interface BennuSettingsSnapshot {
   showWhitespace: boolean;
   highlightCurrentLine: boolean;
   showLineNumbers: boolean;
-  /** Show the right-gutter minimap overview. */
+  /** Show the right-gutter overview strip (diagnostic marks + hover preview) in place of the
+   *  native scrollbar — the IntelliJ error stripe that replaces the old minimap. */
   minimap: boolean;
+  /** Draw indentation guides (faint vertical lines per level, active block brightened). */
+  indentGuides: boolean;
+  /** Pin the enclosing declaration lines (class › method) to the top while scrolling. */
+  stickyScroll: boolean;
   /** Vertical margin guide column (IntelliJ's hard-wrap ruler). 0 = hidden. */
   rightMargin: number;
+  /** Autosave a modified buffer to disk (after a short idle, on tab switch, on window blur).
+   *  Config-backed (persists to `…/bennu/config.toml`). */
+  autosave: boolean;
   // Completion
   autoPopup: boolean;
   popupDelayMs: number;
@@ -72,7 +82,10 @@ const DEFAULTS: BennuSettingsSnapshot = {
   highlightCurrentLine: true,
   showLineNumbers: true,
   minimap: true,
+  indentGuides: true,
+  stickyScroll: true,
   rightMargin: 120,
+  autosave: true,
   autoPopup: true,
   popupDelayMs: 150,
   caseSensitive: false,
@@ -99,7 +112,10 @@ function createSettingsStore() {
   let highlightCurrentLine = $state(DEFAULTS.highlightCurrentLine);
   let showLineNumbers = $state(DEFAULTS.showLineNumbers);
   let minimap = $state(DEFAULTS.minimap);
+  let indentGuides = $state(DEFAULTS.indentGuides);
+  let stickyScroll = $state(DEFAULTS.stickyScroll);
   let rightMargin = $state(DEFAULTS.rightMargin);
+  let autosave = $state(DEFAULTS.autosave);
   // Completion
   let autoPopup = $state(DEFAULTS.autoPopup);
   let popupDelayMs = $state(DEFAULTS.popupDelayMs);
@@ -123,7 +139,7 @@ function createSettingsStore() {
   function snapshot(): BennuSettingsSnapshot {
     return {
       fontSize, tabSize, indentStyle, wordWrap, showWhitespace,
-      highlightCurrentLine, showLineNumbers, minimap, rightMargin,
+      highlightCurrentLine, showLineNumbers, minimap, indentGuides, stickyScroll, rightMargin, autosave,
       autoPopup, popupDelayMs, caseSensitive, autoImport,
       foldingEnabled, foldBlockComments,
       finalParams, useLombokVal, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
@@ -131,12 +147,25 @@ function createSettingsStore() {
     };
   }
 
-  /** MOCK persistence — no-op today. Wire to `set_bennu_config(snapshot())` when
-   *  the typed `[bennu]` config lands (rule 11). Every setter funnels here so the
-   *  wiring is a one-line change. */
+  /** MOCK persistence — no-op today for the in-memory-only fields (font, folding, java-style, …).
+   *  Wire to `set_bennu_config(snapshot())` when the whole typed `[bennu]` config lands (rule 11).
+   *  The config-backed toggles (autosave / auto-import) DON'T use this — see `persistConfigToggles`. */
   function persist() {
     // MOCK — in-memory only. Future: void setBennuConfig(snapshot()).catch(() => {});
     void snapshot();
+  }
+
+  /** Persist the config-backed toggles (autosave / auto-import) to `…/bennu/config.toml`. These two
+   *  are genuinely persisted (not mock). Read-modify-WRITE against the freshest config so a field
+   *  another flow owns (build type, encoding, JDK paths, per-project overrides) is never clobbered.
+   *  Fire-and-forget: a persistence hiccup must never block the UI. */
+  async function persistConfigToggles() {
+    try {
+      const cur = await getBennuConfig();
+      await setBennuConfig({ ...cur, autosave, auto_import: autoImport });
+    } catch {
+      /* non-critical — the in-memory value still applies for this session */
+    }
   }
 
   /** Parsed excluded-directory list (trimmed, empties dropped) — what a future
@@ -164,8 +193,14 @@ function createSettingsStore() {
     setShowLineNumbers(v: boolean) { showLineNumbers = v; persist(); },
     get minimap() { return minimap; },
     setMinimap(v: boolean) { minimap = v; persist(); },
+    get indentGuides() { return indentGuides; },
+    setIndentGuides(v: boolean) { indentGuides = v; persist(); },
+    get stickyScroll() { return stickyScroll; },
+    setStickyScroll(v: boolean) { stickyScroll = v; persist(); },
     get rightMargin() { return rightMargin; },
     setRightMargin(v: number) { rightMargin = v; persist(); },
+    get autosave() { return autosave; },
+    setAutosave(v: boolean) { autosave = v; void persistConfigToggles(); },
 
     // ── Completion ────────────────────────────────────────────────────────
     get autoPopup() { return autoPopup; },
@@ -175,7 +210,7 @@ function createSettingsStore() {
     get caseSensitive() { return caseSensitive; },
     setCaseSensitive(v: boolean) { caseSensitive = v; persist(); },
     get autoImport() { return autoImport; },
-    setAutoImport(v: boolean) { autoImport = v; persist(); },
+    setAutoImport(v: boolean) { autoImport = v; void persistConfigToggles(); },
 
     // ── Folding ───────────────────────────────────────────────────────────
     get foldingEnabled() { return foldingEnabled; },
@@ -208,7 +243,20 @@ function createSettingsStore() {
     /** Full snapshot (future `set_bennu_config` payload). */
     snapshot,
 
-    /** MOCK — restore every setting to its default. */
+    /** Hydrate the config-backed toggles (autosave / auto-import) from `…/bennu/config.toml`. Call
+     *  once at window boot. The mock in-memory fields keep their defaults until the full store is
+     *  wired to the config. */
+    async loadConfig() {
+      try {
+        const cfg = await getBennuConfig();
+        autosave = cfg.autosave;
+        autoImport = cfg.auto_import;
+      } catch {
+        /* keep defaults — BE absent / not ready */
+      }
+    },
+
+    /** Restore every setting to its default. The two config-backed toggles are also persisted. */
     resetToDefaults() {
       fontSize = DEFAULTS.fontSize;
       tabSize = DEFAULTS.tabSize;
@@ -218,7 +266,10 @@ function createSettingsStore() {
       highlightCurrentLine = DEFAULTS.highlightCurrentLine;
       showLineNumbers = DEFAULTS.showLineNumbers;
       minimap = DEFAULTS.minimap;
+      indentGuides = DEFAULTS.indentGuides;
+      stickyScroll = DEFAULTS.stickyScroll;
       rightMargin = DEFAULTS.rightMargin;
+      autosave = DEFAULTS.autosave;
       autoPopup = DEFAULTS.autoPopup;
       popupDelayMs = DEFAULTS.popupDelayMs;
       caseSensitive = DEFAULTS.caseSensitive;
@@ -234,6 +285,7 @@ function createSettingsStore() {
       rebuildIndexOnOpen = DEFAULTS.rebuildIndexOnOpen;
       excludedDirs = DEFAULTS.excludedDirs;
       persist();
+      void persistConfigToggles(); // autosave / auto-import are config-backed
     },
   };
 }

@@ -36,6 +36,7 @@ impl AccumResolver {
         Self {
             cache: RwLock::new(HashMap::new()),
             p: Arc::new(ClassMembers {
+                type_params: Vec::new(),
                 superclass: obj.clone(),
                 interfaces: Vec::new(),
                 methods: vec![Member::method("m", TypeRef::simple("p/P"), Vec::new())],
@@ -43,6 +44,7 @@ impl AccumResolver {
                 flags: ClassFlags::default(),
             }),
             unique: Arc::new(ClassMembers {
+                type_params: Vec::new(),
                 superclass: obj,
                 interfaces: Vec::new(),
                 methods: vec![Member::method("go", TypeRef::simple("int"), Vec::new())],

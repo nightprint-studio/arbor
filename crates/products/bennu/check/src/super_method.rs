@@ -125,6 +125,7 @@ fn check_call(
                 simple_name(cls_name)
             ),
             severity: "error".to_string(),
+            code: String::new(),
             start: name.start_byte(),
             end: name.end_byte(),
         });
@@ -291,6 +292,7 @@ mod tests {
         members.insert(
             "java/lang/Object".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: None,
                 interfaces: Vec::new(),
                 methods: vec![method("toString", "java/lang/String")],
@@ -301,6 +303,7 @@ mod tests {
         members.insert(
             "com/acme/Base".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
                 methods: vec![method("greet", "void")],
@@ -352,6 +355,7 @@ mod tests {
         r.members.insert(
             "com/acme/Leaky".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("com/acme/Gap".to_string()), // Gap is never seeded → unknown link
                 interfaces: Vec::new(),
                 methods: vec![method("here", "void")],

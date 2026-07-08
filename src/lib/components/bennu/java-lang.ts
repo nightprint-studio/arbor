@@ -27,16 +27,19 @@
 
 import { Parser, Language, type Node } from 'web-tree-sitter';
 import {
-  makeU16ToByte,
+  makeU16ToByte, makeByteToU16,
   type LanguageDescriptor, type TokenClass, type CompletionSource,
 } from '$lib/components/shared/ui/code-editor';
-import type {
-  Completion, CompletionContext, CompletionResult,
+import {
+  insertCompletionText,
+  type Completion, type CompletionContext, type CompletionResult,
 } from '@codemirror/autocomplete';
-import type { EditorView, Tooltip } from '@codemirror/view';
-import { completion as ipcCompletion } from '$lib/ipc/bennu';
+import type { EditorView } from '@codemirror/view';
+import { completion as ipcCompletion, importEdit as ipcImportEdit } from '$lib/ipc/bennu';
 import { hover as ipcHover } from '$lib/ipc/bennu/nav';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
+import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
+import { makeHoverSource } from './bennu-hover';
 
 const RUNTIME_WASM = '/bennu/tree-sitter.wasm';
 const GRAMMAR_WASM = '/bennu/tree-sitter-java.wasm';
@@ -246,6 +249,26 @@ function kindToType(kind: string): string {
   }
 }
 
+/** After accepting a type-name completion, add its import (gated by the auto-import setting). Runs
+ *  against the POST-insertion doc — the import region is above the caret, so the just-inserted name
+ *  doesn't shift its offsets. The BE returns a byte-offset edit (or nothing when no import is needed);
+ *  we map it to UTF-16 and dispatch it as a second, small change. Fire-and-forget. */
+async function applyAutoImport(view: EditorView, fqn: string): Promise<void> {
+  if (!bennuSettingsStore.autoImport) return;
+  const path = projectStore.activeFilePath;
+  if (!path) return;
+  const src = view.state.doc.toString();
+  let edit;
+  try {
+    edit = await ipcImportEdit(src, fqn);
+  } catch {
+    return; // BE absent — the name is inserted; import with Alt+Enter
+  }
+  if (!edit) return; // no import needed (same package / already imported / java.lang)
+  const b2u = makeByteToU16(src);
+  view.dispatch({ changes: { from: b2u(edit.start), to: b2u(edit.end), insert: edit.replacement } });
+}
+
 let completionSeq = 0;
 
 // Java keyword/primitive/constant labels offered as completion fallback (identifier-
@@ -316,11 +339,20 @@ const javaCompletionSource: CompletionSource = async (
   }
   if (seq !== completionSeq) return null; // superseded by a newer keystroke
 
-  const options: Completion[] = (items ?? []).map((it) => ({
-    label: it.label,
-    detail: it.detail,
-    type: kindToType(it.kind),
-  }));
+  const options: Completion[] = (items ?? []).map((it) => {
+    const c: Completion = { label: it.label, detail: it.detail, type: kindToType(it.kind) };
+    // A type-name completion with a single importable class carries its FQN — on accept, insert the
+    // name AND (when auto-import is on) add its import in the same gesture ("IntelliJ-style").
+    if (it.auto_import) {
+      const fqn = it.auto_import;
+      const label = it.label;
+      c.apply = (view, _completion, from, to) => {
+        view.dispatch(insertCompletionText(view.state, label, from, to));
+        void applyAutoImport(view, fqn);
+      };
+    }
+    return c;
+  });
 
   // After a `.` only the BE's member list makes sense; elsewhere (identifier typing or
   // explicit Ctrl+Space) enrich with Java keywords + buffer identifiers so completion
@@ -334,75 +366,13 @@ const javaCompletionSource: CompletionSource = async (
   return { from, options, validFor: /^[\w$]*$/ };
 };
 
-// ── Hover source (symbol signature) ─────────────────────────────────────────────
+// ── Hover source (symbol signature + `var`/`val` inferred type) ──────────────────
 //
-// A CodeMirror `hoverTooltip` source backed by `bennu_hover`. On a stationary hover
-// it finds the identifier word under the pointer, maps it to a UTF-8 byte offset, and
-// renders the resolved signature + kind + container (+ Javadoc when the BE provides
-// it, deferred for now). Returns null gracefully until the index is warm.
+// A CodeMirror `hoverTooltip` source backed by `bennu_hover` — a symbol's signature + kind +
+// container (+ Javadoc), and for a local `var`/`val` (or any local / parameter) its resolved type.
+// The shared factory owns the word-finding + DOM; this just supplies the fetch.
 
-const WORD = /[A-Za-z0-9_$]/;
-
-async function javaHoverSource(view: EditorView, pos: number, _side: -1 | 1): Promise<Tooltip | null> {
-  const path = projectStore.activeFilePath;
-  if (!path) return null;
-
-  // Expand the identifier word around `pos`.
-  const line = view.state.doc.lineAt(pos);
-  const text = line.text;
-  const rel = pos - line.from;
-  let s = rel;
-  let e = rel;
-  while (s > 0 && WORD.test(text[s - 1])) s--;
-  while (e < text.length && WORD.test(text[e])) e++;
-  if (s === e) return null;
-  const from = line.from + s;
-  const to = line.from + e;
-
-  // Map a position INSIDE the word (its middle) to a byte offset — the BE classifier
-  // biases left by one, so the word start could resolve the char before it.
-  const src = view.state.doc.toString();
-  const u2b = makeU16ToByte(src);
-  const byteOffset = u2b(from + Math.floor((e - s) / 2));
-
-  let info;
-  try {
-    info = await ipcHover(path, src, byteOffset);
-  } catch {
-    return null;
-  }
-  if (!info) return null;
-
-  return {
-    pos: from,
-    end: to,
-    above: true,
-    create() {
-      const dom = document.createElement('div');
-      dom.className = 'bennu-hover';
-      const sig = document.createElement('div');
-      sig.className = 'bh-sig';
-      sig.textContent = info.signature;
-      dom.appendChild(sig);
-      const meta: string[] = [];
-      if (info.container) meta.push(info.container);
-      if (info.kind) meta.push(info.kind);
-      if (meta.length) {
-        const m = document.createElement('div');
-        m.className = 'bh-meta';
-        m.textContent = meta.join('  ·  ');
-        dom.appendChild(m);
-      }
-      if (info.doc) {
-        const d = document.createElement('div');
-        d.className = 'bh-doc';
-        d.textContent = info.doc;
-        dom.appendChild(d);
-      }
-      return { dom };
-    },
-  };
-}
+const javaHoverSource = makeHoverSource((path, src, byteOffset) => ipcHover(path, src, byteOffset));
 
 /** The Java {@link LanguageDescriptor} handed to the shared `CodeEditor`. */
 export const javaLanguage: LanguageDescriptor = {

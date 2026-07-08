@@ -14,6 +14,7 @@ exhaustively unit-tested here (the frontend has no test runner).
 | `simplify_size_check` | `x.size()/length() == 0` → `x.isEmpty()` (`!= 0` / `> 0` → `!x.isEmpty()`). |
 | `simplify_boolean_compare` | `flag == true` → `flag`, `flag == false` → `!flag` (+ `!=` mirrors). |
 | `simplify_negated_comparison` | `!(a == b)` → `a != b`, `!(a != b)` → `a == b`. |
+| `insert_import_edit` | Given a source + a fully-qualified name, compute the edit that adds `import <fqn>;` (after the package, sorted among existing imports, CRLF-aware; `None` if already imported). The **detection** of which simple name to import and the **candidate FQNs** are resolver-backed (they need the classpath), so they live in `bennu-java` (`simple_type_needing_import`) and the be handler — this crate stays pure. |
 
 ## The aggregation seam
 

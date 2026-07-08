@@ -50,6 +50,7 @@ fn check_declaration(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
             out.push(Diagnostic {
                 message: format!("Cannot infer type for `var`: {reason}"),
                 severity: "error".to_string(),
+                code: String::new(),
                 start: val.start_byte(),
                 end: val.end_byte(),
             });

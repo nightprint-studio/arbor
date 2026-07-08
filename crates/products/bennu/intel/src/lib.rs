@@ -19,6 +19,7 @@
 //! Workspace convention: call sites reach this crate's surface through
 //! `bennu_intel::prelude::...`.
 
+pub mod class_names;
 pub mod config;
 pub mod diag_cache;
 pub mod java_index;

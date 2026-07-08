@@ -46,6 +46,7 @@ impl ResolveAll {
                 methods.push(Member::method(n, TypeRef::simple("p/S0"), vec![TypeRef::simple("java/lang/Object")]));
             }
             Arc::new(ClassMembers {
+                type_params: Vec::new(),
                 superclass: superclass.map(str::to_string),
                 interfaces,
                 methods,
@@ -68,6 +69,7 @@ impl ResolveAll {
         classes.insert(
             "java/lang/Object".to_string(),
             Arc::new(ClassMembers {
+                type_params: Vec::new(),
                 superclass: None,
                 interfaces: Vec::new(),
                 methods: vec![Member::method("equals", TypeRef::simple("boolean"), vec![TypeRef::simple("java/lang/Object")])],

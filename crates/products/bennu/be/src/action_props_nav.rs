@@ -18,11 +18,12 @@
 //! value-stack roots are linted (EL `${…}` scoped attributes and `#…` context/iterator vars are not).
 
 use std::collections::{BTreeSet, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use bennu_core::prelude::BennuState;
 use bennu_proto::prelude::{
-    ClassEntry, DeclarationTarget, JspActionBinding, JspActionOption, PropertyLintHit,
+    ClassEntry, DeclarationTarget, Diagnostic, HoverInfo, JspActionBinding, JspActionOption,
+    PropertyLintHit,
 };
 use bennu_web::prelude::{
     line_col, parse_jsp_fields, parse_jsp_forms, parse_jsp_vars, parse_validation_text,
@@ -135,7 +136,10 @@ fn class_chain(svc: &IndexService, near_file: &str, fqcn: &str) -> Vec<(String, 
     let mut depth = 0;
     while depth < 20 && seen.insert(cur.clone()) {
         let Some(entry) = classes.iter().find(|c| c.fqcn == cur) else { break };
-        let Ok(src) = std::fs::read_to_string(&entry.file) else { break };
+        // Normalize to LF so the property accessor go-to offset lands correctly in the editor's LF
+        // document (a CRLF action class would otherwise drift the target).
+        let Ok(raw) = std::fs::read_to_string(&entry.file) else { break };
+        let src = bennu_project::prelude::normalize_newlines(&raw);
         let sup = superclass_of(&src, &entry.simple, &classes);
         out.push((entry.file.clone(), src));
         match sup {
@@ -279,60 +283,100 @@ fn bennu_action_property_target(
     args: PropertyTargetArgs,
 ) -> Result<Option<DeclarationTarget>, String> {
     let svc = IndexService::global();
+    let Some((root, simple, chain)) = resolve_property_at(svc, &args.file, &args.source, args.offset)
+    else {
+        return Ok(None);
+    };
+    Ok(target_in_chain(&chain, &simple, &root))
+}
 
-    if is_validation(&args.file) {
-        let Some(rec) = parse_validation_text(Path::new(&args.file), &args.source) else {
-            return Ok(None);
-        };
-        let Some(field) = rec
+/// Hover on a JSP form field / OGNL root / validation `<field>` → the action property's **type**
+/// (`String customer`, `List<Item> items`, …) and its owning action class. `None` (never an error)
+/// when the caret isn't on a resolvable field, or its type can't be read from the class chain.
+#[arbor_rpc::handler]
+fn bennu_action_property_hover(
+    _ctx: &BennuState,
+    args: PropertyTargetArgs,
+) -> Result<Option<HoverInfo>, String> {
+    let svc = IndexService::global();
+    let Some((root, simple, chain)) = resolve_property_at(svc, &args.file, &args.source, args.offset)
+    else {
+        return Ok(None);
+    };
+    Ok(hover_in_chain(&chain, &simple, &root))
+}
+
+/// Resolve the field / OGNL root / validation `<field>` reference under the caret to
+/// `(property_root, action_simple_name, action_class_chain)`. The shared front half of go-to
+/// ([`bennu_action_property_target`]) and hover ([`bennu_action_property_hover`]) — they differ only
+/// in what they do with the resolved chain. `None` when the caret isn't on a resolvable reference.
+fn resolve_property_at(
+    svc: &IndexService,
+    file: &str,
+    source: &str,
+    offset: usize,
+) -> Option<(String, String, Vec<(String, String)>)> {
+    if is_validation(file) {
+        let rec = parse_validation_text(Path::new(file), source)?;
+        let field = rec
             .fields
             .iter()
-            .find(|f| args.offset >= f.name_offset && args.offset <= f.name_offset + f.name.len())
-        else {
-            return Ok(None);
-        };
+            .find(|f| offset >= f.name_offset && offset <= f.name_offset + f.name.len())?;
         let root = property_root(&field.name);
         if !is_plain_identifier(root) {
-            return Ok(None);
+            return None;
         }
-        let Some((simple, chain)) = resolve_validation(svc, &args.file) else {
-            return Ok(None);
-        };
-        return Ok(target_in_chain(&chain, &simple, root));
+        let (simple, chain) = resolve_validation(svc, file)?;
+        return Some((root.to_string(), simple, chain));
     }
 
-    if is_jsp(&args.file) {
-        let bound = jsp_bound_action(svc, &args.file);
+    if is_jsp(file) {
+        let bound = jsp_bound_action(svc, file);
         // A FIELD under the caret — a form field (→ its form's action) or a standalone field spliced
         // into a parent's form (→ the inherited bound action).
-        for (name, start, end, action) in jsp_fields_with_action(&args.source, bound.as_deref()) {
-            if args.offset >= start && args.offset <= end {
+        for (name, start, end, action) in jsp_fields_with_action(source, bound.as_deref()) {
+            if offset >= start && offset <= end {
                 let root = property_root(&name);
                 if !is_plain_identifier(root) {
-                    return Ok(None);
+                    return None;
                 }
-                let Some((simple, chain)) = resolve_action(svc, &args.file, &action) else {
-                    return Ok(None);
-                };
-                return Ok(target_in_chain(&chain, &simple, root));
+                let (simple, chain) = resolve_action(svc, file, &action)?;
+                return Some((root.to_string(), simple, chain));
             }
         }
         // A standalone OGNL reference (a `%{prop}` that isn't a page variable) → the bound action.
-        let vars = parse_jsp_vars(&args.source);
+        let vars = parse_jsp_vars(source);
         let declared: HashSet<&str> = vars.decls.iter().map(|d| d.name.as_str()).collect();
-        if let Some(r) = vars.refs.iter().find(|r| args.offset >= r.start && args.offset <= r.end) {
+        if let Some(r) = vars.refs.iter().find(|r| offset >= r.start && offset <= r.end) {
             let root = property_root(&r.name);
             if !declared.contains(r.name.as_str()) && is_plain_identifier(root) {
                 if let Some(action) = &bound {
-                    if let Some((simple, chain)) = resolve_action(svc, &args.file, action) {
-                        return Ok(target_in_chain(&chain, &simple, root));
+                    if let Some((simple, chain)) = resolve_action(svc, file, action) {
+                        return Some((root.to_string(), simple, chain));
                     }
                 }
             }
         }
     }
 
-    Ok(None)
+    None
+}
+
+/// Build the hover card for property `prop` from the action class chain: the first source in the
+/// chain that declares an accessor for it supplies the type. `None` when no accessor backs it.
+fn hover_in_chain(chain: &[(String, String)], simple: &str, prop: &str) -> Option<HoverInfo> {
+    for (_file, src) in chain {
+        if let Some(pt) = crate::action_props::find_property_type(src, prop) {
+            let kind = if pt.read { "action property" } else { "action property (write-only)" };
+            return Some(HoverInfo {
+                signature: format!("{} {}", pt.type_text, prop),
+                kind: kind.to_string(),
+                container: Some(simple.to_string()),
+                doc: None,
+            });
+        }
+    }
+    None
 }
 
 // ── lint ─────────────────────────────────────────────────────────────────────────
@@ -459,6 +503,317 @@ fn bennu_set_jsp_action(_ctx: &BennuState, args: SetJspActionArgs) -> Result<boo
     Ok(true)
 }
 
+// ── Struts config XML: <result> navigation + linting ────────────────────────────────
+//
+// A `<result>` body is either a JSP path (`/WEB-INF/x.jsp`) or an OGNL/EL reference (`${urlErrori}` /
+// `%{root}`) evaluated against the OWNING action's value stack. So the same two affordances the JSP
+// side has apply here: go-to (open the JSP / jump to the action property) and a conservative lint
+// (the JSP file doesn't exist / the OGNL root isn't a property of the action).
+
+/// One `<result>` scanned from a struts XML buffer: the owning action's qualified name (namespace +
+/// name, when resolvable), the trimmed target body, and its byte span (for go-to / squiggle).
+struct StrutsResult {
+    action_qname: Option<String>,
+    target: String,
+    target_start: usize,
+    target_end: usize,
+}
+
+/// Scan a struts config buffer for `<result …>BODY</result>` elements, tracking the enclosing
+/// `<package namespace="…">` and `<action name="…">` so each result carries its owning action's
+/// qualified name. Body-only results (the common shape); a `<param>`-based result (body contains
+/// `<`) is emitted with that raw body and skipped by the callers. Text scan (no XML parser) over the
+/// LIVE buffer, so offsets match the editor exactly.
+fn scan_struts_results(source: &str) -> Vec<StrutsResult> {
+    let mut out = Vec::new();
+    let mut namespace: Vec<String> = Vec::new(); // one per open <package>
+    let mut action: Option<String> = None;
+    let mut i = 0usize;
+    while let Some(rel) = source[i..].find('<') {
+        let ts = i + rel;
+        let Some(gt) = source[ts..].find('>') else { break };
+        let te = ts + gt; // index of '>'
+        let tag = &source[ts..=te];
+        let lower = tag.to_ascii_lowercase();
+        if lower.starts_with("<package") {
+            namespace.push(tag_attr(tag, "namespace").unwrap_or_default());
+        } else if lower.starts_with("</package") {
+            namespace.pop();
+        } else if lower.starts_with("<action") {
+            action = tag_attr(tag, "name");
+        } else if lower.starts_with("</action") {
+            action = None;
+        } else if lower.starts_with("<result") && !lower.ends_with("/>") {
+            let body_start = te + 1;
+            if let Some(cr) = source[body_start..].find("</result") {
+                let body_end = body_start + cr;
+                let raw = &source[body_start..body_end];
+                let trimmed = raw.trim();
+                if !trimmed.is_empty() {
+                    let lead = raw.len() - raw.trim_start().len();
+                    let start = body_start + lead;
+                    let qname = action.as_ref().map(|n| qualify_action(n, namespace.last()));
+                    out.push(StrutsResult {
+                        action_qname: qname,
+                        target: trimmed.to_string(),
+                        target_start: start,
+                        target_end: start + trimmed.len(),
+                    });
+                }
+                i = body_end;
+                continue;
+            }
+        }
+        i = te + 1;
+    }
+    out
+}
+
+/// The action qualified-name from an `<action name>` + its enclosing `<package namespace>`: an
+/// absolute name (leading `/`) or an empty namespace is left as-is; else `namespace/name`.
+fn qualify_action(name: &str, namespace: Option<&String>) -> String {
+    let ns = namespace.map(String::as_str).unwrap_or("");
+    if name.starts_with('/') || ns.is_empty() {
+        name.to_string()
+    } else {
+        format!("{}/{}", ns.trim_end_matches('/'), name)
+    }
+}
+
+/// The value of attribute `attr` in a single tag's text (`<result name="input" …>` → `input`).
+/// Quote-aware, case-insensitive on the attribute name. `None` when absent.
+fn tag_attr(tag: &str, attr: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(rel) = lower[from..].find(attr) {
+        let at = from + rel;
+        let before_ok = at == 0 || {
+            let c = tag.as_bytes()[at - 1];
+            c.is_ascii_whitespace() || c == b'<'
+        };
+        let mut j = at + attr.len();
+        let b = tag.as_bytes();
+        while j < tag.len() && b[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if before_ok && j < tag.len() && b[j] == b'=' {
+            j += 1;
+            while j < tag.len() && b[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < tag.len() && (b[j] == b'"' || b[j] == b'\'') {
+                let q = b[j];
+                let vs = j + 1;
+                let mut k = vs;
+                while k < tag.len() && b[k] != q {
+                    k += 1;
+                }
+                return Some(tag[vs..k].to_string());
+            }
+        }
+        from = at + attr.len();
+    }
+    None
+}
+
+/// The plain-identifier OGNL/EL root of a result body (`${urlErrori}` / `%{user}` → `urlErrori` /
+/// `user`), or `None` when the body isn't a simple `${…}` / `%{…}` wrapping a plain identifier root
+/// (a JSP path, a Tiles def name, a computed/complex expression).
+fn ognl_result_root(target: &str) -> Option<&str> {
+    let t = target.trim();
+    let inner = t
+        .strip_prefix("${")
+        .or_else(|| t.strip_prefix("%{"))?
+        .strip_suffix('}')?;
+    let root = property_root(inner.trim());
+    is_plain_identifier(root).then_some(root)
+}
+
+/// Whether a result target looks like a JSP path (an absolute path ending `.jsp`/`.jspf`).
+fn is_jsp_result_path(target: &str) -> bool {
+    let t = target.trim();
+    t.starts_with('/') && {
+        let l = t.to_ascii_lowercase();
+        l.ends_with(".jsp") || l.ends_with(".jspf")
+    }
+}
+
+/// The existing webapp base directories under a project root (Maven `src/main/webapp` + the common
+/// alternatives), so a `/WEB-INF/x.jsp` result path resolves to a real file. Empty when the project
+/// has no recognizable webapp dir — in which case the "JSP not found" lint stays silent (we can't
+/// know where JSPs live, so flagging would risk a false positive).
+fn webapp_bases(root: &Path) -> Vec<PathBuf> {
+    ["src/main/webapp", "web", "WebContent", "webapp", "src/webapp", "WebRoot"]
+        .iter()
+        .map(|b| root.join(b))
+        .filter(|p| p.is_dir())
+        .collect()
+}
+
+/// Resolve a struts result JSP path to a real file under one of the webapp `bases` (else the project
+/// root). `None` when no base holds it.
+fn resolve_jsp_result(root: &Path, bases: &[PathBuf], jsp_ref: &str) -> Option<PathBuf> {
+    let rel = jsp_ref.trim_start_matches('/');
+    for base in bases {
+        let cand = base.join(rel);
+        if cand.is_file() {
+            return Some(cand);
+        }
+    }
+    let at_root = root.join(rel);
+    at_root.is_file().then_some(at_root)
+}
+
+/// Go-to on a struts `<result>` body under the caret: a JSP path opens the JSP; an OGNL/EL root
+/// (`${prop}`) jumps to the owning action's property accessor. `None` when the caret isn't on a
+/// resolvable result target.
+#[arbor_rpc::handler]
+fn bennu_struts_result_target(
+    _ctx: &BennuState,
+    args: PropertyTargetArgs,
+) -> Result<Option<DeclarationTarget>, String> {
+    if is_validation(&args.file) || !args.file.to_ascii_lowercase().ends_with(".xml") {
+        return Ok(None);
+    }
+    let svc = IndexService::global();
+    Ok(struts_result_target_at(svc, &args.file, &args.source, args.offset))
+}
+
+/// Resolve the struts `<result>` target under `offset` to its go-to location (JSP file top, or the
+/// owning action's property accessor). `Option`-returning so it can use `?` freely; the handler
+/// wraps it. `None` when the caret isn't on a resolvable result target.
+fn struts_result_target_at(
+    svc: &IndexService,
+    file: &str,
+    source: &str,
+    offset: usize,
+) -> Option<DeclarationTarget> {
+    for r in scan_struts_results(source) {
+        if offset < r.target_start || offset > r.target_end || r.target.contains('<') {
+            continue;
+        }
+        // An OGNL/EL root → the owning action's property accessor; if that root isn't a bean property
+        // (it may be a request attribute the action sets, not a getter/setter), fall back to the
+        // owning action's DECLARATION so the gesture still navigates "to the action".
+        if let Some(root) = ognl_result_root(&r.target) {
+            let action = r.action_qname.as_deref()?;
+            if let Some((simple, chain)) = resolve_action(svc, file, action) {
+                if let Some(t) = target_in_chain(&chain, &simple, root) {
+                    return Some(t);
+                }
+            }
+            let def = svc.definition_action(file, action)?;
+            let config = (!def.config_file.is_empty()).then(|| def.config_file.replace('\\', "/"))?;
+            return Some(DeclarationTarget {
+                file: config,
+                start: def.config_offset,
+                end: def.config_offset,
+                line: 0,
+                col: 0,
+                label: format!("action `{action}`"),
+            });
+        }
+        // A JSP path → the JSP file (top of file).
+        if is_jsp_result_path(&r.target) {
+            let root = svc.root_for_file(file)?;
+            let rp = Path::new(&root);
+            let target = resolve_jsp_result(rp, &webapp_bases(rp), &r.target)?;
+            return Some(DeclarationTarget {
+                file: target.to_string_lossy().replace('\\', "/"),
+                start: 0,
+                end: 0,
+                line: 0,
+                col: 0,
+                label: format!("JSP result `{}`", r.target),
+            });
+        }
+        return None;
+    }
+    None
+}
+
+/// Conservative lint over a struts config buffer's `<result>` targets: a JSP path that resolves to no
+/// file under the project's webapp dir → "JSP not found"; an OGNL/EL root that isn't a property of the
+/// owning action → "not a property of action". Never a false positive: JSP-not-found needs a known
+/// webapp dir; OGNL-not-found needs the action to resolve to a project class with a known property set.
+#[arbor_rpc::handler]
+fn bennu_struts_result_lint(_ctx: &BennuState, args: PropertyLintArgs) -> Result<Vec<Diagnostic>, String> {
+    if is_validation(&args.file) || !args.file.to_ascii_lowercase().ends_with(".xml") {
+        return Ok(Vec::new());
+    }
+    // Cheap gate: nothing to do unless the buffer actually has results.
+    if !args.source.contains("<result") {
+        return Ok(Vec::new());
+    }
+    let svc = IndexService::global();
+    let root = svc.root_for_file(&args.file);
+    let bases = root.as_ref().map(|r| webapp_bases(Path::new(r))).unwrap_or_default();
+    let mut cache: ActionCache = ActionCache::new();
+    // Lazily-discovered project JSP paths (forward-slashed) — the safety net so a JSP that lives
+    // OUTSIDE the primary webapp dir (a multi-module / unusual layout) is never mis-flagged missing.
+    // Built at most once per lint, and only if some result path misses the webapp dirs.
+    let mut project_jsps: Option<Vec<String>> = None;
+    let mut out = Vec::new();
+
+    for r in scan_struts_results(&args.source) {
+        if r.target.contains('<') {
+            continue;
+        }
+        if let Some(prop) = ognl_result_root(&r.target) {
+            if let Some(action) = &r.action_qname {
+                if let Some((simple, props)) = props_for(svc, &args.file, action, &mut cache) {
+                    if !props.contains(prop) {
+                        out.push(Diagnostic {
+                            message: format!("`{prop}` is not a property of action `{simple}`"),
+                            severity: "warning".to_string(),
+                            code: "action-property-missing".to_string(),
+                            start: r.target_start,
+                            end: r.target_end,
+                        });
+                    }
+                }
+            }
+        } else if is_jsp_result_path(&r.target) {
+            // Only adjudicate when the project HAS a webapp dir (else we can't know where JSPs live).
+            let (Some(root), false) = (&root, bases.is_empty()) else { continue };
+            if resolve_jsp_result(Path::new(root), &bases, &r.target).is_some() {
+                continue; // found under the web app → fine
+            }
+            // Missed the primary webapp dirs — before flagging, check the whole project for a JSP whose
+            // path matches (a fragment in a sibling module). Only a genuine miss everywhere is flagged.
+            let jsps = project_jsps.get_or_insert_with(|| {
+                crate::web_discovery::discover_jsp_files(Path::new(root))
+                    .iter()
+                    .map(|p| p.to_string_lossy().replace('\\', "/").to_ascii_lowercase())
+                    .collect()
+            });
+            let needle = r.target.trim_start_matches('/').to_ascii_lowercase();
+            let matched = jsps.iter().any(|p| jsp_suffix_matches(p, &needle));
+            if !matched {
+                out.push(Diagnostic {
+                    message: format!("JSP `{}` not found in the web app", r.target),
+                    severity: "warning".to_string(),
+                    code: "jsp-not-found".to_string(),
+                    start: r.target_start,
+                    end: r.target_end,
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Segment-aligned suffix match: does the forward-slashed, lower-cased `file_path` END with the
+/// (already `/`-trimmed, lower-cased) result `needle`, on a path-segment boundary? (`…/webapp/web-inf/
+/// jsp/tree.jsp` matches `web-inf/jsp/tree.jsp`, but not `e-inf/jsp/tree.jsp`.)
+fn jsp_suffix_matches(file_path: &str, needle: &str) -> bool {
+    if !file_path.ends_with(needle) {
+        return false;
+    }
+    let at = file_path.len() - needle.len();
+    at == 0 || file_path.as_bytes()[at - 1] == b'/'
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -547,5 +902,74 @@ mod tests {
         // With no bound action, a standalone field yields nothing (no false hits on an unbound view).
         let src = r#"<s:textfield name="orphan"/>"#;
         assert!(jsp_fields_with_action(src, None).is_empty());
+    }
+
+    // ── struts <result> navigation + lint ──────────────────────────────────────
+
+    const STRUTS: &str = r#"<struts>
+  <package name="p" namespace="/do/Cat">
+    <action name="viewTree" class="cat">
+      <result name="success">/WEB-INF/jsp/tree.jsp</result>
+      <result name="input" type="redirect">${urlErrori}</result>
+    </action>
+  </package>
+</struts>"#;
+
+    #[test]
+    fn scan_results_tracks_owning_action_and_target_spans() {
+        let rs = scan_struts_results(STRUTS);
+        assert_eq!(rs.len(), 2, "two results");
+        // Both belong to the namespaced action.
+        assert!(rs.iter().all(|r| r.action_qname.as_deref() == Some("/do/Cat/viewTree")), "qname");
+        // The target span slices exactly the trimmed body.
+        let jsp = rs.iter().find(|r| r.target.ends_with(".jsp")).unwrap();
+        assert_eq!(&STRUTS[jsp.target_start..jsp.target_end], "/WEB-INF/jsp/tree.jsp");
+        let ognl = rs.iter().find(|r| r.target.starts_with("${")).unwrap();
+        assert_eq!(&STRUTS[ognl.target_start..ognl.target_end], "${urlErrori}");
+    }
+
+    #[test]
+    fn ognl_result_root_extracts_plain_root_only() {
+        assert_eq!(ognl_result_root("${urlErrori}"), Some("urlErrori"));
+        assert_eq!(ognl_result_root("%{user.name}"), Some("user")); // nested → root
+        assert_eq!(ognl_result_root("/WEB-INF/x.jsp"), None); // a JSP path, not OGNL
+        assert_eq!(ognl_result_root("${foo.bar()}"), Some("foo"));
+        assert_eq!(ognl_result_root("tilesDef"), None); // a bare Tiles name
+    }
+
+    #[test]
+    fn jsp_result_path_predicate() {
+        assert!(is_jsp_result_path("/WEB-INF/jsp/tree.jsp"));
+        assert!(is_jsp_result_path("/pages/x.JSPF"));
+        assert!(!is_jsp_result_path("${urlErrori}")); // OGNL
+        assert!(!is_jsp_result_path("tilesDef")); // not absolute
+        assert!(!is_jsp_result_path("/do/Other/chain")); // absolute but not a JSP
+    }
+
+    #[test]
+    fn qualify_action_folds_namespace() {
+        assert_eq!(qualify_action("viewTree", Some(&"/do/Cat".to_string())), "/do/Cat/viewTree");
+        assert_eq!(qualify_action("/abs/name", Some(&"/do/Cat".to_string())), "/abs/name");
+        assert_eq!(qualify_action("root", Some(&String::new())), "root");
+        assert_eq!(qualify_action("root", None), "root");
+    }
+
+    #[test]
+    fn jsp_suffix_matches_on_segment_boundary() {
+        assert!(jsp_suffix_matches("c:/p/src/main/webapp/web-inf/jsp/tree.jsp", "web-inf/jsp/tree.jsp"));
+        assert!(jsp_suffix_matches("web-inf/jsp/tree.jsp", "web-inf/jsp/tree.jsp")); // whole
+        // Not on a segment boundary → no match (avoids `e-inf/...` matching `web-inf/...`).
+        assert!(!jsp_suffix_matches("c:/p/webapp/web-inf/jsp/tree.jsp", "b-inf/jsp/tree.jsp"));
+        assert!(!jsp_suffix_matches("c:/p/webapp/jsp/other.jsp", "jsp/tree.jsp"));
+    }
+
+    #[test]
+    fn param_based_result_body_is_ignored_by_callers() {
+        // A `<result><param name="location">/x.jsp</param></result>` body contains `<` → the scanner
+        // still emits it, but go-to/lint skip any target with a `<` (not a simple path/OGNL).
+        let src = r#"<action name="a"><result><param name="location">/x.jsp</param></result></action>"#;
+        let rs = scan_struts_results(src);
+        assert_eq!(rs.len(), 1);
+        assert!(rs[0].target.contains('<'), "param body carries markup → skipped downstream");
     }
 }

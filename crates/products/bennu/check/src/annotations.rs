@@ -73,6 +73,7 @@ pub fn annotation_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> 
                 out.push(Diagnostic {
                     message: format!("`@{name}` is only applicable to {}", target_word(&name)),
                     severity: "error".to_string(),
+                    code: String::new(),
                     start: node.start_byte(),
                     end: node.end_byte(),
                 });

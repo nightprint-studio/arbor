@@ -273,7 +273,7 @@ fn last_named(n: Node) -> Option<Node> {
 }
 
 fn err(message: String, node: Node) -> Diagnostic {
-    Diagnostic { message, severity: "error".to_string(), start: node.start_byte(), end: node.end_byte() }
+    Diagnostic { message, severity: "error".to_string(), code: String::new(), start: node.start_byte(), end: node.end_byte() }
 }
 
 fn with_parse(source: &str, f: impl FnOnce(Node) -> Vec<Diagnostic>) -> Vec<Diagnostic> {

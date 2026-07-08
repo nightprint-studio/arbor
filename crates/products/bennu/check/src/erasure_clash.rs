@@ -126,6 +126,7 @@ fn flag_erasure_clashes(members: &[MethodSig], source: &str, out: &mut Vec<Diagn
                         "Method `{name}` clashes with another `{name}`: same signature after generic type erasure"
                     ),
                     severity: "error".to_string(),
+                    code: String::new(),
                     start: node.start_byte(),
                     end: node.end_byte(),
                 });

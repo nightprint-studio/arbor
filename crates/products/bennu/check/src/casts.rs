@@ -97,6 +97,11 @@ fn check_cast(
     if !hierarchy_fully_known(resolver, &source_ty) || !hierarchy_fully_known(resolver, &target) {
         return;
     }
+    // Same simple name resolved to two binaries → treat as the same nominal type (resolution
+    // artifact, e.g. an interface-declared return type), never an inconvertible cast.
+    if simple_name(&source_ty) == simple_name(&target) {
+        return;
+    }
     if !reaches(resolver, &source_ty, &target) && !reaches(resolver, &target, &source_ty) {
         out.push(err(
             format!(
@@ -222,6 +227,13 @@ fn definite_assign_mismatch(
     if !hierarchy_fully_known(resolver, &source_ty) {
         return None;
     }
+    // Same simple name, different binary → almost certainly the SAME nominal type resolved through
+    // two paths (e.g. a method whose return type is declared on an INTERFACE it overrides, resolved
+    // without the impl's full package context). Reporting "`X` cannot be assigned to `X`" is
+    // nonsensical and a pure resolution artifact — never flag it (cardinal rule: no false positives).
+    if simple_name(&source_ty) == simple_name(&target) {
+        return None;
+    }
     (!reaches(resolver, &source_ty, &target))
         .then(|| (simple_name(&source_ty).to_string(), simple_name(&target).to_string()))
 }
@@ -329,7 +341,7 @@ fn enclosing_method(n: Node) -> Option<Node> {
 }
 
 fn err(message: String, node: Node) -> Diagnostic {
-    Diagnostic { message, severity: "error".to_string(), start: node.start_byte(), end: node.end_byte() }
+    crate::check_id::CheckId::IncompatibleType.at(node, message)
 }
 
 #[cfg(test)]
@@ -359,6 +371,7 @@ mod tests {
 
     fn cls(superclass: Option<&str>, methods: Vec<Member>) -> ClassMembers {
         ClassMembers {
+            type_params: Vec::new(),
             superclass: superclass.map(str::to_string),
             interfaces: Vec::new(),
             methods,
@@ -395,6 +408,19 @@ mod tests {
             ),
         );
         members.insert("java/lang/String".to_string(), cls(Some("java/lang/Object"), vec![]));
+        // `List<E>` with `get(int) -> E` — drives the generic-element assignability test (a
+        // `List<Dog>.get(0)` element is a `Dog`, assignable to its supertype `Animal`).
+        members.insert(
+            "java/util/List".to_string(),
+            cls(
+                None,
+                vec![Member::method(
+                    "get",
+                    TypeRef::simple("E".to_string()),
+                    vec![TypeRef::simple("int".to_string())],
+                )],
+            ),
+        );
         // `Orphan` has NO superclass recorded (superclass = None) — stands in for a project class whose
         // implicit `extends Object` the index didn't capture, so its hierarchy walk never reaches
         // Object. Casting an `Object` to it must still be legal.
@@ -408,6 +434,7 @@ mod tests {
             ("Provider", "com/acme/Provider"),
             ("Orphan", "com/acme/Orphan"),
             ("String", "java/lang/String"),
+            ("List", "java/util/List"),
         ]
         .into_iter()
         .map(|(s, b)| (s.to_string(), b.to_string()))
@@ -469,6 +496,46 @@ mod tests {
     fn return_subtype_is_ok() {
         let src = "class C { Provider p; Animal m() { return p.dog(); } }";
         assert!(type_compat_errors(src, &resolver()).is_empty());
+    }
+
+    #[test]
+    fn subtype_assigned_to_supertype_is_ok() {
+        // Direct: `Dog` (from `p.dog()`) assigned to its supertype `Animal` — legal, must not flag.
+        assert!(diags("Animal a = p.dog();").is_empty(), "{:?}", diags("Animal a = p.dog();"));
+    }
+
+    #[test]
+    fn generic_element_subtype_assigned_to_supertype_is_ok() {
+        // The user's case: `List<Dog>.get(0)` is a `Dog` (generic element), assigned to its supertype
+        // `Animal`. The assignability check must walk the (substituted) element type's hierarchy —
+        // NOT flag it as an incompatible type. A non-chained single call, so the chain-skip doesn't
+        // hide it; this genuinely exercises subtype resolution through a generic.
+        let src = "class C { java.util.List<Dog> list; void m() { Animal a = list.get(0); } }";
+        let d: Vec<String> =
+            type_compat_errors(src, &resolver()).into_iter().map(|x| x.message).collect();
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn same_simple_name_two_binaries_is_not_flagged() {
+        // A method whose return type is declared on an interface it overrides can resolve to a
+        // DIFFERENT binary than the assignment target while sharing the simple name (`Twin`). The
+        // walk would judge them unrelated and emit the nonsensical "`Twin` cannot be assigned to
+        // `Twin`" — the guard must suppress it. Two `Twin`s in different packages, both concrete.
+        let mut r = resolver();
+        r.members.insert("com/a/Twin".to_string(), cls(Some("java/lang/Object"), vec![]));
+        r.members.insert("com/b/Twin".to_string(), cls(Some("java/lang/Object"), vec![]));
+        r.members.insert(
+            "com/acme/TwinSource".to_string(),
+            cls(Some("java/lang/Object"), vec![getter("make", "com/a/Twin")]),
+        );
+        r.simple.insert("TwinSource".to_string(), "com/acme/TwinSource".to_string());
+        // The written target name `Twin` resolves to the OTHER package's binary.
+        r.simple.insert("Twin".to_string(), "com/b/Twin".to_string());
+        let src = "class C { TwinSource s; void m() { Twin t = s.make(); } }";
+        let d: Vec<String> =
+            type_compat_errors(src, &r).into_iter().map(|x| x.message).collect();
+        assert!(d.is_empty(), "{d:?}");
     }
 
     #[test]

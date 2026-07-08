@@ -46,6 +46,7 @@ pub fn import_clash_errors(root: Node, source: &str) -> Vec<Diagnostic> {
                         "Import `{fqn}` collides with `{prior}` (both bind `{simple}`)"
                     ),
                     severity: "error".to_string(),
+                    code: String::new(),
                     start: child.start_byte(),
                     end: child.end_byte(),
                 });

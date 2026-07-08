@@ -335,7 +335,7 @@ fn binary_of(text: &str, symbols: &FileSymbols, resolver: &dyn TypeResolver) -> 
 }
 
 fn err(message: String, node: Node) -> Diagnostic {
-    Diagnostic { message, severity: "error".to_string(), start: node.start_byte(), end: node.end_byte() }
+    Diagnostic { message, severity: "error".to_string(), code: String::new(), start: node.start_byte(), end: node.end_byte() }
 }
 
 fn with_parse(source: &str, f: impl FnOnce(Node) -> Vec<Diagnostic>) -> Vec<Diagnostic> {
@@ -376,6 +376,7 @@ mod tests {
 
     fn cm(flags: ClassFlags, superclass: Option<&str>, ifaces: &[&str], methods: Vec<Member>) -> ClassMembers {
         ClassMembers {
+            type_params: Vec::new(),
             superclass: superclass.map(str::to_string),
             interfaces: ifaces.iter().map(|s| s.to_string()).collect(),
             methods,

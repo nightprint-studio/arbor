@@ -72,6 +72,13 @@ pub struct DiagnosticsArgs {
     /// validation (`bennu-check`); absent → no Java diagnostics (the on-disk file may be stale).
     #[serde(default)]
     pub source: Option<String>,
+    /// Which validation tier to run for a Java file. `Some(false)` = the FAST pure-AST pass only
+    /// (syntax / structure / unused imports — instant squiggles while typing); `Some(true)` / absent
+    /// = the FULL resolver-backed pass (adds unknown-member / type / inheritance / … checks). The FE
+    /// runs the fast pass on a short debounce and the full pass on a longer idle debounce, so a large
+    /// file stays responsive. Ignored for a JSP (routed by `actions`).
+    #[serde(default)]
+    pub resolved: Option<bool>,
     /// JSP action references extracted from the file by the FE. When present, each is
     /// checked for existence conservatively (exists / missing / inconclusive). Absent /
     /// empty for a plain Java file (→ the AST validator).
@@ -107,8 +114,12 @@ fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Dia
             if let Some(source) = &args.source {
                 // Route through the owning project's provider so the resolver-backed checks
                 // (unknown members via type inference) run when the index is built; falls back to
-                // the pure AST checks otherwise.
-                return Ok(IndexService::global().validate_java(&args.file, source));
+                // the pure AST checks otherwise. `resolved` picks the tier (fast pure-AST vs full).
+                return Ok(IndexService::global().validate_java(
+                    &args.file,
+                    source,
+                    args.resolved.unwrap_or(true),
+                ));
             }
         }
         return Ok(Vec::new());
@@ -123,6 +134,7 @@ fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Dia
             out.push(Diagnostic {
                 message: format!("Struts action `{}` does not exist", a.qualified_name),
                 severity: "warning".to_string(),
+                code: "struts-action-missing".to_string(),
                 start: a.start,
                 end: a.end,
             });
@@ -138,6 +150,7 @@ fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Dia
             out.push(Diagnostic {
                 message: format!("Included file `{}` was not found", inc.raw),
                 severity: "warning".to_string(),
+                code: "included-file-missing".to_string(),
                 start: inc.start,
                 end: inc.end,
             });
@@ -164,6 +177,13 @@ pub struct DefinitionArgs {
     pub file: String,
     /// The JSP action reference to resolve (`/do/Category/viewTree`).
     pub action: String,
+    /// The live JSP buffer (optional) — lets the resolver fold an enclosing `<s:url namespace="…">`
+    /// onto a relative `action="…"` at `offset` when the bare `action` string doesn't resolve.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Byte offset of the caret in `source` (optional; pairs with it for the namespace-fold fallback).
+    #[serde(default)]
+    pub offset: Option<usize>,
 }
 
 /// A resolved go-to-definition target for a JSP action reference.
@@ -188,14 +208,70 @@ fn bennu_definition(
     _ctx: &BennuState,
     args: DefinitionArgs,
 ) -> Result<Option<DefinitionResult>, String> {
-    Ok(IndexService::global().definition_action(&args.file, &args.action).map(|d| {
-        DefinitionResult {
-            config_file: d.config_file,
-            config_offset: d.config_offset,
-            class_fqcn: d.class_fqcn,
-            view_jsp: d.view_jsp,
+    let svc = IndexService::global();
+    // 1. The verbatim ref — resolves absolute paths and Entando `<wp:action path="/ExtStr2/…">` URLs.
+    let mut resolved = svc.definition_action(&args.file, &args.action);
+    // 2. Namespace-fold fallback: a `<s:url namespace="/do/Cat" action="viewTree">` gives the FE only
+    //    the bare `viewTree` under the caret, which is ambiguous across namespaces. Re-scan the JSP
+    //    buffer at the caret offset — `parse_jsp` folds the enclosing `namespace=` onto the relative
+    //    action, yielding the qualified `/do/Cat/viewTree` that resolves unambiguously.
+    if resolved.is_none() {
+        if let (Some(src), Some(off)) = (&args.source, args.offset) {
+            if is_jsp_file(&args.file) {
+                if let Some(qname) = action_ref_at(src, off) {
+                    resolved = svc.definition_action(&args.file, &qname);
+                }
+            }
         }
+    }
+    Ok(resolved.map(|d| DefinitionResult {
+        config_file: d.config_file,
+        config_offset: d.config_offset,
+        class_fqcn: d.class_fqcn,
+        view_jsp: d.view_jsp,
     }))
+}
+
+/// The (namespace-folded) qualified name of the JSP action reference whose span covers `offset`, if
+/// any — `parse_jsp` already folds an enclosing `namespace="…"` onto a relative `action`. Computed
+/// refs (`${…}`/`%{…}`) are skipped (never a static target).
+fn action_ref_at(source: &str, offset: usize) -> Option<String> {
+    bennu_web::prelude::parse_jsp(source)
+        .action_refs
+        .into_iter()
+        .find(|r| !r.computed && offset >= r.start && offset <= r.end)
+        .map(|r| r.name)
+}
+
+/// Args for [`bennu_decompiled_source`].
+#[derive(Deserialize)]
+pub struct DecompiledArgs {
+    /// A file inside the owning project (to pick its resolver).
+    pub file: String,
+    /// The live buffer (its imports resolve a bare type name).
+    pub source: String,
+    /// The type name under the caret — a simple name (`List`) or a dotted FQCN (`java.util.List`).
+    pub name: String,
+}
+
+/// A generated decompiled-stub location: the on-disk `.java` path + the byte offset to jump to.
+#[derive(Serialize)]
+pub struct DecompiledLocation {
+    pub file: String,
+    pub offset: usize,
+}
+
+/// Resolve `name` (a library/JDK type under the caret) to a generated **decompiled Java stub** on
+/// disk and return its path — the "go-to into a JDK/library class" affordance. `None`-shaped empty
+/// result when the name doesn't resolve, is a project type (real source exists), or can't be decoded.
+#[arbor_rpc::handler]
+fn bennu_decompiled_source(
+    _ctx: &BennuState,
+    args: DecompiledArgs,
+) -> Result<Option<DecompiledLocation>, String> {
+    Ok(IndexService::global()
+        .decompiled_stub(&args.file, &args.source, &args.name)
+        .map(|(file, offset)| DecompiledLocation { file, offset }))
 }
 
 /// Args for [`bennu_bean_class`].

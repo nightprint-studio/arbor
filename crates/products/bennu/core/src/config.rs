@@ -45,6 +45,14 @@ pub struct BennuConfig {
     /// to avoid the one-shot background CPU on every open. The `#[serde(default)]` container fills a
     /// missing key from this struct's `Default` (→ `true`), so existing config files opt in.
     pub validate_on_open: bool,
+    /// **Autosave**: write a modified buffer to disk automatically — after a short idle, on switching
+    /// tabs, and when the window loses focus. `true` by default (IntelliJ-style); turn it off to save
+    /// only explicitly (Ctrl+S).
+    pub autosave: bool,
+    /// **Auto-import on completion**: when accepting a type-name completion whose simple name resolves
+    /// to a SINGLE class, add its `import` line automatically. `true` by default; off inserts just the
+    /// name (import it later with Alt+Enter).
+    pub auto_import: bool,
     /// Extra JDK install directories to search, on top of `JAVA_HOME` +
     /// `C:/Program Files/Java/*`. For a JDK installed somewhere non-standard (a portable
     /// SDK, an IDE-bundled JDK, `/usr/lib/jvm/…`), so the index can still resolve the
@@ -71,6 +79,8 @@ impl Default for BennuConfig {
             indent_width: 4,
             preferred_build_type: "mvn".to_string(),
             validate_on_open: true,
+            autosave: true,
+            auto_import: true,
             jdk_paths: Vec::new(),
             jdk_overrides: BTreeMap::new(),
             encoding_overrides: BTreeMap::new(),
@@ -284,5 +294,19 @@ mod tests {
     fn empty_body_yields_empty_store() {
         assert!(parse_workspaces("").workspaces.is_empty());
         assert!(parse_workspaces("!!! not toml").workspaces.is_empty());
+    }
+
+    /// A config written before `autosave` / `auto_import` existed loads with them ON — the
+    /// container `#[serde(default)]` fills a missing field from `BennuConfig::default()` (→ `true`),
+    /// so upgrading users opt in rather than silently getting `false`.
+    #[test]
+    fn config_defaults_fill_missing_toggle_keys() {
+        let old = "default_encoding = \"UTF-8\"\nindent_width = 4\n";
+        let cfg: BennuConfig = toml::from_str(old).expect("parse");
+        assert!(cfg.autosave, "autosave defaults on");
+        assert!(cfg.auto_import, "auto_import defaults on");
+        // And round-trips.
+        let back: BennuConfig = toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
+        assert!(back.autosave && back.auto_import);
     }
 }

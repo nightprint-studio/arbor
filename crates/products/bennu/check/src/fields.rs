@@ -86,12 +86,10 @@ fn check_access(
         cm.fields.iter().any(|m| m.name == field_name && m.kind == MemberKind::Field)
     });
     if !has {
-        out.push(Diagnostic {
-            message: format!("Cannot resolve field `{field_name}` in `{}`", simple_name(&ty.binary_name)),
-            severity: "error".to_string(),
-            start: field.start_byte(),
-            end: field.end_byte(),
-        });
+        out.push(crate::check_id::CheckId::UnknownField.at(
+            field,
+            format!("Cannot resolve field `{field_name}` in `{}`", simple_name(&ty.binary_name)),
+        ));
     }
 }
 
@@ -126,6 +124,7 @@ mod tests {
         members.insert(
             "com/acme/Base".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: None,
                 interfaces: Vec::new(),
                 methods: Vec::new(),
@@ -136,6 +135,7 @@ mod tests {
         members.insert(
             "com/acme/Point".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("com/acme/Base".to_string()),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
@@ -146,6 +146,7 @@ mod tests {
         members.insert(
             "com/acme/Box".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: None,
                 interfaces: Vec::new(),
                 methods: Vec::new(),

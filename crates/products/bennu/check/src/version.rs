@@ -36,6 +36,7 @@ pub fn version_errors_nodes(root: Node, nodes: &[Node], source: &str, java_major
                         if feature.ends_with('s') { "" } else { "s" }
                     ),
                     severity: "error".to_string(),
+                    code: String::new(),
                     start,
                     end,
                 });

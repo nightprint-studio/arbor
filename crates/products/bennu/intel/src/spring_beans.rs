@@ -107,6 +107,7 @@ mod tests {
             is_abstract: false,
             is_final: false,
             is_sealed: false,
+            type_params: Vec::new(),
             methods: Vec::new(),
             fields: Vec::new(),
             extends: None,
@@ -116,7 +117,7 @@ mod tests {
     }
 
     fn marker(name: &str) -> Annotation {
-        Annotation { name: name.to_string(), value: None }
+        Annotation { name: name.to_string(), value: None, args: Vec::new() }
     }
 
     #[test]
@@ -133,7 +134,7 @@ mod tests {
         let td = typed(
             "FooService",
             "com.x.FooService",
-            vec![Annotation { name: "Service".into(), value: Some("custom".into()) }],
+            vec![Annotation { name: "Service".into(), value: Some("custom".into()), args: Vec::new() }],
         );
         assert_eq!(stereotype_bean(&td, "f.java").unwrap().name, "custom");
     }

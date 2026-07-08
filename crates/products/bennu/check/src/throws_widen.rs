@@ -298,6 +298,7 @@ fn err(message: String, node: Node) -> Diagnostic {
     Diagnostic {
         message,
         severity: "error".to_string(),
+        code: String::new(),
         start: node.start_byte(),
         end: node.end_byte(),
     }
@@ -334,6 +335,7 @@ mod tests {
     /// A no-superclass, no-interface, no-method exception-type node (for building the hierarchy).
     fn exc(superclass: Option<&str>) -> ClassMembers {
         ClassMembers {
+            type_params: Vec::new(),
             superclass: superclass.map(str::to_string),
             interfaces: Vec::new(),
             methods: Vec::new(),
@@ -386,6 +388,7 @@ mod tests {
     /// The default resolver: `Base.run() throws IOException`.
     fn resolver() -> MapResolver {
         let base = ClassMembers {
+            type_params: Vec::new(),
             superclass: Some("java/lang/Object".to_string()),
             interfaces: Vec::new(),
             methods: vec![run_throwing(&["java/io/IOException"])],
@@ -448,6 +451,7 @@ mod tests {
     fn super_throws_supertype_covers_subtype() {
         // Super declares `throws Exception`; SQLException <: Exception → permitted, not flagged.
         let base = ClassMembers {
+            type_params: Vec::new(),
             superclass: Some("java/lang/Object".to_string()),
             interfaces: Vec::new(),
             methods: vec![run_throwing(&["java/lang/Exception"])],
@@ -481,6 +485,7 @@ mod tests {
         // The declared throw resolves but extends an UNKNOWN base → checked classification untrustworthy
         // → SKIP.
         let base = ClassMembers {
+            type_params: Vec::new(),
             superclass: Some("java/lang/Object".to_string()),
             interfaces: Vec::new(),
             methods: vec![run_throwing(&["java/io/IOException"])],
@@ -532,6 +537,7 @@ mod tests {
         // check would flag "does not permit Exception" on perfectly legal code. The permitted-set
         // resolvability guard must SKIP instead (never a false positive).
         let base = ClassMembers {
+            type_params: Vec::new(),
             superclass: Some("java/lang/Object".to_string()),
             interfaces: Vec::new(),
             // Unresolved throws entry: `"Exception"` is NOT a key in the mock resolver's members.
@@ -551,6 +557,7 @@ mod tests {
         // Base and an interface Mixin both declare `run()` with DIFFERENT throws (IOException vs
         // SQLException) → ambiguous permitted set → SKIP (can't say which governs).
         let base = ClassMembers {
+            type_params: Vec::new(),
             superclass: Some("com/acme/Mixin".to_string()),
             interfaces: Vec::new(),
             methods: vec![run_throwing(&["java/io/IOException"])],
@@ -561,6 +568,7 @@ mod tests {
         r.members.insert(
             "com/acme/Mixin".into(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
                 methods: vec![run_throwing(&["java/sql/SQLException"])],

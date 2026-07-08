@@ -21,6 +21,12 @@ export interface BennuConfig {
   /** Warm up the whole-project validation cache in the background right after indexing, so the
    *  first "Validate (no compile)" is instant. `true` by default; off avoids the background CPU. */
   validate_on_open: boolean;
+  /** Autosave a modified buffer to disk automatically (after a short idle, on tab switch, and on
+   *  window blur). `true` by default; off saves only on Ctrl+S. */
+  autosave: boolean;
+  /** Auto-import on accepting a type-name completion whose simple name resolves to a SINGLE class.
+   *  `true` by default; off inserts just the name (import later with Alt+Enter). */
+  auto_import: boolean;
   /** Extra JDK install directories to search, on top of `JAVA_HOME` + the standard roots. */
   jdk_paths: string[];
   /** Per-project JDK override, keyed by absolute project-root path → Java version. */

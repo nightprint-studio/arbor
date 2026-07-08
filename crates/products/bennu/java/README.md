@@ -60,7 +60,7 @@ trait TypeResolver {
     fn resolve_simple_name(&self, name: &str, imports: &[Import]) -> Option<String>;
     fn is_project_type(&self, binary_name: &str) -> bool { true }                        // project source vs JDK/dep jar
 }
-struct ClassMembers { superclass: Option<String>, interfaces: Vec<String>, methods: Vec<Member>, fields: Vec<Member>, flags: ClassFlags }
+struct ClassMembers { superclass: Option<String>, interfaces: Vec<String>, methods: Vec<Member>, fields: Vec<Member>, flags: ClassFlags, type_params: Vec<String> }  // type_params: declared generic names, e.g. Map<K,V> → ["K","V"]
 struct Member { name, kind: MemberKind, return_type: TypeRef, params: Vec<TypeRef>, is_static, is_abstract, is_default, is_final, visibility, raw_signature }
 struct ClassFlags { is_interface, is_abstract, is_final, is_enum, is_annotation, is_record, is_sealed }  // decoded from bytecode
 ```

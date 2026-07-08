@@ -77,6 +77,19 @@ const FIELD_RE = new RegExp(
   String.raw`^\s*(?:(?:public|private|protected|static|final|transient|volatile)\s+)+` +
   String.raw`(${TYPE_TOK})\s+([A-Za-z_$]\w*)\s*[=;]`,
 );
+// INTERFACE-body variants: interface members are implicitly `public` and are normally written with
+// NO modifier at all (`ComunicazioneType getFoo();`, `int MAX = 3;`). The modifier-led regexes above
+// (`(?:…)+`) never match those, so an interface's methods/constants would vanish from the structure
+// view. These laxer forms make modifiers optional (`*`) but REQUIRE a return/field type token — which
+// keeps them from matching a bare statement (there are none in an interface body anyway) or a plain
+// method call. Applied ONLY when the enclosing type is an `interface` / `@interface`.
+const IFACE_METHOD_RE = new RegExp(
+  String.raw`^\s*(?:(?:public|private|protected|abstract|static|default)\s+)*` +
+  String.raw`(?:<[^>]*>\s*)?(${TYPE_TOK})\s+([A-Za-z_$]\w*)\s*\([^;{]*\)\s*(?:throws [\w.,\s]+)?\s*[{;]`,
+);
+const IFACE_FIELD_RE = new RegExp(
+  String.raw`^\s*(?:(?:public|static|final)\s+)*(${TYPE_TOK})\s+([A-Za-z_$]\w*)\s*[=;]`,
+);
 
 /** Declaration lines are short; a very long line is a body / minified / JSP line that
  *  can't hold a single declaration we care about. Skipping it is both a perf win and a
@@ -168,6 +181,9 @@ function scanDeclarations(source: string): RawDecl[] {
   const out: RawDecl[] = [];
   const lines = source.split(/\r?\n/);
   let depth = 0;
+  // Kind of the type opened at each depth, so a member at depth D can ask what kind its enclosing
+  // type (opened at D-1) is — `interface` members drop the modifier and need the laxer regexes.
+  const typeKindAtDepth: (JavaSymbolKind | undefined)[] = [];
   // Whether an `@Override` seen on a preceding annotation / blank / comment line is still
   // waiting to be attached to the method it annotates. Reset the moment a real declaration
   // or statement is consumed. Annotated to break the CFA inference cycle (it's reassigned
@@ -205,29 +221,41 @@ function scanDeclarations(source: string): RawDecl[] {
       } else {
         const t = TYPE_RE.exec(body);
         if (t) {
+          const kind = t[1] as JavaSymbolKind;
           out.push({
-            symbol: { kind: t[1] as JavaSymbolKind, name: t[2], line: i + 1, visibility: visibilityOf(body) },
+            symbol: { kind, name: t[2], line: i + 1, visibility: visibilityOf(body) },
             depth: lineDepth,
             isType: true,
           });
+          typeKindAtDepth[lineDepth] = kind;
+          typeKindAtDepth.length = lineDepth + 1;
           pendingOverride = false;
         } else if (!/^\s*(if|for|while|switch|catch|synchronized|return|new)\b/.test(trimmed)) {
-          const m = METHOD_RE.exec(body);
+          // Inside an interface body, members carry no modifier — try the laxer regexes as a
+          // fallback, and treat a modifier-less match as implicitly `public`.
+          const inInterface = lineDepth > 0 && typeKindAtDepth[lineDepth - 1] === 'interface';
+          const m = METHOD_RE.exec(body) ?? (inInterface ? IFACE_METHOD_RE.exec(body) : null);
           if (m) {
             const ret = (m[1] ?? '').trim();
+            const explicit = visibilityOf(body);
             out.push({
               symbol: {
                 kind: 'method', name: m[2], detail: ret || undefined, line: i + 1,
-                visibility: visibilityOf(body), overrides: overridePending || undefined,
+                visibility: inInterface && explicit === 'package' ? 'public' : explicit,
+                overrides: overridePending || undefined,
               },
               depth: lineDepth,
               isType: false,
             });
           } else {
-            const f = FIELD_RE.exec(body);
+            const f = FIELD_RE.exec(body) ?? (inInterface ? IFACE_FIELD_RE.exec(body) : null);
             if (f) {
+              const explicit = visibilityOf(body);
               out.push({
-                symbol: { kind: 'field', name: f[2], detail: f[1].trim(), line: i + 1, visibility: visibilityOf(body) },
+                symbol: {
+                  kind: 'field', name: f[2], detail: f[1].trim(), line: i + 1,
+                  visibility: inInterface && explicit === 'package' ? 'public' : explicit,
+                },
                 depth: lineDepth,
                 isType: false,
               });

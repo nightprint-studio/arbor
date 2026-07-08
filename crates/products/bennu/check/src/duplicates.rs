@@ -59,6 +59,7 @@ pub fn duplicate_signatures_nodes(nodes: &[Node], source: &str) -> Vec<Diagnosti
             out.push(Diagnostic {
                 message: format!("Duplicate {what}: another with the same signature is already declared"),
                 severity: "error".to_string(),
+                code: String::new(),
                 start: name_node.start_byte(),
                 end: name_node.end_byte(),
             });

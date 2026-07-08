@@ -99,7 +99,7 @@ pub fn parse_jsp_forms(source: &str) -> Vec<JspForm> {
 /// Convenience: read `path` and [`parse_jsp_forms`] it. A read error yields no forms
 /// (skip-and-continue — mirrors [`crate::jsp::parse_jsp_file`]).
 pub fn parse_jsp_forms_file(path: &Path) -> Vec<JspForm> {
-    match std::fs::read_to_string(path) {
+    match crate::io::read_to_string_lf(path) {
         Ok(text) => parse_jsp_forms(&text),
         Err(_) => Vec::new(),
     }
@@ -158,7 +158,7 @@ pub fn parse_jsp_fields(source: &str) -> Vec<JspFormField> {
 
 /// Convenience: read `path` and [`parse_jsp_fields`] it. A read error yields no fields.
 pub fn parse_jsp_fields_file(path: &Path) -> Vec<JspFormField> {
-    match std::fs::read_to_string(path) {
+    match crate::io::read_to_string_lf(path) {
         Ok(text) => parse_jsp_fields(&text),
         Err(_) => Vec::new(),
     }

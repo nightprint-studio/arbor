@@ -57,6 +57,7 @@ pub fn unresolved_imports(
             out.push(Diagnostic {
                 message: format!("Cannot resolve import `{dotted}`"),
                 severity: "error".to_string(),
+                code: String::new(),
                 start: name_node.start_byte(),
                 end: name_node.end_byte(),
             });
@@ -135,6 +136,7 @@ pub fn redundant_imports(root: Node, source: &str) -> Vec<Diagnostic> {
             out.push(Diagnostic {
                 message: format!("Redundant import `{package}.*` — {reason}"),
                 severity: "warning".to_string(),
+                code: String::new(),
                 start: child.start_byte(),
                 end: child.end_byte(),
             });
@@ -177,6 +179,7 @@ pub fn duplicate_imports(root: Node, source: &str) -> Vec<Diagnostic> {
             out.push(Diagnostic {
                 message: "Duplicate import".to_string(),
                 severity: "warning".to_string(),
+                code: String::new(),
                 start: child.start_byte(),
                 end: child.end_byte(),
             });
@@ -204,6 +207,7 @@ pub fn unused_imports(root: Node, source: &str) -> Vec<Diagnostic> {
         out.push(Diagnostic {
             message: format!("Unused import `{}`", imp.simple),
             severity: "warning".to_string(),
+            code: String::new(),
             start: imp.start,
             end: imp.end,
         });
@@ -337,6 +341,7 @@ mod tests {
         fn members_of(&self, binary: &str) -> Option<std::sync::Arc<bennu_java::prelude::ClassMembers>> {
             self.0.contains(binary).then(|| {
                 std::sync::Arc::new(bennu_java::prelude::ClassMembers {
+                    type_params: Vec::new(),
                     superclass: None,
                     interfaces: Vec::new(),
                     methods: Vec::new(),

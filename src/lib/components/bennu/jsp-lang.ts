@@ -20,6 +20,8 @@ import { css } from '@codemirror/legacy-modes/mode/css';
 import type { StreamParser } from '@codemirror/language';
 import type { LanguageDescriptor, TokenClass } from '$lib/components/shared/ui/code-editor';
 import { elOgnlStream } from './jsp-el';
+import { makeHoverSource } from './bennu-hover';
+import { actionPropertyHover } from '$lib/ipc/bennu/nav';
 
 const RUNTIME_WASM = '/bennu/tree-sitter.wasm';
 const GRAMMAR_WASM = '/bennu/tree-sitter-jsp.wasm';
@@ -129,5 +131,8 @@ export const jspLanguage: LanguageDescriptor = {
     el_expression: elOgnlStream as unknown as StreamParser<unknown>,
     ognl_expression: elOgnlStream as unknown as StreamParser<unknown>,
   },
-  // intel: EL / action / taglib completion + hover — reserved for a later wave.
+  // Hover: an OGNL value-stack root / form-field name / validation `<field>` resolves to the bound
+  // action class's property — the card shows its TYPE (`String customer`, `List<Item> items`) and the
+  // owning action. EL/taglib completion is still reserved for a later wave.
+  intel: { hover: makeHoverSource((path, src, byteOffset) => actionPropertyHover(path, src, byteOffset)) },
 };

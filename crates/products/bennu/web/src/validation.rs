@@ -25,7 +25,7 @@ pub use crate::validation_author::{
 /// Parse a single `<Action>-validation.xml` `file` off disk. Returns `None` when the file name is
 /// not a validation file, the file can't be read, or it doesn't parse (skip-and-continue).
 pub fn parse_file(file: &Path) -> Option<ValidationRecord> {
-    let text = std::fs::read_to_string(file).ok()?;
+    let text = crate::io::read_to_string_lf(file).ok()?;
     parse_text(file, &text)
 }
 
@@ -145,6 +145,41 @@ mod tests {
         let types: Vec<&str> = user.validators.iter().map(|v| v.type_name.as_str()).collect();
         assert_eq!(types, vec!["requiredstring", "stringlength"]);
         assert!(user.name_offset > 0);
+    }
+
+    #[test]
+    fn cdata_messages_do_not_break_field_offsets() {
+        // A realistic Struts validation file: `<?xml?>` + external DOCTYPE + `<message>` bodies wrapped
+        // in CDATA that contain the very characters (`<`, `>`, `&`, `"`) and multibyte glyphs that would
+        // wreck a naive tag scanner. roxmltree handles CDATA, so both fields parse AND — critically —
+        // each `name_offset` still points at the exact bytes of the field name, even the second field
+        // that sits AFTER a multibyte CDATA block.
+        let xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+            <!DOCTYPE validators PUBLIC \"-//Apache Struts//XWork Validator 1.0.3//EN\" \
+             \"http://struts.apache.org/dtds/xwork-validator-1.0.3.dtd\">\n\
+            <validators>\n\
+              <field name=\"username\">\n\
+                <field-validator type=\"requiredstring\">\n\
+                  <message><![CDATA[Serve un <b>valore</b> & \"virgolette\" — con accento à]]></message>\n\
+                </field-validator>\n\
+              </field>\n\
+              <field name=\"email\">\n\
+                <field-validator type=\"email\"><message><![CDATA[email non valida]]></message></field-validator>\n\
+              </field>\n\
+            </validators>";
+        let rec = parse_text(Path::new("OpenPageAction-validation.xml"), xml)
+            .expect("parses with <?xml?> + DOCTYPE + CDATA");
+        assert_eq!(rec.fields.len(), 2, "both fields found past the CDATA: {:?}",
+            rec.fields.iter().map(|f| &f.name).collect::<Vec<_>>());
+        for f in &rec.fields {
+            let slice = &xml.as_bytes()[f.name_offset..f.name_offset + f.name.len()];
+            assert_eq!(
+                std::str::from_utf8(slice).unwrap(),
+                f.name,
+                "name_offset must point exactly at `{}` in the raw bytes (CDATA must not shift it)",
+                f.name,
+            );
+        }
     }
 
     #[test]

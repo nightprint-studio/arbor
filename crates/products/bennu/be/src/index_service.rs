@@ -78,11 +78,43 @@ fn index_base_for(root: &str) -> PathBuf {
     arbor_core::prelude::bennu_data_dir().join("index").join(format!("{hash:016x}"))
 }
 
+/// Where a decompiled-from-bytecode stub for `binary` is cached: `bennu_data_dir()/decompiled/<pkg
+/// dirs>/<Simple>.java`. Laying it out by package + simple name (not the raw binary) keeps the file
+/// stem matching the declared type, so the editor opens it as a normal `.java` (no name-mismatch
+/// noise). `$`-nested types collapse to their innermost simple name (a rare cosmetic case).
+/// Whether `file` is a generated decompiled-from-bytecode stub (under `bennu_data_dir()/decompiled/`).
+/// Such files are read-only JDK/dependency views, never validated. `Path::starts_with` matches
+/// component-wise, so a forward-slashed FE path and the native data dir still compare correctly.
+fn is_decompiled_stub(file: &str) -> bool {
+    let root = arbor_core::prelude::bennu_data_dir().join("decompiled");
+    Path::new(file).starts_with(&root)
+}
+
+fn decompiled_cache_path(binary: &str) -> PathBuf {
+    let simple = binary.rsplit(['/', '$']).next().unwrap_or(binary);
+    let mut path = arbor_core::prelude::bennu_data_dir().join("decompiled");
+    if let Some((pkg, _)) = binary.rsplit_once('/') {
+        for seg in pkg.split('/').filter(|s| !s.is_empty()) {
+            path = path.join(seg);
+        }
+    }
+    path.join(format!("{simple}.java"))
+}
+
+/// The serialized-schema version of the persisted JDK member index. **Bump this whenever the shape
+/// of the decoded `ClassMembers`/`Member` changes** (a new field like `throws` or `type_params`, a
+/// renamed field, …). It's part of the cache filename, so a bump makes every project re-decode the
+/// JDK from bytecode instead of loading a stale memo whose new fields would `serde(default)` to empty
+/// — the reason, e.g., method `throws` clauses went missing from decompiled stubs after `throws` was
+/// added without invalidating the old cache.
+///   v2: added `Member::throws` + `ClassMembers::type_params`.
+const JDK_INDEX_SCHEMA: u32 = 2;
+
 /// The **shared, cross-session** JDK member-index path for `jdk_version`:
-/// `bennu_data_dir()/jdk-index/<major>-<hash-of-home>.json`. Keyed by the RESOLVED JDK (home +
-/// major) — not the requested version — so every project that resolves to the same JDK reuses one
-/// memo, and two different JDKs never share (a cached miss is only valid for its own JDK). `None`
-/// when no JDK resolves (the index then stays in-memory, re-parsing as today).
+/// `bennu_data_dir()/jdk-index/v<schema>-<major>-<hash-of-home>.json`. Keyed by the schema version +
+/// the RESOLVED JDK (home + major) — not the requested version — so every project that resolves to
+/// the same JDK reuses one memo, two different JDKs never share, and a schema change invalidates old
+/// memos. `None` when no JDK resolves (the index then stays in-memory, re-parsing as today).
 fn jdk_index_path(jdk_version: &str) -> Option<PathBuf> {
     let status = bennu_classpath::prelude::jdk_status(jdk_version);
     let home = status.resolved_home?;
@@ -92,7 +124,11 @@ fn jdk_index_path(jdk_version: &str) -> Option<PathBuf> {
         hash ^= *b as u64;
         hash = hash.wrapping_mul(0x100000001b3);
     }
-    Some(arbor_core::prelude::bennu_data_dir().join("jdk-index").join(format!("{major}-{hash:016x}.json")))
+    Some(
+        arbor_core::prelude::bennu_data_dir()
+            .join("jdk-index")
+            .join(format!("v{JDK_INDEX_SCHEMA}-{major}-{hash:016x}.json")),
+    )
 }
 
 /// A stable, filesystem-safe FNV-1a hash of an absolute root — the per-root cache dir name.
@@ -275,6 +311,25 @@ pub struct IndexService {
     /// new warm-up running unnotified ("card done but CPU still at ~70%"). Separate from the on-disk
     /// `g<NNN>` gen dir counter (which is filesystem-collision-safe across process restarts).
     build_gen: Mutex<HashMap<PathBuf, u64>>,
+    /// Per-file **out-of-code-block** validation cache (keyed by the FE file path): the diagnostics of
+    /// each method / constructor body, so re-validating the live buffer after an edit re-runs only the
+    /// body that changed. Threaded through [`IndexService::validate_java`] (the resolved tier); the
+    /// whole-project run doesn't use it. Taken out for the duration of a validation and put back after,
+    /// so concurrent validations of the SAME file simply fall back to a full run (never a wrong result).
+    incremental: Mutex<HashMap<PathBuf, bennu_check::prelude::IncrementalCache>>,
+    /// Buffer-edit counters that make an incremental cache safe across files: `total` bumps on every
+    /// Java `patch_file`, and `per_file[f]` counts f's own patches. A file A's "resolver revision" is
+    /// `build_gen[root]` combined with `total − per_file[A]` = the number of edits to OTHER files since
+    /// A was last edited — so editing A never invalidates A's own cache (its structure is captured
+    /// separately), but editing another file A depends on does.
+    patch_counts: Mutex<PatchCounts>,
+}
+
+/// Buffer-edit bookkeeping for [`IndexService::patch_counts`] — see that field.
+#[derive(Default)]
+struct PatchCounts {
+    total: u64,
+    per_file: HashMap<PathBuf, u64>,
 }
 
 /// Resolve the source encoding label to index a project at `root` in: a per-project config
@@ -300,6 +355,8 @@ impl IndexService {
             include_caches: Mutex::new(HashMap::new()),
             include_synced: Mutex::new(HashSet::new()),
             build_gen: Mutex::new(HashMap::new()),
+            incremental: Mutex::new(HashMap::new()),
+            patch_counts: Mutex::new(PatchCounts::default()),
         })
     }
 
@@ -529,49 +586,52 @@ impl IndexService {
             // still-mapped dir is left for the next open's GC (non-fatal on Windows).
             gc_old_gens(&index_base, gen);
 
-            // Warm up the whole-project VALIDATION cache (opt-in, default on) BEFORE marking the
-            // index "ready", as its OWN visible "validation" phase. With the dependency tier this
-            // decodes library bytecode across the WHOLE project — real, CPU-heavy work — so if it ran
-            // silently AFTER `ready` (as it used to) the progress card would finish while the CPU was
-            // still pegged at ~70% ("the card says done but the machine is still working"). Gating
-            // `ready` on it keeps the card open until the work is genuinely finished. Completion /
-            // navigation are ALREADY live (they don't depend on `ready`), so this holds only the
-            // CARD open, never the editor. Reuses the already-read `sources` (no second disk pass);
-            // a background citizen (leaves ~2 cores free); skipped when no resolver.
-            // A rebuild landed during the reference walk → bail before the (heaviest) warm-up and
-            // before the terminal `ready`, so the superseded thread neither pegs the CPU on a
-            // throwaway whole-project validation nor closes the new build's card.
+            // A rebuild landed during the reference walk → this gen is stale; the newer build owns
+            // the progress card and will emit its own `ready`. Bail before marking ready.
             if svc.superseded(&root_path, my_gen) {
                 eprintln!(
-                    "bennu-be: build gen {my_gen} for {} superseded — bailing before warm-up",
+                    "bennu-be: build gen {my_gen} for {} superseded — bailing before ready",
                     root_path.display()
                 );
                 return;
             }
 
-            if bennu_core::config::load().validate_on_open {
+            // Index + engines are swapped in and completion / navigation are ALREADY live → mark the
+            // project READY NOW, BEFORE the (minutes-long on a big project) whole-project validation
+            // warm-up. The editor must be usable immediately; project-wide validation is a background
+            // citizen that catches up after, exactly like IntelliJ's daemon (editor first, analysis
+            // streams in). Gating `ready` on the warm-up made a 1.3k-file project feel like a 2-minute
+            // boot for zero interactive benefit — completion / go-to don't depend on it, and per-file
+            // diagnostics on open are served from (or lazily fill) the same cache regardless.
+            slot.ready.store(true, Ordering::Relaxed);
+            emit_progress(&sink, &root_str, "ready", "end");
+
+            // Whole-project VALIDATION warm-up (opt-in `validate_on_open`, default on) — now a pure
+            // BACKGROUND pass AFTER `ready`, on this same build thread. It pre-fills the persisted
+            // diagnostic cache (so opening a file + the explicit "Validate" are instant) and warms the
+            // persistent JDK / dependency member cache as a side effect. Skipped when the project is
+            // byte-for-byte unchanged since the last warm-up (the persisted cache is still valid) or
+            // when a rebuild has already superseded this gen. Cancellable: a rebuild bumps the gen and
+            // this thread stops. Leaves ~2 cores free. The `validation` progress phase is still emitted
+            // but is harmless — the FE has already latched `ready` and drops non-`ready` events — and
+            // is the hook for a future non-blocking "analyzing project…" chip.
+            if bennu_core::config::load().validate_on_open
+                && !svc.superseded(&root_path, my_gen)
+                && !svc.warmup_up_to_date(&root_str, &sources)
+            {
                 emit_progress(&sink, &root_str, "validation", "start");
                 warm_up_validation_cache(&root_str, &sources);
+                // Only stamp "up to date" when this gen is still current — a warm-up superseded
+                // mid-run must not record a marker the winning build would trust and then skip its
+                // own warm-up over possibly-different sources.
+                if !svc.superseded(&root_path, my_gen) {
+                    svc.record_warmup_stamp(&root_str, &sources);
+                }
                 emit_progress(&sink, &root_str, "validation", "end");
             }
 
-            // A rebuild could have landed DURING the warm-up (minutes on a big project) — re-check so
-            // the stale terminal `ready` is suppressed even then. The new build owns the card now.
-            if svc.superseded(&root_path, my_gen) {
-                eprintln!(
-                    "bennu-be: build gen {my_gen} for {} superseded during warm-up — suppressing ready",
-                    root_path.display()
-                );
-                return;
-            }
-
-            // Everything (index + engines + warm-up) is done → flip `ready` (drives
-            // `index_stats.ready` → the FE poll's safety-net finish) THEN emit the terminal "ready".
-            slot.ready.store(true, Ordering::Relaxed);
-            emit_progress(&sink, &root_str, "ready", "end");
-            // Diagnostic (idle-CPU investigation): confirms the build thread reaches its end
-            // and exits. If bennu-be still burns CPU after this line logs, the spinner is NOT
-            // this thread (look to a dependency / a thread it left behind).
+            // Diagnostic (idle-CPU investigation): confirms the build thread reaches its end and
+            // exits. If bennu-be still burns CPU after this line logs, the spinner is NOT this thread.
             eprintln!("bennu-be: index build thread exiting for {}", root_path.display());
         });
     }
@@ -667,7 +727,19 @@ impl IndexService {
     /// Validate a Java `file` over its owning project's provider (AST checks + the resolver-backed
     /// unknown-member check when the index is built). `source` is the live buffer. Falls back to the
     /// pure AST checks when no project owns the file / its index isn't built yet.
-    pub fn validate_java(&self, file: &str, source: &str) -> Vec<bennu_proto::prelude::Diagnostic> {
+    ///
+    /// `resolved` picks the tier: `false` runs ONLY the fast pure-AST checks (syntax / structure /
+    /// unused imports — cheap, no type inference), `true` runs the full resolver-backed pass on top.
+    /// The FE fires the fast tier on a short debounce and the full tier on a longer idle debounce, so
+    /// a large file paints syntax squiggles immediately while the ~0.7s semantic pass catches up.
+    pub fn validate_java(&self, file: &str, source: &str, resolved: bool) -> Vec<bennu_proto::prelude::Diagnostic> {
+        // A decompiled-from-bytecode stub — a JDK / dependency class opened via Ctrl+B — is a
+        // signature-only, body-less, read-only view. Running the validator on it only produces useless
+        // noise (missing returns for body-less methods, unresolved references to types we didn't
+        // decompile, …), so skip validation on it entirely.
+        if is_decompiled_stub(file) {
+            return Vec::new();
+        }
         let path = Path::new(file);
         let file_stem = path.file_stem().and_then(|s| s.to_str()).map(str::to_string);
         // Expected package from the file's location under its source root (`src/main/java/...`).
@@ -692,11 +764,51 @@ impl IndexService {
             // on the slot). Absent → the unresolved-import check adjudicates only `java.*`.
             classpath_complete: !slot.dep_jars.read().unwrap_or_else(|p| p.into_inner()).is_empty(),
         };
+        // Fast tier: only the pure-AST checks — no provider / resolver / inference. This is the cheap
+        // pass the FE fires on a short debounce for instant syntax squiggles on a big file.
+        if !resolved {
+            return bennu_check::prelude::check_file(source, &ctx);
+        }
         let provider = {
             let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
             Arc::clone(&g)
         };
-        provider.validate(source, &ctx, status.any_installed)
+        // Full tier: reuse the per-file out-of-code-block cache so a re-validation after typing inside
+        // one method re-runs only that method's body. Take the cache out for the run and put it back
+        // after — a concurrent validation of the SAME file just finds none and does a full run (still
+        // correct). Keyed by the FE `file` string, exactly as `patch_file` counts edits.
+        let file_key = PathBuf::from(file);
+        let resolver_rev = self.resolver_rev_for(&slot.root, &file_key);
+        let mut cache = {
+            let mut g = self.incremental.lock().unwrap_or_else(|p| p.into_inner());
+            g.remove(&file_key).unwrap_or_default()
+        };
+        let out = provider.validate_incremental(source, &ctx, status.any_installed, resolver_rev, &mut cache);
+        {
+            let mut g = self.incremental.lock().unwrap_or_else(|p| p.into_inner());
+            g.insert(file_key, cache);
+        }
+        out
+    }
+
+    /// The "resolver revision" for `file` — combined with the per-body text hash + the structural hash,
+    /// it gates reuse of the out-of-code-block cache. It changes when the project index rebuilds
+    /// (`build_gen`) OR when a file OTHER than `file` is edited (`total − per_file[file]`), so a cached
+    /// body is never replayed against a type that has since moved. Editing `file` itself does NOT
+    /// change it (that file's own structure is captured by the cache's structural hash).
+    fn resolver_rev_for(&self, root: &Path, file: &Path) -> u64 {
+        let build = self
+            .build_gen
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(root)
+            .copied()
+            .unwrap_or(0);
+        let cross = {
+            let g = self.patch_counts.lock().unwrap_or_else(|p| p.into_inner());
+            g.total.wrapping_sub(g.per_file.get(file).copied().unwrap_or(0))
+        };
+        build.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(cross)
     }
 
     /// Validate every file in `files` (`(path, source)`) for a WHOLE-PROJECT run, in PARALLEL,
@@ -842,6 +954,54 @@ impl IndexService {
     pub fn diag_cache_save(&self, root: &str, cache: &bennu_intel::prelude::DiagCache) {
         let base = index_base_for(root);
         bennu_intel::prelude::save_diag_cache(&bennu_intel::prelude::diag_cache_path(&base), cache);
+    }
+
+    /// A content stamp of the whole project's `.java` set for the warm-up short-circuit: the
+    /// classpath/JDK epoch + a hash over every file's (path, content-hash). Two opens produce the
+    /// SAME stamp iff nothing that could change a diagnostic changed — same files, same bytes, same
+    /// classpath — so the warm-up can be skipped entirely (no re-validation, no progress card) rather
+    /// than re-serving the persisted cache file-by-file on every startup. Any edit (content), added /
+    /// removed file, or JDK/dependency change flips it, so a real change still re-warms.
+    fn warmup_stamp(&self, root: &str, sources: &[(PathBuf, String)]) -> u64 {
+        let mut entries: Vec<(String, u64)> = sources
+            .iter()
+            .map(|(p, s)| (norm_path(p), bennu_intel::prelude::source_hash(s)))
+            .collect();
+        entries.sort_unstable();
+        let mut seed = format!("{}\0", self.diag_epoch(root));
+        for (p, h) in &entries {
+            seed.push_str(p);
+            seed.push('\0');
+            seed.push_str(&h.to_string());
+            seed.push('\0');
+        }
+        bennu_intel::prelude::source_hash(&seed)
+    }
+
+    /// The on-disk warm-up stamp path for `root` (stable, under the index base like the diag cache).
+    fn warmup_stamp_path(&self, root: &str) -> PathBuf {
+        index_base_for(root).join("warmup-stamp")
+    }
+
+    /// Whether the warm-up for `root` can be SKIPPED: the current project stamp equals the one
+    /// recorded after the last successful warm-up. `false` (→ warm up) on any mismatch / missing
+    /// stamp / read error.
+    pub fn warmup_up_to_date(&self, root: &str, sources: &[(PathBuf, String)]) -> bool {
+        let stamp = self.warmup_stamp(root, sources);
+        std::fs::read_to_string(self.warmup_stamp_path(root))
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            == Some(stamp)
+    }
+
+    /// Record the current project stamp after a successful warm-up (best-effort), so the next open
+    /// with an unchanged project skips the warm-up.
+    pub fn record_warmup_stamp(&self, root: &str, sources: &[(PathBuf, String)]) {
+        let path = self.warmup_stamp_path(root);
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, self.warmup_stamp(root, sources).to_string());
     }
 
     /// The classpath/JDK epoch for the project at `root` — a hash of the JDK level it was opened at
@@ -1136,11 +1296,64 @@ impl IndexService {
     /// isn't on a symbol we can classify. Mirrors [`find_usages`](Self::find_usages).
     pub fn hover(&self, file: &str, source: &str, offset: usize) -> Option<HoverInfo> {
         let slot = self.slot_for_file(file)?;
+        // 1. The reference-index classifier: fields / methods / types (with Javadoc).
         let engine = {
             let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
             g.as_ref().map(Arc::clone)
-        }?;
-        engine.hover(file, source, offset).map(hover_info_of)
+        };
+        if let Some(engine) = engine {
+            if let Some(info) = engine.hover(file, source, offset) {
+                return Some(hover_info_of(info));
+            }
+        }
+        // 2. Fallback: a local variable / parameter isn't keyed in the reference index — resolve its
+        //    TYPE via the provider's full (JDK-aware) resolver, so hovering a `var`/`val` (or any
+        //    local) shows what it is. Runs on the provider, not the rename engine (which is
+        //    project-only and can't type a JDK `var`).
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.var_hover(source, offset).map(hover_info_of)
+    }
+
+    /// Resolve the library/JDK type `name` references in `source` to a **decompiled Java stub** on
+    /// disk (signatures only), returning `(stub_path, offset)` for go-to. The stub is generated from
+    /// the class's bytecode-decoded members and cached under the profile's data dir, so a second
+    /// go-to reuses it. `None` when `name` doesn't resolve, is a PROJECT type (real source exists), or
+    /// its bytecode isn't decodable. `offset` is currently the top of the file (member-precise jumps
+    /// are a follow-up).
+    pub fn decompiled_stub(&self, file: &str, source: &str, name: &str) -> Option<(String, usize)> {
+        let slot = self.slot_for_file(file)?;
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        let (text, binary) = provider.decompiled_source(source, name)?;
+        let path = decompiled_cache_path(&binary);
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).ok()?;
+        }
+        // Only rewrite when missing/changed (a warm stub opens instantly and keeps a stable mtime).
+        let fresh = std::fs::read_to_string(&path).map(|c| c == text).unwrap_or(false);
+        if !fresh {
+            std::fs::write(&path, &text).ok()?;
+        }
+        Some((path.to_string_lossy().replace('\\', "/"), 0))
+    }
+
+    /// Importable FQNs (dotted, sorted) for a simple type `name`, from the owning project's class-name
+    /// index (JDK + dependency + project types). Empty when no project owns `file` or its index isn't
+    /// built. Powers the "Import class" intention's candidate list.
+    pub fn import_candidates(&self, file: &str, name: &str) -> Vec<String> {
+        let Some(slot) = self.slot_for_file(file) else {
+            return Vec::new();
+        };
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.import_candidates(name).to_vec()
     }
 
     /// A cheap snapshot of the index for the project rooted at `root` (the index
@@ -1307,6 +1520,16 @@ impl IndexService {
         }
 
         let file_path = PathBuf::from(file);
+
+        // Buffer-edit bookkeeping for the out-of-code-block cache: bump the global count + this file's
+        // own count. A file A's resolver revision is `total − per_file[A]`, so editing A leaves A's own
+        // cache valid (both counts rise together) while it invalidates every OTHER file's cache that
+        // might depend on A's now-changed types.
+        {
+            let mut g = self.patch_counts.lock().unwrap_or_else(|p| p.into_inner());
+            g.total = g.total.wrapping_add(1);
+            *g.per_file.entry(file_path.clone()).or_insert(0) += 1;
+        }
 
         // Update the project-wide simple→binary map from the edited file's OWN type decls
         // (a renamed/added/removed type in THIS file), without re-scanning the project.
@@ -2080,6 +2303,15 @@ mod tests {
         assert_eq!(bean_property_name("Username"), "username");
         assert_eq!(bean_property_name("URL"), "URL");
         assert_eq!(bean_property_name("X"), "x");
+    }
+
+    #[test]
+    fn decompiled_stub_paths_are_recognised() {
+        // A path under the decompiled cache dir is a stub (skip validation); a project path is not.
+        let stub = decompiled_cache_path("javax/crypto/Cipher");
+        assert!(is_decompiled_stub(&stub.to_string_lossy()), "{}", stub.display());
+        assert!(!is_decompiled_stub("C:/proj/src/main/java/com/acme/Foo.java"));
+        assert!(!is_decompiled_stub("/home/u/proj/src/main/java/Foo.java"));
     }
 
     #[test]

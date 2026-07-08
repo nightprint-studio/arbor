@@ -59,6 +59,12 @@ pub struct Annotation {
     pub name: String,
     /// The unquoted contents of the annotation's first string-literal argument, if any.
     pub value: Option<String>,
+    /// The `name = value` pairs of the annotation, with each value kept as raw source text
+    /// (`@Accessors(fluent = true, prefix = "m")` → `[("fluent","true"),("prefix","\"m\"")]`).
+    /// Lets consumers read non-string flags (Lombok `@Accessors` `fluent`/`chain`/`prefix`) that
+    /// the single-string `value` can't carry. Empty for a marker or bare-value annotation.
+    #[serde(default)]
+    pub args: Vec<(String, String)>,
 }
 
 /// A field of a type: its name and its declared type (as written in source).
@@ -140,6 +146,11 @@ pub struct TypeDecl {
     /// A `sealed` class/interface (a `permits` list restricts its subtypes).
     #[serde(default)]
     pub is_sealed: bool,
+    /// The declared generic type-parameter NAMES, in order (`class Pair<L, R>` → `["L","R"]`). Empty
+    /// for a non-generic type. Drives exact positional generic substitution downstream (a method
+    /// returning `R` maps to the receiver's 2nd type argument). `#[serde(default)]` for old indexes.
+    #[serde(default)]
+    pub type_params: Vec<String>,
     pub methods: Vec<MethodDecl>,
     pub fields: Vec<FieldDecl>,
     /// The `extends` clause type text, if any.
@@ -288,38 +299,22 @@ fn collect_type(
     if let Some(body) = node.child_by_field_name("body") {
         let mut bw = body.walk();
         for m in body.named_children(&mut bw) {
-            match m.kind() {
-                "method_declaration" => {
-                    if let Some(md) = parse_method(&m, bytes, is_interface) {
-                        methods.push(md);
-                    }
+            // An ENUM's fields / methods / constructors don't sit directly in the body — they live in
+            // an `enum_body_declarations` node (the part after the constants' `;`). Descend into it so
+            // an enum's own fields (`this.sqlCriteriaValue`) and methods resolve like any class's.
+            if m.kind() == "enum_body_declarations" {
+                let mut ew = m.walk();
+                for em in m.named_children(&mut ew) {
+                    collect_body_member(&em, bytes, is_interface, package, &fqn, &mut methods, &mut fields, out);
                 }
-                // Constructors are indexed as `<init>` members (like bytecode) so the super-constructor,
-                // unhandled-exception-from-`new`, and constructor-arity checks work on project types.
-                "constructor_declaration" => {
-                    if let Some(md) = parse_constructor(&m, bytes) {
-                        methods.push(md);
-                    }
-                }
-                // `constant_declaration` is an interface's `int MAX = 100;` — same shape as a
-                // field (type + declarators), just a different node kind, so index it as a field
-                // so a bare / qualified constant reference resolves like any other field.
-                "field_declaration" | "constant_declaration" => {
-                    parse_field(&m, bytes, is_interface, &mut fields);
-                }
-                "class_declaration"
-                | "interface_declaration"
-                | "enum_declaration"
-                | "record_declaration"
-                | "annotation_type_declaration" => {
-                    collect_type(&m, bytes, package, Some(&fqn), out);
-                }
-                _ => {}
+            } else {
+                collect_body_member(&m, bytes, is_interface, package, &fqn, &mut methods, &mut fields, out);
             }
         }
     }
 
     let annotations = collect_annotations(node, bytes);
+    let type_params = type_param_names(node, bytes);
     out.push(TypeDecl {
         name,
         fqn,
@@ -327,6 +322,7 @@ fn collect_type(
         is_abstract,
         is_final,
         is_sealed,
+        type_params,
         methods,
         fields,
         extends,
@@ -335,11 +331,86 @@ fn collect_type(
     });
 }
 
+/// Collect one member node of a type body into `methods` / `fields` (or recurse for a nested type).
+/// Shared by the class/interface body loop and the enum's `enum_body_declarations` loop.
+#[allow(clippy::too_many_arguments)]
+fn collect_body_member(
+    m: &Node,
+    bytes: &[u8],
+    is_interface: bool,
+    package: Option<&str>,
+    fqn: &str,
+    methods: &mut Vec<MethodDecl>,
+    fields: &mut Vec<FieldDecl>,
+    out: &mut Vec<TypeDecl>,
+) {
+    match m.kind() {
+        "method_declaration" => {
+            if let Some(md) = parse_method(m, bytes, is_interface) {
+                methods.push(md);
+            }
+        }
+        // Constructors are indexed as `<init>` members (like bytecode) so the super-constructor,
+        // unhandled-exception-from-`new`, and constructor-arity checks work on project types.
+        "constructor_declaration" => {
+            if let Some(md) = parse_constructor(m, bytes) {
+                methods.push(md);
+            }
+        }
+        // An `@interface` element (`String value();`, `int count() default 3;`) IS a public abstract
+        // no-arg method of the annotation type at the bytecode level. Index it as such so a
+        // `myAnno.value()` access resolves its method (otherwise it false-flags "cannot resolve").
+        "annotation_type_element_declaration" => {
+            if let Some(md) = parse_annotation_element(m, bytes) {
+                methods.push(md);
+            }
+        }
+        // `constant_declaration` is an interface's `int MAX = 100;` — same shape as a field (type +
+        // declarators), just a different node kind, so index it as a field so a bare / qualified
+        // constant reference resolves like any other field.
+        "field_declaration" | "constant_declaration" => {
+            parse_field(m, bytes, is_interface, fields);
+        }
+        "class_declaration"
+        | "interface_declaration"
+        | "enum_declaration"
+        | "record_declaration"
+        | "annotation_type_declaration" => {
+            collect_type(m, bytes, package, Some(fqn), out);
+        }
+        _ => {}
+    }
+}
+
 /// Collect a declaration's annotations from its `modifiers` node. A `marker_annotation`
 /// (`@Getter`) or `annotation` (`@Getter(...)`) contributes its name's LAST segment
 /// (`lombok.Getter` → `Getter`) as [`Annotation::name`], plus the unquoted contents of its
 /// first string-literal argument (`@Service("foo")` / `@Service(value="foo")` → `foo`) as
 /// [`Annotation::value`] when present. Empty when the node has no annotations.
+/// The declared generic type-parameter names of a type declaration, in order (`class Pair<L, R>` →
+/// `["L", "R"]`). Reads the node's `type_parameters` field; each `type_parameter`'s name is its first
+/// `type_identifier` child. Empty for a non-generic type.
+fn type_param_names(node: &Node, bytes: &[u8]) -> Vec<String> {
+    let Some(tps) = node.child_by_field_name("type_parameters") else { return Vec::new() };
+    let mut out = Vec::new();
+    let mut c = tps.walk();
+    for tp in tps.named_children(&mut c) {
+        if tp.kind() != "type_parameter" {
+            continue;
+        }
+        let mut tc = tp.walk();
+        for ch in tp.named_children(&mut tc) {
+            if ch.kind() == "type_identifier" {
+                if let Some(t) = node_text(&ch, bytes) {
+                    out.push(t);
+                }
+                break;
+            }
+        }
+    }
+    out
+}
+
 fn collect_annotations(node: &Node, bytes: &[u8]) -> Vec<Annotation> {
     let mut out = Vec::new();
     let mut cw = node.walk();
@@ -353,7 +424,8 @@ fn collect_annotations(node: &Node, bytes: &[u8]) -> Vec<Annotation> {
                 if let Some(name) = a.child_by_field_name("name").and_then(|n| node_text(&n, bytes)) {
                     let simple = name.rsplit('.').next().unwrap_or(&name).to_string();
                     let value = annotation_string_value(&a, bytes);
-                    out.push(Annotation { name: simple, value });
+                    let args = annotation_arg_pairs(&a, bytes);
+                    out.push(Annotation { name: simple, value, args });
                 }
             }
         }
@@ -383,6 +455,31 @@ fn annotation_string_value(annotation: &Node, bytes: &[u8]) -> Option<String> {
         }
     }
     None
+}
+
+/// The `name = value` pairs of an annotation, each value kept as raw source text (so a boolean,
+/// enum-constant or string reads back verbatim). Positional / string-only arguments are ignored —
+/// only `element_value_pair`s are captured. Used for Lombok `@Accessors(fluent = true, …)`.
+fn annotation_arg_pairs(annotation: &Node, bytes: &[u8]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let Some(args) = annotation.child_by_field_name("arguments") else { return out };
+    let mut aw = args.walk();
+    for arg in args.named_children(&mut aw) {
+        if arg.kind() != "element_value_pair" {
+            continue;
+        }
+        // `key` is the LHS identifier; fall back to the first identifier child if the grammar names
+        // the field differently, so the capture never silently yields nothing.
+        let key = arg
+            .child_by_field_name("key")
+            .or_else(|| arg.named_child(0).filter(|n| n.kind() == "identifier"))
+            .and_then(|k| node_text(&k, bytes));
+        let val = arg.child_by_field_name("value").and_then(|v| node_text(&v, bytes));
+        if let (Some(k), Some(v)) = (key, val) {
+            out.push((k.trim().to_string(), v.trim().to_string()));
+        }
+    }
+    out
 }
 
 /// The contents of a `string_literal` node with the surrounding quotes stripped. Robust across
@@ -452,20 +549,64 @@ fn parse_params(node: &Node, bytes: &[u8]) -> Vec<ParamDecl> {
     if let Some(pl) = node.child_by_field_name("parameters") {
         let mut pw = pl.walk();
         for p in pl.named_children(&mut pw) {
-            if p.kind() == "formal_parameter" || p.kind() == "spread_parameter" {
-                let pname = p
-                    .child_by_field_name("name")
-                    .and_then(|n| node_text(&n, bytes))
-                    .unwrap_or_default();
-                let ptype = p
-                    .child_by_field_name("type")
-                    .and_then(|n| node_text(&n, bytes))
-                    .unwrap_or_default();
-                params.push(ParamDecl { name: pname, type_text: ptype });
+            match p.kind() {
+                "formal_parameter" => {
+                    let pname = p
+                        .child_by_field_name("name")
+                        .and_then(|n| node_text(&n, bytes))
+                        .unwrap_or_default();
+                    let ptype = p
+                        .child_by_field_name("type")
+                        .and_then(|n| node_text(&n, bytes))
+                        .unwrap_or_default();
+                    params.push(ParamDecl { name: pname, type_text: ptype });
+                }
+                // A varargs parameter `T... xs` — which IS a `T[]` array. Unlike `formal_parameter`,
+                // tree-sitter gives its type as an UNNAMED child (before `...`) and its name inside a
+                // `variable_declarator`, so neither is a direct field. Extract both and record the type
+                // WITH a trailing `[]`, so downstream (the arity check) sees the array/varargs it is and
+                // accepts a call with zero trailing arguments.
+                "spread_parameter" => {
+                    params.push(parse_spread_parameter(&p, bytes));
+                }
+                _ => {}
             }
         }
     }
     params
+}
+
+/// Parse a `spread_parameter` (`T... xs`) into a [`ParamDecl`] whose `type_text` is the varargs
+/// element type with a `[]` suffix (varargs erase to an array). The element type is the first
+/// non-modifier / non-annotation / non-declarator child; the name lives in the `variable_declarator`.
+fn parse_spread_parameter(p: &Node, bytes: &[u8]) -> ParamDecl {
+    let mut type_text = String::new();
+    let mut name = String::new();
+    let mut c = p.walk();
+    for ch in p.named_children(&mut c) {
+        match ch.kind() {
+            "variable_declarator" => {
+                name = ch
+                    .child_by_field_name("name")
+                    .and_then(|n| node_text(&n, bytes))
+                    .unwrap_or_default();
+            }
+            "modifiers" | "annotation" | "marker_annotation" => {}
+            // The first remaining named child is the element type (`String`, `List<X>`, `int`, …).
+            _ if type_text.is_empty() => {
+                type_text = node_text(&ch, bytes).unwrap_or_default();
+            }
+            _ => {}
+        }
+    }
+    if !type_text.is_empty() {
+        // Record the ERASED array type (`List<X>` → `List[]`, `Object` → `Object[]`), matching how
+        // bytecode erases a varargs parameter. Erasing before the `[]` keeps the array suffix on the
+        // resolved binary name (generics would otherwise strip it), so the arity check sees the array.
+        let erased = type_text.split('<').next().unwrap_or("").trim().to_string();
+        type_text = format!("{erased}[]");
+    }
+    ParamDecl { name, type_text }
 }
 
 /// The `throws` clause exception type names (written text; resolved to binary names when the class
@@ -503,6 +644,31 @@ fn parse_constructor(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
         is_default: false,
         is_final: false,
         throws: parse_throws(node, bytes),
+    })
+}
+
+/// Extract an `annotation_type_element_declaration` — an `@interface` element such as
+/// `String value();` or `int count() default 3;`. These ARE public abstract no-arg methods of the
+/// annotation type at the bytecode level, so index each as a [`MethodDecl`] (no params, its declared
+/// return type, implicitly public + abstract) — mirroring how a library annotation's elements decode
+/// from bytecode. Without this, accessing an element on a project annotation (`ann.value()`) can't
+/// resolve its method and would be wrongly flagged "cannot resolve method".
+fn parse_annotation_element(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
+    let name = node.child_by_field_name("name").and_then(|n| node_text(&n, bytes))?;
+    let return_type_text = node
+        .child_by_field_name("type")
+        .and_then(|n| node_text(&n, bytes))
+        .unwrap_or_else(|| "void".to_string());
+    Some(MethodDecl {
+        name,
+        return_type_text,
+        params: Vec::new(),
+        is_static: false,
+        visibility: Visibility::Public,
+        is_abstract: true,
+        is_default: false,
+        is_final: false,
+        throws: Vec::new(),
     })
 }
 
@@ -628,32 +794,47 @@ mod tests {
     #[test]
     fn captures_bare_string_annotation_value() {
         let ann = type_annotations("@Service(\"fooService\") class FooService {}");
-        assert_eq!(ann, vec![Annotation { name: "Service".into(), value: Some("fooService".into()) }]);
+        assert_eq!(ann.len(), 1);
+        assert_eq!(ann[0].name, "Service");
+        assert_eq!(ann[0].value.as_deref(), Some("fooService"));
+        assert!(ann[0].args.is_empty(), "positional arg isn't a pair");
     }
 
     #[test]
     fn captures_value_named_argument() {
         let ann = type_annotations("@Service(value=\"bar\") class FooService {}");
-        assert_eq!(ann, vec![Annotation { name: "Service".into(), value: Some("bar".into()) }]);
+        assert_eq!(ann[0].value.as_deref(), Some("bar"));
     }
 
     #[test]
     fn marker_annotation_has_no_value() {
         let ann = type_annotations("@Service class FooService {}");
-        assert_eq!(ann, vec![Annotation { name: "Service".into(), value: None }]);
+        assert_eq!(ann[0].value, None);
+        assert!(ann[0].args.is_empty());
     }
 
     #[test]
     fn non_string_argument_yields_no_value() {
         // `@RequestMapping(method=POST)` — the argument isn't a plain string literal.
         let ann = type_annotations("@RequestMapping(method=POST) class C {}");
-        assert_eq!(ann, vec![Annotation { name: "RequestMapping".into(), value: None }]);
+        assert_eq!(ann[0].name, "RequestMapping");
+        assert_eq!(ann[0].value, None);
+    }
+
+    #[test]
+    fn captures_named_arg_pairs_as_raw_text() {
+        // `@Accessors(fluent = true, prefix = "m")` — non-string flags land in `args` verbatim.
+        let ann = type_annotations("@Accessors(fluent = true, prefix = \"m\") class C {}");
+        assert_eq!(ann[0].name, "Accessors");
+        let fluent = ann[0].args.iter().find(|(k, _)| k == "fluent").map(|(_, v)| v.as_str());
+        assert_eq!(fluent, Some("true"), "got {:?}", ann[0].args);
     }
 
     #[test]
     fn qualified_annotation_name_is_simple() {
         let ann = type_annotations("@lombok.Getter class C {}");
-        assert_eq!(ann, vec![Annotation { name: "Getter".into(), value: None }]);
+        assert_eq!(ann[0].name, "Getter");
+        assert_eq!(ann[0].value, None);
     }
 
     #[test]
@@ -666,6 +847,60 @@ mod tests {
 
     fn one_type(src: &str) -> TypeDecl {
         extract_symbols(src).types.into_iter().next().expect("one type")
+    }
+
+    #[test]
+    fn extends_and_implements_across_newlines_are_captured() {
+        // A class whose `extends` / `implements` clauses (and the opening brace) sit on their own
+        // lines must still resolve its supertypes and index its members — the tree parse is
+        // whitespace-insensitive, so nothing about the layout may change the extracted symbols.
+        let src = "package com.acme;\n\
+                   public class Foo\n\
+                       extends AbstractBar\n\
+                       implements Baz, Qux {\n\
+                       void run() {}\n\
+                   }\n";
+        let t = one_type(src);
+        assert_eq!(t.name, "Foo");
+        assert_eq!(t.extends.as_deref(), Some("AbstractBar"), "{:?}", t.extends);
+        assert_eq!(t.implements, vec!["Baz", "Qux"], "{:?}", t.implements);
+        assert!(t.methods.iter().any(|m| m.name == "run"), "member indexed: {:?}", t.methods);
+    }
+
+    #[test]
+    fn interface_extends_across_newlines_is_captured() {
+        // An interface `extends` list on its own lines folds into `implements` for the member walk.
+        let src = "interface I\n    extends A,\n            B {\n}\n";
+        let t = one_type(src);
+        assert_eq!(t.implements, vec!["A", "B"], "{:?}", t.implements);
+    }
+
+    #[test]
+    fn varargs_parameter_type_is_recorded_as_an_array() {
+        // `String... args` is a varargs parameter — it erases to `String[]`. Recording it WITH the
+        // `[]` (and its name) is what lets the arity check accept a call with zero trailing args.
+        let t = one_type("class C { void fmt(String f, Object... rest) {} }");
+        let m = t.methods.iter().find(|m| m.name == "fmt").expect("fmt");
+        assert_eq!(m.params.len(), 2, "{:?}", m.params);
+        assert_eq!(m.params[0].type_text, "String");
+        assert_eq!(m.params[1].name, "rest", "varargs name captured: {:?}", m.params[1]);
+        assert_eq!(m.params[1].type_text, "Object[]", "varargs recorded as array: {:?}", m.params[1]);
+
+        // A GENERIC varargs erases to a bare array (`List<T>` → `List[]`), so the array suffix
+        // survives binary-name resolution and the arity check still recognises the varargs.
+        let g = one_type("class C { <T> void addAll(java.util.List<T>... lists) {} }");
+        let gm = g.methods.iter().find(|m| m.name == "addAll").expect("addAll");
+        assert_eq!(gm.params.len(), 1, "{:?}", gm.params);
+        assert_eq!(gm.params[0].type_text, "java.util.List[]", "generic varargs erased: {:?}", gm.params[0]);
+    }
+
+    #[test]
+    fn generic_type_parameters_are_captured_in_order() {
+        assert_eq!(one_type("class Pair<L, R> {}").type_params, vec!["L", "R"]);
+        assert_eq!(one_type("interface Repo<T, ID> {}").type_params, vec!["T", "ID"]);
+        // A bounded parameter keeps just the name.
+        assert_eq!(one_type("class Box<T extends Number> {}").type_params, vec!["T"]);
+        assert!(one_type("class Plain {}").type_params.is_empty());
     }
 
     #[test]
@@ -714,6 +949,17 @@ mod tests {
     }
 
     #[test]
+    fn annotation_elements_are_indexed_as_methods() {
+        // `@interface` elements are public abstract no-arg methods — a `value()` access must resolve.
+        let t = one_type("@interface Route { String value(); int count() default 3; }");
+        let value = t.methods.iter().find(|m| m.name == "value").expect("value()");
+        assert!(value.params.is_empty(), "annotation element takes no args");
+        assert_eq!(value.visibility, Visibility::Public, "{value:?}");
+        assert!(value.return_type_text.contains("String"), "{value:?}");
+        assert!(t.methods.iter().any(|m| m.name == "count"), "element with a default is indexed too");
+    }
+
+    #[test]
     fn type_kind_is_detected() {
         assert_eq!(one_type("class C {}").kind, TypeKind::Class);
         assert_eq!(one_type("interface I {}").kind, TypeKind::Interface);
@@ -740,6 +986,18 @@ mod tests {
         assert!(!ok.is_abstract && ok.is_default, "default method is not abstract");
         let s = t.methods.iter().find(|m| m.name == "s").unwrap();
         assert!(!s.is_abstract && !s.is_default, "static interface method is neither");
+    }
+
+    #[test]
+    fn enum_fields_methods_and_constructor_are_indexed() {
+        // Enum members live under `enum_body_declarations` (after the constants' `;`) — they must be
+        // extracted, so an enum's own field (`this.sqlCriteriaValue`) and methods resolve.
+        let src = "enum OrderCriteria {\n  ASC(\"asc\"), DESC(\"desc\");\n  private final String sqlCriteriaValue;\n  OrderCriteria(String v) { this.sqlCriteriaValue = v; }\n  public String getSql() { return sqlCriteriaValue; }\n}";
+        let t = one_type(src);
+        assert_eq!(t.kind, TypeKind::Enum);
+        assert!(t.fields.iter().any(|f| f.name == "sqlCriteriaValue"), "enum field indexed: {:?}", t.fields);
+        assert!(t.methods.iter().any(|m| m.name == "getSql"), "enum method indexed: {:?}", t.methods);
+        assert!(t.methods.iter().any(|m| m.name == "<init>"), "enum constructor indexed: {:?}", t.methods);
     }
 
     #[test]

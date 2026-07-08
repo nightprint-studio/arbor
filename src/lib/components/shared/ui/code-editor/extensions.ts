@@ -34,6 +34,10 @@ import type { LanguageDescriptor, Tree, Node } from './types';
 import { createHighlightPlugin } from './highlight';
 import { createFoldingExtension } from './folding';
 import { emmetKeymap } from './emmet';
+import { rainbowBrackets } from './rainbow-brackets';
+import { indentGuides } from './indent-guides';
+import { stickyScroll } from './sticky-scroll';
+import { scrollbarOverview } from './scrollbar-overview';
 import { codeEditorTheme, codeEditorHighlightStyle } from './theme';
 
 /** The search keymap minus the bindings the host owns. The host routes `Ctrl+F` to the
@@ -101,6 +105,13 @@ export interface CodeEditorExtensionsOptions {
    *  opts in per markup file (HTML / JSP); the binding no-ops (falls through to indent) when the
    *  caret isn't on a valid abbreviation. */
   emmet?: boolean;
+  /** Draw indentation guides (faint vertical lines per indent level, active block brightened). */
+  indentGuides?: boolean;
+  /** Pin the enclosing declaration lines (class › method › block) to the top as you scroll. */
+  stickyScroll?: boolean;
+  /** Replace the native vertical scrollbar with the IntelliJ-style overview strip (diagnostic
+   *  marks + hover preview). A host enables this INSTEAD of the minimap. */
+  scrollbarOverview?: boolean;
   /** Language-intelligence hook bag (reserved; opaque to the core today). */
   intel?: unknown;
 }
@@ -134,6 +145,9 @@ export function createCodeEditorExtensions(
     drawSelection(),
     indentOnInput(),
     bracketMatching(),
+    // Depth-tinted brackets (matching open/close share a hue) so a block reads at a glance —
+    // composes with `bracketMatching`'s caret-match highlight above.
+    rainbowBrackets(),
     // Auto-close paired delimiters — `(`/`[`/`{`/`"`/`'` insert their match, typing the
     // closer over an auto-inserted one skips it, and Backspace on an empty pair deletes
     // both (via `closeBracketsKeymap`). Language-aware: the pairs come from the language
@@ -177,6 +191,12 @@ export function createCodeEditorExtensions(
 
   // Optional vertical margin guide (host opt-in via `rulerColumn`).
   if (opts.rulerColumn && opts.rulerColumn > 0) exts.push(editorRuler(opts.rulerColumn));
+
+  // IntelliJ-flavoured chrome, each host opt-in (Bennu enables them; other products keep their
+  // current look until they opt in too).
+  if (opts.indentGuides) exts.push(indentGuides());
+  if (opts.stickyScroll) exts.push(stickyScroll());
+  if (opts.scrollbarOverview) exts.push(scrollbarOverview());
 
   // Language intelligence (autocomplete) — only when the descriptor supplies a
   // completion source and the editor is editable. Added before the base keymap

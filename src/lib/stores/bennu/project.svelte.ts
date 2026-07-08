@@ -16,7 +16,7 @@
  * is also an explicit `loadDemo()` affordance. Remove both when the BE is live.
  */
 
-import { SvelteMap } from 'svelte/reactivity';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import {
   moveToPackage as ipcMoveToPackage,
   openProject as ipcOpenProject,
@@ -33,6 +33,8 @@ import { bennuDiagnosticsStore } from './diagnostics.svelte';
 // of the ACTIVE workspace only. It reports its session snapshot up on every change (see
 // `persistWorkspace`). Circular import is safe: neither store touches the other at construction.
 import { workspacesStore } from './workspaces.svelte';
+// Autosave gate — the user's persisted preference (config-backed).
+import { bennuSettingsStore } from './settings.svelte';
 import type { ProjectSession } from '$lib/ipc/bennu/config';
 import type { ProjectInfo, TreeNode } from '$lib/types/bennu';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -80,6 +82,11 @@ function canonTree(node: TreeNode): TreeNode {
  *  (the call is fire-and-forget on the BE blocking pool). */
 const REINDEX_DEBOUNCE_MS = 400;
 
+/** Idle delay (ms) before autosave writes a modified buffer. Long enough that a burst of typing
+ *  coalesces into one save; short enough that "did it save?" is never a worry. Save-on-tab-switch and
+ *  save-on-window-blur cover the cases where you leave before this fires. */
+const AUTOSAVE_DEBOUNCE_MS = 1200;
+
 function createProjectStore() {
   let project = $state<ProjectInfo | null>(null);
   let tree = $state<TreeNode | null>(null);
@@ -116,6 +123,49 @@ function createProjectStore() {
   // reset the path's timer; when it fires we hand the BE the current full text via
   // `bennu_did_change` so it patches the index. Demo paths never fire (no BE).
   const reindexTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  // ── Dirty tracking + autosave ──────────────────────────────────────────────────
+  // `savedContent` holds each open file's last-SAVED text; a file is dirty when its live buffer
+  // differs. Comparing content (not a "touched" flag) keeps a file from re-marking dirty when its
+  // controlled value re-syncs from the cache after a save. `dirty` is reactive so tabs can badge it.
+  const savedContent = new Map<string, string>();
+  const dirty = new SvelteSet<string>();
+  // One pending autosave timer per edited path (mirrors `reindexTimers`).
+  const autosaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function autosaveEnabled(): boolean {
+    return bennuSettingsStore.autosave;
+  }
+
+  /** Recompute `path`'s dirty state from its live text vs the last-saved snapshot. */
+  function markDirty(path: string, text: string) {
+    if (text !== (savedContent.get(path) ?? text)) dirty.add(path);
+    else dirty.delete(path);
+  }
+
+  function cancelAutosave(path: string) {
+    const t = autosaveTimers.get(path);
+    if (t !== undefined) { clearTimeout(t); autosaveTimers.delete(path); }
+  }
+
+  /** Debounced autosave for `path`: after an idle it saves the buffer IF it's still dirty, autosave
+   *  is on, and it's a real (non-demo) file. Reset on every edit, like the re-index debounce. */
+  function scheduleAutosave(path: string) {
+    cancelAutosave(path);
+    if (!autosaveEnabled() || isDemoPath(path)) return;
+    autosaveTimers.set(path, setTimeout(() => {
+      autosaveTimers.delete(path);
+      if (dirty.has(path)) void saveText(path, sources.get(path) ?? '');
+    }, AUTOSAVE_DEBOUNCE_MS));
+  }
+
+  /** Save every file with unsaved edits (used by save-on-window-blur). Ungated — the caller decides
+   *  when; it saves whatever is dirty, sequentially so the writes don't stampede the BE. */
+  async function saveAllDirty() {
+    for (const p of [...dirty]) {
+      await saveText(p, sources.get(p) ?? '');
+    }
+  }
 
   function rememberRecent(root: string) {
     recentProjects = [root, ...recentProjects.filter((p) => p !== root)].slice(0, 10);
@@ -228,15 +278,18 @@ function createProjectStore() {
     if (isDemoPath(path)) {
       const res = demoReadFile(path);
       sources.set(path, res.text);
+      savedContent.set(path, res.text); // freshly loaded → not dirty
       encodings.set(path, res.encoding);
       return;
     }
     try {
       const res = await ipcReadFile(project?.root ?? path, path);
       sources.set(path, res.text);
+      savedContent.set(path, res.text);
       encodings.set(path, res.encoding);
     } catch {
       sources.set(path, '');
+      savedContent.set(path, '');
       encodings.set(path, 'utf-8');
     }
   }
@@ -251,9 +304,14 @@ function createProjectStore() {
     openFilePaths = [];
     sources.clear();
     encodings.clear();
-    // Drop any pending re-index timers from the previous project.
+    // Drop dirty/save state from the previous project.
+    savedContent.clear();
+    dirty.clear();
+    // Drop any pending re-index / autosave timers from the previous project.
     for (const t of reindexTimers.values()) clearTimeout(t);
     reindexTimers.clear();
+    for (const t of autosaveTimers.values()) clearTimeout(t);
+    autosaveTimers.clear();
   }
 
   /** MOCK — load the built-in demo project (explicit affordance + BE-down fallback). */
@@ -311,6 +369,11 @@ function createProjectStore() {
         /* BE absent — cache updated, disk not (best-effort) */
       }
     }
+    // Now clean: record the saved snapshot, clear the dirty mark, and drop a pending autosave (this
+    // write supersedes it). Best-effort: even if the disk write failed above, we don't loop-retry.
+    savedContent.set(path, text);
+    dirty.delete(path);
+    cancelAutosave(path);
     reindexNow(path);
     // Refresh the Problems panel project-wide (silent, debounced) so cross-file effects of this
     // save appear without a manual "Validate".
@@ -581,20 +644,28 @@ function createProjectStore() {
       persistWorkspace();
     },
 
-    /** Set the active tab (must already be open). Ensures its source is loaded — a tab restored
-     *  from the workspace, or a foreign file, may not be cached yet — then persists. */
+    /** Set the active tab (must already be open). With autosave on, the file you're LEAVING is saved
+     *  first if it has unsaved edits (IntelliJ saves on tab switch). Ensures the target's source is
+     *  loaded — a tab restored from the workspace, or a foreign file, may not be cached yet — then
+     *  persists. */
     async setActive(path: string) {
       if (!openFilePaths.includes(path)) return;
+      const leaving = activeFilePath;
+      if (leaving && leaving !== path && autosaveEnabled() && dirty.has(leaving)) {
+        await saveText(leaving, sources.get(leaving) ?? '');
+      }
       activeFilePath = path;
       await ensureLoaded(path);
       persistWorkspace();
     },
 
-    /** Update the cached source (editor edits route here) and schedule a debounced
-     *  live re-index so the BE index tracks the edit without reopening the project. */
+    /** Update the cached source (editor edits route here): recompute dirty, schedule a debounced
+     *  live re-index (so the BE index tracks the edit), and schedule a debounced autosave. */
     setSource(path: string, text: string) {
       sources.set(path, text);
+      markDirty(path, text);
       scheduleReindex(path);
+      scheduleAutosave(path);
     },
 
     /** Force an immediate live re-index of `path` (explicit save — flushes any
@@ -613,6 +684,15 @@ function createProjectStore() {
       await saveText(p, sources.get(p) ?? '');
       return true;
     },
+
+    // ── Dirty / autosave ──────────────────────────────────────────────────
+    /** Whether `path` has unsaved edits (buffer differs from the last-saved snapshot). */
+    isDirty(path: string): boolean { return dirty.has(path); },
+    /** Every path with unsaved edits (reactive) — for a tab "modified" badge. */
+    get dirtyPaths(): string[] { return [...dirty]; },
+    /** Save every file with unsaved edits — the save-on-window-blur entry point (see BennuWindow).
+     *  Ungated: the caller gates on the autosave setting. */
+    saveAllDirty,
   };
 }
 

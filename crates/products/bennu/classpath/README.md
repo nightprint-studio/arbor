@@ -29,8 +29,9 @@ stack plus a homegrown Signature decoder.
   and completion consume: `TypeRef` (a binary name + its generic `type_args`),
   `Member` (name / kind / return type / params / static / **abstract** / **default** /
   visibility / raw signature), `ClassMembers` (superclass + interfaces + methods +
-  fields + `ClassFlags`: interface / abstract / final / enum / record / sealed), and the
-  `MemberIndex` trait (`members_of(binary_name)`). Generics stay **structured**, not
+  fields + `ClassFlags`: interface / abstract / final / enum / record / sealed, plus
+  `type_params`: the declared generic parameter names decoded from the class `Signature`,
+  e.g. `Map<K,V>` → `["K","V"]`), and the `MemberIndex` trait (`members_of(binary_name)`). Generics stay **structured**, not
   rendered: `List.iterator()` decodes to `Iterator<E>` and `Optional.map(...)` to
   `Optional<U>`, with type variables surfaced as bare-name `TypeRef`s (`E`, `T`, `K`,
   `V`) so a caller can substitute the receiver's type arguments (generics

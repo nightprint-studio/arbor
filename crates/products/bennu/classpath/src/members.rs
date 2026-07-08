@@ -137,6 +137,13 @@ pub struct ClassMembers {
     /// so an index persisted before this field existed still deserializes (flags all `false`).
     #[serde(default)]
     pub flags: ClassFlags,
+    /// The class's declared generic type-parameter NAMES, in order (`Map<K,V>` → `["K","V"]`,
+    /// `Pair<L,R>` → `["L","R"]`), decoded from the class `Signature` attribute. Empty for a
+    /// non-generic class (or one whose signature we couldn't decode). Lets a consumer map a method's
+    /// type-variable return (`R`) to the receiver's actual type argument by POSITION, exactly instead
+    /// of by naming convention. `#[serde(default)]` so a pre-existing persisted index still loads.
+    #[serde(default)]
+    pub type_params: Vec<String>,
 }
 
 /// Look up a class's [`ClassMembers`] by binary name (`java/util/ArrayList`).
@@ -182,6 +189,9 @@ impl crate::source::ClassSource for Box<dyn crate::source::ClassSource> {
     fn class_bytes(&self, binary_name: &str) -> Result<Option<Vec<u8>>, String> {
         (**self).class_bytes(binary_name)
     }
+    fn class_names(&self) -> Vec<String> {
+        (**self).class_names()
+    }
 }
 
 // ── decode: cafebabe ClassFile → ClassMembers ────────────────────────────────
@@ -205,8 +215,14 @@ pub fn parse_class_members(bytes: &[u8]) -> Result<ClassMembers, String> {
         .map(|m| decode_method(m, flags.is_interface))
         .collect();
     let fields = parsed.fields.iter().map(decode_field).collect();
+    // The class-level generic signature carries the declared type-parameter names (`<K,V>`); decode
+    // them so a consumer can map a method's type-variable return to the receiver's Nth type argument.
+    let type_params = signature_attr(&parsed.attributes)
+        .and_then(|raw| crate::sig::parse_class(raw).ok())
+        .map(|cs| cs.type_params.into_iter().map(|tp| tp.name).collect())
+        .unwrap_or_default();
 
-    Ok(ClassMembers { superclass, interfaces, methods, fields, flags })
+    Ok(ClassMembers { superclass, interfaces, methods, fields, flags, type_params })
 }
 
 /// Decode the class-level flags a checker needs. `record`/`sealed` come from attributes (there is no
@@ -521,6 +537,8 @@ mod tests {
         assert_eq!(it.return_type.binary_name, "java/util/Iterator", "{label}: List.iterator ret");
         assert_eq!(it.return_type.type_args[0].binary_name, "E", "{label}: List.iterator elem");
         assert_eq!(method(&list, "get").unwrap().return_type.binary_name, "E", "{label}: List.get");
+        // The class-level generic signature yields the declared type-parameter name(s).
+        assert_eq!(list.type_params, vec!["E".to_string()], "{label}: List<E> type_params");
 
         // java/util/ArrayList: superclass populated for inherited-member walking.
         let al =
@@ -528,9 +546,14 @@ mod tests {
         assert_eq!(al.superclass.as_deref(), Some("java/util/AbstractList"), "{label}: AL super");
         assert!(al.interfaces.iter().any(|i| i == "java/util/List"), "{label}: AL impl List");
 
-        // java/util/Map: get(Object) -> V.
+        // java/util/Map: get(Object) -> V, declared as Map<K,V>.
         let map = idx.members_of("java/util/Map").unwrap_or_else(|| panic!("{label}: Map"));
         assert_eq!(method(&map, "get").unwrap().return_type.binary_name, "V", "{label}: Map.get");
+        assert_eq!(
+            map.type_params,
+            vec!["K".to_string(), "V".to_string()],
+            "{label}: Map<K,V> type_params in order"
+        );
 
         // java/util/Optional: get() -> T, map(...) -> Optional<U>.
         let opt = idx.members_of("java/util/Optional").unwrap_or_else(|| panic!("{label}: Optional"));
@@ -556,6 +579,20 @@ mod tests {
         // java/lang/Object terminates the walk.
         let obj = idx.members_of("java/lang/Object").unwrap_or_else(|| panic!("{label}: Object"));
         assert!(obj.superclass.is_none(), "{label}: Object has no super");
+        // Declared checked exceptions come off the `Exceptions` attribute: every `Object.wait(…)`
+        // overload throws InterruptedException. A regression guard that `throws` is decoded (it feeds
+        // the checked-exception checks and the decompiled-stub `throws` clause).
+        assert!(
+            method(&obj, "wait").is_some_and(|w| w.throws.iter().any(|t| t == "java/lang/InterruptedException")),
+            "{label}: Object.wait() must declare `throws InterruptedException`"
+        );
+
+        // javax.crypto is part of the platform: `jce.jar` on JDK 8, module `java.base` on JDK 9+.
+        // A regression guard that the JDK-8 boot-jar set (not just rt.jar) is loaded.
+        assert!(
+            idx.members_of("javax/crypto/Cipher").is_some(),
+            "{label}: javax.crypto.Cipher must resolve (jce.jar on 8 / java.base on 9+)"
+        );
     }
 
     #[test]

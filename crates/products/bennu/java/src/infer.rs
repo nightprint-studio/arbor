@@ -316,6 +316,15 @@ struct Ctx<'a> {
     cache: &'a InferCache,
 }
 
+/// Classification of a bare identifier against the enclosing lambda scopes: it's a lambda parameter
+/// we could TARGET-TYPE, a lambda parameter we couldn't type (but that still SHADOWS a same-named
+/// field, so the caller must not read the field), or not a lambda parameter at all.
+enum LambdaParam {
+    Typed(TypeRef),
+    Untyped,
+    NotParam,
+}
+
 impl Ctx<'_> {
     /// Infer the type of an arbitrary receiver expression node.
     fn infer_expr(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
@@ -342,6 +351,10 @@ impl Ctx<'_> {
                 let inner = node.named_child(0)?;
                 self.infer_expr(&inner, enclosing)
             }
+            // `Foo.class` / `int.class` — a class literal is a `java.lang.Class`, so `Foo.class.getName()`
+            // and completion after `Foo.class.` resolve. (The `<Foo>` argument isn't tracked; Class's
+            // common methods don't need it.)
+            "class_literal" => Some(TypeRef::simple("java/lang/Class")),
             // `new Foo(...)` / `new List<Foo>()`
             "object_creation_expression" => {
                 let ty = node.child_by_field_name("type")?;
@@ -392,20 +405,257 @@ impl Ctx<'_> {
         (is_string("left") || is_string("right")).then(|| TypeRef::simple("java/lang/String"))
     }
 
-    /// A bare identifier: resolve as local var / parameter first (walking up scopes),
-    /// then as a field of the enclosing type.
+    /// A bare identifier: resolve as local var / parameter first (walking up scopes), then as an
+    /// (untyped) lambda parameter — which SHADOWS a same-named field, so it's checked BEFORE the
+    /// field — then as a field of the enclosing type.
     fn infer_identifier(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
         let name = node_text(node, self.bytes)?;
 
         if let Some(tr) = self.resolve_local(node, &name) {
             return Some(tr);
         }
+        // An untyped lambda parameter (`x -> x.foo()`, `(a, b) -> …`) shadows a field of the same
+        // name. Recognise it — and TARGET-TYPE it from the lambda's functional interface when we can
+        // — before the field fallback, so `result` in `foo(result -> result.bar())` is never
+        // mis-resolved to a field named `result` (which surfaced as a false "cannot resolve method").
+        match self.lambda_param(node, &name, enclosing) {
+            LambdaParam::Typed(tr) => return Some(tr),
+            // A lambda param we couldn't type: leave it unresolved (so its uses are skipped), but do
+            // NOT fall through to the field — the param shadows it.
+            LambdaParam::Untyped => return None,
+            LambdaParam::NotParam => {}
+        }
         if let Some(fqn) = enclosing {
             if let Some(tr) = self.field_type_of_source_type(fqn, &name) {
                 return Some(tr);
             }
         }
+        // A statically-imported FIELD (`import static X.PI;` / `import static X.*;`) used bare.
+        self.static_import_field(&name)
+    }
+
+    /// The type of a statically-imported FIELD named `name` (a bare `PI` value reference), or `None`.
+    /// Looks the field up on each `import static` owner whose specific member matches (or any wildcard
+    /// owner), walking the owner's hierarchy like any field access.
+    fn static_import_field(&self, name: &str) -> Option<TypeRef> {
+        for t in crate::static_import::static_import_targets(&self.symbols.imports) {
+            if t.member.as_deref().map_or(true, |m| m == name) {
+                let owner = TypeRef::simple(t.owner_binary);
+                if let Some(tr) = self.field_type_on(&owner, name) {
+                    return Some(tr);
+                }
+            }
+        }
         None
+    }
+
+    /// The return type of a statically-imported static METHOD `name` (a bare `max(…)` call), or `None`.
+    fn static_import_method(&self, name: &str) -> Option<TypeRef> {
+        for t in crate::static_import::static_import_targets(&self.symbols.imports) {
+            if t.member.as_deref().map_or(true, |m| m == name) {
+                let owner = TypeRef::simple(t.owner_binary);
+                if let Some(tr) = self.method_return_on(&owner, name) {
+                    return Some(tr);
+                }
+            }
+        }
+        None
+    }
+
+    /// Classify `name` against the lambda scopes enclosing `use_node`. If it's a parameter of an
+    /// enclosing lambda, try to TARGET-TYPE it: find the functional interface the lambda is passed to
+    /// (its argument position in a call / construction), take that interface's single abstract method,
+    /// and read the parameter at the lambda-param index (with the interface's generics substituted).
+    /// Conservative throughout — any ambiguity (overloaded call, multi-abstract-method interface,
+    /// unknown type) yields [`LambdaParam::Untyped`] (shadow the field, but leave the type unknown so
+    /// nothing is falsely flagged), never a guess.
+    fn lambda_param(&self, use_node: &Node, name: &str, enclosing: Option<&str>) -> LambdaParam {
+        let mut scope = use_node.parent();
+        while let Some(s) = scope {
+            if s.kind() == "lambda_expression" {
+                if let Some(params) = s.child_by_field_name("parameters") {
+                    let names = self.lambda_param_names(&params);
+                    if let Some(idx) = names.iter().position(|n| n == name) {
+                        let typed = self
+                            .lambda_target_type(&s, enclosing)
+                            .and_then(|fi| self.sam_param_type(&fi, idx));
+                        return match typed {
+                            // Never surface a bare type-variable as a resolved type (it would just be
+                            // an unresolvable receiver) — treat it as untyped.
+                            Some(ty) if !is_type_var(&ty.binary_name) => LambdaParam::Typed(ty),
+                            _ => LambdaParam::Untyped,
+                        };
+                    }
+                }
+            }
+            // A lambda parameter can't be declared above its method/constructor — stop climbing.
+            if matches!(s.kind(), "method_declaration" | "constructor_declaration") {
+                break;
+            }
+            scope = s.parent();
+        }
+        LambdaParam::NotParam
+    }
+
+    /// The parameter NAMES of a lambda's `parameters` node, in order — across the three shapes:
+    /// a single bare `identifier` (`x -> …`), `inferred_parameters` (`(a, b) -> …`), and typed
+    /// `formal_parameters` (`(Foo a) -> …`).
+    fn lambda_param_names(&self, params: &Node) -> Vec<String> {
+        match params.kind() {
+            "identifier" => node_text(params, self.bytes).into_iter().collect(),
+            "inferred_parameters" => {
+                let mut out = Vec::new();
+                let mut c = params.walk();
+                for ch in params.named_children(&mut c) {
+                    if ch.kind() == "identifier" {
+                        if let Some(t) = node_text(&ch, self.bytes) {
+                            out.push(t);
+                        }
+                    }
+                }
+                out
+            }
+            "formal_parameters" => {
+                let mut out = Vec::new();
+                let mut c = params.walk();
+                for ch in params.named_children(&mut c) {
+                    if matches!(ch.kind(), "formal_parameter" | "spread_parameter") {
+                        if let Some(n) =
+                            ch.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes))
+                        {
+                            out.push(n);
+                        }
+                    }
+                }
+                out
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// The functional-interface type a lambda is assigned to, when it is passed as an argument to a
+    /// method call or a constructor (the common case, and the only one modelled): the type of the
+    /// parameter at the lambda's argument position. `None` for any other position (declared variable,
+    /// return, cast) or when the callee / position is ambiguous.
+    fn lambda_target_type(&self, lambda: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
+        let arg_list = lambda.parent()?;
+        if arg_list.kind() != "argument_list" {
+            return None;
+        }
+        let call = arg_list.parent()?;
+        // The lambda's index among the REAL arguments (comments are named children — skip them).
+        let mut idx = 0usize;
+        let mut found = false;
+        let mut c = arg_list.walk();
+        for a in arg_list.named_children(&mut c) {
+            if matches!(a.kind(), "line_comment" | "block_comment") {
+                continue;
+            }
+            if a.id() == lambda.id() {
+                found = true;
+                break;
+            }
+            idx += 1;
+        }
+        if !found {
+            return None;
+        }
+        match call.kind() {
+            "method_invocation" => {
+                let name =
+                    call.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes))?;
+                let recv = match call.child_by_field_name("object") {
+                    Some(obj) => self.infer_expr(&obj, enclosing)?,
+                    None => TypeRef::simple(to_binary(enclosing?)),
+                };
+                self.param_at(&recv, &name, idx)
+            }
+            "object_creation_expression" => {
+                let ty = call.child_by_field_name("type")?;
+                let text = node_text(&ty, self.bytes)?;
+                let recv = self.resolve_type_text(&text)?;
+                self.param_at(&recv, "<init>", idx)
+            }
+            _ => None,
+        }
+    }
+
+    /// The type of parameter `idx` of method `name` on `recv`, walking supertypes — but ONLY when
+    /// every overload of that name agrees on that parameter's type (so an ambiguous overloaded call
+    /// yields `None`, never a guess). The receiver's generics are then substituted, so
+    /// `List<Foo>.forEach(Consumer<? super E>)` yields `Consumer<Foo>`.
+    fn param_at(&self, recv: &TypeRef, name: &str, idx: usize) -> Option<TypeRef> {
+        let mut types: Vec<TypeRef> = Vec::new();
+        let mut visited = HashSet::new();
+        let mut stack = vec![recv.binary_name.clone()];
+        while let Some(bn) = stack.pop() {
+            if !visited.insert(bn.clone()) {
+                continue;
+            }
+            // An unknown class in the hierarchy could hide a differing overload → give up (unknown,
+            // not a guess).
+            let cm = self.resolver.members_of(&bn)?;
+            for m in &cm.methods {
+                if m.kind == MemberKind::Method && m.name == name {
+                    types.push(m.params.get(idx)?.clone());
+                }
+            }
+            if let Some(sc) = cm.superclass.clone() {
+                stack.push(sc);
+            }
+            stack.extend(cm.interfaces.iter().cloned());
+        }
+        // Require a single distinct parameter type across all overloads.
+        let mut uniq: Vec<TypeRef> = Vec::new();
+        for t in &types {
+            if !uniq.contains(t) {
+                uniq.push(t.clone());
+            }
+        }
+        let [fi] = uniq.as_slice() else { return None };
+        Some(self.substitute_generics(fi, recv))
+    }
+
+    /// The type of parameter `idx` of a functional interface's SINGLE abstract method (its SAM),
+    /// with the interface's generics substituted (`Consumer<Foo>` → its `accept(T)` param → `Foo`).
+    /// `None` when the interface's hierarchy isn't fully known, or it doesn't have exactly one
+    /// abstract instance method (so we never mistype against a non-functional interface).
+    fn sam_param_type(&self, fi: &TypeRef, idx: usize) -> Option<TypeRef> {
+        let mut abstracts: Vec<Member> = Vec::new();
+        let mut visited = HashSet::new();
+        let mut stack = vec![fi.binary_name.clone()];
+        while let Some(bn) = stack.pop() {
+            if !visited.insert(bn.clone()) {
+                continue;
+            }
+            let cm = self.resolver.members_of(&bn)?; // incomplete hierarchy → give up
+            for m in &cm.methods {
+                if m.kind == MemberKind::Method
+                    && m.is_abstract
+                    && !m.is_default
+                    && !m.is_static
+                    && m.name != "<init>"
+                {
+                    abstracts.push(m.clone());
+                }
+            }
+            if let Some(sc) = cm.superclass.clone() {
+                stack.push(sc);
+            }
+            stack.extend(cm.interfaces.iter().cloned());
+        }
+        // Dedup an override that appears at multiple hierarchy levels, then require EXACTLY one
+        // abstract method — the SAM. (A precise Object-method carve-out isn't modelled; more than one
+        // → give up rather than guess.)
+        let mut uniq: Vec<&Member> = Vec::new();
+        for m in &abstracts {
+            if !uniq.iter().any(|u| u.name == m.name && u.params == m.params) {
+                uniq.push(m);
+            }
+        }
+        let [sam] = uniq.as_slice() else { return None };
+        let pty = sam.params.get(idx)?;
+        Some(self.substitute_generics(pty, fi))
     }
 
     /// `a.b`: infer `a`, then look up field `b` on it. Handles `this.b`.
@@ -426,8 +676,17 @@ impl Ctx<'_> {
 
         let recv_type = match node.child_by_field_name("object") {
             Some(obj) => self.infer_expr(&obj, enclosing)?,
-            // Bare call `foo()` → resolves against the enclosing type.
-            None => TypeRef::simple(to_binary(enclosing?)),
+            // Bare call `foo()` → the enclosing type's method, else a statically-imported static method
+            // (`import static X.max;` → `max(…)`). We try the enclosing type first (an instance/own
+            // method wins over an import, as in Java), then fall back to the static import.
+            None => {
+                if let Some(fqn) = enclosing {
+                    if let Some(tr) = self.method_return_on(&TypeRef::simple(to_binary(fqn)), &name) {
+                        return Some(tr);
+                    }
+                }
+                return self.static_import_method(&name);
+            }
         };
 
         self.method_return_on(&recv_type, &name)
@@ -490,20 +749,48 @@ impl Ctx<'_> {
         None
     }
 
-    /// Substitute type variables in `member_ret` with the receiver's actual type
-    /// arguments. Phase-1 heuristic (seam caveat C2): a single-uppercase-letter type
-    /// (`E`, `T`, `K`, `V`) maps to the receiver's first type arg (`V` → second when
-    /// present, for `Map<K,V>`); nested type args recurse one hop (so `List<Foo>`'s
-    /// `iterator() -> Iterator<E>` becomes `Iterator<Foo>`). Deliberately shallow.
+    /// Substitute type variables in `member_ret` with the receiver's actual type arguments: a
+    /// type-variable name maps to a receiver type-arg by POSITION; nested type args recurse one hop
+    /// (so `List<Foo>`'s `iterator() -> Iterator<E>` becomes `Iterator<Foo>`). Deliberately shallow.
+    ///
+    /// The position comes from the receiver class's REAL declared type-parameter list
+    /// (`ClassMembers::type_params`, from source `<…>` or the bytecode signature) — exact for any
+    /// naming (`Pair<X,Y>.getRight() -> Y`). Only when that list is unavailable do we fall back to the
+    /// naming-convention heuristic ([`type_var_index`]): a 1-arg generic's sole variable, `Map<K,V>`
+    /// value, `Pair<L,R>`/`Entry<K,V>` right, a numeric `T1`/`T2` suffix. An unrecognised variable on
+    /// a 2+-arg generic with no known type-param list is left UNRESOLVED rather than guessed — a wrong
+    /// guess would mis-type the value and could surface a false "cannot resolve method" downstream.
     fn substitute_generics(&self, member_ret: &TypeRef, recv: &TypeRef) -> TypeRef {
         if recv.type_args.is_empty() {
             return member_ret.clone();
         }
         let bn = &member_ret.binary_name;
-        let is_type_var = bn.len() == 1 && bn.chars().all(|c| c.is_ascii_uppercase());
-        if is_type_var {
-            let idx = if bn == "V" && recv.type_args.len() >= 2 { 1 } else { 0 };
-            return recv.type_args.get(idx).cloned().unwrap_or_else(|| member_ret.clone());
+        if is_type_var(bn) {
+            // Position of `bn` in the receiver CLASS's real declared type-parameter list (from source
+            // `<…>` or the bytecode signature).
+            let cm = self.resolver.members_of(&recv.binary_name);
+            let type_params_known = cm.as_ref().is_some_and(|c| !c.type_params.is_empty());
+            let declared_idx = cm.and_then(|c| c.type_params.iter().position(|p| p == bn));
+            let idx = if type_params_known {
+                // The receiver class's real `<…>` list is known. A variable IN it maps to the actual
+                // type argument by position (`Pair<X,Y>.getRight() -> Y`, exact for any naming). A
+                // variable NOT in it is a METHOD-level type variable — `Stream.map`'s `<R>`,
+                // `Stream.collect`'s `<R>`, `Optional.map`'s `<U>` — whose binding comes from the
+                // CALL's arguments, which Phase-1 doesn't model. The old code mapped it to a receiver
+                // type argument via the single-arg heuristic, which was WRONG: it inferred
+                // `stream.collect(toList())` as the stream's element type instead of `List`, then
+                // falsely flagged `.indexOf(…)` as missing. Leave such a variable UNRESOLVED.
+                declared_idx
+            } else {
+                // No declared list (a generic library type whose signature we couldn't decode) — the
+                // naming-convention heuristic is the best guess available.
+                type_var_index(bn, recv.type_args.len())
+            };
+            return match idx {
+                Some(i) => recv.type_args.get(i).cloned().unwrap_or_else(|| member_ret.clone()),
+                // Unresolved (method-level var, or position unknown on a heuristic miss).
+                None => member_ret.clone(),
+            };
         }
         TypeRef {
             binary_name: bn.clone(),
@@ -602,34 +889,65 @@ impl Ctx<'_> {
         let mut map: HashMap<String, Vec<LocalDecl>> = HashMap::new();
         let mut cw = scope.walk();
         for c in scope.named_children(&mut cw) {
-            if c.kind() != "local_variable_declaration" {
-                continue;
-            }
-            let type_text = c.child_by_field_name("type").and_then(|n| node_text(&n, self.bytes));
-            let start = c.start_byte();
-            let mut dw = c.walk();
-            for d in c.named_children(&mut dw) {
-                if d.kind() != "variable_declarator" {
-                    continue;
+            match c.kind() {
+                "local_variable_declaration" => {
+                    let type_text =
+                        c.child_by_field_name("type").and_then(|n| node_text(&n, self.bytes));
+                    let start = c.start_byte();
+                    let mut dw = c.walk();
+                    for d in c.named_children(&mut dw) {
+                        if d.kind() != "variable_declarator" {
+                            continue;
+                        }
+                        let name =
+                            d.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes));
+                        let value = d.child_by_field_name("value");
+                        if let (Some(vn), Some(ty)) = (name, self.local_ty_of(type_text.as_deref(), value)) {
+                            map.entry(vn).or_default().push(LocalDecl { start, ty });
+                        }
+                    }
                 }
-                let Some(vn) = d.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes))
-                else {
-                    continue;
-                };
-                let ty = match type_text.as_deref() {
-                    Some("var") => match d.child_by_field_name("value") {
-                        Some(init) => LocalTy::VarInit(init.start_byte(), init.end_byte()),
-                        None => continue,
-                    },
-                    Some(t) => LocalTy::Declared(t.to_string()),
-                    None => continue,
-                };
-                map.entry(vn).or_default().push(LocalDecl { start, ty });
+                // Try-with-resources: `try (var in = open(); Foo f = ...) { … }`. Each `resource` is a
+                // local visible in the try body, with `type`/`name`/`value` like a declarator (and
+                // `var`/`val` infer from the initializer). A bare `try (existing) {}` resource is just an
+                // identifier / field_access with no `type` → skipped by `local_ty_of`.
+                "resource_specification" => {
+                    let mut rw = c.walk();
+                    for r in c.named_children(&mut rw) {
+                        if r.kind() != "resource" {
+                            continue;
+                        }
+                        let type_text =
+                            r.child_by_field_name("type").and_then(|n| node_text(&n, self.bytes));
+                        let name =
+                            r.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes));
+                        let value = r.child_by_field_name("value");
+                        if let (Some(vn), Some(ty)) = (name, self.local_ty_of(type_text.as_deref(), value)) {
+                            map.entry(vn).or_default().push(LocalDecl { start: r.start_byte(), ty });
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         let rc = Rc::new(map);
         self.cache.scope_locals.borrow_mut().insert(id, rc.clone());
         rc
+    }
+
+    /// Classify a local/resource declaration's type from its written `type_text` and optional
+    /// initializer `value`. `var` (Java 10+) and Lombok `val` (a `final var`) both infer from the
+    /// initializer — so `val x = repo.find();` / `try (var in = open())` resolve `x`/`in`'s members
+    /// (without this, `val` would resolve as a phantom type named `val` and every `x.method()` would be
+    /// falsely flagged). A written type is taken as-is; a missing type/initializer yields `None` (skip).
+    fn local_ty_of(&self, type_text: Option<&str>, value: Option<Node>) -> Option<LocalTy> {
+        match type_text {
+            Some("var") | Some("val") => {
+                value.map(|init| LocalTy::VarInit(init.start_byte(), init.end_byte()))
+            }
+            Some(t) => Some(LocalTy::Declared(t.to_string())),
+            None => None,
+        }
     }
 
     /// Resolve a cached local's type — a declared type text, or a `var` initializer re-descended
@@ -683,6 +1001,18 @@ impl Ctx<'_> {
         // freshly-added type before the next full reindex).
         if let Some(td) = self.symbols.types.iter().find(|t| t.name == simple) {
             return td.fqn.replace('.', "/");
+        }
+        // A type in the file's OWN package is in scope without an import. Resolve it to its exact
+        // binary (`com/acme/C`, a unique key) BEFORE the resolver's flat simple-name lookup, which
+        // collapses same-simple-name types across packages and could otherwise pick the wrong `C`
+        // (mis-typing every `C` receiver in the file, and downstream falsely flagging its members).
+        if let Some(pkg) = self.symbols.package.as_deref() {
+            if !pkg.is_empty() {
+                let candidate = format!("{}/{}", pkg.replace('.', "/"), simple);
+                if self.resolver.members_of(&candidate).is_some() {
+                    return candidate;
+                }
+            }
         }
         if let Some(bn) = self.resolver.resolve_simple_name(simple, &self.symbols.imports) {
             return bn;
@@ -763,4 +1093,97 @@ fn to_binary(fqn: &str) -> String {
 /// `com/foo/Bar` -> `com.foo.Bar`.
 fn from_binary(bn: &str) -> String {
     bn.replace('/', ".")
+}
+
+/// Whether a binary name is really a **type variable** (`E`, `T`, `K`, `V`, `R`, or a numeric-suffixed
+/// `T1`/`T2`) rather than a class: a single leading uppercase letter optionally followed by digits,
+/// no package separator. A real class always carries a lowercase package segment or a mixed-case /
+/// multi-letter simple name, so this never misfires on `String`/`Foo`. Kept to ONE letter (plus
+/// digits) to avoid classifying a rare 2-letter default-package class as a variable.
+fn is_type_var(bn: &str) -> bool {
+    let mut chars = bn.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_uppercase() => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_digit())
+}
+
+/// The receiver type-arg index a type variable named `name` maps to, given a generic of `arity`
+/// arguments — or `None` when the position can't be inferred conventionally (so the caller leaves it
+/// unresolved instead of guessing). Heuristic, because the class's real type-parameter list isn't on
+/// the seam:
+///   * a **1-arg** generic has exactly one variable → index 0, whatever it's named (`List<E>`,
+///     `Optional<T>`, `Future<V>`, `Supplier<S>`);
+///   * a **numeric suffix** encodes the position directly (`T1`→0, `T2`→1, `K2`→1);
+///   * otherwise a small table of conventional role names: value/right/second `V`/`R`/`U`/`B`/`S`→1,
+///     key/element/left/first `K`/`T`/`E`/`A`/`L`/`N`/`O`→0 (`Map<K,V>`, `Pair<L,R>`, `Entry<K,V>`,
+///     `BiFunction`'s `T`/`U`). An unrecognised name on a 2+-arg generic yields `None`.
+fn type_var_index(name: &str, arity: usize) -> Option<usize> {
+    if arity == 0 {
+        return None;
+    }
+    // A single type argument: the only variable is that argument, regardless of its letter.
+    if arity == 1 {
+        return Some(0);
+    }
+    // `T1`/`T2`/`K2` — the digit is a 1-based position.
+    if let Some(pos) = name.find(|c: char| c.is_ascii_digit()) {
+        if let Ok(n) = name[pos..].parse::<usize>() {
+            return (n >= 1 && n <= arity).then_some(n - 1);
+        }
+    }
+    let idx = match name {
+        "V" | "R" | "U" | "B" | "S" => 1,
+        "K" | "T" | "E" | "A" | "L" | "N" | "O" => 0,
+        _ => return None,
+    };
+    (idx < arity).then_some(idx)
+}
+
+#[cfg(test)]
+mod generic_tests {
+    use super::*;
+
+    #[test]
+    fn single_arg_maps_any_var_to_the_sole_argument() {
+        assert_eq!(type_var_index("E", 1), Some(0));
+        assert_eq!(type_var_index("V", 1), Some(0), "Future<V>.get() → V even though V is 'second'");
+        assert_eq!(type_var_index("R", 1), Some(0));
+    }
+
+    #[test]
+    fn two_arg_maps_conventional_roles() {
+        // Map<K,V>: key→0, value→1. Pair<L,R>: left→0, right→1. Entry<K,V> likewise.
+        assert_eq!(type_var_index("K", 2), Some(0));
+        assert_eq!(type_var_index("V", 2), Some(1));
+        assert_eq!(type_var_index("L", 2), Some(0));
+        assert_eq!(type_var_index("R", 2), Some(1), "Pair<L,R>.getRight() → the 2nd arg");
+    }
+
+    #[test]
+    fn numeric_suffix_is_positional() {
+        assert_eq!(type_var_index("T1", 2), Some(0));
+        assert_eq!(type_var_index("T2", 2), Some(1));
+        assert_eq!(type_var_index("T3", 2), None, "out of range → unknown");
+    }
+
+    #[test]
+    fn unknown_name_on_multi_arg_is_unresolved() {
+        // Unconventional names on a 2-arg generic can't be positioned → None (never guessed).
+        assert_eq!(type_var_index("X", 2), None);
+        assert_eq!(type_var_index("Y", 2), None);
+    }
+
+    #[test]
+    fn type_var_recognition() {
+        assert!(is_type_var("T"));
+        assert!(is_type_var("R"));
+        assert!(is_type_var("T1"));
+        assert!(!is_type_var("KK"), "two letters is not a type var (could be a class)");
+        assert!(!is_type_var("java/lang/String"));
+        assert!(!is_type_var("Foo"));
+        assert!(!is_type_var(""));
+        assert!(!is_type_var("String"));
+    }
 }

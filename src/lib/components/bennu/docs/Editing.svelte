@@ -36,10 +36,40 @@
   line stays visible. Folding is computed live from the syntax tree — no indexing needed.
 </p>
 
-<h2>Minimap</h2>
+<h2>Rainbow brackets</h2>
 <p>
-  A scrollable <strong>minimap</strong> in the right gutter gives a bird's-eye overview of the whole
-  file — drag or click it to jump. Toggle it in <strong>Settings → Editor → Minimap</strong>.
+  Every <code>()</code>, <code>[]</code> and <code>&#123;&#125;</code> is tinted by its nesting depth — a
+  matching open/close pair shares a colour — so a block tells you at a glance which bracket it closes.
+  Brackets inside strings and comments are left alone.
+</p>
+
+<h2>Indentation guides</h2>
+<p>
+  A vertical line marks each indent level, tinted the same rainbow colour as the bracket that opens
+  its block, and the guide of the block the caret sits in is fully highlighted — so you can see at a
+  glance which block a line belongs to and where it closes. Toggle it in
+  <strong>Settings → Editor → Indentation guides</strong>.
+</p>
+
+<h2>Sticky scroll</h2>
+<p>
+  As you scroll into a long body, the enclosing declarations — the class signature, then the method —
+  pin to the top of the editor so you never lose the context. Click a pinned line to jump back to it.
+  Toggle it in <strong>Settings → Editor → Sticky scroll</strong>.
+</p>
+
+<h2>File health</h2>
+<p>
+  A badge in the editor's top-right corner shows the current file's error and warning counts (a green
+  check when it's clean), mirroring the marks on the scrollbar overview.
+</p>
+
+<h2>Scrollbar overview</h2>
+<p>
+  The right-edge <strong>overview strip</strong> replaces the plain scrollbar: every error and warning
+  is a coloured bar at its position in the file, so you see where the problems are at a glance. Hover
+  the strip to preview the file at that spot, and click or drag it to jump. Toggle it in
+  <strong>Settings → Editor → Scrollbar overview</strong>.
 </p>
 
 <h2>Emmet</h2>
@@ -52,16 +82,40 @@
 
 <h2>Completions</h2>
 <p>
-  Typing <code>.</code> after an expression, or an identifier, offers member completions. Press
+  Typing <code>.</code> after an expression offers member completions; press
   <kbd>Ctrl</kbd> + <kbd>Space</kbd> to request them explicitly. Completions come from the project
   index and appear once it is warm. Edits re-index in the background as you type, so completion and
   go-to-definition track your changes without reopening the project.
+</p>
+<p>
+  Typing a <strong>capitalised name</strong> (not after a dot) offers <strong>type-name
+  completion</strong> — every class matching the prefix across the JDK, your dependencies and your
+  project, with its package shown alongside (and a <em>(+N more)</em> hint when several packages
+  declare the same simple name). Accepting one whose name maps to a <strong>single</strong> class
+  also <strong>adds its import</strong> automatically (turn this off with Settings → Completion →
+  <em>Auto-import on accept</em>). When the name is ambiguous — several packages — only the name is
+  inserted; press <kbd>Alt</kbd> + <kbd>Enter</kbd> → <strong>Import '…'</strong> to pick the package.
+</p>
+
+<h2>Saving</h2>
+<p>
+  <strong>Autosave is on by default</strong>: a modified file is written to disk automatically — a
+  short moment after you stop typing, when you switch to another tab, and when the window loses focus
+  (IntelliJ-style). You can still save explicitly with <kbd>Ctrl</kbd> + <kbd>S</kbd>. Turn autosave
+  off in Settings → Editor → <strong>Autosave</strong> to save only on <kbd>Ctrl</kbd> + <kbd>S</kbd>;
+  the choice persists across sessions.
 </p>
 
 <h2>Validation</h2>
 <p>
   Java files are checked <strong>as you type</strong>, without compiling. Errors show as red
   squiggles, warnings as yellow, and everything is also listed in the Problems panel:
+</p>
+<p>
+  <strong>Static imports are understood</strong>: a member you bring in with
+  <code>import static …</code> and use unqualified (<code>PI</code>, <code>max(a, b)</code>) resolves
+  to its type and isn't reported as an unknown symbol — while a name that <em>isn't</em> supplied by
+  any static import is still caught.
 </p>
 <ul>
   <li><strong>Syntax errors</strong> — a malformed statement, a missing <code>;</code> or brace.</li>
@@ -128,6 +182,9 @@
     instantiating a type parameter (<code>new T()</code>), generics in an <code>instanceof</code>
     (<code>x instanceof List&lt;String&gt;</code>) or a <code>catch</code> type, and <code>this</code>/<code>super</code>
     used in a <code>static</code> context.</li>
+  <li><strong>Type-argument count</strong> — a generic type given the wrong number of type arguments
+    (<code>List&lt;String, Integer&gt;</code>, <code>Map&lt;String&gt;</code>), checked against the type's
+    declared parameters. The diamond <code>&lt;&gt;</code>, wildcards and raw types are always fine.</li>
   <li><strong>Erasure clash</strong> — two overloads that look distinct but collide after generic
     type erasure (<code>f(List&lt;String&gt;)</code> and <code>f(List&lt;Integer&gt;)</code>).</li>
   <li><strong>Duplicate interface</strong> — the same interface listed twice in an
@@ -178,7 +235,11 @@
   background work.
 </p>
 <p>
-  The <strong>Problems</strong> panel updates live for the file you're editing: as you fix a
+  The <strong>Problems</strong> panel is a tree grouped <strong>by severity</strong> — an
+  <strong>Errors</strong> node and a <strong>Warnings</strong> node at the top, each split by source
+  (a JDK node, an Encoding node, and one node per file), so a file with both errors and warnings
+  appears under both with just its rows of that severity. Every node is collapsible. It updates live
+  for the file you're editing: as you fix a
   problem it disappears, and a newly-introduced one shows up — no need to re-run the whole-project
   validation to see the effect. That file's entry stays correct across the panel even after you
   switch to another file. Once you've run <em>Validate (no compile)</em> once, <strong>saving</strong>
@@ -246,12 +307,32 @@
   It answers from the project index / config graph, so it works once the index is warm and stays quiet
   when a symbol can't be resolved.
 </p>
+<p>
+  In a <strong>Struts config XML</strong> the same gesture works on a <code>&lt;result&gt;</code>: a
+  JSP path (<code>/WEB-INF/x.jsp</code>) opens that JSP, and an OGNL/EL result (<code>$&#123;urlErrori&#125;</code>)
+  jumps to the owning action's property. A JSP path that doesn't exist under the web app, or an OGNL
+  root that isn't a property of the action, is flagged with a warning squiggle.
+</p>
+<p>
+  Ctrl+B on a <strong>library or JDK type</strong> (one with no project source) opens a
+  <strong>decompiled stub</strong> generated from its bytecode — the type declaration plus every field
+  and method signature, with a header noting it's decompiled (method bodies aren't stored in a class
+  file). It's cached, so opening it again is instant. A decompiled stub is a read-only view and is not
+  validated (it has no bodies, so validation would only report noise).
+</p>
 
 <h2>Hover</h2>
 <p>
   Rest the pointer on a class, method or field to see a card with its signature, declaring type and
   Javadoc (when the source has one). It answers from the project index, so it appears once the index
-  is warm.
+  is warm. Hovering a <code>var</code> / <code>val</code> local (or any local variable or parameter)
+  shows its inferred type, so you can see what a <code>var</code> resolves to without reading the
+  initializer.
+</p>
+<p>
+  In a JSP, hovering a form field, an OGNL reference or a <code>*-validation.xml</code>
+  <code>&lt;field&gt;</code> shows the <strong>type</strong> of the matching property on the bound
+  action class, along with the action it belongs to.
 </p>
 
 <h2>Right-click menu</h2>
@@ -266,11 +347,17 @@
 <p>
   <kbd>Alt</kbd> + <kbd>Enter</kbd> opens the <strong>intentions</strong> popup at the caret — a
   keyboard-driven list of the context actions available there (↑/↓ to move, <kbd>Enter</kbd> to
-  apply, <kbd>Esc</kbd> to dismiss). It's the entry point to the generator flows and, as the
-  language service grows, to quick-fixes like adding a missing import or surrounding a block.
+  apply, <kbd>Esc</kbd> to dismiss). It's the entry point to the generator flows and to quick-fixes.
 </p>
 <p>
-  Two quick-fixes already live here. With the caret inside a logging call whose message is built by
+  With the caret on a <strong>type that isn't imported</strong>, the popup offers
+  <strong>Import '…'</strong> — it adds the <code>import</code> line for you (placed after the package
+  declaration and sorted among the existing imports). When more than one class shares that name, each
+  candidate is listed as its own entry, so you pick the package you meant; a type in the same package,
+  in <code>java.lang</code>, or already covered by a wildcard import isn't offered (it needs none).
+</p>
+<p>
+  More quick-fixes live here too. With the caret inside a logging call whose message is built by
   string concatenation — <code>logger.info("user " + id + " logged in")</code> — the popup offers
   <strong>Replace concatenation with parameterized logging</strong>, rewriting it to the form the
   logging APIs prefer: <code>logger.info("user &lbrace;&rbrace; logged in", id)</code> (a trailing

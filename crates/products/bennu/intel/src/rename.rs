@@ -1106,6 +1106,7 @@ mod tests {
                 project.insert(
                     binary,
                     ClassMembers {
+                        type_params: Vec::new(),
                         superclass: None,
                         interfaces: vec![],
                         methods,

@@ -15,7 +15,7 @@ use crate::xml;
 
 /// Parse every `<definition>` in a tiles.xml `file`.
 pub fn parse_file(file: &Path, out: &mut Vec<TilesDefRecord>) {
-    let text = match std::fs::read_to_string(file) {
+    let text = match crate::io::read_to_string_lf(file) {
         Ok(t) => t,
         Err(_) => return,
     };

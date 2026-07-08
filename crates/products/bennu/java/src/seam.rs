@@ -180,6 +180,13 @@ pub struct ClassMembers {
     /// Class-level access flags. `#[serde(default)]` so a pre-existing persisted index still loads.
     #[serde(default)]
     pub flags: ClassFlags,
+    /// The class's declared generic type-parameter NAMES, in order (`Map<K,V>` → `["K","V"]`,
+    /// `Pair<L,R>` → `["L","R"]`). From the source `<…>` clause (project types) or the bytecode class
+    /// `Signature` (library types). Empty for a non-generic / unknown class. Lets the inference walk
+    /// substitute a method's type-variable return (`R`) with the receiver's actual type argument by
+    /// POSITION — exact, not by naming convention. `#[serde(default)]` so an older index still loads.
+    #[serde(default)]
+    pub type_params: Vec<String>,
 }
 
 /// The resolver the inference walk consumes. Provided by the caller — in the real

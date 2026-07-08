@@ -83,12 +83,10 @@ fn check_call(
     // supertype — including the receiver type itself being unknown — might declare the method).
     let has = !res.candidates.is_empty() || !res.complete;
     if !has {
-        out.push(Diagnostic {
-            message: format!("Cannot resolve method `{method}` in `{}`", simple_name(&ty.binary_name)),
-            severity: "error".to_string(),
-            start: name.start_byte(),
-            end: name.end_byte(),
-        });
+        out.push(crate::check_id::CheckId::UnknownMember.at(
+            name,
+            format!("Cannot resolve method `{method}` in `{}`", simple_name(&ty.binary_name)),
+        ));
     }
 }
 
@@ -130,6 +128,7 @@ mod tests {
         members.insert(
             "java/lang/Object".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: None,
                 interfaces: Vec::new(),
                 methods: vec![method("toString", "java/lang/String"), method("equals", "boolean")],
@@ -140,6 +139,7 @@ mod tests {
         members.insert(
             "java/lang/String".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
                 methods: vec![
@@ -154,6 +154,7 @@ mod tests {
         members.insert(
             "java/util/List".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: None,
                 interfaces: Vec::new(),
                 methods: vec![
@@ -232,5 +233,136 @@ mod tests {
     fn bare_and_static_calls_are_skipped() {
         // A bare call (no receiver) and a call whose receiver isn't a value type → not checked.
         assert!(diags("size();").is_empty());
+    }
+
+    #[test]
+    fn method_type_variable_from_a_chain_is_not_misresolved() {
+        // Regression: `xs.stream().map(f).collect(toList()).indexOf(u)` must NOT flag `indexOf` as
+        // missing. `Stream.collect` returns a METHOD-level type variable (`R`), NOT the stream's
+        // element type — the old heuristic mapped `R` to the receiver's sole type argument, so
+        // `collect(...)` inferred as `Attachment` and `.indexOf(…)` resolved against `Attachment`
+        // (which lacks it) → a false "cannot resolve method". `R` now stays unresolved → the call is
+        // skipped conservatively.
+        fn gen(bn: &str, args: Vec<TypeRef>) -> TypeRef {
+            TypeRef { binary_name: bn.to_string(), type_args: args }
+        }
+        fn ty(type_params: Vec<&str>, superclass: Option<&str>, methods: Vec<Member>) -> ClassMembers {
+            ClassMembers {
+                type_params: type_params.into_iter().map(str::to_string).collect(),
+                superclass: superclass.map(str::to_string),
+                interfaces: Vec::new(),
+                methods,
+                fields: Vec::new(),
+                flags: Default::default(),
+            }
+        }
+        let mut members = HashMap::new();
+        members.insert("java/lang/Object".to_string(), ty(vec![], None, vec![]));
+        members.insert("com/acme/Attachment".to_string(), ty(vec![], Some("java/lang/Object"), vec![]));
+        members.insert(
+            "java/util/List".to_string(),
+            ty(
+                vec!["E"],
+                Some("java/lang/Object"),
+                vec![
+                    Member::method("stream", gen("java/util/stream/Stream", vec![TypeRef::simple("E")]), vec![]),
+                    Member::method("indexOf", TypeRef::simple("int"), vec![TypeRef::simple("java/lang/Object")]),
+                ],
+            ),
+        );
+        members.insert(
+            "java/util/stream/Stream".to_string(),
+            ty(
+                vec!["T"],
+                Some("java/lang/Object"),
+                vec![
+                    // `<R> Stream<R> map(Function<? super T, ? extends R>)` — return carries the METHOD var R.
+                    Member::method("map", gen("java/util/stream/Stream", vec![TypeRef::simple("R")]), vec![TypeRef::simple("java/lang/Object")]),
+                    // `<R,A> R collect(Collector<? super T,A,R>)` — return IS the method var R.
+                    Member::method("collect", TypeRef::simple("R"), vec![TypeRef::simple("java/lang/Object")]),
+                ],
+            ),
+        );
+        let simple = [
+            ("List", "java/util/List"),
+            ("Attachment", "com/acme/Attachment"),
+            ("Object", "java/lang/Object"),
+        ]
+        .into_iter()
+        .map(|(s, b)| (s.to_string(), b.to_string()))
+        .collect();
+        let resolver = MapResolver { members, simple };
+        let src = "import java.util.List; class C { void m() { \
+                   List<Attachment> xs = null; xs.stream().map(xs).collect(xs).indexOf(xs); } }";
+        let d: Vec<String> =
+            unknown_members(src, &resolver).into_iter().map(|x| x.message).collect();
+        assert!(d.is_empty(), "expected no cannot-resolve on the stream chain, got {d:?}");
+    }
+
+    #[test]
+    fn untyped_lambda_param_is_target_typed_not_a_shadowed_field() {
+        // `svc.consume(result -> result.getName())`: `result` is an UNTYPED lambda parameter bound to
+        // `Consumer<Attachment>` (consume's parameter), so it types as `Attachment` — NOT the enclosing
+        // class's same-named `String result` field. Before the fix the field won and `result.getName()`
+        // was falsely flagged (String has no getName).
+        fn gen(bn: &str, args: Vec<TypeRef>) -> TypeRef {
+            TypeRef { binary_name: bn.to_string(), type_args: args }
+        }
+        fn ty(type_params: Vec<&str>, superclass: Option<&str>, methods: Vec<Member>) -> ClassMembers {
+            ClassMembers {
+                type_params: type_params.into_iter().map(str::to_string).collect(),
+                superclass: superclass.map(str::to_string),
+                interfaces: Vec::new(),
+                methods,
+                fields: Vec::new(),
+                flags: Default::default(),
+            }
+        }
+        let mut members = HashMap::new();
+        members.insert("java/lang/Object".to_string(), ty(vec![], None, vec![]));
+        members.insert(
+            "java/lang/String".to_string(),
+            ty(vec![], Some("java/lang/Object"), vec![Member::method("length", TypeRef::simple("int"), vec![])]),
+        );
+        members.insert(
+            "com/acme/Attachment".to_string(),
+            ty(vec![], Some("java/lang/Object"), vec![Member::method("getName", TypeRef::simple("java/lang/String"), vec![])]),
+        );
+        // `Consumer<T>` with its single abstract method `accept(T)` — the SAM the param is read from.
+        members.insert(
+            "java/util/function/Consumer".to_string(),
+            ty(vec!["T"], None, vec![Member::method("accept", TypeRef::simple("void"), vec![TypeRef::simple("T")]).abstract_()]),
+        );
+        members.insert(
+            "com/acme/Svc".to_string(),
+            ty(
+                vec![],
+                Some("java/lang/Object"),
+                vec![Member::method("consume", TypeRef::simple("void"), vec![gen("java/util/function/Consumer", vec![TypeRef::simple("com/acme/Attachment")])])],
+            ),
+        );
+        let simple = [
+            ("Svc", "com/acme/Svc"),
+            ("Attachment", "com/acme/Attachment"),
+            ("Consumer", "java/util/function/Consumer"),
+            ("String", "java/lang/String"),
+            ("Object", "java/lang/Object"),
+        ]
+        .into_iter()
+        .map(|(s, b)| (s.to_string(), b.to_string()))
+        .collect();
+        let resolver = MapResolver { members, simple };
+
+        // getName IS on Attachment → the correctly-typed lambda param resolves → no false positive.
+        let ok = "class C { String result; Svc svc; void m() { svc.consume(result -> result.getName()); } }";
+        let d: Vec<String> = unknown_members(ok, &resolver).into_iter().map(|x| x.message).collect();
+        assert!(d.is_empty(), "target-typed lambda param should resolve getName on Attachment, got {d:?}");
+
+        // A method NOT on Attachment IS flagged — proving `result` typed to Attachment (not skipped,
+        // and not the `String` field, which also lacks `nope`).
+        let bad = "class C { String result; Svc svc; void m() { svc.consume(result -> result.nope()); } }";
+        let d2: Vec<String> = unknown_members(bad, &resolver).into_iter().map(|x| x.message).collect();
+        assert_eq!(d2.len(), 1, "nope() is not on Attachment → one diagnostic, got {d2:?}");
+        assert!(d2[0].contains("nope"), "{d2:?}");
     }
 }

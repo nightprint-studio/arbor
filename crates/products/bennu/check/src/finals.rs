@@ -465,6 +465,7 @@ fn err(message: String, node: Node) -> Diagnostic {
     Diagnostic {
         message,
         severity: "error".to_string(),
+        code: String::new(),
         start: node.start_byte(),
         end: node.end_byte(),
     }
@@ -576,6 +577,7 @@ mod tests {
     /// A `Base` with a `final run()`, a `final foo(String)`, and a non-final `ok()`.
     fn resolver() -> MapResolver {
         let base = ClassMembers {
+            type_params: Vec::new(),
             superclass: Some("java/lang/Object".to_string()),
             interfaces: Vec::new(),
             methods: vec![

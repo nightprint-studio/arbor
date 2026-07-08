@@ -119,6 +119,7 @@ fn check_call(
                 plural(argc)
             ),
             severity: "error".to_string(),
+            code: String::new(),
             start: name.start_byte(),
             end: args.end_byte(),
         });
@@ -169,6 +170,7 @@ fn check_new(
                 plural(argc)
             ),
             severity: "error".to_string(),
+            code: String::new(),
             start: ty_node.start_byte(),
             end: args.end_byte(),
         });
@@ -182,13 +184,14 @@ fn sig_of(m: &bennu_java::prelude::Member) -> Sig {
     }
 }
 
+/// The number of ACTUAL arguments in an `argument_list` — tree-sitter exposes `line_comment` /
+/// `block_comment` as NAMED children, so a comment between arguments (`f(a, /* x */ b)`, or a
+/// commented-out arg) must not be counted or it inflates the arity into a false "too many arguments".
 fn arg_count(args: Node) -> usize {
     let mut c = args.walk();
-    let mut n = 0;
-    for _ in args.named_children(&mut c) {
-        n += 1;
-    }
-    n
+    args.named_children(&mut c)
+        .filter(|n| !matches!(n.kind(), "line_comment" | "block_comment"))
+        .count()
 }
 
 fn plural(n: usize) -> &'static str {
@@ -231,6 +234,7 @@ mod tests {
         members.insert(
             "com/acme/Svc".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
                 methods: vec![
@@ -247,6 +251,7 @@ mod tests {
         members.insert(
             "java/lang/Object".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: None,
                 interfaces: Vec::new(),
                 methods: vec![method("toString", &[])],

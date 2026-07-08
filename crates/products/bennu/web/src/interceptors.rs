@@ -39,7 +39,7 @@ pub struct InterceptorParse {
 /// project build folds interceptors into the [`crate::struts`] include-graph walk via
 /// [`collect_from_root`] instead, so the fragments are read once.
 pub fn parse_file(file: &Path, out: &mut InterceptorParse) {
-    let Ok(text) = std::fs::read_to_string(file) else {
+    let Ok(text) = crate::io::read_to_string_lf(file) else {
         return;
     };
     let Some(doc) = xml::parse(&text) else {

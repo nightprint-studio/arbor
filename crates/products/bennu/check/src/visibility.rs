@@ -129,6 +129,17 @@ fn check_access(
         return;
     }
 
+    // An INTERFACE (or `@interface`) member is implicitly PUBLIC (JLS §9.4) — a method with no explicit
+    // access modifier, and every field (constant). So a call like `interfaceField.method()` must NEVER
+    // be flagged as package/private access, whatever visibility the index happened to record for it.
+    // (Interface `private` helper methods exist since Java 9, but they're callable only within the
+    // interface — flagging an external call to one is a rare, low-value case not worth a false positive
+    // risk, so we skip the whole interface here.) This is the fix for "methods on an interface-typed
+    // field wrongly reported as not accessible".
+    if resolver.members_of(&declaring_binary).is_some_and(|cm| cm.flags.is_interface || cm.flags.is_annotation) {
+        return;
+    }
+
     // The OUTERMOST type enclosing the access (lexical, authoritative). Used by BOTH visibility cases
     // to decide "same top-level type" — a class and all its nested types form one nest that shares
     // private access AND, trivially, one package.
@@ -150,6 +161,7 @@ fn check_access(
                     simple_name(&declaring_binary)
                 ),
                 severity: "error".to_string(),
+                code: String::new(),
                 start: name_node.start_byte(),
                 end: name_node.end_byte(),
             });
@@ -180,6 +192,7 @@ fn check_access(
                     access_pkg
                 ),
                 severity: "error".to_string(),
+                code: String::new(),
                 start: name_node.start_byte(),
                 end: name_node.end_byte(),
             });
@@ -416,6 +429,7 @@ mod tests {
         members.insert(
             "java/lang/Object".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: None,
                 interfaces: Vec::new(),
                 methods: Vec::new(),
@@ -426,6 +440,7 @@ mod tests {
         members.insert(
             "com/acme/other/OtherPackageClass".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
                 methods: vec![
@@ -449,6 +464,7 @@ mod tests {
         members.insert(
             "com/dep/LibClass".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
@@ -462,6 +478,7 @@ mod tests {
         members.insert(
             "com/acme/access/Outer/Inner".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
@@ -469,10 +486,25 @@ mod tests {
                 flags: Default::default(),
             },
         );
+        // A PROJECT interface in another package whose method got recorded with `Package` visibility
+        // (the indexing quirk this guards against). Interface members are implicitly public, so a call
+        // through an interface-typed field must never be flagged.
+        members.insert(
+            "com/acme/other/SomeService".to_string(),
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: Some("java/lang/Object".to_string()),
+                interfaces: Vec::new(),
+                methods: vec![method("serve", Visibility::Package)],
+                fields: Vec::new(),
+                flags: bennu_java::prelude::ClassFlags { is_interface: true, ..Default::default() },
+            },
+        );
         // A JDK type with a private field — must never be flagged.
         members.insert(
             "java/lang/String".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
@@ -482,6 +514,7 @@ mod tests {
         );
         let simple = [
             ("OtherPackageClass", "com/acme/other/OtherPackageClass"),
+            ("SomeService", "com/acme/other/SomeService"),
             ("LibClass", "com/dep/LibClass"),
             ("Inner", "com/acme/access/Outer/Inner"),
             ("String", "java/lang/String"),
@@ -549,6 +582,14 @@ mod tests {
     #[test]
     fn public_field_is_not_flagged() {
         assert!(diags(&access("int a = other.ok;")).is_empty());
+    }
+
+    #[test]
+    fn interface_member_is_never_flagged_even_if_recorded_package() {
+        // Calling a method through an INTERFACE-typed field must not be flagged as package/private
+        // access — interface members are implicitly public (JLS §9.4), whatever the index recorded.
+        let src = "package com.acme.access;\nclass Accessor { void m(com.acme.other.SomeService svc) { svc.serve(); } }";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
     }
 
     #[test]

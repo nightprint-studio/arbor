@@ -34,12 +34,15 @@ pub fn init_check_errors(root: Node, source: &str) -> Vec<Diagnostic> {
 pub fn init_check_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let lombok_val = has_lombok_val_import(nodes, bytes);
+    let lombok_present = imports_any_lombok(nodes, bytes);
     let mut out = Vec::new();
     for &n in nodes {
         match n.kind() {
             // Check 1 is scoped to one type body: assignments inside it are gathered, then the type's
             // own blank-final fields are flagged if unassigned.
-            "class_declaration" | "enum_declaration" => check_uninitialized_final_fields(n, bytes, &mut out),
+            "class_declaration" | "enum_declaration" => {
+                check_uninitialized_final_fields(n, bytes, lombok_present, &mut out)
+            }
             // Check 2 is per local declaration.
             "local_variable_declaration" => check_uninferrable_var(n, bytes, lombok_val, &mut out),
             _ => {}
@@ -53,7 +56,18 @@ pub fn init_check_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> 
 /// Flag every `final` field of type `n` that has no declarator initializer AND whose name is assigned
 /// nowhere in the type's own body. Skips as soon as *any* assignment to that name appears — no flow
 /// analysis, so any assignment means "possibly initialized".
-fn check_uninitialized_final_fields(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
+fn check_uninitialized_final_fields(n: Node, bytes: &[u8], lombok_present: bool, out: &mut Vec<Diagnostic>) {
+    // Lombok generates a constructor that initializes the `final` (and `@NonNull`) fields at COMPILE
+    // time — there's no textual assignment in source, so without this the blank-final check would
+    // falsely flag every final field of a `@RequiredArgsConstructor` / `@Data` / `@Value` /
+    // `@AllArgsConstructor` class. The suppression applies ONLY when Lombok is genuinely in use —
+    // the file imports it (`lombok_present`) or the annotation is written fully-qualified
+    // (`@lombok.Data`). Without that, `@Data` is the project's OWN annotation (no generated ctor) and
+    // the final fields really are uninitialized, so the report stands (matching the user's "only if
+    // Lombok is a dependency").
+    if has_lombok_constructor_annotation(n, bytes, lombok_present) {
+        return;
+    }
     let Some(body) = n.child_by_field_name("body") else { return };
 
     // (field name → name node) for each blank final candidate declared directly in this body. A field
@@ -192,6 +206,61 @@ fn check_uninferrable_var(decl: Node, bytes: &[u8], lombok_val: bool, out: &mut 
 
 // ── shared helpers ───────────────────────────────────────────────────────────
 
+/// Whether a class/enum carries a Lombok annotation that generates a constructor initializing its
+/// `final` fields: `@RequiredArgsConstructor` / `@AllArgsConstructor` / `@Data` (bundles
+/// `@RequiredArgsConstructor`) / `@Value` (all fields final + `@AllArgsConstructor`). Matched on the
+/// annotation's simple name (last segment, so `@lombok.Data` counts too), read off the node's
+/// `modifiers`. When present, the class's blank-final fields are Lombok-initialized → skip.
+fn has_lombok_constructor_annotation(node: Node, bytes: &[u8], lombok_present: bool) -> bool {
+    let mut c = node.walk();
+    for ch in node.children(&mut c) {
+        if ch.kind() != "modifiers" {
+            continue;
+        }
+        let mut mc = ch.walk();
+        for a in ch.children(&mut mc) {
+            if !matches!(a.kind(), "marker_annotation" | "annotation") {
+                continue;
+            }
+            let Some(name) = a.child_by_field_name("name").and_then(|nn| nn.utf8_text(bytes).ok())
+            else {
+                continue;
+            };
+            let simple = name.rsplit('.').next().unwrap_or(name);
+            if !matches!(
+                simple,
+                "RequiredArgsConstructor" | "AllArgsConstructor" | "Data" | "Value"
+            ) {
+                continue;
+            }
+            // Only Lombok's generates the ctor: the file must import Lombok, or the annotation must be
+            // written fully-qualified `@lombok.…`. A bare `@Data` with no Lombok import is the
+            // project's own annotation → don't suppress the blank-final check.
+            if lombok_present || name.starts_with("lombok.") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Whether the file imports Lombok at all — any `import lombok.…` (specific or wildcard). Scans the
+/// top-level `import_declaration` nodes in the shared slice.
+fn imports_any_lombok(nodes: &[Node], bytes: &[u8]) -> bool {
+    for &n in nodes {
+        if n.kind() != "import_declaration" {
+            continue;
+        }
+        if let Ok(t) = n.utf8_text(bytes) {
+            let compact = t.replace(char::is_whitespace, "");
+            if compact.contains("importlombok.") || compact.contains("importstaticlombok.") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Whether a declaration node carries the `final` modifier. Same shape as `finals::has_final`.
 fn has_final(node: Node, bytes: &[u8]) -> bool {
     let mut c = node.walk();
@@ -230,6 +299,7 @@ fn err(message: String, node: Node) -> Diagnostic {
     Diagnostic {
         message,
         severity: "error".to_string(),
+        code: String::new(),
         start: node.start_byte(),
         end: node.end_byte(),
     }
@@ -296,6 +366,38 @@ mod tests {
     #[test]
     fn non_final_uninitialized_field_is_not_flagged() {
         assert!(errs("class C { int x; }").is_empty());
+    }
+
+    #[test]
+    fn lombok_constructor_annotations_suppress_blank_final() {
+        // Lombok generates a constructor that initializes the final fields — no source assignment
+        // exists, so the check must NOT flag them (when Lombok is actually imported).
+        for ann in ["@RequiredArgsConstructor", "@AllArgsConstructor", "@Data", "@Value"] {
+            let src = format!(
+                "import lombok.*;\n{ann}\nclass C {{ private final int x; private final String y; }}"
+            );
+            assert!(errs(&src).is_empty(), "{ann} must suppress blank-final: {:?}", errs(&src));
+        }
+        // Fully-qualified annotation name counts even without an import.
+        let fq = "@lombok.RequiredArgsConstructor\nclass C { private final int x; }";
+        assert!(errs(fq).is_empty(), "{:?}", errs(fq));
+    }
+
+    #[test]
+    fn blank_final_not_suppressed_without_lombok_import() {
+        // A bare `@Data` with NO Lombok import is the project's own annotation → no generated ctor →
+        // the blank-final field is still flagged (the "only if Lombok is a dependency" gate).
+        let d = errs("@Data\nclass C { private final int x; }");
+        assert_eq!(d.len(), 1, "unimported @Data must not suppress: {d:?}");
+        assert!(d[0].contains("`x`"), "{d:?}");
+    }
+
+    #[test]
+    fn blank_final_still_flagged_without_lombok_ctor_annotation() {
+        // A different (non-constructor) Lombok annotation doesn't generate a ctor → still flagged.
+        let d = errs("import lombok.*;\n@Getter\nclass C { private final int x; }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`x`"), "{d:?}");
     }
 
     #[test]

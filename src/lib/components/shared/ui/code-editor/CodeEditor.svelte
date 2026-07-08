@@ -32,6 +32,9 @@
     rulerColumn,
     minimap = false,
     emmet = false,
+    indentGuides = false,
+    stickyScroll = false,
+    scrollbarOverview = false,
     tabSize,
     indentUnit,
     initialState,
@@ -52,6 +55,13 @@
     minimap?: boolean;
     /** Enable Emmet abbreviation expansion on Tab (markup buffers). Static at mount. */
     emmet?: boolean;
+    /** Draw indentation guides (active block brightened). Static at mount. */
+    indentGuides?: boolean;
+    /** Pin enclosing declaration lines to the top (sticky scroll). Static at mount. */
+    stickyScroll?: boolean;
+    /** Replace the native scrollbar with the IntelliJ overview strip (diagnostic marks + hover
+     *  preview). A host uses this INSTEAD of `minimap`. Static at mount. */
+    scrollbarOverview?: boolean;
     /** Tab width in columns. Omit to keep CodeMirror's default (an editor that never sets
      *  indentation is unchanged). Applied live via a compartment. */
     tabSize?: number;
@@ -125,7 +135,9 @@
   $effect(() => { void diagnostics; pushDiagnostics(); });
 
   function mount(target: HTMLDivElement) {
-    const { extensions } = createCodeEditorExtensions(language, { readOnly, onGoto, rulerColumn, emmet });
+    const { extensions } = createCodeEditorExtensions(language, {
+      readOnly, onGoto, rulerColumn, emmet, indentGuides, stickyScroll, scrollbarOverview,
+    });
 
     const updateListener = EditorView.updateListener.of((u) => {
       if (u.docChanged && !suppressEmit) {

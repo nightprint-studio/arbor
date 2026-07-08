@@ -64,6 +64,7 @@ fn check_method_named_like_class(method: Node, bytes: &[u8], out: &mut Vec<Diagn
                  (a constructor has no return type)"
             ),
             severity: "warning".to_string(),
+            code: String::new(),
             start: name_node.start_byte(),
             end: name_node.end_byte(),
         });

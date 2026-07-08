@@ -50,7 +50,7 @@ fn parse_file(
     if !visited.insert(canon) {
         return; // already parsed (cycle / diamond include)
     }
-    let text = match std::fs::read_to_string(file) {
+    let text = match crate::io::read_to_string_lf(file) {
         Ok(t) => t,
         Err(_) => return,
     };

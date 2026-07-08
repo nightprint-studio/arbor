@@ -13,6 +13,7 @@
  */
 
 import { bennu } from '../rpc';
+import type { Diagnostic } from '$lib/types/bennu';
 
 /** A resolved go-to-definition target for a JSP form/link action reference — mirrors
  *  the BE `DefinitionResult` (intel.rs). `bennu_definition` returns `null` when no
@@ -45,9 +46,17 @@ export function beanClass(file: string, name: string): Promise<string | null> {
  *  project (used to pick the project's config graph); `action` is the action
  *  qualified name / reference under the caret. Resolves to `null` gracefully when no
  *  target exists (no project, config still building, unknown action).
- *  Wire: `bennu_definition` — `DefinitionArgs { file, action }`. */
-export function definition(file: string, action: string): Promise<DefinitionResult | null> {
-  return bennu('bennu_definition', { args: { file, action } });
+ *  `source` + `offset` (the live JSP buffer + caret) are optional: when the bare `action`
+ *  string is ambiguous, the BE re-scans the buffer to fold an enclosing `<s:url namespace="…">`
+ *  onto a relative `action`, resolving the qualified name.
+ *  Wire: `bennu_definition` — `DefinitionArgs { file, action, source?, offset? }`. */
+export function definition(
+  file: string,
+  action: string,
+  source?: string,
+  offset?: number,
+): Promise<DefinitionResult | null> {
+  return bennu('bennu_definition', { args: { file, action, source, offset } });
 }
 
 /** A resolved go-to-declaration target for a Java symbol under the caret — mirrors the
@@ -92,6 +101,56 @@ export function actionPropertyTarget(
   offset: number,
 ): Promise<DeclarationTarget | null> {
   return bennu('bennu_action_property_target', { args: { file, source, offset } });
+}
+
+/** Hover on a JSP form field / OGNL root, or a `*-validation.xml` `<field>`, under the caret →
+ *  the action property's **type** (`String customer`, `List<Item> items`) and its owning action
+ *  class, as a {@link HoverInfo}. `null` when the caret isn't on a resolvable field.
+ *  Wire: `bennu_action_property_hover` — `{ file, source, offset }`. */
+export function actionPropertyHover(
+  file: string,
+  source: string,
+  offset: number,
+): Promise<HoverInfo | null> {
+  return bennu('bennu_action_property_hover', { args: { file, source, offset } });
+}
+
+/** Go-to on a Struts `<result>` body under the caret in a config XML: a JSP path opens the JSP; an
+ *  OGNL/EL root (`${prop}`) jumps to the owning action's property accessor. `null` when the caret
+ *  isn't on a resolvable result target.
+ *  Wire: `bennu_struts_result_target` — `{ file, source, offset }`. */
+export function strutsResultTarget(
+  file: string,
+  source: string,
+  offset: number,
+): Promise<DeclarationTarget | null> {
+  return bennu('bennu_struts_result_target', { args: { file, source, offset } });
+}
+
+/** Lint a Struts config XML's `<result>` targets: a JSP path that resolves to no file under the web
+ *  app → "JSP not found"; an OGNL/EL root that isn't a property of the owning action → warning.
+ *  Byte-offset diagnostics against the live buffer. Empty when nothing (never a false positive).
+ *  Wire: `bennu_struts_result_lint` — `{ file, source }`. */
+export function strutsResultLint(file: string, source: string): Promise<Diagnostic[]> {
+  return bennu('bennu_struts_result_lint', { args: { file, source } });
+}
+
+/** A generated decompiled-stub location: the on-disk `.java` path + a byte offset to jump to. */
+export interface DecompiledLocation {
+  file: string;
+  offset: number;
+}
+
+/** Resolve a **library/JDK type** `name` (a simple name resolved via `source`'s imports, or a dotted
+ *  FQCN) to a generated decompiled Java stub on disk — the "go-to into a JDK/library class" fallback.
+ *  `null` when it doesn't resolve, is a project type (real source), or can't be decoded.
+ *  Wire: `bennu_decompiled_source` — `{ file, source, name }`. */
+export function decompiledSource(
+  file: string,
+  source: string,
+  name: string,
+): Promise<DecompiledLocation | null> {
+  return bennu('bennu_decompiled_source', { args: { file, source, name } });
 }
 
 /** A single "unknown property on action" lint hit — a JSP field / validation `<field>` whose root

@@ -13,6 +13,12 @@ pub use crate::infer::{
 };
 pub use crate::symbols::{extract_symbols, extract_symbols_from_root};
 
+// "Import class" detection: the simple type name under the caret that needs an import.
+pub use crate::import_hint::simple_type_needing_import;
+
+// Static-import targets — `import static …` parsed into (owner, member) for inference + undefined-var.
+pub use crate::static_import::{static_import_targets, StaticImportTarget};
+
 // The structural model produced by `extract_symbols`.
 pub use crate::symbols::{
     Annotation, FieldDecl, FileSymbols, Import, MethodDecl, ParamDecl, TypeDecl, TypeKind,

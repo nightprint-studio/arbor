@@ -272,6 +272,7 @@ mod tests {
         members.insert(
             "com/acme/Base".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
                 methods: vec![method("greet", "java/lang/String", Visibility::Public)],
@@ -282,6 +283,7 @@ mod tests {
         members.insert(
             "com/acme/Sub".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("com/acme/Base".to_string()),
                 interfaces: Vec::new(),
                 methods: vec![method("own", "int", Visibility::Public)],
@@ -320,6 +322,7 @@ mod tests {
         members.insert(
             "com/acme/Sub".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("java/util/AbstractList".to_string()),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
@@ -330,6 +333,7 @@ mod tests {
         members.insert(
             "java/util/AbstractList".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: None,
                 interfaces: Vec::new(),
                 methods: vec![method("size", "int", Visibility::Public)],
@@ -356,6 +360,7 @@ mod tests {
         members.insert(
             "com/acme/Sub".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("com/acme/Mid".to_string()),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
@@ -366,6 +371,7 @@ mod tests {
         members.insert(
             "com/acme/Mid".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("com/acme/Base".to_string()),
                 interfaces: Vec::new(),
                 methods: vec![method("run", "void", Visibility::Protected)],
@@ -376,6 +382,7 @@ mod tests {
         members.insert(
             "com/acme/Base".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: None,
                 interfaces: Vec::new(),
                 methods: vec![method("run", "void", Visibility::Public)],
@@ -407,6 +414,7 @@ mod tests {
         members.insert(
             "com/acme/Sub".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: Some("com/acme/Base".to_string()),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
@@ -417,6 +425,7 @@ mod tests {
         members.insert(
             "com/acme/Base".to_string(),
             ClassMembers {
+                type_params: Vec::new(),
                 superclass: None,
                 interfaces: Vec::new(),
                 methods: vec![method("zeta", "void", Visibility::Public), method("alpha", "void", Visibility::Public)],

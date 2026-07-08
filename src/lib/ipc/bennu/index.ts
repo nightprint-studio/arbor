@@ -70,11 +70,28 @@ export function completion(file: string, offset: number, source: string): Promis
   return bennu('bennu_completion', { args: { file, offset, source } });
 }
 
+/** A ready import edit (byte range + replacement) for auto-import on completion accept. */
+export interface ImportEdit {
+  start: number;
+  end: number;
+  replacement: string;
+}
+
+/** Compute the `import <fqn>;` edit for `source`, or `null` when no import is needed (java.lang,
+ *  same package, already imported, star-covered). Called on accepting a type-name completion whose
+ *  `auto_import` is set and the auto-import setting is on. Wire: `bennu_import_edit`. */
+export function importEdit(source: string, fqn: string): Promise<ImportEdit | null> {
+  return bennu('bennu_import_edit', { args: { source, fqn } });
+}
+
 /** Diagnostics for a file. For a Java file, pass the live buffer `source` to get AST-level
  *  validation (syntax errors + unused imports) without compiling; for a JSP the backend checks
- *  action/include references itself. Wire: `bennu_diagnostics` — `DiagnosticsArgs { file, source? }`. */
-export function diagnostics(file: string, source?: string): Promise<Diagnostic[]> {
-  return bennu('bennu_diagnostics', { args: { file, source } });
+ *  action/include references itself. `resolved` picks the Java validation tier — `false` = the fast
+ *  pure-AST pass only (syntax / structure — instant while typing), `true` (default) = the full
+ *  resolver-backed pass; the FE runs both on staggered debounces so a big file stays responsive.
+ *  Wire: `bennu_diagnostics` — `DiagnosticsArgs { file, source?, resolved? }`. */
+export function diagnostics(file: string, source?: string, resolved = true): Promise<Diagnostic[]> {
+  return bennu('bennu_diagnostics', { args: { file, source, resolved } });
 }
 
 /** Compile the project: `mvn -q -o compile` (offline, project JDK) with a `javac`

@@ -182,7 +182,7 @@ fn is_primitive(binary: &str) -> bool {
 }
 
 fn err(message: String, node: Node) -> Diagnostic {
-    Diagnostic { message, severity: "error".to_string(), start: node.start_byte(), end: node.end_byte() }
+    Diagnostic { message, severity: "error".to_string(), code: String::new(), start: node.start_byte(), end: node.end_byte() }
 }
 
 #[cfg(test)]
@@ -210,6 +210,7 @@ mod tests {
 
     fn cls(flags: ClassFlags, superclass: Option<&str>, methods: Vec<Member>) -> ClassMembers {
         ClassMembers {
+            type_params: Vec::new(),
             superclass: superclass.map(str::to_string),
             interfaces: Vec::new(),
             methods,

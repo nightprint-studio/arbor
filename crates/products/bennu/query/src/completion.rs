@@ -114,6 +114,7 @@ fn add_matching(
             label: m.name.clone(),
             kind: kind_tag(m.kind).to_string(),
             detail: Some(render_detail(m)),
+            auto_import: None, // a member has no import to add
         });
     }
 }

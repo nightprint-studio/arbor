@@ -220,7 +220,7 @@ mod tests {
     }
 
     fn diag(msg: &str) -> Diagnostic {
-        Diagnostic { message: msg.to_string(), severity: "error".to_string(), start: 0, end: 1 }
+        Diagnostic { message: msg.to_string(), severity: "error".to_string(), code: String::new(), start: 0, end: 1 }
     }
 
     #[test]

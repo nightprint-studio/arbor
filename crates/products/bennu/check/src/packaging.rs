@@ -28,6 +28,7 @@ pub fn package_mismatch(root: Node, source: &str, expected: &str) -> Vec<Diagnos
                 "Package `{declared}` does not match the file's location (expected `{expected}`)"
             ),
             severity: "error".to_string(),
+            code: String::new(),
             start: name_node.start_byte(),
             end: name_node.end_byte(),
         }],
@@ -37,6 +38,7 @@ pub fn package_mismatch(root: Node, source: &str, expected: &str) -> Vec<Diagnos
             vec![Diagnostic {
                 message: format!("Missing package declaration (the file's location expects `{expected}`)"),
                 severity: "error".to_string(),
+                code: String::new(),
                 start: anchor.start_byte(),
                 end: anchor.end_byte(),
             }]

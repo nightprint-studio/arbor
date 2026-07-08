@@ -65,21 +65,57 @@ pub fn unresolved_types_in(
         if matches!(n.parent().map(|p| p.kind()), Some("scoped_type_identifier") | Some("type_parameter")) {
             continue;
         }
+        // The qualifier of a method reference (`x::method`) — tree-sitter parses the LHS as a
+        // `type_identifier` even when it's actually a VARIABLE / field / parameter (`list::add`,
+        // `helper::process`), which it can't disambiguate from a class (`Integer::parseInt`). Since a
+        // method-ref qualifier can legitimately be a value, never flag it as an unresolved type (only
+        // a genuine `TypoClass::method` slips through — the conservative trade for zero false positives).
+        if n.parent().map(|p| p.kind()) == Some("method_reference") {
+            continue;
+        }
         let Ok(name) = n.utf8_text(bytes) else { continue };
         if name == "var" || known.contains(name) || JAVA_LANG.contains(&name) {
             continue;
         }
-        if resolver.resolve_simple_name(name, &symbols.imports).is_some() {
+        // Lombok `val` (an inferred `final` local) parses as a `type_identifier` named `val`. When
+        // it's the type of a local declaration AND the file imports Lombok's `val` (so it's really the
+        // inference keyword, not a class), skip it like `var` — `val x = repo.find();` isn't flagged
+        // "Cannot resolve symbol `val`". Without the import, `val` isn't Lombok's and IS a real
+        // unresolved type, so it stays flagged.
+        if name == "val"
+            && n.parent().map(|p| p.kind()) == Some("local_variable_declaration")
+            && imports_lombok_val(symbols)
+        {
+            continue;
+        }
+        // Resolvable via imports, the file's OWN package (no import needed), or the global lookup.
+        // Uses the shared `type_binary` so a bare same-package type (`C` referencing a sibling class in
+        // `com.acme`) resolves to `com/acme/C` instead of being falsely flagged.
+        if crate::resolve::type_binary(name, symbols, resolver).is_some() {
             continue;
         }
         out.push(Diagnostic {
             message: format!("Cannot resolve symbol `{name}`"),
             severity: "error".to_string(),
+            code: String::new(),
             start: n.start_byte(),
             end: n.end_byte(),
         });
     }
     out
+}
+
+/// Whether the file imports Lombok's `val` — the specific `import lombok.val;` or a `lombok.*`
+/// wildcard (`val` lives in the core `lombok` package). Only then is a `val`-typed local the Lombok
+/// inference keyword rather than an unresolved class named `val`.
+fn imports_lombok_val(symbols: &FileSymbols) -> bool {
+    symbols.imports.iter().any(|i| {
+        if i.star {
+            i.path == "lombok"
+        } else {
+            i.path == "lombok.val"
+        }
+    })
 }
 
 /// Gather every type-parameter name declared anywhere in the file (`<T>`, `<K, V>`, `<T extends X>`).
@@ -106,16 +142,29 @@ fn collect_type_params(nodes: &[Node], bytes: &[u8], out: &mut HashSet<String>) 
 mod tests {
     use super::*;
     use bennu_java::prelude::{ClassMembers, Import};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
 
     struct MapResolver {
         simple: HashMap<String, String>,
+        /// Binary names for which `members_of` returns a (stub) type — i.e. types that EXIST. The
+        /// same-package resolution probes `members_of("<pkg>/<name>")`, so a same-package test seeds
+        /// the sibling's binary here.
+        known: HashSet<String>,
     }
 
     impl TypeResolver for MapResolver {
-        fn members_of(&self, _binary: &str) -> Option<Arc<ClassMembers>> {
-            None
+        fn members_of(&self, binary: &str) -> Option<Arc<ClassMembers>> {
+            self.known.contains(binary).then(|| {
+                Arc::new(ClassMembers {
+                    type_params: Vec::new(),
+                    superclass: Some("java/lang/Object".to_string()),
+                    interfaces: Vec::new(),
+                    methods: Vec::new(),
+                    fields: Vec::new(),
+                    flags: Default::default(),
+                })
+            })
         }
         fn resolve_simple_name(&self, name: &str, imports: &[Import]) -> Option<String> {
             if let Some(b) = self.simple.get(name) {
@@ -133,7 +182,7 @@ mod tests {
             .into_iter()
             .map(|(s, b)| (s.to_string(), b.to_string()))
             .collect();
-        MapResolver { simple }
+        MapResolver { simple, known: HashSet::new() }
     }
 
     fn diags(src: &str) -> Vec<String> {
@@ -164,9 +213,53 @@ mod tests {
     }
 
     #[test]
+    fn same_package_type_needs_no_import() {
+        // `B` (in `com.acme`) references its sibling `Sibling` (also `com.acme`) with NO import — legal
+        // in Java, and must NOT be flagged. The flat simple-name index doesn't know `Sibling`, but its
+        // exact binary `com/acme/Sibling` resolves (same package).
+        let mut r = resolver();
+        r.known.insert("com/acme/Sibling".to_string());
+        let src = "package com.acme;\nclass B { Sibling s; }";
+        let d: Vec<String> = unresolved_types(src, &r).into_iter().map(|x| x.message).collect();
+        assert!(d.is_empty(), "a same-package type resolves without an import: {d:?}");
+
+        // A name that is NOT a same-package type (and unknown everywhere) is still flagged.
+        let bad = "package com.acme;\nclass B { Nonesuch s; }";
+        let d2: Vec<String> = unresolved_types(bad, &r).into_iter().map(|x| x.message).collect();
+        assert_eq!(d2.len(), 1, "{d2:?}");
+        assert!(d2[0].contains("Nonesuch"), "{d2:?}");
+    }
+
+    #[test]
     fn type_parameter_is_not_flagged() {
         // `T` is a type parameter, not an unresolved type.
         assert!(diags("class Box<T> { T value; T get() { return value; } }").is_empty());
+    }
+
+    #[test]
+    fn var_and_imported_lombok_val_locals_are_not_flagged() {
+        // The JDK `var` is always fine; Lombok `val` is fine ONLY when imported → then neither is
+        // flagged as an unresolved symbol.
+        let src = "import lombok.val;\nclass C { void m() { var x = 1; val y = new Widget(); } }";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
+    }
+
+    #[test]
+    fn lombok_val_without_import_is_flagged() {
+        // No `import lombok.val;` → `val` is not the inference keyword, it's an unresolved type.
+        let d = diags("class C { void m() { val y = new Widget(); } }");
+        assert!(d.iter().any(|m| m.contains("val")), "unimported val is a real unresolved type: {d:?}");
+    }
+
+    #[test]
+    fn method_reference_qualifier_is_not_flagged() {
+        // `list::add` / `helper::process` — the LHS is a VARIABLE, parsed as a `type_identifier` by
+        // tree-sitter, but it must not be flagged as an unresolved type (the false positive the user
+        // hit). The declared types here (`Widget`, `String`) resolve, so only the ref qualifier is
+        // under test.
+        assert!(diags("class C { void m() { Widget c = list::add; } }").is_empty());
+        assert!(diags("class C { void m() { String r = helper::process; } }").is_empty());
+        assert!(diags("class C { void m() { var f = data::make; } }").is_empty());
     }
 
     #[test]

@@ -217,6 +217,7 @@ fn warn(message: &str, node: Node) -> Diagnostic {
     Diagnostic {
         message: message.to_string(),
         severity: "warning".to_string(),
+        code: String::new(),
         start: node.start_byte(),
         end: node.end_byte(),
     }

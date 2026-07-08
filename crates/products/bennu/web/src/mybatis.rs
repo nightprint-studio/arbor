@@ -90,7 +90,7 @@ pub fn parse_mybatis(source: &str, source_file: &str) -> MyBatisParse {
 /// or isn't a `<mapper namespace=…>` root (skip-and-continue) — like
 /// [`crate::validation::parse_file`]. The `source_file` on every record is `file`.
 pub fn parse_mybatis_file(file: &Path) -> Option<MyBatisParse> {
-    let text = std::fs::read_to_string(file).ok()?;
+    let text = crate::io::read_to_string_lf(file).ok()?;
     let parse = parse_mybatis(&text, &file.display().to_string());
     if parse.mappers.is_empty() {
         return None;

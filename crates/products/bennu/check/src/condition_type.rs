@@ -148,7 +148,7 @@ fn is_type_var(binary: &str) -> bool {
 }
 
 fn err(message: String, node: Node) -> Diagnostic {
-    Diagnostic { message, severity: "error".to_string(), start: node.start_byte(), end: node.end_byte() }
+    crate::check_id::CheckId::NonBooleanCondition.at(node, message)
 }
 
 #[cfg(test)]
@@ -180,6 +180,7 @@ mod tests {
 
     fn cls(superclass: Option<&str>, methods: Vec<Member>, fields: Vec<Member>) -> ClassMembers {
         ClassMembers {
+            type_params: Vec::new(),
             superclass: superclass.map(str::to_string),
             interfaces: Vec::new(),
             methods,

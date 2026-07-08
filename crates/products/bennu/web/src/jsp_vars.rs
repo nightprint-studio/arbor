@@ -67,7 +67,7 @@ pub fn parse_jsp_vars(source: &str) -> JspVars {
 
 /// Convenience: read `path` and [`parse_jsp_vars`] it (empty on read error).
 pub fn parse_jsp_vars_file(path: &Path) -> JspVars {
-    match std::fs::read_to_string(path) {
+    match crate::io::read_to_string_lf(path) {
         Ok(text) => parse_jsp_vars(&text),
         Err(_) => JspVars::default(),
     }

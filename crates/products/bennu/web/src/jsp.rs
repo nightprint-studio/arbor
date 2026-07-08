@@ -113,7 +113,7 @@ pub fn parse_jsp(source: &str) -> JspParse {
 /// Convenience: read `path` and [`parse_jsp`] it. A read error yields an empty parse
 /// (skip-and-continue — one unreadable JSP never aborts a project-wide scan).
 pub fn parse_jsp_file(path: &Path) -> JspParse {
-    match std::fs::read_to_string(path) {
+    match crate::io::read_to_string_lf(path) {
         Ok(text) => parse_jsp(&text),
         Err(_) => JspParse::default(),
     }
@@ -182,24 +182,31 @@ fn scan_tag(source: &str, open: usize) -> Option<(usize, Vec<JspActionRef>)> {
     }
 
     let mut refs = Vec::new();
+    // A Struts taglib tag can carry an explicit `namespace="/do/Cat"` alongside a RELATIVE
+    // `action="viewTree"` — the real action key is `<namespace>/<action>` (`/do/Cat/viewTree`). Without
+    // folding it in, a namespaced `<s:url namespace="…" action="newUuidQC">` reduced to the bare
+    // `newUuidQC`, which only resolves by an ambiguous trailing-name guess (so go-to silently failed).
+    let namespace = attr_value(source, after, close, "namespace").map(|(v, _, _)| v);
+    let ns = namespace.as_deref();
     // A `<form>`/`<a>` may carry `action=` (Struts / plain HTML) OR `href=` (plain HTML
     // anchor). We collect the relevant attribute, then normalize.
     if let Some((raw, vstart, vend)) = attr_value(source, after, close, "action") {
-        push_action_ref(&mut refs, raw, vstart, vend, false);
+        push_action_ref(&mut refs, raw, vstart, vend, false, ns);
     }
     if let Some((raw, vstart, vend)) = attr_value(source, after, close, "href") {
         // Only a plain-HTML anchor href that points at a `.action`/`.do` URL is an action
-        // reference; ordinary links are ignored.
-        push_action_ref(&mut refs, raw, vstart, vend, true);
+        // reference; ordinary links are ignored. A plain-HTML href carries a full URL, not a
+        // Struts namespace, so the `namespace=` fold doesn't apply.
+        push_action_ref(&mut refs, raw, vstart, vend, true, None);
     }
-    // The dedicated action tag: Entando `<wp:action path="/x.action">` / Struts
-    // `<s:action name="foo">`. The action reference is the `path=` / `name=` value.
+    // The dedicated action tag: Entando `<wp:action path="/x.action">` (a full URL — no namespace
+    // fold) / Struts `<s:action name="foo" namespace="/do/Cat">` (a relative name — fold the ns).
     if name == "action" {
         if let Some((raw, vstart, vend)) = attr_value(source, after, close, "path") {
-            push_action_ref(&mut refs, raw, vstart, vend, false);
+            push_action_ref(&mut refs, raw, vstart, vend, false, None);
         }
         if let Some((raw, vstart, vend)) = attr_value(source, after, close, "name") {
-            push_action_ref(&mut refs, raw, vstart, vend, false);
+            push_action_ref(&mut refs, raw, vstart, vend, false, ns);
         }
     }
 
@@ -283,7 +290,14 @@ pub(crate) fn attr_value(
 /// Normalize a raw attribute value into a [`JspActionRef`] and push it. `href_mode` = the
 /// value came from an `href=` (plain-HTML anchor) — only kept if it points at a
 /// `.action`/`.do` URL. `action=` values are always kept.
-fn push_action_ref(out: &mut Vec<JspActionRef>, raw: String, start: usize, end: usize, href_mode: bool) {
+fn push_action_ref(
+    out: &mut Vec<JspActionRef>,
+    raw: String,
+    start: usize,
+    end: usize,
+    href_mode: bool,
+    namespace: Option<&str>,
+) {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return;
@@ -305,7 +319,28 @@ fn push_action_ref(out: &mut Vec<JspActionRef>, raw: String, start: usize, end: 
         Some(n) => n,
         None => return, // href not pointing at an action/do URL → not an action reference
     };
+    // Fold an explicit `namespace="/do/Cat"` onto a RELATIVE action name (`viewTree` →
+    // `/do/Cat/viewTree`); an already-absolute action (`/do/Cat/edit`) or an empty namespace is left
+    // as-is. The `raw` / span still point at the action attribute (the go-to / squiggle anchor).
+    let name = apply_namespace(name, namespace);
     out.push(JspActionRef { name, raw, start, end, computed: false });
+}
+
+/// Prefix a RELATIVE action name with an explicit Struts `namespace` (`viewTree` + `/do/Cat` →
+/// `/do/Cat/viewTree`). An already-absolute name (leading `/`) or an empty/whitespace namespace is
+/// returned unchanged — the namespace only supplies the path a bare name lacks.
+fn apply_namespace(name: String, namespace: Option<&str>) -> String {
+    match namespace {
+        Some(ns) => {
+            let ns = ns.trim();
+            if ns.is_empty() || name.starts_with('/') {
+                name
+            } else {
+                format!("{}/{}", ns.trim_end_matches('/'), name)
+            }
+        }
+        None => name,
+    }
 }
 
 /// Normalize a **raw** `action="…"` attribute value — exactly as the editor extracts it
@@ -500,6 +535,26 @@ mod tests {
         let save = parse.action_refs.iter().find(|r| r.name == "save").unwrap();
         assert_eq!(&FIXTURE[save.start..save.end], "save.action");
         assert_eq!(save.raw, "save.action");
+    }
+
+    #[test]
+    fn explicit_namespace_folds_onto_relative_action() {
+        // `<s:url namespace="/do/FrontEnd/ER" action="newUuidQC">` → the key is the qualified
+        // `/do/FrontEnd/ER/newUuidQC`, not the ambiguous bare `newUuidQC`. An already-absolute action
+        // (or an empty namespace) is left untouched, and the span still points at the action value.
+        let src = r#"<%@ taglib prefix="s" uri="/struts-tags" %>
+<s:url namespace="/do/FrontEnd/ER" action="newUuidQC" />
+<s:url namespace="/do/FrontEnd/ER" action="/do/Other/abs" />
+<s:form namespace="" action="rootAction" />"#;
+        let parse = parse_jsp(src);
+        let names: Vec<&str> = parse.action_refs.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"/do/FrontEnd/ER/newUuidQC"), "relative folds: {names:?}");
+        assert!(names.contains(&"/do/Other/abs"), "absolute action untouched: {names:?}");
+        assert!(names.contains(&"rootAction"), "empty namespace leaves bare name: {names:?}");
+        // The go-to / squiggle span still anchors on the action attribute value, not the namespace.
+        let folded = parse.action_refs.iter().find(|r| r.name == "/do/FrontEnd/ER/newUuidQC").unwrap();
+        assert_eq!(&src[folded.start..folded.end], "newUuidQC");
+        assert_eq!(folded.raw, "newUuidQC");
     }
 
     #[test]

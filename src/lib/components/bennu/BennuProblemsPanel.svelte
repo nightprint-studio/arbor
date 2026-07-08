@@ -1,14 +1,15 @@
 <script lang="ts">
   /**
-   * Problems (bottom dock / right tool window) — a small TREE grouped into sections:
-   *   • **JDK** — a warning when no JDK is installed (completion/nav can't resolve the
-   *     standard library) or when a fallback JDK stands in for the level the project targets.
-   *   • **Encoding** — the source files whose bytes weren't valid in the project's declared
-   *     encoding (recovered + indexed, but flagged); click one to open it.
-   *   • **<active file>** — the open file's diagnostics from the editor's LIVE buffer validation
-   *     (shared via `bennuDiagnosticsStore`), so this updates as you type / fix; click to jump.
+   * Problems (bottom dock / right tool window) — a TREE grouped **by severity first**:
+   *   • **Errors** / **Warnings** (/ Info / Hints) are the top-level nodes.
+   *   • Under each, problems are sub-grouped by their source — a **JDK** node (no JDK / fallback
+   *     JDK), an **Encoding** node (files not valid in the declared encoding), and one node per
+   *     **file** carrying diagnostics (the active file's LIVE buffer validation shared via
+   *     `bennuDiagnosticsStore`, plus every other file from the whole-project validation).
+   *   • Each node (severity and file) is collapsible; the leaf rows click to jump.
    *
-   * Each section is collapsible. The count in the header is every row across sections.
+   * Because grouping is severity-first, one file can appear under both Errors and Warnings — each
+   * with only its rows of that severity. The header count is every leaf row.
    */
   import {
     AlertTriangle, CircleAlert, Info, CircleCheckBig, ChevronRight, ChevronDown,
@@ -41,22 +42,37 @@
   );
 
   type Severity = Diagnostic['severity'];
-  interface Row {
+  /** One leaf problem, tagged with the SOURCE group (a file, or the JDK/Encoding pseudo-groups) it
+   *  belongs to — grouping is done afterwards, severity-first. */
+  interface Item {
     id: string;
+    severity: Severity;
+    groupKey: string;            // file path, or 'jdk' / 'encoding'
+    groupLabel: string;
+    groupIcon: typeof Coffee;
     label: string;
     detail?: string;
     title?: string;
-    severity: Severity;
-    onClick?: () => void;
     copy?: string;
+    onClick?: () => void;
   }
-  interface Section {
-    id: string;
+  interface FileGroup {
+    key: string;
     label: string;
     icon: typeof Coffee;
-    severity: Severity;
-    rows: Row[];
+    rows: Item[];
   }
+  interface SevGroup {
+    severity: Severity;
+    label: string;
+    count: number;
+    files: FileGroup[];
+  }
+
+  const SEV_ORDER: Severity[] = ['error', 'warning', 'info', 'hint'];
+  const SEV_LABEL: Record<string, string> = {
+    error: 'Errors', warning: 'Warnings', info: 'Info', hint: 'Hints',
+  };
 
   function baseName(path: string): string {
     return path.split(/[\\/]/).pop() ?? path;
@@ -77,88 +93,105 @@
 
   const jdk = $derived(bennuDiagnosticsStore.jdk);
 
-  const sections = $derived.by<Section[]>(() => {
-    const out: Section[] = [];
+  // Flat list of every leaf problem, each tagged with its source group. Grouping into the
+  // severity-first tree happens in `tree` below.
+  const items = $derived.by<Item[]>(() => {
+    const out: Item[] = [];
 
     // JDK
     if (bennuDiagnosticsStore.jdkMissing) {
       out.push({
-        id: 'jdk', label: 'JDK', icon: Coffee, severity: 'error',
-        rows: [{
-          id: 'jdk-missing', severity: 'error',
-          label: 'No JDK found',
-          detail: 'Completion and navigation can’t resolve the standard library — set a JDK path in Settings.',
-          onClick: () => bennuUiStore.openSettings(),
-        }],
+        id: 'jdk-missing', severity: 'error',
+        groupKey: 'jdk', groupLabel: 'JDK', groupIcon: Coffee,
+        label: 'No JDK found',
+        detail: 'Completion and navigation can’t resolve the standard library — set a JDK path in Settings.',
+        onClick: () => bennuUiStore.openSettings(),
       });
     } else if (bennuDiagnosticsStore.jdkFallback && jdk) {
       out.push({
-        id: 'jdk', label: 'JDK', icon: Coffee, severity: 'warning',
-        rows: [{
-          id: 'jdk-fallback', severity: 'warning',
-          label: `Project targets Java ${jdk.requested_major ?? '?'}, using Java ${jdk.resolved_major ?? '?'}`,
-          detail: jdk.resolved_home ?? 'a different JDK is resolving the standard library — install the matching JDK, or set a path in Settings',
-          title: jdk.resolved_home ?? undefined,
-          onClick: () => bennuUiStore.openSettings(),
-        }],
+        id: 'jdk-fallback', severity: 'warning',
+        groupKey: 'jdk', groupLabel: 'JDK', groupIcon: Coffee,
+        label: `Project targets Java ${jdk.requested_major ?? '?'}, using Java ${jdk.resolved_major ?? '?'}`,
+        detail: jdk.resolved_home ?? 'a different JDK is resolving the standard library — install the matching JDK, or set a path in Settings',
+        title: jdk.resolved_home ?? undefined,
+        onClick: () => bennuUiStore.openSettings(),
       });
     }
 
     // Encoding
-    const enc = bennuDiagnosticsStore.encodingIssues;
-    if (enc.length) {
+    for (const e of bennuDiagnosticsStore.encodingIssues) {
       out.push({
-        id: 'encoding', label: 'Encoding', icon: FileWarning, severity: 'warning',
-        rows: enc.map((e) => ({
-          id: `enc:${e.file}`, severity: 'warning',
-          label: baseName(e.file),
-          detail: `not valid ${e.declared_encoding} — recovered as ${e.decoded_as}`,
-          title: e.file,
-          copy: e.file,
-          onClick: () => void projectStore.openFile(e.file),
-        })),
+        id: `enc:${e.file}`, severity: 'warning',
+        groupKey: 'encoding', groupLabel: 'Encoding', groupIcon: FileWarning,
+        label: baseName(e.file),
+        detail: `not valid ${e.declared_encoding} — recovered as ${e.decoded_as}`,
+        title: e.file,
+        copy: e.file,
+        onClick: () => void projectStore.openFile(e.file),
       });
     }
 
     // Active-file diagnostics (live buffer — authoritative for the open file).
     if (activePath && diags.length) {
-      out.push({
-        id: 'file', label: baseName(activePath), icon: FileCode2,
-        severity: diags.some((d) => d.severity === 'error') ? 'error' : 'warning',
-        rows: diags.map((d, i) => ({
+      const label = baseName(activePath);
+      diags.forEach((d, i) => {
+        out.push({
           id: `d:${i}`, severity: d.severity,
+          groupKey: `file:${norm(activePath)}`, groupLabel: label, groupIcon: FileCode2,
           label: d.message,
           detail: `@${d.start}`,
           copy: d.message,
           onClick: () => bennuUiStore.requestGoto(lineOfOffset(d.start)),
-        })),
+        });
       });
     }
 
-    // Whole-project validation results, one section per file. The active file is skipped — its live
-    // section above is more up-to-date (reflects unsaved edits).
+    // Whole-project validation results. The active file is skipped — its live rows above are more
+    // up-to-date (reflect unsaved edits).
     const activeNorm = activePath ? norm(activePath) : null;
     for (const fd of bennuDiagnosticsStore.projectDiagnostics) {
       if (norm(fd.file) === activeNorm) continue;
-      out.push({
-        id: `proj:${fd.file}`, label: baseName(fd.file), icon: FileCode2,
-        severity: fd.diagnostics.some((d) => d.severity === 'error') ? 'error' : 'warning',
-        rows: fd.diagnostics.map((d, i) => ({
+      const label = baseName(fd.file);
+      fd.diagnostics.forEach((d, i) => {
+        out.push({
           id: `proj:${fd.file}:${i}`, severity: d.severity,
+          groupKey: `file:${norm(fd.file)}`, groupLabel: label, groupIcon: FileCode2,
           label: d.message,
           title: fd.file,
           copy: d.message,
           onClick: () => void projectStore.openFile(fd.file).then(() => bennuUiStore.requestGotoOffset(d.start)),
-        })),
+        });
       });
     }
 
     return out;
   });
 
-  const total = $derived(sections.reduce((n, s) => n + s.rows.length, 0));
+  // Severity-first tree: severity → file/source group → rows. Insertion order of files is preserved
+  // (JDK/Encoding first if present, then files as the stores list them).
+  const tree = $derived.by<SevGroup[]>(() => {
+    const bySev = new Map<Severity, Map<string, FileGroup>>();
+    for (const it of items) {
+      let files = bySev.get(it.severity);
+      if (!files) { files = new Map(); bySev.set(it.severity, files); }
+      let fg = files.get(it.groupKey);
+      if (!fg) { fg = { key: it.groupKey, label: it.groupLabel, icon: it.groupIcon, rows: [] }; files.set(it.groupKey, fg); }
+      fg.rows.push(it);
+    }
+    const out: SevGroup[] = [];
+    for (const sev of SEV_ORDER) {
+      const files = bySev.get(sev);
+      if (!files) continue;
+      let count = 0;
+      for (const fg of files.values()) count += fg.rows.length;
+      out.push({ severity: sev, label: SEV_LABEL[sev] ?? sev, count, files: [...files.values()] });
+    }
+    return out;
+  });
 
-  // Collapsed sections (local). Default expanded.
+  const total = $derived(items.length);
+
+  // Collapsed nodes (severity + file), keyed by id. Default expanded.
   const collapsed = new SvelteSet<string>();
   function toggle(id: string) { if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id); }
 
@@ -170,7 +203,7 @@
     void navigator.clipboard?.writeText(text).catch(() => { /* denied — ignore */ });
   }
 
-  function onRowContextMenu(row: Row, e: MouseEvent) {
+  function onRowContextMenu(row: Item, e: MouseEvent) {
     e.preventDefault();
     const items: MenuItem[] = [];
     if (row.onClick) items.push({ id: 'open', label: 'Open', icon: ChevronRight });
@@ -192,36 +225,56 @@
     <div class="pb-clean"><CircleCheckBig size={14} /> No problems detected</div>
   {:else}
     <div class="pb-tree" role="tree" aria-label="Problems">
-      {#each sections as sec (sec.id)}
-        {@const SecIcon = sec.icon}
-        {@const isCollapsed = collapsed.has(sec.id)}
+      {#each tree as sev (sev.severity)}
+        {@const SevIc = sevIcon(sev.severity)}
+        {@const sevId = `sev:${sev.severity}`}
+        {@const sevCollapsed = collapsed.has(sevId)}
         <button
           class="pb-sec"
           type="button"
           role="treeitem"
-          aria-expanded={!isCollapsed}
-          onclick={() => toggle(sec.id)}
+          aria-expanded={!sevCollapsed}
+          onclick={() => toggle(sevId)}
         >
-          <span class="pb-chev">{#if isCollapsed}<ChevronRight size={13} />{:else}<ChevronDown size={13} />{/if}</span>
-          <span class="pb-sec-icon sev-{sec.severity}"><SecIcon size={13} /></span>
-          <span class="pb-sec-label">{sec.label}</span>
-          <span class="pb-sec-count">{sec.rows.length}</span>
+          <span class="pb-chev">{#if sevCollapsed}<ChevronRight size={13} />{:else}<ChevronDown size={13} />{/if}</span>
+          <span class="pb-sec-icon sev-{sev.severity}"><SevIc size={13} /></span>
+          <span class="pb-sec-label">{sev.label}</span>
+          <span class="pb-sec-count">{sev.count}</span>
         </button>
-        {#if !isCollapsed}
-          {#each sec.rows as row (row.id)}
-            {@const RowIc = sevIcon(row.severity)}
+        {#if !sevCollapsed}
+          {#each sev.files as fg (fg.key)}
+            {@const FileIc = fg.icon}
+            {@const fileId = `${sevId}/${fg.key}`}
+            {@const fileCollapsed = collapsed.has(fileId)}
             <button
-              class="pb-row"
+              class="pb-file"
               type="button"
               role="treeitem"
-              onclick={() => row.onClick?.()}
-              oncontextmenu={(e) => onRowContextMenu(row, e)}
-              title={row.title}
+              aria-expanded={!fileCollapsed}
+              onclick={() => toggle(fileId)}
             >
-              <span class="pb-icon sev-{row.severity}"><RowIc size={12} /></span>
-              <span class="pb-msg">{row.label}</span>
-              {#if row.detail}<span class="pb-detail">{row.detail}</span>{/if}
+              <span class="pb-chev">{#if fileCollapsed}<ChevronRight size={12} />{:else}<ChevronDown size={12} />{/if}</span>
+              <span class="pb-file-icon"><FileIc size={12} /></span>
+              <span class="pb-file-label">{fg.label}</span>
+              <span class="pb-sec-count">{fg.rows.length}</span>
             </button>
+            {#if !fileCollapsed}
+              {#each fg.rows as row (row.id)}
+                {@const RowIc = sevIcon(row.severity)}
+                <button
+                  class="pb-row"
+                  type="button"
+                  role="treeitem"
+                  onclick={() => row.onClick?.()}
+                  oncontextmenu={(e) => onRowContextMenu(row, e)}
+                  title={row.title}
+                >
+                  <span class="pb-icon sev-{row.severity}"><RowIc size={12} /></span>
+                  <span class="pb-msg">{row.label}</span>
+                  {#if row.detail}<span class="pb-detail">{row.detail}</span>{/if}
+                </button>
+              {/each}
+            {/if}
           {/each}
         {/if}
       {/each}
@@ -253,10 +306,23 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Second level: the file / source group under a severity. Lighter weight than the severity node,
+     indented one step. */
+  .pb-file {
+    display: flex; align-items: center; gap: 6px;
+    width: 100%; text-align: left; box-sizing: border-box;
+    padding: 4px 12px 4px 24px; font-size: 12px; cursor: pointer;
+    background: transparent; border: none; font-family: var(--font-ui-sans);
+    color: var(--text-primary); font-weight: 500;
+  }
+  .pb-file:hover { background: var(--bg-hover); }
+  .pb-file-icon { display: flex; flex-shrink: 0; color: var(--text-muted); }
+  .pb-file-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
   .pb-row {
     display: flex; align-items: center; gap: 8px;
     width: 100%; text-align: left; box-sizing: border-box;
-    padding: 4px 12px 4px 30px; font-size: 12px; cursor: pointer;
+    padding: 4px 12px 4px 48px; font-size: 12px; cursor: pointer;
     background: transparent; border: none; font-family: var(--font-ui-sans);
     transition: background var(--transition-fast);
   }
