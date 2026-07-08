@@ -225,13 +225,30 @@ where
     R: Send,
     F: Fn(&T) -> R + Sync,
 {
+    // `0` = the default background budget (leave ~2 cores for the foreground).
+    parallel_map_capped(items, 0, f)
+}
+
+/// Like [`parallel_map`] but with an explicit worker cap. `max_workers == 0` uses the default
+/// background budget (`available_parallelism − 2`); any other value is clamped to `[1, cores]`.
+///
+/// The whole-project validation passes a *gentler* cap (a user setting, default ≈ half the cores) so a
+/// big sweep can't saturate every core and starve the interactive path (go-to / completion) and the UI
+/// shell — the "don't peg the machine so hard the editor freezes" knob the user controls.
+pub fn parallel_map_capped<T, R, F>(items: &[T], max_workers: usize, f: F) -> Vec<R>
+where
+    T: Sync,
+    R: Send,
+    F: Fn(&T) -> R + Sync,
+{
     let n = items.len();
     let cores = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1);
-    // Leave ~2 cores for the foreground: this runs on the background index thread, and
-    // saturating every core starves bennu-be's RPC thread (go-to / completion stall) and the
-    // UI shell — the walk must stay a background citizen, not peg the machine.
-    let workers = cores.saturating_sub(2).max(1);
-    // Serial for a small project / single core — the parse of a handful of files is faster
+    let workers = if max_workers == 0 {
+        cores.saturating_sub(2).max(1)
+    } else {
+        max_workers.min(cores).max(1)
+    };
+    // Serial for a small project / single worker — the parse of a handful of files is faster
     // than spinning threads up.
     if workers <= 1 || n <= 32 {
         return items.iter().map(&f).collect();

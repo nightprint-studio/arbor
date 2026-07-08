@@ -119,16 +119,13 @@ fn check_call(
     }
 
     if !names.contains(method) {
-        out.push(Diagnostic {
-            message: format!(
+        out.push(crate::check_id::CheckId::UnresolvedSuperMethod.at(
+            name,
+            format!(
                 "Cannot resolve method `{method}` in the superclass of `{}`",
                 simple_name(cls_name)
             ),
-            severity: "error".to_string(),
-            code: String::new(),
-            start: name.start_byte(),
-            end: name.end_byte(),
-        });
+        ));
     }
 }
 

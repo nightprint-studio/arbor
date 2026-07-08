@@ -216,13 +216,7 @@ pub fn undefined_var_errors_in(
 
         // Matched NONE of 1–6, hierarchy fully known, no unresolved static wildcard, no intervening
         // nested class / lambda → the name genuinely resolves to nothing here.
-        out.push(Diagnostic {
-            message: format!("Cannot resolve symbol `{name}`"),
-            severity: "error".to_string(),
-            code: String::new(),
-            start: n.start_byte(),
-            end: n.end_byte(),
-        });
+        out.push(crate::check_id::CheckId::UnresolvedSymbol.at(n, format!("Cannot resolve symbol `{name}`")));
     }
     out
 }

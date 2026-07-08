@@ -76,6 +76,6 @@ pub use crate::spell::{
 // no facade re-export).
 pub use crate::java_index::{
     build_project_index, build_project_index_from_sources, collect_java, file_records_from_source,
-    parallel_map, project_type_map, read_java_sources, read_source_for_index, ClassDecl,
+    parallel_map, parallel_map_capped, project_type_map, read_java_sources, read_source_for_index, ClassDecl,
     NonCompliantSource, ProjectBuild, ProjectSources,
 };

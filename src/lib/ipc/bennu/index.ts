@@ -111,6 +111,13 @@ export function validateProject(root: string): Promise<ProjectValidationResult> 
   return bennu('bennu_validate_project', { args: { root } });
 }
 
+/** Cancel the running whole-project validation. Fire-and-forget: the BE stops the sweep and discards
+ *  its partial results (no cache written). No-op if nothing is validating. Wire:
+ *  `bennu_cancel_validation` — `ValidateProjectArgs { root }`. */
+export function cancelValidation(root: string): Promise<void> {
+  return bennu('bennu_cancel_validation', { args: { root } });
+}
+
 /** SILENT whole-project re-validation for the live Problems panel (the on-save refresh): no build
  *  guard, no progress events, no stats — just the diagnostics grouped by file, cheap thanks to the
  *  incremental cache. `null` when the project's index isn't ready yet (leave the panel as-is). Wire:

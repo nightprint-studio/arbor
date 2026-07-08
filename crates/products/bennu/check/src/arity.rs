@@ -112,17 +112,15 @@ fn check_call(
     let sigs: Vec<Sig> = res.candidates.iter().map(sig_of).collect();
     let argc = arg_count(args);
     if !sigs.iter().any(|s| s.accepts(argc)) {
-        out.push(Diagnostic {
-            message: format!(
+        out.push(crate::check_id::CheckId::WrongArgumentCount.span(
+            name.start_byte(),
+            args.end_byte(),
+            format!(
                 "No overload of `{method}` in `{}` takes {argc} argument{}",
                 simple_name(&ty.binary_name),
                 plural(argc)
             ),
-            severity: "error".to_string(),
-            code: String::new(),
-            start: name.start_byte(),
-            end: args.end_byte(),
-        });
+        ));
     }
 }
 
@@ -163,17 +161,15 @@ fn check_new(
     }
     let argc = arg_count(args);
     if !sigs.iter().any(|s| s.accepts(argc)) {
-        out.push(Diagnostic {
-            message: format!(
+        out.push(crate::check_id::CheckId::WrongArgumentCount.span(
+            ty_node.start_byte(),
+            args.end_byte(),
+            format!(
                 "No constructor of `{}` takes {argc} argument{}",
                 simple_name(&binary),
                 plural(argc)
             ),
-            severity: "error".to_string(),
-            code: String::new(),
-            start: ty_node.start_byte(),
-            end: args.end_byte(),
-        });
+        ));
     }
 }
 

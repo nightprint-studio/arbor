@@ -27,6 +27,10 @@ export interface BennuConfig {
   /** Auto-import on accepting a type-name completion whose simple name resolves to a SINGLE class.
    *  `true` by default; off inserts just the name (import later with Alt+Enter). */
   auto_import: boolean;
+  /** Max worker threads the whole-project validation sweep may use. `0` = auto (leaves ~half the
+   *  cores free for the UI / go-to); set a small number (e.g. `1`) so a big project's validation
+   *  can't peg every core and freeze the editor. Doesn't affect the initial index build. */
+  validation_threads: number;
   /** Extra JDK install directories to search, on top of `JAVA_HOME` + the standard roots. */
   jdk_paths: string[];
   /** Per-project JDK override, keyed by absolute project-root path → Java version. */

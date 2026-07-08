@@ -232,7 +232,10 @@
   changed file (and anything whose types it touched) is re-checked. The cache is warmed up in the
   background right after a project finishes indexing, so the first validation is already instant;
   turn that off under <strong>Settings → Java → Validate project on open</strong> to skip the
-  background work.
+  background work. The sweep is a background citizen — it uses at most about half the CPU cores by
+  default (so the editor, go-to and completion stay responsive); cap it under
+  <strong>Settings → Java → Validation CPU threads</strong> (set 1 for single-threaded), and stop a
+  running sweep with the <strong>Cancel</strong> button on the “Validating…” status in the Build panel.
 </p>
 <p>
   The <strong>Problems</strong> panel is a tree grouped <strong>by severity</strong> — an

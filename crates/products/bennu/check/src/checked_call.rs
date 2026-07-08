@@ -276,16 +276,13 @@ fn flag_unhandled(
         }
 
         // Survived every SKIP: a checked exception the call can throw, not caught, not declared → error.
-        out.push(Diagnostic {
-            message: format!(
+        out.push(crate::check_id::CheckId::UnhandledCheckedException.at(
+            anchor,
+            format!(
                 "Unhandled exception: `{}` must be caught or declared to be thrown",
                 simple_name(binary)
             ),
-            severity: "error".to_string(),
-            code: String::new(),
-            start: anchor.start_byte(),
-            end: anchor.end_byte(),
-        });
+        ));
     }
 }
 

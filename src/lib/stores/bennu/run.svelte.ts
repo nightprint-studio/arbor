@@ -22,7 +22,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { SvelteMap } from 'svelte/reactivity';
 import {
   build as ipcBuild, validateProject as ipcValidateProject, run as ipcRun,
-  cancelRun as ipcCancelRun,
+  cancelRun as ipcCancelRun, cancelValidation as ipcCancelValidation,
 } from '$lib/ipc/bennu';
 import { getBennuConfig, setBennuConfig } from '$lib/ipc/bennu/config';
 import type { BuildResult, BuildDiagnostic, ProjectValidationResult } from '$lib/types/bennu';
@@ -63,6 +63,8 @@ function createBennuRunStore() {
 
   // Whole-project validation (the split-button's `validate` build type).
   let validating = $state(false);
+  // The root of the in-flight validation, so `cancelValidation()` needs no argument.
+  let validatingRoot = '';
   let validationResult = $state<ProjectValidationResult | null>(null);
   let validateProgress = $state<{ done: number; total: number } | null>(null);
   // Which build the split-button runs by default (and Ctrl+F9). Loaded from bennu config on attach.
@@ -170,6 +172,7 @@ function createBennuRunStore() {
   async function validateProject(root: string): Promise<ProjectValidationResult | null> {
     if (building || validating) return null;
     validating = true;
+    validatingRoot = root;
     validationResult = null;
     validateProgress = { done: 0, total: 0 };
     lines = [];
@@ -195,6 +198,18 @@ function createBennuRunStore() {
     } finally {
       validating = false;
       validateProgress = null;
+    }
+  }
+
+  /** Cancel the running whole-project validation (the Build panel's Cancel while validating). The BE
+   *  stops the sweep and discards its partial results; the in-flight `validateProject` promise then
+   *  resolves with an empty result. Best-effort. */
+  async function cancelValidation(): Promise<void> {
+    if (!validating) return;
+    try {
+      await ipcCancelValidation(validatingRoot);
+    } catch {
+      /* best-effort — the BE may already have finished */
     }
   }
 
@@ -296,6 +311,7 @@ function createBennuRunStore() {
     attach,
     build,
     validateProject,
+    cancelValidation,
     runPreferred,
     setPreferredBuildType,
     run,

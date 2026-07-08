@@ -94,13 +94,7 @@ pub fn unresolved_types_in(
         if crate::resolve::type_binary(name, symbols, resolver).is_some() {
             continue;
         }
-        out.push(Diagnostic {
-            message: format!("Cannot resolve symbol `{name}`"),
-            severity: "error".to_string(),
-            code: String::new(),
-            start: n.start_byte(),
-            end: n.end_byte(),
-        });
+        out.push(crate::check_id::CheckId::UnresolvedType.at(n, format!("Cannot resolve symbol `{name}`")));
     }
     out
 }

@@ -229,13 +229,10 @@ fn check_reference(
         return; // not an instance member, or a static member of the name also exists → SKIP
     }
 
-    out.push(Diagnostic {
-        message: format!("Non-static member `{name}` cannot be referenced from a static context"),
-        severity: "error".to_string(),
-        code: String::new(),
-        start: name_node.start_byte(),
-        end: name_node.end_byte(),
-    });
+    out.push(crate::check_id::CheckId::StaticContextAccess.at(
+        name_node,
+        format!("Non-static member `{name}` cannot be referenced from a static context"),
+    ));
 }
 
 /// A located top-level type: its CST node plus its declared simple name. (Same shape as

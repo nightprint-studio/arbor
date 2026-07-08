@@ -140,7 +140,7 @@ fn superclass_text(class: Node, bytes: &[u8]) -> Option<String> {
 }
 
 fn err(message: String, node: Node) -> Diagnostic {
-    Diagnostic { message, severity: "error".to_string(), code: String::new(), start: node.start_byte(), end: node.end_byte() }
+    crate::check_id::CheckId::SuperConstructorRequired.at(node, message)
 }
 
 #[cfg(test)]

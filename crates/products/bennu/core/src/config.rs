@@ -53,6 +53,13 @@ pub struct BennuConfig {
     /// to a SINGLE class, add its `import` line automatically. `true` by default; off inserts just the
     /// name (import it later with Alt+Enter).
     pub auto_import: bool,
+    /// **Validation CPU budget**: the maximum worker threads the whole-project validation sweep
+    /// (the background warm-up + the explicit "Validate — no compile") may use. `0` = auto (leave
+    /// roughly half the cores free for the UI / go-to / completion); set a small number (e.g. `1` for
+    /// single-threaded) so a big project's validation can't peg every core and freeze the editor.
+    /// Doesn't affect the one-shot initial index build. `#[serde(default)]` fills a missing key with
+    /// `0`, so existing config files get the auto behaviour.
+    pub validation_threads: usize,
     /// Extra JDK install directories to search, on top of `JAVA_HOME` +
     /// `C:/Program Files/Java/*`. For a JDK installed somewhere non-standard (a portable
     /// SDK, an IDE-bundled JDK, `/usr/lib/jvm/…`), so the index can still resolve the
@@ -81,6 +88,7 @@ impl Default for BennuConfig {
             validate_on_open: true,
             autosave: true,
             auto_import: true,
+            validation_threads: 0,
             jdk_paths: Vec::new(),
             jdk_overrides: BTreeMap::new(),
             encoding_overrides: BTreeMap::new(),

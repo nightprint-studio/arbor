@@ -48,6 +48,15 @@ pub struct ValidateProjectArgs {
     pub root: String,
 }
 
+/// Request cancellation of the currently-running whole-project validation (the FE's Cancel on the
+/// "Validating…" operation card). The in-flight sweep stops and discards its partial results; a no-op
+/// when nothing is validating. Fire-and-forget.
+#[arbor_rpc::handler]
+fn bennu_cancel_validation(_ctx: &BennuState, _args: ValidateProjectArgs) -> Result<(), String> {
+    IndexService::global().request_cancel_validation();
+    Ok(())
+}
+
 /// Validate every `.java` file in the project and return timing stats + diagnostics. A concurrent
 /// build/validation is refused (`Err`) via the shared [`BuildGuard`].
 #[arbor_rpc::handler]

@@ -200,7 +200,7 @@ fn plural(n: usize) -> &'static str {
 }
 
 fn err(message: String, node: Node) -> Diagnostic {
-    Diagnostic { message, severity: "error".to_string(), code: String::new(), start: node.start_byte(), end: node.end_byte() }
+    crate::check_id::CheckId::LambdaArity.at(node, message)
 }
 
 #[cfg(test)]

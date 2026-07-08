@@ -79,6 +79,13 @@
     await saveConfigPatch({ validate_on_open: v });
   }
 
+  // ── Validation CPU threads (0 = auto ≈ half the cores) ────────────────────────
+  const validationThreads = $derived(cfg?.validation_threads ?? 0);
+  async function commitValidationThreads(v: string) {
+    const n = Math.max(0, Math.floor(Number(v) || 0));
+    await saveConfigPatch({ validation_threads: n });
+  }
+
   const groups: SettingsNavGroup[] = [
     { label: 'Editor', items: [
       { id: 'editor',     label: 'Editor',     icon: TextCursorInput },
@@ -354,6 +361,10 @@
           </FormRow>
           <FormRow label="Validate project on open" description="After indexing, validate the whole project in the background so the first ‘Validate (no compile)’ is instant. Uses a little CPU on open.">
             <Toggle checked={validateOnOpen} onchange={(v) => commitValidateOnOpen(v)} ariaLabel="Validate project on open" />
+          </FormRow>
+          <FormRow label="Validation CPU threads" description="Max worker threads the whole-project validation may use. 0 = auto (leaves about half the cores free for the UI). Set 1 for single-threaded so a big project can’t peg every core and freeze the editor.">
+            <Input value={String(validationThreads)} placeholder="0"
+                   onchange={(v) => commitValidationThreads(v)} ariaLabel="Validation CPU threads" />
           </FormRow>
           <FormRow label="Excluded directories" description="Comma-separated folder names skipped by the indexer.">
             <Input value={s.excludedDirs} placeholder="target, .git"

@@ -115,16 +115,13 @@ fn check_call(
             continue;
         };
         if let Some((a, p)) = arg_mismatch(&arg_ty.binary_name, param, resolver) {
-            out.push(Diagnostic {
-                message: format!(
+            out.push(crate::check_id::CheckId::ArgumentType.at(
+                *arg,
+                format!(
                     "Argument {} of `{method}`: `{a}` cannot be passed where `{p}` is expected",
                     i + 1
                 ),
-                severity: "error".to_string(),
-                code: String::new(),
-                start: arg.start_byte(),
-                end: arg.end_byte(),
-            });
+            ));
         }
     }
 }

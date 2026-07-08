@@ -97,6 +97,7 @@
         {#if validateProgress && validateProgress.total > 0}
           <span class="st-progress">{validateProgress.done} / {validateProgress.total} ({validatePct}%)</span>
         {/if}
+        <button type="button" class="st-cancel" onclick={() => void bennuRunStore.cancelValidation()}>Cancel</button>
       {:else if running}
         <Spinner size={13} /><span class="st-text">Running…</span>
       {:else if vres}
@@ -197,6 +198,11 @@
   .st-ok { display: flex; color: var(--success); }
   .st-fail { display: flex; color: var(--error); }
   .st-progress { font-family: var(--font-code); font-size: 10.5px; color: var(--text-muted); }
+  .st-cancel {
+    font-size: 10.5px; color: var(--text-muted); background: none; border: none; cursor: pointer;
+    padding: 1px 6px; border-radius: var(--radius-sm);
+  }
+  .st-cancel:hover { color: var(--error); background: var(--bg-hover); }
   .st-counts { margin-left: auto; font-size: 10.5px; color: var(--text-muted); }
   .st-speed {
     font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;

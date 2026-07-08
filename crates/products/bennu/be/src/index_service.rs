@@ -853,6 +853,20 @@ impl IndexService {
         validate_files_parallel(&provider, jdk_available, classpath_complete, requested_major, files, cache, on_progress)
     }
 
+    /// Request cancellation of the currently-running whole-project validation sweep (the FE's Cancel
+    /// on the "Validating…" operation card). The parallel loop stops doing real work and drains the
+    /// rest cheaply; the run then discards its partial results instead of persisting them. A no-op
+    /// when nothing is validating (the next run clears the flag on start).
+    pub fn request_cancel_validation(&self) {
+        CANCEL_VALIDATION.store(true, Ordering::Release);
+    }
+
+    /// Whether a cancel was requested for the in-flight validation run — the caller checks this after
+    /// the batch to skip persisting a partial result.
+    pub fn validation_cancelled(&self) -> bool {
+        CANCEL_VALIDATION.load(Ordering::Acquire)
+    }
+
     /// Whether the project at `root` has a built resolver (so the diagnostic cache can check
     /// freshness). The background warm-up skips validation until this is true — validating pure-AST
     /// with nothing to cache would be wasted work on every open.
@@ -886,6 +900,12 @@ impl IndexService {
         let run = std::time::Instant::now();
         let results = self.validate_project_batch(root, &sources, &cache, on_progress);
         let wall_ms = run.elapsed().as_millis() as u64;
+
+        // Cancelled mid-sweep → discard the partial batch: don't persist a partial cache, don't
+        // report partial diagnostics. The FE already dismissed the card.
+        if self.validation_cancelled() {
+            return RunOutcome::default();
+        }
 
         let validated = results.len();
         let mut diagnostics: Vec<FileDiagnostics> = Vec::new();
@@ -1625,7 +1645,8 @@ pub struct BatchResult {
 
 /// The folded outcome of a whole-project validation ([`IndexService::validate_project_collect`]).
 /// Everything is UNcapped — each handler applies its own payload caps (slowest-N stats, first-N
-/// diagnostic files).
+/// diagnostic files). `Default` = the empty outcome returned when a run is cancelled.
+#[derive(Default)]
 pub struct RunOutcome {
     /// Files that have diagnostics, in walk order (uncapped).
     pub diagnostics: Vec<FileDiagnostics>,
@@ -1643,10 +1664,30 @@ pub struct RunOutcome {
     pub max_file: Option<String>,
 }
 
+/// Cooperative cancel flag for the whole-project validation sweep (warm-up + explicit "Validate").
+/// Set via [`IndexService::request_cancel_validation`] (the FE's Cancel on the operation card); the
+/// parallel worker loop checks it per file and drains the rest cheaply, and the caller then discards
+/// the (partial) results instead of persisting them. Reset at the start of each run.
+static CANCEL_VALIDATION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The worker cap for the whole-project validation sweep: the user's `validation_threads` setting when
+/// set, else auto = roughly half the cores — so the sweep leaves ample headroom for the interactive
+/// path (go-to / completion) and the UI shell and never pegs the machine. Distinct from the one-shot
+/// index build, which keeps the faster `available_parallelism − 2` default.
+fn validation_worker_cap() -> usize {
+    let cfg = bennu_core::config::load().validation_threads;
+    if cfg > 0 {
+        return cfg;
+    }
+    let cores = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1);
+    (cores / 2).max(1)
+}
+
 /// Validate `files` in parallel against `provider`, consulting the read-only `cache`. Pure/
 /// read-only over the cache + the `Arc`-shared resolver (recording is thread-local per worker), so
-/// it parallelizes safely; the pool leaves ~2 cores free for the interactive path. `on_progress` is
-/// called (from a worker) with the running count every so often.
+/// it parallelizes safely; the pool is capped by [`validation_worker_cap`] (gentle by default) so it
+/// stays a background citizen, and honours the [`CANCEL_VALIDATION`] flag. `on_progress` is called
+/// (from a worker) with the running count every so often.
 fn validate_files_parallel(
     provider: &NativeJavaProvider,
     jdk_available: bool,
@@ -1658,7 +1699,15 @@ fn validate_files_parallel(
 ) -> Vec<BatchResult> {
     let total = files.len();
     let counter = AtomicUsize::new(0);
-    bennu_intel::prelude::parallel_map(files, |(path, source)| {
+    // Fresh run → clear any stale cancel request from a previous sweep.
+    CANCEL_VALIDATION.store(false, Ordering::Release);
+    bennu_intel::prelude::parallel_map_capped(files, validation_worker_cap(), |(path, source)| {
+        // Cooperative cancel: once requested (FE Cancel on the operation card), workers stop doing
+        // real work and drain the remaining files as cheap empty results; the caller then discards
+        // the whole (partial) batch instead of persisting it.
+        if CANCEL_VALIDATION.load(Ordering::Acquire) {
+            return BatchResult { file: norm_path(path), diags: Vec::new(), deps: None, hit: false, ms: 0 };
+        }
         let file = norm_path(path);
         let ctx = bennu_check::prelude::FileContext {
             file_stem: path.file_stem().and_then(|s| s.to_str()).map(str::to_string),
@@ -1705,6 +1754,9 @@ fn warm_up_validation_cache(root: &str, sources: &[(PathBuf, String)]) {
     }
     let mut cache = svc.diag_cache_load(root);
     let results = svc.validate_project_batch(root, sources, &cache, &|_done: usize, _total: usize| {});
+    if svc.validation_cancelled() {
+        return; // cancelled → don't stamp/persist a partial warm-up
+    }
     let mut seen = HashSet::with_capacity(results.len());
     let mut filled = 0usize;
     for r in results {

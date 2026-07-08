@@ -51,6 +51,53 @@ pub enum CheckId {
     // ── enum ────────────────────────────────────────────────────────────────────
     /// A `switch` EXPRESSION over an enum that leaves some constant uncovered and has no `default`.
     NonExhaustiveEnumSwitch,
+
+    // ── inheritance & overrides ──────────────────────────────────────────────────
+    /// An illegal `extends`/`implements` — extending a `final`/record/enum/interface, or
+    /// implementing a non-interface.
+    IllegalInheritance,
+    /// A concrete class that leaves an inherited abstract method unimplemented.
+    MissingAbstractMethod,
+    /// A type that transitively extends / implements itself.
+    CyclicInheritance,
+    /// An `@Override` method that overrides nothing in its (fully-known) supertype hierarchy.
+    OverrideOverridesNothing,
+    /// A method that overrides a `final` supertype method.
+    FinalMethodOverride,
+    /// An override whose return type isn't covariant with the overridden method's.
+    CovariantReturn,
+    /// An override that declares a checked exception the overridden method doesn't.
+    CheckedExceptionWidening,
+    /// A subclass constructor that must chain `super(...)` because the superclass has no no-arg ctor.
+    SuperConstructorRequired,
+
+    // ── lambdas / functional ─────────────────────────────────────────────────────
+    /// A lambda whose parameter count doesn't match its target functional interface's SAM.
+    LambdaArity,
+
+    // ── access ───────────────────────────────────────────────────────────────────
+    /// A `private` / package-private member reached from where it isn't visible.
+    InaccessibleMember,
+    /// A non-static member referenced from a `static` context.
+    StaticContextAccess,
+
+    // ── imports ──────────────────────────────────────────────────────────────────
+    /// A single-type `import a.b.C;` the resolver can't resolve.
+    UnresolvedImport,
+
+    // ── instanceof / new ─────────────────────────────────────────────────────────
+    /// An `instanceof` between inconvertible concrete types.
+    IncompatibleInstanceof,
+    /// A `new` on an abstract class or interface.
+    InstantiateAbstract,
+
+    // ── try / catch ──────────────────────────────────────────────────────────────
+    /// A `catch` whose type is already handled by an earlier clause (unreachable).
+    UnreachableCatch,
+    /// A multi-`catch` listing a type together with its supertype.
+    RedundantMultiCatch,
+    /// A try-with-resources whose resource type definitely isn't `AutoCloseable`.
+    NonAutoCloseableResource,
 }
 
 impl CheckId {
@@ -71,6 +118,23 @@ impl CheckId {
             NonBooleanCondition => "non-boolean-condition",
             UnhandledCheckedException => "unhandled-checked-exception",
             NonExhaustiveEnumSwitch => "non-exhaustive-enum-switch",
+            IllegalInheritance => "illegal-inheritance",
+            MissingAbstractMethod => "missing-abstract-method",
+            CyclicInheritance => "cyclic-inheritance",
+            OverrideOverridesNothing => "override-overrides-nothing",
+            FinalMethodOverride => "final-method-override",
+            CovariantReturn => "covariant-return",
+            CheckedExceptionWidening => "checked-exception-widening",
+            SuperConstructorRequired => "super-constructor-required",
+            LambdaArity => "lambda-arity",
+            InaccessibleMember => "inaccessible-member",
+            StaticContextAccess => "static-context-access",
+            UnresolvedImport => "unresolved-import",
+            IncompatibleInstanceof => "incompatible-instanceof",
+            InstantiateAbstract => "instantiate-abstract",
+            UnreachableCatch => "unreachable-catch",
+            RedundantMultiCatch => "redundant-multi-catch",
+            NonAutoCloseableResource => "non-autocloseable-resource",
         }
     }
 
