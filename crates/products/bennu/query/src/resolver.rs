@@ -178,35 +178,50 @@ impl<M: CpMemberIndex> IndexResolver<M> {
     /// first, so a renamed/removed type doesn't leave a stale entry. An empty `records`
     /// (a deleted / cleared file) just drops the file's prior overlay.
     pub fn apply_file_patch(&self, file: &str, records: &[Symbol]) {
-        // An edit can change any type's members → drop the memoized resolutions. Patches are
-        // rare (debounced per keystroke) and the walk is done, so a full clear is fine; it
-        // repopulates lazily on the next resolution.
-        self.members_cache.write().unwrap_or_else(|p| p.into_inner()).clear();
-        let mut ov = self.overlay.write().unwrap_or_else(|p| p.into_inner());
-        // Drop this file's previous contributions (rename/remove correctness).
-        if let Some(prev) = ov.by_file.remove(file) {
-            for (binary, simple) in prev {
-                ov.members.remove(&binary);
-                // Only clear the simple hint if it still points at this file's type.
-                if ov.simple.get(&simple).map(String::as_str) == Some(binary.as_str()) {
-                    ov.simple.remove(&simple);
+        // The set of binary names whose members this edit can change — the file's PREVIOUS types
+        // (renamed / removed / body-changed) plus its NEW types. Editing THIS file can't change any
+        // OTHER type's members (`members_of` returns a type's OWN declared members + its superclass
+        // NAME, never another type's contents), so ONLY these entries are stale.
+        let mut touched: Vec<String> = Vec::new();
+        {
+            let mut ov = self.overlay.write().unwrap_or_else(|p| p.into_inner());
+            // Drop this file's previous contributions (rename/remove correctness).
+            if let Some(prev) = ov.by_file.remove(file) {
+                for (binary, simple) in prev {
+                    touched.push(binary.clone());
+                    ov.members.remove(&binary);
+                    // Only clear the simple hint if it still points at this file's type.
+                    if ov.simple.get(&simple).map(String::as_str) == Some(binary.as_str()) {
+                        ov.simple.remove(&simple);
+                    }
                 }
             }
-        }
-        // Add the fresh type records (only Class symbols carry members_json).
-        let mut contributed = Vec::new();
-        for sym in records {
-            if sym.members_json.is_empty() {
-                continue;
+            // Add the fresh type records (only Class symbols carry members_json).
+            let mut contributed = Vec::new();
+            for sym in records {
+                if sym.members_json.is_empty() {
+                    continue;
+                }
+                touched.push(sym.fqn.clone());
+                ov.members.insert(sym.fqn.clone(), sym.members_json.clone());
+                if !sym.simple_name.is_empty() {
+                    ov.simple.insert(sym.simple_name.clone(), sym.fqn.clone());
+                }
+                contributed.push((sym.fqn.clone(), sym.simple_name.clone()));
             }
-            ov.members.insert(sym.fqn.clone(), sym.members_json.clone());
-            if !sym.simple_name.is_empty() {
-                ov.simple.insert(sym.simple_name.clone(), sym.fqn.clone());
+            if !contributed.is_empty() {
+                ov.by_file.insert(file.to_string(), contributed);
             }
-            contributed.push((sym.fqn.clone(), sym.simple_name.clone()));
-        }
-        if !contributed.is_empty() {
-            ov.by_file.insert(file.to_string(), contributed);
+        } // release the overlay lock before touching the memo (never hold both at once)
+        // SCOPED memo invalidation: drop only the edited file's own types (positive AND negative
+        // entries), keeping every JDK, dependency and other-project-file resolution warm. This is
+        // what stops a Ctrl+click / completion right after a keystroke from re-decoding the world —
+        // the previous behaviour cleared the ENTIRE memo on every debounced patch.
+        if !touched.is_empty() {
+            let mut cache = self.members_cache.write().unwrap_or_else(|p| p.into_inner());
+            for binary in &touched {
+                cache.remove(binary);
+            }
         }
     }
 }
