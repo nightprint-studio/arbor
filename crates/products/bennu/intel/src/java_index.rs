@@ -56,6 +56,9 @@ pub struct ClassDecl {
     pub file: String,
     /// 1-based line of the type declaration (recovered from the source token position).
     pub line: usize,
+    /// The type-kind slug (`"class"` / `"interface"` / `"enum"` / `"record"` / `"annotation"`) — for
+    /// the file-tree / navigator kind icons.
+    pub kind: String,
 }
 
 /// The whole-project build result: the persistable builder + symbol counts + the derived
@@ -121,6 +124,7 @@ pub fn build_project_index_from_sources(
                 simple: td.name.clone(),
                 file: file_key.clone(),
                 line: decl_line(source, &td.name).unwrap_or(1),
+                kind: td.kind.slug().to_string(),
             });
         }
         builder.set_file(path.clone(), records);

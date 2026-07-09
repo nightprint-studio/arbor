@@ -819,7 +819,7 @@ mod tests {
     use super::*;
 
     fn ce(fqcn: &str, simple: &str) -> ClassEntry {
-        ClassEntry { fqcn: fqcn.into(), simple: simple.into(), file: "X.java".into(), line: 1 }
+        ClassEntry { fqcn: fqcn.into(), simple: simple.into(), file: "X.java".into(), line: 1, kind: "class".into() }
     }
 
     #[test]

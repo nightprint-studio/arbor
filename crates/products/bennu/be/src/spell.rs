@@ -176,8 +176,20 @@ fn current_status() -> SpellStatus {
 // ── bennu_download_dictionaries ──────────────────────────────────────────────────
 
 /// Args for [`bennu_download_dictionaries`] — none.
-#[derive(Deserialize)]
-pub struct DownloadDictionariesArgs {}
+///
+/// Deserializes from ANY shape — an empty `{}`, a missing value, or `null`. The FE sends
+/// `{ args: {} }`, but the **async** handler dispatch hands this argless command `null` (unlike the
+/// sync argless handlers, which receive `{}`), and a derived `#[derive(Deserialize)] struct X {}`
+/// rejects `null` with "invalid type: null, expected struct". This tolerant impl means the download
+/// never fails to even start on a deserialization error.
+pub struct DownloadDictionariesArgs;
+
+impl<'de> Deserialize<'de> for DownloadDictionariesArgs {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        serde::de::IgnoredAny::deserialize(d)?;
+        Ok(DownloadDictionariesArgs)
+    }
+}
 
 /// Download `en_US` + `it_IT` Hunspell (`.aff` + `.dic`) into `<data>/dictionaries/` using
 /// the workspace HTTP client, emitting `arbor://bennu/dict-progress` as each file lands,

@@ -2286,7 +2286,13 @@ fn build_config_graph(
 
 /// Map an intel [`bennu_intel::prelude::ClassDecl`] onto the wire [`ClassEntry`].
 fn class_entry_of(d: &bennu_intel::prelude::ClassDecl) -> ClassEntry {
-    ClassEntry { fqcn: d.fqcn.clone(), simple: d.simple.clone(), file: d.file.clone(), line: d.line }
+    ClassEntry {
+        fqcn: d.fqcn.clone(),
+        simple: d.simple.clone(),
+        file: d.file.clone(),
+        line: d.line,
+        kind: d.kind.clone(),
+    }
 }
 
 /// Merge the edited `file`'s OWN current type declarations into the project-wide
@@ -2319,6 +2325,7 @@ fn refresh_class_cache_for_file(slot: &Arc<ProjectSlot>, file: &Path, source: Op
                 simple: td.name.clone(),
                 file: file_key.clone(),
                 line: decl_line_of(src, &td.name),
+                kind: td.kind.slug().to_string(),
             });
         }
     }
@@ -3058,6 +3065,7 @@ mod tests {
             simple: "Order".into(),
             file: "/proj/Order.java".into(),
             line: 7,
+            kind: "class".into(),
         };
         let e = class_entry_of(&d);
         assert_eq!(e.fqcn, "com.acme.Order");

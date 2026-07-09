@@ -26,6 +26,20 @@ pub enum TypeKind {
     Annotation,
 }
 
+impl TypeKind {
+    /// A stable lowercase slug (`"class"`, `"interface"`, `"enum"`, `"record"`, `"annotation"`) —
+    /// the wire form the FE keys its type-kind icons on.
+    pub fn slug(&self) -> &'static str {
+        match self {
+            TypeKind::Class => "class",
+            TypeKind::Interface => "interface",
+            TypeKind::Enum => "enum",
+            TypeKind::Record => "record",
+            TypeKind::Annotation => "annotation",
+        }
+    }
+}
+
 /// A single import. `star` marks `import a.b.*;`; `static_` marks `import static`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Import {

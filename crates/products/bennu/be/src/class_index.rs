@@ -68,6 +68,7 @@ fn bennu_class_index(_ctx: &BennuState, args: ClassIndexArgs) -> Result<Vec<Clas
                 simple: td.name.clone(),
                 file: file.clone(),
                 line,
+                kind: td.kind.slug().to_string(),
             });
         }
     }

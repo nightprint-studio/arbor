@@ -527,6 +527,11 @@ pub struct ClassEntry {
     pub file: String,
     /// 1-based line of the type declaration.
     pub line: usize,
+    /// The type-kind slug (`"class"` / `"interface"` / `"enum"` / `"record"` / `"annotation"`) — for
+    /// the file-tree + navigator kind icons. `#[serde(default)]` (→ `""`) so a pre-existing cached
+    /// entry without the field still deserializes.
+    #[serde(default)]
+    pub kind: String,
 }
 
 // ── form analysis (form → action → fields inspector) ─────────────────────────

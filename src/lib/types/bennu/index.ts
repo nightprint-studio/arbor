@@ -201,6 +201,9 @@ export interface ClassEntry {
   file: string;
   /** 1-based line of the type declaration. */
   line: number;
+  /** Type-kind slug: `class` | `interface` | `enum` | `record` | `annotation` (`''` if unknown) —
+   *  drives the file-tree + navigator kind icon. */
+  kind: string;
 }
 
 /** Index statistics (`bennu_index_stats`) — powers the index inspector. */

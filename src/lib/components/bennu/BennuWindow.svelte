@@ -64,6 +64,12 @@
   import BennuGotoModal from './BennuGotoModal.svelte';
   import BennuIndexInspectorModal from './BennuIndexInspectorModal.svelte';
   import BennuMojibakeScanModal from './BennuMojibakeScanModal.svelte';
+  // The job-output bottom panel: shared chrome (lives under corvus/jobs/ but depends only on the
+  // shared jobsStore + uiStore — the same one FeedbackHost's JobsOverlay uses). Mounted here so
+  // "view output" from Bennu's Jobs overlay opens the panel instead of doing nothing.
+  import JobOutputPanel from '$lib/components/corvus/jobs/JobOutputPanel.svelte';
+  import { uiStore as sharedUiStore } from '$lib/stores/ui.svelte';
+  import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import BennuFileStructureModal from './BennuFileStructureModal.svelte';
   import type { GenerateMode } from './bennu-intentions';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
@@ -209,6 +215,12 @@
   const showLeft   = $derived(bennuUiStore.leftPanel !== null);
   const showRight  = $derived(bennuUiStore.rightPanel !== null);
   const showBottom = $derived(bennuUiStore.bottomPanel !== null);
+  // A job's output was opened from the (shared) Jobs overlay — the shared uiStore drives it, exactly
+  // like corvus. It takes the bottom slot while shown; closing it (its back/close button clears the
+  // shared section) falls back to Bennu's own bottom dock.
+  const showJobOutput = $derived(
+    sharedUiStore.activeBottomSection === 'jobs' && jobsStore.activeJobId !== null,
+  );
 
   // ── Command palette ────────────────────────────────────────────────────────
   let paletteQuery = $state('');
@@ -509,7 +521,11 @@
           <div class="card grow">
             <BennuEditor bind:this={editor} onGenerate={openGenerateFromIntention} />
           </div>
-          {#if showBottom}
+          {#if showJobOutput}
+            <PanelCard orientation="bottom" initialSize={220} minSize={120} maxSize={560}>
+              <JobOutputPanel />
+            </PanelCard>
+          {:else if showBottom}
             <PanelCard orientation="bottom" initialSize={220} minSize={120} maxSize={560}>
               <BennuBottomDock />
             </PanelCard>

@@ -17,6 +17,8 @@
     FolderOpen, Folder, FileCode2, FolderTree, Plus, Crosshair,
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
     Copy, LocateFixed, ChevronDown, ChevronRight,
+    Box, CircleDashed, Rows3, AtSign,
+    Braces, Hash, FileCog, FileText, Database, Globe,
   } from 'lucide-svelte';
   import { tick } from 'svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
@@ -31,6 +33,7 @@
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import type { TreeNode } from '$lib/types/bennu';
@@ -44,6 +47,99 @@
   // The store's tree root is a single dir node; render its children as the top level
   // so the project folder itself isn't an extra nesting level.
   const rootChildren = $derived<TreeNode[]>(projectStore.tree?.children ?? []);
+
+  // ── File-tree icons (IntelliJ-style) ─────────────────────────────────────────
+  // Per-`.java`-file type kind (class/interface/enum/record/annotation), from the project's class
+  // index. Fetched into a plain map (the class index is async + cached) and refreshed when the index
+  // rebuilds. A file that declares several types keys off the one matching the file name (the public
+  // top-level type).
+  let kindByFile = $state<Map<string, string>>(new Map());
+  $effect(() => {
+    const root = projectStore.project?.root;
+    // Re-fetch when a rebuild lands (the store drops its class cache on rebuild).
+    void bennuIndexStore.buildRevision;
+    if (!root) { kindByFile = new Map(); return; }
+    let cancelled = false;
+    void bennuIndexStore.classesForRoot(root).then((classes) => {
+      if (cancelled) return;
+      const m = new Map<string, string>();
+      for (const c of classes) {
+        const key = c.file.replace(/\\/g, '/');
+        const stem = key.split('/').pop()?.replace(/\.java$/, '') ?? '';
+        // Prefer the primary (file-named) type; otherwise keep the first seen.
+        if (!m.has(key) || c.simple === stem) m.set(key, c.kind);
+      }
+      kindByFile = m;
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  });
+
+  /** Icon + color for a Java type kind — distinct glyphs so class/interface/enum/annotation read at
+   *  a glance (IntelliJ-style). */
+  const KIND_ICON: Record<string, { icon: typeof FileCode2; color: string }> = {
+    class:      { icon: Box,          color: 'var(--success)' },
+    interface:  { icon: CircleDashed, color: 'var(--info)' },
+    enum:       { icon: Rows3,        color: 'var(--warning)' },
+    record:     { icon: Box,          color: 'var(--info)' },
+    annotation: { icon: AtSign,       color: 'var(--color-tag, #c792ea)' },
+  };
+
+  /** Icon + color by file extension (non-Java files) — lucide glyphs tinted with each language's
+   *  brand color for IntelliJ-like recognition (JS yellow, CSS blue, HTML orange, JSP server-orange).
+   *  Lucide has no official brand LOGOS; these are the closest glyphs + the real brand hues. */
+  const EXT_ICON: Record<string, { icon: typeof FileCode2; color: string }> = {
+    // JSP / JSP fragments / tag files — Java server pages (server-side orange).
+    jsp:  { icon: FileCode2, color: '#e76f00' },
+    jspf: { icon: FileCode2, color: '#e76f00' },
+    jspx: { icon: FileCode2, color: '#e76f00' },
+    tag:  { icon: FileCode2, color: '#e76f00' },
+    // JavaScript / TypeScript.
+    js:   { icon: Braces, color: '#f7df1e' },
+    mjs:  { icon: Braces, color: '#f7df1e' },
+    cjs:  { icon: Braces, color: '#f7df1e' },
+    ts:   { icon: Braces, color: '#3178c6' },
+    // Stylesheets.
+    css:  { icon: Hash, color: '#2965f1' },
+    scss: { icon: Hash, color: '#cf649a' },
+    less: { icon: Hash, color: '#1d365d' },
+    // Markup / data.
+    html: { icon: Globe, color: '#e34f26' },
+    htm:  { icon: Globe, color: '#e34f26' },
+    xml:  { icon: FileCode2, color: 'var(--text-muted)' },
+    json: { icon: Braces, color: 'var(--warning)' },
+    // Config / docs / data.
+    properties: { icon: FileCog, color: 'var(--text-muted)' },
+    yml:  { icon: FileCog, color: '#cb171e' },
+    yaml: { icon: FileCog, color: '#cb171e' },
+    sql:  { icon: Database, color: 'var(--info)' },
+    md:   { icon: FileText, color: 'var(--text-muted)' },
+    txt:  { icon: FileText, color: 'var(--text-muted)' },
+  };
+
+  /** The folder-icon tint by source-root role — main (blue) / test (green) / resources (amber) /
+   *  webapp (purple), so the tree conveys main/test/resource context at a glance. */
+  function folderColor(path: string): string {
+    const p = path.replace(/\\/g, '/');
+    if (/\/src\/(main|test)\/resources(\/|$)/.test(p)) return 'var(--warning)';
+    if (/\/src\/test(\/|$)/.test(p)) return 'var(--success)';
+    if (/\/src\/main\/webapp(\/|$)/.test(p)) return 'var(--color-tag, #c792ea)';
+    if (/\/src\/main(\/|$)/.test(p)) return 'var(--info)';
+    return 'var(--text-muted)';
+  }
+
+  /** The icon + color for a tree node: a source-root-tinted folder, a Java kind glyph, or the
+   *  default file icon. */
+  function iconFor(node: TreeNode): { icon: typeof FileCode2; color: string } {
+    if (node.is_dir) return { icon: Folder, color: folderColor(node.path) };
+    const path = node.path.replace(/\\/g, '/');
+    if (path.endsWith('.java')) {
+      const meta = KIND_ICON[kindByFile.get(path) ?? ''];
+      // A `.java` whose kind isn't indexed yet (index still building) → a neutral code icon.
+      return meta ?? { icon: FileCode2, color: 'var(--info)' };
+    }
+    const ext = path.split('.').pop()?.toLowerCase() ?? '';
+    return EXT_ICON[ext] ?? { icon: FileCode2, color: 'var(--text-muted)' };
+  }
 
   async function openProject(dir: string) {
     pickerOpen = false;
@@ -238,12 +334,10 @@
         onContextMenu={onRowContextMenu}
       >
         {#snippet row(ctx: RowSnippetCtx<TreeNode>)}
-          <span class="tree-icon">
-            {#if ctx.node.is_dir}
-              <Folder size={14} />
-            {:else}
-              <FileCode2 size={14} />
-            {/if}
+          {@const meta = iconFor(ctx.node)}
+          {@const Icon = meta.icon}
+          <span class="tree-icon" style="color: {meta.color}">
+            <Icon size={14} />
           </span>
           <span class="tree-label">{ctx.node.name}</span>
         {/snippet}
