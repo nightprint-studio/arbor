@@ -75,7 +75,7 @@ fn check_switch_fallthrough(switch: Node, _source: &str, out: &mut Vec<Diagnosti
         let Some(&last) = stmts.last() else { continue };
         // (c) fires only when the last statement clearly slides off the end.
         if falls_off_end(last) {
-            out.push(warn(FALLTHROUGH_MSG, group));
+            out.push(crate::check_id::CheckId::SwitchFallthrough.at(group, FALLTHROUGH_MSG));
         }
     }
 }
@@ -136,7 +136,7 @@ fn check_finally(finally_clause: Node, out: &mut Vec<Diagnostic>) {
     let mut hits = Vec::new();
     scan_finally(block, false, &mut hits);
     for h in hits {
-        out.push(warn(FINALLY_MSG, h));
+        out.push(crate::check_id::CheckId::FinallyAbrupt.at(h, FINALLY_MSG));
     }
 }
 
@@ -211,17 +211,6 @@ fn has_label(jump: Node) -> bool {
     false
 }
 
-// ── shared ───────────────────────────────────────────────────────────────────
-
-fn warn(message: &str, node: Node) -> Diagnostic {
-    Diagnostic {
-        message: message.to_string(),
-        severity: "warning".to_string(),
-        code: String::new(),
-        start: node.start_byte(),
-        end: node.end_byte(),
-    }
-}
 
 #[cfg(test)]
 mod tests {

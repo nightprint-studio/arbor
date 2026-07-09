@@ -298,8 +298,8 @@ fn has_lombok_val_import(nodes: &[Node], bytes: &[u8]) -> bool {
 fn err(message: String, node: Node) -> Diagnostic {
     Diagnostic {
         message,
-        severity: "error".to_string(),
-        code: String::new(),
+        severity: crate::check_id::CheckId::DefiniteAssignment.severity().to_string(),
+        code: crate::check_id::CheckId::DefiniteAssignment.code().to_string(),
         start: node.start_byte(),
         end: node.end_byte(),
     }

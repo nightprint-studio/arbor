@@ -119,6 +119,11 @@ fn check_throw(
     if callable_in_synthetic_type(callable) {
         return;
     }
+    // Lombok `@SneakyThrows` on the enclosing method/ctor lets its body throw any checked exception
+    // without declaring it → never flag a direct throw inside it.
+    if callable_sneaky_throws(callable, bytes) {
+        return;
+    }
     // RULE 7 (implied by the above): a static/instance initializer block is NOT a
     // method_declaration/constructor_declaration, so its throw never reaches here — initializers SKIP.
 
@@ -201,6 +206,36 @@ pub(crate) fn callable_in_synthetic_type(callable: Node) -> bool {
     false
 }
 
+/// Whether `callable` (a `method_declaration`/`constructor_declaration`) carries Lombok's
+/// **`@SneakyThrows`** — which lets its body throw ANY checked exception without a `throws` clause
+/// (Lombok rewrites the method to sneaky-throw). A method/ctor so annotated must never be flagged for
+/// an unhandled/undeclared checked exception, whether the exception is thrown directly or by a call.
+/// Matches on the annotation's simple name (`@SneakyThrows` or `@lombok.SneakyThrows`, marker or with
+/// an explicit exception list) — conservative: any spurious match only SUPPRESSES a diagnostic
+/// (under-report), never adds one.
+pub(crate) fn callable_sneaky_throws(callable: Node, bytes: &[u8]) -> bool {
+    let mut c = callable.walk();
+    for ch in callable.children(&mut c) {
+        if ch.kind() != "modifiers" {
+            continue;
+        }
+        let mut mc = ch.walk();
+        for a in ch.children(&mut mc) {
+            if !matches!(a.kind(), "marker_annotation" | "annotation") {
+                continue;
+            }
+            if let Some(name) = a.child_by_field_name("name") {
+                if let Ok(t) = name.utf8_text(bytes) {
+                    if t.rsplit('.').next().unwrap_or(t) == "SneakyThrows" {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 pub(crate) fn enclosing_callable(throw: Node) -> Option<Node> {
     let mut cur = throw.parent();
     while let Some(n) = cur {
@@ -269,9 +304,17 @@ pub(crate) fn caught_by_enclosing_try(
     false
 }
 
-/// Whether `child` is the try's protected BLOCK (its `body`), as opposed to a `catch_clause` /
-/// `finally_clause`. A throw in the try's own catch/finally is not caught by that try.
+/// Whether `child` is a PROTECTED region of the try — its `body` block or, for a try-with-resources,
+/// the `resource_specification` (a resource initializer runs inside the try's protection, JLS
+/// §14.20.3, so an exception it throws IS caught by the try's `catch` clauses). A throw in the try's
+/// own `catch`/`finally` is NOT caught by that try.
 fn is_try_body(try_node: Node, child: Node) -> bool {
+    // A try-with-resources resource initializer (`try (X x = mayThrow()) { … }`) is protected — the
+    // call sits in the `resource_specification`, not the body block. Without this, an exception thrown
+    // while opening a resource is falsely reported as unhandled even though the try catches it.
+    if child.kind() == "resource_specification" {
+        return true;
+    }
     match try_node.child_by_field_name("body") {
         Some(body) => body.id() == child.id(),
         // `try_with_resources_statement` may not expose a `body` field on every grammar build; fall
@@ -586,6 +629,20 @@ mod tests {
         // Nested trys: inner catches SQLException (miss), outer catches Exception (hit) → handled.
         assert!(diags(
             "class C { void m() { try { try { throw new IOException(); } catch (SQLException e) {} } catch (Exception e) {} } }"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn sneaky_throws_suppresses_a_direct_checked_throw() {
+        // Lombok `@SneakyThrows` lets the method throw a checked exception without a `throws` clause.
+        assert!(
+            diags("class C { @SneakyThrows void m() { throw new IOException(); } }").is_empty(),
+            "@SneakyThrows must suppress the unhandled-checked flag"
+        );
+        // Qualified, and with an explicit exception list, suppress the same way.
+        assert!(diags(
+            "class C { @lombok.SneakyThrows(IOException.class) void m() { throw new IOException(); } }"
         )
         .is_empty());
     }

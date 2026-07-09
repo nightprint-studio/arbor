@@ -18,8 +18,13 @@ pub use crate::members::{
 // locator (JAVA_HOME for the build/run shell-out), the resolution-status probe (FE JDK
 // diagnostics), and the user-configured extra-JDK-homes setter.
 pub use crate::jdk::{
-    find_jdk_home, jdk_status, resolve_jdk_classpath, set_extra_jdk_homes, JdkStatus, MultiSource,
+    find_jdk_home, jdk_status, resolve_jdk_classpath, resolve_jdk_sources, set_extra_jdk_homes,
+    JdkStatus, MultiSource,
 };
+
+// Java SOURCE containers (`.java` text with bodies) for the "go to source" view — the JDK's
+// `src.zip` and a dependency's `-sources.jar`, distinct from the bytecode `ClassSource`.
+pub use crate::sources::JavaSourceZip;
 
 // Dependency-jar sourcing from ~/.m2 via Maven's build-classpath (cached by pom
 // mtime), layered behind the JDK through the same MultiSource.

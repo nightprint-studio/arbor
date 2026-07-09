@@ -26,6 +26,7 @@ use bennu_java::prelude::{extract_symbols, ClassMembers, FileSymbols, Member, Me
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::{Node, Parser};
 
+use crate::check_id::CheckId;
 use crate::members::simple_name;
 use crate::resolve::type_binary;
 use crate::walk::{for_each_supertype, hierarchy_fully_known};
@@ -58,12 +59,12 @@ pub fn inheritance_errors_in(
                 for (text, node) in extends_types(n, bytes) {
                     if let Some(cm) = resolve_members(&text, symbols, resolver) {
                         if !cm.flags.is_interface {
-                            out.push(err(
+                            out.push(CheckId::IllegalInheritance.at(
+                                node,
                                 format!(
                                     "An interface can only extend interfaces, not `{}`",
                                     simple_name(&binary_of(&text, symbols, resolver))
                                 ),
-                                node,
                             ));
                         }
                     }
@@ -99,19 +100,19 @@ fn check_class_supertypes(
             None
         };
         if let Some(m) = msg {
-            out.push(err(m, node));
+            out.push(CheckId::IllegalInheritance.at(node, m));
         }
     }
     // `implements I, J` — each must be an interface.
     for (text, node) in implements_types(n, bytes) {
         let Some(cm) = resolve_members(&text, symbols, resolver) else { continue };
         if !cm.flags.is_interface {
-            out.push(err(
+            out.push(CheckId::IllegalInheritance.at(
+                node,
                 format!(
                     "Cannot implement `{}`: not an interface",
                     simple_name(&binary_of(&text, symbols, resolver))
                 ),
-                node,
             ));
         }
     }
@@ -200,9 +201,9 @@ fn check_missing_impls(
     let mut missing: Vec<&String> = required.difference(&provided).collect();
     missing.sort();
     for m in missing {
-        out.push(err(
-            format!("`{cls}` is not abstract and does not implement abstract method `{m}()`"),
+        out.push(CheckId::MissingAbstractMethod.at(
             name_node.unwrap_or(n),
+            format!("`{cls}` is not abstract and does not implement abstract method `{m}()`"),
         ));
     }
 }
@@ -332,10 +333,6 @@ fn resolve_members(
 
 fn binary_of(text: &str, symbols: &FileSymbols, resolver: &dyn TypeResolver) -> String {
     type_binary(text, symbols, resolver).unwrap_or_else(|| text.replace('.', "/"))
-}
-
-fn err(message: String, node: Node) -> Diagnostic {
-    Diagnostic { message, severity: "error".to_string(), code: String::new(), start: node.start_byte(), end: node.end_byte() }
 }
 
 fn with_parse(source: &str, f: impl FnOnce(Node) -> Vec<Diagnostic>) -> Vec<Diagnostic> {

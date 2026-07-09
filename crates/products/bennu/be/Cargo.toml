@@ -56,6 +56,10 @@ bennu-web = { path = "../web" }
 bennu-classpath = { path = "../classpath" }
 # `NoWindowExt` — suppress the console window on the short-lived mvn/javac/java children.
 arbor-process-ext = { path = "../../../platform/process-ext" }
+# Shared job model (`JobSpec` / `JobStatus`): the whole-project analysis warm-up registers itself
+# as a tracked job in the shell registry over the reverse channel, so it shows in the bennu Jobs
+# overlay. Workspace-internal crate (same one corvus/merula use), not a new external dependency.
+arbor-feedback = { path = "../../../platform/feedback" }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 # Per-repo run-config persistence: read/merge/write `<repo>/.arbor/config.toml`'s

@@ -74,8 +74,8 @@ fn check_lambda(lambda: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
                 message: format!(
                     "Local variable `{name}` is modified in a lambda; captured variables must be final or effectively final"
                 ),
-                severity: "error".to_string(),
-                code: String::new(),
+                severity: crate::check_id::CheckId::CapturedVariableNotFinal.severity().to_string(),
+                code: crate::check_id::CheckId::CapturedVariableNotFinal.code().to_string(),
                 start: t.start_byte(),
                 end: t.end_byte(),
             });

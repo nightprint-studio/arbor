@@ -63,8 +63,8 @@ fn check_method_named_like_class(method: Node, bytes: &[u8], out: &mut Vec<Diagn
                 "Method `{method_name}` has the same name as the class — did you mean a constructor? \
                  (a constructor has no return type)"
             ),
-            severity: "warning".to_string(),
-            code: String::new(),
+            severity: crate::check_id::CheckId::MethodNamedLikeConstructor.severity().to_string(),
+            code: crate::check_id::CheckId::MethodNamedLikeConstructor.code().to_string(),
             start: name_node.start_byte(),
             end: name_node.end_byte(),
         });

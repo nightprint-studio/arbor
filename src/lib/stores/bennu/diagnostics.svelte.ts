@@ -31,6 +31,10 @@ function createBennuDiagnosticsStore() {
   // `Validate project` run). Shown in the Problems panel as per-file sections so a project-wide
   // validation lands where problems belong, not only in the Build tool window.
   let projectDiagnostics = $state<FileDiagnostics[]>([]);
+  // Whole-project mojibake-scan hits, grouped by file (set by the project mojibake scan). Kept
+  // SEPARATE from `projectDiagnostics` so a subsequent save's silent validation refresh doesn't
+  // wipe them (and vice-versa) — they're an independent, explicitly-run project view.
+  let mojibakeDiagnostics = $state<FileDiagnostics[]>([]);
   // Whether project-wide problems are "armed": once the user runs an explicit "Validate project"
   // (opting into the project-wide view), a save silently refreshes it (cross-file). Before that we
   // don't auto-populate the panel — on a legacy project with thousands of dependency problems, a
@@ -96,6 +100,17 @@ function createBennuDiagnosticsStore() {
     setProjectDiagnostics(list: FileDiagnostics[]) { projectDiagnostics = list; armed = true; },
     /** Clear the project-validation diagnostics (a new run starts, or the results go stale). */
     clearProjectDiagnostics() { projectDiagnostics = []; },
+
+    /** The project mojibake-scan hits, grouped by file (empty until a scan is added to Problems). */
+    get mojibakeDiagnostics() { return mojibakeDiagnostics; },
+    /** Total mojibake hits currently shown in the Problems panel. */
+    get mojibakeProblemCount() {
+      return mojibakeDiagnostics.reduce((n, f) => n + f.diagnostics.length, 0);
+    },
+    /** Show the project mojibake-scan hits in the Problems panel (from the scan modal). */
+    setMojibakeDiagnostics(list: FileDiagnostics[]) { mojibakeDiagnostics = list; },
+    /** Remove the mojibake hits from the Problems panel. */
+    clearMojibakeDiagnostics() { mojibakeDiagnostics = []; },
     /** Whether project-wide problems are armed (an explicit validation has run) — the gate the save
      *  hook checks before its silent cross-file refresh. */
     get armed() { return armed; },
@@ -133,6 +148,7 @@ function createBennuDiagnosticsStore() {
       jdk = null;
       encodingIssues = [];
       projectDiagnostics = [];
+      mojibakeDiagnostics = [];
       activeFile = null;
       activeFileDiagnostics = [];
       armed = false;

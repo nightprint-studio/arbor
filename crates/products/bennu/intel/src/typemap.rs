@@ -19,15 +19,18 @@ struct Parsed {
 }
 
 /// Convert a written type `text` to a resolved [`TypeRef`]. Falls back to a bare token
-/// on unparseable input (an unknown binary name is a benign resolver miss).
+/// on unparseable input (an unknown binary name is a benign resolver miss). `is_project` tests a
+/// candidate binary for project membership, so a wildcard import (`import pkg.*;`) can pin the exact
+/// package of a same-simple-name type.
 pub fn type_text_to_ref(
     text: &str,
     imports: &[Import],
     project_types: &BTreeMap<String, String>,
+    is_project: &dyn Fn(&str) -> bool,
 ) -> TypeRef {
     let trimmed = text.trim();
     match parse_type(trimmed) {
-        Some(p) => to_binary_ref(&p, imports, project_types),
+        Some(p) => to_binary_ref(&p, imports, project_types, is_project),
         None => TypeRef::simple(trimmed.replace('.', "/")),
     }
 }
@@ -36,19 +39,24 @@ fn to_binary_ref(
     p: &Parsed,
     imports: &[Import],
     project_types: &BTreeMap<String, String>,
+    is_project: &dyn Fn(&str) -> bool,
 ) -> TypeRef {
     TypeRef {
-        binary_name: simple_to_binary(&p.name, imports, project_types),
-        type_args: p.args.iter().map(|a| to_binary_ref(a, imports, project_types)).collect(),
+        binary_name: simple_to_binary(&p.name, imports, project_types, is_project),
+        type_args: p.args.iter().map(|a| to_binary_ref(a, imports, project_types, is_project)).collect(),
     }
 }
 
-/// Resolve a simple type name to a binary name: dotted→slashed, project types,
-/// imports, java.lang fallback for the common bare names, else the bare token.
+/// Resolve a simple type name to a binary name, mirroring Java name lookup: dotted→slashed; a
+/// single-type import; a **wildcard import of a project package** (`import com.x.*;` → `com/x/Foo`
+/// when that's a real project type — this disambiguates a simple name that collides across packages,
+/// the JAXB `*Type` case); then the project-wide simple→binary map (collision-prone, so it comes after
+/// the imports); then the java.lang fallback; else the bare token.
 fn simple_to_binary(
     simple: &str,
     imports: &[Import],
     project_types: &BTreeMap<String, String>,
+    is_project: &dyn Fn(&str) -> bool,
 ) -> String {
     if simple.contains('.') {
         return simple.replace('.', "/");
@@ -56,13 +64,23 @@ fn simple_to_binary(
     if simple.ends_with("[]") || is_primitive(simple) {
         return simple.to_string();
     }
-    if let Some(b) = project_types.get(simple) {
-        return b.clone();
-    }
+    // A single-type import wins over the collision-prone project map.
     for imp in imports {
         if imp.simple_name() == Some(simple) {
             return imp.path.replace('.', "/");
         }
+    }
+    // A non-static wildcard import that brings in a PROJECT type of this simple name pins its package.
+    for imp in imports {
+        if imp.star && !imp.static_ {
+            let candidate = format!("{}/{simple}", imp.path.replace('.', "/"));
+            if is_project(&candidate) {
+                return candidate;
+            }
+        }
+    }
+    if let Some(b) = project_types.get(simple) {
+        return b.clone();
     }
     match simple {
         "String" | "Object" | "Integer" | "Long" | "Boolean" | "Double" | "Float"

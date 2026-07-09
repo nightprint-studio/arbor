@@ -63,6 +63,7 @@
   import BennuUsagesPopover from './BennuUsagesPopover.svelte';
   import BennuGotoModal from './BennuGotoModal.svelte';
   import BennuIndexInspectorModal from './BennuIndexInspectorModal.svelte';
+  import BennuMojibakeScanModal from './BennuMojibakeScanModal.svelte';
   import BennuFileStructureModal from './BennuFileStructureModal.svelte';
   import type { GenerateMode } from './bennu-intentions';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
@@ -74,6 +75,7 @@
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
+  import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -97,14 +99,17 @@
     let detachRun: (() => void) | undefined;
     let detachIndex: (() => void) | undefined;
     let detachSpell: (() => void) | undefined;
+    let detachDecompiled: (() => void) | undefined;
     void bennuRunStore.attach().then((d) => { detachRun = d; });
     void bennuIndexStore.attach().then((d) => { detachIndex = d; });
     void bennuSpellStore.attach().then((d) => { detachSpell = d; });
+    // Reload a decompiled tab when its dependency sources finish downloading.
+    void decompiledStore.attach().then((d) => { detachDecompiled = d; });
     // Anti-white-flash: reveal this window once the first real frame is painted.
     requestAnimationFrame(() => requestAnimationFrame(() => void signalWindowReady().catch(() => {})));
     return () => {
       window.removeEventListener('blur', onWindowBlur);
-      detachRun?.(); detachIndex?.(); detachSpell?.(); bennuIndexStore.reset();
+      detachRun?.(); detachIndex?.(); detachSpell?.(); detachDecompiled?.(); bennuIndexStore.reset();
     };
   });
 
@@ -283,6 +288,8 @@
         action: () => run(() => editor?.openIntentions()), when: isJava },
       { id: 'mojibake', title: 'Check file for mojibake', icon: 'shield',
         action: () => run(() => void editor?.checkMojibake()), when: !!path },
+      { id: 'mojibakeproject', title: 'Scan project for mojibake…', icon: 'shield',
+        action: () => run(() => bennuUiStore.openMojibakeScan()), when: !!projectStore.project },
       { id: 'newvalidator', title: 'Add Struts validators…', icon: 'shield',
         action: () => run(() => bennuUiStore.openValidationCreator()),
         when: projectStore.activeFilePath?.toLowerCase().endsWith('-validation.xml') ?? false },
@@ -565,6 +572,10 @@
 
 {#if bennuUiStore.indexInspectorOpen}
   <BennuIndexInspectorModal onClose={() => bennuUiStore.closeIndexInspector()} />
+{/if}
+
+{#if bennuUiStore.mojibakeScanOpen}
+  <BennuMojibakeScanModal onClose={() => bennuUiStore.closeMojibakeScan()} />
 {/if}
 
 {#if bennuUiStore.aboutOpen}

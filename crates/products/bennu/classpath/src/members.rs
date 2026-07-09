@@ -98,10 +98,12 @@ pub struct Member {
     /// consumer can render a precise detail line or re-decode if needed.
     pub raw_signature: String,
     /// The checked exceptions this method declares it `throws` — binary names with slashes
-    /// (`java/io/IOException`), decoded from the `Exceptions` attribute. Empty for fields and for a
-    /// method with no `throws` clause. Lets a consumer flag an unhandled/undeclared checked exception
-    /// at a call site. `#[serde(default)]` so an index persisted before this field existed still
-    /// deserializes (empty).
+    /// (`java/io/IOException`). From the `Exceptions` attribute, EXCEPT that a type-variable throws
+    /// (`<X extends Throwable> … throws X`, encoded in the generic `Signature`) is dropped — its actual
+    /// thrown type is bound by the caller and may be unchecked (see [`signature_throws`]). Empty for
+    /// fields and for a method with no `throws` clause. Lets a consumer flag an unhandled/undeclared
+    /// checked exception at a call site. `#[serde(default)]` so an index persisted before this field
+    /// existed still deserializes (empty).
     #[serde(default)]
     pub throws: Vec<String>,
 }
@@ -290,6 +292,30 @@ fn field_visibility(flags: cafebabe::FieldAccessFlags) -> Visibility {
     }
 }
 
+/// The declared checked exceptions for a method whose generic `Signature` is present. The JVM only
+/// encodes a `throws` clause in the Signature when at least one thrown type is a **type variable** or
+/// a parameterized type (JVMS §4.7.9.1); a plain non-generic `throws` lives ONLY in the `Exceptions`
+/// attribute. So:
+///   * `ms.throws` empty → the throws clause (if any) is non-generic → use the erased `Exceptions`
+///     list verbatim (`Thread.sleep() throws InterruptedException` is kept);
+///   * `ms.throws` non-empty → keep only the CONCRETE class throws and DROP every type-variable one
+///     (`<X extends Throwable> T orElseThrow(Supplier<? extends X>) throws X`, as `Optional`): a
+///     type-variable throws is bound to whatever the CALLER supplies — often an *unchecked* exception
+///     (`orElseThrow(() -> new SomeRuntimeException())`) — so we can't soundly assert it's a checked
+///     exception. Dropping it yields at worst a false negative; keeping it (as the erased `Throwable`)
+///     produced the false "unhandled checked exception" this fixes. A concrete `throws IOException`
+///     alongside a type-variable one is still kept.
+fn signature_throws(ms: &crate::sig::MethodSig, erased: &[String]) -> Vec<String> {
+    if ms.throws.is_empty() {
+        return erased.to_vec();
+    }
+    ms.throws
+        .iter()
+        .filter(|t| !matches!(t, crate::sig::TypeSig::TypeVar(_)))
+        .map(|t| type_ref_from_sig(t).binary_name)
+        .collect()
+}
+
 fn decode_method(m: &MethodInfo, class_is_interface: bool) -> Member {
     use cafebabe::MethodAccessFlags as MF;
     let is_static = m.access_flags.contains(MF::STATIC);
@@ -316,7 +342,7 @@ fn decode_method(m: &MethodInfo, class_is_interface: bool) -> Member {
                 is_final,
                 visibility,
                 raw_signature: raw.to_string(),
-                throws: throws.clone(),
+                throws: signature_throws(&ms, &throws),
             };
         }
     }
@@ -667,5 +693,40 @@ mod tests {
         let string = idx.members_of("java/lang/String").unwrap();
         let length = string.methods.iter().find(|m| m.name == "length").unwrap();
         assert!(length.throws.is_empty(), "String.length throws nothing, got {:?}", length.throws);
+    }
+
+    #[test]
+    fn signature_throws_drops_type_variables_keeps_concrete() {
+        use crate::sig::{ClassType, MethodSig, TypeSig};
+        let ioe = || {
+            TypeSig::Class(ClassType { name: "java.io.IOException".into(), args: vec![], inners: vec![] })
+        };
+        let ms = |throws| MethodSig {
+            type_params: vec![],
+            params: vec![],
+            result: TypeSig::Void,
+            throws,
+        };
+
+        // `<X extends Throwable> … throws X` (Optional.orElseThrow): the erased `Exceptions` attribute
+        // is `Throwable`, but the Signature marks it a type variable → dropped (no false "unhandled").
+        assert!(
+            signature_throws(&ms(vec![TypeSig::TypeVar("X".into())]), &["java/lang/Throwable".into()])
+                .is_empty(),
+            "a type-variable throws must be dropped"
+        );
+        // A concrete throws alongside a type-variable one is kept.
+        assert_eq!(
+            signature_throws(
+                &ms(vec![TypeSig::TypeVar("X".into()), ioe()]),
+                &["java/lang/Throwable".into(), "java/io/IOException".into()],
+            ),
+            vec!["java/io/IOException".to_string()],
+        );
+        // No throws in the Signature (non-generic throws) → fall back to the erased `Exceptions` list.
+        assert_eq!(
+            signature_throws(&ms(vec![]), &["java/io/IOException".into()]),
+            vec!["java/io/IOException".to_string()],
+        );
     }
 }

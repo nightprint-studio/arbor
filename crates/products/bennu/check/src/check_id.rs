@@ -84,6 +84,12 @@ pub enum CheckId {
     // ── imports ──────────────────────────────────────────────────────────────────
     /// A single-type `import a.b.C;` the resolver can't resolve.
     UnresolvedImport,
+    /// A wildcard import that's already implicitly in scope (`java.lang.*` / own package). *Warning.*
+    RedundantImport,
+    /// An `import` line repeating one declared above it. *Warning.*
+    DuplicateImport,
+    /// A single-type import whose name is never used in the file. *Warning.*
+    UnusedImport,
 
     // ── instanceof / new ─────────────────────────────────────────────────────────
     /// An `instanceof` between inconvertible concrete types.
@@ -98,6 +104,97 @@ pub enum CheckId {
     RedundantMultiCatch,
     /// A try-with-resources whose resource type definitely isn't `AutoCloseable`.
     NonAutoCloseableResource,
+
+    // ── pure-AST: declarations & modifiers ────────────────────────────────────────
+    /// An illegal modifier combination or declaration placement (abstract body, default outside an
+    /// interface, record instance field, enum-constant/ctor mismatch, `final`+`volatile`, …).
+    IllegalDeclaration,
+    /// An annotation applied to a target it isn't `@Target`-ed for.
+    AnnotationNotApplicable,
+    /// A concrete method with no body (nor `abstract`), or a private interface method without one.
+    MissingMethodBody,
+    /// A `public` type whose name doesn't match its file name.
+    TypeNameMismatchFile,
+    /// A `package` declaration that doesn't match the file's on-disk location.
+    PackageMismatch,
+    /// A `package-info.java` / `module-info.java` containing something it may not.
+    SpecialFileContent,
+    /// A language feature used below the project's target Java version.
+    FeatureRequiresNewerJava,
+
+    // ── pure-AST: duplicates & redeclaration ─────────────────────────────────────
+    /// Two methods/constructors with the same erased signature in one type.
+    DuplicateMethod,
+    /// Two methods whose signatures collide only after generic erasure.
+    ErasureClash,
+    /// A duplicated local/parameter/type/field declaration in one scope.
+    DuplicateDeclaration,
+    /// The same interface listed twice in an `implements`/`extends` clause.
+    DuplicateInterface,
+    /// Two `import`s binding the same simple name to different types.
+    ImportCollision,
+
+    // ── pure-AST: constructors & records ─────────────────────────────────────────
+    /// A constructor that delegates to itself (directly or via a cycle).
+    RecursiveConstructor,
+    /// A record component left unassigned by its canonical constructor.
+    RecordConstructor,
+    /// A concrete method named exactly like its class (a likely missing-`void` typo). *Warning.*
+    MethodNamedLikeConstructor,
+
+    // ── pure-AST: finals & definite assignment ───────────────────────────────────
+    /// An assignment to a `final` variable or field.
+    FinalAssignment,
+    /// A blank `final` never assigned, or a definite-assignment violation.
+    DefiniteAssignment,
+    /// A local captured by a lambda/inner class and then reassigned (not effectively final).
+    CapturedVariableNotFinal,
+
+    // ── pure-AST: functional & generics ──────────────────────────────────────────
+    /// A `@FunctionalInterface` that doesn't declare exactly one abstract method.
+    NotAFunctionalInterface,
+    /// An illegal use of generics (generic array creation, `new T()`, generic `instanceof`/`catch`).
+    IllegalGenericUsage,
+
+    // ── pure-AST: control flow ───────────────────────────────────────────────────
+    /// A statement that can never be reached.
+    UnreachableStatement,
+    /// A statement position holding an expression that isn't a statement.
+    NotAStatement,
+    /// A non-`void` method / branch that can fall off the end without returning.
+    MissingReturn,
+    /// A `return value;` in a `void` method or constructor.
+    ReturnValueFromVoid,
+    /// A `case` falling through into the next with code in between. *Warning.*
+    SwitchFallthrough,
+    /// A `finally` block that completes abruptly (swallows the try's outcome). *Warning.*
+    FinallyAbrupt,
+
+    // ── pure-AST: switch ─────────────────────────────────────────────────────────
+    /// A `switch` on a selector type the language doesn't permit.
+    IllegalSwitchSelector,
+    /// A `switch` expression whose arms don't all yield a value.
+    SwitchExpressionIncomplete,
+    /// Two `case` labels with the same constant.
+    DuplicateCaseLabel,
+
+    // ── pure-AST: expressions (lints) ────────────────────────────────────────────
+    /// `x = x` — a self-assignment with no effect. *Warning.*
+    SelfAssignment,
+    /// A constant division (or modulo) by zero. *Warning.*
+    DivisionByZero,
+    /// A stray `;` empty statement. *Warning.*
+    EmptyStatement,
+    /// A `String` compared with `==`/`!=` (reference identity, not contents). *Warning.*
+    StringReferenceEquality,
+    /// A local-variable `var` whose initializer gives no inferable type.
+    VarTypeInferenceFailed,
+
+    // ── pure-AST: syntax ─────────────────────────────────────────────────────────
+    /// A tree-sitter `ERROR` node — a genuine syntax error.
+    SyntaxError,
+    /// A tree-sitter `MISSING` node — a token the grammar expected but didn't find.
+    MissingToken,
 }
 
 impl CheckId {
@@ -130,18 +227,64 @@ impl CheckId {
             InaccessibleMember => "inaccessible-member",
             StaticContextAccess => "static-context-access",
             UnresolvedImport => "unresolved-import",
+            RedundantImport => "redundant-import",
+            DuplicateImport => "duplicate-import",
+            UnusedImport => "unused-import",
             IncompatibleInstanceof => "incompatible-instanceof",
             InstantiateAbstract => "instantiate-abstract",
             UnreachableCatch => "unreachable-catch",
             RedundantMultiCatch => "redundant-multi-catch",
             NonAutoCloseableResource => "non-autocloseable-resource",
+            IllegalDeclaration => "illegal-declaration",
+            AnnotationNotApplicable => "annotation-not-applicable",
+            MissingMethodBody => "missing-method-body",
+            TypeNameMismatchFile => "type-name-mismatch-file",
+            PackageMismatch => "package-mismatch",
+            SpecialFileContent => "special-file-content",
+            FeatureRequiresNewerJava => "feature-requires-newer-java",
+            DuplicateMethod => "duplicate-method",
+            ErasureClash => "erasure-clash",
+            DuplicateDeclaration => "duplicate-declaration",
+            DuplicateInterface => "duplicate-interface",
+            ImportCollision => "import-collision",
+            RecursiveConstructor => "recursive-constructor",
+            RecordConstructor => "record-constructor",
+            MethodNamedLikeConstructor => "method-named-like-constructor",
+            FinalAssignment => "final-assignment",
+            DefiniteAssignment => "definite-assignment",
+            CapturedVariableNotFinal => "captured-variable-not-final",
+            NotAFunctionalInterface => "not-a-functional-interface",
+            IllegalGenericUsage => "illegal-generic-usage",
+            UnreachableStatement => "unreachable-statement",
+            NotAStatement => "not-a-statement",
+            MissingReturn => "missing-return",
+            ReturnValueFromVoid => "return-value-from-void",
+            SwitchFallthrough => "switch-fallthrough",
+            FinallyAbrupt => "finally-abrupt-completion",
+            IllegalSwitchSelector => "illegal-switch-selector",
+            SwitchExpressionIncomplete => "switch-expression-incomplete",
+            DuplicateCaseLabel => "duplicate-case-label",
+            SelfAssignment => "self-assignment",
+            DivisionByZero => "division-by-zero",
+            EmptyStatement => "empty-statement",
+            StringReferenceEquality => "string-reference-equality",
+            VarTypeInferenceFailed => "var-type-inference-failed",
+            SyntaxError => "syntax-error",
+            MissingToken => "missing-token",
         }
     }
 
     /// The default severity string (`"error"` / `"warning"`) for this kind.
     pub const fn severity(self) -> &'static str {
-        // Every kind currently catalogued is a compile-level error; warnings join as they're migrated.
-        "error"
+        use CheckId::*;
+        match self {
+            // Style / hygiene lints — not compile errors.
+            RedundantImport | DuplicateImport | UnusedImport | MethodNamedLikeConstructor
+            | SwitchFallthrough | FinallyAbrupt | SelfAssignment | DivisionByZero | EmptyStatement
+            | StringReferenceEquality => "warning",
+            // Everything else is a compile-level error.
+            _ => "error",
+        }
     }
 
     /// Build a [`Diagnostic`] of this kind spanning `[start, end)`.

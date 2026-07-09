@@ -60,8 +60,8 @@ pub fn func_iface_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> 
             message: format!(
                 "`{name}` is not a functional interface: it must declare exactly one abstract method ({detail})"
             ),
-            severity: "error".to_string(),
-            code: String::new(),
+            severity: crate::check_id::CheckId::NotAFunctionalInterface.severity().to_string(),
+            code: crate::check_id::CheckId::NotAFunctionalInterface.code().to_string(),
             start: anchor.start_byte(),
             end: anchor.end_byte(),
         });

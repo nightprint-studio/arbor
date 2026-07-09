@@ -5,8 +5,8 @@
 //! the prelude is the canonical call-site path.
 
 pub use crate::provider::{
-    DocumentSymbol, IntelError, IntelProvider, Location, LspClientProvider, NativeJavaProvider,
-    Position, ProjectMember, TextEdit,
+    DocumentSymbol, IntelError, IntelProvider, LibraryMember, LibraryTarget, Location,
+    LspClientProvider, NativeJavaProvider, Position, ProjectMember, TextEdit,
 };
 
 // The class-name index behind the "Import class" intention (simple name → importable FQNs).

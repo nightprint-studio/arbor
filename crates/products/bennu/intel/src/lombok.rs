@@ -39,6 +39,7 @@ pub fn synthesize(
     imports: &[Import],
     project_types: &BTreeMap<String, String>,
     existing_methods: &HashSet<String>,
+    is_project: &dyn Fn(&str) -> bool,
 ) -> LombokMembers {
     let mut methods = Vec::new();
     let mut fields = Vec::new();
@@ -82,7 +83,7 @@ pub fn synthesize(
                 getter_name(&f.name, is_primitive_boolean(&f.type_text))
             };
             if !existing_methods.contains(&name) {
-                let ret = type_text_to_ref(&f.type_text, imports, project_types);
+                let ret = type_text_to_ref(&f.type_text, imports, project_types, is_project);
                 methods.push(Member {
                     name: name.clone(),
                     kind: MemberKind::Method,
@@ -101,7 +102,7 @@ pub fn synthesize(
         if want_setter {
             let name = if acc.fluent { f.name.clone() } else { format!("set{}", capitalize(&f.name)) };
             if !existing_methods.contains(&name) {
-                let param = type_text_to_ref(&f.type_text, imports, project_types);
+                let param = type_text_to_ref(&f.type_text, imports, project_types, is_project);
                 // `chain` (implied by `fluent`) → the setter returns the owner for call-chaining.
                 let (ret, ret_text) = if acc.chain {
                     (TypeRef::simple(owner.clone()), td.name.as_str())
@@ -128,7 +129,7 @@ pub fn synthesize(
         if want_with {
             let name = format!("with{}", capitalize(&f.name));
             if !existing_methods.contains(&name) {
-                let param = type_text_to_ref(&f.type_text, imports, project_types);
+                let param = type_text_to_ref(&f.type_text, imports, project_types, is_project);
                 methods.push(Member {
                     name: name.clone(),
                     kind: MemberKind::Method,
@@ -370,7 +371,7 @@ mod tests {
     #[test]
     fn getter_setter_from_data() {
         let td = type_with(&["Data"], vec![field("id", "long"), field("active", "boolean")]);
-        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new());
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
         let names: Vec<&str> = m.methods.iter().map(|x| x.name.as_str()).collect();
         assert!(names.contains(&"getId"), "got {names:?}");
         assert!(names.contains(&"setId"), "got {names:?}");
@@ -381,7 +382,7 @@ mod tests {
     #[test]
     fn value_is_immutable_getters_only() {
         let td = type_with(&["Value"], vec![field("id", "long")]);
-        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new());
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
         let names: Vec<&str> = m.methods.iter().map(|x| x.name.as_str()).collect();
         assert!(names.contains(&"getId"));
         assert!(!names.iter().any(|n| n.starts_with("set")), "@Value has no setters, got {names:?}");
@@ -390,7 +391,7 @@ mod tests {
     #[test]
     fn with_generates_copy_methods_returning_owner() {
         let td = type_with(&["With"], vec![field("id", "long"), field("name", "String")]);
-        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new());
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
         let with_id = m.methods.iter().find(|x| x.name == "withId").expect("withId");
         assert_eq!(with_id.return_type.binary_name, "shop/Order", "returns the owner type");
         assert_eq!(with_id.params.len(), 1, "takes the new value");
@@ -400,7 +401,7 @@ mod tests {
     #[test]
     fn builder_generates_static_entry_point() {
         let td = type_with(&["Builder"], vec![field("id", "long")]);
-        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new());
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
         let b = m.methods.iter().find(|x| x.name == "builder").expect("builder()");
         assert!(b.is_static, "builder() is static");
         assert!(b.params.is_empty(), "builder() takes no args");
@@ -411,7 +412,7 @@ mod tests {
         // `@Accessors(fluent = true)` + `@Data` → getter `id()` / setter `id(v)` returning the owner.
         let mut td = type_with(&["Data"], vec![field("id", "long"), field("name", "String")]);
         td.annotations.push(ann_args("Accessors", &[("fluent", "true")]));
-        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new());
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
         let names: Vec<&str> = m.methods.iter().map(|x| x.name.as_str()).collect();
         assert!(names.contains(&"id"), "fluent getter is `id()`, got {names:?}");
         assert!(names.contains(&"name"), "fluent getter is `name()`, got {names:?}");
@@ -425,7 +426,7 @@ mod tests {
     fn getter_with_access_level_arg_still_generates() {
         // `@Getter(AccessLevel.PACKAGE)` — a non-string positional arg must not suppress generation.
         let td = type_with(&["Getter"], vec![field("id", "long")]);
-        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new());
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
         assert!(m.methods.iter().any(|x| x.name == "getId"), "getter still synthesized");
     }
 
@@ -434,7 +435,7 @@ mod tests {
         let td = type_with(&["Getter"], vec![field("id", "long")]);
         let mut existing = HashSet::new();
         existing.insert("getId".to_string());
-        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &existing);
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &existing, &|_: &str| false);
         assert!(m.methods.iter().all(|x| x.name != "getId"), "user getId() suppresses the synthetic");
     }
 
@@ -443,7 +444,7 @@ mod tests {
         let mut f = field("id", "long");
         f.is_final = true;
         let td = type_with(&["Data"], vec![f]);
-        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new());
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
         assert!(m.methods.iter().any(|x| x.name == "getId"));
         assert!(m.methods.iter().all(|x| x.name != "setId"), "final field → no setter");
     }
@@ -451,7 +452,7 @@ mod tests {
     #[test]
     fn slf4j_injects_log_field() {
         let td = type_with(&["Slf4j"], vec![]);
-        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new());
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
         assert_eq!(m.fields.len(), 1);
         assert_eq!(m.fields[0].name, "log");
         assert!(m.fields[0].is_static);
@@ -470,7 +471,7 @@ mod tests {
         let mut f = field("id", "long");
         f.annotations = vec![ann("Getter")];
         let td = type_with(&[], vec![f, field("name", "String")]);
-        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new());
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
         let names: Vec<&str> = m.methods.iter().map(|x| x.name.as_str()).collect();
         assert!(names.contains(&"getId"), "field-level @Getter, got {names:?}");
         assert!(!names.contains(&"getName"), "the other field has no @Getter, got {names:?}");
@@ -481,7 +482,7 @@ mod tests {
         // The capability gate: a `@Data` class WITHOUT a Lombok import (a project's own `@Data`, or a
         // project that doesn't depend on Lombok) generates nothing — no phantom getters/setters.
         let td = type_with(&["Data"], vec![field("id", "long")]);
-        let m = synthesize(&td, &[], &BTreeMap::new(), &HashSet::new());
+        let m = synthesize(&td, &[], &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
         assert!(m.methods.is_empty(), "no lombok import → no synthesis, got {:?}",
             m.methods.iter().map(|x| &x.name).collect::<Vec<_>>());
         assert!(m.fields.is_empty());
@@ -492,7 +493,7 @@ mod tests {
         // `import lombok.Getter;` (only) → `@Getter` synthesizes, but a `@Setter` that isn't imported
         // from Lombok does not. Proves per-annotation import verification, not a blanket file gate.
         let td = type_with(&["Getter", "Setter"], vec![field("id", "long")]);
-        let m = synthesize(&td, &[lombok_import("Getter")], &BTreeMap::new(), &HashSet::new());
+        let m = synthesize(&td, &[lombok_import("Getter")], &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
         let names: Vec<&str> = m.methods.iter().map(|x| x.name.as_str()).collect();
         assert!(names.contains(&"getId"), "imported @Getter works, got {names:?}");
         assert!(!names.contains(&"setId"), "un-imported @Setter is not Lombok's, got {names:?}");
@@ -503,7 +504,7 @@ mod tests {
         // A `@Data` imported from a NON-lombok package is the project's own annotation → no synthesis.
         let td = type_with(&["Data"], vec![field("id", "long")]);
         let mine = Import { path: "com.acme.Data".to_string(), star: false, static_: false };
-        let m = synthesize(&td, &[mine], &BTreeMap::new(), &HashSet::new());
+        let m = synthesize(&td, &[mine], &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
         assert!(m.methods.is_empty(), "com.acme.Data is not lombok.Data");
     }
 }

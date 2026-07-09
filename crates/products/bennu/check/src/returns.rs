@@ -44,8 +44,8 @@ pub fn missing_return_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
             let ty = ret.utf8_text(bytes).unwrap_or("").trim();
             out.push(Diagnostic {
                 message: format!("Missing return statement (method must return `{ty}`)"),
-                severity: "error".to_string(),
-                code: String::new(),
+                severity: crate::check_id::CheckId::MissingReturn.severity().to_string(),
+                code: crate::check_id::CheckId::MissingReturn.code().to_string(),
                 start: ret.start_byte(),
                 end: ret.end_byte(),
             });
@@ -110,16 +110,16 @@ fn check_returns(body: Node, is_void: bool, is_ctor: bool, ret_ty: &str, out: &m
             let where_ = if is_ctor { "a constructor" } else { "a `void` method" };
             out.push(Diagnostic {
                 message: format!("Cannot return a value from {where_}"),
-                severity: "error".to_string(),
-                code: String::new(),
+                severity: crate::check_id::CheckId::ReturnValueFromVoid.severity().to_string(),
+                code: crate::check_id::CheckId::ReturnValueFromVoid.code().to_string(),
                 start: r.start_byte(),
                 end: r.end_byte(),
             });
         } else if !is_void && !has_value {
             out.push(Diagnostic {
                 message: format!("Missing return value (method must return `{ret_ty}`)"),
-                severity: "error".to_string(),
-                code: String::new(),
+                severity: crate::check_id::CheckId::MissingReturn.severity().to_string(),
+                code: crate::check_id::CheckId::MissingReturn.code().to_string(),
                 start: r.start_byte(),
                 end: r.end_byte(),
             });

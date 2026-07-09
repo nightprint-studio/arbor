@@ -341,6 +341,26 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
                 return Some(binary.clone());
             }
         }
+        // A non-static star import (`import com.x.*;`) of a PROJECT package disambiguates a simple name
+        // that COLLIDES across packages — rife in generated JAXB `*Type` classes, where several
+        // packages each declare a `ComunicazioneType`. The `self.project.get(name)` fallback just below
+        // is keyed by SIMPLE name and keeps only ONE binary per name, so on a collision it binds the
+        // WRONG package's type — and every member access on the receiver then reads as "does not exist"
+        // even though it resolves fine at the source. `self.project` also indexes each type under its
+        // BINARY name (a non-lossy key), so probe `<star-pkg>/<name>` there and prefer a real hit: it
+        // pins the exact package the star import brought in. (Single-type imports and same-package types
+        // were already tried above / by the caller, so they still take precedence.)
+        for imp in imports {
+            if imp.star && !imp.static_ {
+                let candidate = format!("{}/{name}", imp.path.replace('.', "/"));
+                if self.project.get(&candidate).is_some() {
+                    if recording {
+                        dep_record::note_simple_hit(name, &candidate);
+                    }
+                    return Some(candidate);
+                }
+            }
+        }
         // Then a project type of that simple name, then the common-JDK table.
         if let Some(sym) = self.project.get(name) {
             if !sym.fqn.is_empty() {

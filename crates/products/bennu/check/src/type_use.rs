@@ -19,6 +19,7 @@ use bennu_java::prelude::{FileSymbols, InferCache, TypeResolver, infer_node_type
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::check_id::CheckId;
 use crate::members::simple_name;
 use crate::resolve::type_binary;
 use crate::walk::{hierarchy_fully_known, reaches};
@@ -95,13 +96,13 @@ fn check_instanceof(
     // Flag ONLY when NEITHER type reaches the other: not a subtype either direction ⇒ no value of one
     // can ever be an instance of the other (the JLS "inconvertible types" error).
     if !reaches(resolver, &source_ty, &target) && !reaches(resolver, &target, &source_ty) {
-        out.push(err(
+        out.push(CheckId::IncompatibleInstanceof.at(
+            ty_node,
             format!(
                 "Incompatible types: `{}` can never be an instance of `{}`",
                 simple_name(&source_ty),
                 simple_name(&target)
             ),
-            ty_node,
         ));
     }
 }
@@ -142,9 +143,9 @@ fn check_new_abstract(
     // Flag ONLY when definitely abstract or an interface (both un-instantiable directly).
     let name = simple_name(&binary);
     if cm.flags.is_interface {
-        out.push(err(format!("Cannot instantiate the interface `{name}`"), ty_node));
+        out.push(CheckId::InstantiateAbstract.at(ty_node, format!("Cannot instantiate the interface `{name}`")));
     } else if cm.flags.is_abstract {
-        out.push(err(format!("Cannot instantiate the abstract type `{name}`"), ty_node));
+        out.push(CheckId::InstantiateAbstract.at(ty_node, format!("Cannot instantiate the abstract type `{name}`")));
     }
 }
 
@@ -179,10 +180,6 @@ fn is_primitive(binary: &str) -> bool {
         binary,
         "int" | "long" | "short" | "byte" | "char" | "boolean" | "float" | "double" | "void"
     )
-}
-
-fn err(message: String, node: Node) -> Diagnostic {
-    Diagnostic { message, severity: "error".to_string(), code: String::new(), start: node.start_byte(), end: node.end_byte() }
 }
 
 #[cfg(test)]

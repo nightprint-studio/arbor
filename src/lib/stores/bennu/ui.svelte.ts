@@ -53,6 +53,8 @@ function createBennuUiStore() {
   let navMode = $state<'class' | 'file'>('class');
   // Index inspector modal (debug: index stats + class list).
   let indexInspectorOpen = $state(false);
+  // Project mojibake-scan modal (whole-project UTF-8-as-Cp1252 corruption report).
+  let mojibakeScanOpen = $state(false);
   // File Structure popup (Ctrl+F12) — a searchable quick-outline of the active file.
   let fileStructureOpen = $state(false);
   // About Bennu modal.
@@ -113,6 +115,7 @@ function createBennuUiStore() {
     /** Query to pre-fill the Go-to navigator field with (from a selection), or ''. */
     get navInitial()   { return navInitial; },
     get indexInspectorOpen() { return indexInspectorOpen; },
+    get mojibakeScanOpen() { return mojibakeScanOpen; },
     get fileStructureOpen() { return fileStructureOpen; },
     get aboutOpen()    { return aboutOpen; },
     get generateOpen() { return generateOpen; },
@@ -157,6 +160,8 @@ function createBennuUiStore() {
     closeNav()           { navOpen = false; },
     openIndexInspector() { indexInspectorOpen = true; },
     closeIndexInspector() { indexInspectorOpen = false; },
+    openMojibakeScan() { mojibakeScanOpen = true; },
+    closeMojibakeScan() { mojibakeScanOpen = false; },
     openFileStructure() { fileStructureOpen = true; },
     closeFileStructure() { fileStructureOpen = false; },
     openAbout()          { aboutOpen = true; },

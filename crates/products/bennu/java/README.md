@@ -96,8 +96,12 @@ a partial identifier).
 
 ## NOT handled yet (honest edges)
 
-- **No overload resolution by argument types** — the first method matching by name
-  wins. (`String.valueOf(...)` etc. resolve to whichever overload is listed first.)
+- **Overload resolution is arity-first, not full argument-subtype** — among same-named
+  overloads we keep those whose arity admits the call and take their return type when it
+  is unique (breaking a return-type tie by a conservative primitive/reference argument
+  check); a still-ambiguous overload resolves to "unknown" rather than a guess. Covariant
+  overrides collapse to their derived return. Full argument-subtype selection (boxing,
+  varargs element types, most-specific) is not modelled.
 - **No flow-typing / reassignment / narrowing** — a variable's declared type is used
   even after `x = somethingElse`; no ternary/`instanceof` narrowing.
 - **`var` inference** only follows the initializer through the same expression rules;

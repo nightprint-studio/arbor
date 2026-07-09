@@ -29,6 +29,7 @@ use bennu_java::prelude::{FileSymbols, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::{Node, Parser};
 
+use crate::check_id::CheckId;
 use crate::members::simple_name;
 use crate::resolve::type_binary;
 use crate::walk::hierarchy_fully_known;
@@ -105,9 +106,9 @@ fn check_cycle(
     let mut visited: HashSet<String> = HashSet::new();
     let closes = seeds.iter().any(|s| reaches_self(resolver, s, &self_bin, &mut visited, 1));
     if closes {
-        out.push(err(
-            format!("Cyclic inheritance involving `{}`", simple_name(&self_bin)),
+        out.push(CheckId::CyclicInheritance.at(
             name_node,
+            format!("Cyclic inheritance involving `{}`", simple_name(&self_bin)),
         ));
     }
 }
@@ -201,9 +202,9 @@ fn check_overrides(
         if super_method_names.contains(name) {
             continue;
         }
-        out.push(err(
-            "Method does not override or implement a method from a supertype".to_string(),
+        out.push(CheckId::OverrideOverridesNothing.at(
             name_node,
+            "Method does not override or implement a method from a supertype",
         ));
     }
 }
@@ -275,16 +276,6 @@ fn collect_type_texts(wrapper: Node, bytes: &[u8], out: &mut Vec<String>) {
 
 fn is_type_node(kind: &str) -> bool {
     matches!(kind, "type_identifier" | "scoped_type_identifier" | "generic_type")
-}
-
-fn err(message: String, node: Node) -> Diagnostic {
-    Diagnostic {
-        message,
-        severity: "error".to_string(),
-        code: String::new(),
-        start: node.start_byte(),
-        end: node.end_byte(),
-    }
 }
 
 fn with_parse(source: &str, f: impl FnOnce(Node) -> Vec<Diagnostic>) -> Vec<Diagnostic> {

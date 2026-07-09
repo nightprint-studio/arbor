@@ -25,3 +25,29 @@ export interface MojibakeHit {
 export function mojibakeCheck(file: string, source: string): Promise<MojibakeHit[]> {
   return bennu('bennu_mojibake_check', { args: { file, source } });
 }
+
+/** One file's mojibake hits — mirrors the BE `FileMojibake`. */
+export interface FileMojibake {
+  /** Absolute (forward-slashed) path of the file. */
+  file: string;
+  /** Every mojibake hit in the file, in document order. */
+  hits: MojibakeHit[];
+}
+
+/** The whole-project mojibake scan result — mirrors the BE `ProjectMojibakeResult`. */
+export interface ProjectMojibakeResult {
+  /** How many text files were read + scanned. */
+  total_files_scanned: number;
+  /** How many of them had at least one hit. */
+  files_with_hits: number;
+  /** Total hits across the project. */
+  total_hits: number;
+  /** The affected files (hits > 0), most-affected first. */
+  files: FileMojibake[];
+}
+
+/** Scan every text file in the project for mojibake (parallel, whole-project).
+ *  Wire: `bennu_mojibake_project` — `{ root }`. */
+export function mojibakeProject(root: string): Promise<ProjectMojibakeResult> {
+  return bennu('bennu_mojibake_project', { args: { root } });
+}

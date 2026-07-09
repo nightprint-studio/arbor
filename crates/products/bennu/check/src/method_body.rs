@@ -123,8 +123,8 @@ fn name_span(node: Node) -> Node {
 fn err(node: Node, message: impl Into<String>) -> Diagnostic {
     Diagnostic {
         message: message.into(),
-        severity: "error".to_string(),
-        code: String::new(),
+        severity: crate::check_id::CheckId::MissingMethodBody.severity().to_string(),
+        code: crate::check_id::CheckId::MissingMethodBody.code().to_string(),
         start: node.start_byte(),
         end: node.end_byte(),
     }

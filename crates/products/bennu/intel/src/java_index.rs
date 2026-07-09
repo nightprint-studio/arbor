@@ -85,13 +85,20 @@ pub fn build_project_index_from_sources(
     let parsed: Vec<(PathBuf, FileSymbols)> = parse_sources_parallel(sources);
 
     // First pass: every declared simple name → binary name, so a same-project type
-    // reference resolves at ingest time (before the type's own file is processed).
+    // reference resolves at ingest time (before the type's own file is processed). Also the FULL,
+    // non-lossy set of project binaries — the simple→binary map keeps only ONE binary per simple name,
+    // so it can't answer "is `com/x/Foo` a project type?" when several packages declare a `Foo`; the
+    // set can, which is what lets a wildcard import (`import com.x.*;`) resolve to the right package.
     let mut project_types: BTreeMap<String, String> = BTreeMap::new();
+    let mut project_binaries: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for (_p, fs) in &parsed {
         for td in &fs.types {
-            project_types.insert(td.name.clone(), td.fqn.replace('.', "/"));
+            let binary = td.fqn.replace('.', "/");
+            project_types.insert(td.name.clone(), binary.clone());
+            project_binaries.insert(binary);
         }
     }
+    let is_project = |b: &str| project_binaries.contains(b);
 
     let mut builder = IndexBuilder::new(index_dir);
     let mut next_id: u32 = 0;
@@ -100,7 +107,8 @@ pub fn build_project_index_from_sources(
     let mut classes: Vec<ClassDecl> = Vec::new();
 
     for ((path, fs), (_p2, source)) in parsed.iter().zip(sources.iter()) {
-        let (records, ids, types, members) = file_records(path, fs, &project_types, next_id);
+        let (records, ids, types, members) =
+            file_records(path, fs, &project_types, next_id, &is_project);
         next_id = ids;
         type_count += types;
         member_count += members;
@@ -330,25 +338,30 @@ fn line_declares_type(line: &str, name: &str) -> bool {
 
 /// Re-extract a single file's source into fresh [`IndexRecord`]s (for an incremental
 /// [`patch`](IndexBuilder::patch_file)). `project_types` should be the current
-/// project-wide simple→binary map so cross-type references still resolve.
+/// project-wide simple→binary map so cross-type references still resolve. `is_project` answers
+/// "is this binary a project type?" so a wildcard import (`import pkg.*;`) can resolve a supertype /
+/// parameter / field to the exact package — the caller wires it to the live resolver's project view.
 pub fn file_records_from_source(
     path: &Path,
     source: &str,
     project_types: &BTreeMap<String, String>,
     start_id: u32,
+    is_project: &dyn Fn(&str) -> bool,
 ) -> Vec<IndexRecord> {
     let fs = extract_symbols(source);
-    file_records(path, &fs, project_types, start_id).0
+    file_records(path, &fs, project_types, start_id, is_project).0
 }
 
 /// Build one file's records; returns `(records, next_id, type_count, member_count)`.
 /// `project_types` is the project-wide simple→binary type map so cross-type references
-/// (a field of another project type) resolve to a binary name at ingest time.
+/// (a field of another project type) resolve to a binary name at ingest time. `is_project` tests a
+/// candidate binary for project membership (wildcard-import resolution — see [`resolve_binary`]).
 fn file_records(
     path: &Path,
     fs: &FileSymbols,
     project_types: &BTreeMap<String, String>,
     start_id: u32,
+    is_project: &dyn Fn(&str) -> bool,
 ) -> (Vec<IndexRecord>, u32, usize, usize) {
     let mut records = Vec::new();
     let mut next_id = start_id;
@@ -362,7 +375,7 @@ fn file_records(
         next_id += 1;
         type_count += 1;
 
-        let members = build_class_members(td, &fs.imports, project_types);
+        let members = build_class_members(td, &fs.imports, project_types, is_project);
         let members_json = serde_json::to_string(&members).unwrap_or_default();
 
         let class_sym = Symbol {
@@ -413,10 +426,14 @@ fn build_class_members(
     td: &TypeDecl,
     imports: &[Import],
     project_types: &BTreeMap<String, String>,
+    is_project: &dyn Fn(&str) -> bool,
 ) -> ClassMembers {
-    let superclass = td.extends.as_ref().map(|s| resolve_binary(s, imports, project_types));
-    let interfaces =
-        td.implements.iter().map(|i| resolve_binary(i, imports, project_types)).collect();
+    let superclass = td.extends.as_ref().map(|s| resolve_binary(s, imports, project_types, is_project));
+    let interfaces = td
+        .implements
+        .iter()
+        .map(|i| resolve_binary(i, imports, project_types, is_project))
+        .collect();
 
     let mut methods: Vec<Member> = td
         .methods
@@ -424,11 +441,11 @@ fn build_class_members(
         .map(|m| Member {
             name: m.name.clone(),
             kind: MemberKind::Method,
-            return_type: type_text_to_ref(&m.return_type_text, imports, project_types),
+            return_type: type_text_to_ref(&m.return_type_text, imports, project_types, is_project),
             params: m
                 .params
                 .iter()
-                .map(|p| type_text_to_ref(&p.type_text, imports, project_types))
+                .map(|p| type_text_to_ref(&p.type_text, imports, project_types, is_project))
                 .collect(),
             is_static: m.is_static,
             // Carried from the source symbol model (an explicit `abstract` modifier or a bodyless
@@ -442,7 +459,11 @@ fn build_class_members(
             raw_signature: render_method(m),
             // Resolve each written `throws` type to a binary name (imports + project types), so a
             // call site can check an unhandled/undeclared checked exception against a project method.
-            throws: m.throws.iter().map(|t| resolve_binary(t, imports, project_types)).collect(),
+            throws: m
+                .throws
+                .iter()
+                .map(|t| resolve_binary(t, imports, project_types, is_project))
+                .collect(),
         })
         .collect();
 
@@ -452,7 +473,7 @@ fn build_class_members(
         .map(|f| Member {
             name: f.name.clone(),
             kind: MemberKind::Field,
-            return_type: type_text_to_ref(&f.type_text, imports, project_types),
+            return_type: type_text_to_ref(&f.type_text, imports, project_types, is_project),
             params: Vec::new(),
             is_static: f.is_static,
             is_abstract: false,
@@ -469,7 +490,7 @@ fn build_class_members(
     // the synthetic one (the synth checks against the names already collected above).
     let existing_methods: std::collections::HashSet<String> =
         methods.iter().map(|m| m.name.clone()).collect();
-    let synth = crate::lombok::synthesize(td, imports, project_types, &existing_methods);
+    let synth = crate::lombok::synthesize(td, imports, project_types, &existing_methods, is_project);
     methods.extend(synth.methods);
     fields.extend(synth.fields);
 
@@ -502,31 +523,52 @@ fn class_flags(td: &TypeDecl) -> ClassFlags {
 
 /// Resolve a supertype / throws simple name to a binary name (generics stripped).
 ///
-/// Resolution order mirrors Java name lookup: a fully-qualified name wins; then a project type of
-/// that simple name; then an explicit import; then — crucially — the **implicit `java.lang.*`
-/// import** (JLS §7.3), so a bare `Exception` / `RuntimeException` / `Runnable` resolves to its
-/// `java/lang/…` binary instead of an unresolved bare word. Without that last step a PROJECT
-/// method's `throws Exception` was stored as the raw `"Exception"` — never equal to the
-/// fully-resolved `java/lang/Exception` a call/override site resolves to, so the checked-exception
-/// and override-widening checks compared a resolved binary against an unresolved word and misfired
-/// (a false "overridden method does not permit `Exception`"). Only a KNOWN java.lang name is mapped,
-/// so a genuine typo stays raw (unresolvable) rather than being coerced to a fake `java/lang/Typo`.
+/// Resolution order mirrors Java name lookup (JLS §6.5.5 / §7.5.1):
+///   1. a fully-qualified name (`a.b.C`) wins;
+///   2. an explicit single-type `import` of that simple name — it is authoritative and, unlike the
+///      flat project map below, CANNOT be shadowed by a same-simple-name type in another package.
+///      This precedence fix matters in large legacy code full of duplicate simple names (generated
+///      `*Type` classes): a supertype/param/field whose name collides elsewhere resolved to whichever
+///      binary the global map happened to keep — so a class's `extends`/`implements`, or a method's
+///      parameter, could bind to the WRONG same-named type (its members then "missing", or its binary
+///      unequal to the caller's) even though the file imports the right one;
+///   3. the project-wide simple→binary map — a same-package type used without an import, or a
+///      cross-file reference. Collision-prone for duplicate simple names, so it comes AFTER imports;
+///   4. the **implicit `java.lang.*` import** (JLS §7.3), so a bare `Exception` / `RuntimeException` /
+///      `Runnable` resolves to its `java/lang/…` binary instead of an unresolved bare word (without
+///      it a project method's `throws Exception` stayed the raw `"Exception"`, never equal to the
+///      resolved `java/lang/Exception` a call site sees → a false "does not permit `Exception`"). Only
+///      a KNOWN java.lang name is mapped, so a genuine typo stays raw rather than a fake `java/lang/Typo`.
 fn resolve_binary(
     simple: &str,
     imports: &[Import],
     project_types: &BTreeMap<String, String>,
+    is_project: &dyn Fn(&str) -> bool,
 ) -> String {
     let base = simple.split('<').next().unwrap_or(simple).trim();
     if base.contains('.') {
         return base.replace('.', "/");
     }
-    if let Some(b) = project_types.get(base) {
-        return b.clone();
-    }
+    // An explicit single-type import wins over the collision-prone global project map.
     for imp in imports {
         if imp.simple_name() == Some(base) {
             return imp.path.replace('.', "/");
         }
+    }
+    // A non-static wildcard import that brings in a PROJECT type of this simple name pins its exact
+    // package — the fix for a supertype (`extends`/`implements`) or a `throws` whose simple name
+    // collides across packages (JAXB `*Type`) and would otherwise bind whichever binary the collapsed
+    // map kept, mis-walking the hierarchy (a false `@Override`-overrides-nothing on an inherited method).
+    for imp in imports {
+        if imp.star && !imp.static_ {
+            let candidate = format!("{}/{base}", imp.path.replace('.', "/"));
+            if is_project(&candidate) {
+                return candidate;
+            }
+        }
+    }
+    if let Some(b) = project_types.get(base) {
+        return b.clone();
     }
     // `java.lang` is implicitly imported: a bare name that's a known java.lang type resolves there.
     if is_java_lang_implicit(base) {
@@ -735,7 +777,7 @@ mod tests {
         // project supertypes (not only bytecode ones).
         let fs = extract_symbols("package p;\npublic interface Repo { void save(); }\n");
         let td = fs.types.iter().find(|t| t.name == "Repo").unwrap();
-        let cm = build_class_members(td, &fs.imports, &BTreeMap::new());
+        let cm = build_class_members(td, &fs.imports, &BTreeMap::new(), &|_: &str| false);
         assert!(cm.flags.is_interface, "interface flag carried");
         assert!(cm.flags.is_abstract, "interface is implicitly abstract");
         let save = cm.methods.iter().find(|m| m.name == "save").unwrap();
@@ -744,7 +786,7 @@ mod tests {
         // A `final` class → is_final; a plain class → no flags.
         let ff = extract_symbols("package p;\npublic final class Utils {}\n");
         let ftd = ff.types.iter().find(|t| t.name == "Utils").unwrap();
-        assert!(build_class_members(ftd, &ff.imports, &BTreeMap::new()).flags.is_final);
+        assert!(build_class_members(ftd, &ff.imports, &BTreeMap::new(), &|_: &str| false).flags.is_final);
     }
 
     #[test]
@@ -757,26 +799,26 @@ mod tests {
             "package p;\npublic class Base { public void init() throws Exception {} }\n",
         );
         let td = fs.types.iter().find(|t| t.name == "Base").unwrap();
-        let cm = build_class_members(td, &fs.imports, &BTreeMap::new());
+        let cm = build_class_members(td, &fs.imports, &BTreeMap::new(), &|_: &str| false);
         let init = cm.methods.iter().find(|m| m.name == "init").unwrap();
         assert_eq!(init.throws, vec!["java/lang/Exception".to_string()], "{:?}", init.throws);
 
         // A bare `extends RuntimeException` / `implements Runnable` resolve to their java.lang binary.
         let ex = extract_symbols("package p;\npublic class Boom extends RuntimeException {}\n");
         let etd = ex.types.iter().find(|t| t.name == "Boom").unwrap();
-        let ecm = build_class_members(etd, &ex.imports, &BTreeMap::new());
+        let ecm = build_class_members(etd, &ex.imports, &BTreeMap::new(), &|_: &str| false);
         assert_eq!(ecm.superclass.as_deref(), Some("java/lang/RuntimeException"));
 
         let rn = extract_symbols("package p;\npublic class Job implements Runnable { public void run() {} }\n");
         let rtd = rn.types.iter().find(|t| t.name == "Job").unwrap();
-        let rcm = build_class_members(rtd, &rn.imports, &BTreeMap::new());
+        let rcm = build_class_members(rtd, &rn.imports, &BTreeMap::new(), &|_: &str| false);
         assert!(rcm.interfaces.iter().any(|i| i == "java/lang/Runnable"), "{:?}", rcm.interfaces);
 
         // A genuinely unknown bare name is NOT coerced to a fake `java/lang/…` — it stays raw so the
         // checks treat it as unresolved (SKIP), never as a real java.lang type.
         let tp = extract_symbols("package p;\npublic class C { public void m() throws Wibble {} }\n");
         let ctd = tp.types.iter().find(|t| t.name == "C").unwrap();
-        let ccm = build_class_members(ctd, &tp.imports, &BTreeMap::new());
+        let ccm = build_class_members(ctd, &tp.imports, &BTreeMap::new(), &|_: &str| false);
         assert_eq!(ccm.methods[0].throws, vec!["Wibble".to_string()], "unknown stays raw");
     }
 

@@ -25,6 +25,7 @@ use bennu_java::prelude::{FileSymbols, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::{Node, Parser};
 
+use crate::check_id::CheckId;
 use crate::members::simple_name;
 use crate::resolve::type_binary;
 use crate::walk::{hierarchy_fully_known, reaches};
@@ -115,13 +116,13 @@ fn check_catch_clauses(
                 if alts[i].binary != alts[j].binary
                     && is_confirmed_subtype(resolver, &alts[i].binary, &alts[j].binary)
                 {
-                    out.push(err(
+                    out.push(CheckId::RedundantMultiCatch.at(
+                        alts[i].node,
                         format!(
                             "Multi-catch cannot list `{}` and its supertype `{}` together",
                             simple_name(&alts[i].binary),
                             simple_name(&alts[j].binary),
                         ),
-                        alts[i].node,
                     ));
                     break;
                 }
@@ -132,13 +133,13 @@ fn check_catch_clauses(
         for alt in &alts {
             for prev in &earlier {
                 if is_confirmed_subtype(resolver, &alt.binary, &prev.binary) {
-                    out.push(err(
+                    out.push(CheckId::UnreachableCatch.at(
+                        alt.node,
                         format!(
                             "Unreachable catch: `{}` is already caught by `{}` above",
                             simple_name(&alt.binary),
                             simple_name(&prev.binary),
                         ),
-                        alt.node,
                     ));
                     break; // one shadowing clause is enough
                 }
@@ -208,6 +209,13 @@ fn check_resources(
         // uncertainty there is a false-positive risk, so we SKIP it (sound under-report).
         let Some(type_node) = res.child_by_field_name("type") else { continue };
         let Ok(text) = type_node.utf8_text(bytes) else { continue };
+        // A `var` / Lombok `val` resource has no written type — its type comes from the initializer,
+        // which this check doesn't infer → SKIP. Crucially this must happen BEFORE resolution: with
+        // `import lombok.val;` in the file, `val` resolves to the real `lombok.val` type (not
+        // AutoCloseable), which produced the false "resource type `val` must implement AutoCloseable".
+        if text == "var" || text == "val" {
+            continue;
+        }
         // Unresolvable type → SKIP (it might well be AutoCloseable).
         let Some(binary) = type_binary(text, symbols, resolver) else { continue };
         // Only flag when the WHOLE hierarchy is known AND AutoCloseable/Closeable is definitively
@@ -217,9 +225,9 @@ fn check_resources(
         }
         let closeable = reaches(resolver, &binary, AUTO_CLOSEABLE) || reaches(resolver, &binary, CLOSEABLE);
         if !closeable {
-            out.push(err(
-                format!("The resource type `{}` must implement `AutoCloseable`", simple_name(&binary)),
+            out.push(CheckId::NonAutoCloseableResource.at(
                 type_node,
+                format!("The resource type `{}` must implement `AutoCloseable`", simple_name(&binary)),
             ));
         }
     }
@@ -241,16 +249,6 @@ fn child_of_kind<'t>(n: Node<'t>, kind: &str) -> Option<Node<'t>> {
 /// A type node that names a class/interface (a catch alternative or a resource type).
 fn is_type_node(kind: &str) -> bool {
     matches!(kind, "type_identifier" | "scoped_type_identifier" | "generic_type")
-}
-
-fn err(message: String, node: Node) -> Diagnostic {
-    Diagnostic {
-        message,
-        severity: "error".to_string(),
-        code: String::new(),
-        start: node.start_byte(),
-        end: node.end_byte(),
-    }
 }
 
 #[cfg(test)]
@@ -309,6 +307,9 @@ mod tests {
         members.insert("com/acme/PlainThing".into(), cm(Some("java/lang/Object"), &[], false));
         // `RunawayEx` extends an UNKNOWN base → its hierarchy is not fully known (used to prove SKIP).
         members.insert("com/acme/RunawayEx".into(), cm(Some("com/acme/UnknownBase"), &[], false));
+        // `lombok.val` — a REAL, resolvable, non-AutoCloseable type. With `import lombok.val;` a `val`
+        // resource would resolve to it → the false positive the `var`/`val` skip guards against.
+        members.insert("lombok/val".into(), cm(Some("java/lang/Object"), &[], false));
 
         let simple = [
             ("Exception", "java/lang/Exception"),
@@ -320,6 +321,7 @@ mod tests {
             ("FileInputStream", "java/io/FileInputStream"),
             ("PlainThing", "com/acme/PlainThing"),
             ("RunawayEx", "com/acme/RunawayEx"),
+            ("val", "lombok/val"),
         ]
         .into_iter()
         .map(|(s, b)| (s.to_string(), b.to_string()))
@@ -445,5 +447,17 @@ mod tests {
         // infer it → SKIP.
         let d = diags("PlainThing r = null; try (r) { }");
         assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn var_and_val_resources_are_never_flagged() {
+        // A `var` / Lombok `val` resource infers its type from the initializer — the keyword is never
+        // the resource type. With `import lombok.val;` present, `val` resolves to the real
+        // (non-AutoCloseable) `lombok.val`; the skip must happen BEFORE resolution.
+        let with_lombok =
+            "import lombok.val;\nclass C { void m() throws Throwable { try (val bao = new Object()) {} } }";
+        assert!(exception_errors(with_lombok, &resolver()).is_empty(), "`val` must be skipped");
+        let with_var = "class C { void m() throws Throwable { try (var r = new Object()) {} } }";
+        assert!(exception_errors(with_var, &resolver()).is_empty(), "`var` must be skipped");
     }
 }

@@ -418,6 +418,22 @@ function createProjectStore() {
     /** Decoded encoding for `path` (defaults to `UTF-8`). */
     encodingOf(path: string): string { return encodings.get(path) ?? 'UTF-8'; },
 
+    /** Force-reload `path` from disk, discarding its cached source/encoding — e.g. after a
+     *  decompiled tab's real sources were downloaded and the backend rewrote the file. A no-op for a
+     *  path that was never loaded (nothing open to refresh). Updating the reactive `sources` map
+     *  re-renders the open editor. */
+    async reload(path: string): Promise<void> {
+      const p = canonPath(path);
+      if (!sources.has(p)) return; // nothing open to refresh
+      try {
+        // Read-then-set (no intermediate clear) so the open editor never flashes empty.
+        const res = await ipcReadFile(project?.root ?? p, p);
+        sources.set(p, res.text);
+        savedContent.set(p, res.text);
+        encodings.set(p, res.encoding);
+      } catch { /* keep the current content on a read failure */ }
+    },
+
     /** Open a project as a **new single-project workspace** (replaces the current one, dropping
      *  the other members). Use {@link addProject} to add to the existing workspace instead.
      *  Tries real IPC; on backend-absent failure, falls back to the demo project so the shell

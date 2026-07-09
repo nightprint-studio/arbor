@@ -139,7 +139,7 @@ fn err(message: String, node: Node, bytes: &[u8]) -> Diagnostic {
         .position(|&b| b == b'\n')
         .map(|nl| start + nl)
         .unwrap_or(node.end_byte());
-    Diagnostic { message, severity: "error".to_string(), code: String::new(), start, end }
+    Diagnostic { message, severity: crate::check_id::CheckId::SpecialFileContent.severity().to_string(), code: crate::check_id::CheckId::SpecialFileContent.code().to_string(), start, end }
 }
 
 #[cfg(test)]

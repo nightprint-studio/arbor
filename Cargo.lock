@@ -840,6 +840,7 @@ version = "0.3.0"
 dependencies = [
  "arbor-be",
  "arbor-core",
+ "arbor-feedback",
  "arbor-ipc",
  "arbor-process-ext",
  "arbor-rpc",

@@ -29,6 +29,8 @@ pub struct ReindexArgs {
 /// event stream. No-op when no open project owns `root`.
 #[arbor_rpc::handler]
 fn bennu_reindex(ctx: &BennuState, args: ReindexArgs) -> Result<(), String> {
+    // Keep the reverse channel current so the rebuild's warm-up job still tracks.
+    IndexService::global().set_host(ctx.host_caller());
     IndexService::global().reindex(&args.root, ctx.event_sink());
     Ok(())
 }

@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 use crate::source::{ClassSource, JarSource, JimageSource};
+use crate::sources::JavaSourceZip;
 
 /// User-configured extra JDK home directories (settings `jdk_paths`), consulted by
 /// [`candidate_jdks`] on top of `JAVA_HOME` + the standard install roots — for a JDK
@@ -213,6 +214,28 @@ fn find_jdk_for(major: u32) -> Option<PathBuf> {
 pub fn find_jdk_home(version: &str) -> Option<PathBuf> {
     let major = requested_major(version)?;
     find_jdk_for(major)
+}
+
+/// Locate the **source** archive for the JDK matching `version` — `lib/src.zip` (JDK 9+) or
+/// `src.zip` at the JDK root (JDK 8) — mirroring [`resolve_jdk_classpath`]'s exact-then-newest
+/// discovery (so a Java-8 project on a modern-JDK-only machine still gets sources). `None` when no
+/// JDK is installed OR the chosen JDK ships no sources (a bare JRE, or a JDK installed without the
+/// `src.zip` component). The caller then falls back to the signatures-only decompiled stub — the
+/// real `.java` (method bodies, locals, lambdas) is strictly better for the "go to source" view,
+/// but it's a best-effort enhancement, never required.
+pub fn resolve_jdk_sources(version: &str) -> Option<JavaSourceZip> {
+    let major = requested_major(version)?;
+    let home = find_jdk_for(major).or_else(|| best_available_jdk().map(|(home, _)| home))?;
+    // JDK 9+ keeps sources under `lib/`; JDK 8 puts `src.zip` at the install root. Probe both.
+    for rel in ["lib/src.zip", "src.zip"] {
+        let path = home.join(rel);
+        if path.is_file() {
+            if let Ok(zip) = JavaSourceZip::open(&path) {
+                return Some(zip);
+            }
+        }
+    }
+    None
 }
 
 /// JDK 8: every boot jar in `jre/lib/` (rt.jar first, then jce.jar / jsse.jar / charsets.jar /

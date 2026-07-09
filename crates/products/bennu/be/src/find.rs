@@ -35,7 +35,7 @@
 //! walk caps at [`MAX_HITS`] results (reported in the terminal `capped` flag; also logged
 //! to stderr, never erroring).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use arbor_ipc::prelude::EventSink;
@@ -308,6 +308,33 @@ fn scan_dir(dir: &Path, matcher: &Matcher, sink: &mut BatchSink) {
             scan_dir(&path, matcher, sink);
         } else if is_scannable(&path) {
             scan_file(&path, matcher, sink);
+        }
+    }
+}
+
+/// Collect the absolute paths of every scannable text file under `root` — the same walk as
+/// [`scan_dir`] (skips `SKIP_DIRS`, [`is_scannable`] extensions), WITHOUT reading them. Shared by
+/// whole-project text passes that want the file set up front (e.g. the project mojibake scan) and
+/// decode each file themselves (in the project's resolved encoding, in parallel). Paths use native
+/// separators — normalise at the call site.
+pub(crate) fn collect_text_paths(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    collect_text_paths_into(root, &mut out);
+    out
+}
+
+fn collect_text_paths_into(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for entry in rd.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if SKIP_DIRS.contains(&name) {
+                continue;
+            }
+            collect_text_paths_into(&path, out);
+        } else if is_scannable(&path) {
+            out.push(path);
         }
     }
 }

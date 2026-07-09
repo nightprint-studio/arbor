@@ -96,7 +96,15 @@ fn check_call(
     // the `String` one as the lone signature → false positive.)
     let mut sigs: Vec<&Vec<TypeRef>> = Vec::new();
     for m in &res.candidates {
-        if m.params.len() == argc && !sigs.iter().any(|p| **p == m.params) {
+        // A candidate can bind this call if its arity matches exactly, OR it is varargs (a trailing
+        // array parameter) and the call supplies at least its fixed prefix — SLF4J's `debug(String,
+        // Object...)` binds a 4-argument `debug(fmt, a, b, c)`. Both shapes MUST enter the ambiguity
+        // set: committing to a lone fixed-arity overload (`debug(Marker, String, Object, Object)`) while
+        // a varargs overload could also bind is exactly what produced a false "wrong argument type".
+        let admits = m.params.len() == argc
+            || (m.params.last().is_some_and(|p| p.binary_name.ends_with("[]"))
+                && argc + 1 >= m.params.len());
+        if admits && !sigs.iter().any(|p| **p == m.params) {
             sigs.push(&m.params);
         }
     }
@@ -159,6 +167,15 @@ fn arg_mismatch(arg: &str, param: &TypeRef, resolver: &dyn TypeResolver) -> Opti
         return None;
     }
     if !hierarchy_fully_known(resolver, arg) {
+        return None;
+    }
+    // Same SIMPLE name, different binaries → almost always the SAME logical type resolved to two
+    // different binary FORMS: a nested type spelled `Outer/Inner` (from a source FQN) vs `Outer$Inner`
+    // (from bytecode), or two files resolving the simple name through different packages. Passing a
+    // value where the SAME type is expected is legal, so the "`ComunicazioneType` cannot be passed
+    // where `ComunicazioneType` is expected" report is a false positive → don't flag (sound: at worst
+    // a missed genuine same-simple-name mismatch across packages, which is rare and low-value).
+    if simple_name(arg) == simple_name(pbin) {
         return None;
     }
     (!reaches(resolver, arg, pbin))
@@ -231,6 +248,8 @@ mod tests {
         dog.superclass = Some("com/acme/Animal".to_string());
         members.insert("com/acme/Dog".to_string(), dog);
         members.insert("com/acme/Widget".to_string(), cls(vec![]));
+        // A DIFFERENT type sharing the simple name `Widget` (another package) — for the same-name skip.
+        members.insert("com/other/Widget".to_string(), cls(vec![]));
         members.insert(
             "com/acme/Svc".to_string(),
             cls(vec![
@@ -244,6 +263,14 @@ mod tests {
                 // `setRecipients(String, Addresses[])` + `setRecipients(String, String)` case.
                 method("recip", &["java/lang/String", "com/acme/Widget[]"]),
                 method("recip", &["java/lang/String", "java/lang/String"]),
+                // A VARARGS overload of a DIFFERENT arity than a fixed sibling — SLF4J's
+                // `debug(String, Object...)` vs `debug(Marker, String, Object, Object)`. A 3-arg call
+                // could bind the varargs, so the fixed arity-3 must not be judged alone.
+                method("emit", &["java/lang/String", "java/lang/Object[]"]),
+                method("emit", &["com/acme/Widget", "java/lang/String", "java/lang/String"]),
+                // A parameter typed as a SAME-SIMPLE-NAME type in another package (`com/other/Widget`
+                // vs the argument's `com/acme/Widget`) — the same-name-collision case.
+                method("dup", &["com/other/Widget"]),
             ]),
         );
         // Give Svc providers returning types, for building args.
@@ -323,5 +350,22 @@ mod tests {
     #[test]
     fn unknown_receiver_is_skipped() {
         assert!(diags("Unknown u = null; u.whatever(1);").is_empty());
+    }
+
+    #[test]
+    fn same_simple_name_argument_is_not_flagged() {
+        // `dup(com.other.Widget)` called with a `com.acme.Widget` — same simple name, different
+        // packages. Very likely one logical type resolved through two packages; the
+        // "`Widget` cannot be passed where `Widget` is expected" message is unhelpful → never flagged.
+        assert!(diags("s.dup(s.widget());").is_empty());
+    }
+
+    #[test]
+    fn varargs_overload_of_other_arity_is_skipped() {
+        // `emit(String, Object...)` (varargs) can bind a 3-argument call, so the arity-3
+        // `emit(Widget, String, String)` must NOT be judged alone (that flagged `"a"` ↔ Widget). This
+        // is the SLF4J `LOG.debug("fmt", id, name, note)` false positive, where the call binds the
+        // varargs but the check committed to the arity-4 `debug(Marker, String, Object, Object)`.
+        assert!(diags("s.emit(\"a\", s.widget(), \"c\");").is_empty());
     }
 }

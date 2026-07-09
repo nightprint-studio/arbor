@@ -164,6 +164,23 @@
       });
     }
 
+    // Project mojibake scan hits (explicitly added from the scan modal). Grouped by file like the
+    // validation rows; NOT skipped for the active file (its mojibake hits aren't in the live buffer
+    // diagnostics, which come from validation, not the mojibake scan).
+    for (const fd of bennuDiagnosticsStore.mojibakeDiagnostics) {
+      const label = baseName(fd.file);
+      fd.diagnostics.forEach((d, i) => {
+        out.push({
+          id: `moji:${fd.file}:${i}`, severity: d.severity,
+          groupKey: `file:${norm(fd.file)}`, groupLabel: label, groupIcon: FileCode2,
+          label: d.message,
+          title: fd.file,
+          copy: d.message,
+          onClick: () => void projectStore.openFile(fd.file).then(() => bennuUiStore.requestGotoOffset(d.start)),
+        });
+      });
+    }
+
     return out;
   });
 

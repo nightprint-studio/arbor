@@ -15,6 +15,8 @@ use bennu_java::prelude::TypeResolver;
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::check_id::CheckId;
+
 /// Flag a single-type `import a.b.C;` whose type the resolver can't find — the classic typo or a
 /// class that no longer exists (mirrors an IDE's red import). Resolver-backed, so it runs only when
 /// the JDK/classpath is available; `static` and wildcard imports are skipped (not one resolvable
@@ -54,13 +56,11 @@ pub fn unresolved_imports(
             continue;
         }
         if !resolves_import(dotted, resolver) {
-            out.push(Diagnostic {
-                message: format!("Cannot resolve import `{dotted}`"),
-                severity: "error".to_string(),
-                code: String::new(),
-                start: name_node.start_byte(),
-                end: name_node.end_byte(),
-            });
+            out.push(CheckId::UnresolvedImport.span(
+                name_node.start_byte(),
+                name_node.end_byte(),
+                format!("Cannot resolve import `{dotted}`"),
+            ));
         }
     }
     out
@@ -133,13 +133,11 @@ pub fn redundant_imports(root: Node, source: &str) -> Vec<Diagnostic> {
             None
         };
         if let Some(reason) = reason {
-            out.push(Diagnostic {
-                message: format!("Redundant import `{package}.*` — {reason}"),
-                severity: "warning".to_string(),
-                code: String::new(),
-                start: child.start_byte(),
-                end: child.end_byte(),
-            });
+            out.push(CheckId::RedundantImport.span(
+                child.start_byte(),
+                child.end_byte(),
+                format!("Redundant import `{package}.*` — {reason}"),
+            ));
         }
     }
     out
@@ -176,13 +174,7 @@ pub fn duplicate_imports(root: Node, source: &str) -> Vec<Diagnostic> {
         // Normalise on the import path (drop the trailing `;` and inner whitespace).
         let key: String = text.trim_end_matches(';').split_whitespace().collect();
         if !seen.insert(key) {
-            out.push(Diagnostic {
-                message: "Duplicate import".to_string(),
-                severity: "warning".to_string(),
-                code: String::new(),
-                start: child.start_byte(),
-                end: child.end_byte(),
-            });
+            out.push(CheckId::DuplicateImport.span(child.start_byte(), child.end_byte(), "Duplicate import"));
         }
     }
     out
@@ -204,13 +196,7 @@ pub fn unused_imports(root: Node, source: &str) -> Vec<Diagnostic> {
         if used.contains(&imp.simple) || word_in(&comments, &imp.simple) {
             continue;
         }
-        out.push(Diagnostic {
-            message: format!("Unused import `{}`", imp.simple),
-            severity: "warning".to_string(),
-            code: String::new(),
-            start: imp.start,
-            end: imp.end,
-        });
+        out.push(CheckId::UnusedImport.span(imp.start, imp.end, format!("Unused import `{}`", imp.simple)));
     }
     out
 }

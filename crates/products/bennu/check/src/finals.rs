@@ -348,7 +348,7 @@ fn check_type_final_overrides(
         let Some(candidates) = final_methods.get(&name) else { continue };
         let Some(params) = method_param_binaries(m, bytes, symbols, resolver) else { continue };
         if candidates.iter().any(|c| *c == params) {
-            out.push(err(format!("Cannot override final method `{name}`"), name_node));
+            out.push(crate::check_id::CheckId::FinalMethodOverride.at(name_node, format!("Cannot override final method `{name}`")));
         }
     }
 }
@@ -464,8 +464,8 @@ fn this_field_name(node: Node, bytes: &[u8]) -> Option<String> {
 fn err(message: String, node: Node) -> Diagnostic {
     Diagnostic {
         message,
-        severity: "error".to_string(),
-        code: String::new(),
+        severity: crate::check_id::CheckId::FinalAssignment.severity().to_string(),
+        code: crate::check_id::CheckId::FinalAssignment.code().to_string(),
         start: node.start_byte(),
         end: node.end_byte(),
     }

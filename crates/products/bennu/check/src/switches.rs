@@ -46,11 +46,11 @@ pub fn switch_selector_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnos
             if let Some(cond) = n.child_by_field_name("condition") {
                 if let Some(ty) = selector_primitive(cond, bytes) {
                     if FORBIDDEN_SELECTOR.contains(&ty) {
-                        out.push(err(
+                        out.push(crate::check_id::CheckId::IllegalSwitchSelector.at(
+                            cond,
                             format!(
                                 "`switch` on `{ty}` is not permitted (only int-family, `String` and `enum`)"
                             ),
-                            cond,
                         ));
                     }
                 }
@@ -273,7 +273,7 @@ fn last_named(n: Node) -> Option<Node> {
 }
 
 fn err(message: String, node: Node) -> Diagnostic {
-    Diagnostic { message, severity: "error".to_string(), code: String::new(), start: node.start_byte(), end: node.end_byte() }
+    Diagnostic { message, severity: crate::check_id::CheckId::SwitchExpressionIncomplete.severity().to_string(), code: crate::check_id::CheckId::SwitchExpressionIncomplete.code().to_string(), start: node.start_byte(), end: node.end_byte() }
 }
 
 fn with_parse(source: &str, f: impl FnOnce(Node) -> Vec<Diagnostic>) -> Vec<Diagnostic> {

@@ -48,6 +48,17 @@ stack plus a homegrown Signature decoder.
   - `"9"`+ / `"21"` → the `lib/modules` jimage, probing `java.base` plus the common
     platform modules.
 
+- **Java `.java` source containers** (`sources.rs`) — the "go to source" view, distinct from the
+  bytecode `ClassSource`: `JavaSourceZip` yields the **real source text** (method bodies, locals,
+  lambdas, anonymous classes) for a binary class name. `resolve_jdk_sources(version)` locates the
+  JDK's `src.zip` (`lib/src.zip` on JDK 9+, `src.zip` at the root on JDK 8), mirroring
+  `resolve_jdk_classpath`'s exact-then-newest discovery. `source_text("java/util/Optional")` returns
+  the actual `.java`; an inner class (`…$Entry`) maps to its enclosing file. `None` when the JDK
+  ships no sources (a bare JRE) — the caller then falls back to a signatures-only decompiled stub.
+  A dependency's `-sources.jar` reads through the very same `JavaSourceZip` (the be opens the ones
+  present in `~/.m2` and, behind the editor's "Download sources" banner, fetches missing ones via
+  `mvn dependency:get`).
+
 - **Dependency-jar sourcing from `~/.m2`** (`maven.rs`) —
   `resolve_maven_classpath(project_dir, &opts)` runs
   `mvn dependency:build-classpath` for a Maven project, reads the resolved classpath,

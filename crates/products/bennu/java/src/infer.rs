@@ -7,10 +7,15 @@
 //!   * simple generics carry-through (`List<Foo>` -> `.get(i)` / `.iterator().next()`
 //!     element = `Foo`)
 //!
-//! Explicitly NOT handled (documented in the crate README): overload resolution by
-//! argument types (we pick the FIRST method matching by name), full flow-typing /
-//! reassignment, conditional/ternary narrowing, raw-array element inference, static
-//! member access on bare type names, wildcard/bound modelling.
+//! Overload selection is arity-first (JLS §15.12.2 in miniature): among the same-named overloads on
+//! the receiver's hierarchy we keep those whose arity admits the call, and take their return type only
+//! when it is UNIQUE — narrowing a return-type tie by a conservative primitive/reference argument
+//! check, and yielding "unknown" rather than *guessing* an ambiguous overload (a wrong return type
+//! would mistype the expression and could surface a false diagnostic downstream).
+//!
+//! Explicitly NOT handled (documented in the crate README): full argument-subtype overload resolution
+//! (boxing/varargs/most-specific), flow-typing / reassignment, conditional/ternary narrowing, raw-array
+//! element inference, static member access on bare type names, wildcard/bound modelling.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -450,11 +455,16 @@ impl Ctx<'_> {
     }
 
     /// The return type of a statically-imported static METHOD `name` (a bare `max(…)` call), or `None`.
-    fn static_import_method(&self, name: &str) -> Option<TypeRef> {
+    fn static_import_method(
+        &self,
+        name: &str,
+        args: &[Node],
+        enclosing: Option<&str>,
+    ) -> Option<TypeRef> {
         for t in crate::static_import::static_import_targets(&self.symbols.imports) {
             if t.member.as_deref().map_or(true, |m| m == name) {
                 let owner = TypeRef::simple(t.owner_binary);
-                if let Some(tr) = self.method_return_on(&owner, name) {
+                if let Some(tr) = self.method_return_on(&owner, name, args, enclosing) {
                     return Some(tr);
                 }
             }
@@ -668,11 +678,12 @@ impl Ctx<'_> {
         self.field_type_on(&obj_type, &field_name)
     }
 
-    /// `recv.foo(args)` or bare `foo(args)`. Resolves `foo`'s return type, applying
-    /// generics carry-through from the receiver.
+    /// `recv.foo(args)` or bare `foo(args)`. Resolves `foo`'s return type (arity-aware overload
+    /// selection), applying generics carry-through from the receiver.
     fn infer_method_invocation(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
         let name =
             node.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes))?;
+        let args = self.call_arg_nodes(node);
 
         let recv_type = match node.child_by_field_name("object") {
             Some(obj) => self.infer_expr(&obj, enclosing)?,
@@ -681,15 +692,36 @@ impl Ctx<'_> {
             // method wins over an import, as in Java), then fall back to the static import.
             None => {
                 if let Some(fqn) = enclosing {
-                    if let Some(tr) = self.method_return_on(&TypeRef::simple(to_binary(fqn)), &name) {
+                    if let Some(tr) = self.method_return_on(
+                        &TypeRef::simple(to_binary(fqn)),
+                        &name,
+                        &args,
+                        enclosing,
+                    ) {
                         return Some(tr);
                     }
                 }
-                return self.static_import_method(&name);
+                return self.static_import_method(&name, &args, enclosing);
             }
         };
 
-        self.method_return_on(&recv_type, &name)
+        self.method_return_on(&recv_type, &name, &args, enclosing)
+    }
+
+    /// The real argument nodes of a call — the `arguments` (`argument_list`) named children, skipping
+    /// comments (which ARE named children in tree-sitter). Their count + inferred types drive
+    /// arity/argument overload selection.
+    fn call_arg_nodes<'t>(&self, call: &Node<'t>) -> Vec<Node<'t>> {
+        let Some(list) = call.child_by_field_name("arguments") else { return Vec::new() };
+        let mut out = Vec::new();
+        let mut c = list.walk();
+        for a in list.named_children(&mut c) {
+            if matches!(a.kind(), "line_comment" | "block_comment") {
+                continue;
+            }
+            out.push(a);
+        }
+        out
     }
 
     // ---- member resolution over a resolved TypeRef (walking supertypes) ----
@@ -708,18 +740,81 @@ impl Ctx<'_> {
         Some(self.substitute_generics(&member, recv))
     }
 
-    /// Return type of `method_name` on a resolved type, applying generic
-    /// substitution from `recv` (so `List<Foo>.get` → `Foo`).
-    fn method_return_on(&self, recv: &TypeRef, method_name: &str) -> Option<TypeRef> {
-        if let Some(tr) =
-            self.method_return_of_source_type(&from_binary(&recv.binary_name), method_name)
-        {
+    /// Return type of `method_name` on a resolved type, applying generic substitution from `recv` (so
+    /// `List<Foo>.get` → `Foo`). Overload-aware: the arity (and, on a return-type tie, the argument
+    /// types) of `args` select which same-named overload the call binds to; an unresolvable overload
+    /// yields `None` rather than a guess.
+    fn method_return_on(
+        &self,
+        recv: &TypeRef,
+        method_name: &str,
+        args: &[Node],
+        enclosing: Option<&str>,
+    ) -> Option<TypeRef> {
+        if let Some(tr) = self.method_return_of_source_type(
+            &from_binary(&recv.binary_name),
+            method_name,
+            args,
+        ) {
             return Some(tr);
         }
-        let ret = self.resolve_and_walk(&recv.binary_name, |cm| {
-            cm.methods.iter().find(|m| m.name == method_name).map(|m| m.return_type.clone())
-        })?;
+        let res = self.cache.resolve_methods(self.resolver, &recv.binary_name, method_name);
+        let ret = self.select_overload_return(&res.candidates, args, enclosing)?;
         Some(self.substitute_generics(&ret, recv))
+    }
+
+    /// Pick the return type of the overload a call of `args` binds to, from all same-named `candidates`
+    /// on the receiver's hierarchy — JLS §15.12.2 in miniature, deliberately conservative:
+    ///   1. keep candidates whose ARITY admits the call (a trailing array/varargs param admits 0+ extra);
+    ///   2. if those all agree on a return type → use it (the common case, and what fixes a 1-arg
+    ///      `df.format(date)` → `String` that the old first-by-name pick mis-resolved to a 3-arg
+    ///      `Format.format(…)` → `StringBuffer`);
+    ///   3. otherwise narrow the tie by argument types, rejecting only a DEFINITE primitive/reference
+    ///      clash, and use the return type iff it is now unique;
+    ///   4. still not unique → `None`. An ambiguous overload is never guessed: a wrong return type
+    ///      mistypes the expression and risks a false "cannot resolve member" / assignment diagnostic.
+    fn select_overload_return(
+        &self,
+        candidates: &[Member],
+        args: &[Node],
+        enclosing: Option<&str>,
+    ) -> Option<TypeRef> {
+        // Collapse OVERRIDE chains: the same method reachable at several hierarchy levels (a plain
+        // inherit, or a COVARIANT override where the derived return type is more specific) arrives as
+        // several candidates with identical parameter signatures. Keep the most-derived occurrence —
+        // `resolve_methods` visits the receiver's own members first — so a covariant override reads as
+        // its derived return type, not as an "ambiguous overload". Only genuinely distinct signatures
+        // survive as real overloads to disambiguate.
+        let mut distinct: Vec<&Member> = Vec::new();
+        for m in candidates {
+            if !distinct.iter().any(|d| d.params == m.params) {
+                distinct.push(m);
+            }
+        }
+        // A single method of this name is NOT an overload — trust it whatever the arity. This keeps the
+        // (correct) single-method behavior identical to the old first-by-name resolution and avoids
+        // second-guessing an imperfect param model; only genuine overload sets go through arity/argument
+        // disambiguation below.
+        if let [only] = distinct.as_slice() {
+            return Some(only.return_type.clone());
+        }
+        let argc = args.len();
+        let arity_ok: Vec<&Member> = distinct
+            .into_iter()
+            .filter(|m| arity_admits(m.params.len(), last_is_array(m), argc))
+            .collect();
+        if let Some(ret) = unique_return(&arity_ok) {
+            return Some(ret);
+        }
+        if arity_ok.is_empty() {
+            return None;
+        }
+        // Return types disagree → narrow by argument types (each inferred once; unknown args abstain).
+        let arg_types: Vec<Option<TypeRef>> =
+            args.iter().map(|a| self.infer_expr(a, enclosing)).collect();
+        let applicable: Vec<&Member> =
+            arity_ok.into_iter().filter(|m| args_admissible(&m.params, &arg_types)).collect();
+        unique_return(&applicable)
     }
 
     /// Walk the class + its superclass/interfaces, returning the first `f` hit.
@@ -820,11 +915,43 @@ impl Ctx<'_> {
         self.resolve_type_text(ext)
     }
 
-    /// Look up a method return on a source-declared type by its FQN (or bare name).
-    fn method_return_of_source_type(&self, fqn: &str, method_name: &str) -> Option<TypeRef> {
+    /// Look up a method return on a source-declared type by its FQN (or bare name) — arity-aware over
+    /// the same-named overloads (a trailing `T...`/`T[]` param admits 0+ trailing args). Returns the
+    /// return type only when the arity-admitting overloads AGREE on it; an ambiguous project overload
+    /// yields `None` (never the first-declared one).
+    fn method_return_of_source_type(
+        &self,
+        fqn: &str,
+        method_name: &str,
+        args: &[Node],
+    ) -> Option<TypeRef> {
         let td = self.symbols.types.iter().find(|t| t.fqn == fqn || t.name == fqn)?;
-        let md = td.methods.iter().find(|m| m.name == method_name)?;
-        self.resolve_type_text(&md.return_type_text)
+        let same_named: Vec<&crate::symbols::MethodDecl> =
+            td.methods.iter().filter(|m| m.name == method_name).collect();
+        // A single method of this name isn't an overload → trust it (behavior identical to before).
+        if let [only] = same_named.as_slice() {
+            return self.resolve_type_text(&only.return_type_text);
+        }
+        let argc = args.len();
+        let mut ret_text: Option<&str> = None;
+        for md in same_named.iter().copied() {
+            let last_array = md
+                .params
+                .last()
+                .is_some_and(|p| {
+                    let t = p.type_text.trim_end();
+                    t.ends_with("...") || t.ends_with("[]")
+                });
+            if !arity_admits(md.params.len(), last_array, argc) {
+                continue;
+            }
+            match ret_text {
+                None => ret_text = Some(md.return_type_text.as_str()),
+                Some(t) if t == md.return_type_text.as_str() => {}
+                Some(_) => return None, // arity-admitting overloads disagree on return → don't guess
+            }
+        }
+        self.resolve_type_text(ret_text?)
     }
 
     // ---- local scope resolution ----
@@ -1109,6 +1236,94 @@ fn is_type_var(bn: &str) -> bool {
     chars.all(|c| c.is_ascii_digit())
 }
 
+// ---- overload selection helpers ----
+
+/// Whether an overload of `nparams` (its last parameter being an array → possibly varargs) can bind a
+/// call of `argc` arguments: an exact arity match, or — for a trailing array/varargs parameter — any
+/// count from `nparams - 1` up (0+ variadic arguments). The seam carries no explicit varargs flag, so
+/// a trailing `T[]` is treated as varargs-capable; the extra matches this admits are harmless (a real
+/// call to a fixed `T[]` param supplies exactly one argument, matching the exact arm anyway).
+fn arity_admits(nparams: usize, last_is_array: bool, argc: usize) -> bool {
+    argc == nparams || (last_is_array && argc + 1 >= nparams)
+}
+
+/// Whether a member's last parameter is an array type (`T[]`) — the resolved shape of a `T...` varargs
+/// parameter (no explicit flag on the seam).
+fn last_is_array(m: &Member) -> bool {
+    m.params.last().is_some_and(|p| p.binary_name.ends_with("[]"))
+}
+
+/// The single return type shared by every member in `members`, or `None` when the set is empty or its
+/// members return more than one distinct type — the "unique return" gate that keeps an ambiguous
+/// overload UNRESOLVED (never guessed) while resolving the common single-return case.
+fn unique_return(members: &[&Member]) -> Option<TypeRef> {
+    let mut ret: Option<&TypeRef> = None;
+    for m in members {
+        match ret {
+            None => ret = Some(&m.return_type),
+            Some(r) if r == &m.return_type => {}
+            Some(_) => return None,
+        }
+    }
+    ret.cloned()
+}
+
+/// Whether a fixed-arity overload's `params` could accept arguments of `arg_types` — used ONLY to
+/// break a return-type tie. Conservative: rejects a candidate only on a DEFINITE primitive/reference
+/// clash (an `int` param can't take a `String` argument, nor vice versa). An unknown argument, a type
+/// variable, or an arity/varargs slack never rejects — we keep the candidate rather than risk dropping
+/// the real one and mistyping the call.
+fn args_admissible(params: &[TypeRef], arg_types: &[Option<TypeRef>]) -> bool {
+    if params.len() != arg_types.len() {
+        return true; // varargs / arity slack → no argument verdict
+    }
+    for (p, a) in params.iter().zip(arg_types) {
+        let Some(a) = a else { continue }; // argument type unknown → abstain
+        if is_type_var(&p.binary_name) {
+            continue; // a generic parameter accepts anything
+        }
+        if primitive_ref_clash(&p.binary_name, &a.binary_name) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Whether a parameter and argument sit on OPPOSITE sides of the primitive/reference divide with no
+/// autoboxing bridge — a definite non-match (`int` param vs `String` arg; `String` param vs `int`
+/// arg). A primitive paired with its own wrapper (`int`/`Integer`) is NOT a clash. Two primitives or
+/// two references are left undecided here (returns `false`).
+fn primitive_ref_clash(param: &str, arg: &str) -> bool {
+    if is_primitive(param) == is_primitive(arg) {
+        return false; // same side of the divide → not a primitive/reference clash
+    }
+    !boxes(param, arg) && !boxes(arg, param)
+}
+
+/// A JVM primitive binary name.
+fn is_primitive(bn: &str) -> bool {
+    matches!(
+        bn,
+        "int" | "long" | "short" | "byte" | "char" | "boolean" | "float" | "double" | "void"
+    )
+}
+
+/// Whether primitive `a` autoboxes to reference wrapper `b` (`int` → `java/lang/Integer`).
+fn boxes(a: &str, b: &str) -> bool {
+    let wrapper = match a {
+        "int" => "java/lang/Integer",
+        "long" => "java/lang/Long",
+        "short" => "java/lang/Short",
+        "byte" => "java/lang/Byte",
+        "char" => "java/lang/Character",
+        "boolean" => "java/lang/Boolean",
+        "float" => "java/lang/Float",
+        "double" => "java/lang/Double",
+        _ => return false,
+    };
+    b == wrapper
+}
+
 /// The receiver type-arg index a type variable named `name` maps to, given a generic of `arity`
 /// arguments — or `None` when the position can't be inferred conventionally (so the caller leaves it
 /// unresolved instead of guessing). Heuristic, because the class's real type-parameter list isn't on
@@ -1185,5 +1400,146 @@ mod generic_tests {
         assert!(!is_type_var("Foo"));
         assert!(!is_type_var(""));
         assert!(!is_type_var("String"));
+    }
+}
+
+#[cfg(test)]
+mod overload_tests {
+    use super::*;
+    use crate::seam::ClassMembers;
+    use crate::symbols::Import;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    struct MapResolver {
+        members: HashMap<String, ClassMembers>,
+        simple: HashMap<String, String>,
+    }
+    impl TypeResolver for MapResolver {
+        fn members_of(&self, b: &str) -> Option<Arc<ClassMembers>> {
+            self.members.get(b).cloned().map(Arc::new)
+        }
+        fn resolve_simple_name(&self, n: &str, _i: &[Import]) -> Option<String> {
+            self.simple.get(n).cloned()
+        }
+    }
+
+    fn cm(methods: Vec<Member>) -> ClassMembers {
+        ClassMembers {
+            superclass: Some("java/lang/Object".into()),
+            interfaces: vec![],
+            methods,
+            fields: vec![],
+            flags: Default::default(),
+            type_params: vec![],
+        }
+    }
+    fn meth(name: &str, ret: &str, params: &[&str]) -> Member {
+        Member::method(name, TypeRef::simple(ret), params.iter().map(|p| TypeRef::simple(*p)).collect())
+    }
+
+    /// `Fmt` mimics `java.text.Format`/`SimpleDateFormat`: `format(Object) -> String` and
+    /// `format(Object, StringBuffer, FieldPosition) -> StringBuffer`. `Ov` has two SAME-arity overloads
+    /// with different returns (`pick(int) -> A`, `pick(String) -> B`) to exercise the argument tie-break.
+    fn resolver() -> MapResolver {
+        let mut members = HashMap::new();
+        members.insert("java/lang/Object".into(), cm(vec![]));
+        members.insert("java/lang/String".into(), cm(vec![]));
+        members.insert("java/lang/StringBuffer".into(), cm(vec![]));
+        members.insert(
+            "acme/Fmt".into(),
+            cm(vec![
+                meth("format", "java/lang/String", &["java/lang/Object"]),
+                meth(
+                    "format",
+                    "java/lang/StringBuffer",
+                    &["java/lang/Object", "java/lang/StringBuffer", "acme/FieldPosition"],
+                ),
+            ]),
+        );
+        members.insert(
+            "acme/Ov".into(),
+            cm(vec![
+                meth("pick", "acme/A", &["int"]),
+                meth("pick", "acme/B", &["java/lang/String"]),
+                // Two REFERENCE overloads of the same arity — a tie the primitive/reference check
+                // can't break.
+                meth("amb", "acme/A", &["java/lang/Object"]),
+                meth("amb", "acme/B", &["java/lang/String"]),
+            ]),
+        );
+        members.insert("acme/A".into(), cm(vec![]));
+        members.insert("acme/B".into(), cm(vec![]));
+        let simple = [
+            ("Fmt", "acme/Fmt"),
+            ("Ov", "acme/Ov"),
+            ("String", "java/lang/String"),
+            ("Object", "java/lang/Object"),
+        ]
+        .into_iter()
+        .map(|(s, b)| (s.to_string(), b.to_string()))
+        .collect();
+        MapResolver { members, simple }
+    }
+
+    /// Infer the binary type of the `call` substring of `src`.
+    fn infer_call(src: &str, call: &str, r: &MapResolver) -> Option<String> {
+        let start = src.find(call).expect("call substring present");
+        infer_expression_type(src, start, start + call.len(), r).map(|t| t.binary_name)
+    }
+
+    #[test]
+    fn arity_picks_the_one_arg_overload() {
+        // `f.format(f)` is 1-arg → the `format(Object) -> String` overload, NOT the 3-arg
+        // `format(…) -> StringBuffer` the old first-by-name pick returned (the reported false positive).
+        let r = resolver();
+        let src = "class C { void m(acme.Fmt f) { Object o = f.format(f); } }";
+        assert_eq!(infer_call(src, "f.format(f)", &r).as_deref(), Some("java/lang/String"));
+    }
+
+    #[test]
+    fn argument_type_breaks_a_same_arity_tie() {
+        // Two 1-arg overloads with different returns; a `String` argument rules out the `int` one via
+        // the primitive/reference clash → `pick(String) -> B`.
+        let r = resolver();
+        let src = "class C { void m(acme.Ov v) { Object o = v.pick(\"s\"); } }";
+        assert_eq!(infer_call(src, "v.pick(\"s\")", &r).as_deref(), Some("acme/B"));
+    }
+
+    #[test]
+    fn ambiguous_same_arity_is_unresolved_not_guessed() {
+        // `amb(Object)->A` and `amb(String)->B` are both 1-arg references; an `Object` argument rules
+        // out neither → the return type isn't unique → None (never the first-declared overload's A).
+        let r = resolver();
+        let src = "class C { void m(acme.Ov v, Object x) { Object o = v.amb(x); } }";
+        assert_eq!(infer_call(src, "v.amb(x)", &r), None);
+    }
+
+    #[test]
+    fn arity_admits_matches_exact_and_varargs() {
+        assert!(arity_admits(2, false, 2), "exact");
+        assert!(!arity_admits(2, false, 1), "fixed arity, wrong count");
+        assert!(arity_admits(1, true, 0), "varargs with zero variadic args");
+        assert!(arity_admits(2, true, 5), "varargs with many variadic args");
+        assert!(!arity_admits(3, true, 1), "varargs needs at least the fixed prefix");
+    }
+
+    #[test]
+    fn primitive_reference_clash_is_definite_only() {
+        assert!(primitive_ref_clash("int", "java/lang/String"), "int param vs String arg");
+        assert!(primitive_ref_clash("java/lang/String", "int"), "String param vs int arg");
+        assert!(!primitive_ref_clash("int", "java/lang/Integer"), "autoboxing bridge, not a clash");
+        assert!(!primitive_ref_clash("java/lang/Object", "java/lang/String"), "both references");
+        assert!(!primitive_ref_clash("int", "long"), "both primitives");
+    }
+
+    #[test]
+    fn unique_return_requires_agreement() {
+        let a = meth("x", "acme/A", &[]);
+        let b = meth("x", "acme/B", &[]);
+        let a2 = meth("x", "acme/A", &["int"]);
+        assert_eq!(unique_return(&[&a, &a2]).map(|t| t.binary_name), Some("acme/A".to_string()));
+        assert!(unique_return(&[&a, &b]).is_none(), "different returns → no unique");
+        assert!(unique_return(&[]).is_none(), "empty → none");
     }
 }

@@ -135,15 +135,18 @@ export function strutsResultLint(file: string, source: string): Promise<Diagnost
   return bennu('bennu_struts_result_lint', { args: { file, source } });
 }
 
-/** A generated decompiled-stub location: the on-disk `.java` path + a byte offset to jump to. */
+/** A source-view location: the on-disk `.java` path + a byte offset to jump to, plus whether the
+ *  tab should offer "Download sources" (a stub served for a third-party dependency). */
 export interface DecompiledLocation {
   file: string;
   offset: number;
+  can_download: boolean;
 }
 
 /** Resolve a **library/JDK type** `name` (a simple name resolved via `source`'s imports, or a dotted
- *  FQCN) to a generated decompiled Java stub on disk — the "go-to into a JDK/library class" fallback.
- *  `null` when it doesn't resolve, is a project type (real source), or can't be decoded.
+ *  FQCN) to a source view on disk — the real `.java` (JDK `src.zip` / a downloaded dependency
+ *  `-sources.jar`) when available, else a decompiled-from-bytecode stub. `null` when it doesn't
+ *  resolve, is a project type (real source), or can't be decoded.
  *  Wire: `bennu_decompiled_source` — `{ file, source, name }`. */
 export function decompiledSource(
   file: string,
@@ -151,6 +154,20 @@ export function decompiledSource(
   name: string,
 ): Promise<DecompiledLocation | null> {
   return bennu('bennu_decompiled_source', { args: { file, source, name } });
+}
+
+/** Download the `-sources.jar` for the dependency that owns the library type `name` (resolved via
+ *  `file`'s buffer `source`), via `mvn dependency:get`, as a tracked background job. `viewPath` is
+ *  the open decompiled tab's path, echoed back in `arbor://bennu/sources-ready { path, ok }` so the
+ *  FE reloads the right tab (and clears its spinner on failure). Rejects fast only when the type
+ *  isn't a resolvable library type. Wire: `bennu_download_sources` — `{ file, source, name, view_path }`. */
+export function downloadSources(
+  file: string,
+  source: string,
+  name: string,
+  viewPath: string,
+): Promise<string> {
+  return bennu('bennu_download_sources', { args: { file, source, name, view_path: viewPath } });
 }
 
 /** A single "unknown property on action" lint hit — a JSP field / validation `<field>` whose root
@@ -432,4 +449,28 @@ export interface HoverInfo {
  *  Wire: `bennu_hover` — `HoverArgs { file, source, offset }`. */
 export function hover(file: string, source: string, offset: number): Promise<HoverInfo | null> {
   return bennu('bennu_hover', { args: { file, source, offset } });
+}
+
+/** Go-to-declaration from a caret INSIDE a library/JDK source view — resolves the target against the
+ *  ORIGIN project (`originFile`, which picks the classpath resolver; a library view's own path is
+ *  under no project) and returns the target source view (member-precise). Chains library → library.
+ *  `null` when the caret isn't a resolvable type / member access.
+ *  Wire: `bennu_library_declaration` — `{ origin_file, source, offset }`. */
+export function libraryDeclaration(
+  originFile: string,
+  source: string,
+  offset: number,
+): Promise<DecompiledLocation | null> {
+  return bennu('bennu_library_declaration', { args: { origin_file: originFile, source, offset } });
+}
+
+/** Hover INSIDE a library/JDK source view — the inferred type of the local/expression at the caret,
+ *  via the origin project's resolver. `null` when the caret isn't a typeable local.
+ *  Wire: `bennu_library_hover` — `{ origin_file, source, offset }`. */
+export function libraryHover(
+  originFile: string,
+  source: string,
+  offset: number,
+): Promise<HoverInfo | null> {
+  return bennu('bennu_library_hover', { args: { origin_file: originFile, source, offset } });
 }

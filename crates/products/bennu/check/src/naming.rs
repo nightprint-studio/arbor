@@ -34,8 +34,8 @@ pub fn class_name_matches_file(root: Node, source: &str, file_stem: &str) -> Vec
         if name != file_stem {
             out.push(Diagnostic {
                 message: format!("Public type `{name}` must be declared in a file named `{name}.java`"),
-                severity: "error".to_string(),
-                code: String::new(),
+                severity: crate::check_id::CheckId::TypeNameMismatchFile.severity().to_string(),
+                code: crate::check_id::CheckId::TypeNameMismatchFile.code().to_string(),
                 start: name_node.start_byte(),
                 end: name_node.end_byte(),
             });

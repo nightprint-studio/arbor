@@ -35,6 +35,7 @@ use bennu_java::prelude::{
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::check_id::CheckId;
 use crate::members::simple_name;
 use crate::resolve::type_binary;
 use crate::walk::{for_each_supertype, hierarchy_fully_known};
@@ -155,16 +156,11 @@ fn check_access(
             if in_same_nest(&access_top, &declaring_binary) {
                 return; // same top-level type (outer ↔ nested private access) → legal
             }
-            out.push(Diagnostic {
-                message: format!(
-                    "`{member_name}` has private access in `{}`",
-                    simple_name(&declaring_binary)
-                ),
-                severity: "error".to_string(),
-                code: String::new(),
-                start: name_node.start_byte(),
-                end: name_node.end_byte(),
-            });
+            out.push(CheckId::InaccessibleMember.span(
+                name_node.start_byte(),
+                name_node.end_byte(),
+                format!("`{member_name}` has private access in `{}`", simple_name(&declaring_binary)),
+            ));
         }
         Visibility::Package => {
             // Same top-level type ⇒ same package ⇒ always legal — settle it before the package compare,
@@ -185,17 +181,15 @@ fn check_access(
             if access_pkg == decl_pkg {
                 return; // same package → legal
             }
-            out.push(Diagnostic {
-                message: format!(
+            out.push(CheckId::InaccessibleMember.span(
+                name_node.start_byte(),
+                name_node.end_byte(),
+                format!(
                     "`{member_name}` is not public in `{}` and can't be accessed from package `{}`",
                     simple_name(&declaring_binary),
                     access_pkg
                 ),
-                severity: "error".to_string(),
-                code: String::new(),
-                start: name_node.start_byte(),
-                end: name_node.end_byte(),
-            });
+            ));
         }
         // Public / Protected are never flagged (protected subclass rules are subtle → skipped whole).
         Visibility::Public | Visibility::Protected => {}

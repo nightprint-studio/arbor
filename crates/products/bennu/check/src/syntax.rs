@@ -57,8 +57,8 @@ fn error_diag(n: Node, bytes: &[u8]) -> Diagnostic {
     }
     Diagnostic {
         message: "Syntax error".to_string(),
-        severity: "error".to_string(),
-        code: String::new(),
+        severity: crate::check_id::CheckId::SyntaxError.severity().to_string(),
+        code: crate::check_id::CheckId::SyntaxError.code().to_string(),
         start,
         end,
     }
@@ -71,8 +71,8 @@ fn missing_diag(n: Node) -> Diagnostic {
     let kind = n.kind();
     Diagnostic {
         message: format!("Missing `{kind}`"),
-        severity: "error".to_string(),
-        code: String::new(),
+        severity: crate::check_id::CheckId::MissingToken.severity().to_string(),
+        code: crate::check_id::CheckId::MissingToken.code().to_string(),
         start,
         end: start, // zero-width — the FE widens the marker to one glyph
     }

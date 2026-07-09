@@ -33,6 +33,27 @@ pub struct ProjectMember {
     pub is_method: bool,
 }
 
+/// The member to land on in a library source view — a method or field name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryMember {
+    /// The member's simple name (`add`, `MAX_VALUE`).
+    pub name: String,
+    /// `true` for a field, `false` for a method.
+    pub is_field: bool,
+}
+
+/// A go-to target resolved from a caret INSIDE a library/JDK source view: the binary name of the
+/// type to open, plus (for a member access) the member to land on. Produced by
+/// [`NativeJavaProvider::library_target_at`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryTarget {
+    /// Binary name of the target type to open the source view of (`java/util/function/Supplier`).
+    pub binary: String,
+    /// The member to jump to within that type, or `None` for a plain type reference (jump to the
+    /// type declaration).
+    pub member: Option<LibraryMember>,
+}
+
 /// A location in a file — byte offset, matching the wire diagnostics (docs §3: byte
 /// ranges, the FE maps them). Used by definition / references results.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,6 +132,11 @@ fn render_stub(binary: &str, cm: &bennu_java::prelude::ClassMembers) -> String {
     s.push_str(kind);
     s.push(' ');
     s.push_str(simple);
+    // Class-level type parameters (`class Optional<T>`, `interface Map<K, V>`) — names only (the seam
+    // carries no bounds for a class's own parameters).
+    if !cm.type_params.is_empty() {
+        s.push_str(&format!("<{}>", cm.type_params.join(", ")));
+    }
     if !cm.flags.is_interface {
         if let Some(sc) = cm.superclass.as_deref().filter(|sc| *sc != "java/lang/Object") {
             s.push_str(&format!(" extends {}", type_name(sc)));
@@ -136,24 +162,33 @@ fn render_stub(binary: &str, cm: &bennu_java::prelude::ClassMembers) -> String {
         s.push('\n');
     }
     for m in cm.methods.iter().filter(|m| m.kind == MemberKind::Method) {
-        let params: Vec<String> = m
-            .params
-            .iter()
-            .enumerate()
-            .map(|(i, p)| format!("{} arg{i}", render_type_ref(p)))
-            .collect();
-        let throws = if m.throws.is_empty() {
-            String::new()
-        } else {
-            let list: Vec<String> = m.throws.iter().map(|t| type_name(t)).collect();
-            format!(" throws {}", list.join(", "))
-        };
-        // A constructor is `<init>` in bytecode → render it as `Simple(...)`.
-        let (ret, name) = if m.name == "<init>" {
-            (String::new(), simple.to_string())
-        } else {
-            (format!("{} ", render_type_ref(&m.return_type)), m.name.clone())
-        };
+        let is_ctor = m.name == "<init>";
+        // Prefer the bytecode GENERIC `Signature` (method type parameters `<X extends Throwable>`,
+        // wildcards `Supplier<? extends X>`, and a type-variable `throws X`) — the IntelliJ-style
+        // shape. Fall back to the erased seam fields when the method carries no generic signature
+        // (a plain descriptor either renders identically here or fails to parse → this branch).
+        let core = generic_method_core(&m.raw_signature, &m.name, is_ctor.then_some(simple))
+            .unwrap_or_else(|| {
+                let params: Vec<String> = m
+                    .params
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| format!("{} arg{i}", render_type_ref(p)))
+                    .collect();
+                let throws = if m.throws.is_empty() {
+                    String::new()
+                } else {
+                    let list: Vec<String> = m.throws.iter().map(|t| type_name(t)).collect();
+                    format!(" throws {}", list.join(", "))
+                };
+                // A constructor is `<init>` in bytecode → render it as `Simple(...)`.
+                let (ret, name) = if is_ctor {
+                    (String::new(), simple.to_string())
+                } else {
+                    (format!("{} ", render_type_ref(&m.return_type)), m.name.clone())
+                };
+                format!("{ret}{name}({}){throws}", params.join(", "))
+            });
         // Interface/abstract methods have no body; concrete ones get a placeholder so the stub parses.
         let body = if cm.flags.is_interface || m.is_abstract {
             ";".to_string()
@@ -161,18 +196,115 @@ fn render_stub(binary: &str, cm: &bennu_java::prelude::ClassMembers) -> String {
             " { throw new RuntimeException(\"compiled code\"); }".to_string()
         };
         s.push_str(&format!(
-            "    {}{}{}{}({}){}{}\n",
+            "    {}{}{}{}\n",
             vis(m.visibility),
             if m.is_static { "static " } else { "" },
-            ret,
-            name,
-            params.join(", "),
-            throws,
+            core,
             body,
         ));
     }
     s.push_str("}\n");
     s
+}
+
+/// The generic method "core" — `<TypeParams> Ret name(Params) throws X` (no modifiers / body) —
+/// decoded from a method's bytecode `Signature` (carried in `raw_signature`). `None` when there's no
+/// generic signature to decode (a plain erased descriptor may still parse, in which case it renders
+/// identically to the erased path). `ctor_simple` is `Some(simpleClassName)` for a `<init>` so it
+/// renders as `Simple(...)` without a return type. This is what makes the decompiled stub match
+/// IntelliJ's `<X extends Throwable> T orElseThrow(Supplier<? extends X> arg0) throws X` instead of the
+/// erased `T orElseThrow(Supplier<X> arg0) throws Throwable`.
+fn generic_method_core(raw_signature: &str, name: &str, ctor_simple: Option<&str>) -> Option<String> {
+    let ms = bennu_classpath::prelude::parse_method_signature(raw_signature).ok()?;
+    let type_params = if ms.type_params.is_empty() {
+        String::new()
+    } else {
+        let ps: Vec<String> = ms.type_params.iter().map(render_sig_type_param).collect();
+        format!("<{}> ", ps.join(", "))
+    };
+    let params: Vec<String> =
+        ms.params.iter().enumerate().map(|(i, p)| format!("{} arg{i}", render_sig_type(p))).collect();
+    let throws = if ms.throws.is_empty() {
+        String::new()
+    } else {
+        let ts: Vec<String> = ms.throws.iter().map(render_sig_type).collect();
+        format!(" throws {}", ts.join(", "))
+    };
+    let head = match ctor_simple {
+        Some(simple) => format!("{type_params}{simple}"),
+        None => format!("{type_params}{} {name}", render_sig_type(&ms.result)),
+    };
+    Some(format!("{head}({}){throws}", params.join(", ")))
+}
+
+/// Render a decoded generic-signature type to readable simple-name Java (`Supplier<? extends X>`,
+/// `List<String>`, `T`, `int[]`). Simple names only — a stub reads cleaner than fully-qualified.
+fn render_sig_type(t: &bennu_classpath::prelude::TypeSig) -> String {
+    use bennu_classpath::prelude::TypeSig;
+    match t {
+        TypeSig::Base(c) => match c {
+            'I' => "int",
+            'J' => "long",
+            'S' => "short",
+            'B' => "byte",
+            'C' => "char",
+            'Z' => "boolean",
+            'F' => "float",
+            'D' => "double",
+            _ => "Object",
+        }
+        .to_string(),
+        TypeSig::Void => "void".to_string(),
+        TypeSig::TypeVar(n) => n.clone(),
+        TypeSig::Array(inner) => format!("{}[]", render_sig_type(inner)),
+        TypeSig::Class(ct) => {
+            let mut s = ct.name.rsplit('.').next().unwrap_or(&ct.name).to_string();
+            if !ct.args.is_empty() {
+                let a: Vec<String> = ct.args.iter().map(render_sig_arg).collect();
+                s.push_str(&format!("<{}>", a.join(", ")));
+            }
+            for (iname, iargs) in &ct.inners {
+                s.push('.');
+                s.push_str(iname);
+                if !iargs.is_empty() {
+                    let a: Vec<String> = iargs.iter().map(render_sig_arg).collect();
+                    s.push_str(&format!("<{}>", a.join(", ")));
+                }
+            }
+            s
+        }
+    }
+}
+
+/// Render one `<...>` type argument (`?`, `? extends X`, `? super X`, or an exact type).
+fn render_sig_arg(a: &bennu_classpath::prelude::TypeArg) -> String {
+    use bennu_classpath::prelude::TypeArg;
+    match a {
+        TypeArg::Unbounded => "?".to_string(),
+        TypeArg::Extends(t) => format!("? extends {}", render_sig_type(t)),
+        TypeArg::Super(t) => format!("? super {}", render_sig_type(t)),
+        TypeArg::Exact(t) => render_sig_type(t),
+    }
+}
+
+/// Render a method/class type parameter (`X extends Throwable`, `T`), suppressing a vacuous
+/// `extends Object` bound.
+fn render_sig_type_param(tp: &bennu_classpath::prelude::TypeParam) -> String {
+    let mut bounds: Vec<String> = Vec::new();
+    if let Some(cb) = &tp.class_bound {
+        let s = render_sig_type(cb);
+        if s != "Object" {
+            bounds.push(s);
+        }
+    }
+    for ib in &tp.interface_bounds {
+        bounds.push(render_sig_type(ib));
+    }
+    if bounds.is_empty() {
+        tp.name.clone()
+    } else {
+        format!("{} extends {}", tp.name, bounds.join(" & "))
+    }
 }
 
 /// Errors a provider can return.
@@ -263,6 +395,11 @@ pub struct NativeJavaProvider {
     /// Simple type name → importable FQNs (JDK + dependency + project), for the "Import class"
     /// intention. Empty for the pre-index provider.
     class_names: ClassNameIndex,
+    /// The JDK's `.java` source archive (`src.zip`), when the resolved JDK ships one. Lets
+    /// [`jdk_source_text`](Self::jdk_source_text) serve the REAL source (method bodies, locals,
+    /// lambdas) for a JDK type instead of a signatures-only stub. `None` on a bare-JRE / no-sources
+    /// install (→ stub) and on the pre-index provider.
+    jdk_sources: Option<bennu_classpath::prelude::JavaSourceZip>,
 }
 
 impl std::fmt::Debug for NativeJavaProvider {
@@ -290,6 +427,14 @@ impl NativeJavaProvider {
     /// intention's picker list. Empty for the pre-index provider or an unknown name.
     pub fn import_candidates(&self, simple: &str) -> &[String] {
         self.class_names.candidates(simple)
+    }
+
+    /// Whether `binary` names a PROJECT source type (not the JDK / a dependency). Used by the
+    /// incremental re-index to resolve a wildcard-imported supertype/return/parameter to the exact
+    /// package when a simple name collides across packages. `false` for the pre-index provider.
+    pub fn is_project_type(&self, binary: &str) -> bool {
+        use bennu_java::prelude::TypeResolver; // brings `is_project_type` into scope
+        self.resolver.as_ref().is_some_and(|r| r.is_project_type(binary))
     }
 
     /// Type-name completion candidates at `offset` in `text`: distinct simple type names from the
@@ -352,6 +497,9 @@ impl NativeJavaProvider {
         let fst = index_dir.join("names.fst");
         let project = PersistedIndex::open(&blob, &fst).map_err(|e| e.to_string())?;
         let source = resolve_jdk_classpath(jdk_version)?;
+        // The JDK's `.java` sources, when present (`src.zip`). Opened once per build; a bare-JRE /
+        // no-sources install yields `None` and go-to-into-JDK falls back to the decompiled stub.
+        let jdk_sources = bennu_classpath::prelude::resolve_jdk_sources(jdk_version);
 
         // Build the "Import class" name index from the classpath + project types. Enumerate the JDK
         // (and, below, the dependency) `.class` names BEFORE the sources are moved into the member
@@ -380,7 +528,7 @@ impl NativeJavaProvider {
         for (simple, binary) in project_simple_names {
             resolver.add_simple_hint(simple, binary);
         }
-        Ok(Self { resolver: Some(resolver), class_names })
+        Ok(Self { resolver: Some(resolver), class_names, jdk_sources })
     }
 
     /// Persist the classpath member index's memos now (best-effort; no-op for the empty provider or
@@ -392,14 +540,13 @@ impl NativeJavaProvider {
         }
     }
 
-    /// A **decompiled-from-bytecode Java stub** for the library/JDK type `name` references in `source`
-    /// (a simple name resolved via the file's imports, or a dotted FQCN). Signatures only — no method
-    /// bodies exist in bytecode — with a header warning. Returns `(java_text, binary_name)`, or `None`
-    /// when the name doesn't resolve, is a PROJECT type (which has real source to open), or its
-    /// bytecode isn't decodable. This is the "go-to into a JDK/library class" affordance (IntelliJ's
-    /// decompiled `.class` view), scoped to the API surface.
-    pub fn decompiled_source(&self, source: &str, name: &str) -> Option<(String, String)> {
-        use bennu_java::prelude::TypeResolver; // brings `members_of`/`resolve_simple_name`/`is_project_type` into scope
+    /// Resolve the type `name` under the caret (a simple name via the file's `imports`, or a dotted
+    /// FQCN) to its binary name — the shared front of the "go to source / decompile" flow. `None`
+    /// when it doesn't resolve, or is a PROJECT type (real source exists — the normal go-to opens it,
+    /// never a stub). The be then serves, in order: JDK `src.zip` source, a dependency `-sources.jar`,
+    /// or a decompiled stub.
+    pub fn library_binary(&self, source: &str, name: &str) -> Option<String> {
+        use bennu_java::prelude::TypeResolver; // brings `resolve_simple_name`/`is_project_type` into scope
         let resolver = self.resolver.as_ref()?;
         let binary = if name.contains('.') {
             name.replace('.', "/")
@@ -407,12 +554,92 @@ impl NativeJavaProvider {
             let imports = bennu_java::prelude::extract_symbols(source).imports;
             resolver.resolve_simple_name(name, &imports)?
         };
-        // A project type has real source — the normal go-to opens it; never decompile our own code.
         if resolver.is_project_type(&binary) {
             return None;
         }
-        let cm = resolver.members_of(&binary)?;
-        Some((render_stub(&binary, &cm), binary))
+        Some(binary)
+    }
+
+    /// The REAL `.java` source for `binary` from the JDK's `src.zip` (method bodies, loops, locals,
+    /// lambdas, anonymous classes), when the JDK ships sources and holds this type. `None` on a
+    /// bare-JRE install or a non-JDK type — the be then tries dependency sources, then a stub.
+    pub fn jdk_source_text(&self, binary: &str) -> Option<String> {
+        self.jdk_sources.as_ref().and_then(|z| z.source_text(binary))
+    }
+
+    /// A signatures-only **decompiled-from-bytecode stub** for `binary` — the fallback when no real
+    /// source is available (a bare JRE, or a dependency whose `-sources.jar` isn't downloaded).
+    /// `None` on the pre-index provider or when the bytecode isn't decodable.
+    pub fn stub_for(&self, binary: &str) -> Option<String> {
+        use bennu_java::prelude::TypeResolver; // brings `members_of` into scope
+        let resolver = self.resolver.as_ref()?;
+        let cm = resolver.members_of(binary)?;
+        Some(render_stub(binary, &cm))
+    }
+
+    /// The binary name of the static type of the expression spanning `[start, end)` in `source`,
+    /// against this provider's full (JDK + dependency + project) resolver. For navigation/hover
+    /// INSIDE a library source view — e.g. inferring `list` in `list.add(x)` to know which type
+    /// declares `add`. `None` when the expression can't be typed. Works on any `.java` text.
+    pub fn infer_type_binary(&self, source: &str, start: usize, end: usize) -> Option<String> {
+        let resolver = self.resolver.as_ref()?;
+        let tr = bennu_java::prelude::infer_expression_type(source, start, end, resolver)?;
+        Some(tr.binary_name)
+    }
+
+    /// Classify the caret at `offset` in a library source view `source` into a go-to [`LibraryTarget`]
+    /// — the type to open + (for a member access) the member to land on. Resolves against this
+    /// provider's full resolver, using the library file's OWN imports. Handles: a type reference
+    /// (`Supplier` → its type), an instance member access (`recv.foo()` / `recv.bar` → the receiver's
+    /// type + member), and a static member access (`Foo.bar()` / `Foo.CONST`). `None` when the caret
+    /// isn't on a resolvable navigable anchor (e.g. a bare same-class call, a local — the be handles
+    /// those, or they stay in-file). Works on any `.java` text (project or library).
+    pub fn library_target_at(&self, source: &str, offset: usize) -> Option<LibraryTarget> {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
+        let tree = parser.parse(source, None)?;
+        let bytes = source.as_bytes();
+        let node = tree.root_node().named_descendant_for_byte_range(offset, offset)?;
+        if !matches!(node.kind(), "identifier" | "type_identifier") {
+            return None;
+        }
+        let text = node.utf8_text(bytes).ok()?;
+
+        // The binary name of a member-access RECEIVER: infer its value type, else (a static access
+        // like `Foo.bar()`) resolve the receiver as a type name.
+        let receiver_binary = |obj: tree_sitter::Node| -> Option<String> {
+            self.infer_type_binary(source, obj.start_byte(), obj.end_byte()).or_else(|| {
+                obj.utf8_text(bytes).ok().and_then(|t| self.library_binary(source, t))
+            })
+        };
+
+        if let Some(p) = node.parent() {
+            match p.kind() {
+                // `recv.foo(...)` — caret on the method name.
+                "method_invocation" if p.child_by_field_name("name") == Some(node) => {
+                    let obj = p.child_by_field_name("object")?; // bare same-class call → not resolved here
+                    let binary = receiver_binary(obj)?;
+                    return Some(LibraryTarget {
+                        binary,
+                        member: Some(LibraryMember { name: text.to_string(), is_field: false }),
+                    });
+                }
+                // `recv.field` — caret on the field name.
+                "field_access" if p.child_by_field_name("field") == Some(node) => {
+                    let obj = p.child_by_field_name("object")?;
+                    let binary = receiver_binary(obj)?;
+                    return Some(LibraryTarget {
+                        binary,
+                        member: Some(LibraryMember { name: text.to_string(), is_field: true }),
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        // Otherwise a TYPE reference (a `type_identifier`, or a bare name used as a type / scope).
+        let binary = self.library_binary(source, text)?;
+        Some(LibraryTarget { binary, member: None })
     }
 
     /// Validate a Java `source` (AST checks always; the resolver-backed unknown-member check when a
@@ -816,6 +1043,36 @@ mod tests {
         };
         let s = render_stub("com/acme/Reader", &cm);
         assert!(s.contains("int read() throws IOException"), "throws clause rendered: {s}");
+    }
+
+    #[test]
+    fn stub_renders_generic_signature_like_intellij() {
+        // `Optional.orElseThrow`'s bytecode `Signature`. The stub must render the method type
+        // parameter (`<X extends Throwable>`), the wildcard argument (`Supplier<? extends X>`) and the
+        // type-variable `throws X` — NOT the erased `Supplier<X> … throws Throwable` the seam fields
+        // carry. (The erased seam `return_type`/`params`/`throws` here are intentionally wrong to prove
+        // the generic `Signature` wins.)
+        let cm = ClassMembers {
+            type_params: vec!["T".to_string()],
+            superclass: Some("java/lang/Object".to_string()),
+            interfaces: Vec::new(),
+            methods: vec![Member::method(
+                "orElseThrow",
+                TypeRef::simple("T"),
+                vec![TypeRef::simple("java/util/function/Supplier")],
+            )
+            .vis(Visibility::Public)
+            .throws(vec!["java/lang/Throwable".to_string()])
+            .sig("<X:Ljava/lang/Throwable;>(Ljava/util/function/Supplier<+TX;>;)TT;^TX;")],
+            fields: Vec::new(),
+            flags: ClassFlags::default(),
+        };
+        let s = render_stub("java/util/Optional", &cm);
+        assert!(
+            s.contains("<X extends Throwable> T orElseThrow(Supplier<? extends X> arg0) throws X"),
+            "generic signature rendered like IntelliJ: {s}"
+        );
+        assert!(!s.contains("throws Throwable"), "erased Throwable must not appear: {s}");
     }
 
     #[test]

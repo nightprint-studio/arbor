@@ -42,8 +42,8 @@ pub fn generics_syntax_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnos
 fn err(node: Node, message: impl Into<String>) -> Diagnostic {
     Diagnostic {
         message: message.into(),
-        severity: "error".to_string(),
-        code: String::new(),
+        severity: crate::check_id::CheckId::IllegalGenericUsage.severity().to_string(),
+        code: crate::check_id::CheckId::IllegalGenericUsage.code().to_string(),
         start: node.start_byte(),
         end: node.end_byte(),
     }
@@ -228,12 +228,12 @@ fn check_static_this_super(n: Node, out: &mut Vec<Diagnostic>) {
             // A lambda does NOT introduce a new `this` — keep walking (a `this` in a lambda inside a
             // static method is still illegal).
             "static_initializer" => {
-                out.push(err(n, "Cannot use `this`/`super` in a static context"));
+                out.push(crate::check_id::CheckId::StaticContextAccess.at(n, "Cannot use `this`/`super` in a static context"));
                 return;
             }
             "method_declaration" => {
                 if is_static_decl(p) {
-                    out.push(err(n, "Cannot use `this`/`super` in a static context"));
+                    out.push(crate::check_id::CheckId::StaticContextAccess.at(n, "Cannot use `this`/`super` in a static context"));
                 }
                 // Reached the nearest enclosing method: static-ness resolved either way → stop.
                 return;
@@ -241,7 +241,7 @@ fn check_static_this_super(n: Node, out: &mut Vec<Diagnostic>) {
             // A static field initializer: `static Foo f = this;` — the `this` is under the
             // `field_declaration`, outside any method/initializer block.
             "field_declaration" if is_static_decl(p) => {
-                out.push(err(n, "Cannot use `this`/`super` in a static context"));
+                out.push(crate::check_id::CheckId::StaticContextAccess.at(n, "Cannot use `this`/`super` in a static context"));
                 return;
             }
             // A constructor/instance-initializer block always has an instance → legal → SKIP.

@@ -36,7 +36,8 @@ import {
 } from '@codemirror/autocomplete';
 import type { EditorView } from '@codemirror/view';
 import { completion as ipcCompletion, importEdit as ipcImportEdit } from '$lib/ipc/bennu';
-import { hover as ipcHover } from '$lib/ipc/bennu/nav';
+import { hover as ipcHover, libraryHover as ipcLibraryHover } from '$lib/ipc/bennu/nav';
+import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
 import { makeHoverSource } from './bennu-hover';
@@ -372,7 +373,14 @@ const javaCompletionSource: CompletionSource = async (
 // container (+ Javadoc), and for a local `var`/`val` (or any local / parameter) its resolved type.
 // The shared factory owns the word-finding + DOM; this just supplies the fetch.
 
-const javaHoverSource = makeHoverSource((path, src, byteOffset) => ipcHover(path, src, byteOffset));
+const javaHoverSource = makeHoverSource((path, src, byteOffset) => {
+  // Inside a library/JDK source view (a tracked decompiled tab), hover resolves against the ORIGIN
+  // project's classpath resolver — its own `/decompiled/` path is under no project.
+  const ctx = decompiledStore.ctx(path);
+  return ctx
+    ? ipcLibraryHover(ctx.originFile, src, byteOffset)
+    : ipcHover(path, src, byteOffset);
+});
 
 /** The Java {@link LanguageDescriptor} handed to the shared `CodeEditor`. */
 export const javaLanguage: LanguageDescriptor = {

@@ -42,8 +42,8 @@ use bennu_proto::prelude::Diagnostic;
 use tree_sitter::{Node, Parser};
 
 use crate::checked_throw::{
-    callable_in_synthetic_type, caught_by_enclosing_try, declared_by_callable, enclosing_callable,
-    is_checked,
+    callable_in_synthetic_type, callable_sneaky_throws, caught_by_enclosing_try,
+    declared_by_callable, enclosing_callable, is_checked,
 };
 use crate::members::simple_name;
 use crate::resolve::type_binary;
@@ -244,6 +244,11 @@ fn flag_unhandled(
     // SKIP: even a real method/ctor, if it belongs to an anonymous/local class, has a non-authoritative
     // `throws` contract (SAM / capture machinery we don't resolve) → stay sound.
     if callable_in_synthetic_type(callable) {
+        return;
+    }
+    // Lombok `@SneakyThrows` on the enclosing method/ctor lets it throw any checked exception without
+    // declaring it → never flag a checked-throwing call inside it.
+    if callable_sneaky_throws(callable, bytes) {
         return;
     }
 
@@ -483,5 +488,33 @@ mod tests {
     fn bare_call_is_skipped() {
         // A bare `readAllBytes()` (no explicit receiver) is not checked → silent.
         assert!(diags("class C { void m() { readAllBytes(); } }").is_empty());
+    }
+
+    #[test]
+    fn checked_call_in_resource_spec_caught_by_try_is_ok() {
+        // A checked-throwing call in the RESOURCE initializer of a try-with-resources is protected by
+        // that try's catch (JLS §14.20.3) — here via a multi-catch alternative. Was falsely flagged
+        // because the resource specification wasn't treated as the try's protected region.
+        let src = "class C { void m() { Files f = null; try (Object o = f.readAllBytes()) {} catch (IOException | RuntimeException e) {} } }";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
+    }
+
+    #[test]
+    fn sneaky_throws_suppresses_a_checked_call() {
+        // Lombok `@SneakyThrows` lets the method call a checked-throwing method without handling it.
+        assert!(
+            diags("class C { @SneakyThrows void m() { Files f = null; f.readAllBytes(); } }").is_empty(),
+            "@SneakyThrows must suppress the unhandled-checked-call flag"
+        );
+    }
+
+    #[test]
+    fn checked_call_in_resource_spec_uncaught_is_flagged() {
+        // The same resource-initializer call, but no catch covers IOException → still flagged (the
+        // resource-spec handling protects, it doesn't blanket-suppress).
+        let src = "class C { void m() { Files f = null; try (Object o = f.readAllBytes()) {} catch (RuntimeException e) {} } }";
+        let d = diags(src);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("IOException"), "{d:?}");
     }
 }

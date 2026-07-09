@@ -74,7 +74,7 @@ fn self_assignment<'t>(assign: Node<'t>, bytes: &[u8]) -> Option<Diagnostic> {
         return None;
     }
 
-    Some(warn(format!("Self-assignment of `{lt}` has no effect"), assign))
+    Some(crate::check_id::CheckId::SelfAssignment.at(assign, format!("Self-assignment of `{lt}` has no effect")))
 }
 
 /// Whether `node` is a side-effect-free simple reference we can safely text-compare: a bare
@@ -110,7 +110,7 @@ fn div_mod_by_zero<'t>(bin: Node<'t>, bytes: &[u8]) -> Option<Diagnostic> {
     if !is_integer_zero_literal(right, bytes) {
         return None;
     }
-    Some(warn(format!("{noun} by zero"), bin))
+    Some(crate::check_id::CheckId::DivisionByZero.at(bin, format!("{noun} by zero")))
 }
 
 /// Whether `node` is an integer literal whose value is zero (`0`, `0L`, `0x0`, `0b0`, `00`, `0_0`, …).
@@ -172,7 +172,7 @@ fn empty_statements_in_block(block: Node, out: &mut Vec<Diagnostic>) {
         // The anonymous `;` token's kind is the literal ";". The block's own `{`/`}` are also
         // anonymous but have distinct kinds, so this matches only genuine empty statements.
         if ch.kind() == ";" {
-            out.push(warn("Empty statement".to_string(), ch));
+            out.push(crate::check_id::CheckId::EmptyStatement.at(ch, "Empty statement"));
         }
     }
 }
@@ -191,25 +191,12 @@ fn string_reference_equality<'t>(bin: Node<'t>, bytes: &[u8]) -> Option<Diagnost
     let left = bin.child_by_field_name("left")?;
     let right = bin.child_by_field_name("right")?;
     if left.kind() == "string_literal" || right.kind() == "string_literal" {
-        return Some(warn(
-            "Comparing strings with `==` compares references, not contents — use `.equals()`"
-                .to_string(),
+        return Some(crate::check_id::CheckId::StringReferenceEquality.at(
             bin,
+            "Comparing strings with `==` compares references, not contents — use `.equals()`",
         ));
     }
     None
-}
-
-// ── shared ───────────────────────────────────────────────────────────────────
-
-fn warn(message: String, node: Node) -> Diagnostic {
-    Diagnostic {
-        message,
-        severity: "warning".to_string(),
-        code: String::new(),
-        start: node.start_byte(),
-        end: node.end_byte(),
-    }
 }
 
 #[cfg(test)]

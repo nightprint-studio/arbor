@@ -44,6 +44,72 @@ fn bennu_mojibake_check(_ctx: &BennuState, args: MojibakeArgs) -> Result<Vec<Moj
     Ok(find_mojibake(&args.source))
 }
 
+/// Args for [`bennu_mojibake_project`].
+#[derive(Deserialize)]
+pub struct MojibakeProjectArgs {
+    /// Absolute path to the project root to scan.
+    pub root: String,
+}
+
+/// One file's mojibake hits, for the project-scan result.
+#[derive(Debug, Clone, Serialize)]
+pub struct FileMojibake {
+    /// Absolute (forward-slashed) path of the file.
+    pub file: String,
+    /// Every mojibake hit in the file (byte spans + fixes), in document order.
+    pub hits: Vec<MojibakeHit>,
+}
+
+/// The whole-project mojibake scan result: headline counts + the affected files (only those WITH
+/// hits, most-affected first).
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectMojibakeResult {
+    /// How many text files were read + scanned.
+    pub total_files_scanned: usize,
+    /// How many of them had at least one hit.
+    pub files_with_hits: usize,
+    /// Total hits across the project.
+    pub total_hits: usize,
+    /// The affected files (hits > 0), sorted by hit count descending then path.
+    pub files: Vec<FileMojibake>,
+}
+
+/// Scan every text file in the project for mojibake, in parallel. Each file is decoded in the
+/// project's **resolved encoding** (per-project override → pom `sourceEncoding` → config default) —
+/// the same decode the index uses — then normalized to LF, so the scanned text (and its byte
+/// offsets) match exactly what the editor shows. This catches mojibake in legacy Cp1252 projects
+/// too, not just UTF-8 files. Runs the same per-file detector as the editor's on-demand check.
+#[arbor_rpc::handler]
+fn bennu_mojibake_project(
+    _ctx: &BennuState,
+    args: MojibakeProjectArgs,
+) -> Result<ProjectMojibakeResult, String> {
+    let label = crate::index_service::resolve_index_encoding(&args.root);
+    let paths = crate::find::collect_text_paths(std::path::Path::new(&args.root));
+    let total_files_scanned = paths.len();
+
+    // Decode + scan each file independently on the shared work-stealing pool (leaves ~2 cores free
+    // for the UI). Reading in the closure parallelises the I/O too; an unreadable file → no hits.
+    let scanned: Vec<FileMojibake> = bennu_intel::prelude::parallel_map(&paths, |path| {
+        let hits = match std::fs::read(path) {
+            Ok(bytes) => {
+                let decoded = bennu_project::prelude::decode_for_index(&bytes, &label);
+                let text = bennu_project::prelude::normalize_newlines(&decoded.text);
+                find_mojibake(&text)
+            }
+            Err(_) => Vec::new(),
+        };
+        FileMojibake { file: path.to_string_lossy().replace('\\', "/"), hits }
+    });
+
+    let mut files: Vec<FileMojibake> = scanned.into_iter().filter(|f| !f.hits.is_empty()).collect();
+    files.sort_by(|a, b| b.hits.len().cmp(&a.hits.len()).then_with(|| a.file.cmp(&b.file)));
+    let files_with_hits = files.len();
+    let total_hits = files.iter().map(|f| f.hits.len()).sum();
+
+    Ok(ProjectMojibakeResult { total_files_scanned, files_with_hits, total_hits, files })
+}
+
 /// Cp1252 decode of a single byte. `0x80–0x9F` are the code page's specials; `0xA0–0xFF` are
 /// Latin-1 (== Unicode); `0x00–0x7F` are ASCII. Returns `None` for the five bytes Cp1252 leaves
 /// undefined (`0x81 0x8D 0x8F 0x90 0x9D`) — a char whose UTF-8 uses one can't round-trip.

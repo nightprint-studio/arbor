@@ -32,8 +32,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
-use arbor_ipc::prelude::EventSink;
+use arbor_feedback::prelude::{JobSpec, JobStatus};
+use arbor_ipc::prelude::{EventSink, HostCaller};
 use bennu_index::prelude::Symbol;
+
+use crate::jobs::JobHandle;
 use bennu_intel::prelude::{
     build_project_index_from_sources, collect_annotation_beans, file_records_from_source,
     ingest_config_graph, read_java_sources, ActionVerdict, CompletionItem, ConfigResolver,
@@ -57,6 +60,11 @@ use crate::web_discovery::{discover_jsp_files, discover_web_inputs};
 /// one of `"project"`, `"references"`, `"config"` (start before / end after each build
 /// phase) plus a terminal `{ "phase": "ready", "state": "end" }` once completion is live.
 const EVT_INDEX_PROGRESS: &str = "arbor://bennu/index-progress";
+
+/// Emitted when a "Download sources" fetch finishes. Payload `{ "path": <decompiled-tab path>,
+/// "ok": <bool> }` — the FE clears the tab's download spinner and, on `ok`, reloads it from disk
+/// (its content flipped from stub to real source).
+const EVT_SOURCES_READY: &str = "arbor://bennu/sources-ready";
 
 /// Emit a single index-progress event (`start` / `end` of a phase) for `root`.
 fn emit_progress(sink: &Arc<dyn EventSink>, root: &str, phase: &str, state: &str) {
@@ -99,6 +107,66 @@ fn decompiled_cache_path(binary: &str) -> PathBuf {
         }
     }
     path.join(format!("{simple}.java"))
+}
+
+/// The OUTER (enclosing) binary name for a source view — `java/util/Map$Entry` → `java/util/Map`.
+/// Real source lives in the enclosing compilation unit, so the cached file is named after the type
+/// that declares it (not the inner class). A no-`$` name is returned unchanged.
+fn outer_binary(binary: &str) -> String {
+    binary.split('$').next().unwrap_or(binary).to_string()
+}
+
+/// Write a source view's `text` to its cache file (named after `file_binary`), rewriting only when
+/// missing/changed (a warm view opens instantly and keeps a stable mtime). Returns the
+/// forward-slashed path, or `None` on an I/O failure.
+fn write_view(file_binary: &str, text: &str) -> Option<String> {
+    let path = decompiled_cache_path(file_binary);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).ok()?;
+    }
+    let fresh = std::fs::read_to_string(&path).map(|c| c == text).unwrap_or(false);
+    if !fresh {
+        std::fs::write(&path, text).ok()?;
+    }
+    Some(path.to_string_lossy().replace('\\', "/"))
+}
+
+/// The byte offset to land on in a served source `text`: the member declaration's name token (for a
+/// member access), else the type declaration's name, else the top of the file. `file_binary` names
+/// the owning type. Member-precise landing is best-effort — an inherited member not declared in
+/// `text` (declared in a supertype) falls back to the type declaration.
+fn member_jump_offset(
+    text: &str,
+    file_binary: &str,
+    member: Option<&bennu_intel::prelude::LibraryMember>,
+) -> usize {
+    use bennu_intel::prelude::{find_member_name_span, find_type_name_span, DeclKey};
+    if let Some(m) = member {
+        let key = if m.is_field {
+            DeclKey::Field { owner: file_binary.to_string(), name: m.name.clone() }
+        } else {
+            DeclKey::Method { owner: file_binary.to_string(), name: m.name.clone() }
+        };
+        if let Some((start, _)) = find_member_name_span(text, &key) {
+            return start;
+        }
+    }
+    let simple = file_binary.rsplit(['/', '$']).next().unwrap_or(file_binary);
+    find_type_name_span(text, simple).map(|(s, _)| s).unwrap_or(0)
+}
+
+/// The result of resolving a library/JDK type to an on-disk source view (real source or a decompiled
+/// stub) — the wire shape behind go-to-into-a-library-class and the "Download sources" banner.
+#[derive(Debug, Clone)]
+pub struct DecompiledView {
+    /// Absolute (forward-slashed) path of the cached `.java` view.
+    pub file: String,
+    /// Byte offset to jump to (currently the top of the file).
+    pub offset: usize,
+    /// `true` when a signatures-only stub was served for a third-party dependency — the FE then
+    /// offers "Download sources". `false` for real source (JDK / already-downloaded dep) or a JDK
+    /// stub (no downloadable artifact).
+    pub can_download: bool,
 }
 
 /// The serialized-schema version of the persisted JDK member index. **Bump this whenever the shape
@@ -323,6 +391,17 @@ pub struct IndexService {
     /// A was last edited — so editing A never invalidates A's own cache (its structure is captured
     /// separately), but editing another file A depends on does.
     patch_counts: Mutex<PatchCounts>,
+    /// The reverse channel back to the shell, set from a handler's [`BennuState`] on project open
+    /// (bennu is one window per backend, so a single host is stable). Used by the background analysis
+    /// warm-up to register itself as a tracked JOB in the shell's registry (→ the bennu Jobs overlay).
+    /// `None` until the first open, or in the (unused) in-process path — the warm-up then runs
+    /// untracked.
+    host: RwLock<Option<Arc<dyn HostCaller>>>,
+    /// Per-project pool of opened dependency `-sources.jar`s (keyed by forward-slashed root), for the
+    /// decompiled-tab "go to source" — consulted for REAL library source before falling back to a
+    /// stub. Built lazily on first library go-to (only the sources jars already on disk), and cleared
+    /// after a "Download sources" fetch so the freshly-downloaded jar is picked up without a reindex.
+    dep_sources: Mutex<HashMap<String, Arc<Vec<bennu_classpath::prelude::JavaSourceZip>>>>,
 }
 
 /// Buffer-edit bookkeeping for [`IndexService::patch_counts`] — see that field.
@@ -357,7 +436,21 @@ impl IndexService {
             build_gen: Mutex::new(HashMap::new()),
             incremental: Mutex::new(HashMap::new()),
             patch_counts: Mutex::new(PatchCounts::default()),
+            host: RwLock::new(None),
+            dep_sources: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Attach (or refresh) the reverse channel back to the shell, so the background analysis warm-up
+    /// can register itself as a tracked job. Called from the open / reindex handlers, which hold the
+    /// [`BennuState`]. Cheap and idempotent — bennu is one window per backend.
+    pub fn set_host(&self, host: Option<Arc<dyn HostCaller>>) {
+        *self.host.write().unwrap_or_else(|p| p.into_inner()) = host;
+    }
+
+    /// A clone of the reverse channel, if wired. `None` before the first open / in-process.
+    fn host(&self) -> Option<Arc<dyn HostCaller>> {
+        self.host.read().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
     /// The include graph for the project at `root`, served from the incremental cache. Cheap on
@@ -452,6 +545,8 @@ impl IndexService {
         let jdk_version = jdk_version.to_string();
         let encoding_label = encoding_label.to_string();
         let root_str = root.to_string();
+        // The reverse channel for the analysis warm-up's tracked job (registered inside the thread).
+        let host = self.host();
         std::thread::spawn(move || {
             if let Err(e) = std::fs::create_dir_all(&index_dir) {
                 eprintln!("bennu-be: index dir {}: {e}", index_dir.display());
@@ -619,6 +714,10 @@ impl IndexService {
                 && !svc.superseded(&root_path, my_gen)
                 && !svc.warmup_up_to_date(&root_str, &sources)
             {
+                // Track the warm-up as a JOB in the shell registry so it shows in the bennu Jobs
+                // overlay (a background citizen, self-purged shortly after it completes). `None` when
+                // no reverse channel is wired — the warm-up still runs, just untracked.
+                let job = host.as_ref().and_then(|h| register_warmup_job(h, &sink, &root_str));
                 emit_progress(&sink, &root_str, "validation", "start");
                 warm_up_validation_cache(&root_str, &sources);
                 // Only stamp "up to date" when this gen is still current — a warm-up superseded
@@ -628,6 +727,7 @@ impl IndexService {
                     svc.record_warmup_stamp(&root_str, &sources);
                 }
                 emit_progress(&sink, &root_str, "validation", "end");
+                finish_warmup_job(&sink, job);
             }
 
             // Diagnostic (idle-CPU investigation): confirms the build thread reaches its end and
@@ -1337,29 +1437,232 @@ impl IndexService {
         provider.var_hover(source, offset).map(hover_info_of)
     }
 
-    /// Resolve the library/JDK type `name` references in `source` to a **decompiled Java stub** on
-    /// disk (signatures only), returning `(stub_path, offset)` for go-to. The stub is generated from
-    /// the class's bytecode-decoded members and cached under the profile's data dir, so a second
-    /// go-to reuses it. `None` when `name` doesn't resolve, is a PROJECT type (real source exists), or
-    /// its bytecode isn't decodable. `offset` is currently the top of the file (member-precise jumps
-    /// are a follow-up).
-    pub fn decompiled_stub(&self, file: &str, source: &str, name: &str) -> Option<(String, usize)> {
+    /// Resolve the library/JDK type `name` references in `source` to an on-disk **source view** for
+    /// go-to, returning `(path, offset, can_download)`. The view is, best-first: the REAL `.java`
+    /// from the JDK's `src.zip`, then a dependency's `-sources.jar` (if downloaded), else a
+    /// signatures-only **decompiled stub** from the class's bytecode. Cached under the profile's data
+    /// dir so a second go-to reuses it. `None` when `name` doesn't resolve, is a PROJECT type (real
+    /// source exists), or its bytecode isn't decodable. `offset` is the top of the file (member-
+    /// precise jumps are a follow-up). `can_download` is `true` when we served a STUB for a
+    /// third-party dependency (the project has deps and it isn't a JDK type) — the FE then offers the
+    /// "Download sources" banner.
+    pub fn decompiled_stub(&self, file: &str, source: &str, name: &str) -> Option<DecompiledView> {
         let slot = self.slot_for_file(file)?;
+        let root = norm_path(&slot.root);
         let provider = {
             let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
             Arc::clone(&g)
         };
-        let (text, binary) = provider.decompiled_source(source, name)?;
-        let path = decompiled_cache_path(&binary);
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).ok()?;
+        let binary = provider.library_binary(source, name)?;
+        let (text, file_binary, is_stub) = self.serve_source_view(&provider, &root, &binary)?;
+        let path = write_view(&file_binary, &text)?;
+        Some(DecompiledView {
+            file: path,
+            offset: 0,
+            can_download: self.can_download_sources(&slot, &binary, is_stub),
+        })
+    }
+
+    /// The on-disk **source view** for a library/JDK `binary`, best-first: the REAL `.java` from the
+    /// JDK's `src.zip`, then a dependency's `-sources.jar` (if downloaded), else a signatures-only
+    /// decompiled stub. Returns `(text, file_binary, is_stub)` — `file_binary` is the OUTER type for
+    /// real source (an inner class lives in its enclosing compilation unit), so the cached file is
+    /// named after the type it declares. Shared by [`decompiled_stub`](Self::decompiled_stub) (plain
+    /// go-to) and [`library_declaration`](Self::library_declaration) (in-library nav).
+    fn serve_source_view(
+        &self,
+        provider: &NativeJavaProvider,
+        root: &str,
+        binary: &str,
+    ) -> Option<(String, String, bool)> {
+        if let Some(t) = provider.jdk_source_text(binary) {
+            Some((t, outer_binary(binary), false))
+        } else if let Some((t, outer)) = self.dep_source_text(root, binary) {
+            Some((t, outer, false))
+        } else {
+            Some((provider.stub_for(binary)?, binary.to_string(), true))
         }
-        // Only rewrite when missing/changed (a warm stub opens instantly and keeps a stable mtime).
-        let fresh = std::fs::read_to_string(&path).map(|c| c == text).unwrap_or(false);
-        if !fresh {
-            std::fs::write(&path, &text).ok()?;
+    }
+
+    /// Whether to offer the "Download sources" banner: only for a STUB of a third-party dependency (a
+    /// JDK stub has no Maven artifact; a project with no resolved deps can't fetch anything).
+    fn can_download_sources(&self, slot: &ProjectSlot, binary: &str, is_stub: bool) -> bool {
+        let has_deps = !slot.dep_jars.read().unwrap_or_else(|p| p.into_inner()).is_empty();
+        is_stub && has_deps && !crate::sources_download::is_jdk_package(binary)
+    }
+
+    /// Go-to-declaration from a caret INSIDE a library/JDK source view (`view_source` = the library
+    /// tab's buffer, `offset` = the caret). Resolves the target against the ORIGIN project's classpath
+    /// resolver (`origin_file` picks the project — a library file is under no project root, so its own
+    /// path can't), serves the target type's source view, and lands **member-precise** on the method /
+    /// field (or the type declaration for a plain type reference). Returns a [`DecompiledView`] the FE
+    /// opens exactly like the initial go-to — so navigation chains library → library. `None` when the
+    /// caret isn't a resolvable type / member access.
+    pub fn library_declaration(
+        &self,
+        origin_file: &str,
+        view_source: &str,
+        offset: usize,
+    ) -> Option<DecompiledView> {
+        let slot = self.slot_for_file(origin_file)?;
+        let root = norm_path(&slot.root);
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        let target = provider.library_target_at(view_source, offset)?;
+        let (text, file_binary, is_stub) = self.serve_source_view(&provider, &root, &target.binary)?;
+        let jump = member_jump_offset(&text, &file_binary, target.member.as_ref());
+        let path = write_view(&file_binary, &text)?;
+        Some(DecompiledView {
+            file: path,
+            offset: jump,
+            can_download: self.can_download_sources(&slot, &target.binary, is_stub),
+        })
+    }
+
+    /// Hover INSIDE a library/JDK source view — the local/`var`/parameter/expression type at the
+    /// caret, via the ORIGIN project's full (JDK-aware) resolver on the library buffer. `None` when
+    /// the caret isn't on a typeable local (type/member signature hover is a follow-up). Mirrors the
+    /// project-file hover's `var_hover` fallback, routed through the origin project's provider.
+    pub fn library_hover(&self, origin_file: &str, view_source: &str, offset: usize) -> Option<HoverInfo> {
+        let slot = self.slot_for_file(origin_file)?;
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.var_hover(view_source, offset).map(hover_info_of)
+    }
+
+    /// REAL library source for `binary` from an already-downloaded dependency `-sources.jar`, plus
+    /// the OUTER binary name (for the cache filename). `None` when no dep sources jar on disk holds
+    /// it. Lazily builds + caches the per-root pool of opened sources jars (only those present on
+    /// disk); [`refresh_dep_sources`](Self::refresh_dep_sources) clears it after a download.
+    fn dep_source_text(&self, root: &str, binary: &str) -> Option<(String, String)> {
+        let pool = self.dep_sources_pool(root);
+        for zip in pool.iter() {
+            if let Some(text) = zip.source_text(binary) {
+                return Some((text, outer_binary(binary)));
+            }
         }
-        Some((path.to_string_lossy().replace('\\', "/"), 0))
+        None
+    }
+
+    /// The per-root pool of opened dependency `-sources.jar`s, built lazily from the slot's resolved
+    /// dep jars (only the sources jars that already exist on disk).
+    fn dep_sources_pool(
+        &self,
+        root: &str,
+    ) -> Arc<Vec<bennu_classpath::prelude::JavaSourceZip>> {
+        {
+            let cache = self.dep_sources.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(pool) = cache.get(root) {
+                return Arc::clone(pool);
+            }
+        }
+        // Build outside the lock (opening zips does I/O). A racing second builder is harmless — the
+        // last insert wins and both hand back an equivalent pool.
+        let dep_jars = {
+            let slot = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            slot.get(&PathBuf::from(root))
+                .map(|s| s.dep_jars.read().unwrap_or_else(|p| p.into_inner()).clone())
+                .unwrap_or_default()
+        };
+        let pool = Arc::new(crate::sources_download::open_dep_source_zips(&dep_jars));
+        self.dep_sources
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(root.to_string(), Arc::clone(&pool));
+        pool
+    }
+
+    /// Drop the cached dependency-sources pool for `root`, so the next go-to rebuilds it and picks up
+    /// a freshly-downloaded `-sources.jar`. Called after a successful "Download sources" fetch.
+    fn refresh_dep_sources(&self, root: &str) {
+        self.dep_sources.lock().unwrap_or_else(|p| p.into_inner()).remove(root);
+    }
+
+    /// Fetch the `-sources.jar` for the dependency that owns the library type `name` (resolved via
+    /// `file`'s buffer `source`) and reload the decompiled tab at `view_path` with the real source.
+    /// Runs `mvn dependency:get` in the project dir (so its configured repositories apply) as a
+    /// **tracked job**, on a background thread — the potentially-slow owning-jar search + Maven run
+    /// stay OFF the IPC dispatcher. On completion emits `arbor://bennu/sources-ready { path, ok }`;
+    /// on success the tab reloads with the real source, on failure the FE just clears its spinner
+    /// (a toast explains why). `Err` fast only when the type isn't a resolvable library type.
+    pub fn download_sources(
+        &'static self,
+        file: &str,
+        source: &str,
+        name: &str,
+        view_path: &str,
+        host: Option<Arc<dyn HostCaller>>,
+        sink: Arc<dyn EventSink>,
+    ) -> Result<String, String> {
+        let slot = self.slot_for_file(file).ok_or("no open project owns this file")?;
+        let root = norm_path(&slot.root);
+        let jdk_version = slot.jdk_version.clone();
+        let root_path = slot.root.clone();
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        // Cheap (index lookup) — fast-fail here so the FE gets an immediate error.
+        let binary = provider
+            .library_binary(source, name)
+            .ok_or("this type isn't a resolvable library type")?;
+        let dep_jars = slot.dep_jars.read().unwrap_or_else(|p| p.into_inner()).clone();
+        let host = host.ok_or("no reverse channel to register the download job")?;
+
+        // Everything the background thread needs, owned. The owning-jar scan (opens each dep jar) and
+        // the Maven run happen here, not on the dispatcher.
+        let svc: &'static IndexService = self;
+        let (file, source, name, view_path) =
+            (file.to_string(), source.to_string(), name.to_string(), view_path.to_string());
+        std::thread::spawn(move || {
+            let fail = |sink: &Arc<dyn EventSink>, msg: &str| {
+                sink.emit(EVT_SOURCES_READY, json!({ "path": &view_path, "ok": false }));
+                notify(sink, "Download sources failed", msg, "error");
+            };
+            let Some(jar) = crate::sources_download::find_owning_jar(&dep_jars, &binary) else {
+                return fail(&sink, "No resolved dependency jar contains this type.");
+            };
+            let Some(gav) = crate::sources_download::gav_from_m2_jar(&jar) else {
+                return fail(&sink, "Couldn't determine the dependency's Maven coordinates.");
+            };
+            let job = register_bennu_job(
+                &host,
+                &sink,
+                &format!("Download sources: {}", gav.label()),
+                &gav.sources_artifact(),
+                "Download",
+                true,
+            );
+            let mvn = crate::dep_classpath::find_mvn_launcher();
+            let jdk_home = bennu_classpath::prelude::find_jdk_home(&jdk_version);
+            match crate::sources_download::run_mvn_get_sources(&root_path, &mvn, jdk_home.as_deref(), &gav)
+            {
+                Ok((true, _log)) => {
+                    // Pick up the freshly-downloaded jar and rewrite the tab file as real source.
+                    svc.refresh_dep_sources(&root);
+                    let _ = svc.decompiled_stub(&file, &source, &name);
+                    sink.emit(EVT_SOURCES_READY, json!({ "path": &view_path, "ok": true }));
+                    finish_bennu_job(&sink, job, true, None);
+                    notify(&sink, "Sources downloaded", &format!("{} sources attached", gav.label()), "success");
+                }
+                Ok((false, log)) => {
+                    let msg = sources_failure_reason(&log);
+                    sink.emit(EVT_SOURCES_READY, json!({ "path": &view_path, "ok": false }));
+                    finish_bennu_job(&sink, job, false, Some(msg.clone()));
+                    notify(&sink, "Download sources failed", &msg, "error");
+                }
+                Err(e) => {
+                    sink.emit(EVT_SOURCES_READY, json!({ "path": &view_path, "ok": false }));
+                    finish_bennu_job(&sink, job, false, Some(e.clone()));
+                    notify(&sink, "Download sources failed", &e, "error");
+                }
+            }
+        });
+        Ok(String::new())
     }
 
     /// Importable FQNs (dotted, sorted) for a simple type `name`, from the owning project's class-name
@@ -1566,21 +1869,22 @@ impl IndexService {
         // A delete (`source == None`) applies an empty record set, which drops the file's
         // prior overlay entries. Keyed by the FE `file` string so the overlay's per-file
         // rename/remove bookkeeping matches on the next edit.
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        // Resolve a wildcard-imported supertype/return/param to the exact package via the live
+        // resolver's project view (the merged `simple` map is lossy on same-name collisions).
+        let is_project = |b: &str| provider.is_project_type(b);
         let symbols: Vec<Symbol> = source
             .map(|src| {
-                file_records_from_source(&file_path, src, &simple, u32::MAX / 2)
+                file_records_from_source(&file_path, src, &simple, u32::MAX / 2, &is_project)
                     .into_iter()
                     .map(|r| r.symbol)
                     .collect()
             })
             .unwrap_or_default();
-        {
-            let provider = {
-                let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
-                Arc::clone(&g)
-            };
-            provider.apply_file_patch(file, &symbols);
-        }
+        provider.apply_file_patch(file, &symbols);
 
         // Refresh the class navigator cache for THIS file (best-effort): drop its old
         // entries and re-add from the fresh parse, so Go-to-Class reflects a rename.
@@ -1747,6 +2051,112 @@ fn validate_files_parallel(
 /// misses, prunes entries for deleted files, and persists it — so the first explicit "Validate
 /// (no compile)" is a near-instant all-cache-hit. Skips silently when the project has no resolver
 /// yet (nothing to cache against). Emits no FE events (a silent warm-up); logged for diagnostics.
+/// Register a bennu background task as a tracked job in the shell registry and emit
+/// `arbor://job-started`, so it appears in the bennu Jobs overlay. `None` when registration fails.
+///
+/// Routing: `target: "bennu"` — the FE `job-started` listener drops events not addressed to the
+/// window (the bennu FeedbackHost accepts only `"bennu"`), so the target MUST be in the event
+/// payload too, not just the registry spec. Category `"system"` marks a job the FE auto-dismisses on
+/// successful completion (matching `is_system`, which purges the registry entry) — an ephemeral pass
+/// visible only while it runs; any other category lingers as completed. `non_cancellable` because no
+/// FE cancel is wired to these yet.
+fn register_bennu_job(
+    host: &Arc<dyn HostCaller>,
+    sink: &Arc<dyn EventSink>,
+    name: &str,
+    command: &str,
+    category: &str,
+    is_system: bool,
+) -> Option<JobHandle> {
+    let job = JobHandle::register(
+        Arc::clone(host),
+        JobSpec {
+            name: name.to_string(),
+            plugin_name: "bennu".into(),
+            command: command.to_string(),
+            category: Some(category.to_string()),
+            non_cancellable: true,
+            hidden: false,
+            is_system,
+            target: Some("bennu".into()),
+        },
+    )
+    .ok()?;
+    sink.emit(
+        "arbor://job-started",
+        json!({
+            "job_id": &job.id,
+            "name": name,
+            "plugin_name": "bennu",
+            "command": command,
+            "category": category,
+            "target": "bennu",
+        }),
+    );
+    Some(job)
+}
+
+/// Mark a bennu job done: set its terminal status in the registry and emit `arbor://job-done`. A
+/// no-op when the job was never registered (no reverse channel).
+fn finish_bennu_job(
+    sink: &Arc<dyn EventSink>,
+    job: Option<JobHandle>,
+    success: bool,
+    error: Option<String>,
+) {
+    let Some(job) = job else { return };
+    let status = if success {
+        JobStatus::Completed { exit_code: 0 }
+    } else {
+        JobStatus::Failed { error: error.clone().unwrap_or_default() }
+    };
+    job.set_status(status);
+    sink.emit(
+        "arbor://job-done",
+        json!({
+            "job_id": job.id,
+            "success": success,
+            "exit_code": if success { 0i32 } else { -1i32 },
+            "cancelled": false,
+            "error": error,
+        }),
+    );
+}
+
+/// Emit a toast notification to the bennu window (`plugin:notification`, re-emitted by the shell).
+fn notify(sink: &Arc<dyn EventSink>, title: &str, message: &str, level: &str) {
+    sink.emit(
+        "plugin:notification",
+        json!({ "plugin": "bennu", "title": title, "message": message, "level": level }),
+    );
+}
+
+/// A concise, user-facing reason for a failed `mvn dependency:get -…:sources` from its output — the
+/// common case is that no repository publishes a sources jar for the artifact.
+fn sources_failure_reason(log: &str) -> String {
+    if log.contains("Could not find artifact") || log.contains("Could not resolve") {
+        "No sources jar is published for this dependency in the configured repositories.".to_string()
+    } else {
+        "Maven couldn't download the sources jar (see the job output).".to_string()
+    }
+}
+
+/// The whole-project analysis warm-up job (visible while it runs, self-clears when done — like
+/// IntelliJ's background analysis). Supersession by a rebuild stops the pass.
+fn register_warmup_job(
+    host: &Arc<dyn HostCaller>,
+    sink: &Arc<dyn EventSink>,
+    root: &str,
+) -> Option<JobHandle> {
+    let display = root.rsplit(['/', '\\']).next().unwrap_or(root);
+    register_bennu_job(host, sink, "Analyzing project", &format!("→ {display}"), "system", true)
+}
+
+/// Finish the warm-up job (always success — the pass either completes or is superseded before this).
+fn finish_warmup_job(sink: &Arc<dyn EventSink>, job: Option<JobHandle>) {
+    finish_bennu_job(sink, job, true, None);
+}
+
 fn warm_up_validation_cache(root: &str, sources: &[(PathBuf, String)]) {
     let svc = IndexService::global();
     if !svc.has_resolver(root) {

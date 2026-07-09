@@ -35,8 +35,8 @@ pub fn version_errors_nodes(root: Node, nodes: &[Node], source: &str, java_major
                         "{feature} require{} Java {min}, but the project targets Java {java_major}",
                         if feature.ends_with('s') { "" } else { "s" }
                     ),
-                    severity: "error".to_string(),
-                    code: String::new(),
+                    severity: crate::check_id::CheckId::FeatureRequiresNewerJava.severity().to_string(),
+                    code: crate::check_id::CheckId::FeatureRequiresNewerJava.code().to_string(),
                     start,
                     end,
                 });

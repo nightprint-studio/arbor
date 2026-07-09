@@ -54,8 +54,8 @@ pub fn invalid_statements_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
             };
             out.push(Diagnostic {
                 message: format!("`{}` is not a statement{hint}", text.trim()),
-                severity: "error".to_string(),
-                code: String::new(),
+                severity: crate::check_id::CheckId::NotAStatement.severity().to_string(),
+                code: crate::check_id::CheckId::NotAStatement.code().to_string(),
                 start: expr.start_byte(),
                 end: expr.end_byte(),
             });

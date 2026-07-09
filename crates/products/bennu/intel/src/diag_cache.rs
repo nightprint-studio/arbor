@@ -391,10 +391,13 @@ mod integration {
 
     /// Apply an edited file to the resolver's overlay (mirrors `IndexService::patch_file`).
     fn patch(resolver: &IndexResolver<NoJdk>, file: &str, src: &str, type_map: &BTreeMap<String, String>) {
-        let symbols: Vec<Symbol> = file_records_from_source(Path::new(file), src, type_map, u32::MAX / 2)
-            .into_iter()
-            .map(|r| r.symbol)
-            .collect();
+        use bennu_java::prelude::TypeResolver;
+        let is_project = |b: &str| resolver.is_project_type(b);
+        let symbols: Vec<Symbol> =
+            file_records_from_source(Path::new(file), src, type_map, u32::MAX / 2, &is_project)
+                .into_iter()
+                .map(|r| r.symbol)
+                .collect();
         resolver.apply_file_patch(file, &symbols);
     }
 

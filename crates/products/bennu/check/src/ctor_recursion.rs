@@ -209,8 +209,8 @@ fn named_argument_list(inv: Node) -> Option<Node> {
 fn err(name: Node) -> Diagnostic {
     Diagnostic {
         message: "Recursive constructor invocation".to_string(),
-        severity: "error".to_string(),
-        code: String::new(),
+        severity: crate::check_id::CheckId::RecursiveConstructor.severity().to_string(),
+        code: crate::check_id::CheckId::RecursiveConstructor.code().to_string(),
         start: name.start_byte(),
         end: name.end_byte(),
     }

@@ -254,24 +254,59 @@ pub struct DecompiledArgs {
     pub name: String,
 }
 
-/// A generated decompiled-stub location: the on-disk `.java` path + the byte offset to jump to.
+/// A generated source-view location: the on-disk `.java` path + the byte offset to jump to, plus
+/// whether the FE should offer "Download sources".
 #[derive(Serialize)]
 pub struct DecompiledLocation {
     pub file: String,
     pub offset: usize,
+    /// `true` when a signatures-only stub was served for a third-party dependency — the tab shows a
+    /// "Download sources" banner. `false` for real source (JDK / already-downloaded dependency).
+    pub can_download: bool,
 }
 
-/// Resolve `name` (a library/JDK type under the caret) to a generated **decompiled Java stub** on
-/// disk and return its path — the "go-to into a JDK/library class" affordance. `None`-shaped empty
-/// result when the name doesn't resolve, is a project type (real source exists), or can't be decoded.
+/// Resolve `name` (a library/JDK type under the caret) to an on-disk **source view** and return its
+/// path — the real `.java` (JDK `src.zip` / a downloaded dependency `-sources.jar`) when available,
+/// else a decompiled-from-bytecode stub. `None`-shaped empty result when the name doesn't resolve,
+/// is a project type (real source exists), or can't be decoded.
 #[arbor_rpc::handler]
 fn bennu_decompiled_source(
     _ctx: &BennuState,
     args: DecompiledArgs,
 ) -> Result<Option<DecompiledLocation>, String> {
-    Ok(IndexService::global()
-        .decompiled_stub(&args.file, &args.source, &args.name)
-        .map(|(file, offset)| DecompiledLocation { file, offset }))
+    Ok(IndexService::global().decompiled_stub(&args.file, &args.source, &args.name).map(|v| {
+        DecompiledLocation { file: v.file, offset: v.offset, can_download: v.can_download }
+    }))
+}
+
+/// Args for [`bennu_download_sources`].
+#[derive(Deserialize)]
+pub struct DownloadSourcesArgs {
+    /// A file inside the owning project (to pick its resolver + dependency jars).
+    pub file: String,
+    /// The live buffer (its imports resolve a bare type name).
+    pub source: String,
+    /// The library type whose dependency sources to fetch (simple name or dotted FQCN).
+    pub name: String,
+    /// The open decompiled tab's on-disk path — echoed back in `sources-ready` so the FE reloads the
+    /// right tab (and clears its spinner on failure).
+    pub view_path: String,
+}
+
+/// Fetch the `-sources.jar` for the dependency that owns `name` via `mvn dependency:get`, as a
+/// tracked background job (returns immediately). On completion emits `arbor://bennu/sources-ready`
+/// for the tab at `view_path`; on success the tab reloads with the real source. `Err` fast only when
+/// the type isn't a resolvable library type.
+#[arbor_rpc::handler]
+fn bennu_download_sources(ctx: &BennuState, args: DownloadSourcesArgs) -> Result<String, String> {
+    IndexService::global().download_sources(
+        &args.file,
+        &args.source,
+        &args.name,
+        &args.view_path,
+        ctx.host_caller(),
+        ctx.event_sink(),
+    )
 }
 
 /// Args for [`bennu_bean_class`].

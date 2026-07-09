@@ -51,8 +51,8 @@ fn check_block(block: Node, out: &mut Vec<Diagnostic>) {
         if terminated {
             out.push(Diagnostic {
                 message: "Unreachable statement".to_string(),
-                severity: "error".to_string(),
-                code: String::new(),
+                severity: crate::check_id::CheckId::UnreachableStatement.severity().to_string(),
+                code: crate::check_id::CheckId::UnreachableStatement.code().to_string(),
                 start: stmt.start_byte(),
                 end: stmt.end_byte(),
             });

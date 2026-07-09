@@ -14,6 +14,7 @@
     Hash, FileCode2, MapPin, Scissors, Copy, ClipboardPaste, Target, SearchCode,
     PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed, ShieldCheck, Plus, BookOpen,
     Braces, ArrowLeftRight, Package, FolderInput, CircleAlert, TriangleAlert, Check,
+    DownloadCloud, FileDown,
   } from 'lucide-svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -43,11 +44,14 @@
     strutsResultTarget as ipcStrutsResultTarget,
     strutsResultLint as ipcStrutsResultLint,
     decompiledSource as ipcDecompiledSource,
+    downloadSources as ipcDownloadSources,
+    libraryDeclaration as ipcLibraryDeclaration,
     jspActions as ipcJspActions, setJspAction as ipcSetJspAction, type JspActionBinding,
     renameApply as ipcRenameApply, type RenameEdit,
   } from '$lib/ipc/bennu/nav';
   import { applyByteEdits } from './rename-apply';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
+  import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
   import { spellcheck as ipcSpellcheck, type SpellHit } from '$lib/ipc/bennu/spell';
   import { mojibakeCheck as ipcMojibakeCheck } from '$lib/ipc/bennu/mojibake';
   import { intentionsAt as ipcIntentionsAt } from '$lib/ipc/bennu/intentions';
@@ -839,10 +843,68 @@
   async function tryGoToDecompiled(name: string): Promise<boolean> {
     const path = activePath;
     if (!path || !editorComp || !name) return false;
-    const loc = await ipcDecompiledSource(path, editorComp.getValue(), name).catch(() => null);
+    const src = editorComp.getValue();
+    const loc = await ipcDecompiledSource(path, src, name).catch(() => null);
     if (!loc) return false;
+    // Remember the origin (file/buffer/type) so the tab's "Download sources" button can fetch the
+    // dependency's real sources against the same imports.
+    decompiledStore.register(loc.file, {
+      originFile: path,
+      originSource: src,
+      name,
+      canDownload: loc.can_download,
+    });
     openDefinitionFile(loc.file, loc.offset);
     return true;
+  }
+
+  /** Go-to WITHIN a library/JDK source view: resolve the caret against the origin project's
+   *  classpath resolver and open the target's source view (member-precise). Registers the target
+   *  with the SAME origin project so navigation chains library → library. */
+  async function tryGoToLibraryNav(offset: number): Promise<boolean> {
+    const ctx = decompiledCtx;
+    if (!ctx || !editorComp) return false;
+    const loc = await ipcLibraryDeclaration(ctx.originFile, editorComp.getValue(), offset).catch(() => null);
+    if (!loc) return false;
+    // The target is another library view — track it (same origin project) so it's read-only and
+    // itself navigable. A chained target doesn't carry the type name for the download button, so its
+    // banner is suppressed (canDownload: false); the initial go-to tab keeps its download banner.
+    decompiledStore.register(loc.file, {
+      originFile: ctx.originFile,
+      originSource: '',
+      name: '',
+      canDownload: false,
+    });
+    openDefinitionFile(loc.file, loc.offset);
+    return true;
+  }
+
+  /** The current tab's decompiled-view context (present only for a JDK/library source view), and
+   *  whether it's a read-only decompiled path (by the data-dir `/decompiled/` segment — robust for
+   *  restored tabs too). */
+  const decompiledCtx = $derived(decompiledStore.ctx(activePath));
+  // A decompiled view lives in the data dir (never under a project root → always "foreign"); the
+  // `isForeign` guard means a real project package literally named `decompiled` isn't made read-only.
+  const isDecompiledView = $derived(
+    !!decompiledCtx ||
+      ((activePath?.includes('/decompiled/') ?? false) && projectStore.isForeign(activePath ?? '')),
+  );
+
+  /** Fetch the dependency's real sources for the current decompiled tab (a tracked backend job). On
+   *  success the backend emits `sources-ready`, which reloads the tab with the real source. */
+  async function downloadTabSources() {
+    const path = activePath;
+    const ctx = decompiledCtx;
+    if (!path || !ctx || decompiledStore.isDownloading(path)) return;
+    decompiledStore.markDownloading(path);
+    try {
+      // `path` is the open decompiled tab — the backend echoes it back to reload / clear the spinner.
+      await ipcDownloadSources(ctx.originFile, ctx.originSource, ctx.name, path);
+      toastStore.show('Downloading sources…', 'info');
+    } catch (e) {
+      decompiledStore.clearDownloading(path);
+      toastStore.show(`Couldn't download sources: ${e}`, 'error');
+    }
   }
 
   /** Try JSP **include / view reference** go-to for the token under the caret — a path in a
@@ -931,6 +993,11 @@
   async function resolveDefinition(action: string, offset?: number, silent = false) {
     const path = activePath;
     if (!path) return;
+    // 0. Current tab IS a library/JDK source view → resolve the caret against the ORIGIN project's
+    //    classpath resolver and open the target's source view (member-precise), chaining library →
+    //    library. Runs BEFORE the project engine (a `/decompiled/` path ends in `.java` and would
+    //    otherwise route into the project declaration and get nothing).
+    if (offset != null && decompiledCtx && (await tryGoToLibraryNav(offset))) return;
     // 1. BE go-to-declaration — any Java symbol (class/method/field/local) — when we have
     //    a byte offset to classify at. Authoritative + precise (jumps to the exact line).
     if (offset != null && (await tryGoToDeclarationBE(offset, action))) return;
@@ -1218,6 +1285,22 @@
     </div>
   {/if}
 
+  <!-- Decompiled dependency with no attached sources: offer a one-click "Download sources" fetch. -->
+  {#if decompiledCtx?.canDownload}
+    <div class="ed-sources-banner">
+      <span class="ed-sources-msg"><FileDown size={13} /> Decompiled from bytecode — no sources attached.</span>
+      <button
+        class="ed-tbtn primary"
+        onclick={downloadTabSources}
+        disabled={decompiledStore.isDownloading(activePath)}
+        use:tooltip={'Fetch this dependency’s -sources.jar via Maven'}
+      >
+        <DownloadCloud size={13} />
+        {decompiledStore.isDownloading(activePath) ? 'Downloading…' : 'Download sources'}
+      </button>
+    </div>
+  {/if}
+
   {#if activePath}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="ed-editor-wrap" oncontextmenu={onEditorContextMenu}>
@@ -1226,6 +1309,7 @@
           bind:this={editorComp}
           value={projectStore.sourceOf(activePath)}
           language={editorLanguage}
+          readOnly={isDecompiledView}
           diagnostics={allDiags}
           rulerColumn={bennuSettingsStore.rightMargin}
           minimap={false}
@@ -1366,6 +1450,22 @@
   .ed-tbtn.primary { background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); }
   .ed-tbtn.primary:hover { filter: brightness(1.08); }
   .ed-tsep { width: 1px; height: 16px; background: var(--border-subtle); margin: 0 3px; }
+
+  /* "Download sources" banner over a decompiled dependency tab (between toolbar and editor). */
+  .ed-sources-banner {
+    display: flex; align-items: center; gap: 10px;
+    padding: 5px 10px;
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-base));
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+  .ed-sources-msg {
+    flex: 1; min-width: 0;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--text-secondary);
+  }
+  .ed-sources-banner .ed-tbtn:disabled { opacity: 0.6; cursor: default; }
+  .ed-sources-banner .ed-tbtn.primary:disabled:hover { filter: none; }
 
   .ed-editor-wrap { flex: 1; display: flex; min-width: 0; min-height: 0; position: relative; }
   .ed-editor-wrap > :global(.code-editor) { flex: 1; min-width: 0; min-height: 0; }

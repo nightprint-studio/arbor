@@ -108,7 +108,7 @@ fn resolve_via_maven(root: &Path, jdk_version: &str) -> Option<Vec<String>> {
 /// (`mvn.cmd`/`mvn.bat`) — a bare `Command::new("mvn")` only locates `mvn.exe`, so a Maven install
 /// that ships only `mvn.cmd` (the norm on Windows) would never spawn. Scans `PATH`; falls back to
 /// the bare `"mvn"` (correct on Unix, or when a real `mvn`/`mvn.exe` is on PATH).
-fn find_mvn_launcher() -> String {
+pub(crate) fn find_mvn_launcher() -> String {
     let names: &[&str] =
         if cfg!(windows) { &["mvn.cmd", "mvn.bat", "mvn.exe", "mvn"] } else { &["mvn"] };
     if let Ok(path) = std::env::var("PATH") {

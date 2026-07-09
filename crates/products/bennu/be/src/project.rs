@@ -59,6 +59,8 @@ fn bennu_open_project(ctx: &BennuState, args: OpenProjectArgs) -> Result<Project
     // `sourceEncoding` → config default) so a legacy Cp1252 tree is indexed in its real
     // encoding; a mislabelled file is recovered + reported, not dropped.
     let encoding_label = crate::index_service::resolve_index_encoding(&args.root);
+    // Wire the reverse channel so the background analysis warm-up can register a tracked job.
+    IndexService::global().set_host(ctx.host_caller());
     IndexService::global().open(&args.root, &jdk_version, &encoding_label, ctx.event_sink());
 
     Ok(info)

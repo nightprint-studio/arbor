@@ -80,8 +80,8 @@ fn check_switch<'t>(switch: Node<'t>, bytes: &[u8], out: &mut Vec<Diagnostic>) {
                 if seen.iter().any(|s| s == text) {
                     out.push(Diagnostic {
                         message: format!("Duplicate case label `{text}`"),
-                        severity: "error".to_string(),
-                        code: String::new(),
+                        severity: crate::check_id::CheckId::DuplicateCaseLabel.severity().to_string(),
+                        code: crate::check_id::CheckId::DuplicateCaseLabel.code().to_string(),
                         start: cst.start_byte(),
                         end: cst.end_byte(),
                     });

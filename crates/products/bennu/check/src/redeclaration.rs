@@ -148,8 +148,8 @@ fn check_type_dups(container: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
 fn err(message: String, node: Node) -> Diagnostic {
     Diagnostic {
         message,
-        severity: "error".to_string(),
-        code: String::new(),
+        severity: crate::check_id::CheckId::DuplicateDeclaration.severity().to_string(),
+        code: crate::check_id::CheckId::DuplicateDeclaration.code().to_string(),
         start: node.start_byte(),
         end: node.end_byte(),
     }

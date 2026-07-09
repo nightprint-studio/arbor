@@ -58,8 +58,8 @@ pub fn duplicate_signatures_nodes(nodes: &[Node], source: &str) -> Vec<Diagnosti
             let what = if n.kind() == "constructor_declaration" { "constructor" } else { "method" };
             out.push(Diagnostic {
                 message: format!("Duplicate {what}: another with the same signature is already declared"),
-                severity: "error".to_string(),
-                code: String::new(),
+                severity: crate::check_id::CheckId::DuplicateMethod.severity().to_string(),
+                code: crate::check_id::CheckId::DuplicateMethod.code().to_string(),
                 start: name_node.start_byte(),
                 end: name_node.end_byte(),
             });

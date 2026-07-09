@@ -72,8 +72,8 @@ pub fn annotation_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> 
             if allowed(&name, target) == Some(false) {
                 out.push(Diagnostic {
                     message: format!("`@{name}` is only applicable to {}", target_word(&name)),
-                    severity: "error".to_string(),
-                    code: String::new(),
+                    severity: crate::check_id::CheckId::AnnotationNotApplicable.severity().to_string(),
+                    code: crate::check_id::CheckId::AnnotationNotApplicable.code().to_string(),
                     start: node.start_byte(),
                     end: node.end_byte(),
                 });

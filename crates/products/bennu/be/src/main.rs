@@ -24,6 +24,10 @@ use bennu_core::prelude::BennuState;
 // Self-test handlers (be_ping / be_echo) prove the framed-stdio handshake.
 mod selftest;
 
+// `JobHandle`: register the background analysis warm-up as a tracked job in the shell registry
+// (over the reverse channel) so it appears in the bennu Jobs overlay.
+mod jobs;
+
 // Domain handler modules — each holds the `#[arbor_rpc::handler]`s for one bennu
 // domain. They self-register via `inventory`, so `arbor_rpc::registry()` collects
 // them and `Hello` advertises them by name.
@@ -133,6 +137,13 @@ mod build;
 // across sessions by pom mtime) into a `ClassSource`, so validation/completion resolve library
 // types (Spring, servlet, …), not just the JDK + project. Non-fatal — degrades to JDK-only.
 mod dep_classpath;
+// "Download sources" for a Maven dependency: locate its ~/.m2 jar, derive coordinates, and fetch
+// the `-sources.jar` via `mvn dependency:get` — behind the decompiled-tab banner.
+mod sources_download;
+// Go-to-declaration + hover INSIDE a library/JDK source view (`bennu_library_declaration` /
+// `bennu_library_hover`): resolves the caret against the origin project's classpath resolver and
+// opens the target's source view member-precise, chaining library → library.
+mod library_nav;
 // Project-wide "validation without compiling": `bennu_validate_project` — walks every `.java`,
 // runs the editor's per-file validation over all of them, and returns timing stats (the compile-time
 // proxy) + diagnostics. Shares `build`'s single-run guard so a validation and a Maven build can't run

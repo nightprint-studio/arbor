@@ -49,8 +49,8 @@ fn check_declaration(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
         if let Some(reason) = untyped_initializer(val.kind()) {
             out.push(Diagnostic {
                 message: format!("Cannot infer type for `var`: {reason}"),
-                severity: "error".to_string(),
-                code: String::new(),
+                severity: crate::check_id::CheckId::VarTypeInferenceFailed.severity().to_string(),
+                code: crate::check_id::CheckId::VarTypeInferenceFailed.code().to_string(),
                 start: val.start_byte(),
                 end: val.end_byte(),
             });
