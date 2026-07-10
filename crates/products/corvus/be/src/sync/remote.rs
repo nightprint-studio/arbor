@@ -43,10 +43,14 @@ pub(crate) fn from_config(cfg: &crate::corvus_config::SyncConfig) -> Option<Sync
 }
 
 /// Resolve the sync repo for `provider_key`, creating it private if absent.
+/// Returns `(remote, created)` — `created = true` only when a brand-new empty
+/// repo was made. An **adopted** (already-existing) repo must NOT be pushed to
+/// on enable: it holds another machine's data, so pushing this machine's state
+/// would clobber it. The caller pulls first instead.
 pub(crate) async fn resolve_or_create(
     provider_key: &str,
     repo_name: Option<&str>,
-) -> Result<SyncRemote, String> {
+) -> Result<(SyncRemote, bool), String> {
     let provider = crate::provider::for_host(provider_key)?;
     let user = provider.current_user().await.map_err(crate::provider::pe)?;
     let owner = user.login;
@@ -56,7 +60,7 @@ pub(crate) async fn resolve_or_create(
     };
 
     match provider.get_repo(&owner, &name).await {
-        Ok(info) => Ok(from_info(provider_key, &owner, &name, &info)),
+        Ok(info) => Ok((from_info(provider_key, &owner, &name, &info), false)),
         Err(e) if is_absent(&e) => {
             let req = RepoCreateRequest {
                 name: name.clone(),
@@ -66,7 +70,7 @@ pub(crate) async fn resolve_or_create(
                 namespace_id: None,
             };
             let info = provider.create_repo(req).await.map_err(crate::provider::pe)?;
-            Ok(from_info(provider_key, &owner, &name, &info))
+            Ok((from_info(provider_key, &owner, &name, &info), true))
         }
         Err(e) => Err(crate::provider::pe(e)),
     }

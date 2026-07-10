@@ -34,6 +34,7 @@ fn status_of(state: &CorvusState) -> SyncStatus {
         last_pull_at: cfg.last_pull_at,
         last_machine: cfg.last_machine,
         dirty,
+        awaiting_pull: cfg.awaiting_pull,
     }
 }
 
@@ -54,15 +55,20 @@ async fn sync_enable(
     if provider != "github" {
         return Err("Settings sync currently supports GitHub only.".to_string());
     }
-    let target = remote::resolve_or_create(&provider, repo_name.as_deref()).await?;
+    let (target, created) = remote::resolve_or_create(&provider, repo_name.as_deref()).await?;
     corvus_config::update_sync(state, |s| {
         s.enabled = true;
         s.provider = Some(provider.clone());
         s.repo_name = repo_name.clone().filter(|n| !n.trim().is_empty());
         s.repo_full_name = Some(target.full_name.clone());
         s.clone_url = Some(target.clone_url.clone());
+        // Adopting an existing repo → don't push (it holds another machine's
+        // data); the user pulls first. A brand-new repo is safe to seed.
+        s.awaiting_pull = !created;
     })?;
-    push_now(state).await?;
+    if created {
+        push_now(state).await?;
+    }
     Ok(status_of(state))
 }
 
@@ -106,6 +112,9 @@ async fn push_now(state: &CorvusState) -> Result<(), String> {
     corvus_config::update_sync(state, |s| {
         s.last_push_at = Some(super::now_epoch());
         s.last_machine = Some(super::machine_id());
+        // An explicit push is the user choosing local → remote; it settles the
+        // adopt-first-pull state.
+        s.awaiting_pull = false;
     })?;
     state.emit(
         "arbor://corvus-sync-pushed",

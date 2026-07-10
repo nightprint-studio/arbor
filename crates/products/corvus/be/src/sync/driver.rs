@@ -35,6 +35,11 @@ fn run(state: Arc<CorvusState>, rt: tokio::runtime::Handle) {
         if !cfg.enabled {
             continue;
         }
+        // Adopted an existing repo and not pulled yet — pushing now would clobber
+        // the other machine's data. Wait for the user to pull.
+        if cfg.awaiting_pull {
+            continue;
+        }
         let Some(remote) = crate::sync::remote::from_config(&cfg) else { continue };
         let files = match crate::sync::sources::build(&state, &cfg) {
             Ok(f) => f,

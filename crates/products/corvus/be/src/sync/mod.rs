@@ -118,4 +118,6 @@ pub(crate) struct SyncStatus {
     /// Whether local state differs from what was last pushed (best-effort;
     /// `false` when sync is disabled or the bundle can't be built yet).
     pub dirty: bool,
+    /// Adopted an existing repo — a pull is needed before auto-push resumes.
+    pub awaiting_pull: bool,
 }

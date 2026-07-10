@@ -49,6 +49,13 @@
   repo doesn't exist it is created <strong>private</strong>, and a first push runs immediately.
 </p>
 
+<Callout variant="info">
+  On a <strong>second machine</strong>, enable with the same repository (leave the name blank to
+  adopt the default). Because it already holds your first machine's data, enabling does
+  <strong>not</strong> push — it pauses auto-push and waits for you to <strong>Pull &amp; merge</strong>,
+  so this machine can't overwrite the other's settings.
+</Callout>
+
 <h2>Auto-push</h2>
 <p>
   Once enabled, a background driver watches for changes and pushes them to the sync repo,

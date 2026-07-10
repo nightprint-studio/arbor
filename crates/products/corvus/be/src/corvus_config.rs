@@ -297,6 +297,10 @@ pub struct SyncConfig {
     #[serde(default = "default_true")] pub include_plugin_data: bool,
     /// Skip any per-plugin `global.json` larger than this (keeps heavy blobs out).
     #[serde(default = "default_plugin_data_cap_kb")] pub plugin_data_cap_kb: u64,
+    /// Set when sync is enabled by **adopting** a repo that already has data:
+    /// the driver refuses to auto-push (which would clobber the remote) until a
+    /// pull runs. Cleared by a pull, or by an explicit manual push.
+    #[serde(default)] pub awaiting_pull: bool,
     // ── Status (written back by the engine) ──────────────────────────────────
     #[serde(default)] pub last_push_at: Option<i64>,
     #[serde(default)] pub last_pull_at: Option<i64>,
@@ -311,6 +315,7 @@ impl Default for SyncConfig {
             clone_url: None, interval_secs: default_sync_interval(),
             include_workspaces: true, include_settings: true, include_mods: true,
             include_plugin_data: true, plugin_data_cap_kb: default_plugin_data_cap_kb(),
+            awaiting_pull: false,
             last_push_at: None, last_pull_at: None, last_machine: None,
         }
     }

@@ -32,6 +32,7 @@ export interface SyncStatus {
   last_pull_at: number | null;
   last_machine: string | null;
   dirty: boolean;
+  awaiting_pull: boolean;
 }
 
 // ── Pull plan / apply ────────────────────────────────────────────────────────
@@ -81,7 +82,6 @@ export interface PullPlan {
 export interface PullSelections {
   workspace_ids: string[];
   settings_keys: string[];
-  mod_enable: boolean;
   plugin_data_names: string[];
 }
 

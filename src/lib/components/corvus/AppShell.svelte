@@ -627,7 +627,14 @@
     return () => window.removeEventListener('arbor:open-sync-pull', open);
   });
   $effect(() => {
-    function reload() { void appearanceStore.loadConfig(); void animStore.loadConfig(); }
+    function reload() {
+      void appearanceStore.loadConfig();
+      void animStore.loadConfig();
+      void diffStore.loadConfig();
+      void commitConfigStore.loadConfig();
+      void branchesConfigStore.loadConfig();
+      void activityBarConfigStore.load();
+    }
     window.addEventListener('arbor:sync-settings-applied', reload);
     return () => window.removeEventListener('arbor:sync-settings-applied', reload);
   });

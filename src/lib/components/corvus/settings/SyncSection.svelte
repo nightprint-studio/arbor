@@ -79,7 +79,10 @@
   }
 
   function openPull() {
+    // Dispatch first (AppShell mounts the modal), then close the settings panel
+    // so the modal isn't rendered behind the settings overlay.
     window.dispatchEvent(new CustomEvent('arbor:open-sync-pull'));
+    uiStore.setPanel('graph');
   }
 
   function fmtTime(ts: number | null | undefined): string {
@@ -150,13 +153,32 @@
       <span><Clock size={11} /> Last push: {fmtTime(status.last_push_at)}</span>
       <span><Clock size={11} /> Last pull: {fmtTime(status.last_pull_at)}</span>
     </div>
+
+    {#if status.awaiting_pull}
+      <div class="pull-banner">
+        <TriangleAlert size={13} />
+        <div>
+          <div class="pull-banner-title">This repo already has settings from another machine</div>
+          <div class="pull-banner-body">Pull &amp; merge to import them. Auto-push is paused until you do, so this
+            machine can't overwrite the other's data.</div>
+        </div>
+      </div>
+    {/if}
+
     <div class="actions">
-      <Button variant="primary" onclick={pushNow} disabled={busy} loading={busy}>
-        <RefreshCw size={12} /> Push now
-      </Button>
-      <Button variant="secondary" onclick={openPull} disabled={busy}>
-        <RefreshCw size={12} /> Pull &amp; merge…
-      </Button>
+      {#if status.awaiting_pull}
+        <Button variant="primary" onclick={openPull} disabled={busy}>
+          <RefreshCw size={12} /> Pull &amp; merge…
+        </Button>
+        <Button variant="ghost" onclick={pushNow} disabled={busy} loading={busy}>Push local anyway</Button>
+      {:else}
+        <Button variant="primary" onclick={pushNow} disabled={busy} loading={busy}>
+          <RefreshCw size={12} /> Push now
+        </Button>
+        <Button variant="secondary" onclick={openPull} disabled={busy}>
+          <RefreshCw size={12} /> Pull &amp; merge…
+        </Button>
+      {/if}
       <Button variant="ghost" onclick={disable} disabled={busy}>Disable</Button>
     </div>
   </div>
@@ -231,6 +253,17 @@
   }
   .notice-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
   .notice-body { font-size: 11.5px; color: var(--text-secondary); line-height: 1.4; margin-top: 2px; }
+
+  .pull-banner {
+    display: flex; gap: 9px; align-items: flex-start;
+    padding: 9px 11px; margin-bottom: 10px;
+    color: var(--warning);
+    border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+    background: color-mix(in srgb, var(--warning) 8%, transparent);
+    border-radius: var(--radius-sm);
+  }
+  .pull-banner-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+  .pull-banner-body { font-size: 11.5px; color: var(--text-secondary); line-height: 1.4; margin-top: 2px; }
 
   .provider-pill, .repo-row {
     display: inline-flex; align-items: center; gap: 6px;

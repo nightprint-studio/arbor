@@ -74,8 +74,9 @@ pub(crate) struct MissingRepo {
 pub(crate) struct PullSelections {
     #[serde(default)] pub workspace_ids: Vec<String>,
     #[serde(default)] pub settings_keys: Vec<String>, // "profile" | "corvus"
-    #[serde(default)] pub mod_enable: bool,
     #[serde(default)] pub plugin_data_names: Vec<String>,
+    // Mods (install + enable state) are applied FE-side through the marketplace,
+    // not here — the marketplace owns the install ledger and plugin host reload.
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -229,13 +230,6 @@ pub(crate) async fn apply(state: &CorvusState, sel: PullSelections) -> Result<Pu
         }
     }
 
-    // ── mod enable states ──
-    if sel.mod_enable {
-        if let Some(bytes) = remote_map.get(super::F_MODS) {
-            summary.mods_enabled = apply_mod_enable(&dirs.plugins, bytes)?;
-        }
-    }
-
     // ── plugin data ──
     for name in &sel.plugin_data_names {
         let path = format!("{}{}/global.json", super::PLUGIN_DATA_PREFIX, name);
@@ -247,7 +241,16 @@ pub(crate) async fn apply(state: &CorvusState, sel: PullSelections) -> Result<Pu
 
     summary.missing_repos = missing_repos(state, remote_map.get(super::F_REPOS));
 
-    let _ = corvus_config::update_sync(state, |s| s.last_pull_at = Some(super::now_epoch()));
+    // Pulling settles the "adopt then pull" bootstrap: auto-push may resume.
+    let _ = corvus_config::update_sync(state, |s| {
+        s.last_pull_at = Some(super::now_epoch());
+        s.awaiting_pull = false;
+    });
+    // Treat the post-pull local state as the pushed baseline, so the driver
+    // doesn't immediately re-push what we just merged.
+    if let Ok(files) = sources::build(state, &corvus_config::load(state).sync) {
+        super::record_pushed(sources::fingerprint(&files));
+    }
     crate::workspace::emit_registry_changed(state);
     state.emit(
         "arbor://corvus-sync-pulled",
@@ -385,31 +388,6 @@ fn apply_profile_subset(path: &Path, remote_text: &str) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::write(path, text).map_err(|e| e.to_string())
-}
-
-/// Apply remote enable/disable states to the mods that are installed locally.
-fn apply_mod_enable(plugins_dir: &Path, remote_mods: &[u8]) -> Result<usize, String> {
-    let states_path = plugins_dir.join("plugin_states.json");
-    let mut states: serde_json::Map<String, Value> = std::fs::read_to_string(&states_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-
-    let mut n = 0;
-    for (name, _version, enabled) in parse_mods(Some(&remote_mods.to_vec())) {
-        if is_installed(plugins_dir, &name) {
-            states.insert(name, Value::Bool(enabled));
-            n += 1;
-        }
-    }
-    let text = serde_json::to_string_pretty(&Value::Object(states)).map_err(|e| e.to_string())?;
-    std::fs::write(&states_path, text).map_err(|e| e.to_string())?;
-    Ok(n)
-}
-
-fn is_installed(plugins_dir: &Path, name: &str) -> bool {
-    plugins_dir.join("installed").join(name).is_dir()
-        || plugins_dir.join("marketplace_plugins").join(name).is_dir()
 }
 
 fn write_plugin_data(plugins_dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {

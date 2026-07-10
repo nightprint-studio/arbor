@@ -4,6 +4,8 @@
   import { syncPullPreview, syncPullApply } from '$lib/ipc/corvus/sync';
   import type { PullPlan, PullSelections } from '$lib/types/corvus/sync';
   import { uiStore } from '$lib/stores/ui.svelte';
+  import { installPlugin, setPluginEnabled } from '$lib/ipc/marketplace';
+  import { workspacesStore } from '$lib/stores/corvus/workspaces.svelte';
   import Modal from './../shared/Modal.svelte';
   import ModalHeader from './../shared/ModalHeader.svelte';
   import Button from './../shared/ui/Button.svelte';
@@ -28,7 +30,8 @@
   let wsChoice   = $state<Record<string, Choice>>({});
   let setChoice  = $state<Record<string, Choice>>({});
   let dataChoice = $state<Record<string, Choice>>({});
-  let modEnable  = $state(false);
+  // Install any missing mods and apply their enable state (via the marketplace).
+  let modsApply  = $state(true);
 
   onMount(load);
 
@@ -54,11 +57,12 @@
     }
   }
 
+  const modsToApply = $derived(modsApply ? (plan?.mods.length ?? 0) : 0);
   const selectedCount = $derived(
     Object.values(wsChoice).filter(c => c === 'remote').length +
     Object.values(setChoice).filter(c => c === 'remote').length +
     Object.values(dataChoice).filter(c => c === 'remote').length +
-    (modEnable ? 1 : 0)
+    modsToApply
   );
 
   async function apply() {
@@ -67,20 +71,44 @@
     const sel: PullSelections = {
       workspace_ids:     Object.entries(wsChoice).filter(([, c]) => c === 'remote').map(([id]) => id),
       settings_keys:     Object.entries(setChoice).filter(([, c]) => c === 'remote').map(([k]) => k),
-      mod_enable:        modEnable,
       plugin_data_names: Object.entries(dataChoice).filter(([, c]) => c === 'remote').map(([n]) => n),
     };
     try {
+      // 1) Backend writes the files it owns (workspaces, settings, plugin data).
       const summary = await syncPullApply(sel);
+
+      // 2) Mods go through the marketplace so the install ledger + plugin host
+      //    stay authoritative: install any missing one, then apply its enable state.
+      let modsDone = 0;
+      let modsFailed = 0;
+      if (modsApply && plan) {
+        for (const m of plan.mods) {
+          try {
+            if (!m.installed) await installPlugin(m.name);
+            await setPluginEnabled(m.name, m.enabled);
+            modsDone++;
+          } catch {
+            modsFailed++;
+          }
+        }
+      }
+
+      // 3) Refresh so the changes are visible immediately (the sidebar reads a
+      //    reactive store, not the file the backend just wrote). `load()` reloads
+      //    both the workspaces and the repo registry.
+      await workspacesStore.load();
+      if (summary.settings_applied > 0) {
+        window.dispatchEvent(new CustomEvent('arbor:sync-settings-applied'));
+      }
+
       const parts: string[] = [];
       if (summary.workspaces_applied) parts.push(`${summary.workspaces_applied} workspace(s)`);
       if (summary.settings_applied) parts.push(`${summary.settings_applied} settings group(s)`);
-      if (summary.mods_enabled) parts.push(`${summary.mods_enabled} mod state(s)`);
+      if (modsDone) parts.push(`${modsDone} mod(s)`);
       if (summary.plugin_data_applied) parts.push(`${summary.plugin_data_applied} plugin data`);
-      uiStore.showToast(parts.length ? `Applied ${parts.join(', ')}` : 'Nothing to apply', 'success');
-      if (summary.settings_reload_needed) {
-        window.dispatchEvent(new CustomEvent('arbor:sync-settings-applied'));
-      }
+      let msg = parts.length ? `Applied ${parts.join(', ')}` : 'Nothing to apply';
+      if (modsFailed) msg += ` · ${modsFailed} mod(s) couldn't be installed`;
+      uiStore.showToast(msg, modsFailed ? 'warning' : 'success');
       onClose();
     } catch (e) {
       uiStore.showToast(`Pull failed: ${e}`, 'error');
@@ -162,10 +190,10 @@
           <div class="group-title"><Boxes size={12} /> Mods</div>
           <div class="row">
             <div class="row-main">
-              <span class="row-name">Apply enable/disable states</span>
-              <span class="row-sub">Only affects mods already installed here</span>
+              <span class="row-name">Install missing &amp; apply enable state</span>
+              <span class="row-sub">Missing mods are installed from the marketplace</span>
             </div>
-            <Toggle checked={modEnable} onchange={(v) => (modEnable = v)} />
+            <Toggle checked={modsApply} onchange={(v) => (modsApply = v)} />
           </div>
           <div class="mod-list">
             {#each plan.mods as m (m.name)}
@@ -174,7 +202,6 @@
               </span>
             {/each}
           </div>
-          <div class="hint">Mods not installed here are re-installed from the marketplace, not synced as files.</div>
         </section>
       {/if}
 
@@ -223,7 +250,7 @@
       disabled={applying || loading || !plan?.available}
       loading={applying}
     >
-      {applying ? 'Applying…' : `Apply ${selectedCount || ''}`.trim()}
+      {applying ? 'Applying…' : (selectedCount ? `Apply ${selectedCount}` : 'Apply')}
     </Button>
   {/snippet}
 </Modal>
