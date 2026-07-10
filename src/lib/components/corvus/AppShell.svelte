@@ -59,6 +59,8 @@
   import ImageLightbox from '../shared/ImageLightbox.svelte';
   import ConflictResolutionModal from './stage/conflict/ConflictResolutionModal.svelte';
   import CheckoutConflictModal from './CheckoutConflictModal.svelte';
+  import SyncPullMergeModal from './SyncPullMergeModal.svelte';
+  import { syncStore } from '$lib/stores/corvus/sync.svelte';
   import InitRepoModal from './InitRepoModal.svelte';
   import CloneRepoModal from './CloneRepoModal.svelte';
   import GitSetupModal from './GitSetupModal.svelte';
@@ -576,6 +578,7 @@
   onMount(() => { void commitConfigStore.loadConfig(); });
   onMount(() => { void branchesConfigStore.loadConfig(); });
   onMount(() => { void explorerStore.loadConfig(); });
+  onMount(() => { void syncStore.loadConfig(); });
 
   // ── Onboarding tour ──────────────────────────────────────────────────────
   // Load the persisted onboarding state up front. The auto-open trigger is
@@ -610,6 +613,23 @@
     function open() { onboardingStore.show(); }
     window.addEventListener('arbor:open-onboarding', open);
     return () => window.removeEventListener('arbor:open-onboarding', open);
+  });
+
+  // ── Settings-sync ────────────────────────────────────────────────────────
+  // The pull-merge modal is opened from the Sync settings section or the
+  // Command Palette via the `arbor:open-sync-pull` window event. After a pull
+  // that touched UI settings, reload the appearance/animation stores so theme
+  // and motion changes apply live.
+  let syncPullOpen = $state(false);
+  $effect(() => {
+    function open() { syncPullOpen = true; }
+    window.addEventListener('arbor:open-sync-pull', open);
+    return () => window.removeEventListener('arbor:open-sync-pull', open);
+  });
+  $effect(() => {
+    function reload() { void appearanceStore.loadConfig(); void animStore.loadConfig(); }
+    window.addEventListener('arbor:sync-settings-applied', reload);
+    return () => window.removeEventListener('arbor:sync-settings-applied', reload);
   });
 
   // ── What's New modal ────────────────────────────────────────────────────
@@ -1616,6 +1636,9 @@
     const unlistenLinks = linkedWorktreesStore.setupListeners();
     linkedWorktreesStore.load();
 
+    // Settings-sync status events (background push / pull)
+    const unlistenSync = syncStore.setupListeners();
+
     // Stats events (result of background compute_repo_stats)
     const unlistenStats = statsStore.setupListeners();
 
@@ -1635,6 +1658,7 @@
       unlistenPluginLogs();
       unlistenPipelines();
       unlistenLinks();
+      unlistenSync();
       unlistenStats();
     };
   });
@@ -2390,6 +2414,11 @@
   {/if}
   {#if uiStore.checkoutConflictModalOpen}
     <CheckoutConflictModal />
+  {/if}
+
+  <!-- Settings-sync pull & merge -->
+  {#if syncPullOpen}
+    <SyncPullMergeModal onClose={() => (syncPullOpen = false)} />
   {/if}
 
   <!-- Init Repository modal — shown when opening a non-git folder -->

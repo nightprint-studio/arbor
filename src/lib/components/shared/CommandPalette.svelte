@@ -25,6 +25,7 @@
   import { workspacesStore } from '$lib/stores/corvus/workspaces.svelte';
   import { linkedWorktreesStore } from '$lib/stores/corvus/linkedWorktrees.svelte';
   import { setWorktreeLinkSyncEnabled, removeWorktreeLinkMember } from '$lib/ipc/corvus/linkedWorktree';
+  import { syncPushNow } from '$lib/ipc/corvus/sync';
   import type { WorkspaceDef, RepoRegistryEntry } from '$lib/types/corvus/workspace';
   import { activityBarConfigStore } from '$lib/stores/corvus/activityBarConfig.svelte';
   import { firePluginAction, reloadPlugins } from '$lib/ipc/plugin';
@@ -614,6 +615,22 @@
       { id: 'action:reload-plugins', kind: 'action', icon: 'RefreshCw', group: 'System',
         title: 'Reload Plugins',
         action: () => reloadAllPlugins() },
+      { id: 'action:sync-push', kind: 'action', icon: 'RefreshCw', group: 'System',
+        title: 'Sync: Push now',
+        subtitle: 'Push corvus workspaces & settings to your private sync repo',
+        action: async () => {
+          onClose();
+          try { await syncPushNow(); uiStore.showToast('Settings synced', 'success'); }
+          catch (e) { uiStore.showToast(`Sync failed: ${e}`, 'error'); }
+        } },
+      { id: 'action:sync-pull', kind: 'action', icon: 'RefreshCw', group: 'System',
+        title: 'Sync: Pull & merge…',
+        subtitle: 'Review and merge settings from your private sync repo',
+        action: () => closeAndDispatch('arbor:open-sync-pull') },
+      { id: 'action:sync-settings', kind: 'action', icon: 'RefreshCw', group: 'System',
+        title: 'Settings Sync',
+        subtitle: 'Configure GitHub-backed settings sync',
+        action: () => { uiStore.setPanel('settings'); onClose(); } },
       { id: 'action:active-schedules', kind: 'action', icon: 'Clock', group: 'System',
         title: 'Show Active Schedules',
         subtitle: 'Plugin timers, marketplace auto-refresh and other registered schedules',

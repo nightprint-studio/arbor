@@ -1,6 +1,6 @@
 <script lang="ts">
   import {
-    Monitor, GitBranch, Code, Github, TicketCheck, FolderGit2, ChevronRight, Sparkles, GitMerge, FlaskConical, Database, Layers, BarChart2, ShieldCheck, FolderX, Terminal, GitPullRequest, Settings, Workflow, ExternalLink, Link2, Boxes, Command, Store,
+    Monitor, GitBranch, Code, Github, TicketCheck, FolderGit2, ChevronRight, Sparkles, GitMerge, FlaskConical, Database, Layers, BarChart2, ShieldCheck, FolderX, Terminal, GitPullRequest, Settings, Workflow, ExternalLink, Link2, Boxes, Command, Store, RefreshCw,
   } from 'lucide-svelte';
   import { fade } from 'svelte/transition';
   import { tick, untrack } from 'svelte';
@@ -38,13 +38,14 @@
   import StudioSection                  from './settings/StudioSection.svelte';
   import MarketplaceSection              from './settings/MarketplaceSection.svelte';
   import ExplorerSection                 from './settings/ExplorerSection.svelte';
+  import SyncSection                     from './settings/SyncSection.svelte';
 
   let { onClose, onOpenThemeEditor }: {
     onClose: () => void;
     onOpenThemeEditor: () => void;
   } = $props();
 
-  type Section = 'appearance' | 'animations' | 'keystrokes' | 'graph' | 'diff' | 'explorer' | 'git' | 'git-cli' | 'issue-trackers' | 'repository' | 'project-issue-tracker' | 'project-gitflow' | 'project-ext-integrations' | 'gitflow' | 'experimental' | 'cache' | 'ide' | 'terminals' | 'stats' | 'recovery' | 'missing-projects' | 'mr' | 'pipelines' | 'deep-link' | 'studio' | 'marketplace';
+  type Section = 'appearance' | 'animations' | 'keystrokes' | 'graph' | 'diff' | 'explorer' | 'git' | 'git-cli' | 'issue-trackers' | 'repository' | 'project-issue-tracker' | 'project-gitflow' | 'project-ext-integrations' | 'gitflow' | 'experimental' | 'cache' | 'ide' | 'terminals' | 'stats' | 'recovery' | 'missing-projects' | 'mr' | 'pipelines' | 'deep-link' | 'studio' | 'marketplace' | 'sync';
   let activeSection = $state<Section>('appearance');
 
   const sectionComponents: Record<Section, any> = {
@@ -74,6 +75,7 @@
     'deep-link':                 DeepLinkSection,
     studio:                      StudioSection,
     marketplace:                 MarketplaceSection,
+    sync:                        SyncSection,
   };
 
   const navGroups: { label: string; items: { id: Section; label: string; icon: any }[] }[] = [
@@ -95,6 +97,7 @@
         { id: 'gitflow',           label: 'Git Flow',         icon: GitMerge       },
         { id: 'mr',                label: 'Merge Requests',   icon: GitPullRequest },
         { id: 'recovery',          label: 'Recovery',         icon: ShieldCheck    },
+        { id: 'sync',              label: 'Settings Sync',    icon: RefreshCw      },
         { id: 'missing-projects',  label: 'Missing Projects', icon: FolderX        },
         { id: 'experimental',      label: 'Experimental',     icon: FlaskConical   },
       ],

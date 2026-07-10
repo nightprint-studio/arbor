@@ -89,6 +89,24 @@ pub trait GitProvider: Send + Sync {
         Err(ProviderError::Unsupported { feature: "get_file_content".into() })
     }
 
+    // ── Raw file read/write (settings-sync, config-holding repos) ─────────
+    /// Fetch a file's **raw bytes** at `path` on `branch`, or `None` when the
+    /// file does not exist. Unlike [`get_file_content`] this is not preview-
+    /// oriented: no size cap, no binary/image classification — just the bytes.
+    /// The settings-sync engine reads a bundle file from its private repo with it.
+    async fn get_repo_file(&self, repo: &RepoRef, path: &str, branch: &str) -> Result<Option<Vec<u8>>, ProviderError> {
+        let _ = (repo, path, branch);
+        Err(ProviderError::Unsupported { feature: "get_repo_file".into() })
+    }
+    /// Create or update the file at `path` on `branch` with `content`, committing
+    /// with `message`. Idempotent: an existing file is overwritten (the impl
+    /// resolves the current blob sha itself). The settings-sync engine writes a
+    /// bundle file into its private repo with it.
+    async fn put_repo_file(&self, repo: &RepoRef, path: &str, branch: &str, content: &[u8], message: &str) -> Result<(), ProviderError> {
+        let _ = (repo, path, branch, content, message);
+        Err(ProviderError::Unsupported { feature: "put_repo_file".into() })
+    }
+
     // ── MR / PR ──────────────────────────────────────────────────────────
     //
     // Repo-scoped methods take `&RepoRef` so a single host-keyed provider

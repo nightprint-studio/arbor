@@ -72,6 +72,7 @@ mod stash;
 mod stats;
 mod status;
 mod submodule;
+mod sync;
 mod tickets;
 mod workspace;
 mod workspace_mutation;
@@ -1671,6 +1672,14 @@ fn main() {
     app.init(|| {
         corvus_git_cli::detect(None);
     });
+    // Settings-sync driver: a background thread that debounce-pushes the corvus
+    // bundle to its private repo. Self-healing — idles until sync is enabled and
+    // the shell has pushed the corvus dir, so starting it here (before the serve
+    // loop) is safe. Needs the provider registry (init'd just above) + the runtime
+    // handle for its async pushes.
+    let sync_state = Arc::clone(&state);
+    let sync_rt = app.runtime_handle();
+    app.init(move || sync::driver::start(sync_state, sync_rt));
 
     if let Err(e) = app.run(dispatcher) {
         eprintln!("corvus-be: serve loop ended with error: {e}");

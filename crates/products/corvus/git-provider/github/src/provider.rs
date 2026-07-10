@@ -181,6 +181,12 @@ impl GitProvider for GithubProvider {
     async fn get_file_content(&self, repo: &RepoRef, path: &str, branch: &str) -> Result<RemoteFileContent, ProviderError> {
         repo::get_file_content(&self.http, repo, path, branch).await
     }
+    async fn get_repo_file(&self, repo: &RepoRef, path: &str, branch: &str) -> Result<Option<Vec<u8>>, ProviderError> {
+        repo::get_repo_file(&self.http, repo, path, branch).await
+    }
+    async fn put_repo_file(&self, repo: &RepoRef, path: &str, branch: &str, content: &[u8], message: &str) -> Result<(), ProviderError> {
+        repo::put_repo_file(&self.http, repo, path, branch, content, message).await
+    }
 
     // ── MR / PR ──────────────────────────────────────────────────────────
     async fn list_mrs(&self, repo: &RepoRef, filter: MrFilter) -> Result<Vec<MrInfo>, ProviderError> {

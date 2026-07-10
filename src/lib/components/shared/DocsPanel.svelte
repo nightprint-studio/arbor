@@ -74,6 +74,7 @@
   import FileExplorer   from './docs/FileExplorer.svelte';
   import Reflog         from './docs/Reflog.svelte';
   import Recovery       from './docs/Recovery.svelte';
+  import SettingsSync   from './docs/SettingsSync.svelte';
   import MissingProjects from './docs/MissingProjects.svelte';
   import GitExecutable   from './docs/GitExecutable.svelte';
   import GitBisect      from './docs/GitBisect.svelte';
@@ -153,6 +154,7 @@
         { id: 'settings-interface',   label: 'Interface & Git',  icon: Monitor   },
         { id: 'settings-performance', label: 'Performance',      icon: Database  },
         { id: 'settings-access',      label: 'Access',           icon: Shield    },
+        { id: 'settings-sync',        label: 'Settings Sync',    icon: Cloud     },
         { id: 'settings-project',     label: 'Project',          icon: FolderGit2 },
         { id: 'themes',               label: 'Themes & Presets', icon: Palette   },
       ],
@@ -185,6 +187,7 @@
     'file-explorer':   FileExplorer,
     'reflog':          Reflog,
     'recovery':        Recovery,
+    'settings-sync':   SettingsSync,
     'missing-projects': MissingProjects,
     'git-executable':  GitExecutable,
     'bisect':          GitBisect,

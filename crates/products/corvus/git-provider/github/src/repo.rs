@@ -8,6 +8,7 @@
 //! delegate wrapped wholesale in `ProviderError::Internal` — that behavior is
 //! preserved (see `list_user_repos`).
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::Deserialize;
 
 use corvus_git_provider_api::prelude::*;
@@ -315,6 +316,142 @@ pub(crate) async fn get_file_content(
         .map_err(|e| classify(format!("GitHub file read: {e}")))?;
     let mime = mime_for_path(path);
     Ok(build_file_content(path, bytes.to_vec(), &mime))
+}
+
+// ---------------------------------------------------------------------------
+// get_repo_file / put_repo_file — raw contents API (settings-sync)
+// ---------------------------------------------------------------------------
+//
+// Both go through the contents API (`/repos/{o}/{r}/contents/{path}`) so the
+// same token + 401→refresh→retry seam applies. `get_repo_file` asks for the
+// `raw` media type (bytes verbatim, no size cap up to the 1 MB contents-API
+// limit — fine for the small settings bundle); a 404 is mapped to `None` so a
+// first-ever sync reads cleanly. `put_repo_file` resolves the current blob sha
+// (absent → create) then PUTs the base64 content, one commit per file.
+
+pub(crate) async fn get_repo_file(
+    http: &GithubHttp,
+    repo: &RepoRef,
+    path: &str,
+    branch: &str,
+) -> Result<Option<Vec<u8>>, ProviderError> {
+    let owner = repo.owner_or_path.as_str();
+    let name = repo
+        .name
+        .as_deref()
+        .ok_or_else(|| ProviderError::BadRequest("GitHub RepoRef requires name".into()))?;
+
+    let url = format!("https://api.github.com/repos/{owner}/{name}/contents/{path}?ref={branch}");
+    let resp = http
+        .send(|s| {
+            http.client()
+                .get(&url)
+                .header("Authorization", &s.auth_header)
+                .header("Accept", "application/vnd.github.raw")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("User-Agent", "arbor-git-gui/1.0")
+        })
+        .await?;
+
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(classify(format!("GitHub get file {s}: {b}")));
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| classify(format!("GitHub file read: {e}")))?;
+    Ok(Some(bytes.to_vec()))
+}
+
+/// Metadata slice used only to recover the blob `sha` of an existing file.
+#[derive(Deserialize)]
+struct GhContentMeta {
+    sha: String,
+}
+
+/// Resolve the current blob sha of a file, or `None` when it doesn't exist yet.
+async fn get_file_sha(
+    http: &GithubHttp,
+    owner: &str,
+    name: &str,
+    path: &str,
+    branch: &str,
+) -> Result<Option<String>, ProviderError> {
+    let url = format!("https://api.github.com/repos/{owner}/{name}/contents/{path}?ref={branch}");
+    let resp = http
+        .send(|s| {
+            http.client()
+                .get(&url)
+                .header("Authorization", &s.auth_header)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("User-Agent", "arbor-git-gui/1.0")
+        })
+        .await?;
+
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(classify(format!("GitHub file meta {s}: {b}")));
+    }
+    let meta: GhContentMeta = resp
+        .json()
+        .await
+        .map_err(|e| classify(format!("GitHub file meta parse: {e}")))?;
+    Ok(Some(meta.sha))
+}
+
+pub(crate) async fn put_repo_file(
+    http: &GithubHttp,
+    repo: &RepoRef,
+    path: &str,
+    branch: &str,
+    content: &[u8],
+    message: &str,
+) -> Result<(), ProviderError> {
+    let owner = repo.owner_or_path.as_str();
+    let name = repo
+        .name
+        .as_deref()
+        .ok_or_else(|| ProviderError::BadRequest("GitHub RepoRef requires name".into()))?;
+
+    let sha = get_file_sha(http, owner, name, path, branch).await?;
+    let url = format!("https://api.github.com/repos/{owner}/{name}/contents/{path}");
+    let mut body = serde_json::json!({
+        "message": message,
+        "content": BASE64.encode(content),
+        "branch":  branch,
+    });
+    if let Some(sha) = sha {
+        body["sha"] = serde_json::Value::String(sha);
+    }
+
+    let resp = http
+        .send(|s| {
+            http.client()
+                .put(&url)
+                .header("Authorization", &s.auth_header)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("User-Agent", "arbor-git-gui/1.0")
+                .json(&body)
+        })
+        .await?;
+
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(classify(format!("GitHub put file {s}: {b}")));
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

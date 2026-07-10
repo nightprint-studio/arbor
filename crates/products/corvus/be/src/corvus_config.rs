@@ -53,6 +53,7 @@ pub struct CorvusConfig {
     #[serde(default)] pub studio: StudioSettings,
     #[serde(default)] pub graph_columns: GraphColumnsConfig,
     #[serde(default)] pub onboarding: OnboardingConfig,
+    #[serde(default)] pub sync: SyncConfig,
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +272,50 @@ pub struct OnboardingConfig {
 
 fn default_true() -> bool { true }
 
+// ── sync ──
+// Settings-sync to a private git-provider repo (see [`crate::sync`]). Owned by
+// corvus-be like every other corvus setting; the status fields (`last_*`) are
+// written back by the sync engine after a push/pull. Machine-specific and heavy
+// data are intentionally out of scope — see the sync module docs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncConfig {
+    /// Master switch. When false the driver idles and no push/pull runs.
+    #[serde(default)] pub enabled: bool,
+    /// Provider host key (`"github"` | `"gitlab"`). Mandatory to enable.
+    #[serde(default)] pub provider: Option<String>,
+    /// User-chosen repo name; `None` → auto (`arbor-corvus-sync`, created private).
+    #[serde(default)] pub repo_name: Option<String>,
+    /// Resolved `"owner/name"` once the repo is created or adopted.
+    #[serde(default)] pub repo_full_name: Option<String>,
+    /// HTTPS clone URL of the resolved repo (informational / future git use).
+    #[serde(default)] pub clone_url: Option<String>,
+    /// Minimum seconds between auto-pushes (the debounce window).
+    #[serde(default = "default_sync_interval")] pub interval_secs: u64,
+    #[serde(default = "default_true")] pub include_workspaces: bool,
+    #[serde(default = "default_true")] pub include_settings: bool,
+    #[serde(default = "default_true")] pub include_mods: bool,
+    #[serde(default = "default_true")] pub include_plugin_data: bool,
+    /// Skip any per-plugin `global.json` larger than this (keeps heavy blobs out).
+    #[serde(default = "default_plugin_data_cap_kb")] pub plugin_data_cap_kb: u64,
+    // ── Status (written back by the engine) ──────────────────────────────────
+    #[serde(default)] pub last_push_at: Option<i64>,
+    #[serde(default)] pub last_pull_at: Option<i64>,
+    #[serde(default)] pub last_machine: Option<String>,
+}
+fn default_sync_interval() -> u64 { 300 }
+fn default_plugin_data_cap_kb() -> u64 { 256 }
+impl Default for SyncConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false, provider: None, repo_name: None, repo_full_name: None,
+            clone_url: None, interval_secs: default_sync_interval(),
+            include_workspaces: true, include_settings: true, include_mods: true,
+            include_plugin_data: true, plugin_data_cap_kb: default_plugin_data_cap_kb(),
+            last_push_at: None, last_pull_at: None, last_machine: None,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Persistence — the shell pushes only the profile-resolved corvus product
 // DIRECTORY (config bag key `"corvus_config_dir"`); corvus-be composes its own
@@ -303,13 +348,29 @@ pub fn load(state: &CorvusState) -> CorvusConfig {
     }
 }
 
-fn save(state: &CorvusState, cfg: &CorvusConfig) -> Result<(), String> {
+pub(crate) fn save(state: &CorvusState, cfg: &CorvusConfig) -> Result<(), String> {
     let p = config_file_path(state)?;
     let content = toml::to_string_pretty(cfg).map_err(|e| e.to_string())?;
     if let Some(parent) = Path::new(&p).parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(&p, content).map_err(|e| e.to_string())
+    std::fs::write(&p, content).map_err(|e| e.to_string())?;
+    // A config write is a candidate change for settings-sync; the engine's
+    // fingerprint decides whether it actually differs from what was last pushed.
+    crate::sync::mark_dirty();
+    Ok(())
+}
+
+/// Load → mutate only the `sync` section → save. Used by the sync engine to
+/// write status fields (`last_push_at`, resolved repo) without clobbering the
+/// rest of the config.
+pub(crate) fn update_sync(
+    state: &CorvusState,
+    f: impl FnOnce(&mut SyncConfig),
+) -> Result<(), String> {
+    let mut c = load(state);
+    f(&mut c.sync);
+    save(state, &c)
 }
 
 // ---------------------------------------------------------------------------
@@ -510,5 +571,22 @@ fn get_onboarding_config(state: &CorvusState) -> Result<OnboardingConfig, String
 fn set_onboarding_config(state: &CorvusState, config: OnboardingConfig) -> Result<(), String> {
     let mut c = load(state);
     c.onboarding = config;
+    save(state, &c)
+}
+
+// ── sync ──
+// Read/write the non-secret sync knobs (interval, include toggles). Enabling the
+// repo itself goes through `crate::sync::handlers::sync_enable` (it must resolve
+// or create the remote); this setter only tweaks an already-configured sync.
+
+#[arbor_rpc::handler]
+fn get_sync_config(state: &CorvusState) -> Result<SyncConfig, String> {
+    Ok(load(state).sync)
+}
+
+#[arbor_rpc::handler]
+fn set_sync_config(state: &CorvusState, config: SyncConfig) -> Result<(), String> {
+    let mut c = load(state);
+    c.sync = config;
     save(state, &c)
 }
