@@ -146,11 +146,10 @@ fn create_or_focus(app: &AppHandle) {
 /// packaged builds. Frameless to match Arbor; TytoShell paints its own titlebar +
 /// WindowControls.
 fn build_tyto_window(app: &AppHandle) {
-    let res = WebviewWindowBuilder::new(app, TYTO_WINDOW_LABEL, WebviewUrl::default())
+    let builder = WebviewWindowBuilder::new(app, TYTO_WINDOW_LABEL, WebviewUrl::default())
         .title("Tyto — Arbor")
         .inner_size(TYTO_FULL_W, TYTO_FULL_H)
         .min_inner_size(TYTO_FULL_MIN_W, TYTO_FULL_MIN_H)
-        .decorations(false)
         .shadow(true)
         .center()
         // Build HIDDEN and reveal once TytoShell has painted (window_ready) — an
@@ -159,8 +158,9 @@ fn build_tyto_window(app: &AppHandle) {
         .visible(false)
         // Match the main window's WebView2 env (see WEBVIEW_BROWSER_ARGS) —
         // mismatched args on a second webview → HRESULT 0x8007139F.
-        .additional_browser_args(WEBVIEW_BROWSER_ARGS)
-        .build();
+        .additional_browser_args(WEBVIEW_BROWSER_ARGS);
+    // Native traffic lights on macOS, frameless elsewhere (see super::native_titlebar).
+    let res = super::native_titlebar(builder).build();
 
     match res {
         Ok(_) => super::arm_ready_reveal(app, TYTO_WINDOW_LABEL),

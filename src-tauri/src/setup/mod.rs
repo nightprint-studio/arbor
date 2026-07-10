@@ -140,6 +140,14 @@ fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // Park the launcher (main window) bottom-right, JetBrains-Toolbox-style.
     crate::window::placement::place_launcher_bottom_right(app.handle());
 
+    // macOS: give the `main` launcher the native Overlay title bar so its window
+    // controls are the real traffic lights (native icons, tiling menu, zoom). The
+    // builder-created product windows get this at build time; `main` comes from
+    // `tauri.conf.json`, so it's converted here. No-op on Windows/Linux.
+    if let Some(w) = app.get_webview_window("main") {
+        crate::window::apply_native_titlebar_runtime(&w);
+    }
+
     // Register the configured OS-global File-Explorer shortcut (opt-in; no-op
     // when disabled or unset). The press handler is wired on the plugin builder.
     #[cfg(desktop)]

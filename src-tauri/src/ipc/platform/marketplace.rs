@@ -116,6 +116,13 @@ fn reload_host(state: &AppState) -> Result<()> {
         host.reload()?;
         host.start_all_schedulers();
     }
+    // Also rescan corvus-be — the sole loader of universal + git plugins. Without
+    // this a freshly installed (or uninstalled) plugin would never load into /
+    // unload from the running Corvus window; only the launcher host saw the folder
+    // change. Best-effort: drops silently when corvus-be isn't running (it rescans
+    // the plugin dir on its next spawn). The host lock is already dropped above —
+    // never dispatch to a backend while holding it (the broker re-enters the host).
+    let _ = crate::ipc::dispatch_rpc(state, "corvus", "reload_plugins", serde_json::json!({}));
     state.emit("arbor://plugins-reloaded", ());
     Ok(())
 }
@@ -210,14 +217,45 @@ fn marketplace_set_plugin_enabled(
     name: String,
     enabled: bool,
 ) -> Result<MarketplacePlugin> {
-    // Mirror the change through the host so the live VM picks it up. Both sides
-    // cascade; capture the list so the ledger stays in sync for everything
-    // touched, not just the user-clicked plugin.
-    let cascaded: Vec<String> = {
+    // A plugin lives in exactly one host: the launcher host (this process — only
+    // `launcher`-targeted plugins) OR a product backend (corvus-be, the sole
+    // loader of universal + git plugins). The marketplace toggle must reach the
+    // plugin wherever it actually runs, so we drive BOTH and treat a host that
+    // doesn't own the plugin as a no-op rather than a "plugin not found" error —
+    // which is exactly what used to break toggling a git/universal plugin here
+    // (it only ever hit the launcher host).
+    let mut cascaded: Vec<String> = Vec::new();
+
+    // Launcher host (in-process) — only when it actually owns the plugin, so a
+    // product plugin doesn't fail with "not found". A genuine cascade error
+    // (e.g. a missing required dependency) still propagates.
+    {
         let mut host = state.lock_plugin_host()?;
-        if enabled { host.enable_plugin(&name)? }
-        else       { host.disable_plugin(&name)? }
-    };
+        if host.knows_plugin(&name) {
+            cascaded = if enabled { host.enable_plugin(&name)? }
+                       else       { host.disable_plugin(&name)? };
+        }
+    }
+
+    // corvus-be — the live host for universal + git plugins. It drives its own
+    // runtime AND persists `plugin_states.json`, so the plugin toggles live and
+    // stays toggled across reloads. Best-effort: when corvus-be isn't running the
+    // method isn't advertised and the call drops (the backend adopts the on-disk
+    // state on its next spawn); blockers are pre-checked by the modal's
+    // enable-preview, so we don't hard-fail the toggle here.
+    let method = if enabled { "enable_plugin" } else { "disable_plugin" };
+    match crate::ipc::dispatch_rpc(state, "corvus", method, serde_json::json!({ "name": name })) {
+        Ok(v) => {
+            if let Ok(list) = serde_json::from_value::<Vec<String>>(v) {
+                for n in list {
+                    if !cascaded.contains(&n) { cascaded.push(n); }
+                }
+            }
+        }
+        Err(e) => tracing::debug!(
+            "marketplace toggle: corvus '{method}' for '{name}' did not apply live: {e}"
+        ),
+    }
 
     mk::set_plugin_enabled(&name, enabled);
     for other in &cascaded {

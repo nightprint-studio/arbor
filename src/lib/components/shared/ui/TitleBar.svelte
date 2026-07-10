@@ -59,6 +59,7 @@
    */
   import Dropdown from './Dropdown.svelte';
   import { AlignJustify, BookOpen, Command, Settings } from 'lucide-svelte';
+  import { isMac } from '$lib/utils/platform';
   // Title bar sits at the very top — tooltips fly downward so they're never
   // clipped by the window edge.
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
@@ -139,6 +140,10 @@
 {/snippet}
 
 <div class="tb {cls}" data-tauri-drag-region role="banner">
+  <!-- macOS: a hairline that divides the native traffic-light gutter from the
+       app chrome. Sits at the start, right after the reserved gutter. -->
+  {#if isMac}<div class="tb-mac-sep" aria-hidden="true"></div>{/if}
+
   {#if logo}
     <div class="tb-nodrag tb-brand" use:tooltip={logoTooltip ?? ''}>
       {@render logo()}
@@ -174,7 +179,7 @@
   <!-- Draggable region so the user can grab the empty middle. -->
   <div class="tb-spacer" data-tauri-drag-region></div>
 
-  <div class="tb-right tb-nodrag">
+  <div class="tb-right tb-nodrag" class:tb-right-mac={isMac}>
     {#if trailing}{@render trailing()}{/if}
     {#if actions}{@render actions()}{/if}
     {#if docs}{@render namedButton(docs, BookOpen, 'Documentation')}{/if}
@@ -185,7 +190,9 @@
       {@render namedButton(settings, Settings, 'Settings')}
     {/if}
     {#if windowControls}
-      <div class="tb-sep"></div>
+      <!-- On macOS the controls slot renders nothing (native traffic lights sit
+           top-left instead), so the divider before it is suppressed too. -->
+      {#if !isMac}<div class="tb-sep"></div>{/if}
       {@render windowControls()}
     {/if}
   </div>
@@ -203,6 +210,8 @@
     z-index: 100;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
     transition: height var(--anim-dur-base) ease;
+    /* Clear the macOS native traffic lights (0 off macOS). */
+    padding-left: var(--mac-traffic-gutter, 0);
   }
 
   /* Each interactive cluster opts out of the window-drag region and lays its
@@ -233,6 +242,21 @@
   .tb-right {
     height: 100%;
     flex-shrink: 0;
+  }
+  /* macOS: the native traffic lights replace our controls, so the settings gear
+     is the last element — give it a touch more room from the rounded corner. */
+  .tb-right-mac {
+    padding-right: 8px;
+  }
+
+  /* macOS-only hairline separating the traffic-light gutter from app chrome. */
+  .tb-mac-sep {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
+    flex-shrink: 0;
+    margin-right: 8px;
+    -webkit-app-region: no-drag;
   }
 
   /* ── Hamburger trigger ──────────────────────────────────────────────── */

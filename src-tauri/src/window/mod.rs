@@ -36,7 +36,7 @@ pub mod merula;
 pub mod placement;
 pub mod tyto;
 
-use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 
 /// WebView2 additional browser args, shared by **every** Arbor window. Every
 /// WebView2 instance in the process shares one user-data-folder + environment,
@@ -45,6 +45,79 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 /// window's `additionalBrowserArgs` in `tauri.conf.json`.
 pub const WEBVIEW_BROWSER_ARGS: &str =
     "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,InterestFeedContentSuggestions,WebRTC,AutofillServerCommunication";
+
+// ───────────────────────────────────────────────────────────────────────────
+//  Window chrome — native traffic lights on macOS, frameless elsewhere
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Every Arbor product/launcher window paints its own title bar. On Windows and
+// Linux it also paints its own min/max/close (IntelliJ-style, flush right) and
+// the OS window stays frameless (`decorations(false)`).
+//
+// On macOS that model fights the platform: users expect the real traffic lights
+// (top-left), the native hover menu (window tiling — "Move & Resize"), and the
+// green button doing a *zoom* rather than opening a full-screen Space. Faux CSS
+// buttons can provide none of it. So on macOS we keep native decorations but
+// hide the OS title bar (`TitleBarStyle::Overlay` + `hidden_title`): the real
+// traffic lights float over our custom title bar, nudged down to sit centered in
+// it. The frontend hides its faux controls and reserves a left gutter on macOS.
+
+/// Horizontal inset (logical px) of the macOS traffic-light cluster from the
+/// window's left edge.
+#[cfg(target_os = "macos")]
+const MAC_TRAFFIC_LIGHT_X: f64 = 19.0;
+/// Vertical inset (logical px). tao grows the native title-bar container to
+/// `button_height + y` and pins it to the window top, so a LARGER `y` pushes the
+/// lights DOWN. At the small default the cluster centers in a ~28px band and
+/// reads high against our 42px bar (`--titlebar-h`); ~22 drops it to the bar's
+/// centre. The position is fixed at build time, so a compact bar sits slightly
+/// low — an accepted minor offset.
+#[cfg(target_os = "macos")]
+const MAC_TRAFFIC_LIGHT_Y: f64 = 22.0;
+
+/// Apply Arbor's window chrome to a builder. macOS → native Overlay title bar
+/// (real traffic lights over the custom bar); elsewhere → frameless. Call it in
+/// place of `.decorations(false)` on every window that renders an Arbor title
+/// bar. NOT for chromeless overlays (the recording HUD, the drag ghost) — those
+/// stay frameless directly.
+pub fn native_titlebar<'a, R: Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'a, R, M>,
+) -> WebviewWindowBuilder<'a, R, M> {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::{LogicalPosition, TitleBarStyle};
+        builder
+            .decorations(true)
+            .title_bar_style(TitleBarStyle::Overlay)
+            .hidden_title(true)
+            .traffic_light_position(LogicalPosition::new(
+                MAC_TRAFFIC_LIGHT_X,
+                MAC_TRAFFIC_LIGHT_Y,
+            ))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder.decorations(false)
+    }
+}
+
+/// macOS: convert an already-created window to the native Overlay title bar. Used
+/// for the `main` launcher window, which is created from `tauri.conf.json` (so it
+/// can't go through [`native_titlebar`] at build time). No-op elsewhere.
+///
+/// The high-level API exposes no runtime traffic-light-position or hidden-title
+/// setter, so we blank the window title (otherwise macOS would draw it over the
+/// custom chrome) and let the lights sit at the OS default — the launcher
+/// reserves its left gutter on macOS to clear them.
+pub fn apply_native_titlebar_runtime(_w: &WebviewWindow) {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::TitleBarStyle;
+        let _ = _w.set_decorations(true);
+        let _ = _w.set_title_bar_style(TitleBarStyle::Overlay);
+        let _ = _w.set_title("");
+    }
+}
 
 /// Bring a window to the foreground: undo a minimize, show it, take focus. The
 /// idempotent three-step every "focus the existing window" path repeats.

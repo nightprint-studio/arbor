@@ -42,11 +42,10 @@ fn create_or_focus(app: &AppHandle) {
 /// (a toolbox, not a workspace), centred and NOT maximised — unlike the product
 /// windows. The shell paints its own titlebar + window controls.
 fn build_launcher_window(app: &AppHandle) {
-    let res = WebviewWindowBuilder::new(app, LAUNCHER_WINDOW_LABEL, WebviewUrl::default())
+    let builder = WebviewWindowBuilder::new(app, LAUNCHER_WINDOW_LABEL, WebviewUrl::default())
         .title("Arbor")
         .inner_size(960.0, 640.0)
         .min_inner_size(720.0, 480.0)
-        .decorations(false)
         .shadow(true)
         .center()
         // Build HIDDEN and reveal once the launcher shell has painted (window_ready) —
@@ -55,8 +54,9 @@ fn build_launcher_window(app: &AppHandle) {
         .visible(false)
         // Match the main window's WebView2 env (see WEBVIEW_BROWSER_ARGS) —
         // mismatched args on a second webview → HRESULT 0x8007139F.
-        .additional_browser_args(WEBVIEW_BROWSER_ARGS)
-        .build();
+        .additional_browser_args(WEBVIEW_BROWSER_ARGS);
+    // Native traffic lights on macOS, frameless elsewhere (see super::native_titlebar).
+    let res = super::native_titlebar(builder).build();
 
     match res {
         Ok(_) => super::arm_ready_reveal(app, LAUNCHER_WINDOW_LABEL),

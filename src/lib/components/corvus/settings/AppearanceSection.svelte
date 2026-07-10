@@ -11,6 +11,7 @@
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { isMac } from '$lib/utils/platform';
 
   let { onOpenThemeEditor }: { onOpenThemeEditor: () => void } = $props();
 
@@ -58,15 +59,19 @@
     </div>
   </FormRow>
 
-  <FormRow label="Window controls" description="Style of the close/minimize/maximize buttons in the title bar. Position and size stay the same.">
-    <RadioGroup
-      value={appearanceStore.windowControlsStyle}
-      options={WC_OPTIONS}
-      appearance="segment"
-      size="sm"
-      onchange={(v) => appearanceStore.setWindowControlsStyle(v as WindowControlsStyle)}
-    />
-  </FormRow>
+  <!-- macOS paints the real traffic lights over the title bar, so this faux-control
+       toggle has no effect there and is hidden. -->
+  {#if !isMac}
+    <FormRow label="Window controls" description="Style of the close/minimize/maximize buttons in the title bar. Position and size stay the same.">
+      <RadioGroup
+        value={appearanceStore.windowControlsStyle}
+        options={WC_OPTIONS}
+        appearance="segment"
+        size="sm"
+        onchange={(v) => appearanceStore.setWindowControlsStyle(v as WindowControlsStyle)}
+      />
+    </FormRow>
+  {/if}
 
   <FormRow label="Compact title bar" description="Reduce the title-bar height for narrow displays.">
     <Toggle

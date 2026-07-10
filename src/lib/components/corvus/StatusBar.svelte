@@ -11,6 +11,7 @@
   import FeedbackStatusButtons from '$lib/feedback/FeedbackStatusButtons.svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
+  import { isMac } from '$lib/utils/platform';
 
   const activeTab = $derived(tabsStore.activeTab);
   const status    = $derived(repoStore.status);
@@ -98,7 +99,7 @@
   }
 </script>
 
-<div class="statusbar">
+<div class="statusbar" class:mac={isMac}>
   {#if activeTab}
 
     <!-- Branch chip (accent colored) — click copies branch name -->
@@ -322,6 +323,12 @@
     gap: 4px;
     flex-shrink: 0;
     overflow: hidden;
+  }
+  /* macOS: the maximised window has rounded bottom corners — inset the corner
+     chips (branch on the left, notifications on the right) so they clear the
+     curve instead of being clipped by it. */
+  .statusbar.mac {
+    padding: 0 10px;
   }
 
   /* Branch chip — primary accent */

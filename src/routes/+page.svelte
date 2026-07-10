@@ -2,6 +2,11 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import type { Component } from 'svelte';
   import { signalWindowReady } from '$lib/ipc/window';
+  import { applyOsAttribute } from '$lib/utils/platform';
+
+  // Stamp `<html data-os>` before any shell mounts so title-bar chrome reserves
+  // the macOS traffic-light gutter on its very first paint. Runs in every window.
+  applyOsAttribute();
 
   // Every window loads this same index.html; we branch on the window label to
   // mount the right shell:

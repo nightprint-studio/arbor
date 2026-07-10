@@ -123,11 +123,10 @@ fn create_or_focus(app: &AppHandle) {
 /// (Vite) and packaged builds. Frameless to match Arbor's main window; the
 /// standalone shell paints its own titlebar + WindowControls.
 fn build_explorer_window(app: &AppHandle, label: &str) {
-    let res = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
+    let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
         .title("File Explorer — Arbor")
         .inner_size(1100.0, 720.0)
         .min_inner_size(720.0, 460.0)
-        .decorations(false)
         .shadow(true)
         .center()
         // Build HIDDEN and reveal once the shell has painted (window_ready) — an
@@ -136,8 +135,9 @@ fn build_explorer_window(app: &AppHandle, label: &str) {
         .visible(false)
         // Match the main window's WebView2 env (see WEBVIEW_BROWSER_ARGS) —
         // mismatched args on a second webview → HRESULT 0x8007139F.
-        .additional_browser_args(WEBVIEW_BROWSER_ARGS)
-        .build();
+        .additional_browser_args(WEBVIEW_BROWSER_ARGS);
+    // Native traffic lights on macOS, frameless elsewhere (see super::native_titlebar).
+    let res = super::native_titlebar(builder).build();
 
     match res {
         Ok(_) => super::arm_ready_reveal(app, label),

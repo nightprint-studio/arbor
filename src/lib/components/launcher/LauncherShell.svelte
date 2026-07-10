@@ -248,7 +248,8 @@
   }
   .content { position: relative; height: 100%; display: flex; flex-direction: column; z-index: 1; }
 
-  .topbar { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; flex: none; }
+  /* Left padding falls back to 12px off macOS; on macOS it clears the native traffic lights. */
+  .topbar { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px var(--mac-traffic-gutter, 12px); flex: none; }
   .spacer { flex: 1; align-self: stretch; min-width: 12px; }
   .tb-right { display: flex; align-items: center; gap: 6px; flex: none; }
 

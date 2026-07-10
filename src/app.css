@@ -8,6 +8,12 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100vh; overflow: hidden; }
 
+/* macOS: the native traffic lights overlay the top-left of the custom title bar
+   (see window/mod.rs::native_titlebar). Reserve a left gutter so title-bar
+   content clears them. Consumed by every top title bar via padding-left. Stamped
+   by utils/platform.ts::applyOsAttribute. */
+:root[data-os="mac"] { --mac-traffic-gutter: 80px; }
+
 /* ---- Design Tokens ---- */
 :root {
   /* ── Theme-injected color vars (dark defaults for FOUC prevention) ──────

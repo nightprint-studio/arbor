@@ -19,6 +19,17 @@ impl PluginHost {
         self.plugins.iter().any(|p| p.manifest.name == name && p.is_enabled())
     }
 
+    /// True when this host owns a plugin with the given manifest name at all —
+    /// loaded (enabled or disabled) or dormant. Unlike [`is_plugin_enabled`] this
+    /// ignores the enabled flag. Callers that toggle a plugin across multiple
+    /// hosts (the marketplace touches both the launcher host and a product
+    /// backend) use it to no-op on the host that doesn't hold the plugin instead
+    /// of erroring with "plugin not found".
+    pub fn knows_plugin(&self, name: &str) -> bool {
+        self.plugins.iter().any(|p| p.manifest.name == name)
+            || self.dormant.iter().any(|d| d.manifest.name == name)
+    }
+
     pub fn list_plugin_info(&self) -> Vec<PluginInfo> {
         // Pre-build a reverse-edge map (dep_name → [dependent names]) so each
         // entry below can answer "who needs me?" in O(1). Both live and

@@ -42,6 +42,7 @@
   import { matchesBinding } from '$lib/utils/keybindings';
   import { tooltip } from '$lib/actions/tooltip';
   import { copyToClipboard } from '$lib/utils/clipboard';
+  import { isMac } from '$lib/utils/platform';
   import {
     fsReadDir, listFsRoots, listWslDistros, fsRename, fsCreateDir, fsCreateFile,
     fsCopy, fsMove, fsTrash, fsUntrash, fsDeleteMany, fsOpenDefault, fsRevealInDir, fsShowProperties, fsIcon,
@@ -138,8 +139,8 @@
   // svelte-ignore state_referenced_locally
   const pickerMulti = isPicker && mode === 'file' && multiple && !!onConfirmMulti;
   // macOS can't Put-Back to the original location, so Restore recovers to the
-  // Desktop there — surfaced in the Recycle Bin view + restore toast.
-  const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent || '');
+  // Desktop there — surfaced in the Recycle Bin view + restore toast. `isMac`
+  // (imported) also drives the native-traffic-light gutter/inset in this window.
   // Save-mode filename (editable in the footer). Clicking/double-clicking a file
   // populates it; Enter / the Save button commit `currentPath + filename`.
   // svelte-ignore state_referenced_locally
@@ -3561,7 +3562,9 @@
 {#if standalone}
   <!-- Dedicated window: frameless titlebar + WindowControls, body fills the OS window. -->
   <div class="fx-win">
-    <header class="fx-win-bar" data-tauri-drag-region>
+    <header class="fx-win-bar" class:mac={isMac} data-tauri-drag-region>
+      <!-- macOS: hairline dividing the native traffic-light gutter from the chrome. -->
+      {#if isMac}<div class="fx-win-mac-sep" aria-hidden="true"></div>{/if}
       <div class="fx-win-island fx-win-left">{@render headerNavButtons()}</div>
       <!-- Center zone: drag-region wrapper, address bar centered + capped. -->
       <div class="fx-win-center" data-tauri-drag-region>
@@ -3578,7 +3581,7 @@
         </ActivityBar>
       {/if}
     </div>
-    <footer class="fx-win-foot">{@render footerBody()}</footer>
+    <footer class="fx-win-foot" class:mac={isMac}>{@render footerBody()}</footer>
   </div>
 {:else}
   <Modal onClose={dismiss} width={isPicker ? '960px' : '1240px'} height={isPicker ? '620px' : '720px'}
@@ -3737,7 +3740,13 @@
      page collapsed). `min-height: 0` lets it shrink so the inner scroll panes size
      correctly. No `overflow: hidden` needed — the inner panels clip their own. */
   .fx-win { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-elevated); }
-  .fx-win-bar { display: flex; align-items: center; gap: 8px; height: 38px; flex-shrink: 0; padding-left: 10px; }
+  /* padding-left falls back to 10px off macOS; on macOS it becomes the traffic-light gutter. */
+  .fx-win-bar { display: flex; align-items: center; gap: 8px; height: 38px; flex-shrink: 0; padding-left: var(--mac-traffic-gutter, 10px); }
+  /* macOS: the native traffic lights replace our controls, so the right island is
+     the last element — give it room from the rounded corner. */
+  .fx-win-bar.mac { padding-right: 8px; }
+  /* macOS-only hairline separating the traffic-light gutter from the chrome. */
+  .fx-win-mac-sep { width: 1px; height: 16px; background: var(--border); flex-shrink: 0; -webkit-app-region: no-drag; }
   /* Interactive islands opt out of the titlebar drag region. */
   .fx-win-island { display: flex; align-items: center; gap: 8px; flex-shrink: 0; -webkit-app-region: no-drag; }
   /* Center zone fills the space between the left/right islands; the address
@@ -3753,6 +3762,9 @@
      recomputed reliably. */
   .fx-win-body { flex: 1; min-width: 0; min-height: 0; margin: 0 4px 4px; overflow: hidden; display: flex; flex-direction: column; }
   .fx-win-foot { display: flex; align-items: center; padding: var(--modal-footer-padding); background: var(--modal-chrome-bg); flex-shrink: 0; }
+  /* macOS: the maximised/standalone window has rounded bottom corners — inset the
+     footer's corner content so it clears the curve. */
+  .fx-win-foot.mac { padding-left: 14px; padding-right: 14px; }
 
   /* ══ Header chrome ══ */
   .fx-nav-btns { display: inline-flex; gap: 2px; flex-shrink: 0; }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
+  import { isMac } from '$lib/utils/platform';
   // Title bar lives at the very top — tooltips fly downward so they don't
   // get clipped by the window edge.
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
@@ -22,10 +23,12 @@
   const style = $derived(appearanceStore.windowControlsStyle);
 </script>
 
-<!-- Mac and Windows variants share the same outer wrapper but differ in
-     dimensions: mac keeps the original 18×18 trio with breathing room, while
-     windows goes IntelliJ-style — full title-bar height, no gap, flush to
-     the right edge so the close button reaches the corner. -->
+<!-- On macOS the OS paints the REAL traffic lights over our title bar (native
+     Overlay style — see window/mod.rs::native_titlebar), so we render nothing
+     here and let the platform own the min/max/close trio. Off macOS we paint our
+     own: the `style` setting picks the faux-mac trio (18×18, right-aligned) or
+     the Windows/IntelliJ trio (full-height, flush to the corner). -->
+{#if !isMac}
 <div class="window-controls no-drag" data-style={style}>
   {#if style === 'windows'}
     <button class="wc-btn wc-win wc-minimize" onclick={() => appWindow.minimize()} use:tooltip={'Minimize'} aria-label="Minimize">
@@ -75,6 +78,7 @@
     </button>
   {/if}
 </div>
+{/if}
 
 <style>
   .window-controls {

@@ -45,22 +45,24 @@ fn create_or_focus(app: &AppHandle) {
 /// titlebar + window controls. Opens maximised: a full IDE-style editor wants the
 /// screen.
 fn build_bennu_window(app: &AppHandle) {
-    let res = WebviewWindowBuilder::new(app, BENNU_WINDOW_LABEL, WebviewUrl::default())
+    let builder = WebviewWindowBuilder::new(app, BENNU_WINDOW_LABEL, WebviewUrl::default())
         .title("Bennu — Arbor")
         .inner_size(1320.0, 860.0)
         .min_inner_size(900.0, 600.0)
+        // Opens maximised — a zoom-to-fill, NOT a full-screen Space. No `.center()`:
+        // paired with `.maximized(true)` it raced and left the window off-centre at
+        // its restore size when maximise didn't take (the macOS frameless bug).
         .maximized(true)
-        .decorations(false)
         .shadow(true)
-        .center()
         // Build HIDDEN and reveal once the shell has painted (window_ready) — an
         // opaque WebView2 window would otherwise flash its white default page during
         // load. See super::window_ready / arm_ready_reveal.
         .visible(false)
         // Match the main window's WebView2 env (see WEBVIEW_BROWSER_ARGS) —
         // mismatched args on a second webview → HRESULT 0x8007139F.
-        .additional_browser_args(WEBVIEW_BROWSER_ARGS)
-        .build();
+        .additional_browser_args(WEBVIEW_BROWSER_ARGS);
+    // Native traffic lights on macOS, frameless elsewhere (see super::native_titlebar).
+    let res = super::native_titlebar(builder).build();
 
     match res {
         Ok(_) => super::arm_ready_reveal(app, BENNU_WINDOW_LABEL),

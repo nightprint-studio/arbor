@@ -47,25 +47,25 @@ fn create_or_focus(app: &AppHandle) {
 /// titlebar + window controls. Sized larger than the explorer: a DAW needs room
 /// for the tracks viz, the editor and the bottom console side by side.
 fn build_merula_window(app: &AppHandle) {
-    let res = WebviewWindowBuilder::new(app, MERULA_WINDOW_LABEL, WebviewUrl::default())
+    let builder = WebviewWindowBuilder::new(app, MERULA_WINDOW_LABEL, WebviewUrl::default())
         .title("merula — Arbor")
         // `inner_size` is the *restore* size (what you get after un-maximising);
         // the window opens maximised so a DAW lands full-screen, not at the small
-        // explorer footprint.
+        // explorer footprint. No `.center()` — it raced with `.maximized(true)` and
+        // left the window off-centre when maximise didn't take (macOS frameless bug).
         .inner_size(1320.0, 860.0)
         .min_inner_size(900.0, 600.0)
         .maximized(true)
-        .decorations(false)
         .shadow(true)
-        .center()
         // Build HIDDEN and reveal once the shell has painted (window_ready) — an
         // opaque WebView2 window would otherwise flash its white default page during
         // load. See super::window_ready / arm_ready_reveal.
         .visible(false)
         // Match the main window's WebView2 env (see WEBVIEW_BROWSER_ARGS) —
         // mismatched args on a second webview → HRESULT 0x8007139F.
-        .additional_browser_args(WEBVIEW_BROWSER_ARGS)
-        .build();
+        .additional_browser_args(WEBVIEW_BROWSER_ARGS);
+    // Native traffic lights on macOS, frameless elsewhere (see super::native_titlebar).
+    let res = super::native_titlebar(builder).build();
 
     match res {
         Ok(_) => super::arm_ready_reveal(app, MERULA_WINDOW_LABEL),
