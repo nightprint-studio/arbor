@@ -258,6 +258,8 @@
     margin-right: 8px;
     -webkit-app-region: no-drag;
   }
+  /* Fullscreen hides the traffic lights, so there's nothing to divide from. */
+  :global([data-fullscreen="true"]) .tb-mac-sep { display: none; }
 
   /* ── Hamburger trigger ──────────────────────────────────────────────── */
   .tb-hamburger {

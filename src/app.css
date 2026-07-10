@@ -13,6 +13,10 @@ html, body { height: 100vh; overflow: hidden; }
    content clears them. Consumed by every top title bar via padding-left. Stamped
    by utils/platform.ts::applyOsAttribute. */
 :root[data-os="mac"] { --mac-traffic-gutter: 80px; }
+/* In fullscreen macOS hides the traffic lights, so the gutter is dead space —
+   collapse it and every header's leading content (logo, hamburger, combo) slides
+   left to reclaim it. Stamped by utils/platform.ts::watchFullscreen. */
+:root[data-os="mac"][data-fullscreen="true"] { --mac-traffic-gutter: 0px; }
 
 /* ---- Design Tokens ---- */
 :root {

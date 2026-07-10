@@ -3747,6 +3747,8 @@
   .fx-win-bar.mac { padding-right: 8px; }
   /* macOS-only hairline separating the traffic-light gutter from the chrome. */
   .fx-win-mac-sep { width: 1px; height: 16px; background: var(--border); flex-shrink: 0; -webkit-app-region: no-drag; }
+  /* Fullscreen hides the traffic lights, so there's nothing to divide from. */
+  :global([data-fullscreen="true"]) .fx-win-mac-sep { display: none; }
   /* Interactive islands opt out of the titlebar drag region. */
   .fx-win-island { display: flex; align-items: center; gap: 8px; flex-shrink: 0; -webkit-app-region: no-drag; }
   /* Center zone fills the space between the left/right islands; the address

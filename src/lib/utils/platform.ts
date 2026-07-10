@@ -24,3 +24,34 @@ export function applyOsAttribute(): void {
   if (typeof document === 'undefined') return;
   document.documentElement.dataset.os = isMac ? 'mac' : 'other';
 }
+
+/**
+ * Track this window's fullscreen state and stamp `<html data-fullscreen>`.
+ * In fullscreen macOS hides the native traffic lights, so the reserved gutter
+ * (`--mac-traffic-gutter`) becomes dead space — the attribute lets global CSS
+ * collapse it to 0 and hide the divider, so every header's leading content slides
+ * left. macOS-only (the gutter is the sole consumer); a no-op elsewhere.
+ *
+ * Returns a disposer. Re-checks on every resize because Tauri exposes no dedicated
+ * fullscreen event and entering/leaving fullscreen always resizes the window.
+ */
+export function watchFullscreen(): () => void {
+  if (typeof document === 'undefined' || !isMac) return () => {};
+  let active = true;
+  let unlisten: (() => void) | null = null;
+  // Lazy import keeps this module free of a hard Tauri dependency (it's also read
+  // for `isMac` in plain-navigator contexts).
+  void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+    if (!active) return;
+    const w = getCurrentWindow();
+    const apply = async () => {
+      try {
+        const fs = await w.isFullscreen();
+        if (active) document.documentElement.dataset.fullscreen = fs ? 'true' : 'false';
+      } catch { /* non-Tauri / SSR */ }
+    };
+    void apply();
+    void w.onResized(apply).then(fn => { if (active) unlisten = fn; else fn(); });
+  });
+  return () => { active = false; unlisten?.(); };
+}
