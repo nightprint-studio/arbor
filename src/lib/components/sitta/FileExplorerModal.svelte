@@ -980,6 +980,18 @@
       // Generic external link (custom scheme, or http/https) → maybe open it.
       const scheme = externalScheme(t);
       if (scheme) { handleExternalLink(t, scheme); return; }
+      // Windows-Explorer-style terminal launch: typing a bare shell name opens
+      // the OS terminal in the current folder instead of navigating (cmd is the
+      // familiar one on Windows; terminal / shell read naturally on macOS/Linux;
+      // powershell / pwsh / bash / wt are accepted as synonyms). It always opens
+      // the OS default terminal — the word is just a trigger. Browse-only, and
+      // only when the current tab is a real directory.
+      if (view === 'browse' && currentPath && /^(cmd|terminal|shell|powershell|pwsh|bash|wt)$/i.test(t)) {
+        try { await fsOpenTerminal(currentPath); }
+        catch (e) { uiStore.showToast(`Couldn't open a terminal here: ${e}`, 'error'); }
+        tick().then(() => { if (view === 'browse') listEl?.focus(); });
+        return;
+      }
     }
     // Shell-style shortcuts: `%appdata%`, `$HOME`, `~/code`, … resolve to real
     // paths via the backend (env vars + cross-platform virtual names). Left as

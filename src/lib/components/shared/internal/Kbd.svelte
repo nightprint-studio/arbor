@@ -24,7 +24,8 @@
    */
   import type { Snippet } from 'svelte';
   import { keybindingsStore } from '$lib/stores/keybindings.svelte';
-  import { formatBinding, type Keybinding } from '$lib/utils/keybindings';
+  import { formatBinding, macKeyLabel, type Keybinding } from '$lib/utils/keybindings';
+  import { isMac } from '$lib/utils/platform';
 
   type Size    = 'sm' | 'md';
   type Tone    = 'default' | 'accent' | 'muted';
@@ -48,18 +49,24 @@
   }: Props = $props();
 
   // Live resolution — re-runs when keybindingsStore.custom changes.
+  // `formatBinding` is already macOS-aware; the free-form `label`/`keys` paths
+  // carry raw "Ctrl+…" text, so fold those to glyphs here on the Mac.
   const resolvedLabel = $derived.by(() => {
     if (action) {
       const b = keybindingsStore.getBinding(action);
       return b && b.key ? formatBinding(b) : null;
     }
     if (binding && binding.key) return formatBinding(binding);
-    return label ?? null;
+    if (label == null) return null;
+    return isMac ? macKeyLabel(label) : label;
   });
 
-  const parts = $derived(
-    keys ?? (resolvedLabel ? resolvedLabel.split('+').map(s => s.trim()).filter(Boolean) : []),
-  );
+  const parts = $derived.by(() => {
+    const raw = keys
+      ? (isMac ? macKeyLabel(keys.join('+')).split('+') : keys)
+      : (resolvedLabel ? resolvedLabel.split('+') : []);
+    return raw.map(s => s.trim()).filter(Boolean);
+  });
 
   // Render-nothing guard: only kicks in for the action/binding paths so
   // legacy callers passing an empty <Kbd> still render an empty box.
@@ -69,16 +76,17 @@
 
 {#if !empty}
   {#if variant === 'inline'}
-    <!-- IntelliJ-menu style: plain monospace muted text, no border, no bg. -->
+    <!-- IntelliJ-menu style: plain monospace muted text, no border, no bg.
+         macOS joins glyphs with no separator (⇧⌘K), elsewhere uses '+'. -->
     <span class="kbd-inline tone-{tone}">
-      {#if children}{@render children()}{:else}{resolvedLabel ?? parts.join('+') ?? ''}{/if}
+      {#if children}{@render children()}{:else}{parts.join(isMac ? '' : '+')}{/if}
     </span>
   {:else if children}
     <kbd class="kbd sz-{size} tone-{tone}">{@render children()}</kbd>
   {:else if parts.length > 1}
     <span class="kbd-combo sz-{size}">
       {#each parts as p, i}
-        {#if i > 0}<span class="kbd-plus" aria-hidden="true">+</span>{/if}
+        {#if i > 0 && !isMac}<span class="kbd-plus" aria-hidden="true">+</span>{/if}
         <kbd class="kbd sz-{size} tone-{tone}">{p}</kbd>
       {/each}
     </span>

@@ -9,14 +9,24 @@
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import { MERULA_BINDINGS, type MerulaBinding } from '../merula-keybindings';
-
-  let { onClose }: { onClose: () => void } = $props();
+  import { macKeyLabel } from '$lib/utils/keybindings';
+  import { isMac } from '$lib/utils/platform';
 
   /** Human key label for a single binding key (Space / letter / fn / punctuation). */
   function keyLabel(k: string): string {
     if (k === ' ') return 'Space';
     if (k.length === 1) return k.toUpperCase();
     return k; // F1, …
+  }
+
+  /**
+   * Render-time chord pieces. Built as words (Ctrl · Alt · Shift · key), then
+   * folded to macOS glyphs on the Mac via the shared {@link macKeyLabel} so the
+   * cheat-sheet matches the rest of the app. Also applies to the pre-split
+   * `keys` arrays (editor / contextual), so 'Ctrl' → ⌘ there too.
+   */
+  function displayParts(parts: string[]): string[] {
+    return isMac ? macKeyLabel(parts.join('+')).split('+') : parts;
   }
 
   /** The chord pieces, in render order (Ctrl · Alt · Shift · key). */
@@ -26,7 +36,7 @@
     if (b.alt) parts.push('Alt');
     if (b.shift) parts.push('Shift');
     parts.push(keyLabel(b.key));
-    return parts;
+    return displayParts(parts);
   }
 
   // Editor keys provided by CodeMirror (not keydown bindings in MERULA_BINDINGS) —
@@ -72,7 +82,7 @@
         <tr>
           <td class="sc-keys">
             {#each chord(b) as part, i (i)}
-              {#if i > 0}<span class="sc-plus">+</span>{/if}
+              {#if i > 0 && !isMac}<span class="sc-plus">+</span>{/if}
               <kbd>{part}</kbd>
             {/each}
           </td>
@@ -87,8 +97,8 @@
       {#each editorKeys as c (c.description)}
         <tr>
           <td class="sc-keys">
-            {#each c.keys as part, i (i)}
-              {#if i > 0}<span class="sc-plus">+</span>{/if}
+            {#each displayParts(c.keys) as part, i (i)}
+              {#if i > 0 && !isMac}<span class="sc-plus">+</span>{/if}
               <kbd>{part}</kbd>
             {/each}
           </td>
@@ -100,8 +110,8 @@
       {#each contextual as c (c.description)}
         <tr>
           <td class="sc-keys">
-            {#each c.keys as part, i (i)}
-              {#if i > 0}<span class="sc-plus">+</span>{/if}
+            {#each displayParts(c.keys) as part, i (i)}
+              {#if i > 0 && !isMac}<span class="sc-plus">+</span>{/if}
               <kbd>{part}</kbd>
             {/each}
           </td>

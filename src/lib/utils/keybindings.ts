@@ -1,3 +1,5 @@
+import { isMac } from './platform';
+
 export interface Keybinding {
   key: string;
   ctrl?: boolean;
@@ -185,11 +187,64 @@ export function matchesBinding(event: KeyboardEvent, binding: Keybinding): boole
 // awkwardly (the dedicated context-menu key reports as 'ContextMenu').
 const KEY_DISPLAY: Record<string, string> = { ContextMenu: 'Menu' };
 
+// macOS renders modifiers as glyphs. Arbor's logical `ctrl` maps to Cmd on the
+// Mac (see matchesBinding: `event.metaKey` counts as ctrl), so Ctrl → ⌘; the
+// Tauri-accelerator aliases (CmdOrCtrl, Super, …) fold into the same bucket.
+const MAC_MOD_ALIASES: Record<string, 'alt' | 'shift' | 'ctrl'> = {
+  ctrl: 'ctrl', control: 'ctrl', cmd: 'ctrl', command: 'ctrl',
+  cmdorctrl: 'ctrl', commandorcontrol: 'ctrl', meta: 'ctrl', super: 'ctrl', win: 'ctrl',
+  '⌘': 'ctrl',
+  alt: 'alt', option: 'alt', opt: 'alt', '⌥': 'alt',
+  shift: 'shift', '⇧': 'shift',
+};
+
+// Named (non-glyph) keys → their macOS glyph. Keyed case-insensitively and by
+// both the short label form ("Up") and the KeyboardEvent.key form ("ArrowUp"),
+// since free-form <Kbd label="…" /> strings use either.
+const MAC_KEY_ALIASES: Record<string, string> = {
+  enter: '↩', return: '↩', tab: '⇥', backspace: '⌫', delete: '⌦', del: '⌦',
+  escape: '⎋', esc: '⎋', space: '␣', spacebar: '␣',
+  up: '↑', down: '↓', left: '←', right: '→',
+  arrowup: '↑', arrowdown: '↓', arrowleft: '←', arrowright: '→',
+  home: '↖', end: '↘', pageup: '⇞', pagedown: '⇟', pgup: '⇞', pgdn: '⇟',
+};
+
+/**
+ * Convert a `'+'`-joined chord string ("Ctrl+Shift+E", "Alt+Left", "F1") to its
+ * macOS form: word modifiers become glyphs (⌥⇧⌘) reordered into Apple's
+ * canonical order, named keys become glyphs (Enter → ↩, Tab → ⇥, arrows, …).
+ * The `'+'` separator is preserved as a split token for {@link Kbd}; it is not
+ * necessarily rendered (macOS chords show glyphs with no separator).
+ *
+ * Non-macOS callers never invoke this — the wording (Ctrl/Alt/Shift) stays.
+ */
+export function macKeyLabel(label: string): string {
+  const mods = { alt: false, shift: false, ctrl: false };
+  const rest: string[] = [];
+  for (const tok of label.split('+').map(t => t.trim()).filter(Boolean)) {
+    const mod = MAC_MOD_ALIASES[tok.toLowerCase()];
+    if (mod) { mods[mod] = true; continue; }
+    rest.push(MAC_KEY_ALIASES[tok.toLowerCase()] ?? tok);
+  }
+  const out: string[] = [];
+  if (mods.alt)   out.push('⌥');
+  if (mods.shift) out.push('⇧');
+  if (mods.ctrl)  out.push('⌘');
+  out.push(...rest);
+  return out.join('+');
+}
+
+/**
+ * Format a binding for display. Builds the canonical "Ctrl+Alt+Shift+Key"
+ * string and, on macOS, folds it to native glyphs via {@link macKeyLabel}.
+ */
 export function formatBinding(binding: Keybinding): string {
+  const key = KEY_DISPLAY[binding.key] ?? (binding.key.length === 1 ? binding.key.toUpperCase() : binding.key);
   const parts: string[] = [];
   if (binding.ctrl)  parts.push('Ctrl');
   if (binding.alt)   parts.push('Alt');
   if (binding.shift) parts.push('Shift');
-  parts.push(KEY_DISPLAY[binding.key] ?? (binding.key.length === 1 ? binding.key.toUpperCase() : binding.key));
-  return parts.join('+');
+  parts.push(key);
+  const label = parts.join('+');
+  return isMac ? macKeyLabel(label) : label;
 }
