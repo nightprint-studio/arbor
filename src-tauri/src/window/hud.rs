@@ -87,7 +87,7 @@ fn build_hud_window(app: &AppHandle) {
         .title("Tyto — Recording")
         .inner_size(HUD_COMPACT_W, HUD_COMPACT_H)
         .decorations(false)
-        .transparent(false) // MUST stay opaque — see the module doc.
+        // .transparent(false) // MUST stay opaque — see the module doc.
         .always_on_top(true)
         .content_protected(true) // exclude the HUD from screen capture where honored.
         .shadow(true)

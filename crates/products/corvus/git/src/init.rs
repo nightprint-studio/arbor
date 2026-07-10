@@ -117,6 +117,35 @@ pub fn get_git_identity() -> (String, String) {
     (String::new(), String::new())
 }
 
+/// Write user.name and user.email to the **global** git config
+/// (`~/.gitconfig`), creating the file if it doesn't exist yet.
+///
+/// Used when a commit fails because the identity was never configured: the
+/// frontend collects name/email and calls this so `repo.signature()` can build
+/// the author signature on the retry. Writing to the global level (rather than
+/// per-repo) matches [`get_git_identity`], which reads from it.
+pub fn set_git_identity(name: &str, email: &str) -> Result<()> {
+    // Prefer the existing global config file; on a fresh machine `find_global`
+    // fails (no `~/.gitconfig` yet), so fall back to the conventional path and
+    // let libgit2 create it on the first write.
+    let path = match git2::Config::find_global() {
+        Ok(p) => p,
+        Err(_) => {
+            let home = std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .ok_or_else(|| {
+                    GitError::Other("Cannot locate home directory for git config".into())
+                })?;
+            Path::new(&home).join(".gitconfig")
+        }
+    };
+
+    let mut cfg = git2::Config::open(&path)?;
+    cfg.set_str("user.name", name)?;
+    cfg.set_str("user.email", email)?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Init entry point
 // ---------------------------------------------------------------------------

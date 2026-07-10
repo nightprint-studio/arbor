@@ -33,6 +33,14 @@ fn get_git_identity(_state: &CorvusState) -> Result<(String, String), String> {
     Ok(corvus_git::init::get_git_identity())
 }
 
+/// Write user.name / user.email to the global git config (`~/.gitconfig`).
+/// Called when a commit failed for lack of a configured identity, so the retry
+/// can build the author signature.
+#[arbor_rpc::handler]
+fn set_git_identity(_state: &CorvusState, name: String, email: String) -> Result<(), String> {
+    corvus_git::init::set_git_identity(&name, &email).map_err(|e| e.to_string())
+}
+
 /// Read metadata (path, name, current branch, bare/empty flags) from the repo
 /// opened for `tab_id`.
 ///

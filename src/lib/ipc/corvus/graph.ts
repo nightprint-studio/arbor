@@ -12,6 +12,10 @@ export const checkIsGitRepo = (path: string) =>
 export const getGitIdentity = () =>
   corvus<[string, string]>('get_git_identity');
 
+/** Write user.name / user.email to the global git config (`~/.gitconfig`). */
+export const setGitIdentity = (name: string, email: string) =>
+  corvus<void>('set_git_identity', { name, email });
+
 /** Initialise a new git repository with the given options. */
 export const initRepo = (path: string, tabId: string, options: InitRepoOptions) =>
   corvus<InitRepoResult>('init_repo', { path, tab_id: tabId, options });

@@ -43,8 +43,8 @@ pub use crate::worktree::{
     add_worktree, detect_project_type, list_worktrees, remove_worktree, ProjectType, WorktreeInfo,
 };
 pub use crate::init::{
-    get_git_identity, gitignore_content, init, is_git_repo, license_content, InitOutcome,
-    InitRepoOptions, PushFn,
+    get_git_identity, gitignore_content, init, is_git_repo, license_content, set_git_identity,
+    InitOutcome, InitRepoOptions, PushFn,
 };
 pub use crate::notes::{
     check_remote_status, delete_note, list_notes, set_note, CommitNote, NoteRemoteStatus,

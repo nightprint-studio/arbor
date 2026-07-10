@@ -57,6 +57,9 @@
 <h2>Commit form</h2>
 <p>The commit requires at least one staged file and a non-empty message. The first line becomes the summary; anything after a blank line becomes the extended body — standard git convention.</p>
 <p>Press <Kbd action="commit" /> in the message field to commit immediately.</p>
+<Callout variant="info" title="Git identity">
+  Every commit is stamped with an author name and email. If neither is configured yet, Arbor opens a <em>Set your Git identity</em> dialog on your first commit, saves what you enter to the global git config (<code>~/.gitconfig</code>), and completes the commit — so it applies to every repository from then on.
+</Callout>
 
 <h2>Discarding changes</h2>
 <p>Discarding restores a file (or all files) to match the current index. <strong>This is irreversible</strong> — any working-directory edits are permanently lost.</p>

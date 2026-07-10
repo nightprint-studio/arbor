@@ -65,14 +65,18 @@
     const dest = joinPath(parentDir.replace(/[\\/]+$/, ''), entry.display_name);
     busy = 'clone';
     try {
-      await cloneRepo({
+      // Re-point the entry at the path the clone actually landed at (canonical,
+      // as libgit2 reports it) — not the string-joined `dest`, which can differ
+      // (macOS `/private` symlink resolution, separators) and make relocate a
+      // silent no-op that leaves the row stuck on "not cloned"/"missing".
+      const info = await cloneRepo({
         url: entry.remote_url,
         dest_path: dest,
         branch: undefined,
         shallow: false,
         recurse_submodules: false,
       });
-      await relocateRepo(entry.id, dest);
+      await relocateRepo(entry.id, info.path || dest);
       await workspacesStore.reloadRegistry();
       uiStore.showToast(`Cloned "${entry.display_name}"`, 'success');
       onResolved();

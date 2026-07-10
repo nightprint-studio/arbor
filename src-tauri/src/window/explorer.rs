@@ -414,7 +414,7 @@ fn build_drag_overlay(app: &AppHandle) {
         .title("")
         .inner_size(360.0, 52.0)
         .decorations(false)
-        .transparent(true)
+        // .transparent(true)
         .always_on_top(true)
         .skip_taskbar(true)
         .resizable(false)

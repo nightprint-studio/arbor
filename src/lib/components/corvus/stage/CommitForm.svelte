@@ -9,10 +9,12 @@
   import { repoStore } from '$lib/stores/corvus/repo.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { commitChanges, getGitCommitTemplate } from '$lib/ipc/corvus/stage';
+  import { getGitIdentity } from '$lib/ipc/corvus/graph';
   import { graphStore } from '$lib/stores/corvus/graph.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
   import { commitConfigStore } from '$lib/stores/corvus/commit_config.svelte';
   import { pushBranch } from '$lib/ipc/corvus/remote';
+  import GitIdentityModal from '$lib/components/corvus/GitIdentityModal.svelte';
 
   let { onCommit }: { onCommit?: () => void } = $props();
 
@@ -20,6 +22,12 @@
   let amend            = $state(false);
   let committing       = $state(false);
   let textareaEl       = $state<HTMLTextAreaElement | undefined>(undefined);
+
+  // Git-identity prompt: shown when a commit fails because user.name/user.email
+  // are unset. `identityPromptPush` remembers whether the blocked commit was a
+  // "commit & push" so the retry after saving preserves that intent.
+  let identityPromptOpen = $state(false);
+  let identityPromptPush = $state(false);
 
   // Palette "Commit" / "Amend Last Commit" focus the textarea here.
   $effect(() => {
@@ -83,6 +91,15 @@
       try {
         oid = await commitChanges(activeTab.id, message.trim(), amend);
       } catch (err) {
+        // A missing git identity is the one commit failure the user can fix
+        // in-app: detect it (not by matching the git error string, which is a
+        // wire contract, but by probing the config) and offer the identity
+        // modal instead of a dead-end toast. The retry runs after they save.
+        if (await isMissingIdentity()) {
+          identityPromptPush = andPush;
+          identityPromptOpen = true;
+          return;
+        }
         uiStore.showToast(`Commit failed: ${err}`, 'error');
         return;
       }
@@ -138,6 +155,22 @@
     } finally {
       committing = false;
     }
+  }
+
+  // True when the global git config has no name or no email — the cause of the
+  // "config value 'user.name' was not found" commit failure.
+  async function isMissingIdentity(): Promise<boolean> {
+    try {
+      const [name, email] = await getGitIdentity();
+      return !name.trim() || !email.trim();
+    } catch {
+      return false;
+    }
+  }
+
+  function onIdentitySaved() {
+    identityPromptOpen = false;
+    handleCommit(identityPromptPush);
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -201,6 +234,13 @@
     />
   </div>
 </div>
+
+{#if identityPromptOpen}
+  <GitIdentityModal
+    onSaved={onIdentitySaved}
+    onCancel={() => (identityPromptOpen = false)}
+  />
+{/if}
 
 <style>
   .commit-form {

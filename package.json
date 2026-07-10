@@ -19,8 +19,11 @@
     "backends:dev": "cargo build -p corvus-be -p merula-be -p sitta-be -p tyto-be -p bennu-be",
     "backends:release": "cargo build --release -p corvus-be -p merula-be -p sitta-be -p tyto-be -p bennu-be",
     "backends:stage": "node scripts/stage-backends.mjs",
-    "tauri:dev": "npm run backends:dev && tauri dev",
-    "tauri:build": "npm run backends:release && npm run backends:stage && tauri build"
+    "sign:mac": "node scripts/sign-macos.mjs",
+    "tauri:dev": "yarn backends:dev && tauri dev",
+    "tauri:dev:signed": "yarn backends:dev && cargo build -p arbor && yarn sign:mac && tauri dev",
+    "tauri:build": "yarn backends:release && yarn backends:stage && tauri build",
+    "tauri:release": "yarn tauri:build"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.0",
