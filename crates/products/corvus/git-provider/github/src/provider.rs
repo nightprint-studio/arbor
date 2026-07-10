@@ -184,8 +184,8 @@ impl GitProvider for GithubProvider {
     async fn get_repo_file(&self, repo: &RepoRef, path: &str, branch: &str) -> Result<Option<Vec<u8>>, ProviderError> {
         repo::get_repo_file(&self.http, repo, path, branch).await
     }
-    async fn put_repo_file(&self, repo: &RepoRef, path: &str, branch: &str, content: &[u8], message: &str) -> Result<(), ProviderError> {
-        repo::put_repo_file(&self.http, repo, path, branch, content, message).await
+    async fn put_repo_files(&self, repo: &RepoRef, branch: &str, files: &[(String, Vec<u8>)], message: &str) -> Result<bool, ProviderError> {
+        repo::put_repo_files(&self.http, repo, branch, files, message).await
     }
 
     // ── MR / PR ──────────────────────────────────────────────────────────

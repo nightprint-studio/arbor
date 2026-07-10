@@ -46,12 +46,11 @@ pub(crate) fn build(state: &CorvusState, cfg: &SyncConfig) -> Result<Vec<BundleF
 
     let mut files: Vec<BundleFile> = Vec::new();
 
-    // Manifest — carries a timestamp, so it's excluded from the fingerprint.
+    // Manifest — intentionally STABLE (no timestamp/machine) so it doesn't churn
+    // the commit history; per-push metadata lives in the local config instead.
     let manifest = serde_json::json!({
         "schema_version": super::SCHEMA_VERSION,
         "product":        "corvus",
-        "machine":        super::machine_id(),
-        "pushed_at":      super::now_epoch(),
     });
     files.push(BundleFile {
         path:  super::F_MANIFEST.to_string(),

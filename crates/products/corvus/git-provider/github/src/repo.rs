@@ -8,6 +8,7 @@
 //! delegate wrapped wholesale in `ProviderError::Internal` — that behavior is
 //! preserved (see `list_user_repos`).
 
+use arbor_ipc::prelude::AuthSession;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::Deserialize;
 
@@ -368,90 +369,167 @@ pub(crate) async fn get_repo_file(
     Ok(Some(bytes.to_vec()))
 }
 
-/// Metadata slice used only to recover the blob `sha` of an existing file.
+// ── put_repo_files — atomic multi-file commit via the git data API ──────────
+//
+// ONE commit per push (not one per file), and NO empty commits: if the new tree
+// is identical to the current one, the commit is skipped. Flow: resolve the
+// branch head (absent on a fresh repo) → its tree → a blob per file → a new tree
+// over the base → compare shas → commit → move/create the ref.
+
 #[derive(Deserialize)]
-struct GhContentMeta {
+struct GhSha {
     sha: String,
 }
-
-/// Resolve the current blob sha of a file, or `None` when it doesn't exist yet.
-async fn get_file_sha(
-    http: &GithubHttp,
-    owner: &str,
-    name: &str,
-    path: &str,
-    branch: &str,
-) -> Result<Option<String>, ProviderError> {
-    let url = format!("https://api.github.com/repos/{owner}/{name}/contents/{path}?ref={branch}");
-    let resp = http
-        .send(|s| {
-            http.client()
-                .get(&url)
-                .header("Authorization", &s.auth_header)
-                .header("Accept", "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", "2022-11-28")
-                .header("User-Agent", "arbor-git-gui/1.0")
-        })
-        .await?;
-
-    if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(None);
-    }
-    if !resp.status().is_success() {
-        let s = resp.status();
-        let b = resp.text().await.unwrap_or_default();
-        return Err(classify(format!("GitHub file meta {s}: {b}")));
-    }
-    let meta: GhContentMeta = resp
-        .json()
-        .await
-        .map_err(|e| classify(format!("GitHub file meta parse: {e}")))?;
-    Ok(Some(meta.sha))
+#[derive(Deserialize)]
+struct GhRefObj {
+    object: GhSha,
+}
+#[derive(Deserialize)]
+struct GhCommitObj {
+    tree: GhSha,
 }
 
-pub(crate) async fn put_repo_file(
+/// Attach the standard GitHub API headers + the session auth header.
+fn gh_headers(rb: reqwest::RequestBuilder, s: &AuthSession) -> reqwest::RequestBuilder {
+    rb.header("Authorization", &s.auth_header)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .header("User-Agent", "arbor-git-gui/1.0")
+}
+
+pub(crate) async fn put_repo_files(
     http: &GithubHttp,
     repo: &RepoRef,
-    path: &str,
     branch: &str,
-    content: &[u8],
+    files: &[(String, Vec<u8>)],
     message: &str,
-) -> Result<(), ProviderError> {
+) -> Result<bool, ProviderError> {
     let owner = repo.owner_or_path.as_str();
     let name = repo
         .name
         .as_deref()
         .ok_or_else(|| ProviderError::BadRequest("GitHub RepoRef requires name".into()))?;
+    let api = format!("https://api.github.com/repos/{owner}/{name}");
 
-    let sha = get_file_sha(http, owner, name, path, branch).await?;
-    let url = format!("https://api.github.com/repos/{owner}/{name}/contents/{path}");
-    let mut body = serde_json::json!({
-        "message": message,
-        "content": BASE64.encode(content),
-        "branch":  branch,
-    });
-    if let Some(sha) = sha {
-        body["sha"] = serde_json::Value::String(sha);
+    // 1) Current branch head + its tree (both absent on a fresh, empty repo).
+    let ref_url = format!("{api}/git/ref/heads/{branch}");
+    let ref_resp = http.send(|s| gh_headers(http.client().get(&ref_url), s)).await?;
+    let (base_commit, base_tree): (Option<String>, Option<String>) =
+        if ref_resp.status() == reqwest::StatusCode::NOT_FOUND {
+            (None, None)
+        } else if ref_resp.status().is_success() {
+            let r: GhRefObj = ref_resp
+                .json()
+                .await
+                .map_err(|e| classify(format!("GitHub ref parse: {e}")))?;
+            let commit_url = format!("{api}/git/commits/{}", r.object.sha);
+            let c_resp = http.send(|s| gh_headers(http.client().get(&commit_url), s)).await?;
+            if !c_resp.status().is_success() {
+                let st = c_resp.status();
+                let b = c_resp.text().await.unwrap_or_default();
+                return Err(classify(format!("GitHub commit {st}: {b}")));
+            }
+            let c: GhCommitObj = c_resp
+                .json()
+                .await
+                .map_err(|e| classify(format!("GitHub commit parse: {e}")))?;
+            (Some(r.object.sha), Some(c.tree.sha))
+        } else {
+            let st = ref_resp.status();
+            let b = ref_resp.text().await.unwrap_or_default();
+            return Err(classify(format!("GitHub ref {st}: {b}")));
+        };
+
+    // 2) One blob per file.
+    let mut entries = Vec::with_capacity(files.len());
+    for (path, bytes) in files {
+        let blob_url = format!("{api}/git/blobs");
+        let blob_body = serde_json::json!({ "content": BASE64.encode(bytes), "encoding": "base64" });
+        let resp = http
+            .send(|s| gh_headers(http.client().post(&blob_url), s).json(&blob_body))
+            .await?;
+        if !resp.status().is_success() {
+            let st = resp.status();
+            let b = resp.text().await.unwrap_or_default();
+            return Err(classify(format!("GitHub blob {st}: {b}")));
+        }
+        let blob: GhSha = resp
+            .json()
+            .await
+            .map_err(|e| classify(format!("GitHub blob parse: {e}")))?;
+        entries.push(serde_json::json!({
+            "path": path, "mode": "100644", "type": "blob", "sha": blob.sha,
+        }));
     }
 
+    // 3) Build the tree (as a delta over the base when there is one).
+    let tree_url = format!("{api}/git/trees");
+    let mut tree_body = serde_json::json!({ "tree": entries });
+    if let Some(bt) = &base_tree {
+        tree_body["base_tree"] = serde_json::Value::String(bt.clone());
+    }
     let resp = http
-        .send(|s| {
-            http.client()
-                .put(&url)
-                .header("Authorization", &s.auth_header)
-                .header("Accept", "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", "2022-11-28")
-                .header("User-Agent", "arbor-git-gui/1.0")
-                .json(&body)
-        })
+        .send(|s| gh_headers(http.client().post(&tree_url), s).json(&tree_body))
         .await?;
-
     if !resp.status().is_success() {
-        let s = resp.status();
+        let st = resp.status();
         let b = resp.text().await.unwrap_or_default();
-        return Err(classify(format!("GitHub put file {s}: {b}")));
+        return Err(classify(format!("GitHub tree {st}: {b}")));
     }
-    Ok(())
+    let tree: GhSha = resp
+        .json()
+        .await
+        .map_err(|e| classify(format!("GitHub tree parse: {e}")))?;
+
+    // 4) Nothing changed → skip the commit entirely (no empty commits).
+    if base_tree.as_deref() == Some(tree.sha.as_str()) {
+        return Ok(false);
+    }
+
+    // 5) Create the commit.
+    let commit_url = format!("{api}/git/commits");
+    let mut commit_body = serde_json::json!({ "message": message, "tree": tree.sha });
+    if let Some(bc) = &base_commit {
+        commit_body["parents"] = serde_json::json!([bc]);
+    }
+    let resp = http
+        .send(|s| gh_headers(http.client().post(&commit_url), s).json(&commit_body))
+        .await?;
+    if !resp.status().is_success() {
+        let st = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(classify(format!("GitHub commit create {st}: {b}")));
+    }
+    let commit: GhSha = resp
+        .json()
+        .await
+        .map_err(|e| classify(format!("GitHub commit create parse: {e}")))?;
+
+    // 6) Move (or create) the branch ref.
+    if base_commit.is_some() {
+        let upd_url = format!("{api}/git/refs/heads/{branch}");
+        let upd_body = serde_json::json!({ "sha": commit.sha, "force": false });
+        let resp = http
+            .send(|s| gh_headers(http.client().patch(&upd_url), s).json(&upd_body))
+            .await?;
+        if !resp.status().is_success() {
+            let st = resp.status();
+            let b = resp.text().await.unwrap_or_default();
+            return Err(classify(format!("GitHub ref update {st}: {b}")));
+        }
+    } else {
+        let new_url = format!("{api}/git/refs");
+        let new_body = serde_json::json!({ "ref": format!("refs/heads/{branch}"), "sha": commit.sha });
+        let resp = http
+            .send(|s| gh_headers(http.client().post(&new_url), s).json(&new_body))
+            .await?;
+        if !resp.status().is_success() {
+            let st = resp.status();
+            let b = resp.text().await.unwrap_or_default();
+            return Err(classify(format!("GitHub ref create {st}: {b}")));
+        }
+    }
+    Ok(true)
 }
 
 // ---------------------------------------------------------------------------

@@ -77,17 +77,15 @@ pub(crate) async fn resolve_or_create(
 }
 
 fn from_info(provider_key: &str, owner: &str, name: &str, info: &RemoteRepoInfo) -> SyncRemote {
-    let branch = if info.default_branch.trim().is_empty() {
-        super::BRANCH.to_string()
-    } else {
-        info.default_branch.clone()
-    };
     SyncRemote {
         provider_key: provider_key.to_string(),
+        // Always `main` — matches `from_config` and the branch `put_repo_files`
+        // creates, so enable/push/pull all target the same branch regardless of
+        // the account's default-branch name.
         repo_ref: RepoRef::github(owner.to_string(), name.to_string()),
         full_name: info.full_name.clone(),
         clone_url: info.clone_url_https.clone(),
-        branch,
+        branch: super::BRANCH.to_string(),
     }
 }
 

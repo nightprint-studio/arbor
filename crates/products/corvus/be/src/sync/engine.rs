@@ -9,16 +9,16 @@ use super::BundleFile;
 
 const COMMIT_MSG: &str = "arbor: sync corvus settings";
 
-/// Write every bundle file to the remote on its branch.
-pub(crate) async fn push(remote: &SyncRemote, files: &[BundleFile]) -> Result<(), String> {
+/// Write the whole bundle to the remote in a **single commit**. Returns `true`
+/// when a commit was made, `false` when nothing changed (no empty commit).
+pub(crate) async fn push(remote: &SyncRemote, files: &[BundleFile]) -> Result<bool, String> {
     let provider = crate::provider::for_host(&remote.provider_key)?;
-    for f in files {
-        provider
-            .put_repo_file(&remote.repo_ref, &f.path, &remote.branch, &f.bytes, COMMIT_MSG)
-            .await
-            .map_err(crate::provider::pe)?;
-    }
-    Ok(())
+    let payload: Vec<(String, Vec<u8>)> =
+        files.iter().map(|f| (f.path.clone(), f.bytes.clone())).collect();
+    provider
+        .put_repo_files(&remote.repo_ref, &remote.branch, &payload, COMMIT_MSG)
+        .await
+        .map_err(crate::provider::pe)
 }
 
 /// Fetch the given paths from the remote. Missing files are silently skipped, so

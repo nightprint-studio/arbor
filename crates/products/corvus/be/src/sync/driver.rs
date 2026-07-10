@@ -63,7 +63,7 @@ fn run(state: Arc<CorvusState>, rt: tokio::runtime::Handle) {
         }
 
         match rt.block_on(crate::sync::engine::push(&remote, &files)) {
-            Ok(()) => {
+            Ok(_) => {
                 crate::sync::record_pushed(fp);
                 last_push = Some(Instant::now());
                 let _ = crate::corvus_config::update_sync(&state, |s| {

@@ -98,13 +98,14 @@ pub trait GitProvider: Send + Sync {
         let _ = (repo, path, branch);
         Err(ProviderError::Unsupported { feature: "get_repo_file".into() })
     }
-    /// Create or update the file at `path` on `branch` with `content`, committing
-    /// with `message`. Idempotent: an existing file is overwritten (the impl
-    /// resolves the current blob sha itself). The settings-sync engine writes a
-    /// bundle file into its private repo with it.
-    async fn put_repo_file(&self, repo: &RepoRef, path: &str, branch: &str, content: &[u8], message: &str) -> Result<(), ProviderError> {
-        let _ = (repo, path, branch, content, message);
-        Err(ProviderError::Unsupported { feature: "put_repo_file".into() })
+    /// Commit a set of files to `branch` in a **single commit**, creating the
+    /// branch if it doesn't exist yet. Returns `true` when a commit was made,
+    /// `false` when the resulting tree was identical to the current one (nothing
+    /// to commit — so no empty commits pile up). The settings-sync engine writes
+    /// its whole bundle atomically with this instead of one commit per file.
+    async fn put_repo_files(&self, repo: &RepoRef, branch: &str, files: &[(String, Vec<u8>)], message: &str) -> Result<bool, ProviderError> {
+        let _ = (repo, branch, files, message);
+        Err(ProviderError::Unsupported { feature: "put_repo_files".into() })
     }
 
     // ── MR / PR ──────────────────────────────────────────────────────────
