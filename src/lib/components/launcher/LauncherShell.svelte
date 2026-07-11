@@ -241,6 +241,10 @@
     overflow: hidden;
     background: #06080d;
     -webkit-font-smoothing: antialiased;
+    /* The launcher is frameless on every platform (no native macOS traffic lights),
+       so it must NOT reserve the app-wide traffic-light gutter — override it back to
+       a normal edge inset for the topbar padding below. */
+    --mac-traffic-gutter: 12px;
   }
   .overlay {
     position: absolute; inset: 0; pointer-events: none;
@@ -248,7 +252,7 @@
   }
   .content { position: relative; height: 100%; display: flex; flex-direction: column; z-index: 1; }
 
-  /* Left padding falls back to 12px off macOS; on macOS it clears the native traffic lights. */
+  /* Frameless launcher → no traffic-light gutter to clear (see `.launcher` override). */
   .topbar { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px var(--mac-traffic-gutter, 12px); flex: none; }
   .spacer { flex: 1; align-self: stretch; min-width: 12px; }
   .tb-right { display: flex; align-items: center; gap: 6px; flex: none; }

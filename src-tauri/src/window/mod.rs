@@ -101,24 +101,6 @@ pub fn native_titlebar<'a, R: Runtime, M: Manager<R>>(
     }
 }
 
-/// macOS: convert an already-created window to the native Overlay title bar. Used
-/// for the `main` launcher window, which is created from `tauri.conf.json` (so it
-/// can't go through [`native_titlebar`] at build time). No-op elsewhere.
-///
-/// The high-level API exposes no runtime traffic-light-position or hidden-title
-/// setter, so we blank the window title (otherwise macOS would draw it over the
-/// custom chrome) and let the lights sit at the OS default — the launcher
-/// reserves its left gutter on macOS to clear them.
-pub fn apply_native_titlebar_runtime(_w: &WebviewWindow) {
-    #[cfg(target_os = "macos")]
-    {
-        use tauri::TitleBarStyle;
-        let _ = _w.set_decorations(true);
-        let _ = _w.set_title_bar_style(TitleBarStyle::Overlay);
-        let _ = _w.set_title("");
-    }
-}
-
 /// Bring a window to the foreground: undo a minimize, show it, take focus. The
 /// idempotent three-step every "focus the existing window" path repeats.
 pub fn show_and_focus(w: &WebviewWindow) {

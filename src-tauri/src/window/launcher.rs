@@ -55,8 +55,11 @@ fn build_launcher_window(app: &AppHandle) {
         // Match the main window's WebView2 env (see WEBVIEW_BROWSER_ARGS) —
         // mismatched args on a second webview → HRESULT 0x8007139F.
         .additional_browser_args(WEBVIEW_BROWSER_ARGS);
-    // Native traffic lights on macOS, frameless elsewhere (see super::native_titlebar).
-    let res = super::native_titlebar(builder).build();
+    // Frameless on EVERY platform — no native macOS traffic lights here. Unlike the
+    // product windows, the launcher reduces to the tray on close (release), so it
+    // needs no OS window controls; `tauri dev` (no tray) paints its own dev-only
+    // close button. See LauncherShell.svelte.
+    let res = builder.decorations(false).build();
 
     match res {
         Ok(_) => super::arm_ready_reveal(app, LAUNCHER_WINDOW_LABEL),
