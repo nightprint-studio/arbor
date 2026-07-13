@@ -120,6 +120,67 @@ fn walk_types(
     }
 }
 
+/// The JVM **binary name** (package + nesting, `/`-separated) of the **innermost type declaration**
+/// whose byte range contains `byte_offset` — i.e. the type the caret is writing inside. `None` when
+/// the offset sits in no type body (file header, imports, between top-level types).
+///
+/// Used by member-access completion to decide **private** member visibility: a `private` member is
+/// accessible only from within its own top-level class (JLS §6.6.1), so completion compares this
+/// against each candidate member's declaring type. Same `/`-nesting convention as
+/// [`binary_of_type_at`] (`Outer/Inner`), so it lines up with indexed project binaries.
+pub fn enclosing_type_binary(source: &str, byte_offset: usize) -> Option<String> {
+    let mut parser = Parser::new();
+    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
+    let tree = parser.parse(source, None)?;
+    let bytes = source.as_bytes();
+    let root = tree.root_node();
+    let package = package_name(&root, bytes);
+    let mut found: Option<String> = None;
+    walk_enclosing(&root, bytes, package.as_deref(), None, byte_offset, &mut found);
+    found
+}
+
+/// Recursive walk tracking the innermost type declaration containing `offset` — descending into a
+/// containing type's body overwrites `found` with the nested binary, so the deepest wins.
+fn walk_enclosing(
+    node: &Node,
+    bytes: &[u8],
+    package: Option<&str>,
+    outer_binary: Option<&str>,
+    offset: usize,
+    found: &mut Option<String>,
+) {
+    let mut cur = node.walk();
+    for child in node.named_children(&mut cur) {
+        if matches!(
+            child.kind(),
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "record_declaration"
+                | "annotation_type_declaration"
+        ) {
+            let Some(name_node) = child.child_by_field_name("name") else { continue };
+            let Ok(name) = name_node.utf8_text(bytes) else { continue };
+            let binary = match outer_binary {
+                Some(o) => format!("{o}/{name}"),
+                None => match package {
+                    Some(p) => format!("{}/{name}", p.replace('.', "/")),
+                    None => name.to_string(),
+                },
+            };
+            if offset >= child.start_byte() && offset < child.end_byte() {
+                *found = Some(binary.clone());
+                if let Some(body) = child.child_by_field_name("body") {
+                    walk_enclosing(&body, bytes, package, Some(&binary), offset, found);
+                }
+            }
+        } else {
+            walk_enclosing(&child, bytes, package, outer_binary, offset, found);
+        }
+    }
+}
+
 /// The package name of a compilation unit, if declared.
 fn package_name(root: &Node, bytes: &[u8]) -> Option<String> {
     let mut cur = root.walk();
@@ -179,5 +240,18 @@ mod tests {
     fn binary_of_type_without_package() {
         let src = "class Bare {\n}\n";
         assert_eq!(binary_of_type_at(src, "Bare", 1).as_deref(), Some("Bare"));
+    }
+
+    #[test]
+    fn enclosing_type_binary_finds_innermost() {
+        let src = "package com.acme;\nclass Outer {\n  void m() {\n    int x = 0;\n  }\n  class Inner {\n    int y = 1;\n  }\n}\n";
+        // Offset inside `m()`'s body (the `int x` line) → Outer.
+        let in_m = src.find("int x").unwrap();
+        assert_eq!(enclosing_type_binary(src, in_m).as_deref(), Some("com/acme/Outer"));
+        // Offset inside Inner's body (`int y`) → the nested binary.
+        let in_inner = src.find("int y").unwrap();
+        assert_eq!(enclosing_type_binary(src, in_inner).as_deref(), Some("com/acme/Outer/Inner"));
+        // Offset in the file header (the package line) → not inside any type.
+        assert!(enclosing_type_binary(src, 3).is_none());
     }
 }

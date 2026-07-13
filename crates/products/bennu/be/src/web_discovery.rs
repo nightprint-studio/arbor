@@ -63,10 +63,31 @@ pub fn discover_web_inputs(root: &Path) -> WebInputs {
 /// Discover the project's JSP-family files (`*.jsp` / `*.jspf` / `*.tag` / `*.tagx`),
 /// project-wide. Used by action find-usages (which JSPs reference a given `<action>`).
 pub fn discover_jsp_files(root: &Path) -> Vec<PathBuf> {
-    find_files(root, &|n| {
-        let n = n.to_ascii_lowercase();
-        n.ends_with(".jsp") || n.ends_with(".jspf") || n.ends_with(".tag") || n.ends_with(".tagx")
-    })
+    find_files(root, &|n| is_jsp_family(n))
+}
+
+/// Whether a file NAME is a JSP-family page (`.jsp` / `.jspf` / `.tag` / `.tagx`), case-insensitive.
+pub fn is_jsp_family(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.ends_with(".jsp") || n.ends_with(".jspf") || n.ends_with(".tag") || n.ends_with(".tagx")
+}
+
+/// Candidate **webapp source** directories, relative to a project root — the folder that holds the
+/// JSPs + `WEB-INF` (Maven's `src/main/webapp` first, then the common legacy layouts). Ordered by
+/// precedence; the FIRST that exists on disk is the project's webapp root.
+pub const WEBAPP_DIR_CANDIDATES: &[&str] =
+    &["src/main/webapp", "web", "WebContent", "webapp", "src/webapp", "WebRoot"];
+
+/// Every existing webapp source directory under `root` (in precedence order). Empty when the
+/// project has no recognizable webapp layout.
+pub fn webapp_dirs(root: &Path) -> Vec<PathBuf> {
+    WEBAPP_DIR_CANDIDATES.iter().map(|b| root.join(b)).filter(|p| p.is_dir()).collect()
+}
+
+/// The project's PRIMARY webapp source directory (the first existing candidate) — where its JSPs
+/// live. `None` when the project isn't a web app (no `src/main/webapp` &co.).
+pub fn source_webapp_dir(root: &Path) -> Option<PathBuf> {
+    webapp_dirs(root).into_iter().next()
 }
 
 /// Recursively collect files under `dir` whose file name matches `matcher`, skipping

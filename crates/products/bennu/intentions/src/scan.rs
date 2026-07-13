@@ -2,14 +2,26 @@
 //! `np_equals`, …). String/char/comment-aware forward scanning without a full parse — enough for
 //! caret-anchored quick-fixes that only need to find a call's parens or a literal's bounds.
 
-/// Is `c` a valid first char of a Java identifier?
-pub(crate) fn is_ident_start(c: u8) -> bool {
-    c.is_ascii_alphabetic() || c == b'_' || c == b'$'
+// A non-ASCII byte (≥ 0x80) is treated as an identifier byte. Java identifiers admit Unicode
+// letters (JLS §3.8 — `à`, `è`, `ù` in legacy Italian code all qualify), but more importantly this
+// keeps the byte-level scanners **char-boundary safe**: a multibyte UTF-8 char is all ≥ 0x80 bytes,
+// so a scan consuming/stopping on identifier bytes never halts in the MIDDLE of one. Without this a
+// backward walk (`chain_start`) stops on a continuation byte and the caller's `&source[i..]` slice
+// panics ("byte index is not a char boundary") on any accented identifier. It's a deliberate
+// over-approximation (a stray `©` in code would count too) — the transforms trim/re-parse the
+// extracted text, so precision isn't required here; boundary safety is.
+const fn is_ident_byte(c: u8) -> bool {
+    c >= 0x80
 }
 
-/// Is `c` a valid non-first char of a Java identifier?
+/// Is `c` a valid first char of a Java identifier (byte-level, non-ASCII-permissive — see note)?
+pub(crate) fn is_ident_start(c: u8) -> bool {
+    c.is_ascii_alphabetic() || c == b'_' || c == b'$' || is_ident_byte(c)
+}
+
+/// Is `c` a valid non-first char of a Java identifier (byte-level, non-ASCII-permissive — see note)?
 pub(crate) fn is_ident_part(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'_' || c == b'$'
+    c.is_ascii_alphanumeric() || c == b'_' || c == b'$' || is_ident_byte(c)
 }
 
 /// Index just past the closing quote of the string/char literal starting at `open` (`"`/`'`).
@@ -146,6 +158,22 @@ pub(crate) fn chain_start(b: &[u8], end: usize) -> Option<usize> {
         Some(i)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chain_start_returns_char_boundary_on_accented_identifier() {
+        // `società1` before `==`: the backward walk must consume the whole `à` (a 2-byte char), not
+        // stop on its continuation byte — else the caller's `&source[start..]` slice panics.
+        let src = "società1 == true";
+        let end = src.find(" ==").expect("operator present");
+        let start = chain_start(src.as_bytes(), end).expect("chain found");
+        assert!(src.is_char_boundary(start), "start {start} must be a char boundary");
+        assert_eq!(&src[start..end], "società1");
     }
 }
 

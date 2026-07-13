@@ -244,7 +244,11 @@
           diags = ds.map((d) => ({ from: d.start, to: d.end, severity: d.severity, message: d.message }));
           bennuDiagnosticsStore.setActiveFileDiagnostics(path, ds);
         })
-        .catch(() => { if (!cancelled) diags = []; });
+        // A full-pass FAILURE (backend error/panic) must NOT blank the editor: keep whatever the
+        // fast pure-AST pass already painted, so a single failing resolver check can't make all
+        // validation — syntax included — appear to vanish. An empty *success* still clears via the
+        // `.then` above.
+        .catch(() => {});
     };
     if (isJava) {
       // Two-tier validation (IntelliJ's fast-syntax-then-semantic model) so a big file stays

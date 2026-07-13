@@ -156,6 +156,10 @@ mod run_config;
 // Main-class discovery (run-config editor's picker): `bennu_main_classes` — a fresh
 // `.java` scan for types declaring `public static void main(String[])`.
 mod main_classes;
+// Tomcat JSP hot-swap (per-repo `[bennu.tomcat]`): `bennu_get/set_tomcat_config` (the link) +
+// `bennu_detect_tomcat` (validate a Tomcat root + resolve the deployed context) + `bennu_hotswap_jsp`
+// (copy one/all JSPs into the exploded webapp so Jasper recompiles them — no redeploy/restart).
+mod tomcat;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, `bennu_config_dir()` /

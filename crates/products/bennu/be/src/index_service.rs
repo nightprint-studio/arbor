@@ -29,8 +29,14 @@ use std::collections::HashMap;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::time::Duration;
+
+/// Coalescing window for the config-graph rebuild after a `.xml` edit: the worker waits this long
+/// (absorbing the rest of a typing burst) before running the O(whole-project) rebuild, so a run of
+/// keystrokes collapses into one rebuild instead of one per debounced change.
+const CONFIG_REBUILD_COALESCE_MS: u64 = 300;
 
 use arbor_feedback::prelude::{JobSpec, JobStatus};
 use arbor_ipc::prelude::{EventSink, HostCaller};
@@ -39,7 +45,8 @@ use bennu_index::prelude::Symbol;
 use crate::jobs::JobHandle;
 use bennu_intel::prelude::{
     build_project_index_from_sources, collect_annotation_beans, file_records_from_source,
-    ingest_config_graph, read_java_sources, ActionVerdict, CompletionItem, ConfigResolver,
+    ingest_config_graph, read_java_sources, ActionVerdict, AnnotationBean, CompletionItem,
+    ConfigResolver,
     DeclarationLocation, HoverInfo as IntelHoverInfo, IntelProvider, NativeJavaProvider,
     NonCompliantSource, Position, ProjectSources, ReferencesResult, RenameEngine, RenamePlan,
 };
@@ -357,6 +364,26 @@ struct ProjectSlot {
     /// live), so `index_stats.ready` — which the FE's "Indexing" card finishes on — stays
     /// false through the O(N) reference walk and the References-index step remains visible.
     ready: AtomicBool,
+    /// Coalescing coordinator for the config-graph rebuild triggered by a `.xml` edit. A config
+    /// rebuild is O(whole project) — it walks the tree, parses every config XML, and (the first
+    /// time after a Java change) re-decodes every source to re-collect annotation beans — so it
+    /// must NOT run once per keystroke. This gates it to at most one running + one pending
+    /// rebuild per slot, off the request thread. See [`IndexService::schedule_config_rebuild`].
+    config_rebuild: ConfigRebuild,
+}
+
+/// Coalescing state for a slot's config-graph rebuild — see [`ProjectSlot::config_rebuild`].
+#[derive(Default)]
+struct ConfigRebuild {
+    /// Bumped on every `.xml` edit: the newest logical version a rebuild must catch up to.
+    requested: AtomicU64,
+    /// Whether a worker thread is currently active (so a keystroke coalesces into it instead of
+    /// spawning a second whole-project rebuild).
+    running: AtomicBool,
+    /// Cached annotation beans + the Java-edit generation (`patch_counts.total`) they were
+    /// computed at. A config-only edit (no Java changed since) reuses these instead of
+    /// re-reading + re-decoding every source in the project — the dominant cost of a rebuild.
+    beans: Mutex<Option<(u64, Arc<Vec<AnnotationBean>>)>>,
 }
 
 /// The process-wide index service (one per `bennu-be`).
@@ -528,6 +555,7 @@ impl IndexService {
             types: AtomicUsize::new(0),
             members: AtomicUsize::new(0),
             ready: AtomicBool::new(false),
+            config_rebuild: ConfigRebuild::default(),
         });
         self.slots.lock().unwrap_or_else(|p| p.into_inner()).insert(root_path.clone(), slot.clone());
 
@@ -784,6 +812,20 @@ impl IndexService {
         Some(cache.clone())
     }
 
+    /// Every declared project type across ALL open projects (each slot's class-navigator cache),
+    /// concatenated. Used by cross-file resolution (JSP → action class chain) so an action class
+    /// indexed under a DIFFERENT open project/module than the JSP it's referenced from still resolves
+    /// — the JSP (webapp) and the action (a Java module) can live under separate roots. Empty until a
+    /// build lands.
+    pub fn all_project_classes(&self) -> Vec<ClassEntry> {
+        let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        let mut out = Vec::new();
+        for slot in slots.values() {
+            out.extend(slot.classes.read().unwrap_or_else(|p| p.into_inner()).iter().cloned());
+        }
+        out
+    }
+
     /// The source files that weren't valid in the project's declared encoding (recovered +
     /// indexed, but flagged) for the project rooted at `root`. Empty when no slot owns `root`,
     /// the build hasn't landed, or every file was compliant. Served by `bennu_encoding_report`.
@@ -883,12 +925,27 @@ impl IndexService {
             let mut g = self.incremental.lock().unwrap_or_else(|p| p.into_inner());
             g.remove(&file_key).unwrap_or_default()
         };
-        let out = provider.validate_incremental(source, &ctx, status.any_installed, resolver_rev, &mut cache);
-        {
-            let mut g = self.incremental.lock().unwrap_or_else(|p| p.into_inner());
-            g.insert(file_key, cache);
+        // Contain a panic in any single resolver-backed check (e.g. an out-of-bounds byte slice on
+        // some buffer content). Without this, the panic surfaces as an RPC error → the FE's full-pass
+        // promise rejects → EVERY squiggle is wiped (syntax included) and live validation looks dead.
+        // On a panic we discard the (possibly half-updated) incremental cache and fall back to the
+        // pure-AST checks, so the editor keeps at least syntax/structure diagnostics. The default
+        // panic hook still prints the offending location to stderr, so the real bug stays diagnosable.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            provider.validate_incremental(source, &ctx, status.any_installed, resolver_rev, &mut cache)
+        }));
+        match result {
+            Ok(out) => {
+                let mut g = self.incremental.lock().unwrap_or_else(|p| p.into_inner());
+                g.insert(file_key, cache);
+                out
+            }
+            Err(_) => {
+                eprintln!("bennu-be: validation panicked for {file}; falling back to syntax-only checks");
+                // Nothing reinserted → the next validation of this file starts from a fresh cache.
+                bennu_check::prelude::check_file(source, &ctx)
+            }
         }
-        out
     }
 
     /// The "resolver revision" for `file` — combined with the per-body text hash + the structural hash,
@@ -1831,11 +1888,13 @@ impl IndexService {
     pub fn patch_file(&self, file: &str, source: Option<&str>) {
         let Some(slot) = self.slot_for_file(file) else { return };
 
-        // A config (`.xml`) edit changes the config graph, not the Java index → rebuild
-        // the config resolver rather than mis-parsing XML as Java. (Cheap: bounded walk +
-        // parse.)
+        // A config (`.xml`) edit changes the config graph, not the Java index → rebuild the
+        // config resolver rather than mis-parsing XML as Java. This is O(whole project), so it
+        // is COALESCED onto a background worker (never per-keystroke) — see the doc of
+        // `schedule_config_rebuild`. That is why editing XML no longer thrashes the disk like a
+        // Java edit's cheap in-memory overlay never did.
         if is_xml_config(file) {
-            self.rebuild_config(&slot);
+            self.schedule_config_rebuild(&slot);
             return;
         }
         if !is_java(file) {
@@ -1891,8 +1950,52 @@ impl IndexService {
         refresh_class_cache_for_file(&slot, &file_path, source);
     }
 
-    /// Re-parse + re-ingest the project's config graph (after a struts/spring/tiles XML
-    /// edit), swapping the live [`ConfigResolver`] in. Non-fatal on failure.
+    /// Schedule a coalesced, off-request-thread rebuild of the config graph after a `.xml` edit.
+    ///
+    /// A rebuild is O(whole project). Running it synchronously on every debounced keystroke (the
+    /// old behavior) stacks N concurrent whole-project disk walks — that is what made XML editing
+    /// "tremendously slow" while Java stayed smooth (Java takes a cheap in-memory overlay patch).
+    /// This instead:
+    ///   * bumps `requested` (the newest version a rebuild must reach), and
+    ///   * ensures **exactly one** worker thread is active per slot; a keystroke arriving while a
+    ///     rebuild runs just advances `requested`, and the worker re-runs once more at the end.
+    /// So a burst of edits collapses into one rebuild + at most one trailing rebuild, never a
+    /// pile-up. The short coalescing sleep batches a typing burst before the (slow) rebuild fires.
+    fn schedule_config_rebuild(&self, slot: &Arc<ProjectSlot>) {
+        let cr = &slot.config_rebuild;
+        cr.requested.fetch_add(1, Ordering::SeqCst);
+        // If a worker already owns the rebuild, it will observe this newer `requested` and re-run.
+        if cr.running.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let slot = Arc::clone(slot);
+        std::thread::spawn(move || {
+            let svc = IndexService::global();
+            let cr = &slot.config_rebuild;
+            loop {
+                // Absorb the rest of a typing burst before paying for the whole-project rebuild.
+                std::thread::sleep(Duration::from_millis(CONFIG_REBUILD_COALESCE_MS));
+                let target = cr.requested.load(Ordering::SeqCst);
+                svc.rebuild_config(&slot);
+                // Edits that landed DURING the (slow) rebuild advanced `requested` past `target`
+                // → loop again to catch them; otherwise try to retire the worker.
+                if cr.requested.load(Ordering::SeqCst) != target {
+                    continue;
+                }
+                cr.running.store(false, Ordering::SeqCst);
+                // Close the lost-wakeup race: an edit between the check above and this store bumps
+                // `requested` then sees `running == true` and returns, trusting us. Re-check and
+                // re-acquire ownership if so; if another edit already claimed it, let that one run.
+                if cr.requested.load(Ordering::SeqCst) == target || cr.running.swap(true, Ordering::SeqCst) {
+                    break;
+                }
+            }
+        });
+    }
+
+    /// Re-parse + re-ingest the project's config graph (after a struts/spring/tiles XML edit),
+    /// swapping the live [`ConfigResolver`] in. Non-fatal on failure. Runs on the coalescing
+    /// worker (see [`schedule_config_rebuild`]), never directly on the keystroke path.
     fn rebuild_config(&self, slot: &Arc<ProjectSlot>) {
         let inputs = discover_web_inputs(&slot.root);
         if inputs.struts_roots.is_empty() && inputs.spring_files.is_empty() {
@@ -1902,17 +2005,35 @@ impl IndexService {
         // Config `config-*` files are read back into OWNED memory (no lingering mmap), so
         // re-ingesting into the current gen dir is safe to overwrite. Snapshot the path.
         let index_dir = slot.index_dir.read().unwrap_or_else(|p| p.into_inner()).clone();
-        // Re-collect annotation-declared beans so a `.java` that added/removed a `@Service`
-        // since the last full build is reflected on this config rebuild. Costs one source
-        // walk (bounded), acceptable off the keystroke path (this is a config-XML edit).
-        let ProjectSources { sources, .. } = read_java_sources(&slot.root, &slot.encoding_label);
-        let annotation_beans = collect_annotation_beans(&sources);
+        let annotation_beans = self.annotation_beans_cached(slot);
         match ingest_config_graph(&graph, &index_dir, &annotation_beans) {
             Ok(cfg) => {
                 *slot.config.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(cfg));
             }
             Err(e) => eprintln!("bennu-be: config rebuild failed: {e}"),
         }
+    }
+
+    /// Annotation-declared beans (`@Service`/`@Component`/…) for the config resolver's fallback,
+    /// cached per slot and keyed by the Java-edit generation (`patch_counts.total`). A config-only
+    /// XML edit — the common case while typing in `struts.xml` — reuses the cache and skips the
+    /// whole-project source re-read + re-decode entirely. The cache is recomputed once after any
+    /// Java edit, so an added/removed `@Service` is still reflected on the next config rebuild.
+    fn annotation_beans_cached(&self, slot: &Arc<ProjectSlot>) -> Arc<Vec<AnnotationBean>> {
+        let java_gen = self.patch_counts.lock().unwrap_or_else(|p| p.into_inner()).total;
+        {
+            let g = slot.config_rebuild.beans.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some((gen, beans)) = g.as_ref() {
+                if *gen == java_gen {
+                    return Arc::clone(beans);
+                }
+            }
+        }
+        let ProjectSources { sources, .. } = read_java_sources(&slot.root, &slot.encoding_label);
+        let beans = Arc::new(collect_annotation_beans(&sources));
+        *slot.config_rebuild.beans.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some((java_gen, Arc::clone(&beans)));
+        beans
     }
 
     /// The slot whose root is the longest prefix of `file`.
@@ -2124,10 +2245,12 @@ fn finish_bennu_job(
 }
 
 /// Emit a toast notification to the bennu window (`plugin:notification`, re-emitted by the shell).
+/// `target:"bennu"` is REQUIRED: the feedback router (`makeAccepts`) drops untagged notifications
+/// for a non-main host, so without it the bennu window shows nothing at all.
 fn notify(sink: &Arc<dyn EventSink>, title: &str, message: &str, level: &str) {
     sink.emit(
         "plugin:notification",
-        json!({ "plugin": "bennu", "title": title, "message": message, "level": level }),
+        json!({ "plugin": "bennu", "target": "bennu", "title": title, "message": message, "level": level }),
     );
 }
 

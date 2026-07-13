@@ -163,6 +163,12 @@ pub fn infer_receiver_type(
     // local scopes. Splice a dummy call at the caret so the buffer parses cleanly,
     // then work on the repaired source. In a real editor there is usually a partial
     // identifier already; this just normalises the empty-prefix case.
+    // Clamp the caret to a valid char boundary ≤ len before slicing `source` below — a stale/
+    // out-of-range offset (or, defensively, one mid-multibyte-char) would panic the slice.
+    let mut byte_offset = byte_offset.min(source.len());
+    while byte_offset > 0 && !source.is_char_boundary(byte_offset) {
+        byte_offset -= 1;
+    }
     let needs_stub = matches!(
         source.as_bytes().get(byte_offset),
         None | Some(b' ' | b'\t' | b'\n' | b'\r' | b'}' | b')' | b';')

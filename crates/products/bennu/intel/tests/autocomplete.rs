@@ -154,6 +154,41 @@ fn local_variable_receiver_resolves() {
     assert!(labels.contains(&"legs".to_string()), "local Dog offers inherited legs, got {labels:?}");
 }
 
+// ── Visibility ───────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn private_member_hidden_from_external_receiver() {
+    // `pooch` is a Dog parameter in Owner — an external receiver. `Dog.barks` is private, so it
+    // must NOT be offered across classes (it was, before visibility filtering).
+    let p = zoo();
+    let s = p.source("Owner.java").to_string();
+    let labels = p.complete_labels("Owner.java", at_pooch_dot(&s));
+    assert!(
+        !labels.contains(&"barks".to_string()),
+        "private field must be hidden from an external receiver, got {labels:?}"
+    );
+}
+
+#[test]
+fn private_member_shown_within_same_class() {
+    // Within its own class body, a private member IS accessible and must still be offered.
+    let d = Project::new(&[(
+        "Cat.java",
+        "package zoo;\n\
+         public class Cat {\n\
+         \x20   private int lives;\n\
+         \x20   public int look() { return this.\n }\n\
+         }\n",
+    )]);
+    let s = d.source("Cat.java").to_string();
+    let off = at(&s, "this.") + "this.".len();
+    let labels = d.complete_labels("Cat.java", off);
+    assert!(
+        labels.contains(&"lives".to_string()),
+        "private field visible within its own class, got {labels:?}"
+    );
+}
+
 // ── Detail rendering ─────────────────────────────────────────────────────────────────────────
 
 #[test]

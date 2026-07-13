@@ -55,6 +55,8 @@ function createBennuUiStore() {
   let indexInspectorOpen = $state(false);
   // Project mojibake-scan modal (whole-project UTF-8-as-Cp1252 corruption report).
   let mojibakeScanOpen = $state(false);
+  // Tomcat hot-swap settings modal (link a Tomcat + pick the deployed webapp).
+  let tomcatConfigOpen = $state(false);
   // File Structure popup (Ctrl+F12) — a searchable quick-outline of the active file.
   let fileStructureOpen = $state(false);
   // About Bennu modal.
@@ -116,6 +118,7 @@ function createBennuUiStore() {
     get navInitial()   { return navInitial; },
     get indexInspectorOpen() { return indexInspectorOpen; },
     get mojibakeScanOpen() { return mojibakeScanOpen; },
+    get tomcatConfigOpen() { return tomcatConfigOpen; },
     get fileStructureOpen() { return fileStructureOpen; },
     get aboutOpen()    { return aboutOpen; },
     get generateOpen() { return generateOpen; },
@@ -162,6 +165,8 @@ function createBennuUiStore() {
     closeIndexInspector() { indexInspectorOpen = false; },
     openMojibakeScan() { mojibakeScanOpen = true; },
     closeMojibakeScan() { mojibakeScanOpen = false; },
+    openTomcatConfig() { tomcatConfigOpen = true; },
+    closeTomcatConfig() { tomcatConfigOpen = false; },
     openFileStructure() { fileStructureOpen = true; },
     closeFileStructure() { fileStructureOpen = false; },
     openAbout()          { aboutOpen = true; },

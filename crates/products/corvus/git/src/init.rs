@@ -166,12 +166,48 @@ pub async fn init(
 ) -> Result<InitOutcome> {
     let p = Path::new(path);
 
+    // Whether `.git` already existed — so the transactional rollback below only ever removes a
+    // `.git` WE created, never a pre-existing repo (defensive: init is FE-gated to non-repos, but a
+    // rollback that could nuke a real repo is never acceptable).
+    let git_dir = p.join(".git");
+    let git_preexisted = git_dir.exists();
+
     // git init with the specified default branch name
     let mut init_opts = RepositoryInitOptions::new();
     init_opts.initial_head(&options.default_branch);
     let repo = Repository::init_opts(p, &init_opts)
         .map_err(GitError::Git)?;
 
+    // Everything past `Repository::init_opts` is TRANSACTIONAL: `init_opts` already created `.git`
+    // with an unborn `HEAD`, and if a later step fails (a bad remote URL, an FS/permission error, a
+    // commit failure on a machine with a broken git identity) the repo is left half-initialised — a
+    // `.git` with a branch that was never born and no commit, which is unusable and which the user
+    // would otherwise have to delete by hand. So on ANY hard error, tear `.git` back down and leave
+    // the folder exactly as clean as we found it. A push failure is NOT such an error — it's carried
+    // out in `InitOutcome.push_error`, so a good repo with a failed push is kept.
+    match init_contents(&repo, p, options, push) {
+        Ok(outcome) => Ok(outcome),
+        Err(e) => {
+            // Drop the handle before removing `.git`: on Windows an open `Repository` locks files
+            // inside `.git`, so the removal would fail and the broken repo would persist.
+            drop(repo);
+            if !git_preexisted {
+                let _ = std::fs::remove_dir_all(&git_dir);
+            }
+            Err(e)
+        }
+    }
+}
+
+/// The post-`init` steps (generated files, remote wiring, the initial commit, the optional push).
+/// Split out of [`init`] so a failure in any of them can roll `.git` back — see the call site.
+/// `repo` is the already-opened repository. Not `async`: the push closure is synchronous.
+fn init_contents(
+    repo: &Repository,
+    p: &Path,
+    options: &InitRepoOptions,
+    push: PushFn<'_>,
+) -> Result<InitOutcome> {
     // .git/description
     if !options.description.trim().is_empty() {
         let _ = std::fs::write(p.join(".git").join("description"), options.description.trim());
@@ -222,7 +258,7 @@ pub async fn init(
     // Initial commit
     let has_commit = if options.initial_commit {
         let (name, email) = effective_identity(options);
-        make_initial_commit(&repo, &name, &email, &options.commit_message, &options.default_branch)?;
+        make_initial_commit(repo, &name, &email, &options.commit_message, &options.default_branch)?;
         true
     } else {
         false
@@ -237,7 +273,7 @@ pub async fn init(
     if options.push_initial && remote_url.is_some() && has_commit {
         let branch = &options.default_branch;
         let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
-        match push(&repo, "origin", &refspec, false) {
+        match push(repo, "origin", &refspec, false) {
             Ok(_) => {
                 // Set upstream tracking so subsequent fetch/pull/push work
                 // without -u. Failure here is non-fatal — the push itself

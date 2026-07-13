@@ -64,6 +64,7 @@
   import BennuGotoModal from './BennuGotoModal.svelte';
   import BennuIndexInspectorModal from './BennuIndexInspectorModal.svelte';
   import BennuMojibakeScanModal from './BennuMojibakeScanModal.svelte';
+  import BennuTomcatConfigModal from './BennuTomcatConfigModal.svelte';
   // The job-output bottom panel: shared chrome (lives under corvus/jobs/ but depends only on the
   // shared jobsStore + uiStore — the same one FeedbackHost's JobsOverlay uses). Mounted here so
   // "view output" from Bennu's Jobs overlay opens the panel instead of doing nothing.
@@ -74,7 +75,7 @@
   import type { GenerateMode } from './bennu-intentions';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { workspacesStore } from '$lib/stores/bennu/workspaces.svelte';
-  import { isJavaFile, supportsCodeNav } from './file-kind';
+  import { isJavaFile, isJspFile, supportsCodeNav } from './file-kind';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
@@ -84,6 +85,8 @@
   import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
+  import { bennuTomcatStore } from '$lib/stores/bennu/tomcat.svelte';
+  import { hotswapJsp } from '$lib/ipc/bennu/tomcat';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 
   onMount(() => {
@@ -184,6 +187,31 @@
   // Alt+Enter "Generate…" intention → open the Generate modal in that mode.
   function openGenerateFromIntention(mode: GenerateMode) {
     bennuUiStore.openGenerate(mode);
+  }
+
+  // ── Tomcat JSP hot-swap ───────────────────────────────────────────────────────
+  /** Deploy the current JSP (`all=false`) or every project JSP (`all=true`) into the linked
+   *  Tomcat's exploded webapp. Opens the Tomcat settings modal when no server is linked yet.
+   *  The BE fires the success/failure toast; the current buffer is saved first so fresh bytes ship. */
+  async function deployToTomcat(all: boolean) {
+    const root = projectStore.project?.root;
+    if (!root) return;
+    if (!bennuTomcatStore.isLoaded(root)) await bennuTomcatStore.load(root);
+    if (!bennuTomcatStore.isLinked(root)) {
+      toastStore.show('Link a Tomcat to hot-swap JSPs', 'info');
+      bennuUiStore.openTomcatConfig();
+      return;
+    }
+    const path = projectStore.activeFilePath;
+    if (!all && !isJspFile(path)) { toastStore.show('Open a JSP to deploy it', 'info'); return; }
+    // Save the active JSP first so the copy ships the latest edits (byte-for-byte off disk).
+    if (!all) await projectStore.saveActive();
+    try {
+      await hotswapJsp(root, all ? undefined : path ?? undefined);
+      // The BE emits the success toast (with the count / target); nothing else to do here.
+    } catch {
+      // The BE also emits the failure toast; swallow to avoid a duplicate.
+    }
   }
 
   // ── Left/right rail items ────────────────────────────────────────────────────
@@ -307,6 +335,8 @@
         when: projectStore.activeFilePath?.toLowerCase().endsWith('-validation.xml') ?? false },
       { id: 'createvalidation', title: 'Create Struts validation file', icon: 'shield',
         action: () => run(() => void editor?.createValidationFile()), when: isJava },
+      { id: 'hotswap-jsp', title: 'Deploy current JSP to Tomcat', icon: 'server', shortcut: 'Ctrl+Shift+F10',
+        action: () => run(() => void deployToTomcat(false)), when: isJspFile(path) },
       // Indentation — mirrors the footer control (BennuIndentStatus). Gated to the
       // alternatives only (the active style / width is hidden), so at most 3 entries show.
       { id: 'indent-spaces', title: 'Indent using spaces', icon: 'indent',
@@ -344,6 +374,8 @@
         action: () => run(() => void bennuRunStore.stop()), when: bennuRunStore.running },
       { id: 'runcfg', title: 'Edit run configuration…', icon: 'sliders',
         action: () => run(() => bennuUiStore.openRunConfig()), when: !!projectStore.project },
+      { id: 'hotswap-all', title: 'Deploy all JSPs to Tomcat', icon: 'server',
+        action: () => run(() => void deployToTomcat(true)), when: !!projectStore.project },
     ];
     // Switch project — one entry per other project in the ACTIVE workspace (keyboard-first).
     const projectSwitchItems = projectStore.hasWorkspace
@@ -370,6 +402,7 @@
       { id: 'newworkspace', title: 'New workspace…', icon: 'folder-tree',
         action: () => run(async () => { await workspacesStore.create('New workspace'); bennuUiStore.openWorkspaceManager(); }), when: true },
       { id: 'projectcfg', title: 'Project Configuration…', icon: 'sliders', action: () => run(() => bennuUiStore.openProjectConfig()), when: !!projectStore.project },
+      { id: 'tomcatcfg', title: 'Tomcat hot-swap…', icon: 'server', action: () => run(() => bennuUiStore.openTomcatConfig()), when: !!projectStore.project },
       { id: 'indexinspector', title: 'Index inspector…', icon: 'box', action: () => run(() => bennuUiStore.openIndexInspector()), when: !!projectStore.project },
       { id: 'reindex', title: 'Rebuild index', icon: 'refresh-cw',
         action: () => run(() => { const r = projectStore.project?.root; if (r) void bennuIndexStore.rebuild(r); }),
@@ -429,6 +462,11 @@
     if (!mod && e.shiftKey && !e.altKey && e.key === 'F10') {
       if (!projectStore.project || bennuRunStore.active) return;
       e.preventDefault(); triggerRun(); return;
+    }
+    // Deploy current JSP to Tomcat (Ctrl+Shift+F10) — the JSP hot-swap.
+    if (mod && e.shiftKey && !e.altKey && e.key === 'F10') {
+      if (!projectStore.project) return;
+      e.preventDefault(); void deployToTomcat(false); return;
     }
 
     // Find in project (Ctrl+Shift+F) — a modal, replacing the old Search rail.
@@ -592,6 +630,10 @@
 
 {#if bennuUiStore.mojibakeScanOpen}
   <BennuMojibakeScanModal onClose={() => bennuUiStore.closeMojibakeScan()} />
+{/if}
+
+{#if bennuUiStore.tomcatConfigOpen}
+  <BennuTomcatConfigModal onClose={() => bennuUiStore.closeTomcatConfig()} />
 {/if}
 
 {#if bennuUiStore.aboutOpen}

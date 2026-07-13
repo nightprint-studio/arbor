@@ -504,8 +504,9 @@
 
   async function handleInitRepo(opts: InitRepoOptions) {
     initModalOpen = false;
+    let repoId: string | null = null;
     try {
-      const repoId = await workspacesStore.ensureRepoRegistered(initModalPath);
+      repoId = await workspacesStore.ensureRepoRegistered(initModalPath);
       const result = await initRepo(initModalPath, repoId, opts);
       tabsStore.addTab(result.info);
       uiStore.addRecentRepo(initModalPath);
@@ -540,6 +541,12 @@
         );
       }
     } catch (err) {
+      // Init failed. The BE rolls back any half-created `.git`, so undo the registry entry we
+      // created above too — otherwise a dangling entry points at a folder that is no longer a repo
+      // (the exact "unusable repo I had to drop" the transactional init is meant to prevent).
+      if (repoId) {
+        try { await workspacesStore.deregisterRepo(repoId); } catch { /* best-effort cleanup */ }
+      }
       uiStore.showToast(`Failed to initialize repository: ${err}`, 'error');
     }
   }
