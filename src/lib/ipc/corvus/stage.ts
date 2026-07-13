@@ -42,6 +42,27 @@ export const discardAll = async (tabId: string): Promise<void> => {
   invalidateTabCache(tabId);
 };
 
+// ── Folder / multi-path (ATOMIC — one index write / checkout for the whole group) ─────
+// Staging a folder must NOT fan out N concurrent single-file RPCs: each opens its own repo
+// handle and rewrites the whole `.git/index`, so parallel writes race (last-writer-wins → only
+// a subset staged, or an `index.lock` collision). These pass the full path list to a single
+// handler that mutates the index once.
+
+export const stagePaths = async (tabId: string, paths: string[]): Promise<void> => {
+  await corvus<void>('stage_paths', { tab_id: tabId, paths });
+  invalidateTabCache(tabId);
+};
+
+export const unstagePaths = async (tabId: string, paths: string[]): Promise<void> => {
+  await corvus<void>('unstage_paths', { tab_id: tabId, paths });
+  invalidateTabCache(tabId);
+};
+
+export const discardPaths = async (tabId: string, paths: string[]): Promise<void> => {
+  await corvus<void>('discard_paths', { tab_id: tabId, paths });
+  invalidateTabCache(tabId);
+};
+
 export const stagePatch = async (tabId: string, patch: string): Promise<void> => {
   await corvus<void>('stage_patch', { tab_id: tabId, patch });
   invalidateTabCache(tabId);

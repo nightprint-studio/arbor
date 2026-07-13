@@ -784,6 +784,20 @@ impl IndexService {
         Some(cache.clone())
     }
 
+    /// Every declared project type across ALL open projects (each slot's class-navigator cache),
+    /// concatenated. Used by cross-file resolution (JSP → action class chain) so an action class
+    /// indexed under a DIFFERENT open project/module than the JSP it's referenced from still resolves
+    /// — the JSP (webapp) and the action (a Java module) can live under separate roots. Empty until a
+    /// build lands.
+    pub fn all_project_classes(&self) -> Vec<ClassEntry> {
+        let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        let mut out = Vec::new();
+        for slot in slots.values() {
+            out.extend(slot.classes.read().unwrap_or_else(|p| p.into_inner()).iter().cloned());
+        }
+        out
+    }
+
     /// The source files that weren't valid in the project's declared encoding (recovered +
     /// indexed, but flagged) for the project rooted at `root`. Empty when no slot owns `root`,
     /// the build hasn't landed, or every file was compliant. Served by `bennu_encoding_report`.
@@ -2124,10 +2138,12 @@ fn finish_bennu_job(
 }
 
 /// Emit a toast notification to the bennu window (`plugin:notification`, re-emitted by the shell).
+/// `target:"bennu"` is REQUIRED: the feedback router (`makeAccepts`) drops untagged notifications
+/// for a non-main host, so without it the bennu window shows nothing at all.
 fn notify(sink: &Arc<dyn EventSink>, title: &str, message: &str, level: &str) {
     sink.emit(
         "plugin:notification",
-        json!({ "plugin": "bennu", "title": title, "message": message, "level": level }),
+        json!({ "plugin": "bennu", "target": "bennu", "title": title, "message": message, "level": level }),
     );
 }
 

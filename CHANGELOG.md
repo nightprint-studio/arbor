@@ -7,8 +7,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Corvus** (Git): **Stage / unstage / discard folder** in the Stage panel works reliably again — it staged only some of a folder's files (or failed outright) because it fired one request per file in parallel, which raced on the git index; the whole folder is now applied in a single atomic operation.
+- **Corvus** (Git): **Initialize repository** no longer leaves behind a broken, half-initialized repo when a step fails (e.g. a bad remote URL or a git-identity problem) — init is now transactional: on any failure it rolls back the `.git` it created, so the folder is left clean and you can retry instead of having to delete and recreate it.
+
 ### Added
 
+- **Bennu** (Java editor): **Tomcat JSP hot-swap** — link a project to a local Tomcat (*Tomcat hot-swap…* in the Command Palette; pick the Tomcat root and Bennu auto-detects the deployed web app by finalName/artifactId/folder or the single deployed app). **Ctrl+Shift+F10** deploys the current JSP into the running server at its matching path, and *Deploy all JSPs to Tomcat* pushes every page — Tomcat recompiles them on next request, no redeploy or restart. A toast confirms what shipped.
 - **Sitta** (File Explorer): typing a shell name in the address bar — `cmd`, `terminal`, `shell` (or `powershell` / `pwsh` / `bash` / `wt`) — opens your OS terminal in the current folder, mirroring the `cmd` trick in Windows Explorer's address bar.
 
 - **Corvus** (Git): **Settings Sync** — mirror your workspaces, settings, installed-mod list and light plugin data to a private GitHub repo (created automatically if it doesn't exist), so a new machine picks up where you left off. Enable it in Settings → Git → *Settings Sync* (choose GitHub; the repo name is optional and auto-generated); it auto-pushes on a configurable interval and via *Sync: Push now* in the Command Palette. *Sync: Pull & merge…* opens a per-item review where you choose local vs. remote for each workspace, settings group, mod state and plugin data — repos are matched by remote URL, and ones missing locally are listed to clone. Repository paths, credentials and heavy caches/indexes are never synced.

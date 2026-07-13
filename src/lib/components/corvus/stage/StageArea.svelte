@@ -17,7 +17,7 @@
   import { compactMiddleDirs } from '$lib/utils/file-tree/compact-middle-dirs';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import StashDialog from '$lib/components/shared/internal/StashDialog.svelte';
-  import { getStatus, stageFile, unstageFile, stageAll, unstageAll, discardFile, discardAll, stagePatch } from '$lib/ipc/corvus/stage';
+  import { getStatus, stageFile, unstageFile, stageAll, unstageAll, discardFile, discardAll, stagePatch, stagePaths, unstagePaths, discardPaths } from '$lib/ipc/corvus/stage';
   import { stashSave } from '$lib/ipc/corvus/branch';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
   import { getWorkdirDiff } from '$lib/ipc/corvus/diff';
@@ -389,7 +389,7 @@
   async function handleStageFolder(paths: string[]) {
     if (!tab || paths.length === 0) return;
     try {
-      await Promise.all(paths.map(p => stageFile(tab!.id, p)));
+      await stagePaths(tab!.id, paths);
       await refreshStatus();
       uiStore.showToast(`Staged ${paths.length} file${paths.length !== 1 ? 's' : ''}`, 'success');
     } catch (err) {
@@ -400,7 +400,7 @@
   async function handleUnstageFolder(paths: string[]) {
     if (!tab || paths.length === 0) return;
     try {
-      await Promise.all(paths.map(p => unstageFile(tab!.id, p)));
+      await unstagePaths(tab!.id, paths);
       await refreshStatus();
       uiStore.showToast(`Unstaged ${paths.length} file${paths.length !== 1 ? 's' : ''}`, 'success');
     } catch (err) {
@@ -420,7 +420,7 @@
   async function executeDiscardFolder(paths: string[]) {
     if (!tab) return;
     try {
-      await Promise.all(paths.map(p => discardFile(tab!.id, p)));
+      await discardPaths(tab!.id, paths);
       for (const p of paths) {
         if (diffStore.selectedFile?.path === p) diffStore.setFiles([]);
       }

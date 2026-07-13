@@ -87,19 +87,59 @@ fn binding_key(file: &str) -> String {
     file.replace('\\', "/")
 }
 
+/// Whether the JSP→action go-to diagnostic log is enabled (env `BENNU_GOTO_LOG` set at BE launch).
+/// Gated so the per-keystroke lint/hover paths (which share the resolution helpers) stay silent —
+/// only an explicit repro with the flag on emits the trace. Read once, then cached.
+fn goto_log_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("BENNU_GOTO_LOG").is_some())
+}
+
+/// Emit one JSP→action go-to diagnostic line to **stderr** (stdout is the RPC protocol channel).
+/// A no-op unless [`goto_log_enabled`]. Grep the BE console for `[bennu-goto]`.
+fn goto_log(args: std::fmt::Arguments) {
+    if goto_log_enabled() {
+        eprintln!("[bennu-goto] {args}");
+    }
+}
+
 /// The action a JSP's OGNL is bound to: the persisted pin, else the SINGLE reverse-lookup candidate.
 /// `None` for an ambiguous view (no pin and 0 or >1 candidates) → OGNL stays silent (no false hits).
-fn jsp_bound_action(svc: &IndexService, file: &str) -> Option<String> {
+fn jsp_bound_action(svc: &IndexService, file: &str, source: &str) -> Option<String> {
     let cfg = bennu_core::config::load();
     if let Some(a) = cfg.jsp_action_bindings.get(&binding_key(file)) {
+        goto_log(format_args!("jsp_bound_action: PINNED '{a}' (key '{}')", binding_key(file)));
         return Some(a.clone());
     }
     let cands = svc.jsp_action_candidates(file);
+    goto_log(format_args!(
+        "jsp_bound_action: no pin (key '{}'), {} reverse candidate(s): {:?}",
+        binding_key(file),
+        cands.len(),
+        cands.iter().map(|(q, _)| q.as_str()).collect::<Vec<_>>(),
+    ));
     if cands.len() == 1 {
-        Some(cands[0].0.clone())
-    } else {
-        None
+        return Some(cands[0].0.clone());
     }
+    // Fallback: the page's OWN form action. A self-posting `<form action="X">` (the norm in legacy
+    // Struts) both renders FROM and submits TO action X, so the page's standalone OGNL `%{prop}` refs
+    // (e.g. `<s:if test="%{elencoRiservato}">`) resolve against X's value stack — the same action its
+    // form fields already bind to. Used only when the reverse view→action lookup didn't decide (0 or
+    // ambiguous) and there's no pin, and only when the page names a SINGLE distinct form action.
+    let actions: BTreeSet<String> = parse_jsp_forms(source)
+        .into_iter()
+        .filter_map(|f| f.action)
+        .filter(|a| !a.trim().is_empty())
+        .collect();
+    goto_log(format_args!(
+        "jsp_bound_action: form-action fallback, {} distinct form action(s): {:?}",
+        actions.len(),
+        actions
+    ));
+    if actions.len() == 1 {
+        return actions.into_iter().next();
+    }
+    None
 }
 
 // ── action class chain (own + project superclasses) ─────────────────────────────
@@ -127,19 +167,54 @@ fn superclass_of(src: &str, simple: &str, classes: &[ClassEntry]) -> Option<Stri
 /// its real declaration; the lint never flags it). Stops at the first library/unknown super (its
 /// accessors — e.g. `ActionSupport`'s — are rarely form-bound, so missing them is a false-negative,
 /// never a false positive). Empty when `fqcn` isn't a readable project class.
-fn class_chain(svc: &IndexService, near_file: &str, fqcn: &str) -> Vec<(String, String)> {
+fn class_chain(svc: &IndexService, fqcn: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
-    let Some(root) = svc.root_for_file(near_file) else { return out };
-    let Some(classes) = svc.class_index(&root) else { return out };
+    // Search EVERY open project's class index (not just the JSP's own root): the JSP (webapp) and the
+    // action class (a Java module) can live under separate roots, and the go-to must still find it.
+    let classes = svc.all_project_classes();
+    goto_log(format_args!(
+        "class_chain: seek '{fqcn}' across {} indexed project class(es)",
+        classes.len()
+    ));
+    if classes.is_empty() {
+        return out;
+    }
     let mut cur = fqcn.to_string();
     let mut seen = HashSet::new();
     let mut depth = 0;
     while depth < 20 && seen.insert(cur.clone()) {
-        let Some(entry) = classes.iter().find(|c| c.fqcn == cur) else { break };
-        // Normalize to LF so the property accessor go-to offset lands correctly in the editor's LF
-        // document (a CRLF action class would otherwise drift the target).
-        let Ok(raw) = std::fs::read_to_string(&entry.file) else { break };
-        let src = bennu_project::prelude::normalize_newlines(&raw);
+        // The action's class FQCN from the config graph may not match the class-index FQCN
+        // byte-for-byte (a Spring bean/proxy, a package alias, a nested `Outer$Inner` vs `Outer.Inner`
+        // form). Fall back to the simple name so the chain still finds the class — mirroring
+        // `resolve_super_fqcn`'s fqcn-then-simple lookup. Without this the whole chain is empty →
+        // `resolve_action` returns None → JSP→action go-to silently fails (and the lint goes quiet).
+        let entry = classes.iter().find(|c| c.fqcn == cur).or_else(|| {
+            let simple = cur.rsplit(['.', '/', '$']).next().unwrap_or(cur.as_str());
+            classes.iter().find(|c| c.simple == simple)
+        });
+        let Some(entry) = entry else {
+            goto_log(format_args!(
+                "class_chain: '{cur}' NOT found (by fqcn or simple name) — chain stops here"
+            ));
+            break;
+        };
+        goto_log(format_args!("class_chain: matched '{cur}' -> {} ({})", entry.fqcn, entry.file));
+        // Read + decode in the PROJECT's source encoding — legacy trees are frequently Cp1252, and
+        // `read_to_string` is UTF-8-only: a non-UTF-8 action class would fail the read here, break out
+        // with an EMPTY chain, and silently kill BOTH the JSP→action go-to and the property lint (which
+        // shares this chain). Decode via `decode_for_index` (declared encoding, recover on mismatch)
+        // then normalize to LF so the accessor offset lands correctly in the editor's LF document.
+        let Ok(bytes) = std::fs::read(&entry.file) else {
+            goto_log(format_args!("class_chain: read failed for {}", entry.file));
+            break;
+        };
+        let enc = svc
+            .root_for_file(&entry.file)
+            .map(|r| crate::index_service::resolve_index_encoding(&r))
+            .unwrap_or_default();
+        let src = bennu_project::prelude::normalize_newlines(
+            &bennu_project::prelude::decode_for_index(&bytes, &enc).text,
+        );
         let sup = superclass_of(&src, &entry.simple, &classes);
         out.push((entry.file.clone(), src));
         match sup {
@@ -190,8 +265,36 @@ fn target_in_chain(
 fn resolve_action(svc: &IndexService, file: &str, action: &str) -> Option<(String, Vec<(String, String)>)> {
     let (fqcn, _config, _writable, _validated) = svc.form_action_context(file, action);
     let fqcn = fqcn?;
-    let chain = class_chain(svc, file, &fqcn);
+    let chain = class_chain(svc, &fqcn);
     if chain.is_empty() {
+        return None;
+    }
+    let simple = fqcn.rsplit('.').next().unwrap_or(&fqcn).to_string();
+    Some((simple, chain))
+}
+
+/// Resolve a **bound** action (a pinned / reverse-lookup qname) to its (simple, chain). Prefers the
+/// FQCN the candidate list ([`IndexService::jsp_action_candidates`]) already resolved for that qname
+/// — the exact one the picker showed the user — before the config-graph action-ref resolution, so a
+/// pinned action that `form_action_context` wouldn't re-resolve from the qname still navigates.
+fn resolve_bound_action(
+    svc: &IndexService,
+    file: &str,
+    action: &str,
+) -> Option<(String, Vec<(String, String)>)> {
+    let from_cand = svc
+        .jsp_action_candidates(file)
+        .into_iter()
+        .find(|(q, _)| q == action)
+        .and_then(|(_, fqcn)| fqcn);
+    let from_ctx = if from_cand.is_none() { svc.form_action_context(file, action).0 } else { None };
+    goto_log(format_args!(
+        "resolve_bound_action: action='{action}' from_candidate={from_cand:?} from_config_graph={from_ctx:?}"
+    ));
+    let fqcn = from_cand.or(from_ctx)?;
+    let chain = class_chain(svc, &fqcn);
+    if chain.is_empty() {
+        goto_log(format_args!("resolve_bound_action: fqcn='{fqcn}' resolved but class chain is EMPTY"));
         return None;
     }
     let simple = fqcn.rsplit('.').next().unwrap_or(&fqcn).to_string();
@@ -202,7 +305,7 @@ fn resolve_action(svc: &IndexService, file: &str, action: &str) -> Option<(Strin
 fn resolve_validation(svc: &IndexService, file: &str) -> Option<(String, Vec<(String, String)>)> {
     let ctx = svc.validation_context(file);
     let fqcn = ctx.action_fqcn?;
-    let chain = class_chain(svc, file, &fqcn);
+    let chain = class_chain(svc, &fqcn);
     if chain.is_empty() {
         return None;
     }
@@ -241,7 +344,10 @@ fn props_for<'a>(
     cache
         .entry(action.to_string())
         .or_insert_with(|| {
-            resolve_action(svc, file, action).map(|(s, chain)| (s, chain_property_set(&chain)))
+            // `resolve_bound_action` is a superset of `resolve_action` (candidate-FQCN first, then the
+            // config-graph resolution), so a pinned/reverse-lookup qname resolves here too — keeping
+            // the lint's property set in lock-step with what go-to can reach.
+            resolve_bound_action(svc, file, action).map(|(s, chain)| (s, chain_property_set(&chain)))
         })
         .as_ref()
 }
@@ -287,7 +393,14 @@ fn bennu_action_property_target(
     else {
         return Ok(None);
     };
-    Ok(target_in_chain(&chain, &simple, &root))
+    let target = target_in_chain(&chain, &simple, &root);
+    if target.is_none() {
+        goto_log(format_args!(
+            "bennu_action_property_target: '{root}' resolved to action '{simple}' but NO accessor \
+             (get/is/set) found for it in the class chain"
+        ));
+    }
+    Ok(target)
 }
 
 /// Hover on a JSP form field / OGNL root / validation `<field>` → the action property's **type**
@@ -331,12 +444,16 @@ fn resolve_property_at(
     }
 
     if is_jsp(file) {
-        let bound = jsp_bound_action(svc, file);
+        goto_log(format_args!("resolve_property_at: JSP '{file}' offset={offset}"));
+        let bound = jsp_bound_action(svc, file, source);
         // A FIELD under the caret — a form field (→ its form's action) or a standalone field spliced
         // into a parent's form (→ the inherited bound action).
         for (name, start, end, action) in jsp_fields_with_action(source, bound.as_deref()) {
             if offset >= start && offset <= end {
                 let root = property_root(&name);
+                goto_log(format_args!(
+                    "resolve_property_at: caret on FORM FIELD '{name}' (root '{root}') -> action '{action}'"
+                ));
                 if !is_plain_identifier(root) {
                     return None;
                 }
@@ -347,13 +464,37 @@ fn resolve_property_at(
         // A standalone OGNL reference (a `%{prop}` that isn't a page variable) → the bound action.
         let vars = parse_jsp_vars(source);
         let declared: HashSet<&str> = vars.decls.iter().map(|d| d.name.as_str()).collect();
-        if let Some(r) = vars.refs.iter().find(|r| offset >= r.start && offset <= r.end) {
+        let hit = vars.refs.iter().find(|r| offset >= r.start && offset <= r.end);
+        goto_log(format_args!(
+            "resolve_property_at: OGNL branch, {} ref(s), caret matched ref={:?}",
+            vars.refs.len(),
+            hit.map(|r| (r.name.as_str(), r.start, r.end)),
+        ));
+        if let Some(r) = hit {
             let root = property_root(&r.name);
-            if !declared.contains(r.name.as_str()) && is_plain_identifier(root) {
-                if let Some(action) = &bound {
-                    if let Some((simple, chain)) = resolve_action(svc, file, action) {
-                        return Some((root.to_string(), simple, chain));
-                    }
+            let is_declared = declared.contains(r.name.as_str());
+            let plain = is_plain_identifier(root);
+            goto_log(format_args!(
+                "resolve_property_at: ref '{}' root='{root}' page_var={is_declared} plain_ident={plain} bound={bound:?}",
+                r.name
+            ));
+            if !is_declared && plain {
+                match &bound {
+                    Some(action) => match resolve_bound_action(svc, file, action) {
+                        Some((simple, chain)) => {
+                            goto_log(format_args!(
+                                "resolve_property_at: OK -> property '{root}' on '{simple}' (chain of {})",
+                                chain.len()
+                            ));
+                            return Some((root.to_string(), simple, chain));
+                        }
+                        None => goto_log(format_args!(
+                            "resolve_property_at: bound action '{action}' did not resolve to a project class"
+                        )),
+                    },
+                    None => goto_log(format_args!(
+                        "resolve_property_at: no bound action for this JSP -> cannot resolve OGNL"
+                    )),
                 }
             }
         }
@@ -424,7 +565,7 @@ fn bennu_action_property_lint(
     }
 
     if is_jsp(&args.file) {
-        let bound = jsp_bound_action(svc, &args.file);
+        let bound = jsp_bound_action(svc, &args.file, &args.source);
         let mut cache = ActionCache::new();
         // Every field (form-bound or standalone-in-a-fragment) → the action it binds to.
         for (name, start, end, action) in jsp_fields_with_action(&args.source, bound.as_deref()) {
@@ -643,11 +784,7 @@ fn is_jsp_result_path(target: &str) -> bool {
 /// has no recognizable webapp dir — in which case the "JSP not found" lint stays silent (we can't
 /// know where JSPs live, so flagging would risk a false positive).
 fn webapp_bases(root: &Path) -> Vec<PathBuf> {
-    ["src/main/webapp", "web", "WebContent", "webapp", "src/webapp", "WebRoot"]
-        .iter()
-        .map(|b| root.join(b))
-        .filter(|p| p.is_dir())
-        .collect()
+    crate::web_discovery::webapp_dirs(root)
 }
 
 /// Resolve a struts result JSP path to a real file under one of the webapp `bases` (else the project
