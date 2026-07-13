@@ -36,4 +36,4 @@ pub use crate::scaffold::{
 };
 
 // Declaration-site name-span + binary-name CST scans (go-to-declaration / rename / inherited).
-pub use crate::spans::{binary_of_type_at, find_type_name_span};
+pub use crate::spans::{binary_of_type_at, enclosing_type_binary, find_type_name_span};

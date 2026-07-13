@@ -10,7 +10,10 @@
 use std::collections::HashSet;
 
 use bennu_classpath::prelude::MemberIndex as CpMemberIndex;
-use bennu_java::prelude::{infer_receiver_type, ClassMembers, Member, MemberKind, TypeRef, TypeResolver};
+use bennu_java::prelude::{
+    enclosing_type_binary, infer_receiver_type, ClassMembers, Member, MemberKind, TypeRef,
+    TypeResolver, Visibility,
+};
 use bennu_proto::prelude::CompletionItem;
 
 use crate::resolver::IndexResolver;
@@ -25,6 +28,13 @@ pub fn completion<M: CpMemberIndex>(
     byte_offset: usize,
     resolver: &IndexResolver<M>,
 ) -> Vec<CompletionItem> {
+    // Guard the caret before any `&source[..]` slicing below: a stale/out-of-range offset, or one
+    // that (defensively) isn't a char boundary, would panic. Clamp to len, then back off to the
+    // preceding boundary.
+    let mut byte_offset = byte_offset.min(source.len());
+    while byte_offset > 0 && !source.is_char_boundary(byte_offset) {
+        byte_offset -= 1;
+    }
     let (dot_offset, prefix) = split_prefix(source, byte_offset);
 
     // `infer_receiver_type` wants the caret immediately after the `.` (it splices a
@@ -45,12 +55,30 @@ pub fn completion<M: CpMemberIndex>(
         return Vec::new();
     };
 
+    // The class the caret sits inside (original coords — the prefix excision above doesn't move
+    // `byte_offset` relative to the enclosing type). A `private` member is offered only when its
+    // declaring type shares this top-level class (JLS §6.6.1); `None` (caret outside any type) →
+    // no private is accessible.
+    let site = enclosing_type_binary(source, byte_offset);
+
     let mut out = Vec::new();
     let mut seen = HashSet::new();
-    collect_members(resolver, &recv, &prefix, &mut out, &mut seen, &mut HashSet::new());
+    collect_members(resolver, &recv, &prefix, site.as_deref(), &mut out, &mut seen, &mut HashSet::new());
     // Deterministic order: fields then methods (kind tag), alphabetical within.
     out.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.label.cmp(&b.label)));
     out
+}
+
+/// Whether a `private` member declared in `declaring` is accessible from within `site`: true iff
+/// they belong to the same top-level class — equal, or one nested in the other (its binary is the
+/// other's with a `/`-boundary suffix). Package vs nesting is `/`-ambiguous in a binary, but two
+/// *top-level* classes never prefix each other at a `/` boundary, so this only ever matches a real
+/// same-class / nesting relationship.
+fn same_top_level(declaring: &str, site: Option<&str>) -> bool {
+    let Some(site) = site else { return false };
+    declaring == site
+        || site.starts_with(&format!("{declaring}/"))
+        || declaring.starts_with(&format!("{site}/"))
 }
 
 /// Split the caret into `(dot_offset, typed_prefix)`: scan back over identifier chars;
@@ -75,6 +103,7 @@ fn collect_members<M: CpMemberIndex>(
     resolver: &IndexResolver<M>,
     recv: &TypeRef,
     prefix: &str,
+    site: Option<&str>,
     out: &mut Vec<CompletionItem>,
     seen: &mut HashSet<String>,
     visited: &mut HashSet<String>,
@@ -86,24 +115,34 @@ fn collect_members<M: CpMemberIndex>(
     let Some(cm) = resolver.members_of(bn) else {
         return;
     };
-    add_matching(&cm, prefix, out, seen);
+    // `private` members of this level are offered only when the caret's class is the same top-level
+    // class (a private is never inherited, so a supertype level's privates are simply never shown).
+    let allow_private = same_top_level(bn, site);
+    add_matching(&cm, prefix, allow_private, out, seen);
 
     if let Some(sc) = &cm.superclass {
-        collect_members(resolver, &TypeRef::simple(sc.clone()), prefix, out, seen, visited);
+        collect_members(resolver, &TypeRef::simple(sc.clone()), prefix, site, out, seen, visited);
     }
     for iface in &cm.interfaces {
-        collect_members(resolver, &TypeRef::simple(iface.clone()), prefix, out, seen, visited);
+        collect_members(resolver, &TypeRef::simple(iface.clone()), prefix, site, out, seen, visited);
     }
 }
 
 fn add_matching(
     cm: &ClassMembers,
     prefix: &str,
+    allow_private: bool,
     out: &mut Vec<CompletionItem>,
     seen: &mut HashSet<String>,
 ) {
     for m in cm.methods.iter().chain(cm.fields.iter()) {
         if !m.name.starts_with(prefix) {
+            continue;
+        }
+        // Hide a private member from an external / cross-class receiver (the common case: a field
+        // of another object). Protected/package stay visible — hiding them would need package +
+        // subclass context and risks dropping genuinely-accessible members.
+        if m.visibility == Visibility::Private && !allow_private {
             continue;
         }
         let key = format!("{}/{}", kind_tag(m.kind), m.name);

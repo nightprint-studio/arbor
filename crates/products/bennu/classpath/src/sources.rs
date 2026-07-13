@@ -16,31 +16,11 @@
 //! `None` from a lookup means "no source here" — the caller falls back to the signatures-only
 //! decompiled stub.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use std::sync::Mutex;
-
-/// The module segments a JDK 9+ `src.zip` prefixes its entries with
-/// (`java.base/java/lang/String.java`). Probed in order for a direct lookup before a full scan;
-/// mirrors [`crate::jdk`]'s classpath probe list, so the common `java.*` / `javax.*` sources
-/// resolve without scanning the whole archive.
-const JDK_SOURCE_MODULES: &[&str] = &[
-    "java.base",
-    "java.sql",
-    "java.xml",
-    "java.naming",
-    "java.desktop",
-    "java.logging",
-    "java.management",
-    "java.net.http",
-    "java.rmi",
-    "java.compiler",
-    "java.instrument",
-    "java.scripting",
-    "java.security.jgss",
-    "java.transaction.xa",
-];
+use std::sync::{Mutex, OnceLock};
 
 /// A ZIP of `.java` sources — the JDK's `src.zip` or a dependency's `-sources.jar`. Yields the
 /// **real source text** for a binary class name.
@@ -50,6 +30,13 @@ const JDK_SOURCE_MODULES: &[&str] = &[
 /// without a wrapping lock at the call site.
 pub struct JavaSourceZip {
     archive: Mutex<zip::ZipArchive<File>>,
+    /// Lazily-built map from a **module-stripped** relative path (`java/util/Optional.java`) to the
+    /// real entry name (flat `java/util/Optional.java` or module-prefixed
+    /// `java.base/java/util/Optional.java`). Built once from the central directory on the first
+    /// lookup so `source_text` is an O(1) map hit instead of a full-archive linear scan — the scan
+    /// spiked CPU (~one core) on every go-to into a dependency type whose source isn't in this ZIP
+    /// (a guaranteed miss that used to walk every entry), and re-ran on each Ctrl+B (no miss cache).
+    index: OnceLock<HashMap<String, String>>,
 }
 
 impl JavaSourceZip {
@@ -60,40 +47,60 @@ impl JavaSourceZip {
             .map_err(|e| format!("open source zip {}: {e}", path.as_ref().display()))?;
         let archive = zip::ZipArchive::new(file)
             .map_err(|e| format!("read source zip {}: {e}", path.as_ref().display()))?;
-        Ok(Self { archive: Mutex::new(archive) })
+        Ok(Self { archive: Mutex::new(archive), index: OnceLock::new() })
     }
 
     /// The `.java` text for the binary class name `binary_name` (`java/util/Optional`), or `None`
     /// when absent.
     ///
     /// An **inner class** (`java/util/Map$Entry`) maps to its OUTER compilation unit
-    /// (`java/util/Map.java`) — inner types live in the enclosing file. The lookup tries, in order:
-    /// the flat layout (JDK 8 `src.zip` / a `-sources.jar`, `java/util/Map.java`), the
-    /// module-prefixed layout (JDK 9+, `<module>/java/util/Map.java`) over the common modules, then a
-    /// one-shot scan for a class in a module we didn't probe. Non-UTF-8 bytes are decoded lossily
-    /// (JDK sources are UTF-8; this only guards a stray dependency source).
+    /// (`java/util/Map.java`) — inner types live in the enclosing file. Resolution is a single O(1)
+    /// hit against a map built once from the archive's central directory (see [`Self::index`]),
+    /// which uniformly covers the flat layout (JDK 8 `src.zip` / a `-sources.jar`) and the
+    /// module-prefixed layout (JDK 9+, any module — not just a probed subset). A binary not in this
+    /// ZIP misses instantly (the caller falls back to the decompiled stub). Non-UTF-8 bytes are
+    /// decoded lossily (JDK sources are UTF-8; this only guards a stray dependency source).
     pub fn source_text(&self, binary_name: &str) -> Option<String> {
         let outer = binary_name.split('$').next().unwrap_or(binary_name);
         let rel = format!("{outer}.java");
+        let entry = self.index().get(&rel)?.clone();
         let mut ar = self.archive.lock().ok()?;
+        read_zip_entry(&mut ar, &entry)
+    }
 
-        // 1. Flat: `java/util/Optional.java` (JDK 8 src.zip, dependency -sources.jar).
-        if let Some(text) = read_zip_entry(&mut ar, &rel) {
-            return Some(text);
-        }
-        // 2. Module-prefixed (JDK 9+): `<module>/java/util/Optional.java` over the common modules.
-        for module in JDK_SOURCE_MODULES {
-            if let Some(text) = read_zip_entry(&mut ar, &format!("{module}/{rel}")) {
-                return Some(text);
+    /// The module-stripped-relative-path → real-entry-name map, built once (lock-free after the
+    /// first call) from the central directory via `file_names()` — which reads only the in-memory
+    /// directory, never a per-entry local header, so building it is cheap and, crucially, happens
+    /// **once** rather than a full-archive scan on every lookup.
+    fn index(&self) -> &HashMap<String, String> {
+        self.index.get_or_init(|| {
+            let ar = self.archive.lock().unwrap_or_else(|p| p.into_inner());
+            let mut map = HashMap::new();
+            for name in ar.file_names() {
+                if !name.ends_with(".java") {
+                    continue;
+                }
+                // A flat entry (`java/util/Map.java`) keys as-is; a module-prefixed one
+                // (`java.base/java/util/Map.java`) keys by its path after the module segment, so a
+                // caller's binary-derived `rel` resolves regardless of layout. First writer wins —
+                // if both shapes exist for the same class, either serves identical source.
+                map.entry(strip_module_prefix(name).to_string())
+                    .or_insert_with(|| name.to_string());
             }
-        }
-        // 3. Fallback: a class in a module not in the probe list — scan for the entry whose path
-        //    ends in `/<rel>` (the `/` anchors the boundary so `xOptional.java` can't false-match).
-        let suffix = format!("/{rel}");
-        let hit = (0..ar.len())
-            .filter_map(|i| ar.by_index(i).ok().map(|e| e.name().to_string()))
-            .find(|name| name.ends_with(&suffix))?;
-        read_zip_entry(&mut ar, &hit)
+            map
+        })
+    }
+}
+
+/// Strip a JDK 9+ module segment from a `src.zip` entry name, yielding the layout-independent
+/// relative path (`java.base/java/util/Map.java` → `java/util/Map.java`). A module segment is the
+/// first path component and always contains a `.` (`java.base`, `jdk.compiler`); a package
+/// component never does (`java`, `com`, `org`) — so a flat entry (`com/acme/Foo.java`) is returned
+/// unchanged. A worst-case misjudgement only yields a lookup miss (→ stub fallback), never a scan.
+fn strip_module_prefix(name: &str) -> &str {
+    match name.split_once('/') {
+        Some((head, rest)) if head.contains('.') => rest,
+        _ => name,
     }
 }
 
@@ -157,6 +164,19 @@ mod tests {
         // A class not present → None (caller falls back to the stub).
         assert!(zip.source_text("java/util/Absent").is_none());
 
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn resolves_class_in_any_module_without_scanning() {
+        // A module NOT in the old probe list (`jdk.compiler`) — used to require the full-archive
+        // scan; now the central-directory index resolves it uniformly.
+        let (zip, path) = source_zip(&[(
+            "jdk.compiler/com/sun/tools/javac/Main.java",
+            "package com.sun.tools.javac; class Main {}",
+        )]);
+        assert!(zip.source_text("com/sun/tools/javac/Main").is_some(), "unprobed module resolves");
+        assert!(zip.source_text("com/sun/tools/javac/Absent").is_none());
         let _ = std::fs::remove_file(path);
     }
 }

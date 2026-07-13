@@ -281,8 +281,42 @@ impl<M: CpMemberIndex> IndexResolver<M> {
         if self.project_only {
             return None;
         }
-        let cp = self.jdk.members_of(binary_name)?;
-        Some(convert_members(&cp))
+        if let Some(cp) = self.jdk.members_of(binary_name) {
+            return Some(convert_members(&cp));
+        }
+        // A nested type is stored `$`-joined in bytecode (`pkg/Outer$Inner`), but the project-side
+        // name resolvers join every segment with `/` (`pkg/Outer/Inner`) — so a project class that
+        // `extends`/`implements` a JDK/dependency NESTED type resolves its supertype to a `/`-form
+        // that misses here, `members_of` returns None, and that single miss poisons `complete` for
+        // the whole hierarchy walk (→ `unknown method`/arity checks silently give up on every class
+        // on that base). Retry the bytecode `$`-form so the nested supertype resolves.
+        if let Some(alt) = nested_bytecode_name(binary_name) {
+            if let Some(cp) = self.jdk.members_of(&alt) {
+                return Some(convert_members(&cp));
+            }
+        }
+        None
+    }
+}
+
+/// The bytecode nesting form of a `/`-joined binary: keep the lowercase package prefix `/`-joined
+/// and `$`-join the type segments (the first Uppercase segment onward, Java naming convention).
+/// `pkg/Outer/Inner` → `Some("pkg/Outer$Inner")`. `None` when there's no nesting to fix (fewer than
+/// two type segments) — the caller then keeps the original miss. Only consulted on a miss, so a
+/// wrong guess (e.g. an Uppercase package segment) just yields another miss, never a bad resolve.
+fn nested_bytecode_name(binary: &str) -> Option<String> {
+    let segs: Vec<&str> = binary.split('/').collect();
+    let first_type = segs
+        .iter()
+        .position(|s| s.chars().next().is_some_and(|c| c.is_uppercase()))?;
+    if segs.len() - first_type < 2 {
+        return None; // at most one type segment → nothing nested to re-join
+    }
+    let types = segs[first_type..].join("$");
+    if first_type == 0 {
+        Some(types)
+    } else {
+        Some(format!("{}/{}", segs[..first_type].join("/"), types))
     }
 }
 
@@ -510,6 +544,21 @@ mod tests {
     use bennu_classpath::prelude::ClassMembers as CpClassMembers;
     use bennu_index::prelude::{IndexBuilder, IndexRecord, Source, SymbolKind};
     use std::path::PathBuf;
+
+    #[test]
+    fn nested_bytecode_name_rejoins_type_segments() {
+        assert_eq!(nested_bytecode_name("pkg/Outer/Inner").as_deref(), Some("pkg/Outer$Inner"));
+        assert_eq!(
+            nested_bytecode_name("java/util/Map/Entry").as_deref(),
+            Some("java/util/Map$Entry")
+        );
+        assert_eq!(nested_bytecode_name("a/b/Outer/Inner/Deep").as_deref(), Some("a/b/Outer$Inner$Deep"));
+        // No package prefix.
+        assert_eq!(nested_bytecode_name("Outer/Inner").as_deref(), Some("Outer$Inner"));
+        // Nothing nested (single or zero type segment) → None, keep the original miss.
+        assert!(nested_bytecode_name("java/util/List").is_none());
+        assert!(nested_bytecode_name("pkg/sub").is_none());
+    }
 
     /// A JDK stub that resolves nothing — the overlay/persisted-index precedence under
     /// test never needs the JDK fall-through, so this keeps the test free of a live JDK.
