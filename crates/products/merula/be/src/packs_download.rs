@@ -32,7 +32,7 @@ use arbor_ipc::prelude::EventSink;
 
 use merula_core::config::{self as config_cmds, MerulaConfig};
 use merula_core::events::{self, PackProgress, EVT_PACK_PROGRESS};
-use crate::jobs::{category, JobHandle};
+use crate::jobs::{category, percent_of, JobHandle, ProgressThrottle};
 use crate::packs::{self, Layout, Pack};
 use merula_core::prelude::MerulaState;
 
@@ -194,7 +194,7 @@ fn extract_and_index(
     let count = zip.len();
     let mut extracted_bytes: u64 = 0;
     let mut root: Option<PathBuf> = None;
-    let mut last_pct: i64 = -1;
+    let mut throttle = ProgressThrottle::default();
 
     for i in 0..count {
         if job.is_cancelled() {
@@ -220,7 +220,7 @@ fn extract_and_index(
             extracted_bytes +=
                 std::io::copy(&mut entry, &mut out).map_err(|e| format!("extract: {e}"))?;
         }
-        emit_throttled(sink, job, pack_id, "extracting", i as u64 + 1, count as u64, &mut last_pct);
+        emit_throttled(sink, job, pack_id, "extracting", i as u64 + 1, count as u64, &mut throttle);
     }
 
     let root = root.ok_or_else(|| "empty archive".to_string())?;
@@ -308,7 +308,9 @@ async fn stream_archive(
     use sha2::{Digest, Sha256};
     use std::io::Write;
 
-    let resp = arbor_core::prelude::client()
+    // `download_client` (not `client`): the API client's 30s TOTAL deadline spans the
+    // body too, so it aborts every multi-hundred-MB pack mid-stream.
+    let resp = arbor_core::prelude::download_client()
         .get(url)
         .send()
         .await
@@ -321,7 +323,7 @@ async fn stream_archive(
         std::fs::File::create(archive_path).map_err(|e| format!("create archive: {e}"))?;
     let mut hasher = Sha256::new();
     let mut received: u64 = 0;
-    let mut last_pct: i64 = -1;
+    let mut throttle = ProgressThrottle::default();
     let mut stream = resp.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
@@ -334,7 +336,7 @@ async fn stream_archive(
         hasher.update(&chunk);
         file.write_all(&chunk).map_err(|e| format!("write archive: {e}"))?;
         received += chunk.len() as u64;
-        emit_throttled(sink, job, pack_id, "downloading", received, total, &mut last_pct);
+        emit_throttled(sink, job, pack_id, "downloading", received, total, &mut throttle);
     }
     file.flush().map_err(|e| format!("flush archive: {e}"))?;
     let sha256 = hasher
@@ -346,8 +348,8 @@ async fn stream_archive(
 }
 
 /// Emit a `merula:pack_progress` event + append a coarse line into the job output,
-/// only when the integer percentage changes (throttle for the per-chunk download
-/// loop).
+/// throttled by [`ProgressThrottle`] (the per-chunk download loop would otherwise
+/// emit thousands of events).
 fn emit_throttled(
     sink: &Arc<dyn EventSink>,
     job: &JobHandle,
@@ -355,17 +357,12 @@ fn emit_throttled(
     phase: &str,
     done: u64,
     total: u64,
-    last_pct: &mut i64,
+    throttle: &mut ProgressThrottle,
 ) {
-    let pct = if total > 0 {
-        ((done as f64 / total as f64) * 100.0) as i64
-    } else {
-        -1
-    };
-    if pct == *last_pct {
+    if !throttle.should_emit(done, total) {
         return;
     }
-    *last_pct = pct;
+    let pct = percent_of(done, total);
     events::emit(
         &**sink,
         EVT_PACK_PROGRESS,
@@ -396,11 +393,6 @@ fn emit_pack_progress(
     done: u64,
     total: u64,
 ) {
-    let pct = if total > 0 {
-        ((done as f64 / total as f64) * 100.0) as i64
-    } else {
-        -1
-    };
     events::emit(
         &**sink,
         EVT_PACK_PROGRESS,
@@ -410,7 +402,7 @@ fn emit_pack_progress(
             phase: phase.to_string(),
             done,
             total,
-            pct,
+            pct: percent_of(done, total),
         },
     );
 }

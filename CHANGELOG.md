@@ -9,6 +9,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **Merula** (music): **downloading a sample bank or a model works again** — every transfer aborted after exactly 30 seconds with an "error decoding response", because a timeout meant for short API calls was capping the whole download; large banks are now bound only by a connection and a stall timeout, so a multi-GB bank can take as long as it needs.
+- **Merula** (music): **sample-bank downloads now show live progress** instead of sitting on "Starting…" for the entire transfer — banks served without a declared size (most of them) reported no progress at all.
+- **Merula** (music): the **General MIDI** bank installs again — its download host started refusing non-browser clients outright, so it now comes from a mirror of the same FluidR3 soundfont.
 - **Bennu** (Java editor): **live Java validation no longer goes fully dark** — a single internal check failing on a specific file (e.g. one with accented/legacy-encoded characters) used to wipe *every* squiggle, syntax included, making validation look dead and letting real errors like calls to non-existent methods slip through. A failing check is now contained: the rest of validation keeps working and the editor keeps its diagnostics.
 - **Bennu** (Java editor): resolver-backed checks (**call to a non-existent method**, **wrong argument count**) now fire on classes that `extend`/`implement` a **nested** JDK or library type — such a supertype failed to resolve (a `/` vs `$` binary-name mismatch), and a single unresolved supertype silently disabled those checks for the whole class.
 - **Bennu** (Java editor): **member completion no longer suggests `private` members of another class** — a `receiver.` on an object of a different class now hides that class's private fields/methods (they're offered only inside their own class, per Java's rules).

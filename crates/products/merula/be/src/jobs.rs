@@ -30,6 +30,90 @@ pub mod category {
     pub const IMPORTS: &str = "Imports";
 }
 
+/// Emit granularity when a transfer's response carries no `Content-Length`: a
+/// percentage is unknowable, so the loop throttles on bytes received instead of on
+/// whole percents.
+pub const PROGRESS_BYTE_STEP: u64 = 4 * 1024 * 1024;
+
+/// Decides when a per-chunk transfer loop may emit, so a multi-GB download doesn't
+/// emit once per chunk: on each new whole percent when `total` is known, every
+/// [`PROGRESS_BYTE_STEP`] bytes when it isn't.
+///
+/// The unknown-total case is load-bearing, not theoretical: GitHub generates the
+/// `archive/refs/heads/*.zip` sample packs on the fly and streams them **chunked with
+/// no `Content-Length`**, so `total` is 0 for most of the pack table. Tracking the
+/// last percent as a bare `-1`-initialised int silently broke exactly that case —
+/// `-1` is also the "unknown percent" value, so the first comparison always matched
+/// and *every* emit was suppressed, leaving the transfer stuck on "Starting…" for the
+/// whole download. Hence `Option`: "nothing emitted yet" must not be spellable as a
+/// real percentage.
+#[derive(Default)]
+pub struct ProgressThrottle {
+    last_pct: Option<i64>,
+    last_emit_bytes: Option<u64>,
+}
+
+impl ProgressThrottle {
+    /// Whether to emit for `done`/`total` now, recording the decision.
+    pub fn should_emit(&mut self, done: u64, total: u64) -> bool {
+        if total > 0 {
+            let pct = ((done as f64 / total as f64) * 100.0) as i64;
+            if self.last_pct == Some(pct) {
+                return false;
+            }
+            self.last_pct = Some(pct);
+            return true;
+        }
+        match self.last_emit_bytes {
+            Some(prev) if done.saturating_sub(prev) < PROGRESS_BYTE_STEP => false,
+            _ => {
+                self.last_emit_bytes = Some(done);
+                true
+            }
+        }
+    }
+}
+
+/// The whole-percent value for `done`/`total`, or `-1` when `total` is unknown (the
+/// wire convention every merula progress payload uses for "indeterminate").
+pub fn percent_of(done: u64, total: u64) -> i64 {
+    if total > 0 {
+        ((done as f64 / total as f64) * 100.0) as i64
+    } else {
+        -1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The regression this type exists for: with no `Content-Length` (`total == 0`)
+    /// the old `-1`-sentinel throttle suppressed every emit.
+    #[test]
+    fn unknown_total_emits_on_byte_steps() {
+        let mut t = ProgressThrottle::default();
+        assert!(t.should_emit(1, 0), "first chunk must emit");
+        assert!(!t.should_emit(2, 0), "a byte later is below the step");
+        assert!(t.should_emit(1 + PROGRESS_BYTE_STEP, 0), "a full step later emits");
+    }
+
+    #[test]
+    fn known_total_emits_once_per_whole_percent() {
+        let mut t = ProgressThrottle::default();
+        assert!(t.should_emit(0, 1000), "0% is a new percent");
+        assert!(!t.should_emit(9, 1000), "still 0%");
+        assert!(t.should_emit(10, 1000), "1% is a new percent");
+        assert!(!t.should_emit(10, 1000), "same percent again");
+    }
+
+    #[test]
+    fn percent_is_indeterminate_without_a_total() {
+        assert_eq!(percent_of(500, 1000), 50);
+        assert_eq!(percent_of(500, 0), -1);
+    }
+}
+
 /// A live job in the shell registry, addressed by the id the shell assigned, with
 /// the event egress wired in so the worker can emit the `arbor://job-*` lifecycle
 /// events itself.

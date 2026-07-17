@@ -9,7 +9,10 @@
 
 pub use crate::app_ctx::AppCtx;
 pub use crate::error::{CoreError, Result};
-pub use crate::http::{client, client_builder, DEFAULT_TIMEOUT, USER_AGENT};
+pub use crate::http::{
+    client, client_builder, download_client, download_client_builder,
+    DEFAULT_TIMEOUT, DOWNLOAD_CONNECT_TIMEOUT, DOWNLOAD_IDLE_TIMEOUT, USER_AGENT,
+};
 pub use crate::paths::{
     arbor_cache_dir, arbor_config_dir, arbor_config_path, arbor_data_dir, arbor_global_data_dir,
     bennu_config_dir, bennu_config_path, bennu_data_dir, merula_config_dir, merula_config_path,

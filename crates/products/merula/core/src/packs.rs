@@ -55,7 +55,15 @@ pub enum Layout {
 /// The General MIDI SoundFont (`.sf2`) download URL — descriptor data for the
 /// `gm` pack. Owned by the read surface (it's part of the [`Pack`] table);
 /// merula-be's `packs_download` GM converter reads it from here.
-pub const GM_SF2_URL: &str = "https://musical-artifacts.com/artifacts/738/FluidR3_GM.sf2";
+/// Frank Wen's FluidR3 (MIT-licensed), mirrored on archive.org. NOT the upstream
+/// `musical-artifacts.com` copy: that host sits behind a Cloudflare bot challenge and
+/// answers any non-browser client with a 403, so the GM pack could never install.
+/// Keep this on a host that permits plain programmatic downloads.
+///
+/// The file is `FluidR3_GM_GS` (FluidR3 plus the GS drum kits); its embedded `INAM`
+/// still reads `Fluid R3 GM` and it is the same soundfont the old URL served. The
+/// converter reads whatever presets the bank declares, so the GS superset is fine.
+pub const GM_SF2_URL: &str = "https://archive.org/download/fluidr3-gm-gs/FluidR3_GM_GS.sf2";
 
 /// A declarative downloadable sample pack.
 pub struct Pack {
@@ -124,7 +132,7 @@ pub const PACKS: &[Pack] = &[
         description: "The FluidR3 General MIDI soundfont — the 128 standard GM \
             instruments (pianos, organs, guitars, synths, ethnic and more), \
             converted to playable multisamples at install time.",
-        approx_bytes: 148_000_000,
+        approx_bytes: 151_000_000,
         // A single `.sf2`, converted to wav+SFZ at install time (see packs_download).
         archive_url: GM_SF2_URL,
         layout: Layout::Sf2,

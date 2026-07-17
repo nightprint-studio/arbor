@@ -16,7 +16,7 @@
 use std::path::{Path, PathBuf};
 
 use merula_core::config as config_cmds;
-use crate::jobs::{category, JobHandle};
+use crate::jobs::{category, percent_of, JobHandle, ProgressThrottle};
 use crate::models;
 use merula_core::prelude::MerulaState;
 
@@ -117,7 +117,9 @@ async fn download_file(
     }
     let tmp = dest.with_extension("part");
 
-    let resp = arbor_core::prelude::client()
+    // `download_client` (not `client`): the API client's 30s TOTAL deadline spans the
+    // body too, so it aborts every large model mid-stream.
+    let resp = arbor_core::prelude::download_client()
         .get(url)
         .send()
         .await
@@ -128,7 +130,7 @@ async fn download_file(
 
     let mut file = std::fs::File::create(&tmp).map_err(|e| format!("create file: {e}"))?;
     let mut received: u64 = 0;
-    let mut last_pct: i32 = -1;
+    let mut throttle = ProgressThrottle::default();
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
         if job.is_cancelled() {
@@ -139,14 +141,8 @@ async fn download_file(
         let chunk = chunk.map_err(|e| format!("download interrupted: {e}"))?;
         file.write_all(&chunk).map_err(|e| format!("write: {e}"))?;
         received += chunk.len() as u64;
-        let pct = if total > 0 {
-            ((received as f64 / total as f64) * 100.0) as i32
-        } else {
-            -1
-        };
-        if pct != last_pct {
-            last_pct = pct;
-            job.emit_progress(pct);
+        if throttle.should_emit(received, total) {
+            job.emit_progress(percent_of(received, total) as i32);
         }
     }
     file.flush().map_err(|e| format!("flush: {e}"))?;
