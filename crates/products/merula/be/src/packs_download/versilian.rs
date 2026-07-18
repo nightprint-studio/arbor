@@ -38,8 +38,8 @@ pub fn generate(root: &Path) -> (String, usize) {
     collect_sample_dirs(root, &mut sample_dirs);
     sample_dirs.sort();
 
-    // Group sample folders by instrument: the rel path with any trailing
-    // **articulation** folder stripped.
+    // Group sample folders by instrument: the rel path truncated at the taxonomy's
+    // instrument level, with everything below it treated as the articulation.
     let mut groups: BTreeMap<Vec<String>, Vec<(String, PathBuf)>> = BTreeMap::new();
     for dir in sample_dirs {
         let Ok(rel) = dir.strip_prefix(root) else { continue };
@@ -47,14 +47,15 @@ pub fn generate(root: &Path) -> (String, usize) {
             .components()
             .map(|c| c.as_os_str().to_string_lossy().to_string())
             .collect();
-        if comps.len() < 2 {
-            continue; // need at least <category>/<instrument>
+        let inst_idx = instrument_index(&comps[0]);
+        if comps.len() <= inst_idx {
+            continue; // too shallow to name an instrument
         }
-        let leaf = comps.last().unwrap();
-        let (inst_path, art) = if comps.len() >= 3 && is_articulation(leaf) {
-            (comps[..comps.len() - 1].to_vec(), art_name(leaf))
+        let inst_path = comps[..=inst_idx].to_vec();
+        let art = if comps.len() > inst_idx + 1 {
+            art_name_from(&comps[inst_idx + 1..])
         } else {
-            (comps.clone(), "sustain".to_string())
+            "sustain".to_string()
         };
         groups.entry(inst_path).or_default().push((art, dir));
     }
@@ -419,19 +420,50 @@ fn family_token(name: &str) -> String {
     .to_string()
 }
 
-/// Whether a folder name is an **articulation** rather than an instrument itself.
-fn is_articulation(name: &str) -> bool {
+/// The 0-based index of the **instrument** component in a sample folder's relative
+/// path — the level at which the tree's taxonomy names a playable thing. Everything
+/// below it is articulation.
+///
+/// The two Versilian trees nest instruments at different, but each internally
+/// consistent, depths:
+/// - **VCSL** — Hornbostel-Sachs: `<Category>/<Sub-category>/<Instrument>/…` → `2`
+/// - **VSCO 2** — plain families: `<Family>/<Instrument>/…` → `1`
+///
+/// Deciding this **structurally** is what makes the indexer correct. The rule this
+/// replaced was lexical — "strip the last folder if its name looks like an
+/// articulation" — tested against a fixed whitelist of orchestral-string terms
+/// (`sus`, `pizz`, `trem`, …). VCSL's folders overwhelmingly fall outside that
+/// vocabulary (`Soft Mallets`, `Stroke`, `Roll`, `Hi`/`Low`, `Pedal/On`), so each was
+/// mistaken for the instrument itself: the registry ended up advertising
+/// `mallets.soft_mallets` and a bare `stroke`/`on`/`off` instead of
+/// `mallets.xylophone` and `bell_tree`. A whitelist can never enumerate a taxonomy
+/// it doesn't own; the depth is a property of the tree, and the tree states it.
+fn instrument_index(top: &str) -> usize {
+    if is_hornbostel_sachs(top) {
+        2
+    } else {
+        1
+    }
+}
+
+/// Whether a top-level folder is one of VCSL's Hornbostel-Sachs categories (rather
+/// than a VSCO 2 instrument family). Mirrors the categories [`family_token`] maps.
+fn is_hornbostel_sachs(name: &str) -> bool {
     matches!(
         sanitize(name).as_str(),
-        "sus" | "sustain" | "susvib" | "susnv" | "sus_vib" | "sus_nv" | "suslong"
-            | "vib" | "vibrato" | "novib" | "nonvib" | "nv" | "expvib"
-            | "arco" | "arcovib" | "arco_vib"
-            | "stac" | "stacc" | "staccato" | "spic" | "spiccato"
-            | "pizz" | "pizzt" | "trem" | "tremolo"
-            | "legato" | "leg" | "long" | "short"
-            | "mute" | "muted" | "open" | "buzz" | "fall"
-            | "harmonm_sus" | "straightm_sus"
+        "aerophones" | "chordophones" | "idiophones" | "membranophones" | "electrophones"
     )
+}
+
+/// The `.art(…)` name for the folder levels below the instrument. A single level
+/// normalises through [`art_name`] (so `susVib` still becomes `sustain`); nested
+/// levels join with `_` (`Pedal/On` → `pedal_on`), which keeps distinct variants
+/// distinct instead of collapsing them onto one name.
+fn art_name_from(parts: &[String]) -> String {
+    match parts {
+        [one] => art_name(one),
+        many => many.iter().map(|p| sanitize(p)).collect::<Vec<_>>().join("_"),
+    }
 }
 
 /// Map an articulation folder name to a clean `.art(…)` name.
@@ -553,15 +585,56 @@ mod tests {
     }
 
     #[test]
-    fn articulation_vs_instrument() {
-        assert!(is_articulation("susVib"));
-        assert!(is_articulation("Pizz"));
-        assert!(is_articulation("Trem"));
-        assert!(is_articulation("Sus"));
-        assert!(!is_articulation("Vibraphone"));
-        assert!(!is_articulation("Vibraslap"));
-        assert!(!is_articulation("Anvil"));
-        assert!(!is_articulation("Marimba"));
+    fn instrument_depth_follows_the_taxonomy() {
+        // VCSL nests one level deeper than VSCO 2, and each tree is consistent.
+        assert_eq!(instrument_index("Idiophones"), 2);
+        assert_eq!(instrument_index("Chordophones"), 2);
+        assert_eq!(instrument_index("Electrophones"), 2);
+        assert_eq!(instrument_index("Strings"), 1);
+        assert_eq!(instrument_index("Woodwinds"), 1);
+    }
+
+    /// The regression the depth rule exists for: these are real VCSL paths whose
+    /// leaf folder is outside any articulation vocabulary, so the old lexical rule
+    /// named the instrument after the articulation.
+    #[test]
+    fn articulation_folders_do_not_become_instruments() {
+        // `Idiophones/Struck Idiophones/Xylophone/Soft Mallets` → xylophone, not
+        // `soft_mallets`.
+        let comps = ["Idiophones", "Struck Idiophones", "Xylophone", "Soft Mallets"]
+            .map(String::from);
+        let idx = instrument_index(&comps[0]);
+        assert_eq!(comps[idx], "Xylophone");
+        assert_eq!(art_name_from(&comps[idx + 1..]), "soft_mallets");
+
+        // `Idiophones/Struck Idiophones/Bell Tree/Stroke` → bell_tree, not `stroke`.
+        let comps = ["Idiophones", "Struck Idiophones", "Bell Tree", "Stroke"].map(String::from);
+        let idx = instrument_index(&comps[0]);
+        assert_eq!(sanitize(&comps[idx]), "bell_tree");
+
+        // Two articulation levels join instead of collapsing to a bare `on`/`off`.
+        let comps = ["Chordophones", "Zithers", "Upright Piano, Knight", "Pedal", "On"]
+            .map(String::from);
+        let idx = instrument_index(&comps[0]);
+        assert_eq!(sanitize(&comps[idx]), "upright_piano_knight");
+        assert_eq!(art_name_from(&comps[idx + 1..]), "pedal_on");
+    }
+
+    #[test]
+    fn wavs_directly_under_the_instrument_are_its_sustain() {
+        // `Idiophones/Struck Idiophones/Glockenspiel/*.wav` — nothing below the
+        // instrument level, so it is the default (base-name) articulation.
+        let comps = ["Idiophones", "Struck Idiophones", "Glockenspiel"].map(String::from);
+        let idx = instrument_index(&comps[0]);
+        assert_eq!(comps.len(), idx + 1, "no articulation level present");
+        assert_eq!(family_token(&comps[0]), "mallets");
+        assert_eq!(sanitize(&comps[idx]), "glockenspiel");
+    }
+
+    #[test]
+    fn single_articulation_level_still_normalises() {
+        assert_eq!(art_name_from(&["susVib".to_string()]), "sustain");
+        assert_eq!(art_name_from(&["Pizz".to_string()]), "pizzicato");
     }
 
     #[test]

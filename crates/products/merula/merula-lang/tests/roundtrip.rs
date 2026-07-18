@@ -35,6 +35,7 @@ fn host_sources_round_trip() {
     emits_back("(0..8).par(i => n($i))");
     emits_back("f(a, b, c)");
     emits_back("lead.gain(0.5).pan(0.3)");
+    emits_back("lead.attack(0.008).decay(0.12).sustain(0).release(0.4)");
     emits_back("let bass = n(c2 g1)");
     emits_back("fn bassline(root) = n($root).lpf(800)");
     emits_back(r#"n(c2 g1).inst("synth.bass")"#);
@@ -263,6 +264,18 @@ fn parse_then_eval_degrees_with_scale() {
     let p = eval_first_track(r#"n(0 2 4).scale("c:minor")"#);
     let notes: Vec<f64> = onsets(&p, 0).iter().filter_map(|h| h.value.note).collect();
     assert_eq!(notes, vec![60.0, 63.0, 67.0]);
+}
+
+#[test]
+fn parse_then_eval_envelope_overrides() {
+    // Envelope stages land on the hap as seconds (sustain is a level), and only the
+    // stages actually written are set — the rest stay the instrument's own.
+    let p = eval_first_track(r#"n(c4).inst("sine").attack(0.008).release(0.4)"#);
+    let h = &onsets(&p, 0)[0];
+    assert_eq!(h.value.attack, Some(0.008));
+    assert_eq!(h.value.release, Some(0.4));
+    assert_eq!(h.value.decay, None, "an unwritten stage must not be invented");
+    assert_eq!(h.value.sustain, None);
 }
 
 #[test]

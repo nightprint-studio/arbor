@@ -51,6 +51,30 @@ pub struct RenderOpts {
     pub normalize_lufs: Option<f32>,
 }
 
+/// Resolve a render config for a **batch export**, where the format applies to every
+/// file (see `crate::export_all`). Same rules as [`resolve_config`], but the format is
+/// mandatory rather than optional — a batch has one format by construction.
+pub(crate) fn resolve_export_config(
+    base: RenderConfig,
+    opts: &crate::export_all::ExportAllOpts,
+) -> RenderConfig {
+    RenderConfig {
+        sample_rate: opts.sample_rate.unwrap_or(base.sample_rate),
+        bit_depth: match opts.bit_depth.as_deref() {
+            Some(s) if s.eq_ignore_ascii_case("float32") => BitDepth::Float32,
+            Some(_) => BitDepth::Int24,
+            None => base.bit_depth,
+        },
+        tail_max_secs: opts.tail_max_secs.unwrap_or(base.tail_max_secs),
+        format: if opts.format.eq_ignore_ascii_case("ogg") {
+            Format::Ogg
+        } else {
+            Format::Wav
+        },
+        normalize: opts.normalize_lufs.or(base.normalize),
+    }
+}
+
 /// Resolve the effective [`RenderConfig`] by overlaying `opts` onto `base`.
 fn resolve_config(base: RenderConfig, opts: &RenderOpts) -> RenderConfig {
     RenderConfig {
@@ -101,7 +125,7 @@ fn eval_for_render(
 /// map is present (full offline tempo automation is a future refinement), else the
 /// script's `cps(...)`, else the configured default. Centralised so the WAV /
 /// stems / MIDI / analyze paths agree on the rendered tempo.
-fn render_cps(output: &merula::prelude::EvalOutput, cfg: &MerulaConfig) -> f64 {
+pub(crate) fn render_cps(output: &merula::prelude::EvalOutput, cfg: &MerulaConfig) -> f64 {
     output
         .tempo
         .points

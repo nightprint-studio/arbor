@@ -379,6 +379,20 @@ fn resolve_params(v: &ControlMap) -> VoiceParams {
     if let Some(x) = v.vel {
         p.vel = x as f32;
     }
+    // Amplitude-envelope overrides: each stays `None` when unset so the voice keeps
+    // the instrument's own stage (a preset's ADSR / a region's SFZ `ampeg_*`).
+    if let Some(x) = v.attack {
+        p.attack = Some(x as f32);
+    }
+    if let Some(x) = v.decay {
+        p.decay = Some(x as f32);
+    }
+    if let Some(x) = v.sustain {
+        p.sustain = Some(x as f32);
+    }
+    if let Some(x) = v.release {
+        p.release = Some(x as f32);
+    }
     // Delay-bus controls (Onda 2): carried per-event; the renderer realises them
     // as a per-track delay bus (`delay`/`feedback` configure the line via the
     // engine's `SetTrackDelay`, `delay_mix` is the per-voice send).

@@ -11,8 +11,8 @@ pub use crate::defaults::{DEFAULT_BLOCK_FRAMES, DEFAULT_SAMPLE_RATE};
 
 // ── The engine↔audio contract (frozen core + Onda 2 additive mixer surface) ───
 pub use crate::seam::{
-    AudioCommand, AudioSink, CompSettings, DelayConfig, EqBand, EqBandKind, Frame, ReverbIr,
-    TrackConfig, VoiceEvent, VoiceId, VoiceParams, VoiceSource,
+    AudioCommand, AudioSink, CompSettings, DelayConfig, EnvOverride, EqBand, EqBandKind, Frame,
+    ReverbIr, TrackConfig, VoiceEvent, VoiceId, VoiceParams, VoiceSource,
 };
 
 // ── Non-real-time file decode (mono f32 + source rate) ───────────────────────

@@ -44,7 +44,7 @@ fn base_dir(project_dir: Option<String>) -> PathBuf {
 /// tracks (no rebuild); otherwise it builds the wider registry on a blocking worker
 /// and hands it to the audio thread ready to swap in — so the seconds-long decode
 /// never freezes playback. No-op when no session is live.
-async fn stage_tracks(
+pub(crate) async fn stage_tracks(
     ctx: &MerulaState,
     cfg: &MerulaConfig,
     tracks: Tracks<ControlMap>,

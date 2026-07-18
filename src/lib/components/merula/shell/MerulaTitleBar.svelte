@@ -13,7 +13,7 @@
     Play, Square, SkipBack, SkipForward, Rewind, FastForward, ChevronDown, FolderGit2, Download, Settings, ScrollText, Keyboard,
     PanelLeft, PanelRight, Minimize2, Check, AlertTriangle,
     FolderOpen, FolderPlus, FilePlus2, Save, Clock, LogOut, FolderPen,
-    FileAudio, FileMusic, Layers, Crop, SlidersHorizontal, LayoutGrid,
+    FileAudio, FileMusic, Layers, PackageOpen, Crop, SlidersHorizontal, LayoutGrid,
     User, Plus, UserCog,
   } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -74,6 +74,8 @@
       disabled: !projectActions.canExportRegion, onclick: () => projectActions.exportRegion() },
     { kind: 'item', id: 'stems', label: 'Export stems…', icon: Layers,
       onclick: () => projectActions.exportStems() },
+    { kind: 'item', id: 'export_all', label: 'Export all…', icon: PackageOpen,
+      onclick: () => projectActions.exportAll() },
     { kind: 'item', id: 'midi', label: 'Export MIDI…', icon: FileMusic,
       onclick: () => projectActions.exportMidi() },
     { kind: 'item', id: 'edit', label: 'Edit export…', icon: SlidersHorizontal,

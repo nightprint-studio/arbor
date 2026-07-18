@@ -47,6 +47,10 @@ function createProjectActions() {
   // committing to a path. `exportOptionsOpen` gates the dialog; `exportLoops`
   // is the chosen multiplier, carried into the picker's confirm.
   let exportOptionsOpen = $state(false);
+  // "Export all" is a separate, self-contained dialog: it owns its own file list,
+  // format and output folder, and needs no save picker (it writes N files into one
+  // folder), so it does NOT go through the two-step `picker` flow above.
+  let exportAllOpen = $state(false);
   let exportLoops       = $state(DEFAULT_RENDER_LOOPS);
   // The chosen output format is a *persistent* preference (saved to the merula
   // render config, never localStorage — Arbor hard rule #11), so it survives
@@ -194,6 +198,7 @@ function createProjectActions() {
   return {
     get picker() { return picker; },
     get exportOptionsOpen() { return exportOptionsOpen; },
+    get exportAllOpen()     { return exportAllOpen; },
     get exportLoops()       { return exportLoops; },
     get exportFormat()      { return currentFormat(); },
     get exportSampleRate()  { return exportSampleRate; },
@@ -230,6 +235,9 @@ function createProjectActions() {
      *  resets the loop count to the default each time so the dialog is
      *  predictable. */
     exportWav()   { exportLoops = DEFAULT_RENDER_LOOPS; loadRenderDefaults(); exportOptionsOpen = true; },
+    /** Bounce every script in the project to one folder (see ExportAllModal). */
+    exportAll()      { exportAllOpen = true; },
+    closeExportAll() { exportAllOpen = false; },
     /** Quick export (IntelliJ "run current configuration") — skip the options
      *  dialog and go straight to the save picker, reusing the last-chosen format
      *  and the global render defaults. The split-button's main action; "Edit

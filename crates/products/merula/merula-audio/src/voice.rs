@@ -22,7 +22,7 @@
 use crate::effects::{self, Biquad};
 use crate::registry::{ResolvedVoice, SampleParams};
 use crate::sampler::SamplePlayer;
-use crate::seam::{VoiceId, VoiceParams};
+use crate::seam::{EnvOverride, VoiceId, VoiceParams};
 use crate::synth::{midi_to_freq, Adsr, SynthVoice};
 
 /// The sound generator backing a voice — a synth oscillator+env, or a sample
@@ -108,6 +108,7 @@ impl Source {
         speed: f32,
         sample_rate: f32,
         seed: u64,
+        ov: EnvOverride,
     ) {
         match resolved {
             ResolvedVoice::Synth(preset) => {
@@ -124,6 +125,7 @@ impl Source {
                     speed,
                     sample_rate,
                     seed,
+                    ov,
                 );
             }
             ResolvedVoice::Sample { sample, region } => {
@@ -151,7 +153,7 @@ impl Source {
                     *region_pan = region.pan;
                     return;
                 }
-                *self = build_sample_source(&sample, region, note, shift, speed, sample_rate);
+                *self = build_sample_source(&sample, region, note, shift, speed, sample_rate, ov);
             }
         }
     }
@@ -214,7 +216,15 @@ impl Voice {
         // `shift`. `speed` is a separate rate multiply handled by the player.
         let shift = params.shift;
         // The voice id seeds noise generators so repeated hits decorrelate.
-        let source = build_source(resolved, note, shift, params.speed, sample_rate, id.0);
+        let source = build_source(
+            resolved,
+            note,
+            shift,
+            params.speed,
+            sample_rate,
+            id.0,
+            params.env(),
+        );
 
         let hpf = params
             .hpf
@@ -299,8 +309,15 @@ impl Voice {
         release_at: Option<u64>,
         sample_rate: f32,
     ) {
-        self.source
-            .reglide(resolved, note, params.shift, params.speed, sample_rate, self.id.0);
+        self.source.reglide(
+            resolved,
+            note,
+            params.shift,
+            params.speed,
+            sample_rate,
+            self.id.0,
+            params.env(),
+        );
 
         self.amp = params.gain * params.vel;
         let region_pan = self.source.region_pan();
@@ -401,17 +418,19 @@ fn build_source(
     speed: f32,
     sample_rate: f32,
     seed: u64,
+    ov: EnvOverride,
 ) -> Source {
     match resolved {
         ResolvedVoice::Synth(preset) => {
             // Unpitched synth triggers default to middle C.
             let midi = note.unwrap_or(60.0) + shift;
             let freq = midi_to_freq(midi);
+            // Per-stage override: an unset stage keeps the preset's own value.
             let env = Adsr::new(
-                preset.attack,
-                preset.decay,
-                preset.sustain,
-                preset.release,
+                ov.attack.unwrap_or(preset.attack),
+                ov.decay.unwrap_or(preset.decay),
+                ov.sustain.unwrap_or(preset.sustain),
+                ov.release.unwrap_or(preset.release),
                 sample_rate,
             );
             // `speed` on a synth maps to a frequency multiply (it has no buffer
@@ -420,7 +439,7 @@ fn build_source(
             Source::Synth(SynthVoice::new(preset.shape, freq, env, sample_rate, seed))
         }
         ResolvedVoice::Sample { sample, region } => {
-            build_sample_source(&sample, region, note, shift, speed, sample_rate)
+            build_sample_source(&sample, region, note, shift, speed, sample_rate, ov)
         }
     }
 }
@@ -434,6 +453,7 @@ fn build_sample_source(
     shift: f32,
     speed: f32,
     sample_rate: f32,
+    ov: EnvOverride,
 ) -> Source {
     // Pitched playback only when a note is given; an unpitched one-shot plays at
     // native pitch (just `shift` + region tune).
@@ -451,11 +471,12 @@ fn build_sample_source(
         region.offset,
         region.loop_spec,
     );
+    // Per-stage override: an unset stage keeps the sampled region's own `ampeg_*`.
     let env = Adsr::new(
-        region.attack,
-        region.decay,
-        region.sustain,
-        region.release,
+        ov.attack.unwrap_or(region.attack),
+        ov.decay.unwrap_or(region.decay),
+        ov.sustain.unwrap_or(region.sustain),
+        ov.release.unwrap_or(region.release),
         sample_rate,
     );
     Source::Sample {

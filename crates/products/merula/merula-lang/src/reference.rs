@@ -742,6 +742,30 @@ fn transforms() -> Vec<DslEntry> {
             "strings.vel(rand(0.5, 0.9))",
         ),
         entry(
+            "attack", DslKind::Transform, "attack(sec, pat) -> pat  ·  pat.attack(sec)",
+            "Amplitude-envelope attack in **seconds**, overriding the instrument's own. Softens a hit so repeats blend instead of stacking; unset stages keep the instrument's ADSR. Patternisable.",
+            vec![DslParam::req("sec", "attack time in seconds (number or signal)"), pat()],
+            "n(c4).inst(\"sine\").attack(0.008)",
+        ),
+        entry(
+            "decay", DslKind::Transform, "decay(sec, pat) -> pat  ·  pat.decay(sec)",
+            "Amplitude-envelope decay in **seconds** (the fall from the attack peak to `sustain`), overriding the instrument's own. Patternisable.",
+            vec![DslParam::req("sec", "decay time in seconds (number or signal)"), pat()],
+            "n(c4).inst(\"sine\").decay(0.12)",
+        ),
+        entry(
+            "sustain", DslKind::Transform, "sustain(x, pat) -> pat  ·  pat.sustain(x)",
+            "Amplitude-envelope sustain **level** 0..1 (not a time), overriding the instrument's own. `sustain(0)` makes a purely percussive voice that dies after its decay. Patternisable.",
+            vec![DslParam::req("x", "sustain level 0..1 (number or signal)"), pat()],
+            "n(c4).inst(\"sine\").sustain(0).decay(0.3)",
+        ),
+        entry(
+            "release", DslKind::Transform, "release(sec, pat) -> pat  ·  pat.release(sec)",
+            "Amplitude-envelope release in **seconds** (the tail after the note ends), overriding the instrument's own. The tail rings past the note, so a short note can still have a long bloom. Patternisable.",
+            vec![DslParam::req("sec", "release time in seconds (number or signal)"), pat()],
+            "n(c4).inst(\"sine\").release(0.4)",
+        ),
+        entry(
             "inst", DslKind::Transform, "inst(name, pat) -> pat  ·  pat.inst(name)",
             "Choose the voice: a built-in synth preset (`\"synth.bass\"`, …) or an installed sampler (`\"strings.violin\"`). Unknown names fall back to the synth.",
             vec![DslParam::req("name", "instrument name (string)"), pat()],
@@ -852,7 +876,7 @@ fn notes() -> Vec<DslEntry> {
         ),
         entry(
             "degree", DslKind::Note, "<integer> (scale degree)",
-            "A numeric leaf in an `n(…)` island is a scale degree (0 = root) resolved by `.scale(\"root:mode\")`. Scales: major/ionian minor/aeolian dorian phrygian lydian mixolydian locrian harmonicminor melodicminor majpent minpent chromatic.",
+            "A numeric leaf in an `n(…)` island is a scale degree (0 = root) resolved by `.scale(\"root:mode\")`. Scales: major/ionian minor/aeolian dorian phrygian lydian mixolydian locrian harmonicminor melodicminor majpent minpent yo in/miyakobushi hirajoshi insen iwato kumoi chromatic.",
             vec![],
             "n(0 2 4 7).scale(\"c:dorian\")",
         ),
@@ -970,6 +994,7 @@ mod tests {
     const IMPLEMENTED_TRANSFORMS: &[&str] = &[
         "rev", "degrade", "palindrome", "fast", "slow", "gain", "pan", "room",
         "lpf", "hpf", "shift", "speed", "crush", "shape", "vel", "inst", "art",
+        "attack", "decay", "sustain", "release",
         "hold", "scale", "add", "addDeg", "degradeBy", "sometimesBy", "chunk", "iter",
         "swingBy", "humanize", "delay", "eq", "comp", "every", "off", "sometimes", "jux", "log",
         "engine", "voice", "lang", "pitch", "rate", "mouth", "throat",

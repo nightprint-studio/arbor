@@ -112,6 +112,14 @@ pub struct VoiceParams {
     pub shape: f32,
     /// Velocity `0..1`: selects the sampled velocity-layer + dynamics. Default `0.8`.
     pub vel: f32,
+    /// Amplitude-envelope attack in seconds; `None` keeps the instrument's own.
+    pub attack: Option<f32>,
+    /// Amplitude-envelope decay in seconds; `None` keeps the instrument's own.
+    pub decay: Option<f32>,
+    /// Amplitude-envelope sustain level `0..1`; `None` keeps the instrument's own.
+    pub sustain: Option<f32>,
+    /// Amplitude-envelope release in seconds; `None` keeps the instrument's own.
+    pub release: Option<f32>,
     /// Delay line time in **fractions of a cycle** (e.g. `0.25` = a quarter-cycle);
     /// `None` leaves the destination track's delay bus at its current setting.
     /// Configures the per-track delay bus (additive seam extension, Onda 2).
@@ -138,11 +146,48 @@ impl Default for VoiceParams {
             crush: None,
             shape: 0.0,
             vel: 0.8,
+            attack: None,
+            decay: None,
+            sustain: None,
+            release: None,
             delay: None,
             feedback: None,
             delay_mix: None,
         }
     }
+}
+
+impl VoiceParams {
+    /// The amplitude-envelope overrides this event carries, as one value to hand
+    /// to the voice builder.
+    pub fn env(&self) -> EnvOverride {
+        EnvOverride {
+            attack: self.attack,
+            decay: self.decay,
+            sustain: self.sustain,
+            release: self.release,
+        }
+    }
+}
+
+/// Per-event overrides for an instrument's amplitude envelope, from `.attack()` /
+/// `.decay()` / `.sustain()` / `.release()`.
+///
+/// Every field is optional and each is resolved independently against the
+/// instrument's own stage (a synth preset's ADSR, a sampled region's SFZ
+/// `ampeg_*`), so overriding only the attack leaves the instrument's decay,
+/// sustain and release untouched — and a voice that overrides nothing is
+/// identical to one built before these existed.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct EnvOverride {
+    /// Attack time in seconds.
+    pub attack: Option<f32>,
+    /// Decay time in seconds.
+    pub decay: Option<f32>,
+    /// Sustain level `0..1`.
+    pub sustain: Option<f32>,
+    /// Release time in seconds.
+    pub release: Option<f32>,
 }
 
 /// One parametric-EQ band: a single biquad section. Strip processors are driven

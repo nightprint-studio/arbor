@@ -8,8 +8,8 @@
 
 // ── AST ──────────────────────────────────────────────────────────────────────
 pub use crate::ast::{
-    BinOp, Expr, ExprKind, FnDef, Ident, Import, Island, IslandKind, Item, Leaf, LetBind, Mini,
-    MiniArg, MiniKind, Postfix, Program, UnOp,
+    BinOp, Expr, ExprKind, FnDef, Ident, Import, Island, IslandKind, Item, Leaf, LetBind,
+    MetaBlock, MetaField, MetaValue, Mini, MiniArg, MiniKind, Postfix, Program, UnOp,
 };
 
 // ── Errors ───────────────────────────────────────────────────────────────────

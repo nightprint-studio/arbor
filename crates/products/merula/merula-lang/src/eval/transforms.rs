@@ -115,6 +115,13 @@ pub fn make_transform(
         "shape" => mix(args, span, |p, x| p.shape(x)),
         "vel" => mix(args, span, |p, x| p.vel(x)),
 
+        // Amplitude envelope: each overrides one stage of the instrument's own
+        // ADSR (times in seconds); unset stages keep the instrument's value.
+        "attack" => mix(args, span, |p, x| p.attack(x)),
+        "decay" => mix(args, span, |p, x| p.decay(x)),
+        "sustain" => mix(args, span, |p, x| p.sustain(x)),
+        "release" => mix(args, span, |p, x| p.release(x)),
+
         "inst" => {
             arity(name, args, 1, span)?;
             let s = as_str(&args[0], span)?;

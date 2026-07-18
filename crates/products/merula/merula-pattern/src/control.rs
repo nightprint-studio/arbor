@@ -232,6 +232,24 @@ pub struct ControlMap {
     /// Waveshaper distortion amount `0..1`.
     pub shape: Option<f64>,
 
+    // ── Amplitude envelope (per-event overrides) ─────────────────────────────
+    // Each field overrides one stage of the *instrument's own* amplitude envelope
+    // (a synth preset's ADSR, a sampled region's SFZ `ampeg_*`). `None` keeps the
+    // instrument's value, so a pattern that sets none of them sounds exactly as it
+    // did before these existed — the envelope stays the instrument's business
+    // unless a caller deliberately takes it over.
+    //
+    // Times are in **seconds** (matching `comp`'s attack/release), not milliseconds:
+    // a 8 ms attack is `.attack(0.008)`.
+    /// Attack time in seconds.
+    pub attack: Option<f64>,
+    /// Decay time in seconds.
+    pub decay: Option<f64>,
+    /// Sustain level `0..1`.
+    pub sustain: Option<f64>,
+    /// Release time in seconds.
+    pub release: Option<f64>,
+
     // ── Delay (feedback echo) ─────────────────────────────────────────────────
     // A real feedback echo, distinct from `off` (which retriggers the *pattern*).
     // The three controls travel per-event but the audio engine realises them as a
@@ -323,6 +341,10 @@ impl ControlMap {
             speed: other.speed.or(self.speed),
             crush: other.crush.or(self.crush),
             shape: other.shape.or(self.shape),
+            attack: other.attack.or(self.attack),
+            decay: other.decay.or(self.decay),
+            sustain: other.sustain.or(self.sustain),
+            release: other.release.or(self.release),
             delay: other.delay.or(self.delay),
             feedback: other.feedback.or(self.feedback),
             delay_mix: other.delay_mix.or(self.delay_mix),
@@ -366,6 +388,30 @@ mod tests {
     fn gain_defaults_missing_side_to_unity() {
         let only = ControlMap { gain: Some(0.4), ..Default::default() };
         assert_eq!(ControlMap::default().combine(only).gain, Some(0.4));
+    }
+
+    #[test]
+    fn envelope_stages_override_independently() {
+        // Each stage resolves on its own: overriding the attack must not disturb a
+        // release set further left (the whole point of per-stage `Option`s — the
+        // instrument keeps every stage the caller didn't take over).
+        let base = ControlMap { attack: Some(0.1), release: Some(0.4), ..Default::default() };
+        let overlay = ControlMap { attack: Some(0.008), ..Default::default() };
+        let merged = base.combine(overlay);
+        assert_eq!(merged.attack, Some(0.008), "right wins for the stage it sets");
+        assert_eq!(merged.release, Some(0.4), "an unset stage keeps the left value");
+        assert_eq!(merged.decay, None, "a stage nobody set stays the instrument's");
+    }
+
+    #[test]
+    fn envelope_does_not_multiply_like_gain() {
+        // `gain` is the one multiplying field; a stacked envelope must override,
+        // otherwise two `.attack(0.5)` would silently mean 0.25 s.
+        let a = ControlMap { attack: Some(0.5), sustain: Some(0.5), ..Default::default() };
+        let b = ControlMap { attack: Some(0.5), sustain: Some(0.5), ..Default::default() };
+        let merged = a.combine(b);
+        assert_eq!(merged.attack, Some(0.5));
+        assert_eq!(merged.sustain, Some(0.5));
     }
 
     #[test]

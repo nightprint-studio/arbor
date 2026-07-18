@@ -17,7 +17,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use merula::prelude::Scene;
+use merula::prelude::{ControlMap, Scene, Tracks};
 
 use merula_core::session;
 use merula_core::prelude::MerulaState;
@@ -84,33 +84,65 @@ fn merula_scenes(_ctx: &MerulaState) -> Result<Scenes, String> {
     Ok(resolved.unwrap_or(Scenes { tracks: Vec::new(), scenes: Vec::new() }))
 }
 
-/// One entry of a launch selection: base track `track` should play the clip that
-/// scene `scene` declares for it (instead of its base pattern). Tracks absent from
-/// the selection keep their base pattern.
-// TODO(clippy): dead_code (fields never read) — `merula_launch` is a W3 stub that
-// discards its `selection`; these fields carry the wire payload the W3 impl will
-// read (substitute each scene's clip into its same-named base track). Flagged, not
-// deleted (removing them breaks the IPC contract the front end already sends).
+/// One entry of a launch selection: base track `track` (by mixer-order index) should
+/// play the clip that scene `scene` declares for it (instead of its base pattern).
+/// Tracks absent from the selection keep their base pattern.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClipSelection {
     pub track: u32,
     pub scene: String,
 }
 
+/// Build the override arrangement: clone the base tracks, then for each selection
+/// substitute the chosen scene's same-named clip's pattern into the base track at
+/// that index. Pure (no audio, no state) so it can be unit-tested; a selection whose
+/// index, scene or clip doesn't resolve is skipped, leaving that base track intact.
+pub(crate) fn apply_selection(
+    base: &Tracks<ControlMap>,
+    scenes: &[Scene],
+    selection: &[ClipSelection],
+) -> Tracks<ControlMap> {
+    let mut out = base.clone();
+    for sel in selection {
+        let Some(base_track) = out.tracks.get(sel.track as usize) else {
+            continue; // index past the mixer — a stale selection
+        };
+        let track_name = base_track.name.clone();
+        // The clip is stored as a single-channel track named after the base track it
+        // targets, so we match it by that name within the chosen scene.
+        let clip = scenes
+            .iter()
+            .find(|s| s.name == sel.scene)
+            .and_then(|s| s.clips.iter().find(|c| c.name == track_name));
+        if let Some(clip) = clip {
+            out.tracks[sel.track as usize].pattern = clip.pattern.clone();
+        }
+    }
+    out
+}
+
 /// Fire the clip launcher's current selection: re-stage the last-evaluated tracks
 /// with the chosen scenes' clips substituted into their same-named base tracks. An
 /// empty selection restores every track to its base — i.e. "stop all".
 ///
-/// A no-op when nothing is evaluated yet (the W1 state) or when no session is live;
-/// the W3 eval/audio domains build the override from the typed `Latest` and stage
-/// it on the live session.
+/// A no-op when nothing has been evaluated yet or when no session is live. Uses the
+/// same staging path as `merula_eval`, so it decodes any voice the clips introduce
+/// (a different `.inst(...)`) off the RT thread and swaps the arrangement in without
+/// interrupting playback.
 #[arbor_rpc::handler]
-fn merula_launch(ctx: &MerulaState, selection: Vec<ClipSelection>) -> Result<(), String> {
-    let _ = selection;
-    let _staged = ctx.latest().is_some();
-    // W3: build the override tracks from the typed `Latest` (substitute each
-    // selected scene's same-named clip into its base track) and stage it on the
-    // live session via the audio control channel.
+async fn merula_launch(ctx: &MerulaState, selection: Vec<ClipSelection>) -> Result<(), String> {
+    let cfg = merula_core::config::load();
+    let staged = session::with_latest(|l| {
+        (
+            apply_selection(&l.tracks, &l.scenes, &selection),
+            l.cps,
+            l.tempo.clone(),
+        )
+    });
+    let Some((tracks, cps, tempo)) = staged else {
+        return Ok(()); // nothing evaluated yet
+    };
+    crate::audio_cmds::stage_tracks(ctx, &cfg, tracks, cps, tempo).await;
     Ok(())
 }
 
@@ -143,5 +175,55 @@ mod tests {
     fn no_scenes_is_empty() {
         let names = vec!["drums".to_string()];
         assert!(scene_infos(&names, &[]).is_empty());
+    }
+
+    use merula::prelude::{pure, tracks, ControlMap, Time, TimeSpan};
+
+    /// The `sound` marker of a track's pattern at cycle 0 — a cheap way to tell which
+    /// pattern (base vs clip) a track is currently carrying.
+    fn marker(t: &merula::prelude::Track<ControlMap>) -> Option<String> {
+        t.pattern
+            .query(TimeSpan::new(Time::ZERO, Time::int(1)))
+            .first()
+            .and_then(|h| h.value.sound.clone())
+    }
+
+    /// The regression this whole change fixes: firing a clip must actually swap that
+    /// track's pattern for the scene's same-named clip, and leave the others alone.
+    #[test]
+    fn selection_substitutes_the_named_clip() {
+        // Two base tracks; each clip is stored as a track named after its base track.
+        let base = tracks(vec![
+            track("chords", pure(ControlMap::sound("piano_base"))),
+            track("lead", pure(ControlMap::sound("recorder_base"))),
+        ]);
+        let scenes = vec![Scene {
+            name: "harp".to_string(),
+            clips: vec![track("lead", pure(ControlMap::sound("harp_clip")))],
+        }];
+
+        // Fire the "harp" scene on the `lead` track (index 1).
+        let out = apply_selection(&base, &scenes, &[ClipSelection { track: 1, scene: "harp".into() }]);
+        assert_eq!(marker(&out.tracks[1]).as_deref(), Some("harp_clip"), "lead swapped to the clip");
+        assert_eq!(marker(&out.tracks[0]).as_deref(), Some("piano_base"), "chords untouched");
+    }
+
+    /// An empty selection restores every track to its base ("stop all"); an unknown
+    /// scene or an out-of-range index is skipped rather than erroring.
+    #[test]
+    fn selection_edge_cases_leave_base_intact() {
+        let base = tracks(vec![track("lead", pure(ControlMap::sound("base")))]);
+        let scenes = vec![Scene {
+            name: "harp".to_string(),
+            clips: vec![track("lead", pure(ControlMap::sound("harp")))],
+        }];
+
+        assert_eq!(marker(&apply_selection(&base, &scenes, &[]).tracks[0]).as_deref(), Some("base"));
+        // Unknown scene name → no substitution.
+        let bad_scene = apply_selection(&base, &scenes, &[ClipSelection { track: 0, scene: "nope".into() }]);
+        assert_eq!(marker(&bad_scene.tracks[0]).as_deref(), Some("base"));
+        // Index past the mixer → skipped, no panic.
+        let bad_idx = apply_selection(&base, &scenes, &[ClipSelection { track: 9, scene: "harp".into() }]);
+        assert_eq!(marker(&bad_idx.tracks[0]).as_deref(), Some("base"));
     }
 }

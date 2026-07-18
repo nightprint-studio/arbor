@@ -1052,3 +1052,68 @@ export function merulaDownloadModel(id: string): Promise<string> {
 export function merulaDeleteModel(id: string): Promise<void> {
   return merula('merula_delete_model', { id });
 }
+
+// ── Export all ────────────────────────────────────────────────────────────────
+
+/** One `.merula` in the export plan, as `merula_export_plan` resolves it. */
+export interface MerulaExportPlanEntry {
+  /** Absolute path to the source file. */
+  path: string;
+  /** Project-relative path, for display. */
+  rel: string;
+  /** Output file name without extension. */
+  stem: string;
+  /** `meta.title`, when the file declares one. */
+  title: string | null;
+  /** Cycles to render. */
+  cycles: number;
+  /** Which rule produced `cycles`: `meta` | `arrangement` | `default`. */
+  cycles_from: string;
+  /** Parse/eval error — the file can't be rendered as it stands. */
+  error: string | null;
+}
+
+/** One file to actually render (the plan entry, possibly with `cycles` overridden). */
+export interface MerulaExportEntry {
+  path: string;
+  stem: string;
+  cycles: number;
+}
+
+/** Format + quality for the whole batch — one format for every file. */
+export interface MerulaExportAllOpts {
+  /** `wav` | `ogg`. */
+  format: string;
+  sample_rate?: number;
+  bit_depth?: string;
+  tail_max_secs?: number;
+  normalize_lufs?: number;
+}
+
+/**
+ * List a project's `.merula` files with the render length each one declares, so
+ * an export dialog can show a checklist without asking for a cycle count per file.
+ * Files that fail to parse/evaluate come back with `error` set.
+ */
+export function merulaExportPlan(dir: string): Promise<MerulaExportPlanEntry[]> {
+  return merula('merula_export_plan', { dir });
+}
+
+/**
+ * Render every chosen file into `outDir`, all to the same format, as ONE background
+ * job. Returns the job id immediately; progress spans the whole batch and flows
+ * through the Downloads & Exports overlay.
+ */
+export function merulaExportAll(
+  dir: string,
+  entries: MerulaExportEntry[],
+  outDir: string,
+  opts: MerulaExportAllOpts,
+): Promise<string> {
+  const wire: Record<string, unknown> = { format: opts.format };
+  if (opts.sample_rate !== undefined) wire.sample_rate = opts.sample_rate;
+  if (opts.bit_depth !== undefined) wire.bit_depth = opts.bit_depth;
+  if (opts.tail_max_secs !== undefined) wire.tail_max_secs = opts.tail_max_secs;
+  if (opts.normalize_lufs !== undefined) wire.normalize_lufs = opts.normalize_lufs;
+  return merula('merula_export_all', { dir, entries, out_dir: outDir, opts: wire });
+}

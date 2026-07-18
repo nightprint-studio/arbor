@@ -30,6 +30,7 @@
   <li><strong>Audio (WAV / OGG)</strong> — the full rendered mix.</li>
   <li><strong>Export loop region…</strong> — bounces just the span you marked as the loop region on the ruler.</li>
   <li><strong>Export stems…</strong> — one audio file per track into a folder you pick, each rendered in isolation (ready to mix elsewhere).</li>
+  <li><strong>Export all…</strong> — every script in the project bounced into one folder, all in the same format. Each file's render length comes from its own front-matter (<code>meta &#123; cycles = "88" &#125;</code>), falling back to its arrangement length and then to a single cycle, so a folder of one-shot effects needs no per-file setup. Untick anything you want to leave out; files that don't compile are listed with their error and skipped.</li>
   <li><strong>Export MIDI…</strong> — the arrangement's note data to a <code>.mid</code> (one track per merula track; pitched notes plus recognised drum sounds as General-MIDI percussion) for any other DAW. It bakes the song's natural loop period, once.</li>
   <li><strong>Edit export…</strong> — the options dialog: format, sample rate / bit depth / reverb tail, how many times the loop repeats, and an optional <strong>Normalize</strong> to a target loudness (LUFS), peak-limited so it never clips.</li>
 </ul>

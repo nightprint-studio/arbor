@@ -17,7 +17,7 @@
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
     Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map as MapIcon, StretchVertical,
-    FileMusic, Layers, Crop, Snowflake, Grid3x3, LayoutGrid, FilePen, Trash2, Rewind, FastForward,
+    FileMusic, Layers, PackageOpen, Crop, Snowflake, Grid3x3, LayoutGrid, FilePen, Trash2, Rewind, FastForward,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -51,7 +51,7 @@
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
     Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map: MapIcon, StretchVertical,
-    FileMusic, Layers, Crop, Snowflake, Grid3x3, LayoutGrid, FilePen, Trash2, Rewind, FastForward,
+    FileMusic, Layers, PackageOpen, Crop, Snowflake, Grid3x3, LayoutGrid, FilePen, Trash2, Rewind, FastForward,
   };
   const iconResolver = (name: string): IconComponent => ICONS[name] ?? Command;
 
@@ -150,6 +150,7 @@
     { id: 'export',       label: 'Export audio…',    group: 'Project', icon: 'Download',   keys: 'Ctrl+Shift+R', desc: 'Bounce the arrangement to a WAV / OGG file.', run: () => projectActions.exportWav() },
     { id: 'export_region', label: 'Export loop region…', group: 'Project', icon: 'Crop',  desc: 'Bounce only the loop region to a single file.', run: () => projectActions.exportRegion() },
     { id: 'export_stems', label: 'Export stems…',    group: 'Project', icon: 'Layers',     desc: 'Bounce one audio file per track into a folder.', run: () => projectActions.exportStems() },
+    { id: 'export_all',   label: 'Export all…',      group: 'Project', icon: 'PackageOpen', desc: 'Bounce every script in the project to one folder, all in the same format.', run: () => projectActions.exportAll() },
     { id: 'export_midi',  label: 'Export MIDI…',     group: 'Project', icon: 'FileMusic',  desc: 'Write the arrangement notes to a Standard MIDI File.', run: () => projectActions.exportMidi() },
     { id: 'check_levels', label: 'Check levels (clip analysis)', group: 'Project', icon: 'Gauge', desc: 'Offline-scan for clipping without playing the song.', run: () => projectActions.checkLevels() },
     { id: 'import',       label: 'Import audio / MIDI…', group: 'Project', icon: 'FileInput', keys: 'Alt+Shift+I', desc: 'Transcribe audio or convert MIDI into a .merula file.', run: () => importActions.start() },

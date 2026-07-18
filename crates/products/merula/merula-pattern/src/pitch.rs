@@ -85,6 +85,12 @@ const MODES: &[ScaleMode] = &[
     ScaleMode { name: "majpent",       aliases: &["majorpentatonic"],        intervals: &[0, 2, 4, 7, 9] },
     ScaleMode { name: "minpent",       aliases: &["minorpentatonic"],        intervals: &[0, 3, 5, 7, 10] },
     // Japanese pentatonic / hexatonic modes (used in the author's pieces).
+    // `yo` (陽, no semitones) is the safe generative scale — like `minpent`, no two of
+    // its degrees are a semitone apart, so an SFX on any degree can't clash with the
+    // music on any other (design doc §3.1). `in` (陰, miyako-bushi) carries the two
+    // "Japanese" semitones (0-1, 7-8) and is for the controlled lead voice only.
+    ScaleMode { name: "yo",            aliases: &["ryo"],                    intervals: &[0, 2, 5, 7, 9] },
+    ScaleMode { name: "in",            aliases: &["miyakobushi", "miyako_bushi"], intervals: &[0, 1, 5, 7, 8] },
     ScaleMode { name: "hirajoshi",     aliases: &[],                         intervals: &[0, 2, 3, 7, 8] },
     ScaleMode { name: "insen",         aliases: &["in_sen", "in-sen"],       intervals: &[0, 1, 5, 7, 10] },
     ScaleMode { name: "iwato",         aliases: &[],                         intervals: &[0, 1, 5, 6, 10] },
@@ -192,5 +198,21 @@ mod tests {
             Scale::parse("c:insen").unwrap(),
             Scale::parse("c:in_sen").unwrap()
         );
+
+        // Yo on C: C D F G A (no semitones — the safe generative scale, §3.1).
+        let yo = Scale::parse("c:yo").unwrap();
+        assert_eq!(yo.degree_to_midi(0, 4), 60.0); // C4
+        assert_eq!(yo.degree_to_midi(1, 4), 62.0); // D4
+        assert_eq!(yo.degree_to_midi(2, 4), 65.0); // F4 (the F, not E — no 3rd)
+        assert_eq!(yo.degree_to_midi(3, 4), 67.0); // G4
+        assert_eq!(yo.degree_to_midi(4, 4), 69.0); // A4
+        assert_eq!(yo.degree_to_midi(5, 4), 72.0); // C5 (wraps an octave)
+
+        // In / miyako-bushi on C: C Db F G Ab (the two Japanese semitones, lead only).
+        let in_ = Scale::parse("c:in").unwrap();
+        assert_eq!(in_.degree_to_midi(0, 4), 60.0); // C4
+        assert_eq!(in_.degree_to_midi(1, 4), 61.0); // Db4 (the semitone)
+        assert_eq!(in_.degree_to_midi(4, 4), 68.0); // Ab4 (the other semitone)
+        assert_eq!(Scale::parse("c:in").unwrap(), Scale::parse("c:miyakobushi").unwrap());
     }
 }

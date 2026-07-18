@@ -34,8 +34,8 @@ pub use merula_lang::prelude::{
     emit, emit_expr, evaluate, materialize_island, materialize_source, parse, reference, BinOp, Ctx,
     DslEntry, DslKind, DslParam, Env, EvalConfig, EvalOutput, Expr, ExprKind, FnDef, Func, Ident,
     Import, Island, IslandKind, Item, LangError, LangErrorKind, Leaf, LetBind, LogLevel, LogSink,
-    Mini, MiniArg, MiniKind, NoImports, Postfix, Program, Scene, SilentLog, SourceLoader, Transform,
-    UnOp, Value,
+    MetaBlock, MetaField, MetaValue, Mini, MiniArg, MiniKind, NoImports, Postfix, Program, Scene,
+    SilentLog, SourceLoader, Transform, UnOp, Value,
 };
 
 // ── merula-audio — the DSP / real-time backend ──────────────────────────

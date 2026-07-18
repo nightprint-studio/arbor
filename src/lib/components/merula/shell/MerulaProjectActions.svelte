@@ -7,6 +7,7 @@
    */
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import ExportOptionsModal from './ExportOptionsModal.svelte';
+  import ExportAllModal from './ExportAllModal.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
   import { projectStore } from '../stores/project.svelte';
 </script>
@@ -14,6 +15,8 @@
 {#if projectActions.exportOptionsOpen}
   <ExportOptionsModal />
 {/if}
+
+<ExportAllModal open={projectActions.exportAllOpen} onclose={projectActions.closeExportAll} />
 
 {#if projectActions.picker === 'new' || projectActions.picker === 'open-project'}
   <FileExplorerModal

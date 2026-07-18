@@ -118,6 +118,26 @@ impl Pattern<ControlMap> {
         self.with_control(x.into(), |c, v| c.shape = Some(v))
     }
 
+    /// Amplitude-envelope attack in **seconds**, overriding the instrument's own.
+    pub fn attack(self, x: impl Into<Param>) -> Pattern<ControlMap> {
+        self.with_control(x.into(), |c, v| c.attack = Some(v))
+    }
+
+    /// Amplitude-envelope decay in **seconds**, overriding the instrument's own.
+    pub fn decay(self, x: impl Into<Param>) -> Pattern<ControlMap> {
+        self.with_control(x.into(), |c, v| c.decay = Some(v))
+    }
+
+    /// Amplitude-envelope sustain level `0..1`, overriding the instrument's own.
+    pub fn sustain(self, x: impl Into<Param>) -> Pattern<ControlMap> {
+        self.with_control(x.into(), |c, v| c.sustain = Some(v))
+    }
+
+    /// Amplitude-envelope release in **seconds**, overriding the instrument's own.
+    pub fn release(self, x: impl Into<Param>) -> Pattern<ControlMap> {
+        self.with_control(x.into(), |c, v| c.release = Some(v))
+    }
+
     /// Velocity `0..1`: selects the sampled velocity-layer + dynamics (≠ `gain`).
     pub fn vel(self, x: impl Into<Param>) -> Pattern<ControlMap> {
         self.with_control(x.into(), |c, v| c.vel = Some(v))
