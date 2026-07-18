@@ -16,7 +16,9 @@
   <ExportOptionsModal />
 {/if}
 
-<ExportAllModal open={projectActions.exportAllOpen} onclose={projectActions.closeExportAll} />
+{#if projectActions.exportAllOpen}
+  <ExportAllModal onClose={projectActions.closeExportAll} />
+{/if}
 
 {#if projectActions.picker === 'new' || projectActions.picker === 'open-project'}
   <FileExplorerModal
