@@ -54,6 +54,10 @@ export const BASE: Product[] = [
   // real species like the others), so `bird: 'firebird'` is a placeholder.
   { id: 'bennu',  name: 'Bennu',  bird: 'firebird',    role: 'Java editor',         accent: '#f2c14e',
     blurb: 'Editor and semantic engine for legacy Java: navigation, live validation, refactors and run configurations.' },
+  // TODO(user): confirm accent — picked to read as distinct from Corvus's blue
+  // and Merula's amber on the canopy.
+  { id: 'picus',  name: 'Picus',  bird: 'woodpecker',  role: 'SQL studio',          accent: '#4fbfa8',
+    blurb: 'Oracle and PostgreSQL client, and maintainer of the SQL scripts they install from: it keeps the two dialect branches in step and generates the changes that keep them there.' },
 ];
 
 // ── Colour helpers ───────────────────────────────────────────────────────────

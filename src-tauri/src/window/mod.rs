@@ -15,6 +15,9 @@
 //!   becomes the launcher and Corvus opens as a product window.
 //! - [`bennu`] — the Java-editor / analysis product window (`bennu`). Spawns its
 //!   own `bennu-be` backend lazily, exactly like Corvus.
+//! - [`picus`] — the SQL-studio product window (`picus`): database client +
+//!   maintainer of the per-dialect SQL script repository. No backend yet — the
+//!   shell runs on frontend fixtures until `picus-be` exists.
 //! - [`workspace`] — the tabbed container that can host the workspace products
 //!   in ONE window (`workspace`), used when the user's window mode is `tabbed`.
 //! - [`launcher`] — the JetBrains-Toolbox-like launcher (`launcher`).
@@ -50,6 +53,7 @@ pub mod explorer;
 pub mod hud;
 pub mod launcher;
 pub mod merula;
+pub mod picus;
 pub mod placement;
 pub mod tyto;
 pub mod workspace;
@@ -338,6 +342,8 @@ pub fn product_id_for_label(label: &str) -> Option<&'static str> {
         Some("tyto")
     } else if label == bennu::BENNU_WINDOW_LABEL || label.starts_with("bennu-") {
         Some("bennu")
+    } else if label == picus::PICUS_WINDOW_LABEL || label.starts_with("picus-") {
+        Some("picus")
     } else {
         None
     }

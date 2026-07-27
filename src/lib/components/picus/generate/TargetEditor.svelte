@@ -1,0 +1,336 @@
+<script lang="ts">
+  /**
+   * Target editor — one row per destination file, expandable into its rules.
+   *
+   * This is the component the whole generator hinges on, so it is deliberately
+   * explicit:
+   *
+   *  • The **collapsed** row says everything you need to decide whether to look
+   *    closer: dialect, role, path, and a compact summary of the active rules
+   *    ("procedural block", "4.12 → 4.13").
+   *  • The **expanded** row states, next to every switch, what it turns into in
+   *    the emitted SQL — `DECLARE … BEGIN … END; /` versus `DO $$ … END $$;`,
+   *    `USER_TABLES` versus `to_regclass`. A rule you cannot picture is a rule
+   *    you will get wrong.
+   *  • Rule **dependencies apply themselves, visibly**: switching the version
+   *    guard on switches the procedural block on (a guard needs somewhere to
+   *    live); switching the block off drops the guard.
+   *  • "Copy these rules" only reaches destinations with the **same role** —
+   *    never from initialisation to update, where a version guard would be
+   *    nonsense.
+   */
+  import { ChevronRight, Check, Copy, Eye, RotateCcw, Trash2 } from 'lucide-svelte';
+  import Toggle from '$lib/components/shared/ui/Toggle.svelte';
+  import Input from '$lib/components/shared/ui/Input.svelte';
+  import Button from '$lib/components/shared/ui/Button.svelte';
+  import Badge from '$lib/components/shared/ui/Badge.svelte';
+  import PicusDialectChip from '../PicusDialectChip.svelte';
+  import PicusRoleChip from '../PicusRoleChip.svelte';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+  import { dmlStore } from '$lib/stores/picus/dml.svelte';
+  import type { Target } from '$lib/types/picus';
+
+  /** What each rule turns into, per dialect — shown inline, never hidden. */
+  function wrapHint(t: Target): string {
+    return t.dialect === 'oracle' ? 'DECLARE … BEGIN … END; /' : 'DO $$ … END $$;';
+  }
+  function objectHint(t: Target): string {
+    return t.dialect === 'oracle' ? 'checked against USER_TABLES' : 'checked with to_regclass';
+  }
+  function txHint(t: Target): string {
+    return t.dialect === 'oracle'
+      ? 'SAVEPOINT + ROLLBACK TO on error'
+      : 'the DO block is already one transaction';
+  }
+</script>
+
+{#each dmlStore.targets as target (target.id)}
+  {@const expanded = dmlStore.expandedTargetId === target.id}
+  <div class="te-row" class:te-off={!target.enabled}>
+    <!-- Collapsed head: the whole row expands; the checkbox arms the target. -->
+    <div class="te-head">
+      <button
+        type="button"
+        class="te-check"
+        class:te-on={target.enabled}
+        aria-pressed={target.enabled}
+        aria-label={`${target.enabled ? 'Disable' : 'Enable'} ${target.file}`}
+        onclick={() => dmlStore.toggleTarget(target.id)}
+      >
+        {#if target.enabled}<Check size={11} />{/if}
+      </button>
+
+      <button
+        type="button"
+        class="te-main"
+        aria-expanded={expanded}
+        onclick={() => dmlStore.expandTarget(target.id)}
+      >
+        <PicusDialectChip dialect={target.dialect} />
+        <PicusRoleChip role={target.role} />
+        <span class="te-path">{target.file}</span>
+        <span class="te-summary">
+          <Badge
+            variant="tone"
+            tone={target.wrap === 'block' ? 'accent' : 'neutral'}
+            size="sm"
+            label={target.wrap === 'block' ? 'procedural block' : 'bare statements'}
+          />
+          {#if target.guards.version}
+            <Badge
+              variant="tone"
+              tone="warning"
+              size="sm"
+              label={`${target.guards.version.from || '?'} → ${target.guards.version.to || '?'}`}
+            />
+          {/if}
+          {#if target.guards.skipIfPresent}
+            <Badge variant="tone" tone="neutral" size="sm" label="skip existing" />
+          {/if}
+        </span>
+        <span class="te-twist" class:te-twist-open={expanded}><ChevronRight size={13} /></span>
+      </button>
+    </div>
+
+    {#if expanded}
+      <div class="te-rules">
+        <div class="te-rule">
+          <Toggle
+            checked={target.wrap === 'block'}
+            size="sm"
+            label="Wrap in a procedural block"
+            ariaLabel="Wrap in a procedural block"
+            onchange={(on) => dmlStore.setWrap(target.id, on ? 'block' : 'plain')}
+          />
+          <span class="te-why">{wrapHint(target)}</span>
+        </div>
+
+        <div class="te-rule">
+          <Toggle
+            checked={!!target.guards.version}
+            size="sm"
+            label="Run only when the database is at version"
+            ariaLabel="Version guard"
+            onchange={(on) => dmlStore.setVersionGuard(target.id, on)}
+          />
+          {#if target.guards.version}
+            <span class="te-inline">
+              <Input
+                value={target.guards.version.from}
+                size="sm"
+                narrow
+                block={false}
+                ariaLabel="Starting version"
+                placeholder="4.12"
+                oninput={(v) => dmlStore.setVersionBound(target.id, 'from', String(v))}
+              />
+              <span class="te-inline-text">and carry it to</span>
+              <Input
+                value={target.guards.version.to}
+                size="sm"
+                narrow
+                block={false}
+                ariaLabel="Resulting version"
+                placeholder="4.13"
+                oninput={(v) => dmlStore.setVersionBound(target.id, 'to', String(v))}
+              />
+            </span>
+          {/if}
+          <span class="te-why">
+            {#if target.wrap === 'plain'}
+              needs the procedural block — switching this on turns it on
+            {:else}
+              reads the version table, returns early on a mismatch
+            {/if}
+          </span>
+        </div>
+
+        <div class="te-rule">
+          <Toggle
+            checked={target.guards.skipIfPresent}
+            size="sm"
+            label="Skip rows that are already there"
+            ariaLabel="Skip existing rows"
+            onchange={(on) => dmlStore.setGuard(target.id, 'skipIfPresent', on)}
+          />
+          <span class="te-why">
+            checked on the comparison key ({dmlStore.keyColumns.map((c) => c.name).join(', ') || 'none selected'})
+          </span>
+        </div>
+
+        <div class="te-rule">
+          <Toggle
+            checked={target.guards.requireObject}
+            size="sm"
+            label="Stop if the table doesn't exist"
+            ariaLabel="Require the table to exist"
+            onchange={(on) => dmlStore.setGuard(target.id, 'requireObject', on)}
+          />
+          <span class="te-why">{objectHint(target)}</span>
+        </div>
+
+        <div class="te-rule">
+          <Toggle
+            checked={target.guards.transactional}
+            size="sm"
+            disabled={target.dialect === 'postgres'}
+            label="Savepoint and roll back on error"
+            ariaLabel="Transactional"
+            onchange={(on) => dmlStore.setGuard(target.id, 'transactional', on)}
+          />
+          <span class="te-why">{txHint(target)}</span>
+        </div>
+
+        <div class="te-actions">
+          <Button
+            variant="secondary"
+            size="xs"
+            tooltip={`Applies to the other “${target.role}” destinations only — never across roles`}
+            onclick={() => {
+              const n = dmlStore.copyRulesToSameRole(target.id);
+              toastStore.show(
+                n ? `Rules copied to ${n} other ${target.role} destination${n === 1 ? '' : 's'}.`
+                  : `No other ${target.role} destination to copy to.`,
+                n ? 'success' : 'info',
+              );
+            }}
+          >
+            {#snippet iconStart()}<Copy size={12} />{/snippet}
+            Copy these rules to the same role
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
+            title="Reset this destination to its role's preset"
+            onclick={() => dmlStore.resetTargetToPreset(target.id)}
+          >
+            {#snippet iconStart()}<RotateCcw size={12} />{/snippet}
+            Reset to preset
+          </Button>
+          <span class="te-spacer"></span>
+          <Button variant="ghost" size="xs" title="Show this destination in the preview" onclick={() => dmlStore.setPreviewTarget(target.id)}>
+            {#snippet iconStart()}<Eye size={12} />{/snippet}
+            Preview
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
+            tooltip={'Remove this destination — the file itself is untouched'}
+            ariaLabel="Remove this destination"
+            onclick={() => {
+              dmlStore.removeTarget(target.id);
+              toastStore.show(`${target.file} is no longer a destination.`, 'info');
+            }}
+          >
+            {#snippet iconStart()}<Trash2 size={12} />{/snippet}
+            Remove
+          </Button>
+        </div>
+      </div>
+    {/if}
+  </div>
+{/each}
+
+<style>
+  .te-row { border-bottom: 1px solid var(--border-subtle); }
+  .te-row:last-child { border-bottom: none; }
+  .te-off { opacity: 0.5; }
+
+  .te-head { display: flex; align-items: center; gap: 9px; padding: 0 12px; }
+
+  .te-check {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    padding: 0;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: transparent;
+    cursor: pointer;
+  }
+  .te-check:hover { border-color: var(--border-focus); }
+  .te-check.te-on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--text-on-accent);
+  }
+
+  .te-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    padding: 9px 0;
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .te-main:hover .te-path { color: var(--text-primary); }
+
+  .te-path {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-code);
+    font-size: 11.5px;
+    color: var(--text-secondary);
+  }
+
+  .te-summary { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+  .te-twist {
+    display: inline-flex;
+    color: var(--text-disabled);
+    transition: transform var(--transition-fast);
+  }
+  .te-twist-open { transform: rotate(90deg); }
+
+  /* Expanded rules sit on a slightly recessed ground, indented past the checkbox
+     so they read as belonging to the row above. */
+  .te-rules {
+    padding: 6px 14px 12px 46px;
+    background: var(--bg-input);
+    border-top: 1px dashed var(--border-subtle);
+  }
+
+  .te-rule {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 5px 0;
+    font-size: 11.5px;
+  }
+
+  .te-inline { display: inline-flex; align-items: center; gap: 7px; }
+  .te-inline-text { color: var(--text-secondary); }
+
+  /* The translation note: what this switch becomes in the emitted SQL. */
+  .te-why {
+    margin-left: auto;
+    font-family: var(--font-code);
+    font-size: 10.5px;
+    color: var(--text-disabled);
+    white-space: nowrap;
+  }
+
+  .te-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .te-spacer { flex: 1; }
+</style>

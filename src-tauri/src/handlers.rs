@@ -107,6 +107,8 @@ macro_rules! invoke_handlers {
             $crate::window::corvus::open_corvus_window,
             // Dedicated Bennu (Java editor / analysis) window
             $crate::window::bennu::open_bennu_window,
+            // Dedicated Picus (SQL studio) window
+            $crate::window::picus::open_picus_window,
             // Cross-product recents (Canopy's list) + the "open this project"
             // intent a product's shell pulls as it mounts.
             $crate::commands::recents_commands::record_recent_project,

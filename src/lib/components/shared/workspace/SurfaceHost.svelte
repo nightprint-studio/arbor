@@ -28,6 +28,7 @@
     corvus: () => import('$lib/components/corvus/AppShell.svelte'),
     bennu:  () => import('$lib/components/bennu/BennuWindow.svelte'),
     merula: () => import('$lib/components/merula/MerulaWindow.svelte'),
+    picus:  () => import('$lib/components/picus/PicusWindow.svelte'),
   };
 
   let Shell = $state<Component | null>(null);

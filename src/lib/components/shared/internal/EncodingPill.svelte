@@ -17,9 +17,33 @@
      *  in a future iteration). Defaults to the 16px size that matches the
      *  diff toolbar buttons. */
     compact?: boolean;
+    /**
+     * Encoding the file was EXPECTED to have. When it differs from `encoding`
+     * the file was probably rewritten by another editor — the pill turns into a
+     * standing error rather than a neutral badge, and says so on hover. Picus
+     * reports this as an `ENC001` finding; here it is the at-a-glance signal.
+     */
+    expected?: string;
+    /** Line ending, appended after a separator when supplied (`CRLF` / `LF`). */
+    eol?: string;
   }
 
-  let { encoding, overridden = false, onChange, compact = false }: Props = $props();
+  let { encoding, overridden = false, onChange, compact = false, expected, eol }: Props = $props();
+
+  /** The file's encoding drifted away from what the project expects. */
+  const drifted = $derived(!!expected && expected !== encoding);
+
+  /** Hover copy: state first, then what to do about it. */
+  const hint = $derived.by(() => {
+    if (drifted) {
+      return {
+        content: `Encoding changed: ${encoding} (expected ${expected})`,
+        description: 'The file was rewritten by another editor. Click to convert it back.',
+      };
+    }
+    if (overridden) return { content: `Encoding (overridden): ${encoding}`, description: 'Click to change' };
+    return { content: `Encoding (auto-detected): ${encoding}`, description: 'Click to override' };
+  });
 
   // Read-only display (no callback) → just renders the badge, no dropdown.
   const interactive = $derived(typeof onChange === 'function');
@@ -51,28 +75,24 @@
         type="button"
         class="enc-pill"
         class:overridden
+        class:drifted
         class:open
         class:compact
         onclick={toggle}
         aria-haspopup="listbox"
         aria-expanded={open}
-        use:tooltip={overridden
-          ? { content: `Encoding (overridden): ${encoding}`, description: 'Click to change' }
-          : { content: `Encoding (auto-detected): ${encoding}`, description: 'Click to override' }}
+        use:tooltip={hint}
       >
         <span class="enc-label">{encoding}</span>
+        {#if eol}<span class="enc-eol">{eol}</span>{/if}
         <ChevronDown size={compact ? 9 : 10} />
       </button>
     {/snippet}
   </Dropdown>
 {:else}
-  <span
-    class="enc-pill static"
-    class:overridden
-    class:compact
-    use:tooltip={overridden ? `Encoding (overridden): ${encoding}` : `Encoding (auto-detected): ${encoding}`}
-  >
+  <span class="enc-pill static" class:overridden class:drifted class:compact use:tooltip={hint}>
     <span class="enc-label">{encoding}</span>
+    {#if eol}<span class="enc-eol">{eol}</span>{/if}
   </span>
 {/if}
 
@@ -122,6 +142,28 @@
   button.enc-pill.overridden:hover,
   button.enc-pill.overridden.open {
     background: color-mix(in srgb, var(--warning) 22%, transparent);
+  }
+
+  /* Drift from the expected encoding is an error state, not a preference: the
+     file's accented characters are already wrong on disk. Wins over the
+     `overridden` tint (declared after it). */
+  .enc-pill.drifted {
+    background: color-mix(in srgb, var(--error) 15%, transparent);
+    color: var(--error);
+    border-color: color-mix(in srgb, var(--error) 38%, transparent);
+  }
+  button.enc-pill.drifted:hover,
+  button.enc-pill.drifted.open {
+    background: color-mix(in srgb, var(--error) 24%, transparent);
+  }
+
+  /* Line ending rides along in the same badge — one glance covers both facts
+     you need before saving a legacy file. */
+  .enc-eol {
+    padding-left: 4px;
+    margin-left: 1px;
+    border-left: 1px solid currentColor;
+    opacity: 0.65;
   }
 
   .enc-label {

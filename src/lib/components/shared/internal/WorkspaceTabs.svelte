@@ -8,7 +8,7 @@
    * container `surfaceStore.inContainer` is false and this renders nothing, so
    * the title bars can mount it unconditionally.
    */
-  import { X, Plus, GitBranch, Coffee, Music, LayoutGrid } from 'lucide-svelte';
+  import { X, Plus, GitBranch, Coffee, Music, Database, LayoutGrid } from 'lucide-svelte';
   import type { IconComponent } from '$lib/types/icon';
   import { surfaceStore, surfaceDef, type SurfaceId } from '$lib/stores/surfaces.svelte';
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
@@ -18,6 +18,7 @@
     corvus: GitBranch,
     bennu:  Coffee,
     merula: Music,
+    picus:  Database,
   };
 </script>
 

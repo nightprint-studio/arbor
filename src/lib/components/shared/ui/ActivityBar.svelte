@@ -29,6 +29,13 @@
     iconSnippet?: Snippet;
     /** Lit/accent state — the side-aware active bar is drawn for this button. */
     active?: boolean;
+    /**
+     * Small corner dot marking "there is something here" without opening the
+     * panel — unread items, open findings, a failing check. The tone picks the
+     * colour; `true` means `accent`. Purely a marker: pair it with a `tooltip`
+     * that says what the dot is about, since a dot alone tells nobody anything.
+     */
+    dot?: boolean | 'accent' | 'error' | 'warning' | 'success';
     /** Accessible label (defaults to `tooltip`). */
     ariaLabel?: string;
     onclick: () => void;
@@ -113,6 +120,13 @@
         <span class="ab-emoji">{item.emoji}</span>
       {:else if Icon}
         <Icon size={item.iconSize ?? 18} />
+      {/if}
+      {#if item.dot}
+        <span
+          class="ab-dot"
+          data-tone={item.dot === true ? 'accent' : item.dot}
+          aria-hidden="true"
+        ></span>
       {/if}
     </button>
   {/if}
@@ -217,6 +231,22 @@
     background: var(--accent);
     border-radius: 3px 0 0 3px;
   }
+
+  /* Corner marker — "there is something here". Ringed in the rail's own
+     background so it stays legible over an active button's tinted fill. */
+  :global(.activity-bar .ab-dot) {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    border: 1.5px solid var(--bg-elevated);
+    background: var(--accent);
+  }
+  :global(.activity-bar .ab-dot[data-tone="error"])   { background: var(--error); }
+  :global(.activity-bar .ab-dot[data-tone="warning"]) { background: var(--warning); }
+  :global(.activity-bar .ab-dot[data-tone="success"]) { background: var(--success); }
 
   /* Emoji-as-icon fallback (plugin actions whose `icon` is a single emoji). */
   :global(.activity-bar .ab-emoji) {

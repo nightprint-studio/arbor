@@ -46,6 +46,12 @@ export function openBennuWindow(): Promise<void> {
   return invoke('open_bennu_window');
 }
 
+/** Open (or focus, if already open) the dedicated Picus window — the SQL studio
+ *  (database client + maintainer of the per-dialect SQL script repository). */
+export function openPicusWindow(): Promise<void> {
+  return invoke('open_picus_window');
+}
+
 /** Open (or focus, if already open) the launcher (Canopy) window. */
 export function openLauncherWindow(): Promise<void> {
   return invoke('open_launcher_window');
@@ -81,6 +87,7 @@ export const PRODUCT_WINDOW_OPENERS: Record<string, () => Promise<void>> = {
   merula: openMerulaWindow,    // Music (merula / Merula)
   tyto: openTytoWindow,        // Screen recorder
   bennu: openBennuWindow,      // Java editor
+  picus: openPicusWindow,      // SQL studio
 };
 
 // ── Product window running-state (launcher ↔ product windows) ────────────────
