@@ -159,6 +159,70 @@ pub fn arm_ready_reveal(app: &AppHandle, label: &str) {
 pub fn window_ready(window: WebviewWindow) {
     let _ = window.show();
     let _ = window.set_focus();
+    // A revealed window is a new entry in the window directory — this is the
+    // "window opened" signal for switchers and Window menus (there is no
+    // `WindowEvent::Created`, and a window built hidden isn't listable before
+    // its shell paints anyway).
+    emit_windows_changed(window.app_handle());
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//  Surface taxonomy — what KIND of window a label is
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Arbor's windows are not interchangeable, and treating them as one bag is how
+// the platform-specific papercuts crept in. Four kinds, each with its own
+// contract:
+//
+//  • [`SurfaceKind::Workspace`] — a full product you *work in* (Corvus, Bennu,
+//    Merula). Long-lived, one per project, and the only kind eligible for the
+//    tabbed container: workspaces are what you alt-tab between all day.
+//  • [`SurfaceKind::Utility`] — a helper with its own window, freely
+//    multi-instance (Sitta / the File Explorer). Never a tab: you want two of
+//    them side by side, which is the opposite of tabbing.
+//  • [`SurfaceKind::Ambient`] — an accessory that must be reachable *while you
+//    are in another app* (Tyto, the recorder). Its real entry point is the
+//    tray / menu-bar extra, not a window you go find.
+//  • [`SurfaceKind::Launcher`] — Canopy itself.
+//  • [`SurfaceKind::Overlay`] — chromeless, owned by another surface (the
+//    recording HUD, the drag ghost). Never listed, never focused by the user.
+//
+// The kind is what window chrome, tab-ability, tray presence and close policy
+// should branch on — not a growing pile of `label == "…"` comparisons.
+
+/// The behavioural class of a native window. See the module section above.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceKind {
+    Workspace,
+    Utility,
+    Ambient,
+    Launcher,
+    Overlay,
+}
+
+impl SurfaceKind {
+    /// Can the user switch *to* this window? Overlays are owned by another
+    /// surface and never appear in the Window menu or the window switcher.
+    pub fn is_switchable(self) -> bool {
+        !matches!(self, SurfaceKind::Overlay)
+    }
+}
+
+/// Classify a native window label. Unknown labels fall back to `Workspace`,
+/// mirroring the frontend, where an unrecognised label mounts the Git shell.
+pub fn surface_kind_for_label(label: &str) -> SurfaceKind {
+    if is_launcher_label(label) {
+        SurfaceKind::Launcher
+    } else if label == hud::TYTO_HUD_LABEL || label == explorer::DRAG_OVERLAY_LABEL {
+        SurfaceKind::Overlay
+    } else if label == tyto::TYTO_WINDOW_LABEL {
+        SurfaceKind::Ambient
+    } else if label == explorer::EXPLORER_WINDOW_LABEL || label.starts_with("explorer-") {
+        SurfaceKind::Utility
+    } else {
+        SurfaceKind::Workspace
+    }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -194,8 +258,9 @@ pub fn product_id_for_label(label: &str) -> Option<&'static str> {
 }
 
 /// True for the labels that render the Canopy **launcher** shell — the `main`
-/// window today and the future dedicated [`launcher`] window. These are the
-/// windows that reduce to the tray when they lose focus (release only, see
+/// window today and the future dedicated [`launcher`] window. The backing
+/// predicate of [`SurfaceKind::Launcher`]: these are the windows that reduce to
+/// the tray when they lose focus (Windows/Linux release builds only, see
 /// [`events`]) and that paint their own chrome instead of native decorations.
 pub fn is_launcher_label(label: &str) -> bool {
     label == "main" || label == launcher::LAUNCHER_WINDOW_LABEL
@@ -229,6 +294,102 @@ pub fn list_running_products(app: AppHandle) -> Vec<String> {
         }
     }
     ids
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//  Window directory — the switcher, the Window menu, the taskbar labels
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Arbor drives several top-level windows, and until now the OS had no way to
+// tell them apart: every window was built with a STATIC title ("Corvus —
+// Arbor"), so three open repositories produced three identical entries in the
+// Windows taskbar, in Alt-Tab, and in the macOS Window menu / Mission Control.
+// macOS feels it worst — there is no per-window taskbar button, so the window
+// title IS the only handle the user has — but the fix is not platform-specific:
+// [`set_window_title`] lets each shell publish its real context, and
+// [`list_windows`] + [`focus_window`] back the in-app switcher on every OS.
+
+/// Broadcast when the set of windows — or one of their titles — changes, so
+/// open switchers and title-bar menus re-read [`list_windows`].
+pub const WINDOWS_CHANGED_EVENT: &str = "arbor://windows-changed";
+
+/// Tell every window the directory changed. Cheap and idempotent: listeners
+/// just re-query. Fired on reveal, on retitle and on destroy.
+pub fn emit_windows_changed(app: &AppHandle) {
+    let _ = app.emit(WINDOWS_CHANGED_EVENT, ());
+}
+
+/// One switchable window, as the frontend sees it.
+#[derive(Clone, serde::Serialize)]
+pub struct WindowInfo {
+    pub label: String,
+    /// The OS-level title — what the shell published via [`set_window_title`].
+    pub title: String,
+    /// Canopy product id, when the window belongs to one.
+    pub product: Option<String>,
+    pub kind: SurfaceKind,
+    pub focused: bool,
+    /// Hidden windows (a close-to-tray'd product) still list, so the switcher
+    /// can bring them back — that is the only way back for a tray'd window.
+    pub visible: bool,
+}
+
+/// Every switchable window, for the window switcher and the Window menu.
+///
+/// **Async on purpose**: `title()` / `is_focused()` are round-trips to the
+/// window on the main thread, and Tauri runs sync commands there — an async
+/// command runs on the runtime instead, so the getters can never race the
+/// thread they are asking.
+#[tauri::command]
+pub async fn list_windows(app: AppHandle) -> Vec<WindowInfo> {
+    let mut out: Vec<WindowInfo> = Vec::new();
+    for (label, w) in app.webview_windows() {
+        let kind = surface_kind_for_label(&label);
+        if !kind.is_switchable() {
+            continue;
+        }
+        out.push(WindowInfo {
+            title: w.title().unwrap_or_else(|_| label.clone()),
+            product: product_id_for_label(&label).map(str::to_string),
+            kind,
+            focused: w.is_focused().unwrap_or(false),
+            visible: w.is_visible().unwrap_or(true),
+            label,
+        });
+    }
+    // Stable, meaningful order: the launcher heads the list, then products
+    // alphabetically by title. `webview_windows()` iterates a HashMap, so
+    // without this the switcher would reshuffle between invocations.
+    out.sort_by(|a, b| {
+        let rank = |k: SurfaceKind| match k {
+            SurfaceKind::Launcher => 0,
+            SurfaceKind::Workspace => 1,
+            SurfaceKind::Utility => 2,
+            SurfaceKind::Ambient => 3,
+            SurfaceKind::Overlay => 4,
+        };
+        rank(a.kind)
+            .cmp(&rank(b.kind))
+            .then_with(|| a.title.cmp(&b.title))
+    });
+    out
+}
+
+/// Bring one window to the front — the switcher's and Window menu's action.
+#[tauri::command]
+pub fn focus_window(app: AppHandle, label: String) {
+    if let Some(w) = app.get_webview_window(&label) {
+        show_and_focus(&w);
+    }
+}
+
+/// Publish the calling window's real title — repo, project or folder — so the
+/// OS can tell Arbor's windows apart (taskbar, Alt-Tab, macOS Window menu).
+/// The window is injected by Tauri, so a shell can only ever retitle itself.
+#[tauri::command]
+pub fn set_window_title(app: AppHandle, window: WebviewWindow, title: String) {
+    let _ = window.set_title(&title);
+    emit_windows_changed(&app);
 }
 
 /// Terminate a product — the launcher's "Stop" action. Uses `destroy()` (not

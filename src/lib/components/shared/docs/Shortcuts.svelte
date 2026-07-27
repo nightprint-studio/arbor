@@ -53,6 +53,7 @@
     <tr><td><Kbd action="open_recent" size="sm" /></td><td>Recent repos quick-switch</td></tr>
     <tr><td><Kbd action="repo_browser" size="sm" /></td><td>Browse remote repositories (GitHub / GitLab)</td></tr>
     <tr><td><Kbd action="command_palette" size="sm" /></td><td>Open Command Palette</td></tr>
+    <tr><td><Kbd action="switch_window" size="sm" /></td><td>Switch window — jump to another open Arbor window</td></tr>
     <tr><td><Kbd action="open_project" size="sm" /></td><td>Open project in active workspace</td></tr>
     <tr><td><Kbd action="open_from_workspace" size="sm" /></td><td>Open project from another workspace (cross-WS tab)</td></tr>
     <tr><td><Kbd action="workspace_manager" size="sm" /></td><td>Open Workspace Manager</td></tr>

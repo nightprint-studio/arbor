@@ -16,6 +16,7 @@
   // Titlebar sits at the very top — tooltips fly downward so they aren't clipped.
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
   import { createNativeMenuPublisher } from '$lib/utils/native-menu';
+  import { windowMenuItems } from '$lib/utils/window-menu';
   import { recorderStore, formatDuration, type CaptureMode } from '$lib/stores/tyto/recorder.svelte';
   import { tytoUiStore } from '$lib/stores/tyto/ui.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -37,12 +38,15 @@
   const publishNativeMenu = createNativeMenuPublisher('Tyto', { fallbackTitle: 'Capture' });
 
   // Hamburger — light: identity + about + close (settings live in the gear).
-  const hamburgerMenu: DropdownItem[] = [
+  // `$derived` because the Window section below tracks the live set of open
+  // Arbor windows.
+  const hamburgerMenu = $derived<DropdownItem[]>([
     { kind: 'item', id: 'snip', label: 'Snip capture', icon: Scissors, shortcut: 'Ctrl+Shift+C', onclick: () => void recorderStore.enterSelection('rect') },
     { kind: 'item', id: 'about', label: 'About Tyto…', icon: Info, onclick: () => tytoUiStore.openAbout() },
+    ...windowMenuItems(),
     { kind: 'separator' },
     { kind: 'item', id: 'close', label: 'Close Window', icon: LogOut, danger: true, onclick: () => { void getCurrentWindow().close(); } },
-  ];
+  ]);
 
   // Theme submenu — every available theme, single-select with a check on the
   // active one. Keyboard-navigable through the shared Dropdown flyout.

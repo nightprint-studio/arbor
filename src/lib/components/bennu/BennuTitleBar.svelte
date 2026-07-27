@@ -31,6 +31,7 @@
   import BennuWorkspaceSwitcher from './BennuWorkspaceSwitcher.svelte';
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
   import { createNativeMenuPublisher } from '$lib/utils/native-menu';
+  import { windowMenuItems } from '$lib/utils/window-menu';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -132,6 +133,7 @@
     { kind: 'item', id: 'projectcfg', label: 'Project Configuration…', icon: SlidersHorizontal, disabled: !hasProject, onclick: () => bennuUiStore.openProjectConfig() },
     // MOCK — remove the "Load demo project" entry when bennu-be serves real data.
     { kind: 'item', id: 'demo',  label: 'Load demo project', icon: FlaskConical, onclick: () => projectStore.loadDemo() },
+    ...windowMenuItems(),
     { kind: 'separator' },
     { kind: 'item', id: 'about', label: 'About Bennu', icon: Info, onclick: () => bennuUiStore.openAbout() },
     { kind: 'item', id: 'close', label: 'Close Window', icon: LogOut, danger: true, onclick: () => { void getCurrentWindow().close(); } },

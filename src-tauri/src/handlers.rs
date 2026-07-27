@@ -72,6 +72,11 @@ macro_rules! invoke_handlers {
             // Anti-white-flash reveal: every launcher/product window builds hidden
             // and the shell calls this once painted (see `window::window_ready`).
             $crate::window::window_ready,
+            // Window directory: real per-window titles (taskbar / Alt-Tab /
+            // macOS Window menu) + the in-app window switcher.
+            $crate::window::set_window_title,
+            $crate::window::list_windows,
+            $crate::window::focus_window,
             // Dedicated File Explorer window + cross-window clipboard & drag
             $crate::window::explorer::open_explorer_window,
             $crate::window::explorer::reveal_in_explorer,

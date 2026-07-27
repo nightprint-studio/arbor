@@ -24,6 +24,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **Window switcher** — <kbd>Ctrl/Cmd+Shift+G</kbd> from any Arbor window lists every other open one (Canopy, Git, File Explorer, Merula, Bennu, Tyto); type to filter, Enter to jump. A window minimized to the tray is listed too, and picking it brings it back. Also available as *Switch Window* in the Command Palette and under **Window** in the title-bar menu.
+- Each window is now **named after what it is showing** — the repository, project or folder — instead of a fixed product name, so several windows of the same product are finally distinguishable in the taskbar, in Alt-Tab, in Mission Control and in the macOS Window menu.
+
 - **macOS**: Arbor now uses the **system menu bar** instead of the title-bar hamburger. Every window publishes its own menus when it comes to the front — Corvus as File / Tools / Plugins, Bennu as Project, Merula as File / Project, Tyto as Capture — with their keyboard shortcuts shown natively, plus the standard Arbor, Edit, Window and Help menus (so ⌘C / ⌘V / ⌘Z work in text fields). "Exit" and "Close Window" give way to the native Quit and Window ▸ Close Window. Windows and Linux keep the hamburger unchanged.
 
 - **Merula** (music): **envelope control** — `.attack(s)`, `.decay(s)`, `.sustain(0..1)` and `.release(s)` shape any voice's amplitude envelope, so a sound's attack and tail are yours rather than whatever its instrument declares. Each stage is independent: set only the attack and the instrument keeps its own decay, sustain and release. Patternisable like every other control, and they work on sampled instruments as well as synths.
@@ -106,6 +109,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- **macOS**: Canopy no longer disappears into the tray — it neither hides when it loses focus nor minimizes to the tray when closed, as macOS expects (the app stays alive with no windows and is reopened from the Dock). Windows and Linux keep the tray behaviour.
 - **macOS**: keyboard shortcuts are now shown with the native modifier glyphs (⌘ ⌥ ⇧, plus symbols for Enter, Tab, arrows, …) instead of `Ctrl+…` text — everywhere shortcuts appear (menus, tooltips, the shortcuts reference, command palette). Windows and Linux keep the `Ctrl/Alt/Shift` wording.
 - **macOS**: every window now uses the **native title bar controls** — the real traffic lights (top-left), the system window menu (Move & Resize, tiling) on hover, and a green button that zooms to fill the screen instead of entering full-screen. The faux window-controls setting is hidden on macOS.
 - **Bennu** (Java editor): the **Problems panel is now grouped by severity** — top-level **Errors** and **Warnings** nodes, each split by source (JDK, Encoding, and one node per file), so you can scan all errors first. A file with both errors and warnings appears under each with just its rows of that severity; every node is collapsible.

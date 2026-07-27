@@ -41,20 +41,31 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
                     }
                 }
             }
-            #[cfg(not(debug_assertions))]
+            // Close-to-tray for the main (launcher) window in release.
+            // Auxiliary windows (the drag-ghost overlay, …) close for real.
+            //
+            // Windows/Linux only. On macOS a window that vanishes into a tray
+            // icon on ⌘W is a foreign gesture: the platform expects the window
+            // to close and the *application* to stay alive (it does — the Dock
+            // icon and the menu bar are the app), so the user reopens Canopy
+            // from the Dock, not from a hidden tray. Hiding instead would also
+            // strand the window in the ⌘-Tab list with nothing to click.
+            #[cfg(all(not(debug_assertions), not(target_os = "macos")))]
             {
-                // Close-to-tray for the main (launcher) window in release.
-                // Auxiliary windows (the drag-ghost overlay, …) close for real.
                 if label == "main" {
                     api.prevent_close();
                     let _ = window.hide();
                 }
             }
-            #[cfg(debug_assertions)]
+            #[cfg(any(debug_assertions, target_os = "macos"))]
             let _ = api;
         }
         WindowEvent::Destroyed => {
             let label = window.label();
+            // The window directory shrank: refresh every open switcher and
+            // Window menu. Broadcast for ALL windows, not just product ones —
+            // the launcher and the explorer list there too.
+            super::emit_windows_changed(window.app_handle());
             // merula audio teardown is handled out-of-process: the real session
             // lives in the `merula-be` child, torn down by the `split_broker`
             // detach below on the last merula window's actual destroy (the shell
@@ -126,7 +137,13 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
             // no tray, and a stray focus loss (DevTools, editor) must not make
             // the window vanish — the shell shows a dev-only close button
             // instead. Product windows are untouched (only launcher labels).
-            #[cfg(not(debug_assertions))]
+            //
+            // Windows/Linux only, like the close-to-tray path above: on macOS
+            // the launcher vanishing the moment you click another window reads
+            // as a crash, and there is no tray icon in the user's mental model
+            // to summon it back from — Canopy stays put and is dismissed the
+            // way every mac window is.
+            #[cfg(all(not(debug_assertions), not(target_os = "macos")))]
             if !focused && super::is_launcher_label(window.label()) {
                 let _ = window.hide();
             }

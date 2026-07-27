@@ -113,6 +113,7 @@
     onConfirmMulti,
     onCancel,
     source,
+    onPathChange,
   }: {
     onClose?:         () => void;
     standalone?:      boolean;
@@ -130,6 +131,9 @@
      *  source. The git product passes `explorerProjects`; products without
      *  projects pass nothing (no Projects section) or their own source. */
     source?:          ExplorerProjectsSource;
+    /** Notified whenever the browsed folder changes. The standalone window uses
+     *  it to name the OS window after that folder; modal call sites ignore it. */
+    onPathChange?:    (path: string) => void;
   } = $props();
 
   // Picker flags are static for the component's life (the mode/multiple props
@@ -182,6 +186,9 @@
   // (preview sizing, per-folder view memory) read them.
   const view        = $derived(activeTab.view);
   const currentPath = $derived(activeTab.path);
+  // Let the host follow the browsed folder (the standalone window titles itself
+  // after it). Fires on tab switches too — the folder on screen is what counts.
+  $effect(() => { onPathChange?.(currentPath); });
 
   // ── State ────────────────────────────────────────────────────────────────
   let rawEntries  = $state<FsEntry[]>([]);

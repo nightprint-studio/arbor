@@ -29,6 +29,7 @@
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import { signalWindowReady } from '$lib/ipc/window';
+  import { syncWindowTitle } from '$lib/utils/window-title.svelte';
 
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
   import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
@@ -121,6 +122,10 @@
       detachRun?.(); detachIndex?.(); detachSpell?.(); detachDecompiled?.(); bennuIndexStore.reset();
     };
   });
+
+  // Name the OS window after the open project — what tells two Bennu windows
+  // apart in the taskbar, Alt-Tab and the macOS Window menu.
+  syncWindowTitle('Bennu', () => projectStore.project?.name);
 
   // When a real (non-demo) project opens, kick off the indexing status + job. The BE
   // rebuilds the index on every open, so this fires each time the root changes.

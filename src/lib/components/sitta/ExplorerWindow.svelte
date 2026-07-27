@@ -23,6 +23,7 @@
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
   import ToastItem from '$lib/components/shared/Toast.svelte';
   import { createNativeMenuPublisher } from '$lib/utils/native-menu';
+  import { syncWindowTitle } from '$lib/utils/window-title.svelte';
 
   // macOS: the menu bar is app-wide and this window has no menu of its own, so
   // it claims the baseline bar (App · Edit · Window · Help) rather than leaving
@@ -32,6 +33,17 @@
   // Provide the git Projects source to the explorer below (and any picker it
   // opens) — the standalone window surfaces projects just like the Corvus window.
   setContext(EXPLORER_PROJECTS_KEY, explorerProjects);
+
+  // Name the OS window after the folder on screen. Explorer windows are freely
+  // multi-instance, so without this they'd be indistinguishable in the taskbar,
+  // in Alt-Tab and in the window switcher. The folder NAME (not the full path)
+  // keeps the taskbar label readable; the path is one hover away.
+  let browsedPath = $state('');
+  syncWindowTitle('File Explorer', () => {
+    const clean = browsedPath.replace(/[\\/]+$/, '');
+    // A drive root ("C:") has no basename — show the root itself.
+    return clean.split(/[\\/]/).pop() || clean;
+  });
 
   onMount(() => {
     // Repaint with the active theme + apply persisted user config locally.
@@ -60,7 +72,7 @@
 </script>
 
 <div class="explorer-window">
-  <FileExplorerModal standalone />
+  <FileExplorerModal standalone onPathChange={(p) => { browsedPath = p; }} />
 </div>
 
 <Tooltip />

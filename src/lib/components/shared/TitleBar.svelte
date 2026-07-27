@@ -34,6 +34,7 @@
   import RecentReposModal from '$lib/components/shared/RecentReposModal.svelte';
   import { tooltipForAction } from '$lib/utils/shortcut';
   import { createNativeMenuPublisher } from '$lib/utils/native-menu';
+  import { windowMenuItems } from '$lib/utils/window-menu';
   // Title bar buttons sit at the very top — tooltips fly downward away from the
   // bar, never above (they'd be clipped by the window edge).
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
@@ -100,6 +101,7 @@
           }),
         ]
       : []),
+    ...windowMenuItems(),
     { kind: 'separator' },
     { kind: 'item', id: 'about', label: 'About Arbor', icon: Info,   onclick: () => uiStore.setPanel('about') },
     { kind: 'item', id: 'exit',  label: 'Exit',        icon: LogOut, danger: true, onclick: () => { void getCurrentWindow().close(); } },

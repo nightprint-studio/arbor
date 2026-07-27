@@ -65,7 +65,7 @@ import {
   // Layout
   Workflow, Boxes, Box, Layers, Puzzle, Grid3x3,
   PanelLeft, PanelRight, PanelBottom, PanelTop, SidebarOpen, SidebarClose,
-  LayoutPanelLeft,
+  LayoutPanelLeft, AppWindow,
   // Tags
   Flag, Tag, Hash, AtSign, Percent,
   // World
@@ -119,7 +119,7 @@ export const PLUGIN_ICONS: Record<string, any> = {
   ArrowUpToLine, ArrowDownToLine, ArrowLeftRight,
   Workflow, Boxes, Box, Layers, Puzzle, Grid3x3,
   PanelLeft, PanelRight, PanelBottom, PanelTop, SidebarOpen, SidebarClose,
-  LayoutPanelLeft,
+  LayoutPanelLeft, AppWindow,
   Flag, Tag, Hash, AtSign, Percent,
   Sun, Moon, Globe, Map, MapPin, Compass, Route,
   Leaf, Triangle, Coffee,

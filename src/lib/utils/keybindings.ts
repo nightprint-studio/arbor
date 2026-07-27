@@ -51,6 +51,14 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   // Workspace-aware project pickers (pre-fill the command palette).
   open_project:       { key: 'n',     ctrl: true,                description: 'Open project in workspace',  group: 'Navigation' },
   open_from_workspace:{ key: 'n',     ctrl: true,  shift: true,  description: 'Open project from another workspace', group: 'Navigation' },
+  // Move between Arbor's open windows (Canopy, Corvus, Bennu, Merula, the File
+  // Explorer, Tyto) without leaving the keyboard. Ctrl+Shift+G — "go to
+  // window" — is free across the existing bindings: `focus_graph` is Alt+G and
+  // `toggle_branch_grouping` is Alt+Shift+G, both different chords. Available
+  // in EVERY window (mounted from `+page.svelte`), not just Corvus, because the
+  // whole point is escaping the window you are in — on macOS especially, where
+  // there is no per-window taskbar button to click.
+  switch_window:      { key: 'g',     ctrl: true,  shift: true,  description: 'Switch window',              group: 'Navigation' },
   // Workspace registry / management modal — Alt+Shift+W avoids both the
   // Ctrl+Alt+letter trap (AltGr suppression) and the Win32 Alt-menu access
   // collision of bare Alt+W.

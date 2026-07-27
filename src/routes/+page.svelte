@@ -45,6 +45,22 @@
   let Shell = $state<Component | null>(null);
   loadShell().then((m) => { Shell = m.default; });
 
+  // Chromeless surfaces owned by another window: the recording HUD and the drag
+  // ghost. They get no window-level chrome of their own — no switcher, and they
+  // never appear in one either (the shell's `SurfaceKind::Overlay`).
+  const OVERLAY_LABELS = ['drag-overlay', 'tyto-hud'];
+  const IS_OVERLAY = OVERLAY_LABELS.includes(label);
+
+  // The window switcher rides alongside EVERY real window, not inside a single
+  // product's shell: its whole job is leaving the window you are in, and the OS
+  // switchers are uneven across platforms (a taskbar button per window on
+  // Windows, nothing at all on macOS). Dynamic import for the same reason the
+  // shell uses one — the overlays must not pay for it.
+  let Switcher = $state<Component | null>(null);
+  if (!IS_OVERLAY) {
+    import('$lib/components/shared/WindowSwitcher.svelte').then((m) => { Switcher = m.default; });
+  }
+
   // Anti-white-flash: every launcher/product window is built HIDDEN by the shell and
   // revealed only once painted — an opaque WebView2 window flashes its white default
   // page during load otherwise. Signal readiness after the shell mounts + two frames
@@ -59,4 +75,8 @@
 
 {#if Shell}
   <Shell />
+{/if}
+
+{#if Switcher}
+  <Switcher />
 {/if}

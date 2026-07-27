@@ -77,6 +77,10 @@
 </table>
 <p>Right-click any tab for more options: reveal in explorer, copy path, rename, close others.</p>
 
+<h2>Moving between windows</h2>
+<p>Beyond tabs, Arbor opens several top-level windows — Canopy, one or more Git windows, the File Explorer, Merula, Bennu, Tyto. Each window is named after what it is showing (the repository, project or folder), so it is recognisable in the taskbar, in Alt-Tab and in the macOS Window menu.</p>
+<p><Kbd action="switch_window" /> opens the <strong>window switcher</strong> from any window: type to filter, <kbd>↑</kbd><kbd>↓</kbd> to move, <kbd>↵</kbd> to jump. A window that was closed to the tray still appears there — picking it brings it back. The same list sits under <strong>Window</strong> in the title-bar menu, and <em>Switch Window</em> is in the Command Palette.</p>
+
 <h2>Interface overview</h2>
 <div class="feature-grid">
   <div class="feature-card">

@@ -19,11 +19,18 @@
   import { animStore } from '$lib/stores/animations.svelte';
   import { explorerStore } from '$lib/stores/sitta/explorer.svelte';
   import { profileStore } from '$lib/stores/profiles.svelte';
+  import { projectStore } from '$lib/components/merula/stores/project.svelte';
+  import { syncWindowTitle } from '$lib/utils/window-title.svelte';
   import MerulaShell from '$lib/components/merula/MerulaShell.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
   import MerulaBeDownOverlay from '$lib/components/merula/MerulaBeDownOverlay.svelte';
   import FeedbackHost from '$lib/feedback/FeedbackHost.svelte';
   import FeedbackStatusButtons from '$lib/feedback/FeedbackStatusButtons.svelte';
+
+  // Name the OS window after the open project. Lives in the bridge, not in
+  // MerulaShell: the title is an Arbor/OS concern and the shell stays free of
+  // Arbor imports (see the header note on extractability).
+  syncWindowTitle('merula', () => projectStore.project?.name);
 
   onMount(() => {
     // Repaint with the active theme + apply persisted user config locally.

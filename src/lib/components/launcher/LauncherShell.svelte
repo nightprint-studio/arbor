@@ -23,6 +23,7 @@
   import { Settings as SettingsIcon, X as CloseIcon } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
+  import { windowMenuItems } from '$lib/utils/window-menu';
   import CanopyBackground from './CanopyBackground.svelte';
   import CanopyBrand from './CanopyBrand.svelte';
   import CanopyTree from './CanopyTree.svelte';
@@ -136,6 +137,8 @@
       active: closeToTray[t.id] ?? false,
       onclick: () => toggleCloseToTray(t.id),
     })),
+    // Canopy launches the windows, so it also offers the way back to them.
+    ...windowMenuItems(),
   ]);
 
   // ── Region focus navigation ─────────────────────────────────────────────────

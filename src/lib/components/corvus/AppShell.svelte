@@ -3,6 +3,7 @@
   import { setupTauriListeners } from '$lib/utils/tauri-listeners';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { coalesceLatestByKey } from '$lib/utils/coalesce';
+  import { syncWindowTitle } from '$lib/utils/window-title.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '../shared/TitleBar.svelte';
@@ -561,6 +562,11 @@
   setContext(EXPLORER_PROJECTS_KEY, explorerProjects);
   onMount(() => { void explorerProjects.load(); });
   $effect(() => { explorerProjects.setActiveRepoPath(tabsStore.activeTab?.path ?? null); });
+
+  // Name the OS window after the repository on screen: with several Corvus
+  // windows open, the title is what tells them apart in the taskbar, Alt-Tab,
+  // the macOS Window menu and Arbor's own window switcher.
+  syncWindowTitle('Corvus', () => tabsStore.activeTab?.name);
 
   // Load the profile list + active profile, and listen for `profile-switched`
   // (reloads the window onto the new profile). Powers the title-bar gear menu.

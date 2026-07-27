@@ -15,6 +15,7 @@
   import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
   import { uiStore } from '$lib/stores/ui.svelte';
+  import { windowsStore } from '$lib/stores/windows.svelte';
   import { graphStore } from '$lib/stores/corvus/graph.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
   import { worktreeStore } from '$lib/stores/corvus/worktree.svelte';
@@ -350,6 +351,15 @@
       { id: 'action:import-workspace', kind: 'action', icon: 'FileDown', group: 'Workspaces',
         title: 'Import Workspace', subtitle: 'Import a workspace from exported JSON',
         action: () => closeAndDispatch('arbor:import-workspace') },
+    );
+
+    // ── Windows ─────────────────────────────────────────────────────────────
+    // The switcher itself lists the windows; the palette only needs the verb
+    // that raises it (one implementation, mounted in every window).
+    actions.push(
+      { id: 'action:switch-window', kind: 'action', icon: 'AppWindow', group: 'Windows',
+        title: 'Switch Window', subtitle: 'Jump to another open Arbor window',
+        action: () => { onClose(); windowsStore.openSwitcher(); } },
     );
 
     // ── Tabs ────────────────────────────────────────────────────────────────

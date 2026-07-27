@@ -32,6 +32,7 @@
   // clipped by the window edge.
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
   import { createNativeMenuPublisher } from '$lib/utils/native-menu';
+  import { windowMenuItems } from '$lib/utils/window-menu';
   import { merulaStore, LOG_LEVELS } from '../merula-store.svelte';
   import { merulaEngine } from '../stores/engine.svelte';
   import { configStore } from '../stores/config.svelte';
@@ -106,6 +107,7 @@
     { kind: 'item', id: 'export_region', label: 'Export loop region…', icon: Crop, disabled: !projectActions.canExportRegion, onclick: () => projectActions.exportRegion() },
     { kind: 'item', id: 'export_stems', label: 'Export stems…', icon: Layers, onclick: () => projectActions.exportStems() },
     { kind: 'item', id: 'export_midi', label: 'Export MIDI…', icon: FileMusic, onclick: () => projectActions.exportMidi() },
+    ...windowMenuItems(),
     { kind: 'separator' },
     { kind: 'item', id: 'close', label: 'Close Window', icon: LogOut, danger: true, onclick: () => { void getCurrentWindow().close(); } },
   ]);
