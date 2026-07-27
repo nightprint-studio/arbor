@@ -9,11 +9,14 @@
 //!
 //! Single reusable window, re-summoned rather than duplicated.
 //!
-//! **No backend yet.** `picus-be` does not exist: the shell runs entirely on
-//! frontend fixtures (`src/lib/ipc/picus/mock.ts`), the same staging Tyto went
-//! through before its capture engine landed. When `picus-be` arrives, this file
-//! grows the `ensure_picus_be` call — on `spawn_blocking`, never on a runtime
-//! worker — exactly like `bennu::open_bennu_window`.
+//! `picus-be` (the product backend, spawned lazily by
+//! [`crate::ipc::ensure_picus_be`]) owns the studio's real work. Today it serves the
+//! typed product config and the self-test round-trip; the database and script
+//! domains land in the following waves. Until a domain is served, the frontend runs
+//! on its fixtures (`src/lib/ipc/picus/mock.ts`) — the same staging Tyto went
+//! through before its capture engine landed. The shell here owns only the
+//! OS-integration glue (the window) and the credential broker Picus calls back into:
+//! **the product keeps no password**.
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -86,9 +89,19 @@ fn build_picus_window(app: &AppHandle) {
 /// as [`super::bennu::open_bennu_window`].
 #[tauri::command]
 pub async fn open_picus_window(app: AppHandle) {
-    // No `ensure_picus_be` yet — the product has no backend. When it lands, the
-    // call goes here on `tokio::task::spawn_blocking` (the blocking-pool rule is
-    // mandatory: framed IPC parks on a sync `recv`, and blocking a runtime worker
-    // starves the reverse channel the credential broker needs).
+    // Bring up the studio backend before the window's shell loads and fires its
+    // first BE-required `rpc` (today `get_picus_config`).
+    //
+    // CRITICAL: run `ensure_picus_be` on the BLOCKING POOL, never on a runtime
+    // worker. It does synchronous framed-IPC (`ChildClient::call` parks on a std
+    // `rx.recv()`), and picus-be can fire a reverse-channel host request during
+    // startup that the shell answers with `block_on` — which needs FREE runtime
+    // workers. Blocking a worker here starves that path → blank-window deadlock that
+    // also freezes the launcher. Load-bearing for Picus in particular: the product
+    // stores no password, so credential resolution *is* a reverse-channel call.
+    // `spawn_blocking` keeps all workers free while we await the backend coming up.
+    // Idempotent — a no-op when Picus is re-summoned and the backend is attached.
+    let app_be = app.clone();
+    let _ = tokio::task::spawn_blocking(move || crate::ipc::ensure_picus_be(&app_be)).await;
     open_or_focus(&app);
 }

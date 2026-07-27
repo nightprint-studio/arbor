@@ -91,13 +91,13 @@
         size="xs"
         disabled={state.running}
         tooltip={{ content: 'Run the statement under the cursor', shortcut: 'Ctrl+Enter' }}
-        onclick={() => queryStore.run(tab.id, conn.id)}
+        onclick={() => void queryStore.run(tab.id, conn.id)}
       >
         {#snippet iconStart()}<Play size={12} />{/snippet}
         Run
       </Button>
       {#if state.running}
-        <Button variant="secondary" size="xs" onclick={() => queryStore.cancel(tab.id)}>
+        <Button variant="secondary" size="xs" onclick={() => void queryStore.cancel(tab.id, conn.id)}>
           {#snippet iconStart()}<Square size={12} />{/snippet}
           Cancel
         </Button>

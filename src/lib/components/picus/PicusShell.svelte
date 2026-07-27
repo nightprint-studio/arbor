@@ -184,7 +184,7 @@
 
     const databaseItems = [
       { id: 'newquery', title: 'New query', icon: 'play', shortcut: 'Ctrl+T', when: true, action: () => run(() => picusTabsStore.openQuery()) },
-      { id: 'runquery', title: 'Run the current query', icon: 'play', shortcut: 'Ctrl+Enter', when: tab?.kind === 'query', action: () => run(() => { if (tab && connectionsStore.active) queryStore.run(tab.id, connectionsStore.active.id); }) },
+      { id: 'runquery', title: 'Run the current query', icon: 'play', shortcut: 'Ctrl+Enter', when: tab?.kind === 'query', action: () => run(() => { if (tab && connectionsStore.active) void queryStore.run(tab.id, connectionsStore.active.id); }) },
       { id: 'newconn', title: 'Add a connection…', icon: 'plus', shortcut: 'Ctrl+Shift+N', when: true, action: () => run(() => picusUiStore.openConnectionEditor(null)) },
       { id: 'cycleconn', title: 'Switch to the next connection', icon: 'database', shortcut: 'Ctrl+Shift+D', when: connectionsStore.connections.length > 1, action: () => run(() => connectionsStore.cycle(1)) },
       ...connectionsStore.connections.map((c) => ({
@@ -309,11 +309,15 @@
 
     // Database.
     if (mod && key === 'enter') {
-      if (tab?.kind === 'query' && connectionsStore.active) queryStore.run(tab.id, connectionsStore.active.id);
+      if (tab?.kind === 'query' && connectionsStore.active) void queryStore.run(tab.id, connectionsStore.active.id);
       e.preventDefault();
       return;
     }
-    if (mod && e.shiftKey && key === 'c') { if (tab) queryStore.cancel(tab.id); e.preventDefault(); return; }
+    if (mod && e.shiftKey && key === 'c') {
+      if (tab && connectionsStore.active) void queryStore.cancel(tab.id, connectionsStore.active.id);
+      e.preventDefault();
+      return;
+    }
     if (mod && e.shiftKey && key === 'd') { connectionsStore.cycle(1); e.preventDefault(); return; }
     if (mod && e.shiftKey && key === 'n') { picusUiStore.openConnectionEditor(null); e.preventDefault(); return; }
 

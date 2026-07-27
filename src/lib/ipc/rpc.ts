@@ -14,7 +14,7 @@ import { invoke } from '@tauri-apps/api/core';
  * to a nested JSON payload).
  */
 /** The backend product labels the router dispatches to. */
-export type Program = 'corvus' | 'platform' | 'studio' | 'merula' | 'sitta' | 'tyto' | 'bennu';
+export type Program = 'corvus' | 'platform' | 'studio' | 'merula' | 'sitta' | 'tyto' | 'bennu' | 'picus';
 
 export function rpc<R>(program: Program, method: string, params: Record<string, unknown> = {}): Promise<R> {
   return invoke<R>('rpc', { program, method, params });
@@ -62,3 +62,12 @@ export const tyto = <R>(method: string, params: Record<string, unknown> = {}): P
  *  completion, diagnostics). */
 export const bennu = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
   rpc<R>('bennu', method, params);
+
+/** Bound helper for the Picus (SQL studio) backend — served out-of-process by
+ *  `picus-be`, spawned lazily when the Picus window opens. Today it serves the typed
+ *  product config; the database domains (PostgreSQL first) and the script domains
+ *  (parse / inventory / analyse / emit / rewrite) land in the following waves, so the
+ *  rest of the studio still runs on its fixtures. `BackendNotRunning` when `picus-be`
+ *  isn't up — callers fall back rather than surfacing the error. */
+export const picus = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
+  rpc<R>('picus', method, params);

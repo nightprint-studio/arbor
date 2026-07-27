@@ -13,7 +13,7 @@
    */
   import {
     Database, ChevronRight, Table2, Eye, ListOrdered, Zap,
-    Plus, RefreshCw, Lock, Play,
+    Plus, RefreshCw, Lock, Play, Plug, PlugZap,
   } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
@@ -28,7 +28,19 @@
   import { schemaStore } from '$lib/stores/picus/schema.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { SCHEMA_GROUP_LABELS, type SchemaGroup } from '$lib/types/picus';
+
+  /**
+   * Open a session and surface the failure where the click was.
+   *
+   * A connect failure is ordinary — a server down, a VPN off, a password changed —
+   * so it gets a toast rather than a modal, and the row simply stays disconnected.
+   */
+  async function openConnection(id: string) {
+    const message = await connectionsStore.connect(id);
+    if (message) toastStore.show(message, 'error');
+  }
 
   let query = $state('');
   /** Expansion is keyed `connId` and `connId/group` — one tree, flat keys. */
@@ -126,7 +138,7 @@
       size="xs"
       title="Refresh the schema cache"
       ariaLabel="Refresh the schema cache"
-      onclick={() => schemaStore.refresh()}
+      onclick={() => void schemaStore.refresh()}
     >
       {#snippet iconStart()}<RefreshCw size={13} />{/snippet}
     </Button>
@@ -169,6 +181,30 @@
           <PicusDialectChip dialect={conn.dialect} terse />
         {/snippet}
         {#snippet actions()}
+          <!-- Connect / disconnect. A connection can be configured, listed and
+               edited with no server reachable — opening it is a separate act, so
+               it gets its own control rather than happening on selection. -->
+          {#if conn.state === 'disconnected'}
+            <button
+              class="cp-act"
+              aria-label={`Connect to ${conn.name}`}
+              use:tooltip={`Connect to ${conn.name}`}
+              onclick={(e) => { e.stopPropagation(); void openConnection(conn.id); }}
+            >
+              <Plug size={11} />
+            </button>
+          {:else if conn.state === 'connecting'}
+            <span class="cp-act cp-act-busy"><Spinner size={11} /></span>
+          {:else}
+            <button
+              class="cp-act"
+              aria-label={`Disconnect ${conn.name}`}
+              use:tooltip={`Disconnect ${conn.name}`}
+              onclick={(e) => { e.stopPropagation(); void connectionsStore.disconnect(conn.id); }}
+            >
+              <PlugZap size={11} />
+            </button>
+          {/if}
           <!-- Hover action: the fastest path from "this database" to "a query on it". -->
           <button
             class="cp-act"
@@ -183,7 +219,8 @@
 
       {#if expanded[conn.id]}
         <div class="cp-meta" style:--conn-color={connectionColorVar(conn)}>
-          {conn.schema} · database version {conn.dbVersion}
+          {conn.schema}
+          {#if conn.dbVersion}· database version {conn.dbVersion}{/if}
           {#if schemaStore.loading}
             <span class="cp-loading"><Spinner size={10} /> reading schema…</span>
           {:else if schemaStore.loadedAt}

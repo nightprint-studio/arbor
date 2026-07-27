@@ -30,8 +30,8 @@
   import { schemaStore } from '$lib/stores/picus/schema.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
-  import { MOCK_TABLE_ROWS } from '$lib/ipc/picus/mock';
-  import type { PicusTab } from '$lib/types/picus';
+  import { fetchPage } from '$lib/ipc/picus/db';
+  import type { CellValue, PicusTab } from '$lib/types/picus';
 
   interface Props {
     tab: PicusTab;
@@ -57,6 +57,15 @@
     tab.table && objectKind === 'trigger' ? schemaStore.trigger(tab.table) : null,
   );
 
+  // The schema snapshot carries columns but not constraints — reading every
+  // constraint in the database up front would make opening a connection slow for
+  // detail almost nobody looks at. Ask for this relation's full detail as its tab
+  // opens; the store merges it in, so a second visit is instant.
+  $effect(() => {
+    const name = tab.table;
+    if (name && (objectKind === 'table' || objectKind === 'view')) void schemaStore.detail(name);
+  });
+
   // ── Data (paged) ────────────────────────────────────────────────────────────
   //
   // Paging and virtualisation answer two different problems and are both needed:
@@ -71,8 +80,46 @@
   // A different object means a different result set — never keep the old page.
   $effect(() => { void tab.id; page = 1; });
 
-  const allRows = $derived(tab.table ? (MOCK_TABLE_ROWS[tab.table] ?? []) : []);
-  const pageRows = $derived(allRows.slice((page - 1) * pageSize, page * pageSize));
+  let pageRows = $state<CellValue[][]>([]);
+  let totalRows = $state<number | null>(null);
+  let rowsLoading = $state(false);
+  let rowsError = $state('');
+
+  /**
+   * Fetch the current page.
+   *
+   * `total` is the server's row ESTIMATE, not a `count(*)`: drawing a page number
+   * is not worth scanning a hundred-million-row table. It can therefore be a little
+   * wrong, which is why the last page is discovered by getting fewer rows back
+   * rather than by trusting the arithmetic.
+   */
+  $effect(() => {
+    const id = conn?.id;
+    const name = tab.table;
+    const offset = (page - 1) * pageSize;
+    const limit = pageSize;
+    if (!id || !name || objectKind === 'sequence' || objectKind === 'trigger') {
+      pageRows = [];
+      totalRows = null;
+      return;
+    }
+    let cancelled = false;
+    rowsLoading = true;
+    fetchPage(id, name, offset, limit)
+      .then((res) => {
+        if (cancelled) return;
+        pageRows = res.rows;
+        totalRows = res.total ?? null;
+        rowsError = '';
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        pageRows = [];
+        rowsError = String(e);
+      })
+      .finally(() => { if (!cancelled) rowsLoading = false; });
+    return () => { cancelled = true; };
+  });
 
   const dataColumns = $derived<DataGridColumn[]>(
     (relation?.columns ?? []).map((c) => ({
@@ -217,6 +264,12 @@
         <span>{conn.name} refuses writes: cells are shown but cannot be edited here.</span>
       </div>
     {/if}
+    {#if rowsError}
+      <div class="tv-note">
+        <Badge variant="tone" tone="error" size="sm" label="error" />
+        <span>{rowsError}</span>
+      </div>
+    {/if}
     <DataGrid
       columns={dataColumns}
       rows={pageRows}
@@ -224,12 +277,12 @@
       editable={!conn?.readOnly && relation.kind === 'table'}
       ariaLabel={`Rows of ${relation.name}`}
       onEditCell={() => toastStore.show('Inline editing shows its UPDATE before running it — arriving with the driver.', 'info')}
-      emptyMessage="No row on this page."
+      emptyMessage={rowsLoading ? 'Loading…' : 'No row on this page.'}
     />
     <Pagination
       {page}
       {pageSize}
-      total={allRows.length}
+      total={totalRows ?? (page - 1) * pageSize + pageRows.length}
       pageSizes={PAGE_SIZES}
       onPage={(p) => (page = p)}
       onPageSize={(n) => { pageSize = n; page = 1; }}
@@ -237,8 +290,8 @@
       {#snippet trailing()}
         <span class="tv-trailing">
           {#if relation.kind === 'view'}view{:else}table{/if}
-          {#if relation.estimatedRows != null}
-            · ~{relation.estimatedRows.toLocaleString()} rows on the server
+          {#if totalRows != null}
+            · ~{totalRows.toLocaleString()} rows on the server
           {/if}
         </span>
       {/snippet}

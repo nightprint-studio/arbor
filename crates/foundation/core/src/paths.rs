@@ -167,6 +167,33 @@ pub fn bennu_data_dir() -> PathBuf {
     arbor_global_data_dir().join("bennu")
 }
 
+/// `arbor/profiles/<active>/picus` — picus's **per-profile** config dir. Holds the
+/// SQL studio's own settings (`config.toml`: encoding fallbacks, write guards,
+/// emission defaults, query row limit) and any small per-profile state. Resolved by
+/// `picus-be` itself after `init_active_profile()` — not pushed by the shell —
+/// mirroring [`bennu_config_dir`].
+///
+/// Note what does **not** live here: a script project's own settings (its declared
+/// encoding, line ending and version table) belong to that project, so a colleague
+/// opening the same repository inherits them. Those land in the project's config,
+/// never in this per-profile file.
+pub fn picus_config_dir() -> PathBuf {
+    crate::profile::product_dir(crate::profile::PRODUCT_PICUS)
+}
+
+/// Convenience: join a relative path under [`picus_config_dir`].
+pub fn picus_config_path<P: AsRef<Path>>(sub: P) -> PathBuf {
+    picus_config_dir().join(sub)
+}
+
+/// `arbor/data/picus` — the **global, shared** heavy-asset root for picus: the
+/// parsed-script inventory caches keyed by project path. Rooted under
+/// [`arbor_global_data_dir`] so an index built once is shared across profiles, not
+/// duplicated. Sibling of [`bennu_data_dir`].
+pub fn picus_data_dir() -> PathBuf {
+    arbor_global_data_dir().join("picus")
+}
+
 /// The legacy top-level sibling roots merula used **before** it became a
 /// profile-scoped product (`%APPDATA%\merula`, and the even older `nemus` from
 /// before the rename). Used only by the one-shot boot migration to relocate that

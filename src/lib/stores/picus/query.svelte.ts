@@ -5,14 +5,15 @@
  * once without leaking each other's results. History is per CONNECTION, not per
  * tab: "what did I run on staging" is the question people actually ask.
  *
- * MOCK: execution replays fixtures from `ipc/picus/mock`. Cancellation is real
- * in shape (a running query can be stopped) but there is no driver behind it yet.
+ * Execution goes to `picus-be`. Cancellation is real: the backend holds the
+ * server's cancellation key and opens a second connection to use it, which is why
+ * Cancel stops a running statement instead of merely abandoning its result.
  */
 
-import type { CellValue, Column, QueryLogEntry, QueryResult } from '$lib/types/picus';
-import { DEFAULT_QUERY_TEXT, MOCK_TABLE_ROWS } from '$lib/ipc/picus/mock';
+import type { QueryLogEntry, QueryResult } from '$lib/types/picus';
+import { DEFAULT_QUERY_TEXT } from '$lib/ipc/picus/mock';
+import { cancel as rpcCancel, execute } from '$lib/ipc/picus/db';
 import { connectionsStore } from './connections.svelte';
-import { schemaStore } from './schema.svelte';
 
 export interface HistoryEntry {
   id: string;
@@ -101,57 +102,93 @@ function createQueryStore() {
     /**
      * Run the tab's SQL against its connection.
      *
-     * A read-only connection refuses writes — the check lives in the backend for
-     * real; mirrored here so the mock behaves the same way the product must.
+     * The read-only refusal is the **server's**: a read-only connection was opened
+     * in a read-only transaction mode, so the rejection holds for anything that
+     * reaches it. Nothing is pre-screened here — a client-side guess about what
+     * counts as a write would only ever be a second, weaker opinion.
      */
-    run(tabId: string, connectionId: string) {
+    async run(tabId: string, connectionId: string) {
       const state = ensure(tabId);
       const conn = connectionsStore.byId(connectionId);
-      const isWrite = /^\s*(insert|update|delete|merge|drop|alter|create|truncate)\b/i.test(state.sql);
-
-      if (conn?.readOnly && isWrite) {
-        state.error = `${conn.name} is marked read-only: write statements are refused.`;
-        state.messages = [
-          { time: stamp(), text: `Refused: ${conn.name} is a read-only connection.`, level: 'error' },
-          ...state.messages,
-        ];
+      if (!connectionId) {
+        state.error = 'This tab is not bound to a connection.';
         state.pane = 'messages';
         return;
       }
 
       state.error = null;
       state.running = true;
+      const startedAt = stamp();
 
-      // MOCK execution: replay a fixture after a beat so the running/cancel
-      // states are exercisable.
-      setTimeout(() => {
-        if (!state.running) return; // cancelled meanwhile
-        const relations = schemaStore.relations;
-        const table = relations.find((t) => new RegExp(`\\b${t.name}\\b`, 'i').test(state.sql)) ?? relations[0];
-        const columns: Column[] = table.columns;
-        const rows: CellValue[][] = (MOCK_TABLE_ROWS[table.name] ?? []).slice(0, rowLimit);
-        const elapsedMs = 38 + (seq % 7) * 6;
-        state.result = { columns, rows, elapsedMs, rowCount: rows.length, truncated: false };
+      try {
+        const res = await execute(connectionId, state.sql, rowLimit);
+        state.result = {
+          columns: res.columns,
+          rows: res.rows,
+          elapsedMs: res.elapsedMs,
+          rowCount: res.rowCount,
+          truncated: res.truncated,
+        };
+        const summary = res.commandTag
+          ? res.commandTag
+          : `${res.rowCount} row(s)${res.truncated ? ` (capped at ${rowLimit})` : ''}`;
         state.messages = [
-          { time: stamp(), text: `${rows.length} row(s) in ${elapsedMs} ms on ${conn?.name ?? 'unknown'}`, level: 'info' },
-          { time: stamp(), text: `Plan: TABLE ACCESS FULL ${table.name} (cost 3)`, level: 'info' },
+          {
+            time: startedAt,
+            text: `${summary} in ${res.elapsedMs} ms on ${conn?.name ?? connectionId}`,
+            level: 'info',
+          },
           ...state.messages,
         ];
-        state.running = false;
+        state.pane = 'results';
         seq += 1;
         history = [
-          { id: `h${seq}`, connectionId, sql: state.sql, at: stamp(), rowCount: rows.length, elapsedMs, ok: true },
+          {
+            id: `h${seq}`,
+            connectionId,
+            sql: state.sql,
+            at: startedAt,
+            rowCount: res.rowCount,
+            elapsedMs: res.elapsedMs,
+            ok: true,
+          },
           ...history,
         ].slice(0, 100);
-      }, 320);
+      } catch (e) {
+        const message = String(e);
+        state.error = message;
+        state.messages = [{ time: startedAt, text: message, level: 'error' }, ...state.messages];
+        state.pane = 'messages';
+        seq += 1;
+        history = [
+          { id: `h${seq}`, connectionId, sql: state.sql, at: startedAt, rowCount: 0, elapsedMs: 0, ok: false },
+          ...history,
+        ].slice(0, 100);
+      } finally {
+        state.running = false;
+      }
     },
 
-    /** Stop a running query. Real cancellation is a driver call; this is the UI half. */
-    cancel(tabId: string) {
+    /**
+     * Stop a running query.
+     *
+     * Sends the cancel and stops there: the running flag is cleared by whichever
+     * outcome `run` receives, because the server decides whether the statement
+     * actually stopped. Clearing it here would show "done" over a query still
+     * executing.
+     */
+    async cancel(tabId: string, connectionId: string) {
       const state = ensure(tabId);
-      if (!state.running) return;
-      state.running = false;
-      state.messages = [{ time: stamp(), text: 'Query cancelled.', level: 'error' }, ...state.messages];
+      if (!state.running || !connectionId) return;
+      state.messages = [
+        { time: stamp(), text: 'Cancellation requested…', level: 'info' },
+        ...state.messages,
+      ];
+      try {
+        await rpcCancel(connectionId);
+      } catch (e) {
+        state.messages = [{ time: stamp(), text: String(e), level: 'error' }, ...state.messages];
+      }
     },
 
     clearMessages(tabId: string) { ensure(tabId).messages = []; },

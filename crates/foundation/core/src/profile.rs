@@ -43,6 +43,9 @@ pub const PRODUCT_TYTO: &str = "tyto";
 /// See [`PRODUCT_CORVUS`]. bennu (the Java editor / analysis product) owns its own
 /// per-profile bucket for its settings, served out-of-process by `bennu-be`.
 pub const PRODUCT_BENNU: &str = "bennu";
+/// See [`PRODUCT_CORVUS`]. picus (the SQL studio) owns its own per-profile bucket
+/// for its settings, served out-of-process by `picus-be`.
+pub const PRODUCT_PICUS: &str = "picus";
 
 /// Process-global selected-profile name. Seeded to [`DEFAULT_PROFILE`] and
 /// overwritten at boot by [`init_active_profile`] (or a launch argument).

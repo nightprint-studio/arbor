@@ -1,0 +1,41 @@
+[package]
+name         = "picus-be"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Picus backend — the headless SQL-studio process for Model D. Serves the picus domains over framed-stdio IPC; drives the leaf database/script crates, has no plugin host, keeps no password, and resolves its own config/data dirs once init_active_profile() has run."
+
+[[bin]]
+name = "picus-be"
+path = "src/main.rs"
+
+[dependencies]
+arbor-ipc  = { path = "../../../foundation/ipc" }
+arbor-rpc  = { path = "../../../foundation/rpc" }
+# The Model-D backend runtime scaffold: `BackendIo` (framed-stdio plumbing +
+# runtime) + the `App` builder (pre-serve inits, serve loop). picus-be uses the slim
+# path — no plugin host, no API installer, no scheduler (like bennu-be/merula-be).
+arbor-be   = { path = "../../../foundation/be" }
+# The profile-aware config/data-path resolver: `init_active_profile()` seeds the
+# active profile FIRST in `main`, so the `picus_*` config/data dirs resolve under the
+# launcher's profile.
+arbor-core = { path = "../../../foundation/core" }
+# The canonical picus state: `PicusState` (event egress + reverse channel) + the typed
+# product config. The domain `#[arbor_rpc::handler]`s stay here in picus-be and drive
+# against `picus_core::prelude::*`. Tauri-free by construction.
+picus-core = { path = "../core" }
+# The database contract (traits, wire types, descriptor) the handlers speak…
+picus-db-api = { path = "../db-provider/api" }
+# …and the one engine this binary links today. Adding Oracle later is a crate here
+# plus one `.with(...)` in `main` — nothing else in the backend changes.
+picus-db-postgres = { path = "../db-provider/postgres" }
+# The script half, so far: the dialect-free change model and the emitter that turns
+# one model into one correct statement per destination.
+picus-ast  = { path = "../ast" }
+picus-emit = { path = "../emit" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# Drives the serve loop / async domain handlers as the database + script waves land.
+tokio      = { workspace = true }

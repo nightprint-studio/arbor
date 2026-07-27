@@ -1,0 +1,14 @@
+[package]
+name         = "picus-types"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The vocabulary both halves of Picus share — the engine/dialect and the schema shapes. A leaf crate: serde only, no driver, no SQL, no I/O."
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

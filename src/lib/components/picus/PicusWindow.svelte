@@ -4,21 +4,56 @@
    * studio). Mirrors TytoWindow / MerulaWindow: it is NOT the full Arbor app, it
    * only boots the theme / appearance / animation config and mounts `PicusShell`.
    *
-   * The Picus backend (`picus-be`) does not exist yet: every store falls back to
-   * the fixtures in `ipc/picus/mock`, the same staging Tyto's control panel went
-   * through before its capture engine landed. Each window is its own JS context,
-   * so these stores are independent of the main window's.
+   * `picus-be` serves the studio's settings today; the database and script domains
+   * land in the following waves, so the rest still falls back to the fixtures in
+   * `ipc/picus/mock` — the same staging Tyto's control panel went through before
+   * its capture engine landed. Each window is its own JS context, so these stores
+   * are independent of the main window's.
    */
   import { onMount } from 'svelte';
+  import { listen } from '@tauri-apps/api/event';
   import { themeStore } from '$lib/stores/theme.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
+  import { picusSettingsStore } from '$lib/stores/picus/settings.svelte';
+  import { connectionsStore } from '$lib/stores/picus/connections.svelte';
+  import { schemaStore } from '$lib/stores/picus/schema.svelte';
   import PicusShell from './PicusShell.svelte';
 
   onMount(() => {
     themeStore.init();
     void appearanceStore.loadConfig();
     void animStore.loadConfig();
+    void picusSettingsStore.loadConfig();
+    void connectionsStore.load();
+
+    // `picus-be` spawns off-thread, racing this window's first reads: if it
+    // attaches after we already asked, the persisted settings would silently stay
+    // on defaults — and the next toggle would write those defaults back over the
+    // user's file — while the connections panel would sit empty. Re-read both once
+    // the backend signals it's routable.
+    const unlisten = listen('arbor://picus-be-up', () => {
+      void picusSettingsStore.loadConfig();
+      void connectionsStore.load();
+    });
+    return () => { void unlisten.then((off) => off()); };
+  });
+
+  /**
+   * Keep the schema tree pointed at the active connection.
+   *
+   * Only for a connection that is actually open: a disconnected one has no
+   * catalogue to read, and showing the previous connection's tables under a new
+   * connection's name is the kind of quiet wrongness that gets a DELETE written
+   * against the wrong database.
+   */
+  $effect(() => {
+    const active = connectionsStore.active;
+    if (active && active.state !== 'disconnected' && schemaStore.connectionId !== active.id) {
+      void schemaStore.load(active.id);
+    } else if (!active || active.state === 'disconnected') {
+      if (schemaStore.connectionId) schemaStore.clear();
+    }
   });
 </script>
 

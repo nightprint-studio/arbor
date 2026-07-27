@@ -34,7 +34,14 @@
   import PicusDialectChip from './PicusDialectChip.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
-  import type { Connection, Dialect } from '$lib/types/picus';
+  import {
+    type ConnectionField,
+    type ConnectionSpec,
+    type DbProviderDescriptor,
+    listProviders,
+    testConnection,
+  } from '$lib/ipc/picus/db';
+  import type { Dialect } from '$lib/types/picus';
 
   interface Props {
     /** Connection to edit; `null` creates a new one. */
@@ -44,58 +51,94 @@
 
   let { connectionId, onClose }: Props = $props();
 
-  const existing = $derived(connectionId ? connectionsStore.byId(connectionId) : null);
+  const existing = $derived(connectionId ? connectionsStore.specById(connectionId) : null);
 
-  /** Split a stored `host:port/service` back into its three parts. */
-  function splitHost(host: string | undefined, dialect: Dialect) {
-    const fallbackPort = dialect === 'oracle' ? 1521 : 5432;
-    if (!host) return { host: '', port: fallbackPort, service: '' };
-    const [hostPort, service = ''] = host.split('/');
-    const [h, p] = hostPort.split(':');
-    return { host: h ?? '', port: Number(p) || fallbackPort, service };
-  }
-
-  // Seeded once from the connection under edit — this is a form, not a live view.
-  const seed = splitHost(existing?.host, existing?.dialect ?? 'oracle');
+  // ── The per-engine descriptors ──────────────────────────────────────────────
+  //
+  // The form's labels, placeholders, defaults and required-ness come from the
+  // backend rather than from `if (dialect === 'oracle')` scattered here. The
+  // well-known field ids keep their place in the curated layout; anything else an
+  // engine declares is rendered generically under Advanced, so a third engine that
+  // wants a TNS alias gets one without this component changing.
+  let providers = $state<DbProviderDescriptor[]>([]);
+  $effect(() => {
+    void listProviders()
+      .then((list) => { providers = list; })
+      .catch(() => { providers = []; });
+  });
 
   let name = $state(existing?.name ?? '');
   let alias = $state(existing?.alias ?? '');
-  let dialect = $state<Dialect>(existing?.dialect ?? 'oracle');
-  let host = $state(seed.host);
-  let port = $state(seed.port);
-  let service = $state(seed.service);
+  let dialect = $state<Dialect>(existing?.engine ?? 'postgres');
+  let host = $state(existing?.host ?? '');
+  let port = $state(existing?.port ?? 5432);
+  let service = $state(existing?.database ?? '');
   let schema = $state(existing?.schema ?? '');
-  let username = $state('');
+  let username = $state(existing?.user ?? '');
   let colorIdx = $state(existing?.colorIdx ?? 2);
   let readOnly = $state(existing?.readOnly ?? false);
-  let connectTimeout = $state(15);
-  let extraParams = $state('');
-  let savePassword = $state(true);
+  let tls = $state(existing?.tls ?? false);
+  let extraParams = $state(
+    Object.entries(existing?.params ?? {}).map(([k, v]) => `${k}=${v}`).join('\n'),
+  );
 
-  /** MOCK: the connection test. Real probes come with the driver. */
+  /**
+   * The password.
+   *
+   * `null` means "not touched" — the stored secret stays as it is. Typing anything
+   * (including clearing the box to empty) makes it a string, which is then written.
+   * Collapsing the two would delete a saved password on an unrelated edit.
+   */
+  let password = $state<string | null>(null);
+  const hasStoredSecret = $derived(existing?.hasSecret ?? false);
+
   let testing = $state(false);
+  let saving = $state(false);
   let testResult = $state<{ ok: boolean; message: string } | null>(null);
 
   let firstField = $state<HTMLInputElement | undefined>();
   $effect(() => { firstField?.focus(); });
 
-  const dialectOptions = [
-    { value: 'oracle', label: 'Oracle' },
-    { value: 'postgres', label: 'PostgreSQL' },
-  ];
+  const descriptor = $derived(providers.find((p) => p.kind === dialect) ?? null);
+  const dialectOptions = $derived(
+    providers.length
+      ? providers.map((p) => ({ value: p.kind, label: p.label }))
+      : [{ value: 'postgres', label: 'PostgreSQL' }],
+  );
 
-  // Each engine names the last part of the address differently — and defaults
-  // to a different port. Switching the engine moves both.
-  const serviceLabel = $derived(dialect === 'oracle' ? 'Service name' : 'Database');
-  const servicePlaceholder = $derived(dialect === 'oracle' ? 'DEVPDB' : 'appprod');
-  const schemaPlaceholder = $derived(dialect === 'oracle' ? 'APPPROD' : 'public');
-  const defaultPort = $derived(dialect === 'oracle' ? 1521 : 5432);
+  /** One declared field of the current engine, by id. */
+  function field(id: string): ConnectionField | null {
+    return descriptor?.fields.find((f) => f.id === id) ?? null;
+  }
+
+  /** Ids the curated layout already renders — everything else falls to Advanced. */
+  const WELL_KNOWN = ['host', 'port', 'database', 'user', 'password', 'schema', 'tls'];
+  const extraFields = $derived(
+    (descriptor?.fields ?? []).filter((f) => !WELL_KNOWN.includes(f.id)),
+  );
+
+  /**
+   * Whether this engine can be connected to at all.
+   *
+   * Oracle is fully supported for **scripts** — parsing, analysis, generation and
+   * rewriting all work — and has no driver. Saying that plainly is better than
+   * hiding the engine, which would make the product look like it doesn't know
+   * about Oracle at all.
+   */
+  const connectable = $derived(descriptor?.capabilities.connect ?? true);
+
+  const serviceLabel = $derived(field('database')?.label ?? 'Database');
+  const servicePlaceholder = $derived(field('database')?.placeholder ?? 'appdb');
+  const schemaPlaceholder = $derived(field('schema')?.default ?? 'public');
+  const defaultPort = $derived(descriptor?.defaultPort ?? 5432);
+  const showSchema = $derived(descriptor?.capabilities.schemas ?? true);
 
   function switchDialect(next: Dialect) {
-    // Only move the port if it was still the other engine's default — never
+    // Only move the port if it was still the previous engine's default — never
     // overwrite a port the user typed on purpose.
-    const previousDefault = dialect === 'oracle' ? 1521 : 5432;
-    if (port === previousDefault) port = next === 'oracle' ? 1521 : 5432;
+    const previousDefault = providers.find((p) => p.kind === dialect)?.defaultPort;
+    const nextDefault = providers.find((p) => p.kind === next)?.defaultPort;
+    if (nextDefault && port === previousDefault) port = nextDefault;
     dialect = next;
     testResult = null;
   }
@@ -106,42 +149,95 @@
 
   const valid = $derived(name.trim() !== '' && host.trim() !== '' && service.trim() !== '');
 
-  function test() {
-    if (!valid) return;
-    testing = true;
-    testResult = null;
-    setTimeout(() => {
-      testing = false;
-      testResult = {
-        ok: true,
-        message: `Reached ${composedHost} — the real probe arrives with the driver.`,
-      };
-    }, 700);
+  /** Set one key in the `key=value` block, preserving the rest and the order. */
+  function setParam(key: string, value: string): string {
+    const lines = extraParams.split('\n').filter((l) => l.trim() !== '');
+    const i = lines.findIndex((l) => l.split('=')[0]?.trim() === key);
+    const line = `${key}=${value}`;
+    if (i >= 0) lines[i] = line;
+    else lines.push(line);
+    return lines.join('\n');
   }
 
-  function save() {
-    if (!valid) return;
-    const conn: Connection = {
+  /** `key=value` lines → the spec's `params` map. Blank and malformed lines drop. */
+  function parseParams(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const line of extraParams.split('\n')) {
+      const [k, ...rest] = line.split('=');
+      if (!k?.trim() || !rest.length) continue;
+      out[k.trim()] = rest.join('=').trim();
+    }
+    return out;
+  }
+
+  function toSpec(): ConnectionSpec {
+    return {
       id: existing?.id ?? `conn-${Date.now().toString(36)}`,
       name: name.trim(),
       alias: alias.trim() || 'unnamed',
-      dialect,
-      schema: schema.trim() || schemaPlaceholder,
-      host: composedHost,
-      state: 'disconnected',
-      dbVersion: existing?.dbVersion ?? '—',
+      engine: dialect,
+      host: host.trim(),
+      port,
+      database: service.trim(),
+      user: username.trim(),
+      schema: schema.trim() || (showSchema ? String(schemaPlaceholder ?? '') : ''),
       colorIdx,
       readOnly,
+      tls,
+      params: parseParams(),
     };
-    connectionsStore.upsert(conn);
-    toastStore.show(`${conn.name} saved.`, 'success');
-    onClose();
+  }
+
+  /**
+   * Open, report, close.
+   *
+   * A real probe: it opens a session with these exact settings and shuts it again,
+   * deliberately without touching the session pool — testing must not silently
+   * leave a connection open, nor disturb one already in use.
+   *
+   * The password has to be saved first, because the backend resolves it from the
+   * keychain by connection id rather than receiving it over the wire.
+   */
+  async function test() {
+    if (!valid || !connectable) return;
+    testing = true;
+    testResult = null;
+    try {
+      const spec = toSpec();
+      if (password !== null) await connectionsStore.save(spec, password);
+      const status = await testConnection(spec);
+      testResult = {
+        ok: true,
+        message: status.serverVersion
+          ? `Connected to ${status.serverVersion} at ${composedHost}.`
+          : `Connected to ${composedHost}.`,
+      };
+    } catch (e) {
+      testResult = { ok: false, message: String(e) };
+    } finally {
+      testing = false;
+    }
+  }
+
+  async function save() {
+    if (!valid || saving) return;
+    saving = true;
+    try {
+      const spec = toSpec();
+      await connectionsStore.save(spec, password ?? undefined);
+      toastStore.show(`${spec.name} saved.`, 'success');
+      onClose();
+    } catch (e) {
+      testResult = { ok: false, message: String(e) };
+    } finally {
+      saving = false;
+    }
   }
 
   function onKeyDown(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
-      save();
+      void save();
     }
   }
 </script>
@@ -208,13 +304,28 @@
       </p>
 
       <div class="cm-grid">
-        <FormField label="Schema" hint="Where unqualified names resolve.">
-          <Input value={schema} placeholder={schemaPlaceholder} oninput={(v) => (schema = v)} />
-        </FormField>
-        <FormField label="Username" hint="Stored with the connection; the password is not.">
-          <Input value={username} placeholder="appuser" oninput={(v) => (username = v)} />
+        {#if showSchema}
+          <FormField label={field('schema')?.label ?? 'Schema'} hint={field('schema')?.help ?? 'Where unqualified names resolve.'}>
+            <Input value={schema} placeholder={String(schemaPlaceholder ?? '')} oninput={(v) => (schema = v)} />
+          </FormField>
+        {/if}
+        <FormField label={field('user')?.label ?? 'Username'} hint="Stored with the connection; the password is not.">
+          <Input value={username} placeholder={field('user')?.placeholder ?? 'appuser'} oninput={(v) => (username = v)} />
         </FormField>
       </div>
+
+      {#if !connectable}
+        <Alert variant="warning" compact>
+          <span class="cm-secret">
+            <CircleAlert size={12} />
+            <span>
+              Picus has no driver for {descriptor?.label ?? 'this engine'} yet, so it cannot open a
+              session to one. Its <b>scripts</b> are fully supported — read, analysed, generated
+              into and rewritten — which is what a branch of that dialect actually needs.
+            </span>
+          </span>
+        </Alert>
+      {/if}
     </section>
 
     <section class="cm-section">
@@ -229,17 +340,54 @@
         />
       </FormField>
 
+      {#if field('tls')}
+        <FormField label={field('tls')?.label ?? 'Require TLS'}>
+          <Toggle
+            checked={tls}
+            size="sm"
+            label="Encrypt the connection"
+            description={field('tls')?.help ?? 'Managed cloud databases refuse plaintext connections.'}
+            onchange={(v) => { tls = v; testResult = null; }}
+          />
+        </FormField>
+      {/if}
+
       <Collapsible chevron>
         {#snippet header()}
           <span class="cm-advanced-head">Advanced</span>
         {/snippet}
         <div class="cm-advanced">
-          <FormField label="Connect timeout" hint="Seconds before giving up on the handshake.">
-            <NumberStepper value={connectTimeout} min={1} max={300} onchange={(v) => (connectTimeout = v)} />
-          </FormField>
+          <!-- Fields this engine declares that the curated layout above has no
+               place for. Rendering them generically is what lets a third engine
+               ask for something new without this component changing. -->
+          {#each extraFields as f (f.id)}
+            <FormField label={f.label} hint={f.help ?? undefined} required={f.required}>
+              {#if f.type === 'toggle'}
+                <Toggle
+                  checked={parseParams()[f.id] === 'true'}
+                  size="sm"
+                  label={f.label}
+                  onchange={(v) => { extraParams = setParam(f.id, String(v)); }}
+                />
+              {:else if f.type === 'select'}
+                <Select
+                  value={parseParams()[f.id] ?? f.default ?? ''}
+                  options={(f.options ?? []).map((o) => ({ value: o.value, label: o.label }))}
+                  onchange={(v) => { extraParams = setParam(f.id, v); }}
+                />
+              {:else}
+                <Input
+                  value={parseParams()[f.id] ?? f.default ?? ''}
+                  placeholder={f.placeholder ?? ''}
+                  oninput={(v) => { extraParams = setParam(f.id, v); }}
+                />
+              {/if}
+            </FormField>
+          {/each}
+
           <FormField
             label="Extra parameters"
-            hint="Passed to the driver as-is (sslmode=require, oracle.net.CONNECT_TIMEOUT=…). One per line."
+            hint="Passed to the driver as-is. One `key=value` per line."
           >
             <Input value={extraParams} placeholder="sslmode=require" oninput={(v) => (extraParams = v)} />
           </FormField>
@@ -258,15 +406,28 @@
           </span>
         </span>
       </Alert>
-      <FormField label="Remember in the keychain">
-        <Toggle
-          checked={savePassword}
-          size="sm"
-          label="Ask once, then reuse"
-          description="Off means Picus prompts on every connect and keeps nothing."
-          onchange={(v) => (savePassword = v)}
+      <FormField
+        label={field('password')?.label ?? 'Password'}
+        hint={hasStoredSecret && password === null
+          ? 'A password is saved for this connection. Leave this empty to keep it; type to replace it.'
+          : (field('password')?.help ?? "Goes straight to Arbor's keychain, never into the project.")}
+      >
+        <Input
+          type="password"
+          value={password ?? ''}
+          placeholder={hasStoredSecret && password === null ? '••••••••' : ''}
+          oninput={(v) => { password = v; testResult = null; }}
         />
       </FormField>
+
+      {#if hasStoredSecret && password === ''}
+        <Alert variant="warning" compact>
+          <span class="cm-secret">
+            <CircleAlert size={12} />
+            <span>Saving now will <b>delete</b> the stored password for this connection.</span>
+          </span>
+        </Alert>
+      {/if}
 
       {#if testResult}
         <div class="cm-test" class:cm-test-bad={!testResult.ok}>
@@ -278,15 +439,17 @@
   </div>
 
   {#snippet footer()}
+    <span class="cm-keychain">
+      <ShieldCheck size={13} />
+      <span>Password kept in Arbor's keychain</span>
+    </span>
     <Button
       variant="secondary"
       size="sm"
-      onclick={() => toastStore.show('Storing the secret in the keychain arrives with the driver milestone.', 'info')}
+      disabled={!valid || testing || !connectable}
+      tooltip={!connectable ? { content: 'This engine has no driver — its scripts are still fully supported' } : undefined}
+      onclick={() => void test()}
     >
-      {#snippet iconStart()}<ShieldCheck size={13} />{/snippet}
-      Set the password…
-    </Button>
-    <Button variant="secondary" size="sm" disabled={!valid || testing} onclick={test}>
       {#snippet iconStart()}
         {#if testing}<Spinner size={12} />{:else}<Plug size={13} />{/if}
       {/snippet}
@@ -297,9 +460,9 @@
     <Button
       variant="primary"
       size="sm"
-      disabled={!valid}
+      disabled={!valid || saving}
       tooltip={{ content: 'Save the connection', shortcut: 'Ctrl+Enter' }}
-      onclick={save}
+      onclick={() => void save()}
     >
       Save
     </Button>
@@ -308,6 +471,14 @@
 
 <style>
   .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+
+  .cm-keychain {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
 
   .cm {
     display: flex;

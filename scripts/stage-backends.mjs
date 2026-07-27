@@ -10,7 +10,12 @@
 import { mkdirSync, copyFileSync, existsSync } from 'node:fs';
 
 const EXE = process.platform === 'win32' ? '.exe' : '';
-const BACKENDS = ['corvus-be', 'merula-be', 'sitta-be'];
+// NOTE: `tyto-be` and `bennu-be` are built by `backends:release` but are NOT in
+// this list, so they are not bundled into a packaged install — they work in dev
+// (where the launcher finds them beside itself in `target/debug/`) and silently
+// don't in a build. Looks like an oversight rather than a decision; left alone here
+// because which binaries ship is a release call, not a side effect of adding picus.
+const BACKENDS = ['corvus-be', 'merula-be', 'sitta-be', 'picus-be'];
 const destDir = 'src-tauri/backends';
 
 mkdirSync(destDir, { recursive: true });

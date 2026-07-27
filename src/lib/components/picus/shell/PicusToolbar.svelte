@@ -26,7 +26,6 @@
   import { queryStore } from '$lib/stores/picus/query.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { schemaStore } from '$lib/stores/picus/schema.svelte';
-  import { MOCK_TABLE_ROWS } from '$lib/ipc/picus/mock';
   import { DML_OPERATION_LABELS } from '$lib/types/picus';
 
   interface Props {
@@ -63,7 +62,12 @@
   ];
 
   const queryState = $derived(tab ? queryStore.read(tab.id) : null);
-  const tableRowCount = $derived(tab?.table ? (MOCK_TABLE_ROWS[tab.table]?.length ?? 0) : 0);
+  // The server's row ESTIMATE, not a count — a toolbar label is not worth scanning
+  // a large table for. `null` when the server has none, so "unknown" and "empty"
+  // never render the same.
+  const tableRowCount = $derived(
+    tab?.table ? (schemaStore.relation(tab.table)?.estimatedRows ?? null) : null,
+  );
   const openFile = $derived(tab?.file ? picusProjectStore.fileByPath(tab.file) : null);
 
   /** Tables and views have rows and a structure; sequences and triggers don't. */
@@ -125,7 +129,7 @@
       disabled={queryState?.running}
       tooltip={{ content: 'Run the statement under the cursor', shortcut: 'Ctrl+Enter' }}
       ariaLabel="Run"
-      onclick={() => { if (tab && conn) queryStore.run(tab.id, conn.id); }}
+      onclick={() => { if (tab && conn) void queryStore.run(tab.id, conn.id); }}
     >
       {#snippet iconStart()}<Play size={13} />{/snippet}
       Run
@@ -136,7 +140,7 @@
       disabled={!queryState?.running}
       tooltip={{ content: 'Cancel the running query', shortcut: 'Ctrl+Shift+C' }}
       ariaLabel="Cancel"
-      onclick={() => { if (tab) queryStore.cancel(tab.id); }}
+      onclick={() => { if (tab && conn) void queryStore.cancel(tab.id, conn.id); }}
     >
       {#snippet iconStart()}<Square size={13} />{/snippet}
     </Button>
@@ -195,13 +199,13 @@
         {#snippet iconStart()}<Download size={14} />{/snippet}
       </Button>
     {/if}
-    <Button variant="icon" size="sm" title="Refresh the schema cache" ariaLabel="Refresh the schema cache" onclick={() => schemaStore.refresh()}>
+    <Button variant="icon" size="sm" title="Refresh the schema cache" ariaLabel="Refresh the schema cache" onclick={() => void schemaStore.refresh()}>
       {#snippet iconStart()}<RefreshCw size={14} />{/snippet}
     </Button>
 
     <span class="ptb-spacer"></span>
-    {#if hasSubviews}
-      <div class="ptb-info"><span>{tableRowCount.toLocaleString()} rows</span></div>
+    {#if hasSubviews && tableRowCount != null}
+      <div class="ptb-info"><span>~{tableRowCount.toLocaleString()} rows</span></div>
     {/if}
     <Dropdown items={connectionMenu} position="fixed" direction="down" width="280px">
       {#snippet trigger({ open, toggle })}

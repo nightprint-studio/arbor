@@ -1,0 +1,13 @@
+[package]
+name         = "picus-emit"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Deterministic per-dialect SQL emission for Picus: one dialect-free model in, one correct statement per destination out. No language model anywhere in the flow — a product requirement, not a preference."
+
+[dependencies]
+picus-ast   = { path = "../ast" }
+picus-types = { path = "../types" }
+serde       = { workspace = true }

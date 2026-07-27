@@ -1,0 +1,19 @@
+[package]
+name         = "picus-ast"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Picus's dialect-free model of a change: what to write, to which table, under which guards — with no engine attached. The input every emitter takes and every analysis reads."
+
+[dependencies]
+serde = { workspace = true }
+# The shared vocabulary (`Column`, `EngineKind`). A leaf — serde only — so the
+# script half depends on NO driver, which is what lets Oracle be a first-class
+# engine here while having no Oracle driver.
+picus-types = { path = "../types" }
+
+[dev-dependencies]
+# Round-trip assertions on the wire shapes. Test-only.
+serde_json = { workspace = true }

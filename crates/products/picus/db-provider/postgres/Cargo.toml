@@ -1,0 +1,28 @@
+[package]
+name         = "picus-db-postgres"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "PostgreSQL provider for Picus — implements the picus-db-api contract over tokio-postgres: sessions, catalogue reads, paged rows, statement execution and server-side cancellation."
+
+[dependencies]
+picus-db-api = { path = "../api" }
+async-trait  = { workspace = true }
+tokio        = { workspace = true }
+# The PostgreSQL driver: pure Rust (no libpq to ship), async, and the only one that
+# gives us a real server-side cancel token — which the query editor's Cancel needs.
+tokio-postgres = "0.7"
+# TLS. rustls rather than native-tls so nothing links OpenSSL; `rustls-native-certs`
+# then reads the OS trust store, so an internal corporate CA works without Picus
+# shipping a bundle. Plaintext stays available for an on-prem server on a trusted
+# network (`ConnectionSpec::tls`).
+tokio-postgres-rustls = "0.13"
+rustls = "0.23"
+rustls-native-certs = "0.8"
+
+[dev-dependencies]
+# The descriptor test asserts the exact JSON the frontend reads. Test-only: the
+# crate itself never serialises anything.
+serde_json = { workspace = true }

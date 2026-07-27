@@ -104,20 +104,23 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
                     //
                     // Every product with a lazy OOP backend tears down here so the
                     // headless child never lingers windowless (corvus/merula/sitta/tyto/
-                    // bennu). Sitta included: without it the explorer's `sitta-be` would
+                    // bennu/picus). Sitta included: without it the explorer's `sitta-be` would
                     // survive its last window and a re-open would silently reuse the
                     // stale process (no respawn, no `…-up` reload) instead of a fresh
                     // one — diverging from corvus/merula. Tyto included so closing the
                     // recorder actually ends `tyto-be` (it never minimizes to tray).
                     // Bennu included so closing the Java editor actually ends `bennu-be`
                     // (otherwise the launcher shows it down while the process lingers).
+                    // Picus included for the same reason — and because a lingering
+                    // `picus-be` would hold live database sessions open with no window
+                    // to close them from.
                     //
                     // Safe to call inline on the UI thread: `detach` removes the
                     // routing entry under a brief lock and offloads the blocking
                     // child `kill()`+`wait()` to its own thread (it used to run that
                     // teardown under the routing lock on this very thread, freezing
                     // the launcher and every other product's IPC mid-close).
-                    if matches!(id, "corvus" | "merula" | "sitta" | "tyto" | "bennu") {
+                    if matches!(id, "corvus" | "merula" | "sitta" | "tyto" | "bennu" | "picus") {
                         crate::ipc::split_broker::detach(id, "window-closed");
                     }
                 }

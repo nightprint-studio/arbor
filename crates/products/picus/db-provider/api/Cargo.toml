@@ -1,0 +1,23 @@
+[package]
+name         = "picus-db-api"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Picus database-provider contract — the `DbProvider` / `DbSession` traits, the wire types they exchange (schema, query results, connection specs) and the per-engine descriptor that drives the UI. Engine-agnostic by construction: no driver, no SQL."
+
+[dependencies]
+# The vocabulary both halves of the product share (`EngineKind`, the schema
+# shapes). Re-exported from this crate's `kind` / `schema` / prelude so a
+# driver-side call site never names a third crate.
+picus-types = { path = "../../types" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+# Dyn-compatible async traits (`Arc<dyn DbProvider>`): `async fn` in traits is not
+# object-safe yet. Already a workspace pin — not a new dependency.
+async-trait = { workspace = true }
+# Wipes a resolved password on drop (`secret::Secret`) instead of handing the
+# allocation back to the allocator with the bytes intact. Already a workspace pin.
+zeroize = { workspace = true }

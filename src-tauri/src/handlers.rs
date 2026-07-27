@@ -109,6 +109,13 @@ macro_rules! invoke_handlers {
             $crate::window::bennu::open_bennu_window,
             // Dedicated Picus (SQL studio) window
             $crate::window::picus::open_picus_window,
+            // Picus connection passwords. Shell-side on purpose: the secret goes
+            // from the form straight to Arbor's keychain and never enters the
+            // backend process — `picus-be` asks for it over the reverse channel at
+            // the moment it opens a session.
+            $crate::commands::picus_commands::picus_store_secret,
+            $crate::commands::picus_commands::picus_delete_secret,
+            $crate::commands::picus_commands::picus_has_secret,
             // Cross-product recents (Canopy's list) + the "open this project"
             // intent a product's shell pulls as it mounts.
             $crate::commands::recents_commands::record_recent_project,

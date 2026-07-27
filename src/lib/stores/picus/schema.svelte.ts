@@ -10,25 +10,34 @@
  * reloads under you while you are writing DML from it is worse than a stale one
  * you know is stale.
  *
- * MOCK: one shared snapshot for every connection until `picus-be` reads real
- * catalogues. Keyed lookups already take the shape the real thing will have.
+ * Two granularities, mirroring the backend. The snapshot is the tree — every
+ * relation with its columns, cheap on a schema with hundreds of tables. Constraints
+ * and indexes arrive per relation through {@link detail}, paid for only when a tab
+ * actually opens.
  */
 
 import type { SchemaSnapshot, SequenceInfo, TableInfo, TriggerInfo } from '$lib/types/picus';
-import { MOCK_SEQUENCES, MOCK_TABLES, MOCK_TRIGGERS, MOCK_VIEWS } from '$lib/ipc/picus/mock';
+import { readSchema, tableDetail } from '$lib/ipc/picus/db';
+
+const EMPTY: SchemaSnapshot = { tables: [], views: [], sequences: [], triggers: [] };
 
 function createSchemaStore() {
-  let snapshot = $state<SchemaSnapshot>({
-    tables: MOCK_TABLES,
-    views: MOCK_VIEWS,
-    sequences: MOCK_SEQUENCES,
-    triggers: MOCK_TRIGGERS,
-  });
+  let snapshot = $state<SchemaSnapshot>({ ...EMPTY });
+  /** Which connection the snapshot describes — '' when nothing is loaded. */
+  let connectionId = $state('');
   let loadedAt = $state<string | null>(null);
   let loading = $state(false);
+  let error = $state('');
 
   /** Tables and views together — the things that have columns and rows. */
   const relations = $derived<TableInfo[]>([...snapshot.tables, ...snapshot.views]);
+
+  /** Replace a relation in place once its full detail has been read. */
+  function merge(detail: TableInfo) {
+    const list = detail.kind === 'view' ? snapshot.views : snapshot.tables;
+    const i = list.findIndex((t) => t.name === detail.name);
+    if (i >= 0) list[i] = detail;
+  }
 
   return {
     get tables() { return snapshot.tables; },
@@ -36,8 +45,10 @@ function createSchemaStore() {
     get sequences() { return snapshot.sequences; },
     get triggers() { return snapshot.triggers; },
     get relations() { return relations; },
+    get connectionId() { return connectionId; },
     get loadedAt() { return loadedAt; },
     get loading() { return loading; },
+    get error() { return error; },
 
     /** Total object count — what the connection row reports at a glance. */
     get objectCount() {
@@ -71,7 +82,14 @@ function createSchemaStore() {
       return snapshot.triggers.filter((t) => t.table.toUpperCase() === upper);
     },
 
-    /** Foreign keys pointing AT a table — the other half of its relationships. */
+    /**
+     * Foreign keys pointing AT a table — the other half of its relationships.
+     *
+     * Only as complete as the details already loaded: the snapshot carries no
+     * constraints, so a table whose tab has never been opened contributes nothing
+     * here. That is a deliberate trade against reading every constraint in the
+     * database up front.
+     */
     incomingForeignKeys(table: string) {
       const upper = table.toUpperCase();
       return snapshot.tables.flatMap((t) =>
@@ -81,13 +99,52 @@ function createSchemaStore() {
       );
     },
 
-    /** Re-read the catalogue. MOCK: just re-stamps the load time. */
-    refresh() {
+    /** Forget everything — on disconnect, so the tree can't show a dead schema. */
+    clear() {
+      snapshot = { ...EMPTY };
+      connectionId = '';
+      loadedAt = null;
+      error = '';
+    },
+
+    /** Read the catalogue of an open connection. */
+    async load(id: string) {
+      if (!id) {
+        this.clear();
+        return;
+      }
       loading = true;
-      setTimeout(() => {
-        loading = false;
+      try {
+        snapshot = await readSchema(id);
+        connectionId = id;
         loadedAt = new Date().toTimeString().slice(0, 5);
-      }, 350);
+        error = '';
+      } catch (e) {
+        snapshot = { ...EMPTY };
+        error = String(e);
+      } finally {
+        loading = false;
+      }
+    },
+
+    /** Re-read the catalogue of whatever is currently loaded. */
+    async refresh() {
+      if (connectionId) await this.load(connectionId);
+    },
+
+    /**
+     * The full detail of one relation — constraints, indexes, or a view's SELECT.
+     * Merged into the snapshot so a second open is instant.
+     */
+    async detail(name: string): Promise<TableInfo | null> {
+      if (!connectionId) return null;
+      try {
+        const full = await tableDetail(connectionId, name);
+        merge(full);
+        return full;
+      } catch {
+        return this.relation(name);
+      }
     },
   };
 }

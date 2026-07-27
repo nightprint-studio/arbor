@@ -205,6 +205,15 @@ pub fn build_router(app: &AppHandle) -> Router {
     // at attach/detach time.
     router.register("bennu", Arc::new(SplitBroker::pure_oop("bennu")));
 
+    // Picus backend: the SQL-studio product. Like bennu/tyto, served out-of-process
+    // by `picus-be` — spawned lazily by [`ensure_picus_be`] when the Picus window
+    // opens (the launcher and the other product windows never touch databases or SQL
+    // scripts). Picus has NO in-process handlers in this shell, so it is `pure_oop`:
+    // a `picus` call with `picus-be` detached reports `BackendNotRunning`, an
+    // unadvertised method reports `UnknownMethod` — no catch-all sink. Routing flips
+    // at attach/detach time.
+    router.register("picus", Arc::new(SplitBroker::pure_oop("picus")));
+
     router
 }
 
@@ -1430,6 +1439,29 @@ fn host_dispatch(
         return Ok(meta);
     }
 
+    // ── Picus database secrets ────────────────────────────────────────────────
+    //
+    // Picus stores no password: `picus-be` asks for one here, at the moment it
+    // opens a session. The keychain account is namespaced SHELL-SIDE
+    // (`picus_secret_account`) — the backend sends a connection id and can never
+    // name an arbitrary account, so this door cannot be used to read a git token.
+    if method == "__picus_secret" {
+        let id: String = serde_json::from_value(params)
+            .map_err(|e| format!("__picus_secret: invalid connection id: {e}"))?;
+        let account = picus_secret_account(&id)?;
+        let secret = crate::auth::credential_store::get(&account, "")
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        return Ok(serde_json::json!(secret));
+    }
+    if method == "__picus_delete_secret" {
+        let id: String = serde_json::from_value(params)
+            .map_err(|e| format!("__picus_delete_secret: invalid connection id: {e}"))?;
+        let account = picus_secret_account(&id)?;
+        crate::auth::credential_store::delete(&account, "").map_err(|e| e.to_string())?;
+        return Ok(serde_json::Value::Null);
+    }
+
     let account: String = match method {
         "__session" | "__refresh" => serde_json::from_value(params)
             .map_err(|e| format!("{method}: invalid account: {e}"))?,
@@ -1447,6 +1479,53 @@ fn host_dispatch(
     match resolved {
         Ok(session) => serde_json::to_value(session).map_err(|e| e.to_string()),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+/// The keychain account holding one Picus connection's password.
+///
+/// The `picus/` prefix is applied **here**, in the shell, and never travels over
+/// the reverse channel: `picus-be` sends a connection id, so a compromised or buggy
+/// backend cannot ask for `github.com/arbor` and be handed a git token. The id is
+/// validated to a conservative character set for the same reason — a `/` in it
+/// would let a caller escape the namespace.
+pub(crate) fn picus_secret_account(connection_id: &str) -> Result<String, String> {
+    let ok = !connection_id.is_empty()
+        && connection_id.len() <= 128
+        && connection_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
+    if !ok {
+        return Err("invalid connection id".to_string());
+    }
+    Ok(format!("picus/{connection_id}"))
+}
+
+#[cfg(test)]
+mod picus_secret_account_tests {
+    use super::picus_secret_account;
+
+    #[test]
+    fn a_plain_id_is_namespaced() {
+        assert_eq!(picus_secret_account("prod-01").unwrap(), "picus/prod-01");
+        assert_eq!(picus_secret_account("a.b_c").unwrap(), "picus/a.b_c");
+    }
+
+    #[test]
+    fn an_id_cannot_escape_the_namespace() {
+        // The whole reason the prefix is applied shell-side: none of these may be
+        // able to name another product's credential.
+        for hostile in ["../github.com/arbor", "github.com/arbor", "a/b", "", "a b"] {
+            assert!(
+                picus_secret_account(hostile).is_err(),
+                "must reject {hostile:?} — it could otherwise reach another account"
+            );
+        }
+    }
+
+    #[test]
+    fn an_absurdly_long_id_is_rejected() {
+        assert!(picus_secret_account(&"a".repeat(129)).is_err());
     }
 }
 
@@ -2003,6 +2082,100 @@ fn spawn_bennu_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>
         Ok(pair) => Some(pair),
         Err(e) => {
             tracing::warn!("failed to spawn bennu-be ({e}) — Bennu stays in preview mode");
+            None
+        }
+    }
+}
+
+/// Lazily spawn `picus-be` and attach it to the router, **idempotently**. Called when
+/// the Picus product window opens (`window::picus::open_picus_window`), off the main
+/// thread — the spawn blocks on the child's first `Hello` frame, which must not stall
+/// the UI thread. The picus twin of [`ensure_bennu_be`] / [`ensure_tyto_be`].
+pub fn ensure_picus_be(app: &AppHandle) {
+    // Serialize concurrent triggers (the launcher tile + the Command Palette can both
+    // fire `open_picus_window`) so we never spawn two backends; re-check liveness
+    // inside the lock. A SEPARATE lock from the other backends' spawns so they never
+    // contend.
+    static SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = match SPAWN_LOCK.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if split_broker::is_attached("picus") {
+        tracing::debug!("ensure_picus_be: already attached — no-op (window re-summoned)");
+        return; // backend already up — window is just being re-summoned
+    }
+    let gen = split_broker::next_gen();
+    tracing::info!("ensure_picus_be: spawning picus-be (gen={gen})");
+    match spawn_picus_be(app, gen) {
+        Some((child, methods)) => {
+            tracing::info!(
+                "picus-be up (lazy, gen={gen}): {} method(s) served out-of-process",
+                methods.len()
+            );
+            split_broker::attach(
+                "picus",
+                gen,
+                methods.into_iter().collect(),
+                Arc::new(child) as Arc<dyn BrokerClient>,
+            );
+            // The backend attaches AFTER the Picus window may already have run its
+            // shell's one-shot loads (the spawn is off-thread, racing window
+            // creation). Signal "now routable" so the settings store (re)reads the
+            // persisted config instead of being stuck on defaults.
+            use tauri::Emitter;
+            let _ = app.emit("arbor://picus-be-up", ());
+        }
+        None => {
+            tracing::info!("picus-be not available — the Picus studio stays on its fixtures");
+        }
+    }
+}
+
+fn spawn_picus_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)> {
+    use crate::process_ext::NoWindowExt;
+
+    let bin = match backend_binary(app, "picus-be") {
+        Some(b) => b,
+        None => {
+            tracing::info!(
+                "picus-be binary not found (backends/ resource or beside the launcher) — Picus stays on its fixtures"
+            );
+            return None;
+        }
+    };
+
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
+
+    let app_for_events = app.clone();
+    let app_for_host = app.clone();
+    let app_for_disc = app.clone();
+    match ChildClient::spawn(
+        cmd,
+        move |topic, payload| {
+            use tauri::Emitter;
+            // Studio push events (query progress, index progress) land here when the
+            // database / script waves ship. Global emit is harmless with a single
+            // window.
+            let _ = app_for_events.emit(&topic, payload);
+        },
+        move |method, params| host_dispatch(&app_for_host, method, params),
+        move || {
+            // Fires for a genuine crash AND the intentional teardown of an OLD child
+            // after stop+respawn. `detach_if_current` acts only when gen={gen} is
+            // still attached: genuine crash → detach + down event; stale disconnect
+            // of an already-replaced child → logged no-op.
+            use tauri::Emitter;
+            tracing::warn!("picus-be disconnect callback fired (gen={gen})");
+            if split_broker::detach_if_current("picus", gen, "disconnect") {
+                let _ = app_for_disc.emit("arbor://picus-be-down", ());
+            }
+        },
+    ) {
+        Ok(pair) => Some(pair),
+        Err(e) => {
+            tracing::warn!("failed to spawn picus-be ({e}) — Picus stays on its fixtures");
             None
         }
     }

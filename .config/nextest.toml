@@ -1,0 +1,23 @@
+# cargo-nextest configuration.
+#
+# The reason this file exists is the per-test timeout. Picus's coming crates parse
+# and rewrite SQL, and a loop in a parser or a rewriter must **fail** rather than
+# hang CI forever — a hung run costs far more than a failed one, because nobody
+# knows whether it is stuck or merely slow.
+#
+# Run with: cargo nextest run
+
+[profile.default]
+# A unit test that hasn't finished in 30s is not slow, it is stuck. Report it…
+slow-timeout = { period = "30s", terminate-after = 2 }
+# …and show the output of anything that failed, so a CI log is enough to diagnose.
+failure-output = "immediate-final"
+fail-fast = false
+
+[profile.ci]
+# Same rule, less patience, plus a retry so a genuinely flaky test is visible as
+# flaky (passed on retry) rather than silently masked or spuriously red.
+slow-timeout = { period = "20s", terminate-after = 2 }
+retries = 1
+failure-output = "immediate-final"
+final-status-level = "flaky"

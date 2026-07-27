@@ -78,13 +78,80 @@ Two corollaries the code already honours:
   Deterministic and dialect-aware, but in the wrong language and the wrong process. The real
   emitter owns the golden tests; nothing here should grow a second home.
 
-### Backend — does not exist
+### Backend — the database half is live
 
-No `picus-be`, no crates. Hook points are already commented in place:
+`picus-be` runs and talks to PostgreSQL. Serving today: the typed product config, the
+per-engine descriptors, connections, schema, paged rows, statement execution and
+server-side cancellation. The script half lands in the following waves against the same
+`PicusState`.
 
-- `src-tauri/src/window/picus.rs::open_picus_window` — where `ensure_picus_be` goes, on
-  `spawn_blocking` (the blocking-pool rule is mandatory, see `docs/backend-architecture.md`);
-- `src-tauri/src/window/workspace.rs::ensure_backend_for` — the `match` arm for tabbed mode.
+| Crate | What it holds |
+|---|---|
+| `crates/products/picus/types` | `picus-types`: `EngineKind` + the schema shapes. A **leaf** — serde only. Both halves depend on it and on each other not at all, which is what keeps the script half free of any dependency on drivers. |
+| `crates/products/picus/ast` | `picus-ast`: `DmlModel` (no dialect field, deliberately) + `Target` (where the dialect lives). |
+| `crates/products/picus/emit` | `picus-emit`: one model in, one correct statement per destination out. Owns the golden tests. |
+| `crates/products/picus/core` | `PicusState` (event egress + reverse channel + the engine registry + the live-session pool), `PicusConfig`, the connection store (`connections.toml`). Tauri-free. Public API through `prelude`. |
+| `crates/products/picus/db-provider/api` | `picus-db-api`: the `DbProvider` / `DbSession` traits, the wire types, `DbProviderDescriptor`, `SecretResolver`, the registry. No driver, no SQL. |
+| `crates/products/picus/db-provider/postgres` | `picus-db-postgres`: the implementation over `tokio-postgres` + rustls. |
+| `crates/products/picus/be` | `[[bin]] picus-be` — slim path (no plugin host). `selftest`, `config_cmds`, `connections`, `schema`, `query`, `providers`, `secrets`. |
+
+Wiring, all in place:
+
+- `arbor-core` — `PRODUCT_PICUS` + `picus_config_dir` / `picus_config_path` / `picus_data_dir`,
+  exported from the prelude;
+- workspace `members` + `package.json`'s `backends:dev` / `backends:release` +
+  `scripts/stage-backends.mjs`;
+- `src-tauri/src/ipc/mod.rs` — `router.register("picus", SplitBroker::pure_oop("picus"))`,
+  `ensure_picus_be` + `spawn_picus_be`, emitting `arbor://picus-be-up` / `-down`;
+- `src-tauri/src/window/picus.rs::open_picus_window` — `ensure_picus_be` on `spawn_blocking`
+  (the blocking-pool rule is mandatory, see `docs/backend-architecture.md`);
+- `src-tauri/src/window/workspace.rs::ensure_backend_for` — the `picus` arm for tabbed mode;
+- frontend — `rpc.ts`'s `picus(...)` helper, `ipc/picus/config.ts`, and
+  `picusSettingsStore.loadConfig()` from `PicusWindow` on mount **and** on
+  `arbor://picus-be-up` (the spawn races window creation; without the second read the store
+  would keep defaults and then write them back over the user's file on the next toggle).
+
+**No plugin host**, deliberately. When Picus wants one, do not copy sitta-be/tyto-be's
+`plugin.rs` a third time — that file already carries the note to promote the host-pure wiring
+into a shared `arbor-plugin-be` crate first.
+
+#### The password path (decided 2026-07-27)
+
+The connection form sends the password **straight to the shell** (`picus_store_secret`), which
+puts it in Arbor's keychain. It never enters the `picus-be` process at that point. When a
+session is opened, `picus-be` asks for it back over the reverse channel (`__picus_secret`) and
+drops it as soon as the driver has authenticated (`Secret` zeroes on drop, and its `Debug`
+prints `***`).
+
+Two details are load-bearing rather than decorative:
+
+- **The keychain account is namespaced shell-side.** `picus-be` sends a connection *id*; the
+  shell turns it into `picus/<id>` and validates it against a conservative character set. A
+  backend that asked for `github.com/arbor` gets an error, not a git token. Tested.
+- **"Not typed" and "cleared" are different.** The form's password is `null` until touched;
+  an empty string is a deliberate delete. Collapsing them would silently destroy a saved
+  credential on an unrelated edit, so the store takes `password?: string` and only writes when
+  it is not `undefined`.
+
+Driver choices (approved): `tokio-postgres` (pure Rust, no libpq to ship, and the only driver
+offering a real server-side cancellation key), TLS via rustls + `rustls-native-certs` so an
+internal corporate CA works with no bundle shipped and nothing links OpenSSL.
+
+#### What `PicusConfig` covers, and what it must not
+
+Persisted per profile (`arbor/profiles/<active>/picus/config.toml`): the encoding fallbacks,
+the write guards, the emission defaults, the query row limit — the settings modal's sections,
+one for one.
+
+A **script project's** own settings — declared encoding, line ending, version table — stay in
+memory for now and belong to the *project's* config, never to this file: a colleague opening
+the same repository must inherit them, or the same repo behaves differently per user, which is
+the class of surprise Picus exists to remove.
+
+Two shapes worth keeping when extending it: the insertion rules are stored as **wire strings**
+with typed accessors (an unknown value must degrade to the default, not fail the file's parse
+and silently reset every other setting), and `row_limit` is **clamped on read** rather than
+trusted (a hand-edited `0` would mean "fetch nothing" and read as a broken product).
 
 ---
 
@@ -301,27 +368,41 @@ which is the same grammar decision as §6.5, and should be made once for both.
 
 ## 5. What is left to do
 
-### Backend (nothing exists yet)
+### Backend
 
-1. `picus-core` — `PicusState` + prelude (model on `TytoState`).
-2. `picus-be` — `[[bin]]`, `main.rs` from the `sitta-be` skeleton, `be_ping` first.
-3. Register both in the workspace `members`; `router.register("picus", SplitBroker::pure_oop("picus"))`;
-   `ensure_picus_be` + `spawn_picus_be`; call it from `open_picus_window` on `spawn_blocking`.
-4. `picus-db-api` + `picus-db-postgres` (§4.2).
-5. `picus-ast`, `picus-parse`, `picus-inventory`, `picus-analyze`, `picus-emit`,
-   `picus-rewrite` — the script half. `picus-emit`/`picus-analyze` must know `picus-ast` and
-   **never** Tree-sitter.
+1. ~~`picus-core` — `PicusState` + prelude.~~ **Done.**
+2. ~~`picus-be` — `[[bin]]`, slim `main.rs`, `be_ping` + the typed config.~~ **Done.**
+3. ~~Workspace `members`, `router.register`, `ensure_picus_be` / `spawn_picus_be`,
+   `open_picus_window` on `spawn_blocking`.~~ **Done.**
+4. ~~`picus-db-api` + `picus-db-postgres` (§4.2), the registry and pool on `PicusState`,
+   read-only enforced in the backend.~~ **Done.** Read-only is enforced by the *server*:
+   the session is opened `AS TRANSACTION READ ONLY`, so the refusal holds for a pasted script
+   too; the lexical check only makes the message better and arrive sooner.
+5. ~~`picus-ast` + `picus-emit`~~ **Done**, with `picus-types` extracted under both halves.
+   Emission is in Rust with 29 golden tests; `picus_emit` / `picus_validate_rows` /
+   `picus_validate_value` are served. `picus-emit` knows `picus-ast` and **never**
+   Tree-sitter — keep it that way.
+6. `picus-parse`, `picus-inventory`, `picus-analyze`, `picus-rewrite` — the rest of the script
+   half, and **the next step**. Created one at a time as each is activated (decision §6.2), not
+   all up front.
 6. Encoding: extend the detection in `arbor-fs` (BOM → UTF-8-with-multibyte → ASCII-neutral
    inherited from the folder → single-byte heuristic). Open question: whether to extend
    `arbor-fs` in place — which changes behaviour for Bennu and Corvus — or layer it.
 
-### Frontend, once the backend exists
+### Frontend, as each backend domain lands
 
-- Replace `ipc/picus/mock.ts` and `mock-emit.ts` with real RPC (`picus(method, params)`).
-- Settings must persist to `…/picus/config.toml` in the active profile via
-  `get_picus_config` / `set_picus_config`. They are in-memory today. **Never `localStorage`.**
-- Project-level settings (encoding, version table) belong in the project's own config so a
-  colleague opening the same repository inherits them.
+- ~~Connections, schema, table rows and query execution on real RPC.~~ **Done** — the
+  connection modal now reads its fields, labels, defaults and capabilities from
+  `picus_providers` rather than branching on the engine, and an engine with no driver says so
+  instead of disappearing. `mock.ts` is down to the script-side fixtures plus
+  `DEFAULT_QUERY_TEXT`; `mock-emit.ts` is untouched and goes with `picus-emit`.
+- Replace the remaining `ipc/picus/mock.ts` (project tree, inventory, findings) and
+  `mock-emit.ts` with real RPC as the script crates land.
+- ~~Settings persist to `…/picus/config.toml` via `get_picus_config` / `set_picus_config`.~~
+  **Done** for the product settings (never `localStorage`).
+- Project-level settings (encoding, EOL, version table) are still in memory: they belong in the
+  project's own config so a colleague opening the same repository inherits them. They persist
+  when the script half gives the backend a project to attach them to.
 
 ### Editor intelligence (§4.4)
 
@@ -347,10 +428,22 @@ which is the same grammar decision as §6.5, and should be made once for both.
 
 ### Tests
 
-Nothing yet — there is no Rust to test. When the crates land:
+29 unit tests, all green, none needing a database:
 
-- `cargo-nextest` with a per-test timeout is **mandatory** (a loop in a parser or a rewriter
-  must fail, not hang CI). No `.config/nextest.toml` exists in the repo today.
+- `picus-core` — config round-trip, a partial file keeping its siblings' defaults, an unknown
+  insertion rule degrading instead of failing the parse, the row limit clamped, and the one
+  that matters most: **`connections.toml` never contains a secret**.
+- `picus-db-api` — the wire shapes the frontend reads (`type`, `primaryKey`, `estimatedRows`
+  absent rather than `0`), `null` surviving a round-trip distinct from `""`, `Secret`'s `Debug`
+  refusing to print the value.
+- `picus-db-postgres` — identifier quoting neutralising a hostile table name, statement
+  classification (leading comments, a data-modifying CTE, `UPDATED_AT` not counting as
+  `UPDATE`), trigger bitmask decoding, and the value mapping (`007` staying text, a decimal
+  too precise for `f64` staying text).
+- `arbor` — the keychain namespace refusing every id that could escape `picus/`.
+
+`.config/nextest.toml` now exists with the mandatory per-test timeout (a loop in a parser must
+fail, not hang CI): `cargo nextest run`. Everything below is still owed:
 - The **byte-identical round-trip** over a corpus of real files is the most important test of
   the project.
 - Golden tests per operation × dialect × rules.
@@ -365,17 +458,32 @@ Nothing yet — there is no Rust to test. When the crates land:
 1. **`NamingScheme`** for update scripts — versioned (`4_12__4_13.sql`) vs dated. The real
    questions are (a) where the "next version" comes from (the connected database, the highest
    file on disk, or typed by hand) and (b) what happens to `VER003` (unbroken version chain)
-   under the dated scheme, where it arguably has no meaning.
-2. **Crate granularity** — all ten crates now, or `core` + `be` and split as each is
-   activated (which is how Bennu and Merula actually grew).
+   under the dated scheme, where it arguably has no meaning. **Needed before `picus-rewrite`
+   writes its first file** — not before then.
+2. ~~**Crate granularity.**~~ **Decided (2026-07-27):** create each crate as it is activated,
+   the way Bennu and Merula grew. No empty scaffolds.
 3. **Encoding detection placement** — extend `arbor-fs` (shared benefit, changes existing
    products' behaviour) or layer it for Picus only.
-4. **WASM tier** — `ast` / `emit` / `analyze` / `inventory` can be wasm-clean, which is
-   exactly the slice a "generate SQL" plugin would need. `parse` is the awkward one: the
-   Tree-sitter runtime needs a C toolchain for wasm32, so it should sit behind a feature.
-5. **Tree-sitter PL/SQL coverage** — the biggest technical risk. No mature grammar exists;
-   Arbor's own pattern (own grammar, generated `parser.c` committed, no Node at build time)
-   is the fallback. Measure the percentage of statements landing in `Other` on a real corpus
-   **before** committing to the parsing milestone. A plausible outcome: for Picus's actual
-   scope (DML, anonymous blocks, guards, routines treated as opaque), a robust statement
-   splitter plus a targeted grammar beats full PL/SQL.
+4. **WASM tier** — `types` / `ast` / `emit` are wasm-clean **today** (serde only, no I/O),
+   which is exactly the slice a "generate SQL" plugin would need; `analyze` / `inventory`
+   should stay that way. `parse` is the awkward one: the Tree-sitter runtime needs a C
+   toolchain for wasm32, so it should sit behind a feature.
+5. ~~**Tree-sitter PL/SQL coverage.**~~ **Decided (2026-07-27):** a full Tree-sitter grammar,
+   Arbor's own pattern — own grammar, generated `parser.c` committed, no Node at build time,
+   as Merula does. It is the long road and the honest one; no mature PL/SQL grammar exists to
+   borrow. Explicit direction from the user: **a very large body of unit tests over every kind
+   of SQL that can be thought of**, and permission to run the `tree-sitter` generation
+   commands.
+
+### Decisions taken on 2026-07-27 (this session)
+
+| Question | Decision |
+|---|---|
+| PostgreSQL driver | `tokio-postgres` — pure Rust, no libpq, real server-side cancel key |
+| TLS | rustls + `rustls-native-certs` (OS trust store, no OpenSSL linked) |
+| Where the password lives | Arbor's keychain, written by the shell, read by the BE over the reverse channel |
+| Scope of the DB step | backend **and** frontend wired, not backend alone |
+| Shared `Column` / `EngineKind` | extracted into `picus-types`, a leaf under both halves |
+| Crate granularity | one at a time, as activated |
+| Generated SQL identifiers | **English** (`before_changes`, `v_version`, `v_existing`, `v_object`) |
+| Parsing strategy | full Tree-sitter grammar, with a very large test suite |

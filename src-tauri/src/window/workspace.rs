@@ -161,6 +161,7 @@ async fn ensure_backend_for(app: &AppHandle, product: &str) {
         "corvus" => crate::ipc::ensure_corvus_be(&app_be),
         "bennu" => crate::ipc::ensure_bennu_be(&app_be),
         "merula" => crate::ipc::ensure_merula_be(&app_be),
+        "picus" => crate::ipc::ensure_picus_be(&app_be),
         // `home` (Canopy) has no backend of its own.
         _ => {}
     })
