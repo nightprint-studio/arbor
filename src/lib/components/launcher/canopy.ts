@@ -22,8 +22,12 @@ export interface Product {
   id: string;
   name: string;
   bird: string;
+  /** One-line label, for tight spots (the tree's footer, a tooltip). */
   role: string;
   accent: string;
+  /** A sentence or two on what the product actually does — the welcome page has
+   *  the room for it, and "Git & CI client" tells a newcomer nothing. */
+  blurb?: string;
 }
 
 // ── Palette ──────────────────────────────────────────────────────────────────
@@ -38,13 +42,18 @@ export const CANOPY_H = 600;
 // window (`PRODUCT_WINDOW_OPENERS` in `ipc/app.ts`). Identity only — version and
 // running state are resolved at runtime (see `versions.ts` + `decorate`).
 export const BASE: Product[] = [
-  { id: 'corvus', name: 'Corvus', bird: 'crow',        role: 'Git & CI client',     accent: '#7c9cf5' },
-  { id: 'merula', name: 'Merula', bird: 'blackbird',   role: 'Music synthesizer',   accent: '#e8a857' },
-  { id: 'sitta',  name: 'Sitta',  bird: 'treecreeper', role: 'File explorer',       accent: '#b58cf0' },
-  { id: 'tyto',   name: 'Tyto',   bird: 'barn owl',    role: 'Screen recorder',     accent: '#f28b82' },
+  { id: 'corvus', name: 'Corvus', bird: 'crow',        role: 'Git & CI client',     accent: '#7c9cf5',
+    blurb: 'Branches, commits and diffs, merge requests, pipelines and issues — the whole day-to-day of a repository in one window.' },
+  { id: 'merula', name: 'Merula', bird: 'blackbird',   role: 'Music synthesizer',   accent: '#e8a857',
+    blurb: 'Live-coding DAW: write patterns in a text DSL and hear them immediately, with sample banks, a mixer and audio export.' },
+  { id: 'sitta',  name: 'Sitta',  bird: 'treecreeper', role: 'File explorer',       accent: '#b58cf0',
+    blurb: 'A file manager that knows about git: status overlays while you browse, plus preview, search and the usual file operations.' },
+  { id: 'tyto',   name: 'Tyto',   bird: 'barn owl',    role: 'Screen recorder',     accent: '#f28b82',
+    blurb: 'Screen capture from the tray: record a region or a window, or grab a still, without hunting for the app first.' },
   // TODO(user): confirm bird label + accent — Bennu is a mythical firebird (not a
   // real species like the others), so `bird: 'firebird'` is a placeholder.
-  { id: 'bennu',  name: 'Bennu',  bird: 'firebird',    role: 'Java editor',         accent: '#f2c14e' },
+  { id: 'bennu',  name: 'Bennu',  bird: 'firebird',    role: 'Java editor',         accent: '#f2c14e',
+    blurb: 'Editor and semantic engine for legacy Java: navigation, live validation, refactors and run configurations.' },
 ];
 
 // ── Colour helpers ───────────────────────────────────────────────────────────

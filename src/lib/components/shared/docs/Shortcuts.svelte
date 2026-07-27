@@ -54,6 +54,8 @@
     <tr><td><Kbd action="repo_browser" size="sm" /></td><td>Browse remote repositories (GitHub / GitLab)</td></tr>
     <tr><td><Kbd action="command_palette" size="sm" /></td><td>Open Command Palette</td></tr>
     <tr><td><Kbd action="switch_window" size="sm" /></td><td>Switch window — jump to another open Arbor window</td></tr>
+    <tr><td><Kbd action="new_surface_tab" size="sm" /></td><td>New product tab (tabbed mode) — opens the Canopy home page</td></tr>
+    <tr><td><Kbd action="next_surface_tab" size="sm" /> / <Kbd action="prev_surface_tab" size="sm" /></td><td>Next / previous product tab. <kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>9</kbd> jumps to one directly</td></tr>
     <tr><td><Kbd action="open_project" size="sm" /></td><td>Open project in active workspace</td></tr>
     <tr><td><Kbd action="open_from_workspace" size="sm" /></td><td>Open project from another workspace (cross-WS tab)</td></tr>
     <tr><td><Kbd action="workspace_manager" size="sm" /></td><td>Open Workspace Manager</td></tr>

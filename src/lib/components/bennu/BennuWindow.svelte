@@ -30,6 +30,8 @@
   import { animStore } from '$lib/stores/animations.svelte';
   import { signalWindowReady } from '$lib/ipc/window';
   import { syncWindowTitle } from '$lib/utils/window-title.svelte';
+  import { surfaceStore } from '$lib/stores/surfaces.svelte';
+  import { recordRecentProject, onOpenIntent } from '$lib/ipc/recents';
 
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
   import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
@@ -125,7 +127,21 @@
 
   // Name the OS window after the open project — what tells two Bennu windows
   // apart in the taskbar, Alt-Tab and the macOS Window menu.
-  syncWindowTitle('Bennu', () => projectStore.project?.name);
+  syncWindowTitle('Bennu', () => projectStore.project?.name, {
+    active: () => surfaceStore.hasFocus('bennu'),
+  });
+
+  // Feed Canopy's cross-product recents. The demo project is excluded — it isn't
+  // somewhere the user can return to.
+  $effect(() => {
+    const p = projectStore.project;
+    if (!p?.root || projectStore.isDemo) return;
+    void recordRecentProject('bennu', p.root, p.name).catch(() => {});
+  });
+
+  // Canopy asking for a specific project: open it. Once on mount for a request
+  // parked before this window existed, then on every later request.
+  onMount(() => onOpenIntent('bennu', (path) => { void projectStore.openProject(path); }));
 
   // When a real (non-demo) project opens, kick off the indexing status + job. The BE
   // rebuilds the index on every open, so this fires each time the root changes.
@@ -431,6 +447,10 @@
 
   // ── Window-level keybindings ─────────────────────────────────────────────────
   function onKeyDown(e: KeyboardEvent) {
+    // In the tabbed container this shell stays mounted (and subscribed) while
+    // its tab is in the background — ignore keys unless we're the tab on
+    // screen. No-op in a standalone Bennu window.
+    if (!surfaceStore.hasFocus('bennu')) return;
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); bennuUiStore.togglePalette(); return; }
     if (bennuUiStore.paletteOpen) return; // the palette owns the keyboard while open

@@ -16,9 +16,12 @@
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import LauncherShell from '$lib/components/launcher/LauncherShell.svelte';
+  import WelcomeHome from '$lib/components/launcher/WelcomeHome.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
   import FeedbackHost from '$lib/feedback/FeedbackHost.svelte';
   import { createNativeMenuPublisher } from '$lib/utils/native-menu';
+  import { syncWindowTitle } from '$lib/utils/window-title.svelte';
+  import { surfaceStore } from '$lib/stores/surfaces.svelte';
 
   // macOS: the menu bar is app-wide and the launcher has no menu of its own, so
   // it claims the baseline bar (App · Edit · Window · Help). Without this, the
@@ -26,17 +29,37 @@
   // focused. No-op elsewhere.
   const publishNativeMenu = createNativeMenuPublisher('Arbor');
 
+  // Names the window while the home surface is on screen — in the container
+  // that means "back to the home tab" reads as Welcome in the taskbar and the
+  // switcher, instead of whichever product was there before.
+  syncWindowTitle('Welcome', () => null, { active: () => surfaceStore.hasFocus('home') });
+
+  // Claim the baseline macOS menu bar only while Canopy is the surface on
+  // screen — in the container the product shells are mounted too, and whoever
+  // publishes last owns the app-wide bar.
+  $effect(() => {
+    if (surfaceStore.hasFocus('home')) publishNativeMenu([]);
+  });
+
   onMount(() => {
     themeStore.init();
     void appearanceStore.loadConfig();
     void animStore.loadConfig();
-    publishNativeMenu([]);
     // Release the plugin boot thread (no BootSplash on the launcher window).
     invoke('frontend_ready').catch(() => { /* legacy backend without handshake */ });
   });
 </script>
 
-<LauncherShell />
+<!-- Two different homes, deliberately. The launcher's OWN window is Canopy: a
+     small, self-contained world with its circuit-tree and its own palette. The
+     home tab of the tabbed container sits inside a full-size Arbor window next
+     to product tabs, so it gets an Arbor welcome page instead — same chrome,
+     same theme tokens, same widgets as every other panel. -->
+{#if surfaceStore.inContainer}
+  <WelcomeHome />
+{:else}
+  <LauncherShell />
+{/if}
 
 <Tooltip />
 

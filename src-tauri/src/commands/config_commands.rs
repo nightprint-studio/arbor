@@ -64,6 +64,22 @@ pub fn get_launcher_config(state: State<'_, AppState>) -> Result<LauncherConfig,
     Ok(state.lock_config()?.launcher.clone())
 }
 
+/// Choose where workspace products open: one window each, or tabs in the
+/// shared container. Takes effect on the next product launch — windows that are
+/// already open stay where they are.
+#[tauri::command]
+pub fn set_launcher_window_mode(
+    state: State<'_, AppState>,
+    mode: app_config::WindowMode,
+) -> Result<(), AppError> {
+    let mut cfg = state.lock_config()?;
+    cfg.launcher.window_mode = mode;
+    let cfg_clone = cfg.clone();
+    drop(cfg);
+    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))?;
+    Ok(())
+}
+
 /// Set a single product's tray-close preference (per-product, not global).
 #[tauri::command]
 pub fn set_launcher_close_to_tray(

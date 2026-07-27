@@ -21,6 +21,7 @@
         "decorations": false,
         "maximized": false,
         "shadow": true,
+        "visible": false,
         "transparent": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,InterestFeedContentSuggestions,WebRTC,AutofillServerCommunication"
       }

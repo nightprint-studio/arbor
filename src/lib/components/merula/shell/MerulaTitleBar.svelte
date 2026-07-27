@@ -33,6 +33,7 @@
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
   import { createNativeMenuPublisher } from '$lib/utils/native-menu';
   import { windowMenuItems } from '$lib/utils/window-menu';
+  import WorkspaceTabs from '$lib/components/shared/internal/WorkspaceTabs.svelte';
   import { merulaStore, LOG_LEVELS } from '../merula-store.svelte';
   import { merulaEngine } from '../stores/engine.svelte';
   import { configStore } from '../stores/config.svelte';
@@ -42,6 +43,10 @@
   import { renderStore } from '../stores/render.svelte';
   import { transportUiStore } from '../stores/transport-ui.svelte';
   import { arrangementStore } from '../viz/arrangement.svelte';
+
+  // False while this shell sits in a background tab of Arbor's container: it is
+  // mounted but not on screen, so it must not claim the app-wide macOS menu.
+  let { nativeMenuEnabled = true }: { nativeMenuEnabled?: boolean } = $props();
 
   let recentOpen = $state(false);
   let profileManagerOpen = $state(false);
@@ -185,6 +190,7 @@
   logoTooltip="merula — music live-coding"
   menu={hamburgerMenu}
   onNativeMenu={publishNativeMenu}
+  {nativeMenuEnabled}
   menuWidth="240px"
   docs={{ active: merulaStore.docsOpen, tooltip: 'Documentation (F1)', onclick: () => merulaStore.toggleDocs() }}
   commandPalette={{ active: merulaStore.paletteOpen, tooltip: 'Command palette (Ctrl+K)', onclick: () => merulaStore.togglePalette() }}
@@ -195,6 +201,12 @@
   {/snippet}
 
   <!-- Project fast-swap -->
+  {#snippet center()}
+    <!-- Product tabs, when this window is the tabbed container: they belong to
+         the window, not to merula (nothing in a standalone merula window). -->
+    <WorkspaceTabs />
+  {/snippet}
+
   {#snippet leading()}
     <Dropdown items={projectItems} position="fixed" direction="down" width="240px">
       {#snippet trigger({ open, toggle })}

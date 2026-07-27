@@ -21,8 +21,15 @@ import { setWindowTitle } from '$lib/ipc/window';
  * @param subject Reactive accessor for the window's current subject; return
  *                null/empty when the window is showing nothing in particular.
  */
-export function syncWindowTitle(product: string, subject: () => string | null | undefined): void {
+export function syncWindowTitle(
+  product: string,
+  subject: () => string | null | undefined,
+  opts?: { active?: () => boolean },
+): void {
   $effect(() => {
+    // Inside the tabbed container several shells are mounted at once; only the
+    // tab on screen may name the window, or they'd overwrite each other.
+    if (opts?.active?.() === false) return;
     const s = subject()?.trim();
     void setWindowTitle(s ? `${s} — ${product}` : `${product} — Arbor`).catch(() => {
       // Non-Tauri (SSR/tests) or a window that just went away — the title is

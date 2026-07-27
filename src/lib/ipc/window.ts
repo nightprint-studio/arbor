@@ -60,3 +60,44 @@ export function listWindows(): Promise<ArborWindow[]> {
 export function focusWindow(label: string): Promise<void> {
   return invoke('focus_window', { label });
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+//  Tabbed container
+// ───────────────────────────────────────────────────────────────────────────
+
+/** Pushed to an already-open container to focus (or open) a product's tab. */
+export const WORKSPACE_OPEN_PRODUCT_EVENT = 'workspace://open-product';
+
+/**
+ * Open the tabbed container, or focus it if it's already up, optionally landing
+ * on `product`'s tab. Used instead of `open_<product>_window` when the user's
+ * window mode is `tabbed`.
+ */
+export function openWorkspaceWindow(product?: string): Promise<void> {
+  return invoke('open_workspace_window', { product: product ?? null });
+}
+
+/**
+ * Pull the "show this product" intent parked by the shell before the container
+ * existed. Returns null once consumed — the container calls it once on mount,
+ * and listens to {@link WORKSPACE_OPEN_PRODUCT_EVENT} from then on.
+ */
+export function takeWorkspaceIntent(): Promise<string | null> {
+  return invoke('take_workspace_intent');
+}
+
+/**
+ * Tell the shell a product tab is now open, so it can spawn that product's
+ * backend and light it up in the launcher — everything `open_<product>_window`
+ * does for a windowed product. Must be called for restored tabs too: those
+ * never went through `openWorkspaceWindow`.
+ */
+export function workspaceTabOpened(product: string): Promise<void> {
+  return invoke('workspace_tab_opened', { product });
+}
+
+/** Tell the shell a product tab closed, so its backend is torn down and the
+ *  launcher node clears — the contract of closing that product's window. */
+export function workspaceTabClosed(product: string): Promise<void> {
+  return invoke('workspace_tab_closed', { product });
+}

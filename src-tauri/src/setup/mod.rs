@@ -183,5 +183,8 @@ fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(debug_assertions))]
     tray::install(app)?;
 
+    // Decide where the user lands, and guarantee they land SOMEWHERE.
+    crate::window::boot_entry(app.handle());
+
     Ok(())
 }

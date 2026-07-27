@@ -89,7 +89,11 @@
   // Arbor-specific feedback badges (jobs · notifications) injected by the bridge
   // (MerulaWindow) and rendered in the footer's right cluster — keeps MerulaShell
   // and MerulaFooter free of Arbor store imports (extractability).
-  let { footerExtra }: { footerExtra?: Snippet } = $props();
+  // `active` is false while this shell sits in a background tab of Arbor's
+  // container: still mounted (its session must survive a tab switch) but not
+  // on screen, so its window-level shortcuts must stay quiet. A plain boolean
+  // prop rather than a store read — merula stays free of Arbor imports.
+  let { footerExtra, active = true }: { footerExtra?: Snippet; active?: boolean } = $props();
 
   let unEngine: UnlistenFn | null = null;
   let unPacks:  UnlistenFn | null = null;
@@ -318,6 +322,7 @@
   }
 
   function onKeyDown(e: KeyboardEvent) {
+    if (!active) return;
     // Esc clears the loop region. Global (the loop is global state) but yields Esc
     // to the editor (CodeMirror owns it for autocomplete / multi-cursor) and to any
     // open overlay (which closes on Esc). Only fires when a loop actually exists, so
@@ -442,7 +447,7 @@
 {/snippet}
 
 <div class="shell">
-  {#if !merulaStore.performance}<MerulaTitleBar />{/if}
+  {#if !merulaStore.performance}<MerulaTitleBar nativeMenuEnabled={active} />{/if}
 
   <div class="content-area">
     <WorkspaceShell showLeftRail={!merulaStore.chromeHidden} showRightRail={!merulaStore.chromeHidden}>

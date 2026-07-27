@@ -21,6 +21,8 @@
   import { profileStore } from '$lib/stores/profiles.svelte';
   import { projectStore } from '$lib/components/merula/stores/project.svelte';
   import { syncWindowTitle } from '$lib/utils/window-title.svelte';
+  import { surfaceStore } from '$lib/stores/surfaces.svelte';
+  import { recordRecentProject, onOpenIntent } from '$lib/ipc/recents';
   import MerulaShell from '$lib/components/merula/MerulaShell.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
   import MerulaBeDownOverlay from '$lib/components/merula/MerulaBeDownOverlay.svelte';
@@ -30,7 +32,20 @@
   // Name the OS window after the open project. Lives in the bridge, not in
   // MerulaShell: the title is an Arbor/OS concern and the shell stays free of
   // Arbor imports (see the header note on extractability).
-  syncWindowTitle('merula', () => projectStore.project?.name);
+  syncWindowTitle('merula', () => projectStore.project?.name, {
+    active: () => surfaceStore.hasFocus('merula'),
+  });
+
+  // Feed Canopy's cross-product recents, and honour its "open this project"
+  // requests. Both live in the bridge, like the title sync — merula itself stays
+  // free of Arbor imports.
+  $effect(() => {
+    const p = projectStore.project;
+    if (!p?.path) return;
+    void recordRecentProject('merula', p.path, p.name).catch(() => {});
+  });
+
+  onMount(() => onOpenIntent('merula', (path) => { void projectStore.open(path); }));
 
   onMount(() => {
     // Repaint with the active theme + apply persisted user config locally.
@@ -51,7 +66,7 @@
      as the footer's right-cluster snippet, so MerulaShell/MerulaFooter stay free
      of Arbor store imports. Clicking them opens the overlays rendered by
      <FeedbackHost> below. -->
-<MerulaShell>
+<MerulaShell active={surfaceStore.hasFocus('merula')}>
   {#snippet footerExtra()}
     <FeedbackStatusButtons transfers />
   {/snippet}

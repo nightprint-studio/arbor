@@ -27,6 +27,8 @@
   import Contribution from '$lib/components/corvus/Contribution.svelte';
   import PluginIcon   from '$lib/components/plugins/PluginIcon.svelte';
   import ArborLogo    from '$lib/components/shared/internal/ArborLogo.svelte';
+  import WorkspaceTabs from '$lib/components/shared/internal/WorkspaceTabs.svelte';
+  import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import WindowControls from './WindowControls.svelte';
   import WorkspaceDropdown from '../corvus/workspace/WorkspaceDropdown.svelte';
   import CustomizeActivityBarModal from '../corvus/CustomizeActivityBarModal.svelte';
@@ -158,6 +160,7 @@
   logoTooltip="Arbor"
   menu={hamburgerMenu}
   onNativeMenu={publishNativeMenu}
+  nativeMenuEnabled={surfaceStore.hasFocus('corvus')}
   docs={{
     active: uiStore.activePanel === 'docs',
     tooltip: tooltipForAction('Documentation', 'toggle_docs'),
@@ -178,6 +181,13 @@
 >
   {#snippet logo()}
     <ArborLogo size={22} />
+  {/snippet}
+
+  {#snippet center()}
+    <!-- Product tabs, when this window is the tabbed container. They belong to
+         the WINDOW, not to Corvus, so they sit centred rather than in the
+         product's own leading area. Renders nothing in a standalone window. -->
+    <WorkspaceTabs />
   {/snippet}
 
   {#snippet leading()}

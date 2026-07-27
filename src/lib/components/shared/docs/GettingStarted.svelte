@@ -81,6 +81,17 @@
 <p>Beyond tabs, Arbor opens several top-level windows — Canopy, one or more Git windows, the File Explorer, Merula, Bennu, Tyto. Each window is named after what it is showing (the repository, project or folder), so it is recognisable in the taskbar, in Alt-Tab and in the macOS Window menu.</p>
 <p><Kbd action="switch_window" /> opens the <strong>window switcher</strong> from any window: type to filter, <kbd>↑</kbd><kbd>↓</kbd> to move, <kbd>↵</kbd> to jump. A window that was closed to the tray still appears there — picking it brings it back. The same list sits under <strong>Window</strong> in the title-bar menu, and <em>Switch Window</em> is in the Command Palette.</p>
 
+<h2>The home screen</h2>
+<p>Arbor starts on a <strong>Welcome</strong> page: a card per product — state, version and Launch on each — over <strong>Recent projects</strong>. The products can be filtered down to what's running or what has an update, and the two buttons at the top open or clone a repository. Opening a product replaces the Welcome tab rather than leaving it behind; <kbd>Ctrl</kbd>+<kbd>T</kbd> — or <strong>+</strong> in the tab strip — brings it back.</p>
+<p>The standalone launcher window is a different screen: it draws the Nightprint suite as a circuit-tree — pick a node and the footer shows that product's state, version and <strong>Launch</strong>.</p>
+<p><strong>Recent</strong> is what you last worked on across every product, newest first. A row carries the glyph of the product that opened it; clicking it starts that product directly on that project. Entries can be filtered, and removed with the × on hover. The chips in the title bar filter the products down to what's running or what has an update.</p>
+<p>The list is filled by the products themselves as they open something, so it works even for products that aren't running.</p>
+
+<h2>Windows or tabs</h2>
+<p>Products can open either in a window each, or as <strong>tabs of one window</strong>. The choice lives in the gear menu under <strong>Products open in</strong>.</p>
+<p>In tabbed mode the tab strip sits in the title bar, next to the project switcher. <Kbd action="new_surface_tab" /> opens a new tab on the Welcome page, <Kbd action="next_surface_tab" /> / <Kbd action="prev_surface_tab" /> step through them, and <kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>9</kbd> jumps straight to one. <strong>Move Tab to New Window</strong> — in the Window menu and the Command Palette — pulls the current product back out into its own window.</p>
+<p>Each product gets at most one tab: a product keeps its state per window, and a second copy in the same window would mirror the first. Opening the same product again gives it a window of its own. The File Explorer and Tyto always keep their own windows — the explorer because you want several side by side, Tyto because it lives in the tray.</p>
+
 <h2>Interface overview</h2>
 <div class="feature-grid">
   <div class="feature-card">

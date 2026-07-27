@@ -113,9 +113,14 @@ export interface ProductLauncherConfig {
   close_to_tray: boolean;
 }
 
+/** Where workspace products open. Default is per-OS: `tabbed` on macOS (no
+ *  per-window taskbar there), `windows` elsewhere. */
+export type WindowMode = 'windows' | 'tabbed';
+
 export interface LauncherConfig {
   /** Per-product preferences, keyed by Canopy product id. */
   products: Record<string, ProductLauncherConfig>;
+  window_mode: WindowMode;
 }
 
 // Keep-shell commands (read by the native window-event handler).
@@ -127,6 +132,11 @@ export const getLauncherConfig = () =>
 // `platform`/rpc path, where params are serde-deserialized payload fields.
 export const setLauncherCloseToTray = (id: string, closeToTray: boolean) =>
   invoke<void>('set_launcher_close_to_tray', { id, closeToTray });
+
+/** Switch between one-window-per-product and the tabbed container. Applies to
+ *  the next launch; windows already open stay where they are. */
+export const setLauncherWindowMode = (mode: WindowMode) =>
+  invoke<void>('set_launcher_window_mode', { mode });
 
 // ── Recent repos (persisted in config.toml via backend) ──────────────────────
 

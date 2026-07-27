@@ -26,6 +26,7 @@ macro_rules! invoke_handlers {
             // Launcher (Canopy) preferences — per-product window close behaviour
             $crate::commands::config_commands::get_launcher_config,
             $crate::commands::config_commands::set_launcher_close_to_tray,
+            $crate::commands::config_commands::set_launcher_window_mode,
             // Profile management (keep-shell): CRUD + switch (relaunch).
             $crate::commands::profile_commands::list_profiles,
             $crate::commands::profile_commands::get_active_profile,
@@ -106,8 +107,23 @@ macro_rules! invoke_handlers {
             $crate::window::corvus::open_corvus_window,
             // Dedicated Bennu (Java editor / analysis) window
             $crate::window::bennu::open_bennu_window,
+            // Cross-product recents (Canopy's list) + the "open this project"
+            // intent a product's shell pulls as it mounts.
+            $crate::commands::recents_commands::record_recent_project,
+            $crate::commands::recents_commands::list_recent_projects,
+            $crate::commands::recents_commands::forget_recent_project,
+            $crate::commands::recents_commands::set_open_intent,
+            $crate::commands::recents_commands::take_open_intent,
             // Launcher window (JetBrains-Toolbox-like home screen)
             $crate::window::launcher::open_launcher_window,
+            // Tabbed container: the workspace products in a single window
+            // (the `tabbed` window mode — default on macOS).
+            $crate::window::workspace::open_workspace_window,
+            $crate::window::workspace::take_workspace_intent,
+            // Hosted-product lifecycle: a tab needs the same backend + launcher
+            // state a product window gets, and the shell can't see tabs.
+            $crate::window::workspace::workspace_tab_opened,
+            $crate::window::workspace::workspace_tab_closed,
             // Launcher ↔ product-window lifecycle (running-state + Stop)
             $crate::window::list_running_products,
             $crate::window::close_product_window,

@@ -16,7 +16,7 @@ use crate::error::Result;
 const GENERIC_KEYS: &[&str] = &[
     "theme", "keybindings", "appearance", "animations",
     "whats_new", "explorer", "tyto", "plugins_enabled", "marketplace", "deep_link",
-    "launcher", "terminals", "activity_bar", "ide", "git", "recent_repos",
+    "launcher", "terminals", "activity_bar", "ide", "git", "recent_repos", "recents",
 ];
 
 /// Top-level `AppConfig` keys that are global (shared across every profile),
@@ -34,9 +34,19 @@ pub struct AppConfig {
     pub theme: ThemeConfig,
     #[serde(default)]
     pub keybindings: KeybindingsConfig,
-    /// Paths of recently opened repositories.
+    /// Paths of recently opened repositories (Corvus's own list, kept for its
+    /// quick-switch). The cross-product history is [`AppConfig::recents`].
     #[serde(default)]
     pub recent_repos: Vec<String>,
+    /// What you last worked on, across every product — the list Canopy shows.
+    ///
+    /// Shell-level on purpose: the per-product histories live in three different
+    /// places (Corvus in `recent_repos`, Bennu's only in memory, Merula's in its
+    /// own config), and two of them are unreachable unless that product's
+    /// backend is running. The launcher can't start three backends to draw a
+    /// list, so each product reports here as it opens something.
+    #[serde(default)]
+    pub recents: Vec<RecentProject>,
     /// IDE launcher preferences (for "Open in IDE" from worktrees).
     #[serde(default)]
     pub ide: IdeConfig,
@@ -101,6 +111,19 @@ pub struct AppConfig {
     pub launcher: LauncherConfig,
 }
 
+/// One entry of the cross-product "recently opened" history.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RecentProject {
+    /// Canopy product id that opened it (`corvus` / `bennu` / `merula`).
+    pub product: String,
+    /// Absolute path of the repository / project root — the identity of the entry.
+    pub path: String,
+    /// Display name, as the product knows it (repo name, Maven artifact, …).
+    pub name: String,
+    /// Unix seconds of the last open. Sorting key.
+    pub opened_at: u64,
+}
+
 /// Launcher (Canopy) preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LauncherConfig {
@@ -109,6 +132,46 @@ pub struct LauncherConfig {
     /// defaults (terminate on close).
     #[serde(default)]
     pub products: std::collections::HashMap<String, ProductLauncherConfig>,
+    /// How the launcher opens workspace products — see [`WindowMode`].
+    #[serde(default = "WindowMode::platform_default")]
+    pub window_mode: WindowMode,
+}
+
+/// Where a workspace product (Corvus, Bennu, Merula) opens.
+///
+/// The default is per-OS rather than universal, because the platforms genuinely
+/// differ: Windows and Linux give every window a taskbar button, so separate
+/// windows are the better model there; macOS gives none, so a user with three
+/// products open has nothing to click and lives in ⌘-Tab. Same code either way —
+/// only the default differs, and the user can flip it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowMode {
+    /// One window per product (the historic behaviour).
+    Windows,
+    /// All workspace products as tabs in a single container window.
+    Tabbed,
+}
+
+impl WindowMode {
+    /// Separate windows, on every platform, until the container has proven
+    /// itself.
+    ///
+    /// It was meant to default to `Tabbed` on macOS — that is the whole point of
+    /// the mode — but a default that routes EVERY product launch through one
+    /// window is only safe once that window is known to open reliably: while the
+    /// container was failing to build, nothing could be launched at all. Flip
+    /// the macOS arm back on once the container is validated there; users who
+    /// choose `tabbed` explicitly are unaffected either way.
+    pub fn platform_default() -> Self {
+        WindowMode::Windows
+    }
+}
+
+impl Default for WindowMode {
+    fn default() -> Self {
+        Self::platform_default()
+    }
 }
 
 /// Per-product launcher preferences.

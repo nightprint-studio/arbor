@@ -83,8 +83,19 @@
      * widget free of any IPC. Ignored off macOS and when `hamburger` is set.
      */
     onNativeMenu?: (items: DropdownItem[]) => void;
+    /**
+     * Whether this bar may claim the app-wide menu (macOS). Default true — set
+     * it to false for a bar that is mounted but not on screen, so a host with
+     * several bars alive at once (a tabbed container) doesn't have its
+     * background products overwrite the foreground one's menus.
+     */
+    nativeMenuEnabled?: boolean;
     /** Free content after the hamburger, before the draggable spacer. */
     leading?: Snippet;
+    /** Free content centred in the bar, between two draggable spacers — for
+     *  things that belong to the window rather than to what's on its left or
+     *  right (the container's product tabs). */
+    center?: Snippet;
     /** Free content at the head of the right cluster. */
     trailing?: Snippet;
     /** Free-form buttons just before the named buttons. */
@@ -104,13 +115,17 @@
 
   let {
     logo, logoTooltip, menu, menuWidth = '280px', menuTooltip = 'Main menu',
-    hamburger, onNativeMenu, leading, trailing, actions,
+    hamburger, onNativeMenu, nativeMenuEnabled = true, leading, center, trailing, actions,
     docs, commandPalette, settings, settingsContent,
     windowControls, class: cls = '',
   }: Props = $props();
 
-  /** macOS with a native-menu host: the bar replaces the hamburger entirely. */
-  const nativeMenu = $derived(isMac && !hamburger && !!onNativeMenu && !!menu);
+  /** macOS with a native-menu host: the bar replaces the hamburger entirely.
+   *  `nativeMenuEnabled` lets a host with SEVERAL bars mounted at once (a tabbed
+   *  container) keep the background ones from fighting over the app-wide menu. */
+  const nativeMenu = $derived(
+    isMac && !hamburger && !!onNativeMenu && !!menu && nativeMenuEnabled,
+  );
 
   // Re-publish on every change of the items — and of anything the host reads
   // while deriving them (keybindings, for the accelerators).
@@ -194,8 +209,15 @@
     <div class="tb-nodrag tb-leading">{@render leading()}</div>
   {/if}
 
-  <!-- Draggable region so the user can grab the empty middle. -->
+  <!-- Draggable region so the user can grab the empty middle. With a `center`
+       slot the middle is split in two so the slot sits centred between the
+       leading content and the right cluster. -->
   <div class="tb-spacer" data-tauri-drag-region></div>
+
+  {#if center}
+    <div class="tb-nodrag tb-center">{@render center()}</div>
+    <div class="tb-spacer" data-tauri-drag-region></div>
+  {/if}
 
   <div class="tb-right tb-nodrag" class:tb-right-mac={isMac}>
     {#if trailing}{@render trailing()}{/if}
@@ -255,6 +277,23 @@
     flex: 1;
     min-width: 40px;
     height: 100%;
+  }
+
+  /* Centred slot, anchored to the WINDOW rather than to the leftover space.
+     Flex centring would put it in a different place in every product, because
+     each one has a different amount of chrome to its left and right — and a
+     strip of tabs that jumps sideways when you switch tab is the one thing it
+     must never do. Absolute centring costs the two spacers around it (kept for
+     the drag region) but keeps the tabs nailed to the same pixel everywhere. */
+  .tb-center {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    height: 100%;
+    max-width: 46%;
+    z-index: 1;
   }
 
   .tb-right {

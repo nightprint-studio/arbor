@@ -32,6 +32,8 @@
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
   import { createNativeMenuPublisher } from '$lib/utils/native-menu';
   import { windowMenuItems } from '$lib/utils/window-menu';
+  import WorkspaceTabs from '$lib/components/shared/internal/WorkspaceTabs.svelte';
+  import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -174,6 +176,7 @@
   logoTooltip="Bennu — Java editor"
   menu={hamburgerMenu}
   onNativeMenu={publishNativeMenu}
+  nativeMenuEnabled={surfaceStore.hasFocus('bennu')}
   menuWidth="240px"
   docs={{ active: bennuUiStore.docsOpen, tooltip: 'Documentation (F1)', onclick: () => bennuUiStore.toggleDocs() }}
   commandPalette={{ active: bennuUiStore.paletteOpen, tooltip: 'Command palette (Ctrl+K)', onclick: () => bennuUiStore.togglePalette() }}
@@ -184,6 +187,12 @@
   {/snippet}
 
   <!-- Project/workspace switcher — Corvus-tree: workspace headers + nested projects. -->
+  {#snippet center()}
+    <!-- Product tabs, when this window is the tabbed container: they belong to
+         the window, not to Bennu (nothing in a standalone Bennu window). -->
+    <WorkspaceTabs />
+  {/snippet}
+
   {#snippet leading()}
     <BennuWorkspaceSwitcher onOpenPicker={openPicker} />
   {/snippet}

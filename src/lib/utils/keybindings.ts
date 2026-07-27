@@ -59,6 +59,14 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   // whole point is escaping the window you are in — on macOS especially, where
   // there is no per-window taskbar button to click.
   switch_window:      { key: 'g',     ctrl: true,  shift: true,  description: 'Switch window',              group: 'Navigation' },
+  // Product tabs of the tabbed container (macOS default). Deliberately NOT
+  // Ctrl+Tab: that already steps through Corvus's repository tabs, and the two
+  // levels must stay distinct. Ctrl+PageUp/PageDown is the browser convention
+  // for "the other tab strip" and is free here; Ctrl+T pairs with it for a new
+  // tab. Ctrl+1…9 (positional jump) is handled inside the container itself.
+  new_surface_tab:    { key: 't',       ctrl: true,               description: 'New tab (product)',          group: 'Navigation' },
+  next_surface_tab:   { key: 'PageDown', ctrl: true,              description: 'Next product tab',           group: 'Navigation' },
+  prev_surface_tab:   { key: 'PageUp',   ctrl: true,              description: 'Previous product tab',       group: 'Navigation' },
   // Workspace registry / management modal — Alt+Shift+W avoids both the
   // Ctrl+Alt+letter trap (AltGr suppression) and the Win32 Alt-menu access
   // collision of bare Alt+W.

@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "bennu",
-  "description": "Capability for the dedicated Bennu window (frameless Java-editor product shell).",
-  "windows": ["bennu", "bennu-*"],
+  "description": "Capability for the Bennu (Java editor) product shell — its dedicated window, and the tabbed container that can host it as a tab.",
+  "windows": ["bennu", "bennu-*", "workspace"],
   "permissions": [
     "core:default",
     "core:window:allow-close",

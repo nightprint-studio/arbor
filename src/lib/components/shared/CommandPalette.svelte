@@ -31,7 +31,9 @@
   import type { WorkspaceDef, RepoRegistryEntry } from '$lib/types/corvus/workspace';
   import { activityBarConfigStore } from '$lib/stores/corvus/activityBarConfig.svelte';
   import { firePluginAction, reloadPlugins } from '$lib/ipc/plugin';
-  import { openExplorerWindow, openMerulaWindow } from '$lib/ipc/app';
+  import { openExplorerWindow } from '$lib/ipc/app';
+  import { openProduct, detachSurface } from '$lib/utils/open-product';
+  import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import { openFolder } from '$lib/utils/reveal';
   import {
     checkoutBranch, checkoutBranchSafe, mergeBranch, deleteBranch, createBranch,
@@ -365,6 +367,15 @@
         title: 'Manage Credentials', subtitle: 'Connect or disconnect a git hosting provider',
         action: () => { onClose(); credentialsStore.show(); } },
     );
+    // Only inside the tabbed container — elsewhere this window IS the product.
+    if (surfaceStore.inContainer && surfaceStore.active) {
+      const tab = surfaceStore.active;
+      actions.push(
+        { id: 'action:detach-tab', kind: 'action', icon: 'AppWindow', group: 'Windows',
+          title: 'Move Tab to New Window', subtitle: 'Open this product in a window of its own',
+          action: () => { onClose(); void detachSurface(tab); } },
+      );
+    }
 
     // ── Tabs ────────────────────────────────────────────────────────────────
     if (hasTab) {
@@ -655,8 +666,10 @@
         action: () => { void openExplorerWindow(); onClose(); } },
       { id: 'action:merula',        kind: 'action', icon: 'Activity',   group: 'System',
         title: 'Open merula (Music)',
-        subtitle: 'Standalone music live-coding window — write patterns, hear soundtracks',
-        action: () => { void openMerulaWindow(); onClose(); } },
+        subtitle: 'Music live-coding — write patterns, hear soundtracks',
+        // Through `openProduct`, so it lands wherever the user's window mode
+        // says: its own window, or a tab of the container.
+        action: () => { void openProduct('merula'); onClose(); } },
       { id: 'action:docs',         kind: 'action', icon: 'FileText',  group: 'System',
         title: 'Documentation',
         action: () => { uiStore.setPanel('docs'); onClose(); } },

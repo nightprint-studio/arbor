@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "corvus",
-  "description": "Capability for the dedicated Corvus window (frameless Git product shell).",
-  "windows": ["corvus", "corvus-*"],
+  "description": "Capability for the Corvus (Git) product shell — its dedicated window, and the tabbed container that can host it as a tab. Listing `workspace` here rather than repeating these permissions in a capability of its own keeps the container's grants in step with the product's.",
+  "windows": ["corvus", "corvus-*", "workspace"],
   "permissions": [
     "core:default",
     "core:window:allow-close",

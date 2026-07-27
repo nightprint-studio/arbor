@@ -11,3 +11,4 @@ pub mod workspace_commands;
 pub mod branding_commands;
 pub mod deep_link_commands;
 pub mod marketplace_commands;
+pub mod recents_commands;

@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "merula",
-  "description": "Capability for the dedicated merula window (frameless music live-coding DAW shell).",
-  "windows": ["merula", "merula-*"],
+  "description": "Capability for the merula (music live-coding) product shell — its dedicated window, and the tabbed container that can host it as a tab.",
+  "windows": ["merula", "merula-*", "workspace"],
   "permissions": [
     "core:default",
     "core:window:allow-close",

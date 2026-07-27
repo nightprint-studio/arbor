@@ -15,6 +15,8 @@
 //!   becomes the launcher and Corvus opens as a product window.
 //! - [`bennu`] — the Java-editor / analysis product window (`bennu`). Spawns its
 //!   own `bennu-be` backend lazily, exactly like Corvus.
+//! - [`workspace`] — the tabbed container that can host the workspace products
+//!   in ONE window (`workspace`), used when the user's window mode is `tabbed`.
 //! - [`launcher`] — the JetBrains-Toolbox-like launcher (`launcher`).
 //!   Scaffolding: backend lifecycle is ready; the frontend `LauncherShell`
 //!   is still to come.
@@ -25,6 +27,12 @@
 //! importantly [`WEBVIEW_BROWSER_ARGS`], which **must** match across every
 //! webview in the process (and the `main` window's `additionalBrowserArgs` in
 //! `tauri.conf.json`).
+//!
+//! **A new window label also needs a capability.** Tauri grants permissions per
+//! window label (`src-tauri/capabilities/*.json`, keyed by the `windows` list),
+//! so a label that appears in no capability gets a webview with no grants: it
+//! loads, and then every plugin/core call from it is denied. Add the label to an
+//! existing capability (preferred — the grants stay in step) or ship one for it.
 
 pub mod bennu;
 pub mod corvus;
@@ -35,6 +43,7 @@ pub mod launcher;
 pub mod merula;
 pub mod placement;
 pub mod tyto;
+pub mod workspace;
 
 use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 
@@ -119,6 +128,11 @@ pub fn show_and_focus(w: &WebviewWindow) {
 // flash. The fix, used by EVERY launcher/product window: build with `.visible(false)`
 // and reveal it only once its frontend has painted.
 //
+// This includes `main`, which is declared `"visible": false` in
+// `tauri.conf.json` for the same reason and revealed by [`boot_entry`] /
+// [`window_ready`] — in `tabbed` window mode it stays hidden altogether while
+// the workspace container takes its place as the entry point.
+//
 // Two centralized pieces make this one pattern instead of per-window copies:
 //  • [`window_ready`] — a GENERIC command each shell calls once painted. The window
 //    reveals ITSELF through the injected handle, so a single command serves them all
@@ -134,6 +148,56 @@ pub fn show_and_focus(w: &WebviewWindow) {
 /// Delay before the ready-fallback reveals a built-hidden window even if its frontend
 /// never signalled — long enough to let a healthy shell paint first.
 const READY_FALLBACK_MS: u64 = 800;
+
+/// True when the user's window mode is `tabbed`. Read from disk rather than
+/// cached: it changes rarely, and a stale cache would send the app to the wrong
+/// entry point on the next start. A missing/unreadable config means separate
+/// windows — the mode that works without a container.
+fn launcher_window_mode_is_tabbed() -> bool {
+    crate::config::app_config::load()
+        .map(|c| c.launcher.window_mode == crate::config::app_config::WindowMode::Tabbed)
+        .unwrap_or(false)
+}
+
+/// Open the app's entry point at startup, and make sure one always appears.
+///
+/// `main` is built hidden (`tauri.conf.json`) like every other window, so
+/// something must reveal it — normally its own [`window_ready`]. Two things can
+/// go wrong, and both leave the user staring at nothing, so both get a net:
+///
+///  * **windows mode** — the frontend never signals ready (crash, disabled JS):
+///    [`arm_ready_reveal`] shows `main` anyway after a beat.
+///  * **tabbed mode** — the container is the entry point, so it's opened here
+///    directly instead of routing through the launcher. If it hasn't appeared
+///    shortly after, `main` is revealed as the fallback: a launcher you didn't
+///    want beats an app with no window at all.
+pub fn boot_entry(app: &AppHandle) {
+    if !launcher_window_mode_is_tabbed() {
+        arm_ready_reveal(app, "main");
+        return;
+    }
+
+    tracing::info!("boot_entry: tabbed mode — opening the workspace container");
+    workspace::open_or_focus(app, None);
+
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(CONTAINER_FALLBACK_MS));
+        if app.get_webview_window(workspace::WORKSPACE_WINDOW_LABEL).is_some() {
+            return;
+        }
+        tracing::error!(
+            "boot_entry: the container never appeared — falling back to the launcher window"
+        );
+        if let Some(w) = app.get_webview_window("main") {
+            show_and_focus(&w);
+        }
+    });
+}
+
+/// How long to wait for the container before falling back to the launcher.
+/// Generous: it covers a cold start where the webview is still being created.
+const CONTAINER_FALLBACK_MS: u64 = 4000;
 
 /// Arm the safety-net reveal for a window built with `.visible(false)`: after
 /// [`READY_FALLBACK_MS`] show it regardless, so a frontend that never calls
@@ -157,6 +221,19 @@ pub fn arm_ready_reveal(app: &AppHandle, label: &str) {
 /// for our windows). The `window` arg is the caller's own window, injected by Tauri.
 #[tauri::command]
 pub fn window_ready(window: WebviewWindow) {
+    // In `tabbed` mode the container IS the entry point: the launcher window
+    // would only be a stop on the way to it, so `main` stays hidden (it still
+    // hosts the tray and the app lifecycle) and the container opens instead.
+    // Handled here rather than at startup because this is the one moment we
+    // know a window has painted and is about to be revealed.
+    if window.label() == "main" && launcher_window_mode_is_tabbed() {
+        tracing::info!("window_ready(main): tabbed mode — opening the container instead");
+        // `main` is created visible by `tauri.conf.json`, so it has to be sent
+        // away explicitly; it stays alive as the tray/lifecycle host.
+        let _ = window.hide();
+        workspace::open_or_focus(window.app_handle(), None);
+        return;
+    }
     let _ = window.show();
     let _ = window.set_focus();
     // A revealed window is a new entry in the window directory — this is the
@@ -427,6 +504,15 @@ pub fn restart_app(app: AppHandle) {
 /// correct state"); every `open_or_focus` entry point may run on a background
 /// thread (global-shortcut handler, async command), so they all route through
 /// here. `what` names the window for the error log.
+///
+/// **The calling command must be `async`.** Tauri runs sync commands on the main
+/// thread, so a sync command reaching this function posts a window build back to
+/// the thread it is already occupying: the build re-enters the event loop from
+/// inside the IPC handler and WebView2 wedges. The symptom is brutal and
+/// unhelpful — the closure logs that it started, never logs that it returned,
+/// and from then on NO window in the app can be opened, because every opener
+/// queues behind the stuck UI thread. Every `open_*_window` command is `async`
+/// for this reason.
 pub fn dispatch_to_main(
     app: &AppHandle,
     what: &'static str,

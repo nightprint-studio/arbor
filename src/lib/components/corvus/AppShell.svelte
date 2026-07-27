@@ -4,6 +4,8 @@
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { coalesceLatestByKey } from '$lib/utils/coalesce';
   import { syncWindowTitle } from '$lib/utils/window-title.svelte';
+  import { surfaceStore } from '$lib/stores/surfaces.svelte';
+  import { recordRecentProject, onOpenIntent } from '$lib/ipc/recents';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '../shared/TitleBar.svelte';
@@ -566,7 +568,29 @@
   // Name the OS window after the repository on screen: with several Corvus
   // windows open, the title is what tells them apart in the taskbar, Alt-Tab,
   // the macOS Window menu and Arbor's own window switcher.
-  syncWindowTitle('Corvus', () => tabsStore.activeTab?.name);
+  syncWindowTitle('Corvus', () => tabsStore.activeTab?.name, {
+    active: () => surfaceStore.hasFocus('corvus'),
+  });
+
+  // Feed Canopy's cross-product recents. Keyed off the ACTIVE tab rather than
+  // the open path, so every way in counts — opening, cloning, restoring a
+  // session, switching tab — with one line instead of one per call site.
+  $effect(() => {
+    const t = tabsStore.activeTab;
+    if (!t?.path || t.tombstone) return;
+    void recordRecentProject('corvus', t.path, t.name).catch(() => {});
+  });
+
+  // Canopy asking for a specific repository: open it as a tab. Fires once on
+  // mount for a request parked before this window existed, and on every later
+  // request while it stays open. Reuses the same helper the File Explorer's
+  // "Open in Arbor" delegation goes through.
+  onMount(() =>
+    onOpenIntent('corvus', (path) => {
+      void openRepoFromPath(path).catch(e =>
+        uiStore.showToast(`Failed to open repo: ${e}`, 'error'));
+    }),
+  );
 
   // Load the profile list + active profile, and listen for `profile-switched`
   // (reloads the window onto the new profile). Powers the title-bar gear menu.
@@ -1245,6 +1269,11 @@
   // Global keybindings
   $effect(() => {
     function onKeydown(e: KeyboardEvent) {
+      // Inside the tabbed container this shell stays mounted while its tab is in
+      // the background — hidden, but still subscribed to window events. Ignore
+      // keys unless we're the tab on screen, or every product would answer the
+      // same chord at once. No-op in a standalone Corvus window.
+      if (!surfaceStore.hasFocus('corvus')) return;
       if (e.key === 'Escape') {
         // If any Modal-component-based modal is mounted, let its own ESC
         // handler (Modal.svelte → onClose) close the topmost one. Touching

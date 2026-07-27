@@ -18,7 +18,9 @@
     type FilterKey, type DecoratedTool,
   } from './canopy';
   import { fetchInstalledVersions, fetchLatestVersions } from './versions';
-  import { getLauncherConfig, setLauncherCloseToTray } from '$lib/ipc/config';
+  import { getLauncherConfig, setLauncherCloseToTray, type WindowMode } from '$lib/ipc/config';
+  import { windowModeStore } from '$lib/stores/window-mode.svelte';
+  import { openProduct } from '$lib/utils/open-product';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { Settings as SettingsIcon, X as CloseIcon } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
@@ -73,6 +75,9 @@
       const map: Record<string, boolean> = {};
       for (const [k, v] of Object.entries(c.products ?? {})) map[k] = v.close_to_tray;
       closeToTray = map;
+      // Same read seeds the window-mode store, so launching costs no second
+      // config round-trip.
+      windowModeStore.hydrate(c.window_mode);
     });
 
     const unlisten = onProductState(({ id, running: r }) => {
@@ -92,11 +97,15 @@
 
   function doAction(t: DecoratedTool) {
     if (t.kind === 'update') { void doUpdate(t); return; }
-    const opener = PRODUCT_WINDOW_OPENERS[t.id];
-    if (opener) {
-      void opener();
-      fire((t.isRun ? 'Opening ' : 'Launching ') + t.name + '…', t.accent);
-    }
+    if (!PRODUCT_WINDOW_OPENERS[t.id]) return;
+    // `openProduct` honours the window mode — its own window, or a tab of the
+    // container — so Canopy doesn't have to know which. Failures surface as a
+    // toast: a launcher whose nodes silently do nothing reads as a frozen app.
+    openProduct(t.id).catch((e) => {
+      fire('Could not open ' + t.name + ': ' + e, '#f0908c');
+      console.error('openProduct failed', t.id, e);
+    });
+    fire((t.isRun ? 'Opening ' : 'Launching ') + t.name + '…', t.accent);
   }
   async function doUpdate(t: DecoratedTool) {
     // No update channel yet — re-check latest and report. Wired so that when a
@@ -127,7 +136,24 @@
       console.error('set_launcher_close_to_tray failed', e);
     }
   }
+  /** Flip between one-window-per-product and the tabbed container. */
+  async function pickWindowMode(mode: WindowMode) {
+    if (windowModeStore.mode === mode) return;
+    try {
+      await windowModeStore.set(mode);
+      fire(mode === 'tabbed' ? 'Products open as tabs' : 'Products open in their own window', '#9aa3b2');
+    } catch (e) {
+      fire('Setting not saved: ' + e, '#f0908c');
+      console.error('set_launcher_window_mode failed', e);
+    }
+  }
+
   const settingsMenu = $derived<DropdownItem[]>([
+    { kind: 'separator', label: 'Products open in' },
+    { kind: 'item', id: 'mode:windows', label: 'Their own window',
+      active: !windowModeStore.tabbed, onclick: () => pickWindowMode('windows') },
+    { kind: 'item', id: 'mode:tabbed', label: 'Tabs of one window',
+      active: windowModeStore.tabbed, onclick: () => pickWindowMode('tabbed') },
     { kind: 'separator', label: 'Close minimizes to tray' },
     // Tyto is deliberately excluded: the recorder never minimizes to tray (a hidden,
     // still-running screen recorder is a privacy footgun), so closing it always ends

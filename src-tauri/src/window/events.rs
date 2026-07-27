@@ -68,6 +68,11 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
             // Window menu. Broadcast for ALL windows, not just product ones —
             // the launcher and the explorer list there too.
             super::emit_windows_changed(window.app_handle());
+            // The tabbed container carries products that have no window of their
+            // own, so nothing below would ever tear them down: do it here.
+            if label == super::workspace::WORKSPACE_WINDOW_LABEL {
+                super::workspace::teardown_hosted(window.app_handle());
+            }
             // merula audio teardown is handled out-of-process: the real session
             // lives in the `merula-be` child, torn down by the `split_broker`
             // detach below on the last merula window's actual destroy (the shell
