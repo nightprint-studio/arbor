@@ -22,10 +22,10 @@
     getGitFlowConfig, setGitFlowRepoConfig, clearGitFlowRepoConfig,
     hasGitFlowRepoOverride,
   } from '$lib/ipc/corvus/gitflow';
+  import Button from '$lib/components/shared/ui/Button.svelte';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
-  import { tooltip } from '$lib/actions/tooltip';
 
   const tab = $derived(tabsStore.activeTab);
 
@@ -184,13 +184,15 @@
       <button class="btn-primary" onclick={save} disabled={saving || !dirty}>
         {saving ? 'Saving…' : 'Save Project Override'}
       </button>
-      <button
-        class="btn-ghost"
+      <Button
+        variant="outline"
+        size="sm"
         onclick={clearOverride}
-        use:tooltip={'Remove project override and use global settings'}
+        tooltip={{ content: 'Remove project override and use global settings' }}
       >
-        <RotateCcw size={12} /> Reset to global
-      </button>
+        {#snippet iconStart()}<RotateCcw size={12} />{/snippet}
+        Reset to global
+      </Button>
       {#if !dirty && !saving}
         <span class="saved-label">All changes saved</span>
       {/if}
@@ -225,19 +227,6 @@
     gap: 10px;
   }
 
-  .btn-ghost {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    padding: 5px 10px;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    font-family: var(--font-ui-sans);
-    font-size: 11px;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+  /* The bordered low-emphasis button this section used to hand-roll is now the
+     shared `Button` in its `outline` variant. */
 </style>

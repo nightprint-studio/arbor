@@ -786,35 +786,14 @@
   .content :global(.btn-primary:hover:not(:disabled)) { filter: brightness(1.12); }
   .content :global(.btn-primary:disabled) { opacity: 0.45; cursor: not-allowed; }
 
-  .content :global(.btn-ghost) {
-    padding: 4px 10px;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    font-family: var(--font-ui-sans);
-    font-size: 11px;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .content :global(.btn-ghost:hover) { background: var(--bg-hover); color: var(--text-primary); }
-
-  .content :global(.btn-ghost-danger) {
-    padding: 4px 10px;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    font-family: var(--font-ui-sans);
-    font-size: 11px;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-  }
-  .content :global(.btn-ghost-danger:hover) {
-    background: var(--error-subtle);
-    color: var(--error);
-    border-color: var(--error);
-  }
+  /* `.btn-ghost` and `.btn-ghost-danger` used to live here, as scoped globals
+     that reached into whatever this panel rendered — including SHARED widgets
+     (the provider cards' Disconnect). Two problems: those widgets were styled
+     correctly only while mounted inside this panel, and the rules also hijacked
+     `<Button variant="ghost">`, overriding the design system's own borderless
+     ghost with a bordered one whenever a Button happened to sit in Settings.
+     Both looks are now `Button` variants — `ghost` and `outline` — so they
+     travel with the widget instead of with its container. */
 
   .content :global(.btn-ghost-sm) {
     display: flex;

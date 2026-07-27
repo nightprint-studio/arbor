@@ -4,6 +4,7 @@
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import { repoBrowserStore } from '$lib/stores/corvus/repoBrowser.svelte';
   import type { CacheConfig } from '$lib/types/config';
+  import Button from '$lib/components/shared/ui/Button.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
@@ -69,7 +70,7 @@
     <FormRow label="Currently cached" description="Live tab and commit-detail snapshots in memory">
       <span class="stat-chip">{stats.cachedTabs} tab{stats.cachedTabs !== 1 ? 's' : ''}</span>
       <span class="stat-chip">{stats.cachedCommits} commit{stats.cachedCommits !== 1 ? 's' : ''}</span>
-      <button class="btn-ghost" onclick={clearAll}>Clear all</button>
+      <Button variant="outline" size="sm" onclick={clearAll}>Clear all</Button>
     </FormRow>
   {/if}
 </div>
@@ -189,7 +190,7 @@
   </FormRow>
 
   <FormRow label="Cached repo lists" description="Drop the on-disk repo list cache for every connected provider">
-    <button class="btn-ghost" onclick={clearRepoBrowserCache}>Clear repo browser cache</button>
+    <Button variant="outline" size="sm" onclick={clearRepoBrowserCache}>Clear repo browser cache</Button>
   </FormRow>
 </div>
 

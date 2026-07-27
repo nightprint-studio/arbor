@@ -24,12 +24,14 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
             // (→ `Destroyed` → emit `running:false` + teardown). The launcher
             // staying in control is what guarantees no un-killable zombie.
             if let Some(id) = super::product_id_for_label(label) {
-                // Tyto is EXEMPT from close-to-tray: closing it always terminates the
-                // recorder. A screen recorder lingering invisibly in the tray is a
-                // privacy footgun (the user thinks it's gone), so there is no
-                // "keep alive" option for it — the launcher never offers the toggle and
-                // this path never honours one even if the config somehow held it.
-                if id != "tyto" {
+                // AMBIENT surfaces are EXEMPT from close-to-tray: closing one always
+                // terminates it. Their whole model is "reachable from the tray /
+                // menu bar while you work elsewhere", so a hidden-but-running
+                // instance is exactly the state that must not exist — for Tyto it
+                // would be a privacy footgun (a screen recorder the user believes is
+                // gone). The launcher never offers the toggle for them, and this
+                // path never honours one even if the config somehow held it.
+                if super::surface_kind_for_label(label) != super::SurfaceKind::Ambient {
                     let keep = crate::config::app_config::load()
                         .ok()
                         .and_then(|c| c.launcher.products.get(id).map(|p| p.close_to_tray))

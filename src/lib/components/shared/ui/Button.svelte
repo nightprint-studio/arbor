@@ -4,7 +4,7 @@
   import { tooltip as tooltipAction } from '$lib/actions/tooltip';
   import type { TooltipInput } from '$lib/stores/tooltip.svelte';
 
-  type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'icon' | 'tonal';
+  type Variant = 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger' | 'icon' | 'tonal';
   type Size    = 'xs' | 'sm' | 'md' | 'lg';
 
   interface Props {
@@ -143,6 +143,15 @@
   .btn-danger.has-color { color: var(--btn-color); }
   .btn-danger.has-color:hover:not(:disabled) {
     background: color-mix(in srgb, var(--btn-color) 15%, transparent);
+    border-color: var(--btn-color);
+  }
+
+  /* Outline + colour = the "destructive but not shouting" button: neutral at
+     rest, the colour appears only under the pointer. `Disconnect` on a
+     connected provider is the canonical use. */
+  .btn-outline.has-color:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--btn-color) 15%, transparent);
+    color: var(--btn-color);
     border-color: var(--btn-color);
   }
 

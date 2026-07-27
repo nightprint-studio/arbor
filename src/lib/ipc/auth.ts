@@ -1,30 +1,12 @@
-import { corvus, platform } from './rpc';
+import { platform } from './rpc';
 
-
-// ── Credential store ─────────────────────────────────────────────────────────
-
-export const saveCredential = (host: string, username: string, password: string) =>
-  corvus<void>('save_credential', { host, username, password });
-
-export const getCredential = (host: string, username: string) =>
-  corvus<string | null>('get_credential', { host, username });
-
-export const deleteCredential = (host: string, username: string) =>
-  corvus<void>('delete_credential', { host, username });
-
-// ── Default (host-based) credentials — used by fetch/push automatically ──────
-
-/** Save the default credential for a host/URL. Used automatically during network ops. */
-export const saveDefaultCredential = (urlOrHost: string, username: string, password: string) =>
-  corvus<void>('save_default_credential', { url_or_host: urlOrHost, username, password });
-
-/** Returns true if a default credential is stored for the given host/URL. */
-export const hasDefaultCredential = (urlOrHost: string) =>
-  corvus<boolean>('has_default_credential', { url_or_host: urlOrHost });
-
-/** Delete the default credential for a host/URL. */
-export const deleteDefaultCredential = (urlOrHost: string) =>
-  corvus<void>('delete_default_credential', { url_or_host: urlOrHost });
+// Credential read/write wrappers (`save_credential`, `get_credential`,
+// `delete_credential` and their `*_default_credential` siblings) used to live
+// here for the hand-entered credentials form. Nothing in the frontend enters
+// credentials by hand any more — providers are connected through the generic
+// `ProviderConnectionCard`, and the backend resolves and stores tokens itself
+// during network operations. The RPC methods are still served; add a wrapper
+// back if a UI ever needs to drive them directly.
 
 // ── OAuth client-id overrides ───────────────────────────────────────────────
 

@@ -7,6 +7,7 @@
    */
 
   import { Boxes, RefreshCw, Info, Database } from 'lucide-svelte';
+  import Button from '$lib/components/shared/ui/Button.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import { studioStore } from '$lib/stores/studio/studio.svelte';
@@ -77,12 +78,12 @@
       label="Rebuild now"
       description="Force a full re-walk of the active repo. Useful after editing `.ron` files outside of Arbor or changing the reference-field convention in `.ron-studio.toml`."
     >
-      <button class="btn-ghost"
+      <Button variant="outline" size="sm"
               onclick={rebuildNow}
               disabled={indexRunning || !tabsStore.activeTabId}>
-        <RefreshCw size={11} class={indexRunning ? 'spin' : ''} />
-        <span>{indexRunning ? 'Indexing…' : 'Rebuild index'}</span>
-      </button>
+        {#snippet iconStart()}<RefreshCw size={11} class={indexRunning ? 'spin' : ''} />{/snippet}
+        {indexRunning ? 'Indexing…' : 'Rebuild index'}
+      </Button>
       {#if progress}
         <span class="progress-chip">
           {progress.processed}/{progress.total} files

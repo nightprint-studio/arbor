@@ -16,6 +16,7 @@
   import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { windowsStore } from '$lib/stores/windows.svelte';
+  import { credentialsStore } from '$lib/stores/credentials.svelte';
   import { graphStore } from '$lib/stores/corvus/graph.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
   import { worktreeStore } from '$lib/stores/corvus/worktree.svelte';
@@ -360,6 +361,9 @@
       { id: 'action:switch-window', kind: 'action', icon: 'AppWindow', group: 'Windows',
         title: 'Switch Window', subtitle: 'Jump to another open Arbor window',
         action: () => { onClose(); windowsStore.openSwitcher(); } },
+      { id: 'action:credentials', kind: 'action', icon: 'KeyRound', group: 'Windows',
+        title: 'Manage Credentials', subtitle: 'Connect or disconnect a git hosting provider',
+        action: () => { onClose(); credentialsStore.show(); } },
     );
 
     // ── Tabs ────────────────────────────────────────────────────────────────

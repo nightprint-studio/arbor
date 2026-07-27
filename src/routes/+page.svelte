@@ -51,14 +51,13 @@
   const OVERLAY_LABELS = ['drag-overlay', 'tyto-hud'];
   const IS_OVERLAY = OVERLAY_LABELS.includes(label);
 
-  // The window switcher rides alongside EVERY real window, not inside a single
-  // product's shell: its whole job is leaving the window you are in, and the OS
-  // switchers are uneven across platforms (a taskbar button per window on
-  // Windows, nothing at all on macOS). Dynamic import for the same reason the
-  // shell uses one — the overlays must not pay for it.
-  let Switcher = $state<Component | null>(null);
+  // Cross-product overlays (window switcher, credentials dialog) ride alongside
+  // EVERY real window rather than inside a single product's shell — see
+  // `GlobalOverlays`. Dynamic import for the same reason the shell uses one: the
+  // chromeless overlay windows must not pay for it.
+  let Overlays = $state<Component | null>(null);
   if (!IS_OVERLAY) {
-    import('$lib/components/shared/WindowSwitcher.svelte').then((m) => { Switcher = m.default; });
+    import('$lib/components/shared/GlobalOverlays.svelte').then((m) => { Overlays = m.default; });
   }
 
   // Anti-white-flash: every launcher/product window is built HIDDEN by the shell and
@@ -77,6 +76,6 @@
   <Shell />
 {/if}
 
-{#if Switcher}
-  <Switcher />
+{#if Overlays}
+  <Overlays />
 {/if}

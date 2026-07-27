@@ -75,10 +75,16 @@
   Changing the <code>client_id</code> invalidates any refresh token obtained with the previous one — you'll be re-prompted to authorise the new app on the next refresh attempt.
 </p>
 
-<h2>Additional Git Credentials</h2>
+<h2>Credentials from any window</h2>
 <p>
-  The <strong>Additional Git Credentials</strong> card lets you store credentials for other hosts
-  (Bitbucket, Azure DevOps, custom Git servers). Select a provider preset or choose <em>Custom…</em> and enter the host manually.
+  Credentials are app-wide: the keychain belongs to Arbor, not to a single window, so a token
+  connected here works everywhere — including the standalone File Explorer, which runs Git
+  operations of its own.
+</p>
+<p>
+  The same dialog is therefore reachable without the Git window: <strong>Manage Credentials</strong>
+  in the Command Palette, or <strong>Settings ▸ Git ▸ Credentials</strong> inside the File Explorer.
+  Use it when a token expires or is revoked while you are working somewhere other than Git.
 </p>
 
 <h2>Issue Trackers (Linear / Jira)</h2>

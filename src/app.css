@@ -359,6 +359,18 @@ body {
 }
 .btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
 
+/* Outline — a ghost that keeps its border. The low-emphasis action that still
+   needs to read as a button when it sits next to text or a status badge
+   (Cancel / Disconnect / Clear on a settings row). Pass `color` on <Button> to
+   tint the hover state — that's how a destructive outline button is built,
+   muted at rest and coloured only on hover (see .btn-outline.has-color). */
+.btn-outline {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+.btn-outline:hover { background: var(--bg-hover); color: var(--text-primary); }
+
 .btn-danger {
   background: transparent;
   color: var(--error);

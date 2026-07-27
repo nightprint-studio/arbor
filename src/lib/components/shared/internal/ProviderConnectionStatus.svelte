@@ -15,6 +15,7 @@
    */
   import { CheckCircle2 } from 'lucide-svelte';
   import type { Snippet } from 'svelte';
+  import Button from '$lib/components/shared/ui/Button.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
 
   export type ConnState = 'checking' | 'disconnected' | 'connecting' | 'connected';
@@ -52,20 +53,22 @@
     <span class="status-checking"><Spinner size={12} /> Checking…</span>
   {:else if state === 'connected'}
     <span class="status-ok"><CheckCircle2 size={12} /> {connectedLabel}</span>
-    <button class="btn-ghost-danger" onclick={onDisconnect}>Disconnect</button>
+    <Button variant="outline" size="sm" color="var(--error)" onclick={onDisconnect}>Disconnect</Button>
   {:else if state === 'connecting'}
     <span class="status-wait"><Spinner size={12} /> {connectingLabel}</span>
-    <button class="btn-ghost" onclick={onCancel}>Cancel</button>
+    <Button variant="outline" size="sm" onclick={onCancel}>Cancel</Button>
   {:else if connect}
     {@render connect()}
   {/if}
 </div>
 
 <style>
-  /* `.btn-ghost` and `.btn-ghost-danger` styles cascade from the parent
-     `SettingsPanel`'s scoped globals — the bordered, compact variant used
-     across every settings section. Keeping them centralised there avoids
-     drifting per-widget overrides. */
+  /* Cancel / Disconnect are the shared `Button` in its `outline` variant —
+     Disconnect tinted `--error` so it stays neutral until hovered. They used to
+     be bare `<button class="btn-ghost-danger">` styled by `SettingsPanel`'s
+     scoped globals, which made a SHARED widget render correctly only inside
+     that one consumer: mounted anywhere else (the cross-product Credentials
+     modal) Disconnect lost its colours and came out plain white. */
   .provider-action {
     flex-shrink: 0;
     display: flex;

@@ -8,8 +8,9 @@
    * main SettingsPanel → File Explorer section. Reset actions are owned by the
    * parent explorer (it holds the ephemeral localStorage state) and passed in.
    */
-  import { ArrowLeft, GitCompare, LayoutGrid, Keyboard, RotateCcw, PanelLeft, Eye, EyeOff, ChevronUp, ChevronDown, Link2 } from 'lucide-svelte';
+  import { ArrowLeft, GitCompare, LayoutGrid, Keyboard, RotateCcw, PanelLeft, Eye, EyeOff, ChevronUp, ChevronDown, Link2, KeyRound } from 'lucide-svelte';
   import { explorerStore, mergeSidebarSections, EXPLORER_SECTIONS, MAX_RECENTS_MIN, MAX_RECENTS_MAX } from '$lib/stores/sitta/explorer.svelte';
+  import { credentialsStore } from '$lib/stores/credentials.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import type { ExplorerView, ExplorerSort, ExplorerStartup } from '$lib/types/config';
@@ -130,6 +131,14 @@
         label="Git awareness"
         description="Show status overlays, repo-root markers, the Changes panel and branch switching while browsing. Off by default — when off, the explorer issues no git checks, so plain browsing stays fast.">
         <Toggle bind:checked={gitAwareness} />
+      </FormRow>
+      <FormRow
+        label="Credentials"
+        description="Connect a git hosting provider. Shared with the rest of Arbor — the keychain is app-wide, so what you connect here works everywhere.">
+        <Button variant="secondary" size="sm" onclick={() => credentialsStore.show()}>
+          {#snippet iconStart()}<KeyRound size={13} />{/snippet}
+          Manage…
+        </Button>
       </FormRow>
     </div>
 

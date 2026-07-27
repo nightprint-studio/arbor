@@ -11,6 +11,7 @@
    */
   import { onMount } from 'svelte';
   import { Store, RefreshCw, Info, Timer } from 'lucide-svelte';
+  import Button        from '$lib/components/shared/ui/Button.svelte';
   import Toggle        from '$lib/components/shared/ui/Toggle.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import Select        from '$lib/components/shared/ui/Select.svelte';
@@ -172,13 +173,12 @@
     label="Refresh now"
     description="Bypass the cache and fetch the catalog immediately. Same as the Refresh button in the marketplace modal."
   >
-    <button class="btn-ghost" onclick={refreshNow} disabled={refreshingNow}>
-      {#if refreshingNow}
-        <Timer size={12} /> Refreshing…
-      {:else}
-        <RefreshCw size={12} /> Refresh marketplace
-      {/if}
-    </button>
+    <Button variant="outline" size="sm" onclick={refreshNow} disabled={refreshingNow}>
+      {#snippet iconStart()}
+        {#if refreshingNow}<Timer size={12} />{:else}<RefreshCw size={12} />{/if}
+      {/snippet}
+      {refreshingNow ? 'Refreshing…' : 'Refresh marketplace'}
+    </Button>
   </FormRow>
 </div>
 

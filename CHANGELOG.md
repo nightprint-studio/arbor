@@ -9,6 +9,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- The **Disconnect** button on a connected Git provider was drawn plain white outside the Settings panel (for example in the new Credentials dialog) — it only ever had colours while it happened to sit inside that one panel. Low-emphasis bordered buttons are now a variant of the shared button, so they look the same everywhere.
 - **Merula** (music): **downloading a sample bank or a model works again** — every transfer aborted after exactly 30 seconds with an "error decoding response", because a timeout meant for short API calls was capping the whole download; large banks are now bound only by a connection and a stall timeout, so a multi-GB bank can take as long as it needs.
 - **Merula** (music): **sample-bank downloads now show live progress** instead of sitting on "Starting…" for the entire transfer — banks served without a declared size (most of them) reported no progress at all.
 - **Merula** (music): the **General MIDI** bank installs again — its download host started refusing non-browser clients outright, so it now comes from a mirror of the same FluidR3 soundfont.
@@ -24,6 +25,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **Tyto** (recorder): capture now starts and stops from the **tray icon** — a menu-bar extra on macOS — with *Snip capture*, *Stop recording* and *Open Tyto*, so you never have to go find the recorder's window while working in another app. Release builds only (dev builds have no tray).
+- **Credentials are reachable from any window**: connecting a Git host is no longer buried in the Git window's settings. *Manage Credentials* is in the Command Palette, and the File Explorer — which runs Git operations of its own — offers it under Settings ▸ Git, so an expired token can be reconnected where you hit it.
 - **Window switcher** — <kbd>Ctrl/Cmd+Shift+G</kbd> from any Arbor window lists every other open one (Canopy, Git, File Explorer, Merula, Bennu, Tyto); type to filter, Enter to jump. A window minimized to the tray is listed too, and picking it brings it back. Also available as *Switch Window* in the Command Palette and under **Window** in the title-bar menu.
 - Each window is now **named after what it is showing** — the repository, project or folder — instead of a fixed product name, so several windows of the same product are finally distinguishable in the taskbar, in Alt-Tab, in Mission Control and in the macOS Window menu.
 
