@@ -35,10 +35,24 @@ Two corollaries the code already honours:
 
 ## 2. State: what exists today
 
-### Frontend — complete, running on fixtures
+### Frontend — complete; the database half on real RPC, the script half still on fixtures
 
 ~50 files under `src/lib/{components,stores,ipc,types}/picus/`. Precedent followed: **Tyto**
 (mocked UI + window wiring landed first, backend after).
+
+Which is which, precisely — this is the thing to know before touching anything:
+
+| Area | State |
+|---|---|
+| Connections, schema tree, table tab, query editor | **Real.** `stores/picus/{connections,schema,query}.svelte.ts` → `ipc/picus/db.ts` → `picus-be`. |
+| Connection modal | **Real and data-driven** — fields, labels, defaults, capabilities from `picus_providers`; an engine with no driver says so instead of disappearing. |
+| Settings | **Real** (product half). Project-level settings (encoding, EOL, version table) are still in memory by design — they belong to the project's config. |
+| Generator (form / paste / CSV / preview / diff) | **Still on `ipc/picus/mock-emit.ts`.** The Rust emitter and its handlers exist and are tested; nothing calls them yet. ← *first thing to do next* |
+| Script tree, inventory, consistency findings, file text | **Still on `ipc/picus/mock.ts`** until the parse/inventory/analyze crates land. |
+
+**The frontend has not been type-checked.** `svelte-check` is the user's step (project rule), so
+every frontend change in this session is un-compiled. If the first run after a compact shows
+Svelte/TS errors in Picus, that is where they come from — not from something mysterious.
 
 | Area | Files |
 |---|---|
@@ -114,6 +128,26 @@ Wiring, all in place:
 **No plugin host**, deliberately. When Picus wants one, do not copy sitta-be/tyto-be's
 `plugin.rs` a third time — that file already carries the note to promote the host-pure wiring
 into a shared `arbor-plugin-be` crate first.
+
+#### The RPC surface served today
+
+Everything reaches `picus-be` through `picus(method, params)` (`src/lib/ipc/rpc.ts`), except the
+three password calls, which are Tauri commands straight to the shell.
+
+| Method | Module | Notes |
+|---|---|---|
+| `be_ping` / `be_echo` | `selftest` | handshake |
+| `get_picus_config` / `set_picus_config` | `config_cmds` | per-profile `picus/config.toml` |
+| `picus_providers` | `providers` | every engine, connectable or not |
+| `picus_list_connections` / `picus_save_connection` / `picus_delete_connection` | `connections` | list carries live state + `hasSecret` |
+| `picus_connect` / `picus_disconnect` / `picus_test_connection` | `connections` | test opens+closes without touching the pool |
+| `picus_read_db_version` | `connections` | empty string when the table isn't there — not an error |
+| `picus_read_schema` / `picus_table_detail` / `picus_fetch_page` | `schema` | tree vs detail: constraints only when a tab opens |
+| `picus_execute` / `picus_cancel` | `query` | cancel opens a second connection, hence it works mid-query |
+| `picus_emit` / `picus_validate_rows` / `picus_validate_value` | `emit` | **served but not yet called by the frontend** |
+| `picus_store_secret` / `picus_delete_secret` / `picus_has_secret` | shell command | `commands/picus_commands.rs` — never the backend |
+
+Events: `arbor://picus-be-up` / `-down` (shell), `picus://connection-changed` (backend).
 
 #### The password path (decided 2026-07-27)
 
@@ -211,9 +245,28 @@ trusted (a hand-edited `0` would mean "fetch nothing" and read as a broken produ
   The document-flow views (`GenerateView`, `InventoryView`) own their scroll and set
   `flex-shrink: 0` on children; `.doc-body` only fills.
 
+Paid for in the backend waves (2026-07-27):
+
+- **`#[arbor_rpc::handler] async fn` works** — the `Dispatcher` collects async handlers
+  separately and `block_on`s them on a serve-loop worker thread, never on a runtime worker. So
+  a handler may await freely, and may also block (the `host_call` for a secret does exactly
+  that) without risking the reverse-channel deadlock.
+- **`tokio-postgres-rustls` must be `0.13`**, not the newest `0.14`: 0.13 is the one built
+  against `rustls` 0.23, which is what the rest of the workspace resolves to.
+- **A crate whose tests serialise needs `serde_json` as a `dev-dependency`.** `picus-db-postgres`
+  and `picus-ast` don't use it at runtime and it is missing from the normal deps on purpose.
+- **`&model().something()` in a test doesn't compile** (E0716 — the temporary dies at the end
+  of the statement). Bind it: `let m = model();`.
+- **A frontend store that both reads and writes config must distinguish "untouched" from
+  "cleared."** The connection password is `null` until typed and `''` when deliberately
+  emptied; collapsing them deletes a saved credential on an unrelated edit.
+
 ---
 
-## 4. New directives (2026-07-27) — not yet implemented
+## 4. Directives (2026-07-27)
+
+> §4.1, §4.2 and §4.3 are **implemented** — kept here because they are the *reasoning*, and the
+> next engine will need it. §4.4 (the editors) is **not started**.
 
 ### 4.1 PostgreSQL first; Oracle scripts, not Oracle connections
 
@@ -367,6 +420,26 @@ which is the same grammar decision as §6.5, and should be made once for both.
 ---
 
 ## 5. What is left to do
+
+### Start here
+
+Two pieces, in this order.
+
+**1. Wire the generator to the backend emitter.** `picus-emit` is done and covered by 29 golden
+tests; `picus_emit` / `picus_validate_rows` / `picus_validate_value` are served; nothing calls
+them. The work is `stores/picus/dml.svelte.ts` plus `generate/{DmlValueGrid,SqlPreview,CsvImportGrid}.svelte`,
+then deleting `ipc/picus/mock-emit.ts`.
+
+Two things to carry across rather than re-invent: the model the frontend builds must map onto
+`picus_ast::DmlModel` (snake_case on the wire, `dateColumn: null` meaning "this project stamps
+no date"), and `parsePastedInserts` / `parseCsv` / `proposeCsvMapping` are still frontend-only —
+they belong to `picus-parse` later, so leave them where they are rather than half-moving them.
+
+**2. `picus-parse`** — full Tree-sitter grammar (decision §6.5), Arbor's own pattern: own
+grammar, generated `parser.c` committed, no Node at build time, as Merula does. Explicit user
+direction: **a very large body of unit tests over every kind of SQL that can be thought of**,
+with permission already given to run the `tree-sitter` generation commands.
+
 
 ### Backend
 
