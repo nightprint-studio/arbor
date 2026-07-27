@@ -444,6 +444,27 @@ body {
   filter: none;
 }
 
+/* ---- Window-controls slot ─────────────────────────────────────────────
+   Every title bar that hosts <WindowControls> wraps it (plus its divider)
+   in this slot. The Windows/IntelliJ trio hugs the trailing corner, the
+   Mac trio moves to the LEADING edge like the real traffic lights — the
+   swap is one rule here, driven by the same <html data-window-controls>
+   attribute that restyles `.mac-close-btn`, so no title bar (Corvus,
+   Merula, Bennu, Tyto, launcher, explorer) knows about the setting.
+   `row-reverse` keeps the divider between the trio and the app chrome.
+   ──────────────────────────────────────────────────────────────────── */
+.window-controls-slot {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+[data-window-controls="mac"] .window-controls-slot {
+  order: -1;
+  flex-direction: row-reverse;
+}
+
 /* ---- Inputs ---- */
 .input {
   width: 100%;

@@ -4,21 +4,63 @@
  * Arbor drives several top-level windows and the platforms disagree on how you
  * move between them: Windows gives each window a taskbar button, macOS gives
  * none and expects a Window menu instead. So every product title bar carries
- * the same section — the switcher, the container's detach action, and the live
- * list of open windows — and each product spreads it into its own hamburger
- * rather than re-authoring it.
+ * the same section — the switcher, the container's detach action, the Move &
+ * Resize zones, and the live list of open windows — and each product spreads it
+ * into its own hamburger rather than re-authoring it.
  *
- * On macOS the *listing* is dropped: the system menu bar already owns a native
- * Window menu that enumerates the windows, and a second list beside it would
- * read as a bug. The actions stay — nothing else offers them.
+ * On macOS the *listing* and the *zones* are dropped: the system menu bar
+ * already owns a native Window menu that enumerates the windows, and the real
+ * green button pops the OS tiling panel. The actions stay — nothing else
+ * offers them.
  */
-import { AppWindow, EyeOff, GitBranch, FolderTree, Music, Video, Coffee, LayoutGrid, PictureInPicture2 } from 'lucide-svelte';
+import { AppWindow, EyeOff, GitBranch, FolderTree, Music, Video, Coffee, LayoutGrid, PictureInPicture2, CornerUpLeft, Monitor } from 'lucide-svelte';
 import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
 import type { IconComponent } from '$lib/types/icon';
 import { windowsStore } from '$lib/stores/windows.svelte';
+import { displaysStore } from '$lib/stores/displays.svelte';
 import { surfaceStore } from '$lib/stores/surfaces.svelte';
 import { detachSurface } from '$lib/utils/open-product';
 import { isMac } from '$lib/utils/platform';
+import {
+  applyZone, restorePrevious, moveToDisplay,
+  ZONE_GROUPS, ZONE_LABELS, type DisplayInfo,
+} from '$lib/utils/window-tiling';
+
+/**
+ * Keyboard path to the same zones — and the same categories — the zoom button
+ * offers on hover. `displays` comes from the caller so this stays synchronous;
+ * pass none and the display switcher is simply absent.
+ */
+function moveResizeSubmenu(displays: DisplayInfo[] = []): DropdownItem {
+  const items: DropdownItem[] = [];
+  for (const group of ZONE_GROUPS) {
+    items.push({ kind: 'separator', label: group.title });
+    for (const zone of group.zones) {
+      items.push({
+        kind: 'item', id: `tile:${zone}`, label: ZONE_LABELS[zone],
+        onclick: () => void applyZone(zone),
+      });
+    }
+  }
+  if (displays.length > 1) {
+    items.push({ kind: 'separator', label: 'Displays' });
+    for (const d of displays) {
+      items.push({
+        kind: 'item', id: `display:${d.index}`, label: `Move to ${d.label}`,
+        icon: Monitor, meta: `${d.width}×${d.height}`, disabled: d.current,
+        onclick: () => void moveToDisplay(d.index),
+      });
+    }
+  }
+  items.push(
+    { kind: 'separator' },
+    {
+      kind: 'item', id: 'tile:restore', label: 'Return to Previous Size',
+      icon: CornerUpLeft, onclick: () => void restorePrevious(),
+    },
+  );
+  return { kind: 'submenu', id: 'move-resize', label: 'Move & Resize', icon: LayoutGrid, items };
+}
 
 const PRODUCT_ICONS: Record<string, IconComponent> = {
   corvus: GitBranch,
@@ -51,10 +93,13 @@ export function windowMenuItems(): DropdownItem[] {
     });
   }
 
+  // macOS owns both halves of this natively: the system Window menu enumerates
+  // the windows, and the real green button pops the OS Move & Resize panel.
   if (isMac) return items;
 
   return [
     ...items,
+    moveResizeSubmenu(displaysStore.list),
     ...windowsStore.others.map((w) => ({
       kind: 'item' as const,
       id: `window:${w.label}`,

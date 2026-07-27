@@ -229,13 +229,19 @@
     {:else if settings}
       {@render namedButton(settings, Settings, 'Settings')}
     {/if}
-    {#if windowControls}
-      <!-- On macOS the controls slot renders nothing (native traffic lights sit
-           top-left instead), so the divider before it is suppressed too. -->
+  </div>
+
+  {#if windowControls}
+    <!-- Its own flex child rather than a tail of `.tb-right`: the Mac trio has
+         to be able to jump to the LEADING edge (`.window-controls-slot` in
+         app.css flips its `order`), which it can't do from inside the right
+         cluster. On macOS the slot renders nothing — the native traffic lights
+         sit top-left instead — so the divider is suppressed with it. -->
+    <div class="window-controls-slot">
       {#if !isMac}<div class="tb-sep"></div>{/if}
       {@render windowControls()}
-    {/if}
-  </div>
+    </div>
+  {/if}
 </div>
 
 <style>

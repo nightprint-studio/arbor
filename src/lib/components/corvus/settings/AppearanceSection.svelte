@@ -35,8 +35,8 @@
   }
 
   const WC_OPTIONS = [
-    { value: 'mac',     label: 'Mac-inspired',  description: 'Coloured trio (close/min/max).' },
-    { value: 'windows', label: 'Windows',       description: 'Flat rectangular controls.'    },
+    { value: 'mac',     label: 'Mac-inspired',  description: 'Coloured trio on the left, with the zoom menu.' },
+    { value: 'windows', label: 'Windows',       description: 'Flat rectangular controls on the right.'        },
   ];
 
   const ACTIVITY_BAR_OPTIONS = [
@@ -62,7 +62,7 @@
   <!-- macOS paints the real traffic lights over the title bar, so this faux-control
        toggle has no effect there and is hidden. -->
   {#if !isMac}
-    <FormRow label="Window controls" description="Style of the close/minimize/maximize buttons in the title bar. Position and size stay the same.">
+    <FormRow label="Window controls" description="Style and side of the close/minimize/maximize buttons in the title bar.">
       <RadioGroup
         value={appearanceStore.windowControlsStyle}
         options={WC_OPTIONS}

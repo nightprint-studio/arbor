@@ -33,6 +33,15 @@
 //! so a label that appears in no capability gets a webview with no grants: it
 //! loads, and then every plugin/core call from it is denied. Add the label to an
 //! existing capability (preferred — the grants stay in step) or ship one for it.
+//!
+//! **`core:default` covers only the window *getters*.** Its `core:window:default`
+//! set is `is_maximized`, `outer_position`, `available_monitors`, `theme`, … —
+//! read-only. Anything that *mutates* the window (`set_position`, `set_size`,
+//! `set_focus`, `maximize`, `unmaximize`, `minimize`, `hide`/`show`, `close`)
+//! must be listed explicitly, in **every** capability whose windows call it: the
+//! frontend pieces that use them (window controls, the zoom/tiling panel, the
+//! file picker) are shared, so they ship with every product. A missing grant
+//! surfaces as a rejected promise in the JS console, not as a build error.
 
 pub mod bennu;
 pub mod corvus;

@@ -9,6 +9,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **File Explorer**: the window no longer stays behind after you **drop files onto it from another window** or open it on a path from a link — it now raises itself as it always meant to.
+- **Canopy**: the **maximize button** in its title bar did nothing — that window was never granted permission to maximize itself, so the click was rejected silently. It now maximizes and restores like every other window.
+
 - The **Disconnect** button on a connected Git provider was drawn plain white outside the Settings panel (for example in the new Credentials dialog) — it only ever had colours while it happened to sit inside that one panel. Low-emphasis bordered buttons are now a variant of the shared button, so they look the same everywhere.
 - **Merula** (music): **downloading a sample bank or a model works again** — every transfer aborted after exactly 30 seconds with an "error decoding response", because a timeout meant for short API calls was capping the whole download; large banks are now bound only by a connection and a stall timeout, so a multi-GB bank can take as long as it needs.
 - **Merula** (music): **sample-bank downloads now show live progress** instead of sitting on "Starting…" for the entire transfer — banks served without a declared size (most of them) reported no progress at all.
@@ -113,6 +116,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - File Explorer: **F5** refreshes the file preview and **Ctrl+Shift+T** toggles live tail (follow) while a file preview is open.
 
 ### Changed
+
+- The **Mac-inspired window controls now sit on the left** of the title bar, like real traffic lights, with the platform's own glyphs (×, −, and the outward/inward arrow pair) revealed on all three the moment the pointer enters the group. The Windows/IntelliJ set is unchanged on the right. Applies to every window — Git, Canopy, File Explorer, Merula, Bennu, Tyto.
+- **Zoom menu on the green button** — resting the pointer on it (or pressing <kbd>↓</kbd> when it has focus) opens a *Move & Resize* panel grouped by category: Fill & Center, Halves, Quarters, a *Displays* switcher when more than one monitor is attached, and *Return to Previous Size*. Clicking the button still zooms. The same entries are under **Window ▸ Move & Resize** in the title-bar menu, keyboard-navigable; arrows walk the panel's grid, Enter applies, Esc closes.
 
 - **macOS**: Canopy no longer disappears into the tray — it neither hides when it loses focus nor minimizes to the tray when closed, as macOS expects (the app stays alive with no windows and is reopened from the Dock). Windows and Linux keep the tray behaviour.
 - **macOS**: keyboard shortcuts are now shown with the native modifier glyphs (⌘ ⌥ ⇧, plus symbols for Enter, Tab, arrows, …) instead of `Ctrl+…` text — everywhere shortcuts appear (menus, tooltips, the shortcuts reference, command palette). Windows and Linux keep the `Ctrl/Alt/Shift` wording.

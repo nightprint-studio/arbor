@@ -3590,7 +3590,9 @@
         <div class="fx-win-addr">{@render headerAddress()}</div>
       </div>
       <div class="fx-win-island fx-win-right">{@render headerActions()}</div>
-      <WindowControls />
+      <!-- Slot, not a bare component: `.window-controls-slot` (app.css) is what
+           moves the Mac trio to the leading edge of the bar. -->
+      <div class="window-controls-slot"><WindowControls /></div>
     </header>
     <div class="fx-win-mid">
       <div class="fx-win-body">{@render bodyContent()}</div>
@@ -3761,6 +3763,10 @@
   .fx-win { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-elevated); }
   /* padding-left falls back to 10px off macOS; on macOS it becomes the traffic-light gutter. */
   .fx-win-bar { display: flex; align-items: center; gap: 8px; height: 38px; flex-shrink: 0; padding-left: var(--mac-traffic-gutter, 10px); }
+  /* Mac trio on the leading edge: the trio brings its own inset, so the bar
+     drops the padding that would otherwise double up. (macOS keeps it — there
+     the gutter belongs to the native traffic lights.) */
+  :global([data-window-controls="mac"]) .fx-win-bar:not(.mac) { padding-left: 0; }
   /* macOS: the native traffic lights replace our controls, so the right island is
      the last element — give it room from the rounded corner. */
   .fx-win-bar.mac { padding-right: 8px; }
