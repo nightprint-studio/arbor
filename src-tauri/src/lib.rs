@@ -44,6 +44,7 @@ mod studio;
 mod cloud;
 mod marketplace;
 mod ipc;
+mod native_menu;
 mod setup;
 mod window;
 

@@ -30,6 +30,7 @@
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import BennuWorkspaceSwitcher from './BennuWorkspaceSwitcher.svelte';
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
+  import { createNativeMenuPublisher } from '$lib/utils/native-menu';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -120,6 +121,10 @@
   function openPicker(mode: 'open' | 'add') { pickerMode = mode; pickerOpen = true; }
 
   // ── Hamburger (file / project actions) ────────────────────────────────────────
+  // macOS: the hamburger becomes the real menu bar (Project, from the menu's own
+  // labelled separator). No-op elsewhere.
+  const publishNativeMenu = createNativeMenuPublisher('Bennu');
+
   const hamburgerMenu = $derived<DropdownItem[]>([
     { kind: 'separator', label: 'Project' },
     { kind: 'item', id: 'open',  label: 'Open project…', icon: FolderOpen, shortcut: 'Ctrl+O', onclick: () => openPicker('open') },
@@ -166,6 +171,7 @@
 <TitleBar
   logoTooltip="Bennu — Java editor"
   menu={hamburgerMenu}
+  onNativeMenu={publishNativeMenu}
   menuWidth="240px"
   docs={{ active: bennuUiStore.docsOpen, tooltip: 'Documentation (F1)', onclick: () => bennuUiStore.toggleDocs() }}
   commandPalette={{ active: bennuUiStore.paletteOpen, tooltip: 'Command palette (Ctrl+K)', onclick: () => bennuUiStore.togglePalette() }}

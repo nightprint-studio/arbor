@@ -46,6 +46,9 @@ macro_rules! invoke_handlers {
             $crate::commands::plugin_commands::frontend_ready,
             // Open in browser (OS opener glue)
             $crate::commands::remote_commands::open_in_browser,
+            // macOS system menu bar — the frontend publishes its title-bar menu
+            // instead of drawing a hamburger. No-op on Windows / Linux.
+            $crate::native_menu::set_native_menu,
             // Filesystem browser
             $crate::commands::fs_commands::fs_set_wallpaper,
             $crate::commands::fs_commands::fs_open_default,

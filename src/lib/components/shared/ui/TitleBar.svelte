@@ -41,6 +41,8 @@
    *  • `logo`            — app mark snippet (omit → no brand slot)
    *  • `menu`/`hamburger`— structured `DropdownItem[]` OR a custom control
    *                        (omit both → no hamburger)
+   *  • `onNativeMenu`    — macOS: publish `menu` to the system menu bar instead
+   *                        of drawing a hamburger (the host owns the IPC)
    *  • `leading`         — free content after the hamburger (workspace/project
    *                        switcher, plugin-left items, …)
    *  • `trailing`        — free content at the head of the right cluster
@@ -74,6 +76,13 @@
     menuTooltip?: string;
     /** Escape hatch: a fully custom hamburger control (wins over `menu`). */
     hamburger?: Snippet;
+    /**
+     * macOS only: hand `menu` to the OS menu bar instead of rendering a
+     * hamburger for it. Called with the live items on every change — the host
+     * decides how to publish them (see `utils/native-menu`), keeping this
+     * widget free of any IPC. Ignored off macOS and when `hamburger` is set.
+     */
+    onNativeMenu?: (items: DropdownItem[]) => void;
     /** Free content after the hamburger, before the draggable spacer. */
     leading?: Snippet;
     /** Free content at the head of the right cluster. */
@@ -95,10 +104,19 @@
 
   let {
     logo, logoTooltip, menu, menuWidth = '280px', menuTooltip = 'Main menu',
-    hamburger, leading, trailing, actions,
+    hamburger, onNativeMenu, leading, trailing, actions,
     docs, commandPalette, settings, settingsContent,
     windowControls, class: cls = '',
   }: Props = $props();
+
+  /** macOS with a native-menu host: the bar replaces the hamburger entirely. */
+  const nativeMenu = $derived(isMac && !hamburger && !!onNativeMenu && !!menu);
+
+  // Re-publish on every change of the items — and of anything the host reads
+  // while deriving them (keybindings, for the accelerators).
+  $effect(() => {
+    if (nativeMenu && menu) onNativeMenu!(menu);
+  });
 </script>
 
 {#snippet namedButton(btn: TitleBarButton, fallbackIcon: any, fallbackLabel: string)}
@@ -152,7 +170,7 @@
 
   {#if hamburger}
     <div class="tb-nodrag">{@render hamburger()}</div>
-  {:else if menu}
+  {:else if menu && !nativeMenu}
     <div class="tb-nodrag">
       <Dropdown items={menu} position="fixed" direction="down" width={menuWidth}>
         {#snippet trigger({ open, toggle })}

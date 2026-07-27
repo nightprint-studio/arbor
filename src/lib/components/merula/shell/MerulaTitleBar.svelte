@@ -31,6 +31,7 @@
   // Titlebar lives at the very top — tooltips fly downward so they don't get
   // clipped by the window edge.
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
+  import { createNativeMenuPublisher } from '$lib/utils/native-menu';
   import { merulaStore, LOG_LEVELS } from '../merula-store.svelte';
   import { merulaEngine } from '../stores/engine.svelte';
   import { configStore } from '../stores/config.svelte';
@@ -87,6 +88,10 @@
     const parts = path.split(/[\\/]/).filter(Boolean);
     return parts[parts.length - 1] ?? path;
   }
+
+  // macOS: the hamburger becomes the real menu bar (File · Project, from the
+  // menu's own labelled separators). No-op elsewhere.
+  const publishNativeMenu = createNativeMenuPublisher('merula');
 
   // ── Hamburger (file / project actions — absorbed from the old MerulaMenuBar) ──
   const hamburgerMenu = $derived<DropdownItem[]>([
@@ -177,6 +182,7 @@
 <TitleBar
   logoTooltip="merula — music live-coding"
   menu={hamburgerMenu}
+  onNativeMenu={publishNativeMenu}
   menuWidth="240px"
   docs={{ active: merulaStore.docsOpen, tooltip: 'Documentation (F1)', onclick: () => merulaStore.toggleDocs() }}
   commandPalette={{ active: merulaStore.paletteOpen, tooltip: 'Command palette (Ctrl+K)', onclick: () => merulaStore.togglePalette() }}

@@ -22,6 +22,12 @@
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
   import ToastItem from '$lib/components/shared/Toast.svelte';
+  import { createNativeMenuPublisher } from '$lib/utils/native-menu';
+
+  // macOS: the menu bar is app-wide and this window has no menu of its own, so
+  // it claims the baseline bar (App · Edit · Window · Help) rather than leaving
+  // a product window's menus up while the explorer is focused. No-op elsewhere.
+  const publishNativeMenu = createNativeMenuPublisher('File Explorer');
 
   // Provide the git Projects source to the explorer below (and any picker it
   // opens) — the standalone window surfaces projects just like the Corvus window.
@@ -32,6 +38,7 @@
     themeStore.init();
     void appearanceStore.loadConfig();
     void animStore.loadConfig();
+    publishNativeMenu([]);
     // This is the only window that owns the sitta-be config — opt in before loading
     // so the launcher window never reads/writes the (legitimately down) sitta backend.
     explorerStore.enableSitta();

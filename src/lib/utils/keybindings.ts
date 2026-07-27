@@ -248,3 +248,67 @@ export function formatBinding(binding: Keybinding): string {
   const label = parts.join('+');
   return isMac ? macKeyLabel(label) : label;
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+//  Tauri accelerators (macOS system menu bar)
+// ───────────────────────────────────────────────────────────────────────────
+//
+// The native menu bar wants Tauri/muda accelerator strings ("CmdOrCtrl+Shift+O")
+// — a different alphabet from both the display label and `KeyboardEvent.key`.
+// An unparsable string is *not* an error downstream: muda drops it and the item
+// simply renders without a shortcut, so best-effort mapping is safe.
+
+/** `KeyboardEvent.key` values whose accelerator spelling differs. */
+const ACCEL_KEY_ALIASES: Record<string, string> = {
+  arrowup: 'Up', arrowdown: 'Down', arrowleft: 'Left', arrowright: 'Right',
+  up: 'Up', down: 'Down', left: 'Left', right: 'Right',
+  esc: 'Escape', escape: 'Escape', del: 'Delete', ' ': 'Space', spacebar: 'Space',
+  pgup: 'PageUp', pgdn: 'PageDown', return: 'Enter',
+};
+
+/** Modifier tokens accepted in free-form `shortcut` strings, folded to accelerator form. */
+const ACCEL_MOD_ALIASES: Record<string, 'CmdOrCtrl' | 'Alt' | 'Shift'> = {
+  ctrl: 'CmdOrCtrl', control: 'CmdOrCtrl', cmd: 'CmdOrCtrl', command: 'CmdOrCtrl',
+  cmdorctrl: 'CmdOrCtrl', meta: 'CmdOrCtrl', super: 'CmdOrCtrl', win: 'CmdOrCtrl',
+  alt: 'Alt', option: 'Alt', opt: 'Alt',
+  shift: 'Shift',
+};
+
+/** One key token → its accelerator spelling (letters uppercase, arrows shortened). */
+function acceleratorKey(key: string): string {
+  const alias = ACCEL_KEY_ALIASES[key.toLowerCase()];
+  if (alias) return alias;
+  return key.length === 1 ? key.toUpperCase() : key;
+}
+
+/**
+ * A binding as a Tauri accelerator — `null` when unbound. Arbor's logical `ctrl`
+ * is Cmd on the Mac (see {@link matchesBinding}), which is exactly what
+ * `CmdOrCtrl` means.
+ */
+export function acceleratorFor(binding: Keybinding): string | null {
+  if (!binding.key) return null;
+  const parts: string[] = [];
+  if (binding.ctrl)  parts.push('CmdOrCtrl');
+  if (binding.alt)   parts.push('Alt');
+  if (binding.shift) parts.push('Shift');
+  parts.push(acceleratorKey(binding.key));
+  return parts.join('+');
+}
+
+/**
+ * Same, from a hand-written `'+'`-joined chord ("Ctrl+Shift+R", "Shift+F10") —
+ * the `shortcut` escape hatch on menu items that have no keybinding id.
+ */
+export function acceleratorFromLabel(label: string): string | null {
+  const mods: string[] = [];
+  const keys: string[] = [];
+  for (const tok of label.split('+').map(t => t.trim()).filter(Boolean)) {
+    const mod = ACCEL_MOD_ALIASES[tok.toLowerCase()];
+    if (mod) { if (!mods.includes(mod)) mods.push(mod); continue; }
+    keys.push(acceleratorKey(tok));
+  }
+  // Exactly one non-modifier key, or muda can't parse it.
+  if (keys.length !== 1) return null;
+  return [...mods, keys[0]].join('+');
+}

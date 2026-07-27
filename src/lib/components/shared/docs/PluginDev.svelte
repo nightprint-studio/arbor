@@ -278,7 +278,7 @@ arbor.timer.cancel(id)   -- cancel a timer by its id`, '.lua')}</pre>
     <tr><td><code>arbor.ui.contribute_patch(point, id, partial)</code></td><td>Shallow-merge <code>partial</code> into the existing payload of a previously-contributed item — without re-specifying the full payload.</td></tr>
     <tr><td><code>arbor.ui.add_separator()</code></td><td>Insert a horizontal separator in the activity bar after the last registered item</td></tr>
     <tr><td><code>arbor.ui.add_context_menu_item(opts)</code></td><td>Add item to the commit/branch/file context menu</td></tr>
-    <tr><td><code>arbor.ui.add_menu_item(opts)</code></td><td>Add item to the hamburger menu</td></tr>
+    <tr><td><code>arbor.ui.add_menu_item(opts)</code></td><td>Add item to the hamburger menu (the <strong>Plugins</strong> menu of the system menu bar on macOS)</td></tr>
     <tr><td><code>arbor.ui.open_path(path)</code></td><td>Hand a file/folder to the OS default handler (Explorer / Finder / xdg-open). Great for "Open in file manager" affordances on artefact folders.</td></tr>
     <tr><td><code>arbor.ui.copy_to_clipboard&#123; text, toast? &#125;</code></td><td>Copy <code>text</code> to the system clipboard via the webview; optional <code>toast</code> overrides the success message.</td></tr>
     <tr><td><code>arbor.ui.show_pipeline_run(run_id)</code></td><td>Open the standalone Pipeline Run detail modal (graph + output log) on top of the current view. Deep-link from a plugin modal / sidebar without toggling the bottom Pipelines panel.</td></tr>

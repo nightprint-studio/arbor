@@ -24,6 +24,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **macOS**: Arbor now uses the **system menu bar** instead of the title-bar hamburger. Every window publishes its own menus when it comes to the front — Corvus as File / Tools / Plugins, Bennu as Project, Merula as File / Project, Tyto as Capture — with their keyboard shortcuts shown natively, plus the standard Arbor, Edit, Window and Help menus (so ⌘C / ⌘V / ⌘Z work in text fields). "Exit" and "Close Window" give way to the native Quit and Window ▸ Close Window. Windows and Linux keep the hamburger unchanged.
+
 - **Merula** (music): **envelope control** — `.attack(s)`, `.decay(s)`, `.sustain(0..1)` and `.release(s)` shape any voice's amplitude envelope, so a sound's attack and tail are yours rather than whatever its instrument declares. Each stage is independent: set only the attack and the instrument keeps its own decay, sustain and release. Patternisable like every other control, and they work on sampled instruments as well as synths.
 - **Merula** (music): added the **yo** (`C D F G A`) and **in / miyako-bushi** (`C Db F G Ab`) Japanese scales, usable as `.scale("c:yo")` / `.scale("c:in")` alongside the existing modes.
 - **Merula** (music): **Export all** — bounce every script in a project into one folder, all in the same format, as a single job (*Export all…* in the Project menu and the Command Palette). Pick which files to leave out; each one's render length is read from its own `meta { cycles = "…" }`, falling back to its arrangement length, so a folder of one-shots needs no per-file setup. Files that don't compile are listed with their error and skipped rather than failing the batch.

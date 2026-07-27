@@ -15,6 +15,7 @@
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   // Titlebar sits at the very top — tooltips fly downward so they aren't clipped.
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
+  import { createNativeMenuPublisher } from '$lib/utils/native-menu';
   import { recorderStore, formatDuration, type CaptureMode } from '$lib/stores/tyto/recorder.svelte';
   import { tytoUiStore } from '$lib/stores/tyto/ui.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -29,6 +30,11 @@
     { id: 'record',     label: 'Recording',  icon: Video,  data: { hint: '1' } },
     { id: 'screenshot', label: 'Screenshot', icon: Camera, data: { hint: '2' } },
   ];
+
+  // macOS: the hamburger becomes the real menu bar. Tyto's menu carries no
+  // labelled separator, so its one action lands under "Capture" (About and Close
+  // Window are absorbed by the native app/window menus). No-op elsewhere.
+  const publishNativeMenu = createNativeMenuPublisher('Tyto', { fallbackTitle: 'Capture' });
 
   // Hamburger — light: identity + about + close (settings live in the gear).
   const hamburgerMenu: DropdownItem[] = [
@@ -62,6 +68,7 @@
 <TitleBar
   logoTooltip="Tyto — screen recorder"
   menu={hamburgerMenu}
+  onNativeMenu={publishNativeMenu}
   menuWidth="220px"
   docs={{ active: tytoUiStore.docsOpen, tooltip: { content: 'Documentation', shortcut: 'F1' }, onclick: () => tytoUiStore.toggleDocs() }}
   settings={{ menu: settingsMenu, menuWidth: '230px', tooltip: 'Settings' }}

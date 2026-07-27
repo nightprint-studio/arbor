@@ -33,6 +33,7 @@
   import ProfileManagerModal from '$lib/components/shared/ProfileManagerModal.svelte';
   import RecentReposModal from '$lib/components/shared/RecentReposModal.svelte';
   import { tooltipForAction } from '$lib/utils/shortcut';
+  import { createNativeMenuPublisher } from '$lib/utils/native-menu';
   // Title bar buttons sit at the very top — tooltips fly downward away from the
   // bar, never above (they'd be clipped by the window edge).
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
@@ -51,6 +52,10 @@
     onOpen, onClone, onInit, onOpenThemeEditor,
     onManageWorkspaces, onCreateWorkspace,
   }: Props = $props();
+
+  // macOS: the hamburger's contents become the real menu bar (File · Tools ·
+  // Plugins, from the menu's own labelled separators). No-op elsewhere.
+  const publishNativeMenu = createNativeMenuPublisher('Arbor');
 
   let customizeActivityBarOpen = $state(false);
   let profileManagerOpen = $state(false);
@@ -150,6 +155,7 @@
 <TitleBar
   logoTooltip="Arbor"
   menu={hamburgerMenu}
+  onNativeMenu={publishNativeMenu}
   docs={{
     active: uiStore.activePanel === 'docs',
     tooltip: tooltipForAction('Documentation', 'toggle_docs'),

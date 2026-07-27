@@ -18,11 +18,19 @@
   import LauncherShell from '$lib/components/launcher/LauncherShell.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
   import FeedbackHost from '$lib/feedback/FeedbackHost.svelte';
+  import { createNativeMenuPublisher } from '$lib/utils/native-menu';
+
+  // macOS: the menu bar is app-wide and the launcher has no menu of its own, so
+  // it claims the baseline bar (App · Edit · Window · Help). Without this, the
+  // last product window's File/Tools menus would linger while the launcher is
+  // focused. No-op elsewhere.
+  const publishNativeMenu = createNativeMenuPublisher('Arbor');
 
   onMount(() => {
     themeStore.init();
     void appearanceStore.loadConfig();
     void animStore.loadConfig();
+    publishNativeMenu([]);
     // Release the plugin boot thread (no BootSplash on the launcher window).
     invoke('frontend_ready').catch(() => { /* legacy backend without handshake */ });
   });

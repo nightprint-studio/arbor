@@ -62,6 +62,7 @@
 </ol>
 <p>If the selected folder has no <code>.git</code> directory, Arbor will offer to <strong>initialize a new repository</strong> — see the <em>Initialize Repository</em> section.</p>
 <p>To reopen something you've had open before, use the title-bar <strong>hamburger menu → Recent Repositories…</strong> (or <Kbd action="open_recent" />). It opens a filterable list — the filter field is focused on open, so just start typing; <Kbd label="Up" /> / <Kbd label="Down" /> move the selection and <Kbd label="Enter" /> opens the highlighted repo in a new tab.</p>
+<p>On macOS there is no hamburger: the same entries live in the <strong>system menu bar</strong> at the top of the screen, grouped as <strong>File</strong>, <strong>Tools</strong> and <strong>Plugins</strong>, with <strong>About Arbor</strong> under the <strong>Arbor</strong> menu.</p>
 
 <h2>Multiple tabs</h2>
 <p>Open multiple repositories simultaneously in separate tabs.</p>

@@ -104,6 +104,10 @@ pub fn build_builder() -> tauri::Builder<tauri::Wry> {
         .manage(crate::window::explorer::DragOverlayText::default())
         .setup(run)
         .on_window_event(crate::window::events::handle)
+        // macOS system menu bar: the frontend publishes its title-bar menu with
+        // `set_native_menu`, and every click on a published item lands here and
+        // is forwarded to the window that published it. Inert elsewhere.
+        .on_menu_event(crate::native_menu::on_menu_event)
 }
 
 /// The `setup` hook body — runs once, before the event loop starts (so before

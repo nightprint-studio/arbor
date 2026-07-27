@@ -8,7 +8,7 @@
  * embed elements.
  */
 import { keybindingsStore } from '$lib/stores/keybindings.svelte';
-import { formatBinding, type Keybinding } from '$lib/utils/keybindings';
+import { acceleratorFor, formatBinding, type Keybinding } from '$lib/utils/keybindings';
 import type { TooltipInput } from '$lib/stores/tooltip.svelte';
 
 /** Live shortcut for a built-in action id, or `null` if unbound. */
@@ -17,6 +17,17 @@ export function shortcutFor(action: string | null | undefined): string | null {
   const b = keybindingsStore.getBinding(action);
   if (!b || !b.key) return null;
   return formatBinding(b);
+}
+
+/**
+ * Live Tauri accelerator for a built-in action id — the macOS menu-bar form of
+ * {@link shortcutFor}. Reads the same store, so a remap in Settings flows into
+ * the published menu on the next publish.
+ */
+export function acceleratorForAction(action: string | null | undefined): string | null {
+  if (!action) return null;
+  const b = keybindingsStore.getBinding(action);
+  return b ? acceleratorFor(b) : null;
 }
 
 /** Format an explicit binding (e.g. plugin-registered) — graceful empty. */
