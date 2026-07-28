@@ -62,6 +62,12 @@
   rows you meant to delete, is a decision — and a decision dressed up as a completion is
   worse than no completion.
 </p>
+<p>
+  One proposal is a rewrite rather than a continuation: a line written in the abbreviation
+  shorthand — <code>s#localstrings(keycode,value)[keycode='ita']</code> — previews the whole
+  statement it stands for, and <kbd>Tab</kbd> puts that statement in its place. See
+  <b>SQL abbreviations</b>.
+</p>
 
 <h2>Hover</h2>
 <p>
@@ -99,6 +105,8 @@
     body, columns are not checked — their shape needs a full parse.</li>
   <li><b>Bare names are never called unknown</b>, only ambiguous: a lone word can be an
     output alias, a function or a variable.</li>
+  <li><b>A line written as an abbreviation is not measured as SQL.</b> It is a shorthand the
+    tool understands; what it reports there is the shorthand's own refusal, when it has one.</li>
 </ul>
 
 <h2>Script files</h2>

@@ -17,13 +17,24 @@
  * ancestor each inherited answer came from — without that, "inherited" is a
  * dead end and the user cannot find the row to correct.
  *
- * ## Two ways to say what a folder is
+ * ## Three ways to say what something is
  *
- * `classify()` answers for a **path**. `setAlias()` answers for a **name** —
- * every folder called `POS`, including the ones the next release will add — which
- * is the only shape that survives a repository shipping a folder set per
- * delivered version. Both write the same file and both replace the tree from the
- * reply, because only the backend knows the inheritance rule.
+ * `classify()` answers for a folder **path**. `setAlias()` answers for a
+ * **name** — every folder called `POS`, including the ones the next release will
+ * add — which is the only shape that survives a repository shipping a folder set
+ * per delivered version. `classifyFile()` answers for one **file**, which is
+ * what an untidy repository needs: `4_12_ORA.sql` and `4_12_POS.sql` in one
+ * directory that can say nothing true about either.
+ *
+ * All three write the same file and all three replace the tree from the reply,
+ * because only the backend knows the resolution rule.
+ *
+ * `setExcluded()` answers a different question: not *what* something is, but
+ * whether it is here at all. It is deliberately not a fourth role — `ignored`
+ * says "not an installation folder" and its scripts are still read, indexed and
+ * checked, while excluded says "pretend this is not in the repository". Merging
+ * them would be fatal, because `ignored` is also the fallback for a folder
+ * nobody has classified.
  *
  * ## Four engine states
  *
@@ -61,6 +72,7 @@
  */
 
 import {
+  type AliasScope,
   type FolderAlias,
   type FolderEngine,
   type FolderNode,
@@ -68,9 +80,14 @@ import {
   type InventoryObject,
   type Project,
   type ScriptFile,
+  aliasScope,
+  declaresExclusion,
   engineIsUnknown,
   engineIsUnsupported,
+  fileDeclaresEngine,
+  fileEngine,
   folderEngine,
+  isExcluded,
   isGeneric,
 } from '$lib/types/picus';
 import {
@@ -87,8 +104,13 @@ import {
   type ConfirmedProject,
   type FolderClassification,
   confirmProject,
+  filesNamed,
   folderEdit,
   foldersNamed,
+  // Aliased because the store method below has the same name: the property and
+  // the import would read as each other at a glance, and this is a write.
+  setExcluded as setExcludedOnDisk,
+  setFileEngine,
   setFolderAlias,
 } from '$lib/ipc/picus/project';
 import { consistencyStore } from './consistency.svelte';
@@ -210,26 +232,34 @@ function createProjectStore() {
    * folders, expanding everything is the same as showing nothing, while the
    * folders that declare an engine or a role are exactly the ones worth landing
    * on. The top level is always open, so the panel is never blank.
+   *
+   * An **excluded** folder is closed either way. Its row stays visible — that row
+   * is the only way to change one's mind — but what is inside it is, by the
+   * user's own decision, not what this panel is for, and the folder somebody
+   * excludes is typically the largest one in the repository. Opening it is one
+   * keystroke on the row and the override is remembered, so the script that needs
+   * rescuing is never out of reach.
    */
   const defaultExpanded = $derived.by<Set<string>>(() => {
     const open = new Set<string>();
     if (!entries.length) return open;
     if (entries.length <= OPEN_WHOLE_TREE_BELOW) {
       for (const e of entries) open.add(e.node.path);
-      return open;
-    }
-    for (const e of entries) if (e.depth === 0) open.add(e.node.path);
-    for (const e of entries) {
-      if (e.node.engine === null && e.node.role === null) continue;
-      // The declaring folder itself, and everything between it and the root:
-      // landing on the row is only useful if the path to it is visible.
-      open.add(e.node.path);
-      let parent = e.parent;
-      while (parent) {
-        open.add(parent);
-        parent = byPath.get(parent)?.parent ?? null;
+    } else {
+      for (const e of entries) if (e.depth === 0) open.add(e.node.path);
+      for (const e of entries) {
+        if (e.node.engine === null && e.node.role === null) continue;
+        // The declaring folder itself, and everything between it and the root:
+        // landing on the row is only useful if the path to it is visible.
+        open.add(e.node.path);
+        let parent = e.parent;
+        while (parent) {
+          open.add(parent);
+          parent = byPath.get(parent)?.parent ?? null;
+        }
       }
     }
+    for (const e of entries) if (isExcluded(e.node)) open.delete(e.node.path);
     return open;
   });
 
@@ -251,17 +281,49 @@ function createProjectStore() {
    * places asking a question the user settled the moment they said "SQL Server".
    */
   const unclassifiedFolders = $derived(
-    entries.filter((e) => e.node.files.length > 0 && engineIsUnknown(e.node)),
+    entries.filter((e) => e.node.files.length > 0 && engineIsUnknown(e.node) && !isExcluded(e.node)),
   );
 
   /** Folders written in an engine Picus recognises and does not read. */
   const unsupportedFolders = $derived(
-    entries.filter((e) => engineIsUnsupported(e.node) && e.node.files.length > 0),
+    entries.filter((e) => engineIsUnsupported(e.node) && e.node.files.length > 0 && !isExcluded(e.node)),
   );
 
   /** Folders of portable SQL — written once, counted for every dialect. */
   const genericFolders = $derived(
-    entries.filter((e) => isGeneric(e.node) && e.node.files.length > 0),
+    entries.filter((e) => isGeneric(e.node) && e.node.files.length > 0 && !isExcluded(e.node)),
+  );
+
+  /**
+   * Folders and scripts that **declare** they are outside the project.
+   *
+   * Only the declaring rows, never the ones merely inheriting: one excluded
+   * folder would otherwise enumerate its whole subtree, and putting a
+   * descendant "back" is not what the user means — the decision lives on the
+   * folder that made it. A short list by construction, which is what makes it
+   * safe to address one by one from the palette. Without that, a repository
+   * whose excluded folders are all collapsed has nowhere to say "actually, no".
+   */
+  const excludedFolders = $derived(
+    entries.filter((e) => declaresExclusion(e.node) && isExcluded(e.node)),
+  );
+
+  /** The same, one level down: scripts excluded by their own declaration. */
+  const excludedFiles = $derived(
+    allFiles.filter((f) => declaresExclusion(f) && isExcluded(f)),
+  );
+
+  /**
+   * Files that answer for themselves instead of taking their folder's word.
+   *
+   * A short list by construction — a tidy repository has none — and the only
+   * files worth enumerating anywhere: they are the ones carrying an answer the
+   * folder header does not, and therefore the ones somebody may want to revisit
+   * or clear. Every *other* file is reachable through a filter, which is where a
+   * per-file entry would only have been noise.
+   */
+  const declaredFiles = $derived(
+    allFiles.filter((f) => fileDeclaresEngine(f) && !isExcluded(f)),
   );
 
   // Only the newest read may write: switching connection twice in a second must
@@ -388,6 +450,12 @@ function createProjectStore() {
     get unsupportedFolders() { return unsupportedFolders; },
     /** Folders of portable SQL — one file that counts for every dialect. */
     get genericFolders() { return genericFolders; },
+    /** Files that declare their own engine rather than inheriting their folder's. */
+    get declaredFiles() { return declaredFiles; },
+    /** Folders declared out of the project — the rows that can put themselves back. */
+    get excludedFolders() { return excludedFolders; },
+    /** Scripts declared out of the project, one by one. */
+    get excludedFiles() { return excludedFiles; },
     /** Folder names this repository has declared a meaning for. */
     get aliases() { return aliases; },
     /** A repository is attached — whether or not it could be read. */
@@ -423,6 +491,18 @@ function createProjectStore() {
       expandOverride = next;
     },
 
+    /**
+     * Open the folder holding a file, so the file's row can be seen.
+     *
+     * The same courtesy {@link revealFolder} pays a classified folder: after a
+     * file is classified from a dialog or the palette, the chip that appeared on
+     * its row is the confirmation, and a confirmation nobody can see is a claim.
+     */
+    revealFile(path: string) {
+      const folder = folderOfPath.get(path);
+      if (folder) this.revealFolder(folder.node.path);
+    },
+
     // ── Looking things up ─────────────────────────────────────────────────────
 
     entryFor(path: string): FolderEntry | null { return byPath.get(path) ?? null; },
@@ -437,15 +517,26 @@ function createProjectStore() {
     },
 
     /**
-     * The engine a file is written in: its folder's, after inheritance.
+     * The engine a file is written in — **the file's own answer**, after it has
+     * fallen back to its folder.
      *
-     * `null` is an answer, not a failure — a file under a folder nothing has
-     * classified has no engine, and every consumer renders that state rather
-     * than guessing one. So is `generic`, which is why this answers with a
+     * Asked of the file rather than of the folder, which is the same answer for
+     * all but the handful of files that say otherwise. A caller that asked the
+     * folder would be right almost always, and wrong exactly where file-level
+     * classification exists: the directory holding `4_12_ORA.sql` beside
+     * `4_12_POS.sql` has no engine of its own, and both of its files do.
+     *
+     * `null` is an answer, not a failure — a file nothing has classified, here
+     * or above, has no engine, and every consumer renders that state rather than
+     * guessing one. So is `generic`, which is why this answers with a
      * `FolderEngine` rather than a `Dialect`: a portable file has no single
      * dialect and pretending it had one is the lie the state exists to end.
      */
     dialectOfFile(path: string): FolderEngine | null {
+      const file = allFiles.find((f) => f.path === path);
+      if (file) return fileEngine(file);
+      // A path that is not in the tree still has a folder often enough to be
+      // worth answering for — a destination picked before a rescan, say.
       const folder = folderOfPath.get(path);
       return folder ? folderEngine(folder.node) : null;
     },
@@ -506,7 +597,70 @@ function createProjectStore() {
       }
     },
 
-    // ── Saying what a folder NAME means ───────────────────────────────────────
+    // ── Saying what ONE FILE is ───────────────────────────────────────────────
+
+    /**
+     * Declare (or clear) the engine of a single file, and save it with the
+     * repository.
+     *
+     * The leaf of the same chain `classify` and `setAlias` sit on, for the
+     * repositories where the folder cannot answer: `4_12_ORA.sql` beside
+     * `4_12_POS.sql` in one directory. `null` clears the declaration and the
+     * file follows its folder again.
+     *
+     * Returns an empty string on success and the failure's own words otherwise,
+     * exactly like `classify` — every caller shows them where the action was
+     * taken. The reply's tree replaces this store's for the same reason too: a
+     * file declaration changes which lane the file counts in, and the backend is
+     * the only thing that knows the resolution rule.
+     */
+    async classifyFile(path: string, engine: FolderEngine | null): Promise<string> {
+      if (!root || !path) return 'No repository is attached.';
+      classifying = true;
+      try {
+        acceptWrite(await setFileEngine(root, path, engine));
+        return '';
+      } catch (e) {
+        return String(e);
+      } finally {
+        classifying = false;
+      }
+    },
+
+    // ── Saying what is NOT ours to look at ────────────────────────────────────
+
+    /**
+     * Take a folder or a script out of the project — or put it back.
+     *
+     * One method for both, like the verb behind it: the path names whichever it
+     * is, and it is one decision about one row. Excluding is **not** the
+     * `ignored` role — an ignored folder is still read, indexed and checked and
+     * simply is not an installation folder, while an excluded one is treated as
+     * though it were not in the repository at all.
+     *
+     * `false` on a **file** is not the no-op it looks like: it rescues that one
+     * script from an excluded folder, which is the only way to keep the single
+     * migration that does matter without moving it on disk.
+     *
+     * Returns an empty string on success and the failure's own words otherwise,
+     * exactly like `classify` — every caller shows them where the action was
+     * taken. The reply's tree replaces this store's for the same reason too:
+     * exclusion inherits, so it changes what every descendant effectively is.
+     */
+    async setExcluded(path: string, excluded: boolean): Promise<string> {
+      if (!root) return 'No repository is attached.';
+      classifying = true;
+      try {
+        acceptWrite(await setExcludedOnDisk(root, path, excluded));
+        return '';
+      } catch (e) {
+        return String(e);
+      } finally {
+        classifying = false;
+      }
+    },
+
+    // ── Saying what a NAME means ──────────────────────────────────────────────
 
     /** What this project declares about a name, if anything. */
     aliasFor(name: string): FolderAlias | null {
@@ -515,10 +669,28 @@ function createProjectStore() {
     },
 
     /**
-     * Declare — or forget — what a folder name means in this repository.
+     * Where an existing alias of this name applies — the default when there is
+     * none.
      *
-     * Both fields are replaced: an alias has exactly two, so there is no
-     * "leave that one alone" state to encode. Passing neither removes it.
+     * Exists so a caller that only means to change an engine can send the scope
+     * the alias already has: every field of an alias is *replaced*, so omitting
+     * the scope would quietly move a file-matching rule back to folders only.
+     */
+    aliasScopeFor(name: string): AliasScope {
+      const existing = this.aliasFor(name);
+      return existing ? aliasScope(existing) : 'folders';
+    },
+
+    /**
+     * Declare — or forget — what a name means in this repository.
+     *
+     * Every field is replaced: an alias has exactly these three, so there is no
+     * "leave that one alone" state to encode. Which makes `appliesTo` required
+     * rather than optional — omitting it would not keep what the alias said, it
+     * would move a file-matching rule back to folders only. Callers that are
+     * editing something else pass `aliasScopeFor(name)`.
+     *
+     * Passing neither an engine nor a role removes it.
      *
      * Returns an empty string on success and the failure's own words otherwise,
      * exactly like `classify` — every caller shows them where the action was
@@ -528,11 +700,12 @@ function createProjectStore() {
       name: string,
       engine: FolderEngine | null,
       role: FolderRole | null,
+      appliesTo: AliasScope,
     ): Promise<string> {
       if (!root || !name.trim()) return 'No repository is attached.';
       classifying = true;
       try {
-        acceptWrite(await setFolderAlias(root, name.trim(), engine, role));
+        acceptWrite(await setFolderAlias(root, name.trim(), engine, role, appliesTo));
         return '';
       } catch (e) {
         return String(e);
@@ -541,9 +714,9 @@ function createProjectStore() {
       }
     },
 
-    /** Forget a name. The same write as clearing both of its fields. */
+    /** Forget a name. The same write as clearing every one of its fields. */
     async removeAlias(name: string): Promise<string> {
-      return this.setAlias(name, null, null);
+      return this.setAlias(name, null, null, 'folders');
     },
 
     /**
@@ -560,6 +733,19 @@ function createProjectStore() {
       } catch {
         // The offer is an optimisation, never a blocker: if the count cannot be
         // had, the classification the user just made still stands.
+        return [];
+      }
+    },
+
+    /**
+     * Every **file** an alias of this name would reach — the same question, one
+     * level down, answered by the same rule for the same reason.
+     */
+    async filesNamed(name: string): Promise<string[]> {
+      if (!root || !name.trim()) return [];
+      try {
+        return await filesNamed(root, name.trim());
+      } catch {
         return [];
       }
     },

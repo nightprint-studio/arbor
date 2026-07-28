@@ -45,32 +45,110 @@
 //!   `[generation.insertion]`: a typo drops that one entry and is reported by
 //!   [`ProjectConfig::problems`](crate::config::ProjectConfig::problems), rather
 //!   than failing the parse and resetting every other setting in the file.
+//!
+//! ## Where the name is looked for — [`AliasScope`]
+//!
+//! Folder names, by default. Some repositories are tidier than others, and in a
+//! dirty one the engine is on the **file**: `4_12_POS.sql` and `4_12_ORA.sql`
+//! side by side in one folder that can say nothing about either. `applies_to`
+//! opens the same name up to file names:
+//!
+//! ```toml
+//! [[alias]]
+//! name = "POS"
+//! engine = "postgres"
+//! applies_to = "both"      # "folders" (default) | "files" | "both"
+//! ```
+//!
+//! It is opt-in, and that is not timidity. A file name is a sentence — `POS`,
+//! `ORA`, `DB` are three letters that appear inside ordinary Italian words, and
+//! there are hundreds of file names to a handful of folder names, so a rule that
+//! is merely *usually* right costs far more here. Making it a word the repository's
+//! owner writes means file-name classification is always something someone
+//! decided, never something Picus inferred.
 
 use picus_types::prelude::{FolderEngine, FolderRole, ForeignEngine, EngineKind};
 use serde::{Deserialize, Serialize};
 
 use crate::infer::{contains_words, words, Guess};
 
+/// Where an alias's name is looked for.
+///
+/// A separate type rather than a `bool` because the third answer is real: a
+/// repository can have a `POS` **folder** for the tidy versions and a `4_12_POS.sql`
+/// **file** for the years somebody was in a hurry, and one alias should answer for
+/// both without a second entry that can drift from the first.
+/// Serialised as the same lowercase words `applies_to` takes in the file, so the
+/// RPC verb that sets an alias and the TOML it writes speak one vocabulary.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AliasScope {
+    /// Folder names only — the default, and what every alias written before this
+    /// existed means.
+    #[default]
+    Folders,
+    /// File names only.
+    Files,
+    /// Both.
+    Both,
+}
+
+impl AliasScope {
+    pub const ALL: &'static [AliasScope] =
+        &[AliasScope::Folders, AliasScope::Files, AliasScope::Both];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AliasScope::Folders => "folders",
+            AliasScope::Files => "files",
+            AliasScope::Both => "both",
+        }
+    }
+
+    pub fn from_wire(s: &str) -> Option<AliasScope> {
+        AliasScope::ALL.iter().copied().find(|scope| scope.as_str() == s)
+    }
+
+    /// Does this alias answer about folder names?
+    pub fn covers_folders(self) -> bool {
+        matches!(self, AliasScope::Folders | AliasScope::Both)
+    }
+
+    /// Does this alias answer about file names?
+    pub fn covers_files(self) -> bool {
+        matches!(self, AliasScope::Files | AliasScope::Both)
+    }
+}
+
 /// One name this repository uses for an engine or a role.
 ///
-/// Both value fields are plain strings on purpose — see the module note on
-/// degrading. Both are optional and at least one has to be set; an alias that
-/// says nothing is reported and ignored.
+/// Every value field is a plain string on purpose — see the module note on
+/// degrading. `engine` and `role` are both optional and at least one has to be
+/// set; an alias that says nothing is reported and ignored.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InferenceAlias {
-    /// The folder name, as the repository spells it. Matched whole-word and
+    /// The name, as the repository spells it. Matched whole-word and
     /// case-insensitively, so `POS` is written once and matches `POS`, `pos`,
     /// `01_POS` and `POS_2024`.
     pub name: String,
-    /// The engine folders with this name are written in — a dialect Picus reads
-    /// (`oracle`, `postgres`) or one it only recognises (`sqlserver`, `db2`,
-    /// `mysql`, `mariadb`, `sqlite`).
+    /// The engine things with this name are written in — a dialect Picus reads
+    /// (`oracle`, `postgres`), portable SQL (`generic`), or an engine it only
+    /// recognises (`sqlserver`, `db2`, `mysql`, `mariadb`, `sqlite`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<String>,
     /// What folders with this name are for (`init`, `update`, `routines`,
     /// `data`, `ignored`).
+    ///
+    /// Folders only, whatever `applies_to` says: a role is what a *directory of
+    /// scripts* is for, and the file beside it in the same directory is for the
+    /// same thing. Engines are the axis that genuinely varies file by file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
+    /// Whether the name is looked for in folder names, file names, or both.
+    /// Absent means [`AliasScope::Folders`] — see the module note on why file
+    /// names are opt-in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applies_to: Option<String>,
 }
 
 impl InferenceAlias {
@@ -90,7 +168,19 @@ impl InferenceAlias {
         self.role.as_deref().and_then(FolderRole::from_wire)
     }
 
+    /// Where this alias's name is looked for.
+    ///
+    /// An unreadable value degrades to the **default**, not to nothing: a typo in
+    /// `applies_to` must not silently un-declare an engine the user did spell
+    /// correctly. [`problems`] names it.
+    pub fn scope(&self) -> AliasScope {
+        self.applies_to.as_deref().and_then(AliasScope::from_wire).unwrap_or_default()
+    }
+
     /// Does it say anything at all? One that does not is noise in the file.
+    ///
+    /// `applies_to` alone does not count: it says *where* to look for a name that
+    /// means nothing yet.
     pub fn is_empty(&self) -> bool {
         self.engine.is_none() && self.role.is_none()
     }
@@ -137,12 +227,14 @@ pub struct AliasVocabulary {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CompiledAlias {
-    /// The words a folder's name has to contain, in order.
+    /// The words a name has to contain, in order.
     needle: Vec<String>,
     /// The name as the project spells it — the evidence a proposal shows.
     display: String,
     engine: Option<FolderEngine>,
     role: Option<FolderRole>,
+    /// Which kind of name this entry answers about.
+    scope: AliasScope,
 }
 
 impl AliasVocabulary {
@@ -170,6 +262,7 @@ impl AliasVocabulary {
                     display: alias.name.clone(),
                     engine,
                     role,
+                    scope: alias.scope(),
                 })
             })
             .collect();
@@ -180,29 +273,50 @@ impl AliasVocabulary {
         self.entries.is_empty()
     }
 
-    /// The engine this project declares for a folder of this name.
+    /// The engine this project declares for a **folder** of this name.
     pub fn engine(&self, folder_name: &str) -> Option<Guess<FolderEngine>> {
-        self.best(folder_name, |entry| entry.engine)
+        self.best(folder_name, AliasScope::covers_folders, |entry| entry.engine)
+    }
+
+    /// The engine this project declares for a **file** of this name.
+    ///
+    /// Answers only from the entries that opted into file names — see
+    /// [`AliasScope`]. A repository that declared nothing gets `None` here for
+    /// every file, which is precisely today's behaviour and why this addition
+    /// changes nothing until someone asks for it.
+    ///
+    /// The name is the file's, extension and all; [`crate::infer::file_stem`]
+    /// takes the extension off before this is reached, so `.sql` never matches an
+    /// alias called `SQL`.
+    pub fn file_engine(&self, file_name: &str) -> Option<Guess<FolderEngine>> {
+        self.best(file_name, AliasScope::covers_files, |entry| entry.engine)
     }
 
     /// The role this project declares for a folder of this name.
+    ///
+    /// Folders only, by design — see [`InferenceAlias::role`].
     pub fn role(&self, folder_name: &str) -> Option<Guess<FolderRole>> {
-        self.best(folder_name, |entry| entry.role)
+        self.best(folder_name, AliasScope::covers_folders, |entry| entry.role)
     }
 
-    /// The longest alias that matches and answers the question being asked.
+    /// The longest alias that applies here, matches, and answers the question
+    /// being asked.
     ///
     /// Longest first for the same reason the built-in tables are: a repository
     /// declaring both `POS` and `POS_LEGACY` means the more specific one where
     /// both apply, and the evidence should name the word a human would point at.
     fn best<T: Copy>(
         &self,
-        folder_name: &str,
+        name: &str,
+        applies: impl Fn(AliasScope) -> bool,
         pick: impl Fn(&CompiledAlias) -> Option<T>,
     ) -> Option<Guess<T>> {
-        let haystack = words(folder_name);
+        let haystack = words(name);
         let mut best: Option<(&CompiledAlias, T)> = None;
         for entry in &self.entries {
+            if !applies(entry.scope) {
+                continue;
+            }
             let Some(value) = pick(entry) else { continue };
             if !contains_words(&haystack, &entry.needle) {
                 continue;
@@ -265,6 +379,27 @@ pub fn problems(aliases: &[InferenceAlias]) -> Vec<String> {
                 ));
             }
         }
+        if let Some(applies) = &alias.applies_to {
+            if AliasScope::from_wire(applies).is_none() {
+                out.push(format!(
+                    "the alias `{}` says `applies_to = \"{applies}\"`, which is not one of {} — \
+                     it is treated as `{}`",
+                    alias.name,
+                    known_scopes(),
+                    AliasScope::default().as_str()
+                ));
+            }
+        }
+        // A role is a fact about a directory, so an alias that only declares one
+        // and is pointed at file names has nothing left to say. Worth naming: the
+        // user wrote two correct-looking lines that together do nothing.
+        if alias.scope() == AliasScope::Files && alias.engine.is_none() && alias.role.is_some() {
+            out.push(format!(
+                "the alias `{}` applies to file names and declares only a role, which is a fact \
+                 about a folder — it will classify nothing",
+                alias.name
+            ));
+        }
         if alias.is_empty() {
             out.push(format!(
                 "the alias `{}` declares neither an engine nor a role, so it does nothing",
@@ -285,6 +420,10 @@ fn known_roles() -> String {
     FolderRole::ALL.iter().map(|r| r.as_str()).collect::<Vec<_>>().join(", ")
 }
 
+fn known_scopes() -> String {
+    AliasScope::ALL.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,7 +433,13 @@ mod tests {
             name: name.to_string(),
             engine: engine.map(str::to_string),
             role: role.map(str::to_string),
+            applies_to: None,
         }
+    }
+
+    /// The same, pointed at a kind of name.
+    fn scoped(name: &str, engine: &str, scope: AliasScope) -> InferenceAlias {
+        InferenceAlias { applies_to: Some(scope.as_str().to_string()), ..alias(name, Some(engine), None) }
     }
 
     /// The real repository: eleven folders of each name, per delivered version.
@@ -458,6 +603,111 @@ mod tests {
         // An unnamed alias applies to nothing, here as everywhere.
         assert!(!name_matches("", "POS"));
         assert!(!name_matches("  ", "POS"));
+    }
+
+    // ── Where the name is looked for ──────────────────────────────────────────
+
+    #[test]
+    fn an_alias_says_nothing_about_a_file_name_until_it_is_asked_to() {
+        // The whole safety of the feature: every alias written before `applies_to`
+        // existed, and every one written without it, classifies folders and only
+        // folders. Turning it on is a word somebody types.
+        let v = AliasVocabulary::compile(&real());
+        assert!(v.engine("POS").is_some(), "folders, as always");
+        for name in ["POS", "4_12_POS", "01_pos"] {
+            assert!(v.file_engine(name).is_none(), "{name} must not be classified by name yet");
+        }
+    }
+
+    #[test]
+    fn an_alias_pointed_at_files_classifies_the_scattered_ones() {
+        // The dirty repository: one folder, two engines, and the only thing that
+        // knows which is which is the file name.
+        let v = AliasVocabulary::compile(&[
+            scoped("POS", "postgres", AliasScope::Both),
+            scoped("ORA", "oracle", AliasScope::Both),
+        ]);
+        assert_eq!(
+            v.file_engine("4_12_POS").map(|g| g.value),
+            Some(FolderEngine::Supported(EngineKind::Postgres))
+        );
+        assert_eq!(
+            v.file_engine("4_12_ORA").map(|g| g.value),
+            Some(FolderEngine::Supported(EngineKind::Oracle))
+        );
+        // …and the same whole-word rule as everywhere else, so an ordinary
+        // Italian file name is left alone.
+        for name in ["AGGIORNA_ORARI", "POSIZIONI", "DEPOSITO"] {
+            assert!(v.file_engine(name).is_none(), "{name}");
+        }
+    }
+
+    #[test]
+    fn files_only_means_files_only_and_folders_only_means_folders_only() {
+        let v = AliasVocabulary::compile(&[
+            scoped("POS", "postgres", AliasScope::Files),
+            scoped("ORA", "oracle", AliasScope::Folders),
+        ]);
+        assert!(v.file_engine("4_12_POS").is_some());
+        assert!(v.engine("POS").is_none(), "this one was pointed at files");
+        assert!(v.engine("ORA").is_some());
+        assert!(v.file_engine("4_12_ORA").is_none(), "and this one at folders");
+    }
+
+    #[test]
+    fn a_role_is_a_fact_about_a_folder_whatever_the_scope_says() {
+        // Roles do not vary file by file — the file beside another in one folder
+        // is for the same thing — so `applies_to` moves the engine and nothing
+        // else. Asserted because the opposite is the tempting shortcut.
+        let v = AliasVocabulary::compile(&[InferenceAlias {
+            applies_to: Some("both".to_string()),
+            ..alias("CONSEGNE", Some("postgres"), Some("update"))
+        }]);
+        assert!(v.role("CONSEGNE").is_some(), "folders still get the role");
+        assert!(v.file_engine("4_12_CONSEGNE").is_some(), "and files get the engine");
+    }
+
+    #[test]
+    fn a_scope_that_is_a_typo_degrades_to_the_default_rather_than_to_nothing() {
+        // The rule that keeps a typo cheap: `applies_to` is about *where* to look,
+        // so an unreadable one must not un-declare an engine that is spelled
+        // correctly. The alias keeps working on folders, and the user is told.
+        let typo = InferenceAlias {
+            applies_to: Some("file".to_string()), // singular — not a word Picus knows
+            ..alias("POS", Some("postgres"), None)
+        };
+        let v = AliasVocabulary::compile(std::slice::from_ref(&typo));
+        assert!(v.engine("POS").is_some(), "the engine survived the typo");
+        assert!(v.file_engine("4_12_POS").is_none(), "…but the unreadable scope claims nothing");
+
+        let problems = problems(std::slice::from_ref(&typo));
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("file"), "{problems:?}");
+        assert!(problems[0].contains("folders"), "{problems:?}");
+    }
+
+    #[test]
+    fn an_alias_that_only_declares_a_role_and_points_at_files_is_reported() {
+        // Two lines that each look right and together do nothing.
+        let alias = InferenceAlias {
+            applies_to: Some("files".to_string()),
+            ..alias("CONSEGNE", None, Some("update"))
+        };
+        let problems = problems(&[alias]);
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("classify nothing"), "{problems:?}");
+    }
+
+    #[test]
+    fn the_scope_round_trips_and_defaults_to_folders() {
+        for scope in AliasScope::ALL {
+            assert_eq!(AliasScope::from_wire(scope.as_str()), Some(*scope));
+        }
+        assert_eq!(AliasScope::from_wire("everything"), None);
+        assert_eq!(AliasScope::default(), AliasScope::Folders);
+        // An alias that never mentions it means folders — the behaviour every
+        // existing project file already relies on.
+        assert_eq!(alias("POS", Some("postgres"), None).scope(), AliasScope::Folders);
     }
 
     #[test]

@@ -44,8 +44,9 @@ use std::path::{Path, PathBuf};
 
 use picus_core::prelude::PicusState;
 use picus_project::prelude::{
-    alias_key, discover, name_matches, FolderEngine, FolderRole, InferenceAlias, Project,
-    ProjectConfig, ProposalNote,
+    alias_key, discover, file_stem, name_matches, parent_of, AliasScope, FileDeclaration,
+    FolderDeclaration, FolderEngine, FolderRole, InferenceAlias, Project, ProjectConfig,
+    ProposalNote,
 };
 use serde::{Deserialize, Serialize};
 
@@ -180,10 +181,15 @@ fn picus_confirm_project(
 /// repository with a folder set per delivered version cannot be described folder
 /// by folder without re-describing it every release.
 ///
-/// `engine` and `role` are both replaced, not merged: an alias has exactly these
-/// two fields, so "set it to this" is unambiguous and needs none of the
-/// three-valued machinery [`ProjectEdit`] needs. Passing neither **removes** the
-/// alias, which is the honest reading of "this name means nothing in particular".
+/// Every field is **replaced, not merged**: an alias has exactly these three, so
+/// "set it to this" is unambiguous and needs none of the three-valued machinery
+/// [`ProjectEdit`] needs. Passing no engine and no role **removes** the alias,
+/// which is the honest reading of "this name means nothing in particular".
+///
+/// `applies_to` says where the name is looked for — folder names (the default and
+/// what every alias written before this meant), file names, or both. File names
+/// are opt-in because a file name is a sentence: `ORA` is Italian for *now*, and
+/// a repository has hundreds of file names to a dozen folder names.
 #[arbor_rpc::handler]
 fn picus_set_folder_alias(
     _state: &PicusState,
@@ -191,6 +197,7 @@ fn picus_set_folder_alias(
     name: String,
     engine: Option<FolderEngine>,
     role: Option<FolderRole>,
+    applies_to: Option<AliasScope>,
 ) -> Result<ConfirmedProject, String> {
     if alias_key(&name).is_empty() {
         // An alias with no name would match every folder in the repository — the
@@ -207,9 +214,56 @@ fn picus_set_folder_alias(
             config.remove_alias(&name);
         }
         (engine, role) => {
+            let scope = applies_to.unwrap_or_default();
             let alias = config.alias_mut(&name);
             alias.engine = engine.map(|e| e.as_str().to_string());
             alias.role = role.map(|r| r.as_str().to_string());
+            // Written only when it is not the default, so a repository that never
+            // asked for file matching keeps a file with no mention of it.
+            alias.applies_to =
+                (scope != AliasScope::default()).then(|| scope.as_str().to_string());
+        }
+    }
+    config.tidy();
+    save_and_replan(&root, &config)
+}
+
+/// Declare — or forget — the engine of **one file**.
+///
+/// The leaf of the same chain `picus_confirm_project` and `picus_set_folder_alias`
+/// sit on, and the one that answers for an untidy repository: a directory holding
+/// `4_12_ORA.sql` beside `4_12_POS.sql` can say nothing about either, and neither
+/// a folder declaration nor a name rule fits a one-off.
+///
+/// `dialect` absent **clears** the declaration, and the file goes back to
+/// inheriting its folder. Two-valued rather than three, unlike [`ProjectEdit`]:
+/// this verb names one file and one field, so there is no "leave it alone" to
+/// express — not calling it is what leaves it alone.
+#[arbor_rpc::handler]
+fn picus_set_file_engine(
+    _state: &PicusState,
+    root: String,
+    path: String,
+    dialect: Option<FolderEngine>,
+) -> Result<ConfirmedProject, String> {
+    if path.trim().is_empty() {
+        return Err("a file declaration needs the path of a file".to_string());
+    }
+    let root = PathBuf::from(&root);
+    let proposal = discover(&root).map_err(|e| e.to_string())?;
+    // Refused rather than written blindly: a declaration for a path that is not in
+    // the tree would sit in the project file for ever, doing nothing and looking
+    // like it did something.
+    if proposal.project.file_at(&path).is_none() {
+        return Err(format!(
+            "{path} is not one of this project's scripts — refresh if it has just been added"
+        ));
+    }
+    let mut config = proposal.config;
+    match dialect {
+        Some(engine) => config.file_declaration_mut(&path).dialect = Some(engine),
+        None => {
+            config.clear_file_declaration(&path);
         }
     }
     config.tidy();
@@ -260,6 +314,122 @@ fn folders_matching(project: &Project, name: &str) -> Vec<String> {
         .walk()
         .filter(|folder| !folder.path.is_empty() && name_matches(name, &folder.name))
         .map(|folder| folder.path.clone())
+        .collect()
+}
+
+/// Take something out of the project — or put it back.
+///
+/// One verb for both a folder and a script, because it is one decision and the
+/// user is pointing at one row: the path names whichever it is, and a folder path
+/// and a file path cannot collide in a tree built from real directories.
+///
+/// **Not the same as `role = "ignored"`.** An ignored folder is still read, still
+/// indexed and still checked — it just is not an installation folder and nothing
+/// is generated into it, which is worth knowing about a folder full of old
+/// migrations. An excluded one is treated as though it were not in the repository:
+/// not parsed, not indexed, no coverage column, no findings, never a destination.
+/// The two cannot be merged because `ignored` is also the fallback for a folder
+/// nobody has classified, and dropping *those* from the report silently would hide
+/// exactly what needs attention.
+///
+/// Excluded things stay visible in the tree, marked. Hiding them would leave the
+/// user no way to change their mind.
+#[arbor_rpc::handler]
+fn picus_set_excluded(
+    _state: &PicusState,
+    root: String,
+    path: String,
+    excluded: bool,
+) -> Result<ConfirmedProject, String> {
+    let root = PathBuf::from(&root);
+    let proposal = discover(&root).map_err(|e| e.to_string())?;
+    let mut config = proposal.config;
+
+    // A folder first: `""` is the repository root, which is a legitimate — if
+    // drastic — thing to exclude, and it is not a file.
+    //
+    // In both branches the declaration is written **only when it differs from
+    // what would be inherited**, and cleared otherwise. That is the same rule the
+    // proposed configuration already follows for engines and roles, and it is
+    // what stops "put this script back" from leaving an inert `excluded = false`
+    // in a repository where nothing was excluded in the first place. A project
+    // file should read as the decisions it embodies, not as a log of the buttons
+    // that were pressed.
+    if proposal.project.folder_at(&path).is_some() {
+        let inherited = inherited_exclusion(&proposal.project, parent_of(&path), path.is_empty());
+        set_or_clear(config.declaration_mut(&path), excluded, inherited);
+    } else if let Some(folder) = proposal.project.folder_of(&path) {
+        set_or_clear(config.file_declaration_mut(&path), excluded, folder.is_excluded());
+    } else {
+        return Err(format!(
+            "{path} is not a folder or a script in this project — refresh if it has just been added"
+        ));
+    }
+    config.tidy();
+    save_and_replan(&root, &config)
+}
+
+/// What a folder at `path` would be if it declared nothing — its parent's answer.
+///
+/// `true` for the repository root only when the root declaration says so, which
+/// this cannot read from the tree (the root node exists only when scripts sit
+/// directly in it), so the caller says whether we are at the top.
+fn inherited_exclusion(project: &Project, parent: &str, at_root: bool) -> bool {
+    if at_root {
+        return false;
+    }
+    project.folder_at(parent).map(|folder| folder.is_excluded()).unwrap_or(false)
+}
+
+/// Anything with an `excluded` slot — one function so a folder and a file cannot
+/// end up following different rules about when a declaration is worth keeping.
+trait Excludable {
+    fn excluded_mut(&mut self) -> &mut Option<bool>;
+}
+
+impl Excludable for FolderDeclaration {
+    fn excluded_mut(&mut self) -> &mut Option<bool> {
+        &mut self.excluded
+    }
+}
+
+impl Excludable for FileDeclaration {
+    fn excluded_mut(&mut self) -> &mut Option<bool> {
+        &mut self.excluded
+    }
+}
+
+fn set_or_clear(declaration: &mut impl Excludable, wanted: bool, inherited: bool) {
+    *declaration.excluded_mut() = (wanted != inherited).then_some(wanted);
+}
+
+/// Every **file** whose name this alias would apply to, in tree order.
+///
+/// The twin of [`picus_folders_named`], and it exists for the same reason: the
+/// offer to turn one classification into a repository-wide rule is only safe to
+/// accept because the number beside it is true. A count worked out in the
+/// interface would be a second implementation of `name_matches` — and matching
+/// the stem rather than the whole name, and whole words rather than substrings,
+/// are exactly the rules that must not drift.
+#[arbor_rpc::handler]
+fn picus_files_named(
+    _state: &PicusState,
+    root: String,
+    name: String,
+) -> Result<Vec<String>, String> {
+    let root = PathBuf::from(&root);
+    let proposal = discover(&root).map_err(|e| e.to_string())?;
+    Ok(files_matching(&proposal.project, &name))
+}
+
+/// Matched against the **stem**, exactly as classification does, so `.sql` can
+/// never match an alias called `SQL` and the preview cannot promise a reach the
+/// rule will not deliver.
+fn files_matching(project: &Project, name: &str) -> Vec<String> {
+    project
+        .all_files()
+        .filter(|file| name_matches(name, file_stem(&file.name)))
+        .map(|file| file.path.clone())
         .collect()
 }
 
@@ -360,6 +530,7 @@ mod tests {
                 role: Some(FolderRole::Update),
                 ..FolderDeclaration::default()
             }],
+            files: Vec::new(),
             aliases: Vec::new(),
         }
     }

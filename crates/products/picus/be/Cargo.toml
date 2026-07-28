@@ -33,6 +33,10 @@ picus-db-api = { path = "../db-provider/api" }
 picus-db-postgres = { path = "../db-provider/postgres" }
 # The script half, so far: the dialect-free change model and the emitter that turns
 # one model into one correct statement per destination…
+# The abbreviation language `s#t(a)[b=1]`. In `foundation/` and Picus-free by
+# construction, so a second product can take it; this backend supplies the three
+# things only it can — the schema, the dialect, and the emitter.
+arbor-sql-abbrev = { path = "../../../foundation/sql-abbrev" }
 picus-ast  = { path = "../ast" }
 picus-emit = { path = "../emit" }
 # …and what a repository of scripts IS: its per-dialect branches, each folder's

@@ -14,22 +14,29 @@
 //! repository as missing from it — a first run that produces nothing but noise is
 //! a tool nobody opens twice.
 //!
-//! ## Portable folders are in **every** lane
+//! ## Portable scripts are in **every** lane
 //!
-//! A folder declared portable holds SQL that runs on both engines, so what it
-//! writes is present on both. `FolderNode::is_in_lane` therefore puts it in the
-//! Oracle lane and the PostgreSQL lane at once — the first thing in the model to
-//! belong to more than one — and two consequences follow that are worth stating
-//! rather than discovering:
+//! A script declared portable runs on both engines, so what it writes is present
+//! on both. It is therefore in the Oracle lane and the PostgreSQL lane at once —
+//! the first thing in the model to belong to more than one — and two consequences
+//! follow that are worth stating rather than discovering:
 //!
-//! * **`CONS001` cannot report it as a gap.** `coverage_of` sums a lane's
-//!   folders, so a portable folder's statements are added to *both* dialects'
-//!   totals and neither reads zero. That is the intended answer, not
-//!   double-counting: the sums are per dialect and never added together, and a
-//!   row that really is installed on both engines really does cover both.
+//! * **`CONS001` cannot report it as a gap.** `lane_touches` asks the whole lane,
+//!   so a portable script answers for *both* dialects and neither reads zero.
+//!   That is the intended answer, not double-counting: the question is asked per
+//!   dialect and the answers are never added together, and a row that really is
+//!   installed on both engines really does cover both.
 //! * **The one-finding-per-object-per-dialect dedup is untouched.** It is keyed
-//!   on the dialect that is *missing* something, and a portable folder only ever
+//!   on the dialect that is *missing* something, and a portable script only ever
 //!   removes gaps. It cannot produce a second finding, only prevent a first.
+//!
+//! ## The lane is asked of the files, not of the folders
+//!
+//! In an untidy repository one folder holds both engines, told apart only by the
+//! file names, and its coverage *column* is the folder's. So the lane question is
+//! asked of the **sites** — each of which carries the scope of the file it was
+//! found in — rather than summed out of that column, which would credit one
+//! dialect with what the other's scripts did. See `lane_touches`.
 //!
 //! `CONS004` deliberately leaves portable folders out — see the note there.
 //!
@@ -39,8 +46,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use picus_inventory::prelude::ObjectEntry;
-use picus_parse::prelude::{line_col, DmlOperation, EngineKind};
-use picus_project::prelude::FolderNode;
+use picus_parse::prelude::{DmlOperation, EngineKind};
 use picus_types::prelude::FolderRole;
 
 use crate::compare::{self, RowFingerprint};
@@ -101,11 +107,11 @@ fn gaps_at(
         return Vec::new();
     }
     let covered: Vec<EngineKind> =
-        participating.iter().copied().filter(|d| coverage_of(entry, context, *d, role) > 0).collect();
+        participating.iter().copied().filter(|d| lane_touches(entry, *d, role)).collect();
     let Some(reference) = covered.first().copied() else { return Vec::new() };
     participating
         .into_iter()
-        .filter(|d| coverage_of(entry, context, *d, role) == 0)
+        .filter(|d| !lane_touches(entry, *d, role))
         .map(|d| (d, reference))
         .collect()
 }
@@ -129,7 +135,7 @@ fn missing_finding(
         RuleId::Cons001,
         Anchor::file(path),
         format!("{} is not touched by the {} scripts", entry.name, engine_label(missing)),
-        gap_consequence(entry, context, missing, covering, role),
+        gap_consequence(entry, missing, covering, role),
     )
     .fix(format!("Generate for {} too", engine_label(missing)));
     if let Some(location) = elsewhere {
@@ -141,12 +147,11 @@ fn missing_finding(
 /// What actually goes wrong, which depends entirely on what the folder is for.
 fn gap_consequence(
     entry: &ObjectEntry,
-    context: &Context<'_>,
     missing: EngineKind,
     covering: EngineKind,
     role: FolderRole,
 ) -> String {
-    let count = coverage_of(entry, context, covering, role);
+    let count = lane_statements(entry, covering, role);
     let statements =
         if count == 1 { "1 statement".to_string() } else { format!("{count} statements") };
     let (there, here) = (engine_label(covering), engine_label(missing));
@@ -214,7 +219,7 @@ fn divergent_content(context: &Context<'_>, output: &mut Output) {
                     rows: Some(BTreeSet::new()),
                     anchor: Anchor::at(
                         script.path,
-                        line_col(script.source, shape.table.range.start).0,
+                        script.parsed.line_of(shape.table.range.start),
                     ),
                 });
                 slot.columns.extend(compare::written_columns(shape));
@@ -315,21 +320,41 @@ fn divergence(
 
 // ── shared ───────────────────────────────────────────────────────────────────
 
-/// How many statements the whole lane runs against this object.
+/// Does the whole lane do anything at all with this object?
 ///
-/// Summed across the lane's folders rather than read from one of them: a
-/// repository that splits its updates over `2024/ORA` and `2025/ORA` has one
-/// update story, and counting either half alone would report the other as a gap.
+/// Asked of the **sites** — every place the object was named, each carrying the
+/// scope of the file it was named in — rather than summed out of the coverage
+/// map, and the difference matters in exactly one situation: a folder holding
+/// both an `*_ORA.sql` and a `*_POS.sql` is in both lanes, and its coverage
+/// *column* is the folder's. Summing that column into each lane would credit the
+/// Oracle side with what the PostgreSQL scripts did and report a real gap as
+/// covered — a false negative, which is the one kind of wrong answer this rule
+/// must never give.
 ///
-/// A portable folder is in every lane, so its statements are counted once for
-/// Oracle and once for PostgreSQL. Not double-counting: these sums are per
-/// dialect and are never added to each other, and one portable `INSERT` genuinely
-/// does put the row in both installations.
-fn coverage_of(
-    entry: &ObjectEntry,
-    context: &Context<'_>,
-    dialect: EngineKind,
-    role: FolderRole,
-) -> usize {
-    context.lane(dialect, role).iter().map(|f: &&FolderNode| entry.coverage_in(&f.path)).sum()
+/// Still the whole lane and not one folder of it: a repository that splits its
+/// updates over `2024/ORA` and `2025/ORA` has one update story, and looking at
+/// either half alone would report the other as a gap.
+///
+/// A portable script is in every lane, so it answers for Oracle and for
+/// PostgreSQL. Not double-counting: these are per-dialect questions that are
+/// never added together, and one portable `INSERT` genuinely does put the row in
+/// both installations.
+fn lane_touches(entry: &ObjectEntry, dialect: EngineKind, role: FolderRole) -> bool {
+    entry.sites_in(dialect, role).next().is_some()
+}
+
+/// How many statements the lane runs against this object — for the sentence that
+/// explains the gap, and for nothing else.
+///
+/// Counted per **statement**, not per site: a statement that both defines and
+/// references an object leaves two sites behind and has still done one thing to
+/// it, which is the same thing the coverage cell counts. Separate from
+/// [`lane_touches`] because that one is asked for every object in the repository
+/// and only ever needs to know whether the answer is zero.
+fn lane_statements(entry: &ObjectEntry, dialect: EngineKind, role: FolderRole) -> usize {
+    entry
+        .sites_in(dialect, role)
+        .map(|site| (site.path.as_str(), site.statement_index))
+        .collect::<BTreeSet<_>>()
+        .len()
 }

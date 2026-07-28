@@ -1,0 +1,21 @@
+[package]
+name         = "arbor-sql-abbrev"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "An Emmet-like abbreviation language for SQL, resolved against a live schema: `s#ordini>clienti[nome='rossi']` becomes a structured statement whose joins come from the foreign keys and whose quoting comes from the column types. Host-agnostic — no engine, no driver, no product."
+
+[dependencies]
+# The only dependency, and deliberately so: this crate is a parser and a
+# resolver, and every host (Picus's query editor, Bennu's embedded SQL) has to
+# be able to take it without taking anything else. `serde` is here because the
+# cursor context and the resolved statement both cross an IPC seam on their way
+# to a frontend.
+serde = { workspace = true }
+
+[dev-dependencies]
+# `Statement` and `CursorContext` cross an IPC boundary to a TypeScript
+# frontend, so their JSON is a contract and is asserted as one. Test-only.
+serde_json = { workspace = true }

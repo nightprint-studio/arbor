@@ -9,7 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use picus_parse::prelude::{line_col, ObjectRef, Statement, StatementKind};
+use picus_parse::prelude::{ObjectRef, Statement, StatementKind};
 
 use crate::entry::{ObjectEntry, ObjectSite};
 use crate::input::{ParsedProject, ParsedScript, Placement};
@@ -81,14 +81,23 @@ fn index_statement(
         if name.is_empty() {
             continue;
         }
+        // Both sets are consulted before the row is touched, so a statement that
+        // names the same object again — the common case in a real script — costs
+        // two lookups and no allocation at all. Reaching for the row first would
+        // clone the name on every mention rather than on every new fact.
+        let counts = counted.insert((kind, name.clone()));
+        let sites = sited.insert((kind, name.clone(), defining));
+        if !counts && !sites {
+            continue;
+        }
         let row = rows
             .entry((kind, name.clone()))
             .or_insert_with(|| new_entry(kind, &name, keys));
 
-        if counted.insert((kind, name.clone())) {
-            *row.coverage.entry(coverage_key.to_string()).or_insert(0) += 1;
+        if counts {
+            *row.coverage.entry(coverage_key.clone()).or_insert(0) += 1;
         }
-        if sited.insert((kind, name.clone(), defining)) {
+        if sites {
             row.sites.push(ObjectSite {
                 path: script.path.to_string(),
                 folder_path: placement.folder.path.clone(),
@@ -96,7 +105,7 @@ fn index_statement(
                 role: placement.effective_role(),
                 statement_index: index,
                 range: object.range,
-                line: line_col(script.source, object.range.start).0,
+                line: script.parsed.line_of(object.range.start),
                 declared_kind: object.kind,
                 defining,
                 creating: defining && creating,

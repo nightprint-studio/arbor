@@ -52,7 +52,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use picus_parse::prelude::{line_col, DmlOperation, EngineKind};
+use picus_parse::prelude::{DmlOperation, EngineKind};
 use picus_project::prelude::FolderNode;
 use picus_types::prelude::FolderRole;
 
@@ -167,7 +167,7 @@ fn collect<'a>(context: &Context<'a>) -> BTreeMap<(EngineKind, String), Pair<'a>
                     match compare::comparable_rows(shape) {
                         Some(rows) => {
                             for (row, fingerprint) in shape.rows.iter().zip(rows) {
-                                let line = line_col(script.source, row.range.start).0;
+                                let line = script.parsed.line_of(row.range.start);
                                 let anchor = Anchor::at(script.path, line);
                                 side.rows.push((fingerprint, anchor));
                             }

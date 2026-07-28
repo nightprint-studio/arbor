@@ -175,6 +175,7 @@ mod tests {
                 generation: Default::default(),
                 naming: NamingScheme::default(),
                 folders: Vec::new(),
+                files: Vec::new(),
                 aliases: Vec::new(),
             },
             notes: Vec::new(),

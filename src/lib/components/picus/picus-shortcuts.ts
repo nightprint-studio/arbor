@@ -63,8 +63,12 @@ export const PICUS_SHORTCUTS: PicusShortcutGroup[] = [
     label: 'SQL editor',
     shortcuts: [
       { keys: ['Ctrl', 'Space'], description: 'Completion — tables, columns, keywords for the tab’s dialect' },
-      { keys: ['Tab'], description: 'Accept the completion, or the greyed continuation at the caret' },
-      { keys: ['Esc'], description: 'Dismiss the completion or the greyed continuation' },
+      // No binding of its own for the abbreviation shorthand: it produces exactly
+      // the same greyed proposal every other certain continuation does, and a
+      // second key for "accept the thing on screen" would be a second answer to a
+      // question Tab already answers.
+      { keys: ['Tab'], description: 'Accept the completion, or the greyed proposal at the caret — including the statement an abbreviation stands for' },
+      { keys: ['Esc'], description: 'Dismiss the completion or the greyed proposal' },
       { keys: ['Ctrl', '/'], description: 'Comment or uncomment the selected lines' },
       { keys: ['Ctrl', 'Y'], description: 'Delete the current line' },
     ],
@@ -81,6 +85,12 @@ export const PICUS_SHORTCUTS: PicusShortcutGroup[] = [
       // keyboard layout) — F for folder, and nothing in Picus searches across files
       // for it to collide with.
       { keys: ['Ctrl', 'Shift', 'F'], description: 'Classify a folder — say which engine and which role it has' },
+      // F6 rather than another Ctrl+Shift letter: every mnemonic one is either
+      // taken in this window or reserved by Arbor's opt-in OS-global accelerators
+      // (Ctrl+Shift+E File Explorer, Ctrl+Shift+R Tyto record, Ctrl+Shift+G the
+      // window switcher). The repository verbs already read as a run of function
+      // keys — F5 re-reads, F6 classifies one script, F8 walks the findings.
+      { keys: ['F6'], description: 'Classify a script — say which engine one file is written for' },
       { keys: ['Shift', 'F10'], description: 'Open the menu of the focused row in the tree' },
     ],
   },

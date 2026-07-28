@@ -55,9 +55,24 @@
     inherited?: boolean;
     /** Project-relative path of the folder that declared it — named in the tooltip. */
     from?: string;
+    /**
+     * What this chip is describing.
+     *
+     * The engine normally belongs to a folder, but a single script can declare
+     * one of its own — and "declared on this folder" on a file row is the kind of
+     * small lie that makes a user distrust everything else the tooltip says.
+     */
+    subject?: 'folder' | 'file';
   }
 
-  let { engine, size = 'sm', terse = false, inherited = false, from = '' }: Props = $props();
+  let {
+    engine,
+    size = 'sm',
+    terse = false,
+    inherited = false,
+    from = '',
+    subject = 'folder',
+  }: Props = $props();
 
   const dialect = $derived(isDialect(engine) ? engine : null);
   const generic = $derived(isGenericEngine(engine));
@@ -74,10 +89,12 @@
   /** Where the answer came from — the same clause in every tooltip below. */
   const source = $derived(
     !inherited
-      ? 'declared on this folder'
+      ? `declared on this ${subject === 'file' ? 'script' : 'folder'}`
       : from
         ? `inherited from ${from}`
-        : 'inherited from a folder above',
+        : subject === 'file'
+          ? 'inherited from its folder'
+          : 'inherited from a folder above',
   );
 
   const hint = $derived.by(() => {
@@ -95,6 +112,13 @@
         `${FOREIGN_ENGINES[foreign]} — not supported (${source}). Picus reads and generates ` +
         'Oracle and PostgreSQL; these scripts are listed and left alone. They are not parsed, ' +
         'not compared against any other folder, and nothing is ever written into them.'
+      );
+    }
+    if (subject === 'file') {
+      return (
+        'Nothing says which engine this script is written in — not the file, and not any '
+        + 'folder above it. Nothing is generated into it and nothing about it is compared '
+        + 'until something does. Classify the script, or its folder.'
       );
     }
     return 'Nothing says which engine this folder is written in, and nothing is generated into it until something does. Classify it, or a folder above it.';

@@ -35,6 +35,10 @@
  *   scanner cannot tell, so it does not try.
  * - **A statement containing a subquery skips the ambiguity check**, because the
  *   inner scope is wider than what is collected at the top level.
+ * - **An abbreviation line is not SQL and is not measured as SQL.** `s#t(a)[b=1]`
+ *   is a shorthand the backend expands; scanned as SQL it is nonsense, and a line
+ *   of squiggles under something the tool understands perfectly well is the worst
+ *   kind of wrong. Its own refusal, when it has one, is reported instead.
  *
  * Offsets come out in **UTF-8 bytes**, which is the wire coordinate
  * `EditorDiagnostic` is defined in; the editor core maps them back.
@@ -43,6 +47,7 @@
 import type { EditorDiagnostic } from '$lib/components/shared/ui/code-editor';
 import { makeU16ToByte } from '$lib/components/shared/ui/code-editor';
 import type { Dialect, TableInfo } from '$lib/types/picus';
+import { abbreviationLines, type AbbreviationLine } from './abbrev';
 import {
   analyzeStatement, identOf, resolveQualifier,
   type RelationRef, type StatementInfo,
@@ -251,26 +256,37 @@ function checkStatement(
  *
  * Pure with respect to the editor: a Svelte `$derived` calls it and hands the
  * result to `CodeEditor`'s `diagnostics` prop, so it re-runs when the text, the
- * connection or the schema changes and never at any other time.
+ * connection or the schema changes — and when the backend's answer about an
+ * abbreviation line lands, which is a reactive read for exactly that reason.
  */
 export function sqlDiagnostics(
   text: string, dialect: Dialect, connectionId?: string,
 ): EditorDiagnostic[] {
   if (!text || text.length > MAX_ANALYSED_CHARS) return [];
 
+  // Which lines are abbreviations is the Rust parser's answer, cached — never a
+  // shape test repeated here. Read before anything else because it decides both
+  // what is skipped below and what is reported instead.
+  const abbreviations = abbreviationLines(connectionId, text);
+  const markers: Marker[] = refusals(abbreviations);
+
   const view = schemaViewFor(connectionId);
-  // Nothing to say at all: no catalogue and no connection to refuse a write.
-  if (!view.known && !view.readOnly) return [];
-
-  const { statements } = scanSql(text, dialect);
-  const created = createdInBuffer(statements);
-  const markers: Marker[] = [];
-
-  for (const stmt of statements) {
-    if (markers.length >= MAX_DIAGNOSTICS) break;
-    checkStatement(stmt, dialect, view, created, markers);
+  // Nothing more to say: no catalogue and no connection to refuse a write.
+  if (view.known || view.readOnly) {
+    const { statements } = scanSql(text, dialect);
+    const created = createdInBuffer(statements);
+    for (const stmt of statements) {
+      if (markers.length >= MAX_DIAGNOSTICS) break;
+      // The whole statement, not just the line: an abbreviation carries no `;`, so
+      // the scanner runs it together with whatever follows. Losing a real
+      // statement's markers for the second the shorthand is on screen is the
+      // conservative direction — inventing markers for it is not.
+      if (abbreviations.some((a) => a.from < stmt.to && stmt.from < a.to)) continue;
+      checkStatement(stmt, dialect, view, created, markers);
+    }
   }
 
+  if (markers.length === 0) return [];
   const u2b = makeU16ToByte(text);
   return markers.slice(0, MAX_DIAGNOSTICS).map((m) => ({
     from: u2b(m.from),
@@ -278,4 +294,23 @@ export function sqlDiagnostics(
     severity: m.severity,
     message: m.message,
   }));
+}
+
+/**
+ * The abbreviations that will not expand, as markers.
+ *
+ * Reported at `warning`, the same weight as an unknown table — the line is a
+ * shorthand that has not resolved *yet*, and half of them are refusals for
+ * half-typed names that resolve themselves on the next keystroke. The message is
+ * the backend's own sentence, verbatim: refusing rather than guessing is the whole
+ * posture of the language, and it only works if the reason reaches the person
+ * typing.
+ */
+function refusals(abbreviations: AbbreviationLine[]): Marker[] {
+  const out: Marker[] = [];
+  for (const line of abbreviations) {
+    if (!line.error) continue;
+    out.push({ from: line.from, to: line.to, severity: 'warning', message: line.error });
+  }
+  return out;
 }

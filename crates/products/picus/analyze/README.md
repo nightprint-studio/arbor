@@ -45,19 +45,27 @@ Two axes, and keeping them apart is the point. `CONS001` and `CONS004` compare *
 against the other**; `CONS002` and `CONS003` compare **one dialect's initialisation against its own
 updates**. `DIA001` compares nothing at all — it is one script that will not run.
 
-The unit on both axes is a **lane**: `(dialect, role)` — the folders that play one role for one
+The unit on both axes is a **lane**: `(dialect, role)` — the scripts that play one role for one
 dialect, wherever in the tree they sit and however many of them there are. `INIZIALIZZAZIONE/2024/ORA`
 and `INIZIALIZZAZIONE/2025/ORA` are one lane and one install story; reading either alone would
-report the other as a gap. A folder no ancestor declares a dialect for is in no lane and takes
+report the other as a gap. A script no ancestor declares a dialect for is in no lane and takes
 part in nothing cross-dialect.
+
+The **role** is the folder's and the **dialect** is the file's, so a folder is in a lane when any
+file in it is — a directory holding `4_12_ORA.sql` beside `4_12_POS.sql` is in both. That is also
+why `lane_touches` asks the **sites** rather than summing the coverage map: in a mixed folder that
+map is keyed on the folder, and summing it per lane would credit Oracle with what the PostgreSQL
+scripts did. A gap reported as covered is a false negative, and it is the one kind of wrong answer
+`CONS001` must never give. `Context` resolves every lane once at construction — there are at most
+ten of them, and the cross-dialect rules ask about eight per object in the inventory.
 
 | Rule | Severity | Fires when | Deliberately does **not** fire when |
 |---|---|---|---|
-| `CONS001` | blocking | An object is touched by one dialect's lane at some role and by the other's not at all | The object is a **package** (Oracle-only); the folder has **no dialect**; the role exists for only one dialect |
+| `CONS001` | blocking | An object is touched by one dialect's lane at some role and by the other's not at all | The object is a **package** (Oracle-only); the script has **no dialect**; the role exists for only one dialect |
 | `CONS002` | blocking | A datum the `init`/`data` folders write is written by no `update` script of the same dialect | The updates never load that table at all; a value is **computed**; a row has no column list; the difference is only in a column one half never writes |
 | `CONS003` | blocking | A datum an `update` script writes is written by no `init`/`data` script of the same dialect | Same three, mirrored |
 | `CONS004` | blocking | Both dialects load the same table at the same role, with different columns or different rows | Any value is **computed** (`SYSDATE`, `now()`, a sequence) — the rows are then incomparable, not different |
-| `DIA001` | blocking | A statement uses a construct belonging to the other dialect | The file was parsed as something other than its folder's dialect; the same construct repeats in one statement (one finding, not four) |
+| `DIA001` | blocking | A statement uses a construct belonging to the other dialect | The file was parsed as something other than the scope that applies to it; the same construct repeats in one statement (one finding, not four) |
 | `VER001` | blocking | An `update` file changes something and never **reads** the version table | The folder is not `update`; the file changes nothing; the file only **writes** the version table (that is `VER002`'s job, not a guard) |
 | `VER002` | blocking | An `update` file changes something and never writes the version table | The folder is not `update`; the file changes nothing |
 | `VER003` | blocking | Two update files leave a hole, overlap, or both install the same version | Files that are not update scripts under the project's pattern |

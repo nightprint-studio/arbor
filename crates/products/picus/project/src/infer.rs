@@ -198,6 +198,48 @@ pub fn infer_engine_in(
     match_word(folder_name, ENGINE_KEYWORDS).map(|(kind, keyword)| Guess::matched(kind, keyword))
 }
 
+/// Which engine a **file** is written in, from its own name.
+///
+/// The answer comes from the project's own vocabulary and from nowhere else —
+/// and unlike every other inference in this module, the built-in list is not
+/// consulted at all. Two reasons, and both are about the same asymmetry:
+///
+/// * **A file name is a sentence.** `ORA` is Italian for *now*; `AGGIORNA_ORA_INIZIO.sql`
+///   is an ordinary name for an ordinary script, and a global rule that read it as
+///   Oracle would parse somebody's PostgreSQL file with the wrong dialect. Folder
+///   names are short and deliberate, and there are a dozen of them to review; file
+///   names are hundreds, and nobody reviews them.
+/// * **The full product names are no safer here.** `MIGRAZIONE_DA_MYSQL.sql` is a
+///   PostgreSQL script *about* MySQL, and reading `mysql` out of it would mark the
+///   file as an engine Picus does not support — which does not produce a wrong
+///   finding, it produces **no** findings, silently. `4_12_ORACLE.sql` is the case
+///   this gives up, and one `[[alias]]` line buys it back.
+///
+/// So a file is classified by name only where the repository's owner has said
+/// which names mean what, and said that they mean it about file names — see
+/// [`crate::alias::AliasScope`]. Everywhere else a file simply inherits its
+/// folder, exactly as before.
+pub fn infer_file_engine_in(
+    file_name: &str,
+    aliases: &AliasVocabulary,
+) -> Option<Guess<FolderEngine>> {
+    aliases.file_engine(file_stem(file_name))
+}
+
+/// A file name without its extension.
+///
+/// Taken off before matching so `.sql` cannot match an alias called `SQL`, and so
+/// a repository whose Oracle files are `*.ora` is not classified by an accident of
+/// the extension — that would be a different rule, and one nobody asked for.
+pub fn file_stem(file_name: &str) -> &str {
+    match file_name.rsplit_once('.') {
+        // A dotfile (`.sql`) is all extension and no name; matching on the empty
+        // string would be matching on nothing.
+        Some((stem, _)) if !stem.is_empty() => stem,
+        _ => file_name,
+    }
+}
+
 /// Case-insensitive, separator-insensitive keyword search.
 ///
 /// Matching on the normalised *whole* name rather than on tokens is deliberate:
@@ -457,6 +499,21 @@ mod tests {
                 name: name.to_string(),
                 engine: engine.map(str::to_string),
                 role: role.map(str::to_string),
+                applies_to: None,
+            })
+            .collect();
+        AliasVocabulary::compile(&aliases)
+    }
+
+    /// A vocabulary that answers about file names as well as folder names.
+    fn file_vocabulary(entries: &[(&str, &str)]) -> AliasVocabulary {
+        let aliases: Vec<InferenceAlias> = entries
+            .iter()
+            .map(|(name, engine)| InferenceAlias {
+                name: name.to_string(),
+                engine: Some(engine.to_string()),
+                role: None,
+                applies_to: Some("both".to_string()),
             })
             .collect();
         AliasVocabulary::compile(&aliases)
@@ -551,6 +608,78 @@ mod tests {
         assert!(infer_engine_in("MSQ", &v).is_none(), "the bad entry claims nothing");
         assert!(infer_engine_in("NOTHING", &v).is_none());
         assert!(infer_engine_in("POS", &v).is_some());
+    }
+
+    // ── Classifying one file by its own name ──────────────────────────────────
+
+    #[test]
+    fn the_built_in_vocabulary_never_classifies_a_file() {
+        // The asymmetry this whole path rests on. Every one of these reads as an
+        // engine when it is a FOLDER name, and none of them may when it is a file
+        // name — there is no project vocabulary here, so there is no answer.
+        let none = AliasVocabulary::EMPTY;
+        for name in ["4_12_ORA.sql", "ORACLE.sql", "01_POSTGRES.sql", "MIGRAZIONE_DA_MYSQL.sql"] {
+            assert!(
+                infer_file_engine_in(name, &none).is_none(),
+                "{name} must not be classified without the project saying so"
+            );
+        }
+        // …and the folder rule is untouched: the same words still work there.
+        assert_eq!(engine_of("ORACLE"), Some(FolderEngine::Supported(EngineKind::Oracle)));
+    }
+
+    #[test]
+    fn a_declared_name_classifies_the_scattered_files() {
+        // The repository this exists for: one folder, both engines, and the file
+        // name is the only thing that knows.
+        let v = file_vocabulary(&[("POS", "postgres"), ("ORA", "oracle")]);
+        assert_eq!(
+            infer_file_engine_in("4_12_POS.sql", &v).map(|g| g.value),
+            Some(FolderEngine::Supported(EngineKind::Postgres))
+        );
+        assert_eq!(
+            infer_file_engine_in("4_12_ORA.sql", &v).map(|g| g.value),
+            Some(FolderEngine::Supported(EngineKind::Oracle))
+        );
+        // Whole words here too, so the Italian keeps working.
+        for name in ["AGGIORNA_ORARI.sql", "POSIZIONI.sql", "COMPOSIZIONE.sql"] {
+            assert!(infer_file_engine_in(name, &v).is_none(), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_extension_is_not_part_of_the_name_being_matched() {
+        // `.sql` must never be able to match an alias, and a repository whose
+        // Oracle files end in `.pks` is not classified by that accident either.
+        assert_eq!(file_stem("4_12_POS.sql"), "4_12_POS");
+        assert_eq!(file_stem("PKG_CLIENTI.pkb"), "PKG_CLIENTI");
+        assert_eq!(file_stem("no_extension"), "no_extension");
+        // A dotfile is all extension: matching the empty stem would match nothing
+        // at best and everything at worst.
+        assert_eq!(file_stem(".sql"), ".sql");
+
+        let v = file_vocabulary(&[("SQL", "postgres")]);
+        assert!(infer_file_engine_in("4_12_ORA.sql", &v).is_none(), "the extension is not a word");
+    }
+
+    #[test]
+    fn a_file_can_be_declared_portable_by_name_because_a_person_still_said_it() {
+        // Same rule as folders: `generic` is never inferred, but a name the
+        // repository's owner declared is not inference.
+        let v = file_vocabulary(&[("COMUNE", "generic")]);
+        let guess = infer_file_engine_in("4_12_COMUNE.sql", &v).expect("declared");
+        assert_eq!(guess.value, FolderEngine::Generic);
+        assert!(EngineKind::ALL.iter().all(|d| guess.value.covers(*d)));
+    }
+
+    #[test]
+    fn one_file_can_be_pinned_to_an_engine_picus_does_not_read() {
+        // The dirtiest corner of a dirty repository: a single T-SQL script that
+        // wandered into an Oracle folder. Naming it is what stops it being parsed.
+        let v = file_vocabulary(&[("MSQ", "sqlserver")]);
+        let guess = infer_file_engine_in("4_12_MSQ.sql", &v).expect("recognised");
+        assert!(!guess.value.is_readable());
+        assert_eq!(guess.value.dialect(), None);
     }
 
     #[test]

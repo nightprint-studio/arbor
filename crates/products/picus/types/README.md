@@ -30,6 +30,12 @@ One wire word per value in one key: `dialect = "oracle"`, `"generic"`, `"sqlserv
 is hand-written rather than `untagged` because a unit variant would otherwise spell itself
 `null`, and `null` already means "nobody knows" here.
 
+The same slot is a **file's** engine too. In an untidy repository the engine is on the file rather
+than on the directory — `4_12_ORA.sql` beside `4_12_POS.sql` — so `picus-project`'s `ScriptFile`
+carries a `FolderEngine` on exactly the same terms as `FolderNode` does. One type with four
+answers, asked at two granularities, is what keeps a file and its folder from ever disagreeing
+about what *portable* means.
+
 `ForeignEngine` is a separate type from `EngineKind` on purpose: `EngineKind` is what a
 driver connects with and what an emitter writes, and folding the two would give every
 `match` an arm claiming Picus can emit T-SQL.

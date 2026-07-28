@@ -35,7 +35,13 @@ pub(crate) fn walk_file(root: Node, source: &str, scope: DialectScope) -> Parsed
         }
     }
 
-    ParsedFile { scope, source_len: source.len(), statements, errors }
+    ParsedFile {
+        scope,
+        source_len: source.len(),
+        statements,
+        errors,
+        line_starts: ParsedFile::index_lines(source),
+    }
 }
 
 fn statement_of(

@@ -17,4 +17,5 @@ pub use crate::connections::{
 
 pub use crate::digest::digest;
 
+pub use crate::schema::SchemaCache;
 pub use crate::scripts::{cache_key, CachedSource, ScriptCache, ScriptSnapshot};

@@ -40,20 +40,63 @@ use crate::tree::FolderNode;
 /// the way down. There is nothing here that knows the difference between them,
 /// which is exactly why adding a fourth state cost this function nothing.
 pub fn resolve(nodes: &mut [FolderNode], engine: Option<FolderEngine>, role: Option<FolderRole>) {
+    resolve_in(nodes, engine, role, false)
+}
+
+/// The same, for the one caller that also has the repository root's **exclusion**
+/// to hand down.
+///
+/// Separate rather than a fourth parameter on [`resolve`] because every consumer
+/// but discovery passes `None, None` and has nothing above the forest at all;
+/// making them all say `false` would be noise on a dozen call sites to serve one.
+pub fn resolve_from(
+    nodes: &mut [FolderNode],
+    engine: Option<FolderEngine>,
+    role: Option<FolderRole>,
+    excluded: bool,
+) {
+    resolve_in(nodes, engine, role, excluded)
+}
+
+/// The recursion, carrying the one thing that inherits as a plain value rather
+/// than as an `Option`: whether we are already inside an excluded subtree.
+fn resolve_in(
+    nodes: &mut [FolderNode],
+    engine: Option<FolderEngine>,
+    role: Option<FolderRole>,
+    excluded: bool,
+) {
     for node in nodes {
         let engine = node.engine.or(engine);
         let role = node.role.or(role);
+        // Three-valued on the way in, two-valued on the way out: saying nothing
+        // inherits, and saying `false` inside an excluded folder rescues this
+        // subtree — which is the whole reason it is an `Option<bool>` and not a
+        // `bool`. Without that, one wanted script inside an archived folder
+        // would mean un-archiving the folder.
+        let excluded = node.excluded.unwrap_or(excluded);
         node.effective_engine = engine;
+        node.effective_excluded = excluded;
         // `Ignored` is the honest fallback rather than a dismissal: a folder
         // nobody classified must not receive generated SQL.
         node.effective_role = role.unwrap_or(FolderRole::Ignored);
-        resolve(&mut node.children, engine, role);
+        // A file is the last link of the same chain, on both axes: it takes its
+        // folder's answer unless it declares one, exactly as the folder takes its
+        // parent's. Done here rather than anywhere else so there is one
+        // inheritance rule in the codebase and no second place for a file and its
+        // folder to disagree.
+        for file in &mut node.files {
+            file.effective_engine = file.engine.or(engine);
+            file.effective_excluded = file.excluded.unwrap_or(excluded);
+        }
+        resolve_in(&mut node.children, engine, role, excluded);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::ScriptFile;
     use picus_types::prelude::{EngineKind, ForeignEngine};
 
     fn node(path: &str, dialect: Option<EngineKind>, role: Option<FolderRole>) -> FolderNode {
@@ -235,6 +278,107 @@ mod tests {
         assert_eq!(child.effective_dialect(), Some(EngineKind::Postgres));
         assert_eq!(child.effective_engine.and_then(FolderEngine::foreign), None);
         assert_eq!(tree[0].effective_engine.and_then(FolderEngine::foreign), Some(ForeignEngine::Db2));
+    }
+
+    // ── Exclusion ─────────────────────────────────────────────────────────────
+
+    fn with_files(mut node: FolderNode, names: &[&str]) -> FolderNode {
+        node.files = names
+            .iter()
+            .map(|name| ScriptFile {
+                path: format!("{}/{name}", node.path),
+                name: name.to_string(),
+                size: 0,
+                encoding: "windows-1252".to_string(),
+                encoding_source: arbor_fs::prelude::encoding::EncodingSource::Inherited,
+                eol: crate::tree::LineEnding::Crlf,
+                expected_encoding: "windows-1252".to_string(),
+                engine: None,
+                effective_engine: None,
+                excluded: None,
+                effective_excluded: false,
+            })
+            .collect();
+        node
+    }
+
+    #[test]
+    fn excluding_a_folder_reaches_every_file_under_it() {
+        let mut tree = vec![nest(
+            FolderNode {
+                excluded: Some(true),
+                ..node("MIGRAZIONE_2019", Some(EngineKind::Oracle), Some(FolderRole::Update))
+            },
+            vec![with_files(node("MIGRAZIONE_2019/DDL", None, None), &["01.sql"])],
+        )];
+        resolve(&mut tree, None, None);
+
+        for folder in tree[0].walk() {
+            assert!(folder.is_excluded(), "{}", folder.path);
+        }
+        assert!(tree[0].children[0].files[0].is_excluded());
+        // …and the engine still resolves normally underneath. Exclusion is a
+        // separate axis, not a way of un-classifying something.
+        assert_eq!(tree[0].children[0].effective_dialect(), Some(EngineKind::Oracle));
+    }
+
+    #[test]
+    fn one_script_can_be_rescued_from_an_excluded_folder() {
+        // The reason it is an `Option<bool>` and not a `bool`: without this, one
+        // wanted script inside an archived folder would mean un-archiving the
+        // whole folder.
+        let mut folder = with_files(node("ARCHIVIO", None, None), &["vecchio.sql", "serve.sql"]);
+        folder.excluded = Some(true);
+        folder.files[1].excluded = Some(false);
+        let mut tree = vec![folder];
+        resolve(&mut tree, None, None);
+
+        assert!(tree[0].is_excluded());
+        assert!(tree[0].files[0].is_excluded());
+        assert!(!tree[0].files[1].is_excluded(), "this one was rescued");
+        let kept: Vec<&str> = tree[0].included_files().map(|f| f.name.as_str()).collect();
+        assert_eq!(kept, ["serve.sql"]);
+    }
+
+    #[test]
+    fn a_single_script_can_be_excluded_inside_a_folder_that_is_not() {
+        let mut folder = with_files(node("AGGIORNAMENTO", Some(EngineKind::Oracle), Some(FolderRole::Update)), &["a.sql", "migrazione.sql"]);
+        folder.files[1].excluded = Some(true);
+        let mut tree = vec![folder];
+        resolve(&mut tree, None, None);
+
+        assert!(!tree[0].is_excluded());
+        assert!(!tree[0].files[0].is_excluded());
+        assert!(tree[0].files[1].is_excluded());
+        // The excluded script takes no part in the lane its folder is in.
+        assert!(tree[0].is_in_lane(EngineKind::Oracle, FolderRole::Update));
+        assert_eq!(tree[0].included_files().count(), 1);
+    }
+
+    #[test]
+    fn excluded_is_not_the_same_as_the_ignored_role() {
+        // The distinction the whole design rests on. `Ignored` is also what a
+        // folder nobody classified falls back to, so if it meant "excluded" every
+        // unclassified folder would silently vanish from the report — which is
+        // the opposite of what should happen to it.
+        let mut tree = vec![with_files(node("MISCELLANEA", Some(EngineKind::Oracle), None), &["x.sql"])];
+        resolve(&mut tree, None, None);
+
+        assert_eq!(tree[0].effective_role, FolderRole::Ignored, "nobody said what it is for");
+        assert!(!tree[0].is_excluded(), "…and that must not remove it from the project");
+        assert_eq!(tree[0].included_files().count(), 1);
+    }
+
+    #[test]
+    fn nothing_is_excluded_unless_somebody_said_so() {
+        let mut tree = vec![nest(
+            node("ORACLE", Some(EngineKind::Oracle), None),
+            vec![with_files(node("ORACLE/BACKUP", None, Some(FolderRole::Ignored)), &["old.sql"])],
+        )];
+        resolve(&mut tree, None, None);
+        for folder in tree[0].walk() {
+            assert!(!folder.is_excluded(), "{}", folder.path);
+        }
     }
 
     #[test]

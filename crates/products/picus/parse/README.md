@@ -150,6 +150,22 @@ is asserted over the entire corpus, in both dialects, in `tests/corpus.rs`. It i
 what lets `picus-rewrite` splice a statement and guarantee the rest of the file
 survives untouched.
 
+### The one piece of derived state: `line_starts`
+
+`ParsedFile` keeps a byte offset per line, built once by the parse and skipped by
+serde. It is there for a measured reason. Line numbers are only ever wanted when a
+message is being written for a human, so the obvious design is to count newlines on
+demand — which is what `range::line_col` does, in time linear in the offset. But
+every inventory site, every finding and every suppression asks for one, so "on
+demand" is **O(bytes²) per file**: a repository of ~500 files / 11 MB took over five
+minutes to index, twenty-five of its twenty-nine seconds inside `line_col`. Held as
+an index it is a binary search per question and a `Vec<u32>` per file — kilobytes
+against the megabytes of source it maps.
+
+So: **anything holding a `ParsedFile` must use `line_of` / `line_col_at`.**
+`range::line_col` remains for callers that have a source and no parse, and its doc
+comment says so. Both degrade rather than panicking on an offset past the end.
+
 ## Public API
 
 Through `picus_parse::prelude` (workspace convention):

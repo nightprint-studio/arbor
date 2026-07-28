@@ -25,7 +25,6 @@
 
 use std::collections::BTreeSet;
 
-use picus_parse::prelude::line_col;
 use picus_types::prelude::FolderRole;
 
 use crate::context::{engine_label, Context};
@@ -54,7 +53,7 @@ pub(crate) fn run(context: &Context<'_>, output: &mut Output) {
                     // NVL four times is one thing to rewrite, not four.
                     continue;
                 }
-                let line = line_col(script.source, construct.range.start).0;
+                let line = script.parsed.line_of(construct.range.start);
                 let home = engine_label(construct.belongs_to);
                 let (title, detail) = if scope.is_portable() {
                     (

@@ -24,10 +24,15 @@
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
-  import { CLEAR_ID, ENGINE_CHOICES, ROLE_CHOICES, engineChoiceLabel } from '../folder-classify';
+  import { CLEAR_ID, ENGINE_CHOICES, ROLE_CHOICES, engineChoiceLabel } from '../engine-choices';
   import {
+    ALIAS_SCOPE_CHOICES,
+    ALIAS_SCOPE_LABELS,
     FOLDER_ROLE_LABELS,
+    aliasScope,
     isDialect,
+    scopeCoversFolders,
+    type AliasScope,
     type FolderAlias,
     type FolderEngine,
     type FolderRole,
@@ -43,6 +48,12 @@
     { value: NONE, label: '— says nothing about the role —' },
     ...ROLE_CHOICES.map((r) => ({ value: r as string, label: FOLDER_ROLE_LABELS[r] })),
   ];
+  /**
+   * Where the name is looked for. Third control rather than a checkbox because
+   * "files only" is a real answer: a repository whose engine markers live purely
+   * in file names has no folders of that name to classify.
+   */
+  const scopeOptions = ALIAS_SCOPE_CHOICES.map((s) => ({ value: s as string, label: ALIAS_SCOPE_LABELS[s] }));
 
   const aliases = $derived(picusProjectStore.aliases);
   const attached = $derived(picusProjectStore.attached);
@@ -74,14 +85,23 @@
   let newName = $state('');
   let newEngine = $state<string>(NONE);
   let newRole = $state<string>(NONE);
+  /** A plain string because that is what `Select` binds; cast where it is used. */
+  let newScope = $state<string>('folders');
 
   function engineOf(alias: FolderAlias): string { return alias.engine ?? NONE; }
   function roleOf(alias: FolderAlias): string { return alias.role ?? NONE; }
 
+  /**
+   * Every field of an alias is **replaced**, never merged — so each of the three
+   * controls sends the other two as they stand. Letting one of them default
+   * instead is how editing an engine would quietly move a file-matching rule
+   * back to folders only.
+   */
   async function write(
     name: string,
     engine: string,
     role: string,
+    scope: AliasScope,
     what: string,
   ): Promise<boolean> {
     busy = name;
@@ -89,6 +109,7 @@
       name,
       engine === NONE ? null : (engine as FolderEngine),
       role === NONE ? null : (role as FolderRole),
+      scope,
     );
     busy = '';
     if (message) {
@@ -99,13 +120,20 @@
     return true;
   }
 
-  async function save(alias: FolderAlias, engine: string, role: string) {
+  async function save(alias: FolderAlias, engine: string, role: string, scope: AliasScope) {
     const both = [
       engine === NONE ? null : engineChoiceLabel(engine as FolderEngine),
       role === NONE ? null : FOLDER_ROLE_LABELS[role as FolderRole],
     ].filter(Boolean);
     if (!both.length) { await remove(alias); return; }
-    await write(alias.name, engine, role, `Every folder named ${alias.name} → ${both.join(' · ')}.`);
+    const where = scope === 'files' ? 'file' : scope === 'both' ? 'folder and file' : 'folder';
+    await write(
+      alias.name,
+      engine,
+      role,
+      scope,
+      `Every ${where} named ${alias.name} → ${both.join(' · ')}.`,
+    );
   }
 
   async function remove(alias: FolderAlias) {
@@ -119,11 +147,18 @@
   async function add() {
     const name = newName.trim();
     if (!name || (newEngine === NONE && newRole === NONE)) return;
-    const ok = await write(name, newEngine, newRole, `Every folder named ${name} is now classified.`);
+    const ok = await write(
+      name,
+      newEngine,
+      newRole,
+      newScope as AliasScope,
+      `Everything named ${name} is now classified.`,
+    );
     if (!ok) return;
     newName = '';
     newEngine = NONE;
     newRole = NONE;
+    newScope = 'folders';
   }
 
   const canAdd = $derived(!!newName.trim() && (newEngine !== NONE || newRole !== NONE));
@@ -132,10 +167,17 @@
 <div class="section-header">
   <h2>Folder names</h2>
   <p>
-    What a folder <b>name</b> means in this repository. Picus knows the names that mean the same
+    What a <b>name</b> means in this repository. Picus knows the names that mean the same
     thing everywhere — <code>ORACLE</code>, <code>ORA</code>, <code>POSTGRES</code>,
     <code>MSSQL</code> — and deliberately not the ones that do not: <code>POS</code> is
     PostgreSQL in your repository and <code>POSIZIONI</code> in somebody else's.
+  </p>
+  <p>
+    Each name is looked for in folder names by default. <b>File names</b> are opt-in per
+    name, for the repositories whose engine markers live there instead —
+    <code>4_12_ORA.sql</code> beside <code>4_12_POS.sql</code> in one directory. They are
+    not the default because a file name is a sentence, and there are hundreds of them to a
+    dozen folder names. A <b>role</b> always stays a fact about a folder.
   </p>
 </div>
 
@@ -156,6 +198,7 @@
 
     {#each aliases as alias (alias.name)}
       {@const count = reach[alias.name]}
+      {@const scope = aliasScope(alias)}
       <div class="pa-row">
         <span class="pa-name" title="Matched as a whole word, case-insensitively">{alias.name}</span>
         <span class="pa-icon">
@@ -169,18 +212,26 @@
           value={engineOf(alias)}
           options={engineOptions}
           disabled={busy === alias.name}
-          onchange={(v) => void save(alias, v, roleOf(alias))}
+          onchange={(v) => void save(alias, v, roleOf(alias), scope)}
         />
         <Select
           value={roleOf(alias)}
           options={roleOptions}
           disabled={busy === alias.name}
-          onchange={(v) => void save(alias, engineOf(alias), v)}
+          onchange={(v) => void save(alias, engineOf(alias), v, scope)}
+        />
+        <Select
+          value={scope}
+          options={scopeOptions}
+          disabled={busy === alias.name}
+          onchange={(v) => void save(alias, engineOf(alias), roleOf(alias), v as AliasScope)}
         />
         <!-- A rule whose blast radius is invisible is a rule people are afraid
-             to touch. Blank until the count arrives, never a placeholder zero. -->
+             to touch. Blank until the count arrives, never a placeholder zero —
+             and absent entirely for a file-only rule, because the number that
+             would go here counts folders and would read as "this does nothing". -->
         <span class="pa-reach">
-          {#if count !== undefined}
+          {#if count !== undefined && scopeCoversFolders(scope)}
             <Badge
               variant="tone"
               tone={count === 0 ? 'warning' : 'neutral'}
@@ -213,6 +264,7 @@
       <span class="pa-icon"></span>
       <Select bind:value={newEngine} options={engineOptions} />
       <Select bind:value={newRole} options={roleOptions} />
+      <Select bind:value={newScope} options={scopeOptions} />
       <span></span>
       <Button variant="secondary" size="xs" disabled={!canAdd} onclick={() => void add()}>
         {#snippet iconStart()}<Plus size={12} />{/snippet}
@@ -224,7 +276,7 @@
   <Alert
     variant="info"
     compact
-    text="A folder that declares its own engine keeps it — a specific answer beats the rule. Naming an engine Picus does not support (SQL Server, DB2, …) says those scripts are not its business: they are listed, never parsed, and never asked about."
+    text="A folder — or a script — that declares its own engine keeps it: a specific answer beats the rule. Naming an engine Picus does not support (SQL Server, DB2, …) says those scripts are not its business: they are listed, never parsed, and never asked about. The count beside a rule is the folders it reaches today; a rule pointed only at file names shows none, because that number would be counting the wrong thing."
   />
 {/if}
 
@@ -237,11 +289,13 @@
     color: var(--text-muted);
   }
 
-  /* name · icon · engine · role · reach · remove — one grid so every row's
-     controls line up whatever the name's length. */
+  /* name · icon · engine · role · where · reach · remove — one grid so every
+     row's controls line up whatever the name's length. */
   .pa-row {
     display: grid;
-    grid-template-columns: minmax(90px, 1fr) 14px minmax(150px, 1.4fr) minmax(130px, 1.2fr) auto auto;
+    grid-template-columns:
+      minmax(80px, 1fr) 14px minmax(140px, 1.3fr) minmax(120px, 1.1fr)
+      minmax(120px, 1.1fr) auto auto;
     align-items: center;
     gap: 8px;
     padding: 7px 0;

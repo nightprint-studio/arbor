@@ -95,5 +95,8 @@ fn failed(source: &str, scope: DialectScope, reason: &str) -> ParsedFile {
             text: reason.to_string(),
             expected: None,
         }],
+        // Indexed even here: a file that failed to parse still gets its errors
+        // rendered with a line number.
+        line_starts: ParsedFile::index_lines(source),
     }
 }

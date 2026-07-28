@@ -5,7 +5,7 @@
 //! `DELETE` with no `WHERE`, and saying so in the script is better than a rule
 //! that pretends to know the difference.
 
-use picus_parse::prelude::{line_col, DmlOperation, DmlShape};
+use picus_parse::prelude::{DmlOperation, DmlShape};
 
 use crate::context::Context;
 use crate::finding::{Anchor, Finding};
@@ -17,7 +17,7 @@ pub(crate) fn run(context: &Context<'_>, output: &mut Output) {
     for (script, _) in context.project.placed() {
         for statement in &script.parsed.statements {
             for shape in &statement.dml {
-                let line = line_col(script.source, shape.table.range.start).0;
+                let line = script.parsed.line_of(shape.table.range.start);
                 let anchor = || Anchor::at(script.path, line);
 
                 if unguarded_write(shape, version_table) {

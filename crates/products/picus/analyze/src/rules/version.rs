@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use picus_parse::prelude::{line_col, DmlOperation, Statement, StatementKind};
+use picus_parse::prelude::{DmlOperation, Statement, StatementKind};
 use picus_project::prelude::{
     CompiledNaming, FolderNode, ScriptFile, Version, VersionRange,
 };
@@ -62,7 +62,7 @@ fn guards(context: &Context<'_>, output: &mut Output) {
             continue;
         };
         let anchor = |offset: usize| {
-            Anchor::at(script.path, line_col(script.source, offset).0)
+            Anchor::at(script.path, script.parsed.line_of(offset))
         };
 
         if !reads_version(statements, version_table) {

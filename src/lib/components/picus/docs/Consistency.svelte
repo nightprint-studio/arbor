@@ -24,13 +24,29 @@
   an analysis would be a lie with a plausible face.
 </p>
 
+<h2>What is compared with what</h2>
+<p>
+  The cross-engine rules compare <b>one engine's scripts at one role</b> against the other's at the
+  same role — the folders that initialise Oracle against the folders that initialise PostgreSQL,
+  wherever in the tree they sit and however many of them there are. A repository that splits its
+  updates across <code>2024/ORA</code> and <code>2025/ORA</code> still has one update story, so
+  reading either half alone would report the other as a gap.
+</p>
+<p>
+  Which engine a script belongs to is the <b>file's</b> answer, not its folder's, so a directory
+  holding both <code>4_12_ORA.sql</code> and <code>4_12_POS.sql</code> takes part in both engines'
+  comparisons, and each side is credited only with what its own scripts do. A script no folder and
+  no name has classified takes part in none of this: comparing an unclassified folder against the
+  Oracle ones would report every object in the repository as missing from it.
+</p>
+
 <h2>The rules</h2>
 <table>
   <thead>
     <tr><th>Id</th><th>Rule</th><th>Severity</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>CONS001</code></td><td>Statement present for one engine and absent from the other engine's equivalent folder</td><td>blocking</td></tr>
+    <tr><td><code>CONS001</code></td><td>Statement present for one engine and absent from the other engine's scripts at the same role</td><td>blocking</td></tr>
     <tr><td><code>CONS002</code></td><td>Datum in the initialisation, never propagated to the updates</td><td>blocking</td></tr>
     <tr><td><code>CONS003</code></td><td>Datum in an update, missing from the initialisation — a fresh install ends up incomplete</td><td>blocking</td></tr>
     <tr><td><code>CONS004</code></td><td>Object filled in differently for the two engines — same row, different columns or different values</td><td>blocking</td></tr>

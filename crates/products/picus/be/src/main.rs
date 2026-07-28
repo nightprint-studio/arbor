@@ -69,6 +69,9 @@ mod placement;
 // The two calls that write: a preview that returns the exact bytes, and an apply
 // that refuses if any of them moved in between.
 mod apply;
+// The SQL abbreviation expander, joined to a live connection: the language is a
+// foundation crate, this supplies the schema, the dialect and the emitter.
+mod abbrev;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, any

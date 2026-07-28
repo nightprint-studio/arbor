@@ -23,6 +23,7 @@ export type {
   Node,
   CompletionSource,
   InlineCompletionSource,
+  InlineCompletion,
 } from './types';
 export {
   inlineCompletion,

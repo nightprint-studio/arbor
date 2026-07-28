@@ -16,7 +16,7 @@
 use std::collections::BTreeMap;
 
 use picus_inventory::prelude::ObjectSite;
-use picus_parse::prelude::{line_col, DialectScope, DmlOperation, DmlShape};
+use picus_parse::prelude::{DialectScope, DmlOperation, DmlShape, ParsedFile};
 
 use crate::compare::{self, RowFingerprint};
 use crate::context::Context;
@@ -59,7 +59,7 @@ fn duplicate_rows(context: &Context<'_>, output: &mut Output) {
                             seen.insert(key, row.range.start);
                         }
                         Some(first) => output.findings.push(duplicate_row_finding(
-                            script.source,
+                            script.parsed,
                             script.path,
                             &shape.table.folded_name(),
                             &fingerprint,
@@ -78,15 +78,15 @@ fn signature_of(shape: &DmlShape) -> Signature {
 }
 
 fn duplicate_row_finding(
-    source: &str,
+    parsed: &ParsedFile,
     path: &str,
     table: &str,
     fingerprint: &RowFingerprint,
     first: usize,
     second: usize,
 ) -> Finding {
-    let first_line = line_col(source, first).0;
-    let line = line_col(source, second).0;
+    let first_line = parsed.line_of(first);
+    let line = parsed.line_of(second);
     Finding::new(
         RuleId::Dup001,
         Anchor::at(path, line),

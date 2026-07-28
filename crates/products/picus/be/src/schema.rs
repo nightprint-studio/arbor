@@ -15,9 +15,16 @@ use picus_db_api::prelude::{SchemaSnapshot, TableInfo};
 use crate::connections::require_session;
 
 /// The whole schema of an open connection: tables, views, sequences, triggers.
+///
+/// The answer is also **held** ([`picus_core::prelude::SchemaCache`]), because one
+/// caller asks constantly: the SQL abbreviation expander, on every keystroke. It
+/// is stored here rather than fetched there so there is one place a schema is read
+/// from a server, and re-reading — which is what this call is — replaces it.
 #[arbor_rpc::handler]
 async fn picus_read_schema(state: &PicusState, id: String) -> Result<SchemaSnapshot, String> {
-    require_session(state, &id)?.read_schema().await.map_err(|e| e.to_string())
+    let schema = require_session(state, &id)?.read_schema().await.map_err(|e| e.to_string())?;
+    state.schemas().put(&id, std::sync::Arc::new(schema.clone()));
+    Ok(schema)
 }
 
 /// One relation in full: columns, primary key, foreign keys, indexes — or, for a

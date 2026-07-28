@@ -52,10 +52,16 @@
 
 <h2>The rule everything else follows</h2>
 <p>
-  <b>The dialect belongs to the folder, not to the project.</b> There is no "current
+  <b>The dialect belongs to the script, not to the project.</b> There is no "current
   dialect" anywhere in Picus. A folder declares which engine its scripts are written for,
   everything beneath it inherits that until another folder says otherwise, and every
   operation that reads, analyses or writes SQL is told which engine it is working in. That
   is why the same generation produces four different files, and why each of them is
   correct on its own terms.
+</p>
+<p>
+  The folder is where that answer normally lives, and where it normally should. But a repository
+  that keeps <code>4_12_ORA.sql</code> next to <code>4_12_POS.sql</code> in one directory is
+  describing its engines file by file, so a <b>file</b> can carry the answer too and overrules the
+  folder around it. See <i>Scripts on disk</i>.
 </p>

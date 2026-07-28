@@ -18,6 +18,20 @@
  * that certainly follows, or `null`. What makes it correct is the caller's
  * knowledge, and this module is only responsible for showing it and accepting it.
  *
+ * ## Continuing, and replacing
+ *
+ * The common proposal continues the text: return a string and Tab inserts it at
+ * the caret. Some proposals are not continuations but **rewrites** of what is
+ * already there — a source that recognises a shorthand and knows what it stands
+ * for wants Tab to put the long form *in place of* the short one, not after it.
+ * Returning an {@link InlineCompletion} says so: `replace` is the range Tab
+ * overwrites and `insert` is what it writes, which frees the ghost text to be a
+ * readable rendering of the outcome rather than a literal of it.
+ *
+ * Both halves are deliberately content-free. This module never learns what the
+ * shorthand is or which language it belongs to; it learns only that accepting a
+ * proposal may mean an edit wider than an insertion.
+ *
  * ## How it behaves
  *
  * - Requested after a short pause once the caret settles, and only for a single
@@ -45,7 +59,29 @@ import { Facet, StateEffect, StateField, type Extension } from '@codemirror/stat
 import { completionStatus } from '@codemirror/autocomplete';
 
 /**
- * Produce the text that follows `pos`, or `null` when nothing certainly does.
+ * A proposal that is more than a continuation.
+ *
+ * Every field beyond `text` is optional and defaults to the plain behaviour, so a
+ * source that only ever continues text keeps returning a string.
+ */
+export interface InlineCompletion {
+  /** The greyed text drawn after the caret. Shown, never necessarily written. */
+  text: string;
+  /**
+   * What accepting writes. Defaults to `text`.
+   *
+   * Separate from `text` so a proposal can *read* as one thing and *do* another —
+   * a rewrite is far clearer previewed as `→ <the result>` than as the result
+   * alone butting up against the shorthand it is going to consume.
+   */
+  insert?: string;
+  /** The range accepting overwrites. Defaults to an insertion at the caret. */
+  replace?: { from: number; to: number };
+}
+
+/**
+ * Produce what follows `pos` — or what should stand in place of the text around
+ * it — and `null` when nothing certainly does.
  *
  * May be async — the caller owns any I/O. Returning `null` is the normal answer
  * and must stay cheap: this runs every time the caret settles.
@@ -53,13 +89,33 @@ import { completionStatus } from '@codemirror/autocomplete';
 export type InlineCompletionSource = (
   view: EditorView,
   pos: number,
-) => string | null | Promise<string | null>;
+) => string | InlineCompletion | null | Promise<string | InlineCompletion | null>;
 
-/** The suggestion currently on screen. */
+/** The suggestion currently on screen, normalised. */
 interface Suggestion {
+  /** What is drawn. */
   text: string;
-  /** Document offset the text would be inserted at. */
+  /** Document offset the ghost text is drawn at — always the caret it was asked for. */
   pos: number;
+  /** The range accepting replaces (`from === to` for a plain insertion). */
+  from: number;
+  to: number;
+  /** What accepting writes. */
+  insert: string;
+}
+
+/** A source's answer, in the one shape the rest of the module handles. */
+function normalise(answer: string | InlineCompletion, pos: number): Suggestion | null {
+  const proposal = typeof answer === 'string' ? { text: answer } : answer;
+  if (!proposal.text) return null;
+  const { from, to } = proposal.replace ?? { from: pos, to: pos };
+  return {
+    text: proposal.text,
+    pos,
+    from,
+    to,
+    insert: proposal.insert ?? proposal.text,
+  };
 }
 
 const setSuggestion = StateEffect.define<Suggestion | null>();
@@ -114,14 +170,17 @@ const suggestionField = StateField.define<Suggestion | null>({
     }),
 });
 
-/** Insert the visible suggestion. `false` when there is nothing to accept, so Tab
- *  falls through to indentation as usual. */
+/** Apply the visible suggestion. `false` when there is nothing to accept, so Tab
+ *  falls through to indentation as usual.
+ *
+ *  One dispatch whether it inserts or replaces — a replacement whose range is empty
+ *  *is* an insertion, so there is no second path to keep in step with this one. */
 export const acceptInlineCompletion: Command = (view) => {
   const current = view.state.field(suggestionField, false);
   if (!current) return false;
   view.dispatch({
-    changes: { from: current.pos, insert: current.text },
-    selection: { anchor: current.pos + current.text.length },
+    changes: { from: current.from, to: current.to, insert: current.insert },
+    selection: { anchor: current.from + current.insert.length },
     effects: setSuggestion.of(null),
     userEvent: 'input.complete',
   });
@@ -216,9 +275,9 @@ const inlineCompletionPlugin = ViewPlugin.fromClass(
 
       const seq = ++this.seq;
       const pos = cursor.head;
-      let text: string | null = null;
+      let answer: string | InlineCompletion | null = null;
       try {
-        text = await source(this.view, pos);
+        answer = await source(this.view, pos);
       } catch {
         // A source that throws must not take the editor with it; no proposal is
         // always a valid answer.
@@ -228,9 +287,11 @@ const inlineCompletionPlugin = ViewPlugin.fromClass(
       if (seq !== this.seq) return;
       const now = this.view.state.selection.main;
       if (!now.empty || now.head !== pos) return;
-      if (!text) return;
+      if (!answer) return;
 
-      this.view.dispatch({ effects: setSuggestion.of({ text, pos }) });
+      const suggestion = normalise(answer, pos);
+      if (!suggestion) return;
+      this.view.dispatch({ effects: setSuggestion.of(suggestion) });
     }
   },
 );

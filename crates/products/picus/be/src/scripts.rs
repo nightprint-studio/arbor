@@ -32,7 +32,7 @@
 //! produced inside the call that needs it, by [`parse_all`] and nowhere else,
 //! which is also the single function a future on-disk parse cache would replace.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -41,7 +41,7 @@ use picus_analyze::prelude::{analyze, Finding, RejectedSuppression, SkippedRule}
 use picus_core::prelude::{digest, CachedSource, PicusState, ScriptSnapshot};
 use picus_inventory::prelude::{Inventory, InventoryObject, ParsedProject, ParsedScript};
 use picus_parse::prelude::{DialectScope, EngineKind, ParsedFile, SqlParser};
-use picus_project::prelude::{discover, label_to_encoding, LineEnding, Project};
+use picus_project::prelude::{discover, label_to_encoding, LineEnding, ScriptFile};
 use serde::Serialize;
 
 use crate::project::OpenedProject;
@@ -232,30 +232,28 @@ fn read_one(root: &Path, relative: &str, discovered: &str) -> Result<CachedSourc
 /// body — look the digest up, parse and store on a miss — and to nothing else.
 /// See `picus_core::scripts` for what such a tier has to provide.
 ///
-/// ## Files in an engine Picus does not support are not parsed
-///
-/// Not "parsed and then ignored" — **not parsed**. Handing T-SQL or DB2 SQL to a
-/// grammar built for Oracle and PostgreSQL does not fail; it succeeds, and
-/// produces a plausible-looking tree of statements that mean nothing. Everything
-/// downstream then has to be trusted to throw that away, and the day one rule
-/// forgets, the report is confidently wrong about somebody else's scripts.
-///
-/// It is also the cheapest speed there is on a real repository. Parsing is two
-/// thirds of an analysis, and in the repository this was built for the SQL Server
-/// and DB2 folders are roughly half the files — none of which anyone will ever
-/// look at a finding for.
+/// Files in an engine Picus does not support are skipped, per **file** and not
+/// per folder — see [`scope_of`] for why they must not be parsed at all. It is
+/// also the cheapest speed there is on a real repository: parsing is two thirds
+/// of an analysis, and in the repository this was built for the SQL Server and
+/// DB2 scripts are roughly half the files, none of which anyone will ever look at
+/// a finding for.
 fn parse_all(snapshot: &ScriptSnapshot) -> Vec<(String, ParsedFile)> {
-    // The skip list is built once, from the tree. Asking the tree per file would
-    // be a linear walk per file — quadratic on exactly the large repositories
-    // this skip exists to speed up, which would be a fine joke to leave in.
-    let skip = unparsable_paths(&snapshot.project);
-    let sources: Vec<&CachedSource> =
-        snapshot.sources.values().filter(|s| !skip.contains(s.path.as_str())).collect();
+    // Both the skip list and the per-file scope come out of **one** walk of the
+    // tree. Asking the tree per file would be a linear walk per file — quadratic
+    // on exactly the large repositories this skip exists to speed up, which would
+    // be a fine joke to leave in.
+    let files = snapshot.project.files_by_path();
+    let sources: Vec<&CachedSource> = snapshot
+        .sources
+        .values()
+        .filter(|s| files.get(s.path.as_str()).is_some_and(|f| !f.is_out_of_scope()))
+        .collect();
     // Below this, threads cost more than they save — and it keeps the common case
     // of a handful of files on one obvious code path.
     if sources.len() < PARALLEL_PARSE_THRESHOLD {
         let mut parser = SqlParser::new();
-        return sources.iter().map(|s| parse_one(&mut parser, snapshot, s)).collect();
+        return sources.iter().map(|s| parse_one(&mut parser, &files, s)).collect();
     }
 
     // Parsing is two thirds of an analysis and the files are completely
@@ -275,9 +273,10 @@ fn parse_all(snapshot: &ScriptSnapshot) -> Vec<(String, ParsedFile)> {
         let handles: Vec<_> = sources
             .chunks(chunk)
             .map(|slice| {
+                let files = &files;
                 scope.spawn(move || {
                     let mut parser = SqlParser::new();
-                    slice.iter().map(|s| parse_one(&mut parser, snapshot, s)).collect::<Vec<_>>()
+                    slice.iter().map(|s| parse_one(&mut parser, files, s)).collect::<Vec<_>>()
                 })
             })
             .collect();
@@ -308,51 +307,56 @@ fn parse_threads(files: usize) -> usize {
 
 fn parse_one(
     parser: &mut SqlParser,
-    snapshot: &ScriptSnapshot,
+    files: &HashMap<&str, &ScriptFile>,
     source: &CachedSource,
 ) -> (String, ParsedFile) {
-    let scope = scope_of(&snapshot.project, &source.path);
+    let scope = scope_of(files, &source.path);
     (source.path.clone(), parser.parse(&source.text, scope))
 }
 
-/// The files Picus should not read the SQL of at all.
+/// What a file is parsed as — **its own** scope, which for all but a handful of
+/// files is the one it inherited from its folder.
 ///
-/// Only the folders written in an engine Picus **recognises and does not
-/// support**. A folder nobody has classified yet is still parsed: it is a
-/// question, not an answer, and its inventory is part of what makes the question
-/// answerable — the user is choosing between engines partly on what the files say.
+/// Asked of the file rather than the folder because in an untidy repository the
+/// engine is on the file: one directory holding `4_12_ORA.sql` and `4_12_POS.sql`
+/// has to hand each of them to the right dialect, and its folder can say nothing
+/// about either.
 ///
-/// The distinction is the whole reason those two states are not one value.
-fn unparsable_paths(project: &Project) -> HashSet<&str> {
-    project
-        .walk()
-        .filter(|folder| folder.engine_is_unsupported())
-        .flat_map(|folder| folder.files.iter().map(|file| file.path.as_str()))
-        .collect()
-}
-
-/// What a file is parsed as — its folder's scope, always, inherited from wherever
-/// in the tree it was declared.
-///
-/// **A portable folder is parsed as `Portable`**, not as one of its dialects, and
+/// **A portable file is parsed as `Portable`**, not as one of its dialects, and
 /// that is the whole of what `DIA001`'s inversion needs from this layer: under
 /// `Portable` the parser accepts the syntax of neither engine, so a construct
 /// belonging to either lands in `foreign` and the rule reports the broken promise.
 /// Parsing such a file as Oracle would silently hide every Oracle-ism in it —
-/// exactly the ones the folder must not contain.
+/// exactly the ones it must not contain.
 ///
-/// A folder nobody could identify has no scope, and the fallback is genuinely
+/// A file nobody could identify has no scope, and the fallback is genuinely
 /// arbitrary rather than a guess: the grammar is one permissive superset of both
 /// dialects, so the statements, the objects and the DML come out the same either
 /// way. The engine decides only which constructs count as *foreign*, and `DIA001`
-/// refuses to report those for a folder with no engine — so nothing a user ever
+/// refuses to report those for a file with no engine — so nothing a user ever
 /// sees depends on this choice.
 ///
-/// It is a fallback for the **unclassified** case only. A folder in an engine
-/// Picus does not support never reaches here, because [`unparsable_paths`] kept it
-/// out — the fallback above would be a real guess there, and a wrong one.
-fn scope_of(project: &Project, path: &str) -> DialectScope {
-    project.scope_of(path).unwrap_or(DialectScope::One(EngineKind::Postgres))
+/// It is a fallback for the **unclassified** case only. A file written in an
+/// engine Picus does not support never reaches here: [`parse_all`] filtered it
+/// out, because the fallback above would be a real guess there, and a wrong one.
+///
+/// ## Files in an engine Picus does not support are not parsed
+///
+/// Not "parsed and then ignored" — **not parsed**. Handing T-SQL or DB2 SQL to a
+/// grammar built for Oracle and PostgreSQL does not fail; it succeeds, and
+/// produces a plausible-looking tree of statements that mean nothing. Everything
+/// downstream then has to be trusted to throw that away, and the day one rule
+/// forgets, the report is confidently wrong about somebody else's scripts.
+///
+/// A file nobody has classified *is* still parsed: that is a question, not an
+/// answer, and its inventory is part of what makes the question answerable — the
+/// user is choosing between engines partly on what the files say. The distinction
+/// is the whole reason those two states are not one value.
+fn scope_of(files: &HashMap<&str, &ScriptFile>, path: &str) -> DialectScope {
+    files
+        .get(path)
+        .and_then(|file| file.scope())
+        .unwrap_or(DialectScope::One(EngineKind::Postgres))
 }
 
 /// The reply both `picus_open_scripts` and `picus_refresh_scripts` give.

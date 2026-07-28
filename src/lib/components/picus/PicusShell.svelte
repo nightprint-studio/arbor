@@ -51,13 +51,13 @@
   import PicusDocsPanel from './PicusDocsPanel.svelte';
   import AddDestinationModal from './generate/AddDestinationModal.svelte';
   import ClassifyFolderModal from './ClassifyFolderModal.svelte';
-  import { aliasOfferDetail } from './folder-classify';
+  import ClassifyFileModal from './ClassifyFileModal.svelte';
+  import AliasOfferModal from './AliasOfferModal.svelte';
   import {
     PICUS_SECTIONS,
     buildPicusPalette,
     picusPaletteIcon,
   } from './picus-palette';
-  import { FOLDER_ROLE_LABELS, engineLabel } from '$lib/types/picus';
 
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { picusUiStore, type SidebarSection } from '$lib/stores/picus/ui.svelte';
@@ -237,51 +237,20 @@
     dmlStore.markGenerated();
   }
 
-  // ── "…and every folder named POS" ───────────────────────────────────────────
+  // ── "…and every other thing called POS" ─────────────────────────────────────
   //
-  // Raised by `folder-classify.ts` right after a folder is classified, and owned
-  // here for the same reason the delete confirmation is: classifying is reachable
-  // from the tree row, the dialog and the palette, and the follow-up question must
-  // not depend on which of the three is on screen.
+  // Raised by `folder-classify.ts` / `file-classify.ts` right after something is
+  // classified, and owned here for the same reason the delete confirmation is:
+  // classifying is reachable from the tree row, the dialog and the palette, and
+  // the follow-up question must not depend on which of the three is on screen.
   //
   // It is deliberately a **second** dialog rather than a checkbox on the first.
   // Declaring what one folder is and declaring what a name means across the whole
   // repository are different decisions with different blast radii — one folder
   // versus eleven and counting — and a user who reached the second by pressing a
-  // button that named the first would be right to feel misled.
+  // button that named the first would be right to feel misled. What it says, and
+  // where it lets the name apply, is `AliasOfferModal`.
   const aliasOffer = $derived(picusUiStore.aliasOffer);
-
-  const aliasOfferMessage = $derived.by(() => {
-    const offer = aliasOffer;
-    if (!offer) return '';
-    const said = [
-      offer.engine ? engineLabel(offer.engine) : null,
-      offer.role ? FOLDER_ROLE_LABELS[offer.role] : null,
-    ].filter(Boolean).join(' · ');
-    const others = offer.paths.length - 1;
-    return (
-      `${offer.origin} is ${said}. ` +
-      (others === 1
-        ? `One other folder is called ${offer.name} — should it mean the same thing?`
-        : `${others} other folders are called ${offer.name} — should they all mean the same thing?`)
-    );
-  });
-
-  async function acceptAliasOffer() {
-    const offer = aliasOffer;
-    if (!offer) return;
-    const message = await picusProjectStore.setAlias(offer.name, offer.engine, offer.role);
-    picusUiStore.closeFolderAlias();
-    if (message) {
-      toastStore.show(`${offer.name} could not be declared — ${message}`, 'error');
-      return;
-    }
-    toastStore.show(
-      `Every folder named ${offer.name} is now classified — ${offer.paths.length} of them, ` +
-        'and any added later.',
-      'success',
-    );
-  }
 
   // ── Deleting a connection ───────────────────────────────────────────────────
   //
@@ -440,6 +409,17 @@
       e.preventDefault();
       return;
     }
+    // …and the same for ONE script, which is the exception the folder dialog
+    // cannot express. F6 rather than another Ctrl+Shift letter: every mnemonic
+    // one is taken in this window or reserved by Arbor's OS-global accelerators,
+    // and the repository verbs already read as a run of function keys — F5
+    // re-reads, F6 classifies a script, F8 walks the findings.
+    if (e.key === 'F6' && !mod && !e.shiftKey && !e.altKey) {
+      if (picusProjectStore.fileCount) picusUiStore.openFileClassify();
+      else toastStore.show('No repository is attached — there is no script to classify.', 'warning');
+      e.preventDefault();
+      return;
+    }
 
     // Generation.
     if (mod && !e.shiftKey && key === 'g') { generate(); e.preventDefault(); return; }
@@ -577,21 +557,11 @@
 {/if}
 
 {#if aliasOffer}
-  <!-- The second decision, and visibly a second one: the folder the user
-       classified is already saved, and this asks whether the same answer should
-       hold for every folder of that name. Cancelling costs them nothing they
-       just did — which is the property that makes it safe to offer at all. -->
-  <ConfirmModal
-    title={`Every folder named ${aliasOffer.name}`}
-    message={aliasOfferMessage}
-    detail={aliasOfferDetail(aliasOffer.paths, aliasOffer.origin, picusProjectStore.configPath)}
-    variant="info"
-    confirmLabel={`Apply to all ${aliasOffer.paths.length}`}
-    cancelLabel="Just this folder"
-    busy={picusProjectStore.classifying}
-    onConfirm={() => void acceptAliasOffer()}
-    onCancel={() => picusUiStore.declineFolderAlias()}
-  />
+  <!-- The second decision, and visibly a second one: what the user classified is
+       already saved, and this asks whether the same answer should hold for every
+       folder — or file — of that name. Cancelling costs them nothing they just
+       did, which is the property that makes it safe to offer at all. -->
+  <AliasOfferModal offer={aliasOffer} onClose={() => picusUiStore.declineAlias()} />
 {/if}
 
 {#if picusUiStore.shortcutsOpen}
@@ -614,6 +584,15 @@
   <ClassifyFolderModal
     path={picusUiStore.folderClassifyPath}
     onClose={() => picusUiStore.closeFolderClassify()}
+  />
+{/if}
+
+{#if picusUiStore.fileClassifyPath !== null}
+  <!-- Saying what one script is — for the directories that hold two engines and
+       can say nothing true about either. Mounted here for the same reason. -->
+  <ClassifyFileModal
+    path={picusUiStore.fileClassifyPath}
+    onClose={() => picusUiStore.closeFileClassify()}
   />
 {/if}
 
@@ -660,7 +639,10 @@
 {/if}
 
 {#if picusUiStore.docsOpen}
-  <PicusDocsPanel onClose={() => picusUiStore.closeDocs()} />
+  <PicusDocsPanel
+    initialSection={picusUiStore.docsSection || 'getting-started'}
+    onClose={() => picusUiStore.closeDocs()}
+  />
 {/if}
 
 <Tooltip />

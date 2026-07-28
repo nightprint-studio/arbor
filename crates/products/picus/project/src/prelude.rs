@@ -4,22 +4,25 @@
 //! `picus_project::prelude::...`. The submodules stay `pub` for rustdoc
 //! navigation, but the diff always goes through here.
 
-pub use crate::alias::{alias_key, name_matches, AliasVocabulary, InferenceAlias};
+pub use crate::alias::{alias_key, name_matches, AliasScope, AliasVocabulary, InferenceAlias};
 pub use crate::config::{
-    EncodingSettings, FolderDeclaration, GenerationSettings, ProjectConfig, VersionTableSettings,
-    CURRENT_VERSION, DEFAULT_ENCODING, PROJECT_CONFIG_RELATIVE_PATH,
+    EncodingSettings, FileDeclaration, FolderDeclaration, GenerationSettings, ProjectConfig,
+    VersionTableSettings, CURRENT_VERSION, DEFAULT_ENCODING, PROJECT_CONFIG_RELATIVE_PATH,
 };
 pub use crate::discover::{
     discover, label_to_encoding, plan, scan, Proposal, ProposalNote, SourceFile, SAMPLE_BYTES,
     SCRIPT_EXTENSIONS,
 };
 pub use crate::error::ProjectError;
-pub use crate::infer::{infer_engine, infer_engine_in, infer_role, infer_role_in, Guess};
+pub use crate::infer::{
+    file_stem, infer_engine, infer_engine_in, infer_file_engine_in, infer_role, infer_role_in,
+    Guess,
+};
 pub use crate::insertion::InsertionRule;
 pub use crate::marker::{MarkerFields, MarkerTemplate, DEFAULT_MARKER, KNOWN_PLACEHOLDERS};
 pub use crate::naming::{CompiledNaming, NamingScheme, VersionRange};
 pub use crate::path::{contains, last_segment, parent_of, self_and_ancestors};
-pub use crate::resolve::resolve;
+pub use crate::resolve::{resolve, resolve_from};
 pub use crate::tree::{FolderNode, LineEnding, Project, ScriptFile, Walk};
 pub use crate::version::Version;
 

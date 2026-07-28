@@ -37,10 +37,10 @@ use crate::config::{
     CURRENT_VERSION, DEFAULT_ENCODING,
 };
 use crate::error::ProjectError;
-use crate::infer::{infer_engine_in, infer_role_in};
+use crate::infer::{infer_engine_in, infer_file_engine_in, infer_role_in};
 use crate::naming::NamingScheme;
 use crate::path::{last_segment, parent_of};
-use crate::resolve::resolve;
+use crate::resolve::resolve_from;
 use crate::tree::{FolderNode, LineEnding, Project, ScriptFile};
 
 /// Extensions that count as script files. Anything else is not part of the
@@ -140,10 +140,14 @@ pub fn plan(root: &Path, files: &[SourceFile], existing: Option<&ProjectConfig>)
     }
 
     let root_declaration = existing.and_then(|c| c.declaration(""));
-    resolve(
+    resolve_from(
         &mut tree,
         root_declaration.and_then(|d| d.dialect),
         root_declaration.and_then(|d| d.role),
+        // A declaration on `""` is the repository's own and applies to everything,
+        // exclusion included. Passing only the other two here would have made
+        // `path = "" excluded = true` a line that parses, saves, and does nothing.
+        root_declaration.and_then(|d| d.excluded).unwrap_or(false),
     );
 
     let config = match existing {
@@ -207,6 +211,11 @@ impl Builder<'_> {
         FolderNode {
             engine,
             role,
+            // Never inferred, only ever declared — the same rule `generic`
+            // follows, and for the same reason: dropping somebody's scripts out
+            // of the report is not a conclusion a folder name is allowed to
+            // reach on their behalf.
+            excluded: self.existing.and_then(|c| c.declaration(path)).and_then(|d| d.excluded),
             files,
             children: self.children_of(path, dirs, by_dir),
             ..FolderNode::new(path, name)
@@ -262,19 +271,52 @@ impl Builder<'_> {
             .iter()
             .map(|file| {
                 let detection = detect_in_context(&file.sample, &context);
+                let name = last_segment(&file.path).to_string();
                 ScriptFile {
+                    engine: self.file_engine(&file.path, &name),
+                    excluded: self
+                        .existing
+                        .and_then(|c| c.file_declaration(&file.path))
+                        .and_then(|d| d.excluded),
+                    effective_excluded: false,
                     path: file.path.clone(),
-                    name: last_segment(&file.path).to_string(),
+                    name,
                     size: file.size,
                     encoding: detection.encoding.name().to_string(),
                     encoding_source: detection.source,
                     eol: LineEnding::detect(&file.sample),
                     expected_encoding: expected.clone(),
+                    // Filled by `resolve`, which owns inheritance for the whole
+                    // tree — a folder's and a file's alike.
+                    effective_engine: None,
                 }
             })
             .collect();
         out.sort_by(|a, b| a.path.cmp(&b.path));
         out
+    }
+
+    /// What this **file** declares about itself, if anything.
+    ///
+    /// The same two-step precedence as a folder's, minus the third: a per-path
+    /// `[[file]]` declaration is a specific answer and beats everything; the
+    /// project's own vocabulary answers for names that repeat; and there is no
+    /// built-in step at all, because a file name is a sentence and the global list
+    /// has no business reading engines out of one — see
+    /// [`crate::infer::infer_file_engine_in`].
+    ///
+    /// `None` is the answer for almost every file in almost every repository, and
+    /// it means "my folder's", which is where this has always got its answer.
+    fn file_engine(&self, path: &str, name: &str) -> Option<FolderEngine> {
+        if let Some(declared) = self.existing.and_then(|c| c.file_declaration(path)) {
+            // Unlike a folder's, this declaration carries one field, so an empty
+            // one is dropped by `tidy` rather than meaning "inherit deliberately".
+            // If it is here at all it says something.
+            if declared.dialect.is_some() {
+                return declared.dialect;
+            }
+        }
+        infer_file_engine_in(name, &self.aliases).map(|guess| guess.value)
     }
 }
 
@@ -293,6 +335,10 @@ fn proposed_config(name: &str, tree: &[FolderNode], default_encoding: &str) -> P
         generation: GenerationSettings::default(),
         naming: NamingScheme::default(),
         folders,
+        // Nothing classifies a single file on a first read. A `[[file]]`
+        // declaration is a correction to a file Picus placed wrongly, and there is
+        // nothing to correct yet.
+        files: Vec::new(),
         // A repository being read for the first time has no vocabulary: an alias
         // is something its owner tells Picus, never something Picus invents. The
         // interface offers to add one at the moment a folder is classified, which
@@ -345,10 +391,17 @@ fn notes(tree: &[FolderNode]) -> Vec<ProposalNote> {
         if node.files.is_empty() {
             continue;
         }
+        // Excluded means "pretend this is not in the repository", and a question
+        // about something that is not in the repository is exactly the noise this
+        // report cannot afford. Not even the encoding notes below: a file nobody
+        // will ever generate into cannot have drifted from anything that matters.
+        if node.is_excluded() && node.files.iter().all(ScriptFile::is_excluded) {
+            continue;
+        }
         if node.engine_is_unsupported() {
             // Not silent about the file-level facts below, though: an encoding
             // that drifted is still worth saying, whoever owns the scripts.
-            out.extend(node.files.iter().filter(|f| f.encoding_drifted()).map(|f| drifted(node, f)));
+            out.extend(node.included_files().filter(|f| f.encoding_drifted()).map(|f| drifted(node, f)));
             continue;
         }
         if node.effective_role == FolderRole::Ignored {
@@ -357,19 +410,56 @@ fn notes(tree: &[FolderNode]) -> Vec<ProposalNote> {
             if node.role != Some(FolderRole::Ignored) {
                 out.push(unknown_role(node));
             }
-        } else if node.engine_is_unknown() {
-            // Asked only where it matters: an ignored folder receives nothing
-            // whatever its dialect, so pairing the two questions would double the
-            // list for no extra decision.
+        } else if node.included_files().any(ScriptFile::engine_is_unknown) {
+            // Asked only where it matters, on two counts. An ignored folder
+            // receives nothing whatever its dialect, so pairing the two questions
+            // would double the list for no extra decision. And a folder whose
+            // files have each answered for themselves — the untidy repository
+            // where the engine is in the file name — has nothing left to ask,
+            // even though the folder itself could never say what engine it is.
             out.push(unknown_dialect(node));
         }
-        for file in &node.files {
+        for file in node.included_files() {
             if file.encoding_drifted() {
                 out.push(drifted(node, file));
+            }
+            if let Some(note) = disagrees_with_folder(node, file) {
+                out.push(note);
             }
         }
     }
     out
+}
+
+/// A file that classified itself as something other than the folder it is in.
+///
+/// Only where the folder **declared** its engine, and only when the two differ:
+/// that is the surprising case, and the one worth a line. In the repository this
+/// feature exists for the folder declares nothing and the files answer for
+/// themselves, which is ordinary and produces no note — otherwise the report
+/// would be one line per file, which is a report nobody reads.
+///
+/// Not a question. Picus is not confused about what happened; it is telling the
+/// user that a specific answer is overruling a general one, so a `POS_TERMINALI.sql`
+/// that reads as PostgreSQL inside a declared Oracle folder is visible instead of
+/// silent.
+fn disagrees_with_folder(node: &FolderNode, file: &ScriptFile) -> Option<ProposalNote> {
+    let declared = file.engine?;
+    let folder = node.effective_engine?;
+    if declared == folder {
+        return None;
+    }
+    Some(ProposalNote {
+        path: file.path.clone(),
+        message: format!(
+            "this file reads as {} from its name, while `{}` is {} — the file wins, and nothing \
+             else in the folder is affected",
+            declared.label(),
+            node.name,
+            folder.label()
+        ),
+        needs_attention: false,
+    })
 }
 
 fn unknown_role(node: &FolderNode) -> ProposalNote {
@@ -823,6 +913,7 @@ mod tests {
             generation: GenerationSettings::default(),
             naming: NamingScheme::default(),
             folders: Vec::new(),
+            files: Vec::new(),
             aliases: Vec::new(),
         };
         for (name, engine, role) in entries {
@@ -1017,6 +1108,138 @@ mod tests {
         let text = toml::to_string_pretty(&config).expect("serialises");
         assert!(text.contains(r#"dialect = "generic""#), "{text}");
         assert_eq!(ProjectConfig::parse(&text).unwrap(), config);
+    }
+
+    // ── When the engine is in the file name ───────────────────────────────────
+
+    /// The untidy repository: no engine folders at all, both engines loose in the
+    /// same directories, and the file name the only thing that knows.
+    fn scattered() -> Vec<SourceFile> {
+        let mut files = Vec::new();
+        for version in ["4_11", "4_12"] {
+            for engine in ["ORA", "POS"] {
+                files.push(file(
+                    &format!("AGGIORNAMENTO/{version}/{version}_{engine}.sql"),
+                    cp1252("UPDATE PARAMETRI SET VALORE = 1;\r\n"),
+                ));
+            }
+        }
+        files.push(file("AGGIORNAMENTO/2024/LEGGIMI.sql", cp1252("-- x\r\n")));
+        files
+    }
+
+    /// Aliases pointed at file names as well as folder names.
+    fn with_file_aliases(entries: &[(&str, &str)]) -> ProjectConfig {
+        let mut config = with_aliases(&[]);
+        for (name, engine) in entries {
+            let alias = config.alias_mut(name);
+            alias.engine = Some(engine.to_string());
+            alias.applies_to = Some("both".to_string());
+        }
+        config
+    }
+
+    #[test]
+    fn without_a_declaration_the_file_names_say_nothing() {
+        // The state this replaces, asserted so the improvement is not a claim:
+        // every file unclassified, and a question per folder.
+        let p = plan(Path::new("/repo/prod-core"), &scattered(), None);
+        assert!(p.project.all_files().all(|f| f.engine_is_unknown()));
+        assert!(p.notes.iter().filter(|n| n.needs_attention).count() >= 2);
+    }
+
+    #[test]
+    fn two_alias_lines_classify_every_scattered_file() {
+        let config = with_file_aliases(&[("POS", "postgres"), ("ORA", "oracle")]);
+        let p = plan(Path::new("/repo/prod-core"), &scattered(), Some(&config));
+
+        for version in ["4_11", "4_12"] {
+            assert_eq!(
+                p.project.dialect_of(&format!("AGGIORNAMENTO/{version}/{version}_ORA.sql")),
+                Some(EngineKind::Oracle),
+                "{version}"
+            );
+            assert_eq!(
+                p.project.dialect_of(&format!("AGGIORNAMENTO/{version}/{version}_POS.sql")),
+                Some(EngineKind::Postgres),
+                "{version}"
+            );
+        }
+        // The repository now has both sides, from files alone — no folder in it
+        // could ever have said so.
+        assert_eq!(p.project.dialects(), EngineKind::ALL);
+        // The role still comes from the top of the tree, as always.
+        assert_eq!(at(&p, "AGGIORNAMENTO/4_12").effective_role, FolderRole::Update);
+    }
+
+    #[test]
+    fn the_folder_is_still_asked_about_only_where_a_file_is_left_over() {
+        // The point of asking per file rather than per folder: `AGGIORNAMENTO/2024`
+        // holds one unclassified script, so it is still a question, while the
+        // folders whose files all answered for themselves have gone quiet.
+        let config = with_file_aliases(&[("POS", "postgres"), ("ORA", "oracle")]);
+        let p = plan(Path::new("/repo/prod-core"), &scattered(), Some(&config));
+
+        let asked: Vec<&str> =
+            p.notes.iter().filter(|n| n.needs_attention).map(|n| n.path.as_str()).collect();
+        assert_eq!(asked, ["AGGIORNAMENTO/2024"], "{:?}", p.notes);
+    }
+
+    #[test]
+    fn one_file_can_be_corrected_by_path_and_it_beats_the_name() {
+        // `POS_TERMINALI.sql` is a point-of-sale script in an Oracle repository,
+        // and the name rule reads it as PostgreSQL. The user says otherwise about
+        // that one path, and a rescan must not overrule them.
+        let files = vec![file("ORA/POS_TERMINALI.sql", cp1252("-- x\r\n"))];
+        let mut config = with_file_aliases(&[("POS", "postgres"), ("ORA", "oracle")]);
+
+        let before = plan(Path::new("/repo/prod-core"), &files, Some(&config));
+        assert_eq!(before.project.dialect_of("ORA/POS_TERMINALI.sql"), Some(EngineKind::Postgres));
+
+        config.file_declaration_mut("ORA/POS_TERMINALI.sql").dialect =
+            Some(FolderEngine::Supported(EngineKind::Oracle));
+        let after = plan(Path::new("/repo/prod-core"), &files, Some(&config));
+        assert_eq!(after.project.dialect_of("ORA/POS_TERMINALI.sql"), Some(EngineKind::Oracle));
+    }
+
+    #[test]
+    fn a_file_that_disagrees_with_a_declared_folder_is_reported_but_not_asked_about() {
+        // The surprising case: the folder was declared Oracle and one file reads
+        // as something else. Picus is not confused — it is saying so out loud.
+        let files = vec![
+            file("ORA/4_12.sql", cp1252("-- x\r\n")),
+            file("ORA/4_12_POS.sql", cp1252("-- x\r\n")),
+        ];
+        let mut config = with_file_aliases(&[("POS", "postgres")]);
+        // Both fields: a folder declaration is authoritative for the one it leaves
+        // absent too, so declaring only the role would clear the engine and there
+        // would be nothing for the file to disagree with.
+        config.declaration_mut("ORA").dialect = supported(EngineKind::Oracle);
+        config.declaration_mut("ORA").role = Some(FolderRole::Update);
+
+        let p = plan(Path::new("/repo/prod-core"), &files, Some(&config));
+        assert_eq!(p.project.dialect_of("ORA/4_12.sql"), Some(EngineKind::Oracle));
+        assert_eq!(p.project.dialect_of("ORA/4_12_POS.sql"), Some(EngineKind::Postgres));
+
+        let note = p.notes.iter().find(|n| n.path == "ORA/4_12_POS.sql").expect("a note");
+        assert!(!note.needs_attention, "it is a report, not a question");
+        assert!(note.message.contains("PostgreSQL"), "{}", note.message);
+        // …and the file that agreed with its folder produces nothing.
+        assert!(!p.notes.iter().any(|n| n.path == "ORA/4_12.sql"), "{:?}", p.notes);
+    }
+
+    #[test]
+    fn a_folder_whose_files_all_answered_produces_no_note_at_all() {
+        // In the repository this exists for the folder declares nothing and every
+        // file answers for itself, which is ordinary — one line per file would be
+        // a report nobody reads.
+        let files = vec![
+            file("AGGIORNAMENTO/4_12_ORA.sql", cp1252("-- x\r\n")),
+            file("AGGIORNAMENTO/4_12_POS.sql", cp1252("-- x\r\n")),
+        ];
+        let config = with_file_aliases(&[("POS", "postgres"), ("ORA", "oracle")]);
+        let p = plan(Path::new("/repo/prod-core"), &files, Some(&config));
+        assert!(p.notes.is_empty(), "{:?}", p.notes);
     }
 
     #[test]

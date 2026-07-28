@@ -508,6 +508,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbor-sql-abbrev"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "arbor-studio-api"
 version = "0.3.0"
 dependencies = [
@@ -6004,6 +6012,7 @@ dependencies = [
  "arbor-fs",
  "arbor-ipc",
  "arbor-rpc",
+ "arbor-sql-abbrev",
  "picus-analyze",
  "picus-ast",
  "picus-core",

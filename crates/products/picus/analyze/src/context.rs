@@ -35,6 +35,17 @@ pub struct Context<'a> {
     /// switched version guards off by leaving the name empty. The version rules
     /// report themselves as skipped in that state rather than passing.
     pub version_table: Option<String>,
+    /// Every dialect the repository answers for, resolved once.
+    dialects: Vec<EngineKind>,
+    /// Every lane, resolved once — `(dialect, role)` to the folders in it.
+    ///
+    /// There are `dialects × roles` of them, which is at most ten, and each is one
+    /// walk of the tree. Computed here because the alternative is what this used
+    /// to do: a fresh walk and a fresh `Vec` on **every** call, and the
+    /// cross-dialect rules ask about eight lanes per object in the inventory. On
+    /// a repository with a thousand objects that is eight thousand walks of the
+    /// whole tree to answer ten distinct questions.
+    lanes: Vec<((EngineKind, FolderRole), Vec<&'a FolderNode>)>,
 }
 
 impl<'a> Context<'a> {
@@ -45,17 +56,30 @@ impl<'a> Context<'a> {
     ) -> Context<'a> {
         let table = config.version_table.table.trim();
         let version_table = (!table.is_empty()).then(|| fold_identifier(table));
-        Context { project, config, inventory, version_table }
+        let dialects = project.project().dialects();
+        let lanes = dialects
+            .iter()
+            .flat_map(|dialect| {
+                FolderRole::ALL.iter().map(move |role| {
+                    ((*dialect, *role), project.project().lane(*dialect, *role).collect())
+                })
+            })
+            .collect();
+        Context { project, config, inventory, version_table, dialects, lanes }
     }
 
     /// Every dialect the repository declares somewhere, in a stable order.
     pub fn dialects(&self) -> Vec<EngineKind> {
-        self.project.project().dialects()
+        self.dialects.clone()
     }
 
     /// The folders that play `role` for `dialect`.
-    pub fn lane(&self, dialect: EngineKind, role: FolderRole) -> Vec<&'a FolderNode> {
-        self.project.project().lane(dialect, role).collect()
+    pub fn lane(&self, dialect: EngineKind, role: FolderRole) -> &[&'a FolderNode] {
+        self.lanes
+            .iter()
+            .find(|((d, r), _)| *d == dialect && *r == role)
+            .map(|(_, folders)| folders.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Every folder of the repository, whatever it resolved to.

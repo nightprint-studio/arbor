@@ -214,6 +214,12 @@ fn script_file(path: &str, source: &str) -> ScriptFile {
         encoding_source: EncodingSource::Inherited,
         eol: LineEnding::Crlf,
         expected_encoding: "windows-1252".to_string(),
+        // The fixtures put the engine on the folder, which is what a tidy
+        // repository does. `resolve` hands it down to every file here.
+        engine: None,
+        effective_engine: None,
+        excluded: None,
+        effective_excluded: false,
     }
 }
 
@@ -237,6 +243,7 @@ fn config_for(project: &Project) -> ProjectConfig {
                 ..FolderDeclaration::default()
             })
             .collect(),
+        files: Vec::new(),
         aliases: Vec::new(),
     }
 }

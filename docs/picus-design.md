@@ -72,6 +72,46 @@ Three corollaries the code honours:
 > `DIA001`. `FolderNode` carries one `engine` field and one `effective_engine` field, read
 > through `scope()` / `covers()` / `effective_dialect()`.
 
+> **Corrected again on 2026-07-28: the engine is a property of the FILE, of which the folder is
+> the default.** The invariant as first written was right about where the answer usually lives and
+> wrong about where it *can* live. A tidy repository puts the engine on a directory and everything
+> in it inherits — still the case for essentially every file in essentially every repository. An
+> untidy one puts it in the file name: `4_12_ORA.sql` beside `4_12_POS.sql` in one folder that can
+> say nothing about either, because it is honestly both. There was nowhere to write that down, so
+> the folder stayed unclassified and everything downstream went quiet about half the repository —
+> no lane, no coverage column, no cross-dialect comparison, and a "no engine" warning that no
+> answer could remove.
+>
+> The chain therefore gained one link at the bottom: **file declaration → folder declaration →
+> nearest ancestor's → none**. `ScriptFile` carries `engine` (declared on this file) and
+> `effective_engine` (after inheritance), read through exactly the same
+> `scope()` / `covers()` / `effective_dialect()` methods `FolderNode` exposes — the same four
+> answers, at one more level of granularity, so a file and its folder can never disagree about what
+> *portable* means. `resolve()` fills both in one pass, because one inheritance rule in the
+> codebase is the point.
+>
+> What now asks the **file** rather than the folder: which dialect a script is parsed as, whether
+> it is parsed at all, which lane it counts in, and which dialects the repository is taken to have.
+> What still asks the **folder**: the role. A role is what a *directory of scripts* is for, and the
+> file beside this one in the same directory is for the same thing; the engine is the one axis that
+> genuinely varies file by file. Three corollaries fall out:
+>
+> - **The coverage column splits.** A column is keyed on the folder's path, which in a mixed folder
+>   would add the Oracle statements to the PostgreSQL ones and destroy the only comparison the
+>   table exists to make. Such a folder yields one column *per engine* instead, with the engine in
+>   the header — `AGG · Oracle`, `AGG · PostgreSQL`, `AGG · unclassified`. A tidy folder, which is
+>   every folder of every repository that existed before this, is spelled byte-identically to
+>   before. `Placement::coverage_key` and `ParsedProject::coverage_keys` walk that rule through
+>   **one** function: two implementations would give the table a column nothing counts towards and
+>   lose one that does.
+> - **A folder is in a lane when any file in it is** — so a directory holding one `*_ORA.sql` and
+>   one `*_POS.sql` is in both lanes, where before it was in neither. A folder holding only other
+>   folders is in none, which is right: it has no content to compare.
+> - **The cross-dialect rules ask the sites, not the coverage map.** In a mixed folder the coverage
+>   column is the folder's, so summing it into each lane would credit Oracle with what the
+>   PostgreSQL scripts did — a false negative, the one kind of wrong answer `CONS001` must never
+>   give. `lane_touches` / `lane_statements` replaced `coverage_of` for exactly that reason.
+
 ---
 
 ## 2. State: what exists today
@@ -190,7 +230,8 @@ three password calls, which are Tauri commands straight to the shell.
 | `picus_cancel` | `query` | opens a second connection, so it works mid-query — and records the run ordinal, so a cancel landing between round trips is honoured instead of lost |
 | `picus_emit` / `picus_validate_rows` / `picus_validate_value` | `emit` | **served but not yet called by the frontend** |
 | `picus_open_project` / `picus_confirm_project` / `picus_is_project` / `picus_propose_update_file` | `project` | discovery proposes; nothing is written before the confirmation. `confirm` edits **paths** |
-| `picus_set_folder_alias` / `picus_folders_named` | `project` | the other half of classifying: edits a **name**, so it answers for every folder called `POS` including the ones that do not exist yet. `folders_named` is what lets the offer state its blast radius before the user agrees |
+| `picus_set_folder_alias` / `picus_folders_named` | `project` | the other half of classifying: edits a **name**, so it answers for every folder called `POS` including the ones that do not exist yet. `applies_to` says whether the name is looked for in folder names, file names or both. `folders_named` is what lets the offer state its blast radius before the user agrees |
+| `picus_set_file_engine` | `project` | the leaf of the same chain: the engine of **one file**, for the directory holding `4_12_ORA.sql` beside `4_12_POS.sql`. No dialect clears it and the file inherits its folder again; a path the tree does not know is refused rather than written |
 | `picus_open_scripts` / `picus_refresh_scripts` | `scripts` | reads, decodes and holds the whole repository; same reply shape as `picus_open_project` |
 | `picus_analyze_scripts` | `scripts` | inventory + the fourteen rules + skipped rules + rejected suppressions, all in the crates' own wire types |
 | `picus_script_text` | `scripts` | one file's decoded text, its encoding and its line ending |
@@ -247,12 +288,41 @@ naming default and the generated-block marker template.
 Flat and by path, rather than the nested branch/folder arrays it started as, for a concrete
 reason: adding a subdirectory used to invalidate the shape, and now it does not. A declaration
 is written only where it says something the folder would not inherit anyway, so a repository
-that agrees with the inference writes almost nothing. `version = 2`; a `version = 1` file is
-migrated on read rather than rejected, and the migration reproduces v1's semantics exactly
-through the inheritance rule.
+that agrees with the inference writes almost nothing. A `version = 1` file is migrated on read
+rather than rejected, and the migration reproduces v1's semantics exactly through the
+inheritance rule.
 
 A folder's `dialect` key may name an engine Picus does **not** read (`dialect = "sqlserver"`):
 a folder has one engine, so it has one key.
+
+##### …and, where a repository is untidy, keyed by file
+
+The same flat shape, one level down, for the repositories where the engine is on the file:
+
+```toml
+[[file]]
+path = "AGGIORNAMENTO/2024/4_12_POS.sql"
+dialect = "postgres"
+```
+
+Only the engine, and deliberately only the engine — a role is a fact about a directory, and an
+encoding is measured from the bytes rather than declared. Nothing inherits *downwards* from it: a
+file has nothing below it. It is a leaf answer and it beats everything, including a declaration on
+the folder it sits in, which is the same "a specific answer beats a general rule" that already
+orders `[[folder]]` above `[[alias]]`. Almost always empty: a `[[file]]` line is a correction to a
+file Picus placed wrongly, and discovery never proposes one.
+
+##### The version number is derived from the content, not from the build
+
+The file is stamped with **the lowest schema version that can read it correctly** — `3` exactly
+when something in it classifies an individual file (a `[[file]]` declaration, or an alias pointed
+at file names), `2` otherwise. Not with `CURRENT_VERSION`, and the reason is that a version number
+is a claim about compatibility while the project file is committed and shared. Stamping every save
+with the newest number would lock a colleague on an older build out of a repository that uses
+nothing their build lacks; stamping every save with the oldest would let that build silently ignore
+the declarations deciding which dialect a script is parsed as — and silently ignoring a
+classification is the failure this product exists to prevent. So the claim is computed from what
+the file actually says.
 
 #### Per-project inference aliases (decided 2026-07-28)
 
@@ -308,6 +378,42 @@ declaration that *clears* an engine is authoritative and is not re-inferred from
 the next scan, exactly as it is not re-inferred from the keyword list. Aliases apply at
 **discovery**, so a `POS` folder created next month is classified without anyone touching the
 file.
+
+##### Where the name is looked for: `applies_to`, and why file names are opt-in
+
+An alias matches folder names by default. A repository whose engine is in the file name points the
+same name at file names too:
+
+```toml
+[[alias]]
+name = "POS"
+engine = "postgres"
+applies_to = "both"      # "folders" (the default) | "files" | "both"
+```
+
+An alias written without it means folders, which is what every alias written before this existed
+already meant. The scope moves the **engine** only: a role is a fact about a directory whatever the
+scope says, so an alias that declares nothing but a role and points at file names classifies
+nothing — and is reported as such, because it is two correct-looking lines that together do
+nothing. A typo in `applies_to` degrades to the default rather than to nothing: it says *where* to
+look, and an unreadable one must not un-declare an engine that was spelled correctly.
+
+**The built-in vocabulary never classifies a file**, and this is the asymmetry the whole path rests
+on. Not timidity — two distinct reasons:
+
+- **A file name is a sentence.** `ORA` is Italian for *now*: `AGGIORNA_ORA_INIZIO.sql` is an
+  ordinary name for an ordinary script, and a global rule reading it as Oracle would parse
+  somebody's PostgreSQL file with the wrong dialect. Folder names are short, deliberate and a dozen
+  to a repository, so they get reviewed; file names are hundreds, and nobody reviews them.
+- **The full product names are no safer here.** `MIGRAZIONE_DA_MYSQL.sql` is a PostgreSQL script
+  *about* MySQL, and reading `mysql` out of it would mark the file as an engine Picus does not
+  support — which does not produce a wrong finding, it produces **no** findings, silently.
+  `4_12_ORACLE.sql` is the case this gives up, and one `[[alias]]` line buys it back.
+
+So a file is classified by name only where the repository's owner has said which names mean what
+*and* said they mean it about file names. Everywhere else the file simply inherits its folder. The
+extension is taken off before matching, so `.sql` can never match an alias called `SQL` and a
+repository whose Oracle files end in `.pks` is not classified by that accident either.
 
 Where they come from and where they are reviewed: classifying a folder whose name repeats raises
 a **second, distinct** confirmation offering to make it a rule, naming the count before the user
@@ -644,7 +750,23 @@ serves the six methods above. What was decided while wiring it:
   the only thing a future on-disk tier (content-addressed by that same digest) would replace.
   Measured on 400 files / 1.4 MiB: read+decode 117 ms, parse 848 ms, inventory 41 ms,
   analyse 170 ms — so the parse is two thirds of the cost and the obvious first lever, either
-  a disk tier or `std::thread::scope` over the file list.
+  a disk tier or `std::thread::scope` over the file list. The parallel parse is now in
+  (`parse_all`, a parser per thread, capped under the core count so a scan does not make the
+  window it is filling stutter). What that measurement did **not** show is below.
+- **The real cost was line numbers, and it was quadratic.** A repository of ~500 files / 11 MB
+  took over five minutes to index, and the profile put twenty-five of twenty-nine seconds in
+  `line_col` — which counts newlines from byte zero, and was being called once per inventory site,
+  per finding and per suppression. Linear per call, asked once per interesting position, is
+  **O(bytes²) per file**: fine on 400 small scripts, catastrophic on a few large ones, which is
+  why the 1.4 MiB measurement above missed it entirely. `ParsedFile` now carries a `line_starts`
+  index built once per parse, and every caller holding a parse binary-searches it
+  (`line_of` / `line_col_at`); `line_col` survives only for callers that have a source and no
+  parse. Measured on an 11 MB fixture, the penalty for holding the bytes in a few large files
+  rather than many small ones went from **15× to 0.7×** in `Inventory::build` and from **13.5× to
+  0.8×** in `analyze`. `Context::lane` was the same shape of mistake one layer up — a fresh walk
+  of the whole tree on each of ~8000 calls to answer ten distinct questions — and now resolves
+  every lane once. There is a timing harness at `crates/products/picus/be/tests/perf.rs`, marked
+  `#[ignore]`: `cargo test --release -p picus-be --test perf -- --ignored --nocapture`.
 - **A write is two calls with a staleness check.** The preview returns the exact bytes and a
   digest per file; the apply re-prepares and refuses if any digest moved, naming the file. What
   was approved is what gets written, or nothing is.
@@ -748,7 +870,12 @@ expect it than to watch it change twice.
 
 ### Tests
 
-29 unit tests, all green, none needing a database:
+None of these needs a live database. The count is deliberately not written down — it was
+"29" here for long enough to become wrong by a factor of two — so ask the workspace instead:
+
+```bash
+cargo test -p picus-core -p picus-db-api -p picus-db-postgres
+```
 
 - `picus-core` — config round-trip, a partial file keeping its siblings' defaults, an unknown
   insertion rule degrading instead of failing the parse, the row limit clamped, and the one
@@ -820,6 +947,12 @@ fail, not hang CI): `cargo nextest run`. Everything below is still owed:
 | The portable coverage column | its **own** column in the inventory matrix rather than being counted into both dialects', so one INSERT never reads as two. `coverageGaps` knows a covered portable column at the same role means the dialect columns are not gaps — it has to agree with `CONS001`, which is read beside it |
 | Offering the alias | a **second, distinct** confirmation right after a folder is classified, naming how many folders it would reach. Never a silent side effect of the first action, and declining costs the user nothing they just did |
 | Where a repository is opened from | a **connection** owns it (`ConnectionSpec.scriptRoot`): Picus is database-oriented, so those scripts install *that* database |
+| A repository whose engine is in the **file name** (`4_12_ORA.sql` beside `4_12_POS.sql`) | the engine becomes a property of the **file**, of which the folder is the default. `[[file]]` declarations, `ScriptFile.engine` / `effectiveEngine`, one inheritance rule extended by one link. The folder still owns the **role** |
+| Whether the built-in vocabulary may read an engine out of a file name | **no, never.** `ORA` is Italian for *now* and `MIGRAZIONE_DA_MYSQL.sql` is a PostgreSQL script about MySQL; there are hundreds of file names to a dozen folder names and nobody reviews them. Only the project's own declarations classify a file |
+| …so how does an alias reach file names | `applies_to = "folders" \| "files" \| "both"`, **opt-in**, absent meaning folders — what every alias already written means. It moves the engine only; a role stays a fact about a directory |
+| A folder holding more than one engine, in the inventory | its coverage column **splits per engine** (`AGG · Oracle`, `AGG · PostgreSQL`, `AGG · unclassified`). One column would add the two dialects together and destroy the only comparison the table exists to make. Tidy folders keep byte-identical column names |
+| What `CONS001` counts a lane's coverage from | the **sites**, not the folder-keyed coverage map. In a mixed folder that map is the folder's, so summing it per lane would credit one dialect with the other's statements — a false negative, the one wrong answer this rule must not give |
+| What version number a project file is stamped with | the **lowest that can read it correctly** (`3` when something classifies an individual file, `2` otherwise), never the build's. The file is committed and shared: too new locks a colleague out, too old lets their build silently ignore a classification |
 
 ### Decisions taken on 2026-07-27
 

@@ -25,6 +25,7 @@
  */
 
 import type {
+  AliasScope,
   Dialect,
   FolderAlias,
   FolderEngine,
@@ -97,24 +98,90 @@ export function confirmProject(root: string, edits: ProjectEdit[]): Promise<Conf
 }
 
 /**
- * Declare — or forget — what a folder **name** means in this repository.
+ * Declare — or forget — the engine of **one file**.
+ *
+ * The leaf of the same chain {@link confirmProject} and {@link setFolderAlias}
+ * sit on, and the one that answers for an untidy repository: a directory holding
+ * `4_12_ORA.sql` beside `4_12_POS.sql` can say nothing true about either, and
+ * neither a folder declaration nor a name rule fits a one-off.
+ *
+ * Two-valued rather than three, unlike {@link ProjectEdit}: this names one file
+ * and one field, so there is no "leave it alone" to encode — not calling it is
+ * what leaves it alone. Passing `null` **clears** the declaration and the file
+ * goes back to inheriting its folder.
+ *
+ * Answers with the same shape a confirmation does, because the same thing
+ * happened: `.arbor/picus/project.toml` was written and the tree re-resolved.
+ */
+export function setFileEngine(
+  root: string,
+  path: string,
+  dialect: FolderEngine | null,
+): Promise<ConfirmedProject> {
+  return picus('picus_set_file_engine', { root, path, dialect });
+}
+
+/**
+ * Take a folder or a script out of the project — or put it back.
+ *
+ * **One verb for both**, because it is one decision and the user is pointing at
+ * one row: `path` names whichever it is, and a folder path and a file path
+ * cannot collide in a tree built from real directories.
+ *
+ * **This is not the `ignored` role.** An ignored folder is still read, still
+ * indexed and still checked — it simply is not an installation folder and
+ * nothing is generated into it, which is worth knowing about a folder of old
+ * migrations. An excluded one is treated as though it were not in the
+ * repository: not parsed, not indexed, no coverage column, no findings, never a
+ * destination. The two cannot be merged, because `ignored` is also the fallback
+ * for a folder nobody has classified.
+ *
+ * Two-valued, like {@link setFileEngine} and for the same reason: this names one
+ * row and one field, so not calling it is what leaves it alone. `false` on a
+ * **file** is not a no-op — it rescues that one script from an excluded folder.
+ *
+ * Answers with the same shape a confirmation does, because the same thing
+ * happened: `.arbor/picus/project.toml` was written and the tree re-resolved.
+ */
+export function setExcluded(
+  root: string,
+  path: string,
+  excluded: boolean,
+): Promise<ConfirmedProject> {
+  return picus('picus_set_excluded', { root, path, excluded });
+}
+
+/**
+ * Declare — or forget — what a **name** means in this repository.
  *
  * The other half of classification, and the half that scales: an edit answers for
  * one path, this answers for every folder called `POS` **including the ones that
  * do not exist yet**. A repository shipping a folder set per delivered version
  * cannot be described any other way without re-describing it every release.
  *
- * Both fields are **replaced**, not merged — an alias has exactly two, so "set it
- * to this" needs none of the three-valued machinery {@link ProjectEdit} needs.
- * Passing neither removes the alias.
+ * Every field is **replaced**, not merged — an alias has exactly these three, so
+ * "set it to this" needs none of the three-valued machinery {@link ProjectEdit}
+ * needs. Which is also the trap: `appliesTo` is not optional here on purpose,
+ * because omitting it does not mean "keep what the alias already said", it means
+ * "folders only". Every caller passes the scope it wants, including the ones that
+ * are only editing the engine.
+ *
+ * Passing neither an engine nor a role removes the alias.
  */
 export function setFolderAlias(
   root: string,
   name: string,
   engine: FolderEngine | null,
   role: FolderRole | null,
+  appliesTo: AliasScope,
 ): Promise<ConfirmedProject> {
-  return picus('picus_set_folder_alias', { root, name, engine, role });
+  return picus('picus_set_folder_alias', {
+    root,
+    name,
+    engine,
+    role,
+    applies_to: appliesTo,
+  });
 }
 
 /**
@@ -127,4 +194,17 @@ export function setFolderAlias(
  */
 export function foldersNamed(root: string, name: string): Promise<string[]> {
   return picus('picus_folders_named', { root, name });
+}
+
+/**
+ * Every **file** whose name an alias would apply to.
+ *
+ * The twin of {@link foldersNamed} and asked for the same reason: the offer to
+ * turn one classification into a repository-wide rule is only safe to accept
+ * because the number beside it is true. Matching the stem rather than the whole
+ * name, and whole words rather than substrings, are rules that live in
+ * `picus-project` — a copy of them in the interface would be a copy that drifts.
+ */
+export function filesNamed(root: string, name: string): Promise<string[]> {
+  return picus('picus_files_named', { root, name });
 }

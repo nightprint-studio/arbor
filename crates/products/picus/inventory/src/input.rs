@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use picus_parse::prelude::ParsedFile;
 use picus_project::prelude::{FolderNode, Project, ScriptFile};
-use picus_types::prelude::{DialectScope, EngineKind, FolderRole};
+use picus_types::prelude::{DialectScope, EngineKind, FolderEngine, FolderRole};
 
 /// One parsed script, keyed by the path that joins it to the project tree.
 #[derive(Debug, Clone, Copy)]
@@ -37,55 +37,77 @@ pub struct ParsedScript<'a> {
 }
 
 /// Where a file sits in the repository, and therefore what is expected of it.
+///
+/// Two facts, from two levels. The **role** is the folder's — a directory of
+/// scripts is *for* something and the file beside this one is for the same thing.
+/// The **engine** is the file's, which for all but a handful of files is its
+/// folder's anyway; the exceptions are the untidy repositories where both engines
+/// share a directory and only the file name knows which is which.
 #[derive(Debug, Clone, Copy)]
 pub struct Placement<'a> {
     pub folder: &'a FolderNode,
     pub file: &'a ScriptFile,
+    /// The folder holds files of more than one engine, so its coverage column is
+    /// split per engine — see [`coverage_key`](Self::coverage_key).
+    ///
+    /// Decided once per folder when the tree is joined, rather than re-derived
+    /// per statement: it is a question about every file in the folder, and asking
+    /// it in the indexing loop would be a scan per statement.
+    split: bool,
 }
 
 impl<'a> Placement<'a> {
-    /// The column this file's statements count towards: **the folder's path**,
-    /// which is its identity everywhere else too.
-    pub fn coverage_key(&self) -> &'a str {
-        &self.folder.path
+    /// The column this file's statements count towards.
+    ///
+    /// **The folder's path**, which is its identity everywhere else too — except
+    /// in a folder that holds more than one engine, where the path alone would
+    /// merge the Oracle statements and the PostgreSQL ones into a single number
+    /// and destroy the one comparison this table exists to make. There the column
+    /// is split, and the engine is named in the header.
+    ///
+    /// Tidy repositories — the overwhelming majority, and every repository that
+    /// existed before a file could carry an engine — are unaffected: one engine
+    /// per folder means one column per folder, spelled exactly as before.
+    pub fn coverage_key(&self) -> String {
+        coverage_key(self.folder, self.file, self.split)
     }
 
-    /// The **single** dialect these scripts are written in, or `None` when there
-    /// is not exactly one — nobody declared an engine, the engine is one Picus
-    /// does not read, or the folder is **portable** and answers for both.
+    /// The **single** dialect this script is written in, or `None` when there is
+    /// not exactly one — nobody declared an engine, the engine is one Picus does
+    /// not read, or it is **portable** and answers for both.
     ///
     /// A rule asking "which side of the comparison is this" wants
     /// [`covers`](Self::covers); this one is for the rules that need one dialect
     /// and genuinely have nothing to say without it.
     pub fn effective_dialect(&self) -> Option<EngineKind> {
-        self.folder.effective_dialect()
+        self.file.effective_dialect()
     }
 
-    /// What these scripts have to be valid in — the parse and emit target.
+    /// What this script has to be valid in — the parse and emit target.
     ///
     /// `None` only for an engine Picus does not read and for one nobody declared.
     pub fn scope(&self) -> Option<DialectScope> {
-        self.folder.scope()
+        self.file.scope()
     }
 
     /// Does what is written here count as present for `dialect`?
     ///
-    /// True of **both** for a portable folder. Every cross-dialect rule asks this
+    /// True of **both** for a portable script. Every cross-dialect rule asks this
     /// rather than comparing `effective_dialect`, because a row inserted by a
     /// portable script really is present on both engines and reporting it as
     /// missing from either would be reporting the opposite of the truth.
     pub fn covers(&self, dialect: EngineKind) -> bool {
-        self.folder.covers(dialect)
+        self.file.covers(dialect)
     }
 
-    /// Every dialect this placement answers for — two for a portable folder.
+    /// Every dialect this placement answers for — two for a portable script.
     pub fn dialects(&self) -> &'static [EngineKind] {
-        self.folder.effective_engine.map(|e| e.dialects()).unwrap_or(&[])
+        self.file.effective_engine.map(|e| e.dialects()).unwrap_or(&[])
     }
 
     /// Portable SQL: written to run on every dialect Picus supports.
     pub fn is_generic(&self) -> bool {
-        self.folder.is_generic()
+        self.file.is_generic()
     }
 
     /// What the folder is for, after inheritance.
@@ -94,12 +116,57 @@ impl<'a> Placement<'a> {
     }
 }
 
+/// Does this folder hold files of more than one engine?
+///
+/// Files Picus does not read are left out of the count: a stray T-SQL script does
+/// not make an otherwise Oracle folder "mixed", because it contributes no column
+/// either way.
+fn is_split(folder: &FolderNode) -> bool {
+    let mut seen: Option<Option<FolderEngine>> = None;
+    for file in folder.files.iter().filter(|f| !f.is_out_of_scope()) {
+        match seen {
+            None => seen = Some(file.effective_engine),
+            Some(first) if first != file.effective_engine => return true,
+            Some(_) => {}
+        }
+    }
+    false
+}
+
+/// The coverage column one file counts under.
+///
+/// The single definition, called both by [`Placement::coverage_key`] and by
+/// [`ParsedProject::coverage_keys`]. They have to produce the same strings or the
+/// table gains a column nothing counts towards and loses one that does — so they
+/// go through one function rather than two implementations of one rule.
+fn coverage_key(folder: &FolderNode, file: &ScriptFile, split: bool) -> String {
+    if !split {
+        return folder.path.clone();
+    }
+    let engine = file.effective_engine.map(FolderEngine::label).unwrap_or(UNCLASSIFIED);
+    format!("{}{COLUMN_SEPARATOR}{engine}", folder.path)
+}
+
+/// Between a folder's path and the engine, when a column is split. A character
+/// that cannot occur in a path, so the key stays unambiguous.
+const COLUMN_SEPARATOR: &str = " · ";
+
+/// How the leftover files of a mixed folder are labelled — the ones nobody has
+/// classified yet. Named rather than blank: a column headed with nothing reads
+/// like a rendering bug.
+const UNCLASSIFIED: &str = "unclassified";
+
 /// A repository's tree with its files parsed.
 #[derive(Debug)]
 pub struct ParsedProject<'a> {
     project: &'a Project,
     scripts: Vec<ParsedScript<'a>>,
     placement: HashMap<&'a str, Placement<'a>>,
+    /// Path to index into `scripts`, so [`script_of`](Self::script_of) is a
+    /// lookup rather than a scan. Built here because a linear `find` on a public
+    /// accessor is a trap: it costs nothing until somebody calls it in a loop
+    /// over every file, and then it is quadratic and nobody knows why.
+    by_path: HashMap<&'a str, usize>,
     orphans: Vec<&'a str>,
 }
 
@@ -114,8 +181,9 @@ impl<'a> ParsedProject<'a> {
     pub fn new(project: &'a Project, scripts: Vec<ParsedScript<'a>>) -> Self {
         let mut placement: HashMap<&'a str, Placement<'a>> = HashMap::new();
         for folder in project.walk() {
+            let split = is_split(folder);
             for file in &folder.files {
-                placement.insert(file.path.as_str(), Placement { folder, file });
+                placement.insert(file.path.as_str(), Placement { folder, file, split });
             }
         }
         let orphans = scripts
@@ -123,7 +191,9 @@ impl<'a> ParsedProject<'a> {
             .filter(|s| !placement.contains_key(s.path))
             .map(|s| s.path)
             .collect();
-        ParsedProject { project, scripts, placement, orphans }
+        let by_path =
+            scripts.iter().enumerate().map(|(index, script)| (script.path, index)).collect();
+        ParsedProject { project, scripts, placement, by_path, orphans }
     }
 
     pub fn project(&self) -> &'a Project {
@@ -145,7 +215,7 @@ impl<'a> ParsedProject<'a> {
     }
 
     pub fn script_of(&self, path: &str) -> Option<&ParsedScript<'a>> {
-        self.scripts.iter().find(|s| s.path == path)
+        self.by_path.get(path).map(|index| &self.scripts[*index])
     }
 
     /// Every coverage column the repository has, in tree order.
@@ -160,18 +230,33 @@ impl<'a> ParsedProject<'a> {
     /// column that can never be anything but zero is noise in a table whose whole
     /// point is that a zero means something.
     ///
-    /// So are folders written in an engine Picus does not support. The paragraph
-    /// above is exactly why: their files are deliberately never parsed, so their
-    /// column can only ever read zero — and a permanent row of zeroes for the SQL
-    /// Server folders would read as "these are missing everything" when the truth
-    /// is "these are none of Picus's business". An unclassified folder is a
-    /// different case and keeps its column: there, the zeroes are the question.
+    /// So are files written in an engine Picus does not support. The paragraph
+    /// above is exactly why: they are deliberately never parsed, so their column
+    /// can only ever read zero — and a permanent row of zeroes for the SQL Server
+    /// scripts would read as "these are missing everything" when the truth is
+    /// "these are none of Picus's business". An unclassified file is a different
+    /// case and keeps its column: there, the zeroes are the question.
+    ///
+    /// A folder holding more than one engine yields **one column per engine** —
+    /// see [`Placement::coverage_key`], which is where that rule lives and which
+    /// this walks in lockstep with.
     pub fn coverage_keys(&self) -> Vec<String> {
-        self.project
-            .walk()
-            .filter(|folder| !folder.files.is_empty() && !folder.engine_is_unsupported())
-            .map(|folder| folder.path.clone())
-            .collect()
+        let mut out: Vec<String> = Vec::new();
+        for folder in self.project.walk() {
+            let split = is_split(folder);
+            // Deduplicated within the folder, which is the only place a key can
+            // repeat, and in tree order — which is what the header reads in. A
+            // folder yields one column, or one per engine in it, so this stays a
+            // handful of comparisons however many files it holds.
+            let first = out.len();
+            for file in folder.files.iter().filter(|f| !f.is_out_of_scope()) {
+                let key = coverage_key(folder, file, split);
+                if !out[first..].contains(&key) {
+                    out.push(key);
+                }
+            }
+        }
+        out
     }
 }
 
@@ -207,6 +292,91 @@ mod tests {
         let joined = ParsedProject::new(&project, scripts);
         assert_eq!(joined.orphans(), ["ORACLE/GONE/x.sql"]);
         assert_eq!(joined.placed().count(), 0);
+    }
+
+    // ── When one folder holds two engines ─────────────────────────────────────
+
+    use crate::testing::file_of;
+    use picus_project::prelude::{resolve, FolderNode};
+
+    /// One folder, both engines, and a script nobody classified.
+    fn mixed() -> Project {
+        let mut folder = FolderNode {
+            role: Some(FolderRole::Update),
+            files: vec![
+                file_of("AGG/4_12_ORA.sql", FolderEngine::Supported(EngineKind::Oracle)),
+                file_of("AGG/4_12_POS.sql", FolderEngine::Supported(EngineKind::Postgres)),
+                crate::testing::file("AGG/note.sql"),
+            ],
+            ..FolderNode::new("AGG", "AGG")
+        };
+        folder.children = Vec::new();
+        let mut project =
+            Project { name: "P".to_string(), root: "/p".to_string(), tree: vec![folder] };
+        resolve(&mut project.tree, None, None);
+        project
+    }
+
+    #[test]
+    fn a_mixed_folder_gets_one_column_per_engine() {
+        // The whole point of the table is telling the Oracle side from the
+        // PostgreSQL one. A single column here would add them together and
+        // destroy exactly that.
+        let project = mixed();
+        let joined = ParsedProject::new(&project, Vec::new());
+        assert_eq!(
+            joined.coverage_keys(),
+            ["AGG · Oracle", "AGG · PostgreSQL", "AGG · unclassified"]
+        );
+
+        // …and each file counts under its own.
+        let ora = joined.placement_of("AGG/4_12_ORA.sql").expect("placed");
+        let pos = joined.placement_of("AGG/4_12_POS.sql").expect("placed");
+        assert_eq!(ora.coverage_key(), "AGG · Oracle");
+        assert_eq!(pos.coverage_key(), "AGG · PostgreSQL");
+        assert_eq!(ora.effective_dialect(), Some(EngineKind::Oracle));
+        assert_eq!(pos.effective_dialect(), Some(EngineKind::Postgres));
+        // The role is the folder's, for both.
+        assert_eq!(ora.effective_role(), FolderRole::Update);
+        assert_eq!(pos.effective_role(), FolderRole::Update);
+    }
+
+    #[test]
+    fn a_tidy_folder_is_spelled_exactly_as_it_always_was() {
+        // Every repository that existed before a file could carry an engine must
+        // produce byte-identical columns, or every saved view and every habit
+        // breaks for a feature it does not use.
+        let project = project();
+        let joined = ParsedProject::new(&project, Vec::new());
+        assert!(
+            joined.coverage_keys().iter().all(|k| !k.contains('·')),
+            "{:?}",
+            joined.coverage_keys()
+        );
+    }
+
+    #[test]
+    fn a_stray_unreadable_file_does_not_split_the_folder_around_it() {
+        // A single T-SQL script that wandered in contributes no column either
+        // way, so it must not turn its Oracle neighbours into "ORA · Oracle".
+        let mut folder = FolderNode {
+            role: Some(FolderRole::Update),
+            files: vec![
+                file_of("ORA/4_12.sql", FolderEngine::Supported(EngineKind::Oracle)),
+                file_of(
+                    "ORA/4_12_MSQ.sql",
+                    FolderEngine::Unsupported(picus_types::prelude::ForeignEngine::SqlServer),
+                ),
+            ],
+            ..FolderNode::new("ORA", "ORA")
+        };
+        folder.children = Vec::new();
+        let mut project =
+            Project { name: "P".to_string(), root: "/p".to_string(), tree: vec![folder] };
+        resolve(&mut project.tree, None, None);
+
+        let joined = ParsedProject::new(&project, Vec::new());
+        assert_eq!(joined.coverage_keys(), ["ORA"]);
     }
 
     #[test]

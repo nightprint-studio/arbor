@@ -24,7 +24,17 @@ pub(crate) fn file(path: &str) -> ScriptFile {
         encoding_source: EncodingSource::Inherited,
         eol: LineEnding::Crlf,
         expected_encoding: "windows-1252".to_string(),
+        engine: None,
+        effective_engine: None,
+        excluded: None,
+        effective_excluded: false,
     }
+}
+
+/// A file that carries its own engine, whatever folder it lands in — the untidy
+/// repository, where both engines share a directory.
+pub(crate) fn file_of(path: &str, engine: FolderEngine) -> ScriptFile {
+    ScriptFile { engine: Some(engine), ..file(path) }
 }
 
 fn folder(path: &str, role: FolderRole, files: Vec<ScriptFile>) -> FolderNode {

@@ -113,12 +113,100 @@ pub struct ScriptFile {
     /// What the folder expects. Different from `encoding` means the file was
     /// rewritten by something that did not know — the `ENC001` diagnostic.
     pub expected_encoding: String,
+    /// Declared **on this file** — almost always `None`, which means "whatever my
+    /// folder is" and is the answer for essentially every file in a tidy
+    /// repository.
+    ///
+    /// It exists for the untidy ones, where both engines sit in one directory and
+    /// only the file name knows which is which. Same four answers as
+    /// [`FolderNode::engine`], including `Unsupported` for the single T-SQL script
+    /// that wandered in.
+    pub engine: Option<FolderEngine>,
+    /// After falling back to the folder — what actually applies to this file.
+    ///
+    /// This, not the folder's, is what decides how the file is parsed, which lane
+    /// it counts in, and whether it is read at all. `None` means nobody has said,
+    /// here or anywhere above it.
+    pub effective_engine: Option<FolderEngine>,
+    /// Declared on this file: leave it out of the project. `None` = inherit from
+    /// the folder.
+    pub excluded: Option<bool>,
+    /// After inheritance. `true` means this script is not part of the project:
+    /// not parsed, not indexed, no findings, never a destination.
+    pub effective_excluded: bool,
 }
 
+/// The engine questions, asked of one file.
+///
+/// Thin by design: every answer is [`FolderEngine`]'s, so the rules live in one
+/// place and this is only the question being asked at a different granularity.
+/// [`FolderNode`] delegates to exactly the same methods, which is what keeps a
+/// folder and a file from ever disagreeing about what "portable" means.
 impl ScriptFile {
     /// Has this file drifted from what its folder expects?
     pub fn encoding_drifted(&self) -> bool {
         !self.encoding.eq_ignore_ascii_case(&self.expected_encoding)
+    }
+
+    /// Does this file say something about itself, rather than taking its folder's
+    /// word? What the interface shows as an inherited chip versus an own one.
+    pub fn declares_engine(&self) -> bool {
+        self.engine.is_some()
+    }
+
+    /// What this file's SQL has to be valid in. `None` for an unsupported engine
+    /// and for one nobody declared — the single gate everything downstream goes
+    /// through.
+    pub fn scope(&self) -> Option<DialectScope> {
+        self.effective_engine.and_then(FolderEngine::scope)
+    }
+
+    /// The **single** dialect this file is written in, if there is one. `None` for
+    /// portable as well as for unclassified.
+    pub fn effective_dialect(&self) -> Option<EngineKind> {
+        self.scope().and_then(DialectScope::dialect)
+    }
+
+    /// Does what is written here count as present for `dialect`? True of **both**
+    /// for a portable file.
+    pub fn covers(&self, dialect: EngineKind) -> bool {
+        self.effective_engine.map(|e| e.covers(dialect)).unwrap_or(false)
+    }
+
+    /// Portable SQL: written to run on every dialect Picus supports.
+    pub fn is_generic(&self) -> bool {
+        self.effective_engine.map(FolderEngine::is_generic).unwrap_or(false)
+    }
+
+    /// Is this file written in an engine Picus recognises and does not read? The
+    /// state that stops the parse.
+    pub fn engine_is_unsupported(&self) -> bool {
+        self.effective_engine.map(|e| !e.is_readable()).unwrap_or(false)
+    }
+
+    /// Does anybody know what engine this file is?
+    pub fn engine_is_unknown(&self) -> bool {
+        self.effective_engine.is_none()
+    }
+
+    /// Is this script part of the project at all?
+    ///
+    /// The gate every consumer goes through before doing anything with a file.
+    /// An excluded script is still **read** — it opens in the editor like any
+    /// other, and hiding it would leave no way to change one's mind — but it is
+    /// not parsed, not indexed, not compared and never generated into.
+    pub fn is_excluded(&self) -> bool {
+        self.effective_excluded
+    }
+
+    /// Does Picus have anything at all to say about this file?
+    ///
+    /// The two states that stop the pipeline, in one question, because every
+    /// caller that skips one skips the other: excluded means *not ours to look
+    /// at*, an unsupported engine means *not ours to read*. Different reasons,
+    /// identical consequences.
+    pub fn is_out_of_scope(&self) -> bool {
+        self.is_excluded() || self.engine_is_unsupported()
     }
 }
 
@@ -148,6 +236,11 @@ pub struct FolderNode {
     pub effective_engine: Option<FolderEngine>,
     /// After inheritance, falling back to [`FolderRole::Ignored`].
     pub effective_role: FolderRole,
+    /// Declared here: leave this folder and everything under it out of the
+    /// project. `None` = inherit; a descendant may set it back to `false`.
+    pub excluded: Option<bool>,
+    /// After inheritance.
+    pub effective_excluded: bool,
     pub children: Vec<FolderNode>,
     pub files: Vec<ScriptFile>,
 }
@@ -163,9 +256,16 @@ impl FolderNode {
             role: None,
             effective_engine: None,
             effective_role: FolderRole::Ignored,
+            excluded: None,
+            effective_excluded: false,
             children: Vec::new(),
             files: Vec::new(),
         }
+    }
+
+    /// Is this folder part of the project at all? See [`ScriptFile::is_excluded`].
+    pub fn is_excluded(&self) -> bool {
+        self.effective_excluded
     }
 
     /// What this folder's SQL has to be valid in, after inheritance.
@@ -228,11 +328,27 @@ impl FolderNode {
     /// Does this folder take part in the `(dialect, role)` lane the cross-dialect
     /// rules compare?
     ///
-    /// A **portable** folder is in the lane of every dialect: what it writes runs
-    /// on both, so it fills a gap on both, and reporting it as missing from either
+    /// A **portable** file is in the lane of every dialect: what it writes runs on
+    /// both, so it fills a gap on both, and reporting it as missing from either
     /// would be reporting the opposite of the truth.
+    ///
+    /// Asked of the **files**, because that is where the engine now lives. A
+    /// folder holding one `*_ORA.sql` and one `*_POS.sql` is in both lanes even
+    /// though the folder itself could never say which engine it is — and a folder
+    /// with no files at all is in none, which is right: a directory that only
+    /// contains other directories has no content to compare.
     pub fn is_in_lane(&self, dialect: EngineKind, role: FolderRole) -> bool {
-        self.covers(dialect) && self.effective_role == role
+        self.effective_role == role
+            && self.files.iter().any(|file| !file.is_excluded() && file.covers(dialect))
+    }
+
+    /// The files of this folder that are actually part of the project.
+    ///
+    /// What every consumer wants. Excluded scripts stay in `files` so the tree
+    /// can still show them — and so there is somewhere to click to change one's
+    /// mind — but nothing downstream should ever iterate `files` directly.
+    pub fn included_files(&self) -> impl Iterator<Item = &ScriptFile> {
+        self.files.iter().filter(|file| !file.is_excluded())
     }
 }
 
@@ -283,32 +399,63 @@ impl Project {
         self.walk().find(|node| node.path == path)
     }
 
-    /// Which folder a project-relative **file** path sits in, and therefore what
-    /// applies to it.
+    /// Which folder a project-relative **file** path sits in.
+    ///
+    /// Linear in the size of the repository. Callers that need this for *every*
+    /// file must build an index once instead — see [`Project::files_by_path`] —
+    /// or the walk turns quadratic on exactly the repositories where it hurts.
     pub fn folder_of(&self, path: &str) -> Option<&FolderNode> {
         self.walk().find(|node| node.files.iter().any(|f| f.path == path))
     }
 
-    /// The dialect a file must be written in. `None` when no folder above it
-    /// declares one — the caller must refuse to generate rather than pick one.
+    /// The file at a project-relative path.
+    pub fn file_at(&self, path: &str) -> Option<&ScriptFile> {
+        self.walk().find_map(|node| node.files.iter().find(|f| f.path == path))
+    }
+
+    /// Every file, indexed by path — one walk instead of one walk per lookup.
+    ///
+    /// The whole tree is read once and the map borrows it, so this costs a
+    /// `HashMap` of pointers and nothing else.
+    pub fn files_by_path(&self) -> std::collections::HashMap<&str, &ScriptFile> {
+        self.walk()
+            .flat_map(|node| node.files.iter())
+            .map(|file| (file.path.as_str(), file))
+            .collect()
+    }
+
+    /// The dialect a file must be written in. `None` when neither the file nor any
+    /// folder above it declares one — the caller must refuse to generate rather
+    /// than pick one.
+    ///
+    /// Asked of the **file**, which is the folder's answer for all but the handful
+    /// of files that say otherwise. A caller that asked the folder instead would
+    /// be right almost always, and wrong exactly where this feature exists.
     pub fn dialect_of(&self, path: &str) -> Option<EngineKind> {
-        self.folder_of(path).and_then(|folder| folder.effective_dialect())
+        self.file_at(path).and_then(ScriptFile::effective_dialect)
     }
 
     /// What a file's SQL has to be valid in — the parse and emit target.
     pub fn scope_of(&self, path: &str) -> Option<DialectScope> {
-        self.folder_of(path).and_then(|folder| folder.scope())
+        self.file_at(path).and_then(ScriptFile::scope)
     }
 
     /// Every dialect the repository actually answers for somewhere.
     ///
-    /// A portable folder contributes **both**: a repository whose only `init`
-    /// folder is portable still has an Oracle install story and a PostgreSQL one,
-    /// written once.
+    /// A portable file contributes **both**: a repository whose only `init`
+    /// scripts are portable still has an Oracle install story and a PostgreSQL
+    /// one, written once.
+    ///
+    /// Counted over **files**, not folders, and the difference is the whole point
+    /// of file-level classification: a repository whose PostgreSQL content is four
+    /// scattered `*_POS.sql` files in otherwise unclassified folders genuinely has
+    /// a PostgreSQL side, and a folder-level count would say it does not and leave
+    /// every cross-dialect rule silent about it.
     pub fn dialects(&self) -> Vec<EngineKind> {
         let mut out: Vec<EngineKind> = self
             .walk()
-            .flat_map(|node| node.effective_engine.map(FolderEngine::dialects).unwrap_or(&[]))
+            .flat_map(FolderNode::included_files)
+            .flat_map(|file| file.effective_engine.map(FolderEngine::dialects).unwrap_or(&[]))
             .copied()
             .collect();
         out.sort();
@@ -318,8 +465,29 @@ impl Project {
 
     /// The folders that play `role` for `dialect` — one lane of the comparison
     /// the consistency rules make.
+    ///
+    /// A folder is in the lane when **any file in it** is: with the engine on the
+    /// file, a directory holding both an `*_ORA.sql` and a `*_POS.sql` belongs to
+    /// both lanes, and asking the folder's own engine would put it in neither.
+    /// Callers that need the files themselves — anything counting content — want
+    /// [`lane_files`](Self::lane_files).
     pub fn lane(&self, dialect: EngineKind, role: FolderRole) -> impl Iterator<Item = &FolderNode> {
         self.walk().filter(move |node| node.is_in_lane(dialect, role))
+    }
+
+    /// Every file that plays `role` for `dialect`, with the folder holding it.
+    ///
+    /// The lane at the granularity content actually has. `role` is still the
+    /// folder's — a role is what a directory of scripts is *for* — while the
+    /// dialect is the file's.
+    pub fn lane_files(
+        &self,
+        dialect: EngineKind,
+        role: FolderRole,
+    ) -> impl Iterator<Item = (&FolderNode, &ScriptFile)> {
+        self.walk().filter(move |node| node.effective_role == role).flat_map(move |node| {
+            node.included_files().filter(move |file| file.covers(dialect)).map(move |file| (node, file))
+        })
     }
 }
 
@@ -358,7 +526,16 @@ mod tests {
             encoding_source: EncodingSource::Heuristic,
             eol: LineEnding::Crlf,
             expected_encoding: expected.to_string(),
+            engine: None,
+            effective_engine: None,
+            excluded: None,
+            effective_excluded: false,
         }
+    }
+
+    /// A file that says what engine it is, whatever folder it lands in.
+    fn file_of(path: &str, engine: FolderEngine) -> ScriptFile {
+        ScriptFile { engine: Some(engine), ..file(path, "windows-1252", "windows-1252") }
     }
 
     use picus_types::prelude::ForeignEngine;
@@ -516,6 +693,133 @@ mod tests {
         // The file itself still has no single dialect to be emitted as.
         assert_eq!(project.dialect_of("COMUNE/parametri.sql"), None);
         assert_eq!(project.scope_of("COMUNE/parametri.sql"), Some(DialectScope::Portable));
+    }
+
+    // ── When the engine is on the file ────────────────────────────────────────
+
+    /// The untidy repository: one folder, both engines, and only the file names
+    /// know which is which.
+    fn mixed() -> Project {
+        let mut year = node("AGGIORNAMENTO/2024", None, Some(FolderRole::Update));
+        year.files = vec![
+            file_of("AGGIORNAMENTO/2024/4_12_ORA.sql", FolderEngine::Supported(EngineKind::Oracle)),
+            file_of("AGGIORNAMENTO/2024/4_12_POS.sql", FolderEngine::Supported(EngineKind::Postgres)),
+            file("AGGIORNAMENTO/2024/note.sql", "windows-1252", "windows-1252"),
+        ];
+        let mut project =
+            Project { name: "P".to_string(), root: "/p".to_string(), tree: vec![year] };
+        resolve(&mut project.tree, None, None);
+        project
+    }
+
+    #[test]
+    fn a_file_answers_for_itself_and_its_neighbour_is_unaffected() {
+        let p = mixed();
+        assert_eq!(p.dialect_of("AGGIORNAMENTO/2024/4_12_ORA.sql"), Some(EngineKind::Oracle));
+        assert_eq!(p.dialect_of("AGGIORNAMENTO/2024/4_12_POS.sql"), Some(EngineKind::Postgres));
+        // The folder itself still knows nothing, and that is not a contradiction:
+        // it is a directory holding two engines, so there is no answer to give.
+        assert_eq!(p.folder_at("AGGIORNAMENTO/2024").unwrap().effective_dialect(), None);
+        // …and the file nobody classified inherits that nothing, rather than
+        // being handed whichever of its neighbours happened to be first.
+        assert_eq!(p.dialect_of("AGGIORNAMENTO/2024/note.sql"), None);
+    }
+
+    #[test]
+    fn a_mixed_folder_is_in_both_lanes_and_the_repository_has_both_dialects() {
+        // The failure this replaces: with the engine read off the folder, a
+        // directory like this belonged to NO lane, so every cross-dialect rule
+        // went silent about half the repository.
+        let p = mixed();
+        assert_eq!(p.dialects(), EngineKind::ALL);
+        for dialect in EngineKind::ALL {
+            let lane: Vec<&str> =
+                p.lane(*dialect, FolderRole::Update).map(|n| n.path.as_str()).collect();
+            assert_eq!(lane, ["AGGIORNAMENTO/2024"], "{dialect}");
+        }
+        // …and at the granularity content actually has, each lane holds its own
+        // file and not its neighbour's.
+        let oracle: Vec<&str> = p
+            .lane_files(EngineKind::Oracle, FolderRole::Update)
+            .map(|(_, f)| f.name.as_str())
+            .collect();
+        assert_eq!(oracle, ["4_12_ORA.sql"]);
+        let postgres: Vec<&str> = p
+            .lane_files(EngineKind::Postgres, FolderRole::Update)
+            .map(|(_, f)| f.name.as_str())
+            .collect();
+        assert_eq!(postgres, ["4_12_POS.sql"]);
+    }
+
+    #[test]
+    fn a_file_declaration_overrides_the_folder_it_sits_in() {
+        // A specific answer beats a general one, one level further down than it
+        // used to: the folder is Oracle, this file is not.
+        let mut ora = node("ORA", Some(EngineKind::Oracle), Some(FolderRole::Update));
+        ora.files = vec![
+            file("ORA/4_12.sql", "windows-1252", "windows-1252"),
+            file_of("ORA/4_12_POS.sql", FolderEngine::Supported(EngineKind::Postgres)),
+        ];
+        let mut project = Project { name: "P".to_string(), root: "/p".to_string(), tree: vec![ora] };
+        resolve(&mut project.tree, None, None);
+
+        assert_eq!(project.dialect_of("ORA/4_12.sql"), Some(EngineKind::Oracle));
+        assert_eq!(project.dialect_of("ORA/4_12_POS.sql"), Some(EngineKind::Postgres));
+        assert!(!project.file_at("ORA/4_12.sql").unwrap().declares_engine());
+        assert!(project.file_at("ORA/4_12_POS.sql").unwrap().declares_engine());
+    }
+
+    #[test]
+    fn a_single_file_can_be_portable_or_an_engine_picus_does_not_read() {
+        let mut folder = node("AGGIORNAMENTO", None, Some(FolderRole::Update));
+        folder.files = vec![
+            file_of("AGGIORNAMENTO/comune.sql", FolderEngine::Generic),
+            file_of(
+                "AGGIORNAMENTO/4_12_MSQ.sql",
+                FolderEngine::Unsupported(ForeignEngine::SqlServer),
+            ),
+        ];
+        let mut project =
+            Project { name: "P".to_string(), root: "/p".to_string(), tree: vec![folder] };
+        resolve(&mut project.tree, None, None);
+
+        let portable = project.file_at("AGGIORNAMENTO/comune.sql").unwrap();
+        assert!(portable.is_generic());
+        assert_eq!(portable.scope(), Some(DialectScope::Portable));
+        assert!(EngineKind::ALL.iter().all(|d| portable.covers(*d)));
+
+        let foreign = project.file_at("AGGIORNAMENTO/4_12_MSQ.sql").unwrap();
+        assert!(foreign.engine_is_unsupported() && !foreign.engine_is_unknown());
+        assert_eq!(foreign.scope(), None, "nothing is parsed with it");
+        assert!(EngineKind::ALL.iter().all(|d| !foreign.covers(*d)));
+    }
+
+    #[test]
+    fn the_wire_shape_carries_the_files_own_engine_and_the_one_in_force() {
+        let p = mixed();
+        let json = serde_json::to_value(&p).unwrap();
+        let files = &json["tree"][0]["files"];
+        assert_eq!(files[0]["name"], "4_12_ORA.sql");
+        assert_eq!(files[0]["engine"], "oracle");
+        assert_eq!(files[0]["effectiveEngine"], "oracle");
+        // The unclassified one carries both as null, which is a real answer and
+        // the one the interface renders as a question.
+        assert_eq!(files[2]["engine"], serde_json::Value::Null);
+        assert_eq!(files[2]["effectiveEngine"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn every_file_is_indexed_by_path_in_one_walk() {
+        // The index exists because asking the tree per file is a walk per file,
+        // which is quadratic on exactly the repositories where it hurts.
+        let p = mixed();
+        let index = p.files_by_path();
+        assert_eq!(index.len(), 3);
+        assert_eq!(
+            index.get("AGGIORNAMENTO/2024/4_12_POS.sql").unwrap().effective_dialect(),
+            Some(EngineKind::Postgres)
+        );
+        assert!(index.get("nowhere.sql").is_none());
     }
 
     #[test]

@@ -37,6 +37,12 @@ input type of `picus-analyze` too. A rule that had to re-derive a file's folder 
 dialect and its role — would be a rule
 that could derive it differently.
 
+A `Placement` answers from **two levels**, and which is which matters: the **role** is the folder's
+(a directory of scripts is *for* something, and the file beside this one is for the same thing),
+the **engine** is the file's — which for all but a handful of files is its folder's anyway. The
+exceptions are the untidy repositories where both engines share a directory and only the file name
+knows which is which.
+
 ## The identifier-case rule
 
 **Unquoted names fold to UPPER CASE; quoted names keep their contents exactly; the schema
@@ -92,6 +98,21 @@ were never parsed — a column that only appeared once something was found would
 folder has none"* indistinguishable from *"nothing looked here"*, which is the one failure a
 consistency tool must not have. Folders that hold only other folders get no column: a cell that
 can never be anything but zero is noise in a table whose point is that a zero means something.
+
+**Except where one folder holds more than one engine.** With the engine on the file, a directory
+can hold `4_12_ORA.sql` beside `4_12_POS.sql`, and keying that on the path alone would add the
+Oracle statements to the PostgreSQL ones and destroy the one comparison the table exists to make.
+Such a folder yields **one column per engine**, with the engine named in the header —
+`AGG · Oracle`, `AGG · PostgreSQL`, and `AGG · unclassified` for the files nobody has classified
+yet (named rather than blank: a column headed with nothing reads like a rendering bug). Files in an
+engine Picus does not read are left out of the count that decides this, so a stray T-SQL script
+does not split the Oracle folder around it.
+
+Tidy repositories — the overwhelming majority, and every repository that existed before a file
+could carry an engine — are unaffected: one engine per folder means one column per folder, spelled
+byte-identically to before. `Placement::coverage_key` and `ParsedProject::coverage_keys` go through
+one function for that rule, because two implementations of it would give the table a column nothing
+counts towards and lose one that does.
 
 `ALTER` defines an object but does not **create** it (`ObjectSite::creating`). A table created
 in the initialisation folder and altered by three update scripts is an ordinary repository, not

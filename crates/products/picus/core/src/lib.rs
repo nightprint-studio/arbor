@@ -32,5 +32,6 @@ pub mod config;
 pub mod connections;
 pub mod digest;
 pub mod prelude;
+pub mod schema;
 pub mod scripts;
 pub mod state;

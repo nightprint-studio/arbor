@@ -7,7 +7,8 @@
   A script repository is a folder tree, and Picus shows it as it is. Any folder can say
   which <b>engine</b> its scripts are written for and what they are <b>for</b> — their
   role: initialisation, updates, routines, data. Everything beneath a folder inherits both
-  until another folder says otherwise.
+  until another folder says otherwise, and a single <b>file</b> can say which engine it is
+  when its folder cannot.
 </p>
 
 <h2>The tree is the tree</h2>
@@ -151,6 +152,8 @@ role = "update"`}</code></pre>
     <code>POSIZIONI</code>.</li>
   <li>A name can carry an <b>engine</b>, a <b>role</b>, or both — including an engine Picus
     does not support, and including <code>generic</code> for folders of portable SQL.</li>
+  <li>A name means folder names unless you say otherwise. Pointing it at <b>file</b> names too
+    is one more line — see <i>When the engine is in the file name</i>, below.</li>
   <li>It <b>adds to</b> Picus's own vocabulary rather than replacing it — declaring one name
     never costs you the defaults.</li>
   <li>It applies as the repository is read, so a folder of that name added <b>later</b> is
@@ -161,11 +164,89 @@ role = "update"`}</code></pre>
 </ul>
 <p>
   Classify a folder whose name repeats and Picus offers, as a <b>separate</b> question, to
-  make it a rule — naming how many folders that would reach before you agree. Declining
-  leaves the folder you just classified exactly as you set it. The names a project has
-  accumulated are listed, editable and removable under
-  <b>Settings ▸ Project ▸ Folder names</b>, each showing how many folders it currently
-  reaches; the command palette opens it by name.
+  make it a rule — naming how many folders that would reach before you agree. Classify a
+  script and it offers the same thing about a word of its name, proposing the word that recurs
+  across the most files and letting you correct the guess. Either way the offer asks
+  <b>where the name applies</b> — folder names, file names, or both — with the count beside
+  each, and it starts on the axis you were working on rather than the wider one. Declining
+  leaves what you just classified exactly as you set it.
+</p>
+<p>
+  The names a project has accumulated are listed, editable and removable under
+  <b>Settings ▸ Project ▸ Folder names</b>, each showing where it applies and how many folders
+  it currently reaches; the command palette opens it by name.
+</p>
+
+<h2>When the engine is in the file name</h2>
+<p>
+  Not every repository puts the engine in a directory. Plenty hold
+  <code>4_12_ORA.sql</code> and <code>4_12_POS.sql</code> side by side in one folder, and that
+  folder is honestly neither: it is both. So the engine is a property of the <b>file</b>, of which
+  the folder is only the default. A file that says nothing is in its folder's engine — which is
+  every file in a tidy repository — and a file that says something wins over the folder it sits
+  in, the same way a folder wins over the one above it.
+</p>
+<p>
+  Point a name at file names and one line classifies every scattered script:
+</p>
+<pre><code>{`[[alias]]
+name = "POS"
+engine = "postgres"
+applies_to = "both"      # "folders" (the default), "files", or "both"`}</code></pre>
+<p>
+  Or answer for one path, when a single file is the exception:
+</p>
+<pre><code>{`[[file]]
+path = "AGGIORNAMENTO/2024/4_12_POS.sql"
+dialect = "postgres"`}</code></pre>
+<p>
+  A file declaration carries the engine and nothing else. A <b>role</b> is what a directory of
+  scripts is for, and the script beside this one is for the same thing; an <b>encoding</b> is
+  measured from the bytes rather than declared. The engine is the one thing that genuinely varies
+  file by file, so it is the one thing this says.
+</p>
+<p>
+  Neither line has to be typed. Right-click a file in the tree — or press
+  <kbd>Shift</kbd>+<kbd>F10</kbd> on the focused row — and set <b>Engine of this file</b>; the
+  folder's own entry stays right below it, because most of the time the correction really does
+  belong to the folder. <kbd>F6</kbd> opens the same thing as a dialog: type part of a path,
+  walk the matches with <kbd>↑</kbd> <kbd>↓</kbd>, pick the engine and press
+  <kbd>Ctrl</kbd>+<kbd>Enter</kbd>. <b>Inherit from the folder</b> clears the declaration
+  again, and the dialog names what the file would fall back to before you do it. The command
+  palette lists the dialog, and lists every script that declares an engine of its own by name.
+</p>
+<p>
+  The tree stays quiet about all of this on purpose. A file row carries an engine chip only
+  when it says something the folder header does not: when it <b>declares its own engine</b>, or
+  when it has <b>no engine while a script beside it has one</b> — the odd one out in a folder
+  somebody has started sorting by file name, and the only one nothing is generated into.
+  Everything else inherits silently, because a badge on all five hundred rows is the folder's
+  badge repeated five hundred times, and a badge that is always there is one nobody reads.
+</p>
+<p>
+  <b>Picus never reads an engine out of a file name on its own</b>, and that is deliberate rather
+  than cautious. A folder name is short and chosen; a file name is a sentence.
+  <code>ORA</code> is Italian for <i>now</i>, so <code>AGGIORNA_ORA_INIZIO.sql</code> would read as
+  Oracle, and <code>MIGRAZIONE_DA_MYSQL.sql</code> is a PostgreSQL script <i>about</i> MySQL —
+  reading <code>mysql</code> out of it would not produce a wrong finding, it would produce
+  <i>no</i> findings at all, silently. A repository has a dozen folder names and hundreds of file
+  names, and nobody reviews hundreds. So a file is classified by its name only where you have said
+  which names mean what, <i>and</i> said you meant it about file names. The extension is never part
+  of the match.
+</p>
+<p>
+  What follows once files carry engines: a folder holding both takes part in <b>both</b> engines'
+  comparisons instead of neither, its files are each parsed as the dialect they actually are, and
+  a repository whose PostgreSQL side is four scattered <code>*_POS.sql</code> files genuinely has a
+  PostgreSQL side. In the Inventory, such a folder's column <b>splits per engine</b> —
+  <code>AGG · Oracle</code>, <code>AGG · PostgreSQL</code> — because one column would add the two
+  together and destroy the only comparison the table is there to make. A folder with a single
+  engine keeps a single column, headed with its path alone.
+</p>
+<p>
+  When a file disagrees with a folder that <i>declared</i> its engine, Picus says so under the
+  tree — not as a question, but as a statement that a specific answer is overruling a general one.
+  Nothing else in the folder is affected.
 </p>
 
 <h2>A repository belongs to a connection</h2>
@@ -201,9 +282,13 @@ role = "update"`}</code></pre>
 <p>
   Folders holding scripts that no engine covers get their own warning, because they are
   the ones that stop the repository working: nothing is generated into them and nothing
-  about them is compared. Classifying one — or any folder above it, or its name — is what
-  fixes it. Folders in an engine Picus does not support are counted separately and stated
-  rather than warned about: there is nothing to fix there.
+  about them is compared. The question is asked where a <b>file</b> is left over, not merely
+  where a folder is silent — a directory whose scripts have each answered for themselves is
+  settled even though the directory itself could never say what engine it is. Classifying a
+  folder, a file, or a name is what fixes it. Folders in an engine Picus does not support are
+  counted separately and stated rather than warned about: there is nothing to fix there.
+  <b>Excluded</b> folders and scripts raise none of this at all — they are not in the project,
+  so nothing about them is a question.
 </p>
 
 <h2>Roles</h2>
@@ -214,9 +299,63 @@ role = "update"`}</code></pre>
     starting version and closing on the resulting one.</li>
   <li><b>Routines</b> — packages, procedures, functions, triggers.</li>
   <li><b>Data</b> — reference rows loaded alongside the schema.</li>
-  <li><b>Ignored</b> — not indexed and never written into. A real choice, for the folder
-    of one-off fixes that should take no part in any of this.</li>
+  <li><b>Ignored</b> — not an installation folder: nothing is generated into it and it
+    takes part in no comparison between engines. It is still read, its objects still
+    appear in the inventory and its files are still checked. A real choice, for the
+    folder of one-off fixes that should take no part in the installation.</li>
 </ul>
+
+<h2>Leaving something out of the project</h2>
+<p>
+  Some scripts are none of Picus's business at all — the migration folder that ran once in
+  2019, the export somebody committed by mistake. Those are <b>excluded</b>: Picus treats
+  them as though they were not in the repository. Not parsed, not indexed, no coverage
+  column, no findings, and never a destination for a generation.
+</p>
+<p>
+  Right-click a folder or a script in the tree — or press <kbd>Shift</kbd>+<kbd>F10</kbd>
+  on the focused row — and choose <b>Exclude this folder from the project</b> or
+  <b>Exclude this script from the project</b>. The command palette offers the same for the
+  script you have open, and lists everything currently excluded so it can be put back by
+  name. Excluding a folder covers everything beneath it.
+</p>
+<pre><code>{`[[folder]]
+path = "MIGRAZIONE_2019"
+excluded = true
+
+[[file]]
+path = "AGGIORNAMENTO/2024/export_una_tantum.sql"
+excluded = true`}</code></pre>
+<p>
+  <b>Excluded is not the <i>ignored</i> role</b>, and the difference is worth the two
+  sentences. <i>Ignored</i> says <i>this is not an installation folder</i>: nothing is
+  generated into it and it is compared with nothing, but it is still read, its objects still
+  show up in the inventory and its files are still checked — knowing that
+  <code>MIGRAZIONE_2019</code> creates a table is worth having. <i>Excluded</i> says
+  <i>pretend this is not in the repository</i>. The two cannot be one setting, because
+  <i>ignored</i> is also what a folder nobody has classified falls back to: if that meant
+  excluded, the folders most in need of attention would be the ones silently dropped from
+  the report.
+</p>
+<p>
+  One script can be kept out of an excluded folder's fate. A folder of migrations that holds
+  the one file that does matter says so on the file, and the tree's menu offers it as
+  <b>Keep this script in the project</b>:
+</p>
+<pre><code>{`[[folder]]
+path = "MIGRAZIONE_2019"
+excluded = true
+
+[[file]]
+path = "MIGRAZIONE_2019/4_12__4_13.sql"
+excluded = false`}</code></pre>
+<p>
+  Excluded rows <b>stay in the tree</b>, dimmed and struck through, with the badge on the
+  row that made the decision. Hiding them would leave no way to change your mind. An
+  excluded folder starts <b>collapsed</b> — what is inside it is not what the panel is for —
+  and opens like any other with <kbd>→</kbd> or a click, which is how the script that needs
+  rescuing is reached.
+</p>
 
 <h2>Encoding</h2>
 <p>
@@ -256,7 +395,9 @@ role = "update"`}</code></pre>
 <p>
   The per-folder detail is not lost — expand an object's row and every column breaks down
   into the folders behind it, which is where "<i>which</i> of the eleven version folders is
-  missing it" is actually answered. Statements that land in no column at all are counted
+  missing it" is actually answered. A folder holding more than one engine appears there once per
+  engine, with the engine named beside its path, so its Oracle and its PostgreSQL numbers are never
+  added together. Statements that land in no column at all are counted
   on the row as <b>elsewhere</b>, and files under an <b>ignored</b> folder — or one in an
   engine Picus does not read — are stated under the table, so a folded matrix can never
   look complete when it is not. Those folders get no column of their own: their files are

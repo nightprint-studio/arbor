@@ -34,6 +34,36 @@ PostgreSQL file — the exact failure Picus exists to catch. `POS` above matches
 knows *by default*, and being asked about it is the correct outcome — until the project says
 what it means (below).
 
+### …and the last link of the chain is the file
+
+Not every repository puts the engine in a directory. An untidy one puts it in the file name —
+`4_12_ORA.sql` beside `4_12_POS.sql` in one folder that can say nothing about either, because it
+is honestly both. So the engine is a property of the **file**, of which the folder is the default:
+
+```
+file declaration → folder declaration → nearest ancestor's → none
+```
+
+`ScriptFile` carries `engine` (declared on this file, `None` for essentially every file in
+essentially every repository) and `effective_engine` (after inheritance), read through exactly the
+same `scope()` / `covers()` / `effective_dialect()` / `is_generic()` methods `FolderNode` exposes.
+Same four answers, one level of granularity further down — the rules live in `FolderEngine`, and
+these are the same questions asked of a smaller thing, which is what keeps a file and its folder
+from ever disagreeing about what *portable* means. `resolve()` fills both in one pass, so there is
+one inheritance rule in the crate and no second place for the two to drift.
+
+The **role** stays the folder's. A directory of scripts is *for* something and the file beside this
+one is for the same thing; the engine is the one axis that genuinely varies file by file.
+
+Two consequences downstream depends on:
+
+- `FolderNode::is_in_lane` asks the **files**, so a folder holding one `*_ORA.sql` and one
+  `*_POS.sql` is in both lanes where before it was in neither, and a folder holding only other
+  folders is in none. `Project::lane_files` gives the lane at the granularity content actually has.
+- `Project::dialects` counts over files, so a repository whose PostgreSQL content is four scattered
+  `*_POS.sql` files genuinely has a PostgreSQL side — a folder-level count said it did not, and
+  every cross-dialect rule stayed silent about it.
+
 ## Four engine states
 
 A folder is not "a Picus dialect or a question". `AGGIORNAMENTO/2024/MSQ` in that repository is
@@ -83,12 +113,12 @@ declaration, per path or by name in `alias`.
 | Module | Holds |
 |---|---|
 | `tree` | `Project` / `FolderNode` / `ScriptFile` — the wire shapes the interface renders, `camelCase`, serialize-only |
-| `resolve` | inheritance: what a folder declares → what applies to it |
-| `config` | `.arbor/picus/project.toml`: the declarations, version table, naming, marker |
+| `resolve` | inheritance: what a folder declares → what applies to it, and to every file in it |
+| `config` | `.arbor/picus/project.toml`: the folder and file declarations, version table, naming, marker |
 | `legacy` | reading a `version = 1` file and folding its branches into declarations |
 | `discover` | `plan()` (pure) + `scan()` (the filesystem) + `discover()` (both) |
-| `infer` | a folder's role and engine from its own name, each with the keyword that produced it |
-| `alias` | folder names that mean something in **this** repository, and the rule that matches them |
+| `infer` | a folder's role and engine from its own name, each with the keyword that produced it — and a file's engine, from the project's vocabulary and from nothing else |
+| `alias` | names that mean something in **this** repository, where they are looked for, and the rule that matches them |
 | `naming` | the update-file scheme: a versioned default plus a per-project regex |
 | `marker` | the comment above a generated block, its template, and recognising it again |
 | `insertion` | where a generated block lands, per folder role |
@@ -123,6 +153,30 @@ declaration survives a subdirectory being added, which the previous nested branc
 could not. Encoding and naming overrides inherit the same way the dialect does. `dialect` may
 name an engine Picus does not read (`dialect = "sqlserver"`): a folder has one engine, so it
 has one key.
+
+### And, where a repository is untidy, keyed by file
+
+```toml
+[[file]]
+path = "AGGIORNAMENTO/2024/4_12_POS.sql"
+dialect = "postgres"
+```
+
+Same shape, same key, one level down. Only the engine, and deliberately only the engine: a role is
+a fact about a directory, an encoding is measured from the bytes rather than declared. Nothing
+inherits *downwards* from it — a file has nothing below it — so it is a leaf answer and it beats
+everything, including the folder it sits in. Almost always empty: a `[[file]]` line is a correction
+to a file Picus placed wrongly, and `discover()` never proposes one.
+
+### The version number is derived from the content
+
+`ProjectConfig::save` stamps **`required_version()`**, not `CURRENT_VERSION`: the lowest schema
+version that can read this configuration correctly — `3` exactly when something in it classifies an
+individual file (a `[[file]]` declaration, or an alias whose scope covers file names), `2`
+otherwise. A version number is a claim about compatibility and the file is committed and shared, so
+the honest claim depends on what the file says. Always writing the newest would lock a colleague on
+an older build out of a repository using nothing their build lacks; always writing the oldest would
+let that build silently ignore the declarations that decide which dialect a script is parsed as.
 
 ### And a vocabulary, for the names that repeat
 
@@ -159,6 +213,34 @@ Precedence, and it is the whole design: **`[[folder]]` beats `[[alias]]` beats t
 vocabulary**. A specific answer beats a general rule; a local fact beats a global heuristic.
 Aliases apply at *discovery*, so a `POS` folder created next month is classified without anyone
 touching this file.
+
+#### Where the name is looked for — `applies_to`
+
+Folder names by default. A repository whose engine is in the file name points the same name at file
+names as well:
+
+```toml
+[[alias]]
+name = "POS"
+engine = "postgres"
+applies_to = "both"      # "folders" (default) | "files" | "both"
+```
+
+It moves the **engine** only — a role stays a fact about a directory, and an alias declaring only a
+role while pointed at file names classifies nothing and is reported as such. An unreadable value
+degrades to the default rather than to nothing: `applies_to` says *where* to look, so a typo must
+not un-declare an engine that was spelled correctly. `AliasScope` is a type rather than a `bool`
+because the third answer is real — one alias answering for a `POS` folder *and* a `4_12_POS.sql`
+without a second entry that can drift from the first.
+
+**The built-in vocabulary never classifies a file** (`infer_file_engine_in` consults the project's
+aliases and nothing else), and it is the asymmetry the whole path rests on. `ORA` is Italian for
+*now*, so `AGGIORNA_ORA_INIZIO.sql` would read as Oracle; `MIGRAZIONE_DA_MYSQL.sql` is a PostgreSQL
+script *about* MySQL, and reading `mysql` out of it produces not a wrong finding but **no**
+findings, silently. Folder names are short, deliberate and a dozen to a repository; file names are
+hundreds and nobody reviews them. `4_12_ORACLE.sql` is the case this gives up, and one `[[alias]]`
+line buys it back. The extension is stripped before matching (`infer::file_stem`), so `.sql` can
+never match an alias called `SQL`.
 
 A `version = 1` file, with `[[branch]]` tables holding `[[branch.folder]]` ones, still loads:
 `legacy` folds it into declarations on the way in and the resolver reproduces exactly what the
@@ -198,6 +280,9 @@ Three properties are worth knowing about because downstream crates depend on the
 - **A per-path declaration beats an alias, and an alias beats the built-in vocabulary.** All
   three orderings are asserted at the discovery level, including the awkward one: a declaration
   that *clears* the engine must not be re-inferred from the alias on the next scan.
+- **An alias says nothing about a file name until it is asked to,** and the built-in vocabulary
+  never does at all. Both are asserted directly, because the safety of file-level classification is
+  entirely that it only happens where somebody wrote it down.
 
 ```bash
 cargo test -p picus-project

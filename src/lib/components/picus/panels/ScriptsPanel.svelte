@@ -17,7 +17,7 @@
    * connection with none attached is offered a folder to point at, rather than
    * leaving the panel to look broken.
    */
-  import { FolderTree, RefreshCw, FolderOpen, Database, FolderCog } from 'lucide-svelte';
+  import { FolderTree, RefreshCw, FolderOpen, Database, FileCog, FolderCog } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
@@ -88,6 +88,19 @@
       onclick={() => picusUiStore.openFolderClassify()}
     >
       {#snippet iconStart()}<FolderCog size={13} />{/snippet}
+    </Button>
+    <Button
+      variant="icon"
+      size="xs"
+      tooltip={{
+        content: 'Say what one script is — for a folder holding two engines at once',
+        shortcut: 'F6',
+      }}
+      ariaLabel="Classify a script"
+      disabled={!attached || !picusProjectStore.fileCount}
+      onclick={() => picusUiStore.openFileClassify()}
+    >
+      {#snippet iconStart()}<FileCog size={13} />{/snippet}
     </Button>
     <Button
       variant="icon"
@@ -205,6 +218,7 @@
     <p class="sp-hint">
       A folder declares its engine and its purpose; everything under it inherits them until
       something says otherwise. A quiet chip is inherited — the solid one is where it is set.
+      A script carries a chip of its own only when it says something its folder does not.
     </p>
     <p class="sp-root" title={picusProjectStore.root}>
       <Database size={11} />

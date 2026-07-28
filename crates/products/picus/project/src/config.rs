@@ -32,6 +32,23 @@
 //! describe two fixed levels, and a repository whose dialect sits three levels
 //! down had nowhere to say so.
 //!
+//! ## …and, where a repository is untidy, keyed by file
+//!
+//! Not every repository puts the engine in a directory. In a dirty one it is on
+//! the file, with both engines side by side in one folder that can say nothing
+//! about either:
+//!
+//! ```toml
+//! [[file]]
+//! path = "AGGIORNAMENTO/2024/4_12_POS.sql"
+//! dialect = "postgres"
+//! ```
+//!
+//! Same shape, same key, one level down — and the same precedence: a file that
+//! declares nothing is in its folder's engine, which is the case for almost every
+//! file in almost every repository. This exists so the exceptions have somewhere
+//! to be written down rather than forcing a folder to be split.
+//!
 //! ## And a vocabulary, for the names that repeat
 //!
 //! A declaration answers for one path. A repository with a folder per delivered
@@ -74,11 +91,20 @@ use crate::tree::LineEnding;
 /// Where the file sits, relative to the project root.
 pub const PROJECT_CONFIG_RELATIVE_PATH: &str = ".arbor/picus/project.toml";
 
-/// The schema version this build writes and understands.
+/// The highest schema version this build understands.
 ///
-/// `2` is the flat `[[folder]]` shape. `1` — branches holding folders — is still
-/// read, and migrated on the way in.
-pub const CURRENT_VERSION: u32 = 2;
+/// `1` — branches holding folders — is still read, and migrated on the way in.
+/// `2` is the flat `[[folder]]` shape. `3` adds file-level classification:
+/// `[[file]]` declarations and aliases that match file names.
+///
+/// What is written is **not** this constant but
+/// [`required_version`](ProjectConfig::required_version) — the lowest version that
+/// can read the file correctly. See there for why.
+pub const CURRENT_VERSION: u32 = 3;
+
+/// The version of the flat `[[folder]]` shape, before anything could classify a
+/// single file.
+const FLAT_FOLDER_VERSION: u32 = 2;
 
 /// The default single-byte encoding for these repositories. Not a guess about
 /// text in general — a fact about the corpus Picus was built for.
@@ -108,12 +134,17 @@ pub struct ProjectConfig {
     /// writes a short file.
     #[serde(default, rename = "folder")]
     pub folders: Vec<FolderDeclaration>,
-    /// Folder **names** that mean something in this repository — the vocabulary
-    /// that answers for every folder called `POS`, including the ones not yet
-    /// created. `alias` singular for the same TOML reason as `folder`.
+    /// What individual **files** declare, for the repositories where the engine
+    /// is on the file rather than on the directory. Almost always empty.
+    #[serde(default, rename = "file")]
+    pub files: Vec<FileDeclaration>,
+    /// **Names** that mean something in this repository — the vocabulary that
+    /// answers for every folder called `POS`, including the ones not yet created,
+    /// and (where the alias says so) for every file with `POS` in its name.
+    /// `alias` singular for the same TOML reason as `folder`.
     ///
     /// Ordered after `folders` in this struct because `toml` refuses to emit a
-    /// value after a table, and both of these are arrays of tables: the plain
+    /// value after a table, and all of these are arrays of tables: the plain
     /// values have to come first, and between two arrays the order is free.
     #[serde(default, rename = "alias")]
     pub aliases: Vec<InferenceAlias>,
@@ -243,10 +274,72 @@ pub struct FolderDeclaration {
     /// Overrides the project's default encoding from here down.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encoding: Option<String>,
+    /// Leave this folder — and everything under it — out of the project
+    /// entirely. Absent means "inherit"; a descendant may set it back to `false`.
+    ///
+    /// **Not the same as `role = "ignored"`**, and the difference is the reason
+    /// this is a separate field rather than a fifth role. `ignored` says *this is
+    /// not an installation folder*: nothing is generated into it and it takes
+    /// part in no cross-dialect comparison, but it is still read, its objects
+    /// still appear in the inventory, and its files are still checked. That is
+    /// deliberate — knowing that `MIGRAZIONE_2019` creates a table is useful.
+    ///
+    /// `excluded` says *pretend this is not in the repository*: not parsed, not
+    /// indexed, no column, no findings, never a destination.
+    ///
+    /// They cannot be merged, because `ignored` is also the **fallback** for a
+    /// folder nobody has classified. Making the fallback mean "excluded" would
+    /// silently drop from the report exactly the folders that need attention —
+    /// the same trap the model already avoids by keeping "an engine Picus cannot
+    /// read" distinct from "an engine nobody has named".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excluded: Option<bool>,
     /// Overrides the update-file naming from here down — a folder whose update
     /// files are named differently from its sibling's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub naming: Option<NamingScheme>,
+}
+
+/// What one **file** declares about itself.
+///
+/// Only the engine, and deliberately only the engine. A role is what a directory
+/// of scripts is *for*, and the file beside this one in the same directory is for
+/// the same thing; an encoding is measured from the bytes rather than declared.
+/// The engine is the one fact that genuinely varies file by file in an untidy
+/// repository, so it is the one fact this can say.
+///
+/// Unlike [`FolderDeclaration`], nothing here inherits **downwards** — a file has
+/// nothing below it. It is a leaf answer, and it beats everything.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct FileDeclaration {
+    /// Project-relative path of the file, POSIX separators.
+    pub path: String,
+    /// The engine this one file is written in. Named `dialect` to match
+    /// [`FolderDeclaration::dialect`]: it is the same question with the same
+    /// answers, including `generic` for a portable script and `sqlserver` for one
+    /// that wandered in from another product.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dialect: Option<FolderEngine>,
+    /// Leave this one script out of the project — the migration script nobody
+    /// wants counted, sitting in a folder full of ones they do. Absent means
+    /// "inherit from the folder"; `false` rescues a single file from an excluded
+    /// folder. See [`FolderDeclaration::excluded`] for why this is not a role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excluded: Option<bool>,
+}
+
+impl FileDeclaration {
+    pub fn new(path: impl Into<String>) -> FileDeclaration {
+        FileDeclaration { path: path.into(), ..FileDeclaration::default() }
+    }
+
+    /// A declaration that says neither of the two things it can say is noise — a
+    /// file with no declaration already inherits its folder — so it is dropped
+    /// rather than written.
+    pub fn is_empty(&self) -> bool {
+        self.dialect.is_none() && self.excluded.is_none()
+    }
 }
 
 impl FolderDeclaration {
@@ -261,6 +354,7 @@ impl FolderDeclaration {
         self.dialect.is_none()
             && self.role.is_none()
             && self.encoding.is_none()
+            && self.excluded.is_none()
             && self.naming.is_none()
     }
 }
@@ -314,7 +408,10 @@ impl ProjectConfig {
                 reason: e.to_string(),
             })?;
         }
-        let text = toml::to_string_pretty(self)
+        // Stamped with what this content actually needs, not with what this build
+        // happens to be — see `required_version`.
+        let stamped = ProjectConfig { version: self.required_version(), ..self.clone() };
+        let text = toml::to_string_pretty(&stamped)
             .map_err(|e| ProjectError::Malformed { path: path.clone(), reason: e.to_string() })?;
         std::fs::write(&path, text)
             .map_err(|e| ProjectError::Io { path: path.clone(), reason: e.to_string() })?;
@@ -339,14 +436,65 @@ impl ProjectConfig {
         self.folders.last_mut().expect("just pushed")
     }
 
+    /// What this exact **file** declares, if anything.
+    pub fn file_declaration(&self, path: &str) -> Option<&FileDeclaration> {
+        self.files.iter().find(|f| f.path == path)
+    }
+
+    /// The declaration for a file, created empty if there is none.
+    pub fn file_declaration_mut(&mut self, path: &str) -> &mut FileDeclaration {
+        if let Some(index) = self.files.iter().position(|f| f.path == path) {
+            return &mut self.files[index];
+        }
+        self.files.push(FileDeclaration::new(path));
+        self.files.last_mut().expect("just pushed")
+    }
+
+    /// Forget what a file declared, so it inherits its folder again. `true` when
+    /// there was something to forget.
+    pub fn clear_file_declaration(&mut self, path: &str) -> bool {
+        let before = self.files.len();
+        self.files.retain(|f| f.path != path);
+        self.files.len() != before
+    }
+
     /// Drop declarations that no longer say anything, and keep the file ordered
     /// by path so a diff of it reads like the tree. The vocabulary is tidied the
     /// same way, by name.
     pub fn tidy(&mut self) {
         self.folders.retain(|f| !f.is_empty());
         self.folders.sort_by(|a, b| a.path.cmp(&b.path));
+        self.files.retain(|f| !f.is_empty() && !f.path.is_empty());
+        self.files.sort_by(|a, b| a.path.cmp(&b.path));
         self.aliases.retain(|a| !a.is_empty() && !a.key().is_empty());
         self.aliases.sort_by(|a, b| a.key().cmp(&b.key()));
+    }
+
+    /// The lowest schema version that can read this configuration **correctly**.
+    ///
+    /// Written instead of [`CURRENT_VERSION`] because a version number is a claim
+    /// about compatibility, and the honest claim depends on what the file says.
+    /// The project file is committed and shared: stamping every save with the
+    /// newest number would lock a colleague on an older build out of a repository
+    /// that uses nothing their build lacks, while stamping every save with the
+    /// oldest would let that build silently ignore the `[[file]]` declarations
+    /// that decide which dialect a script is parsed as — and silently ignoring a
+    /// classification is the failure this product exists to prevent.
+    ///
+    /// So: `3` exactly when something here classifies an individual file, `2`
+    /// otherwise.
+    pub fn required_version(&self) -> u32 {
+        // Exclusion counts for the same reason file classification does: a build
+        // that silently ignored it would analyse and report on scripts their
+        // owner has said do not belong to this project.
+        let excludes = self.folders.iter().any(|f| f.excluded.is_some());
+        let classifies_files =
+            !self.files.is_empty() || self.aliases.iter().any(|a| a.scope().covers_files());
+        if excludes || classifies_files {
+            CURRENT_VERSION
+        } else {
+            FLAT_FOLDER_VERSION
+        }
     }
 
     // ── The project's own vocabulary ──────────────────────────────────────────
@@ -501,6 +649,7 @@ mod tests {
                     ..FolderDeclaration::default()
                 },
             ],
+            files: Vec::new(),
             aliases: Vec::new(),
         }
     }
@@ -694,6 +843,99 @@ mod tests {
         let problems = config.problems();
         assert_eq!(problems.len(), 1);
         assert!(problems[0].starts_with("AGGIORNAMENTO/2024/ORA:"), "{problems:?}");
+    }
+
+    // ── Classifying one file ──────────────────────────────────────────────────
+
+    #[test]
+    fn a_single_file_can_be_declared_and_round_trips() {
+        let mut config = sample();
+        config.file_declaration_mut("AGGIORNAMENTO/2024/4_12_POS.sql").dialect =
+            Some(FolderEngine::Supported(EngineKind::Postgres));
+
+        let text = toml::to_string_pretty(&config).expect("serialises");
+        assert!(text.contains("[[file]]"), "{text}");
+        assert!(text.contains(r#"path = "AGGIORNAMENTO/2024/4_12_POS.sql""#), "{text}");
+        assert_eq!(ProjectConfig::parse(&text).expect("parses"), config);
+    }
+
+    #[test]
+    fn a_file_declaration_takes_the_same_four_answers_a_folder_does() {
+        let text = r#"
+            name = "MINIMAL"
+            [[file]]
+            path = "AGGIORNAMENTO/comune.sql"
+            dialect = "generic"
+            [[file]]
+            path = "AGGIORNAMENTO/4_12_MSQ.sql"
+            dialect = "sqlserver"
+        "#;
+        let config = ProjectConfig::parse(text).expect("parses");
+        assert_eq!(
+            config.file_declaration("AGGIORNAMENTO/comune.sql").unwrap().dialect,
+            Some(FolderEngine::Generic)
+        );
+        assert_eq!(
+            config.file_declaration("AGGIORNAMENTO/4_12_MSQ.sql").unwrap().dialect,
+            Some(FolderEngine::Unsupported(ForeignEngine::SqlServer))
+        );
+        assert!(config.file_declaration("AGGIORNAMENTO/other.sql").is_none());
+    }
+
+    #[test]
+    fn clearing_a_file_declaration_puts_it_back_in_its_folders_hands() {
+        let mut config = sample();
+        config.file_declaration_mut("a/b.sql").dialect =
+            Some(FolderEngine::Supported(EngineKind::Postgres));
+        assert!(config.clear_file_declaration("a/b.sql"));
+        assert!(config.file_declaration("a/b.sql").is_none());
+        assert!(!config.clear_file_declaration("a/b.sql"), "nothing left to clear");
+    }
+
+    #[test]
+    fn tidying_drops_a_file_declaration_that_says_nothing_and_orders_the_rest() {
+        let mut config = sample();
+        config.file_declaration_mut("z.sql").dialect = Some(FolderEngine::Generic);
+        config.file_declaration_mut("a.sql").dialect = Some(FolderEngine::Generic);
+        config.file_declaration_mut("m.sql"); // started and never filled in
+        config.tidy();
+        let paths: Vec<&str> = config.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["a.sql", "z.sql"]);
+    }
+
+    #[test]
+    fn the_written_version_is_the_lowest_that_can_read_the_file_correctly() {
+        // A version number is a claim about compatibility, so it has to depend on
+        // what the file says rather than on which build wrote it.
+        let plain = sample();
+        assert_eq!(plain.required_version(), 2, "nothing here classifies a file");
+
+        let mut with_file = sample();
+        with_file.file_declaration_mut("a.sql").dialect = Some(FolderEngine::Generic);
+        assert_eq!(with_file.required_version(), CURRENT_VERSION);
+
+        // …and an alias pointed at file names counts just as much: an older build
+        // would read it, ignore the `applies_to`, and classify the files wrongly.
+        let mut with_alias = sample();
+        with_alias.alias_mut("POS").engine = Some("postgres".to_string());
+        assert_eq!(with_alias.required_version(), 2);
+        with_alias.alias_mut("POS").applies_to = Some("both".to_string());
+        assert_eq!(with_alias.required_version(), CURRENT_VERSION);
+    }
+
+    #[test]
+    fn a_version_two_file_still_loads_and_declares_no_files() {
+        let text = r#"
+            version = 2
+            name = "PROD_CORE"
+            [[folder]]
+            path = "AGGIORNAMENTO"
+            role = "update"
+        "#;
+        let config = ProjectConfig::parse(text).expect("parses");
+        assert_eq!(config.version, 2);
+        assert!(config.files.is_empty());
+        assert_eq!(config.declaration("AGGIORNAMENTO").unwrap().role, Some(FolderRole::Update));
     }
 
     // ── The project's own vocabulary ──────────────────────────────────────────

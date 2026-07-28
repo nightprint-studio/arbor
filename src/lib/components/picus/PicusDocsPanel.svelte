@@ -4,7 +4,7 @@
    * panel the rest of the suite uses. Topics live in `./docs/`; this file only
    * wires the navigation.
    */
-  import { BookOpen, Rocket, Database, FolderTree, FormInput, TriangleAlert, Keyboard, Lightbulb } from 'lucide-svelte';
+  import { BookOpen, Rocket, Database, FolderTree, FormInput, TriangleAlert, Keyboard, Lightbulb, Zap } from 'lucide-svelte';
   import DocsShell, { type DocsNavItem, type DocsNavGroup } from '$lib/components/shared/DocsShell.svelte';
   import GettingStarted from './docs/GettingStarted.svelte';
   import Connections from './docs/Connections.svelte';
@@ -12,9 +12,14 @@
   import Generating from './docs/Generating.svelte';
   import Consistency from './docs/Consistency.svelte';
   import Editing from './docs/Editing.svelte';
+  import Abbreviations from './docs/Abbreviations.svelte';
   import Shortcuts from './docs/Shortcuts.svelte';
 
-  let { onClose }: { onClose: () => void } = $props();
+  let { onClose, initialSection = 'getting-started' }: {
+    onClose: () => void;
+    /** Topic to land on. The palette addresses topics by name. */
+    initialSection?: string;
+  } = $props();
 
   const topItems: DocsNavItem[] = [
     { id: 'getting-started', label: 'Getting Started', icon: Rocket },
@@ -22,6 +27,9 @@
     // behave the same — so it sits above the Database / Scripts split rather than
     // being filed under one of them.
     { id: 'editing', label: 'The SQL editor', icon: Lightbulb },
+    // Beside it rather than inside it: the shorthand is a language of its own, and
+    // a page nobody can find is the failure mode of a feature nobody can guess at.
+    { id: 'abbreviations', label: 'SQL abbreviations', icon: Zap },
   ];
 
   const navGroups: DocsNavGroup[] = [
@@ -47,6 +55,7 @@
   const sections = {
     'getting-started': GettingStarted,
     'editing': Editing,
+    'abbreviations': Abbreviations,
     'connections': Connections,
     'scripts': Scripts,
     'generating': Generating,
@@ -62,5 +71,5 @@
   {onClose}
   title="Picus Documentation"
   headerIcon={BookOpen}
-  initialSection="getting-started"
+  {initialSection}
 />

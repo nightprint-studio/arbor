@@ -16,7 +16,7 @@
 
 use std::collections::HashMap;
 
-use picus_parse::prelude::{line_col, ParsedFile};
+use picus_parse::prelude::ParsedFile;
 
 use crate::finding::Finding;
 use crate::rule::RuleId;
@@ -98,10 +98,10 @@ pub fn scan(
 
     for (offset, text) in line_comments(source) {
         let Some(body) = suppression_body(&text) else { continue };
-        let line = line_col(source, offset).0;
+        let line = parsed.line_of(offset);
         match read_body(body) {
             Ok((rule, reason)) => {
-                accepted.push(Suppression { rule, reason, line, scope: scope_of(offset, source, parsed) })
+                accepted.push(Suppression { rule, reason, line, scope: scope_of(offset, parsed) })
             }
             Err(problem) => rejected.push(RejectedSuppression {
                 file: path.to_string(),
@@ -221,9 +221,9 @@ fn read_body(body: &str) -> Result<(RuleId, String), String> {
 /// above, or to the thing it sits on the same line as. The header is the
 /// exception, and it is the useful one — it is the only place from which a
 /// file-wide rule can be silenced.
-fn scope_of(offset: usize, source: &str, parsed: &ParsedFile) -> Scope {
+fn scope_of(offset: usize, parsed: &ParsedFile) -> Scope {
     let lines = |start: usize, end: usize| {
-        (line_col(source, start).0, line_col(source, end.saturating_sub(1).max(start)).0)
+        (parsed.line_of(start), parsed.line_of(end.saturating_sub(1).max(start)))
     };
     let Some(first) = parsed.statements.first() else {
         return Scope::Header { first_statement: None };
@@ -243,9 +243,9 @@ fn scope_of(offset: usize, source: &str, parsed: &ParsedFile) -> Scope {
     }
     // Trailing on the same line as the statement that just ended: `INSERT …; --
     // picus: ignore DML002 — …` is about that INSERT, not about the next one.
-    let comment_line = line_col(source, offset).0;
+    let comment_line = parsed.line_of(offset);
     if let Some(previous) = parsed.statements.iter().rev().find(|s| s.range.end <= offset) {
-        if line_col(source, previous.range.end.saturating_sub(1)).0 == comment_line {
+        if parsed.line_of(previous.range.end.saturating_sub(1)) == comment_line {
             return span(previous.range.start, previous.range.end);
         }
     }

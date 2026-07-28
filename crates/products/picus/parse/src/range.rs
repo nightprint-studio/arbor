@@ -48,9 +48,14 @@ impl ByteRange {
 
 /// 1-based line and column (column counted in bytes) for a byte offset.
 ///
-/// A helper rather than stored state: line numbers are only ever needed when a
-/// message is being written for a human, and precomputing a line table for every
-/// parsed file would cost memory on every file that never produces one.
+/// **Linear in the offset**, because it counts newlines from byte zero. That is
+/// fine for a caller asking once and catastrophic for one asking per statement:
+/// doing it that way made indexing a real repository quadratic in the size of
+/// each file, and took five minutes over eleven megabytes.
+///
+/// So this is for callers that have a source and no parse. Anything holding a
+/// [`ParsedFile`](crate::statement::ParsedFile) must use its
+/// `line_col_at` / `line_of`, which binary-search an index built once.
 pub fn line_col(source: &str, offset: usize) -> (usize, usize) {
     let clamped = offset.min(source.len());
     let before = &source.as_bytes()[..clamped];

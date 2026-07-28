@@ -19,25 +19,42 @@ export type BottomTab = 'consistency' | 'output' | 'changes';
 /** Sub-view of a table tab: its rows, its columns, or its DDL. */
 export type TableSubview = 'data' | 'structure' | 'ddl';
 
+/** Did the offer come from classifying a folder, or one file? */
+export type AliasOfferKind = 'folder' | 'file';
+
 /**
- * An offer to turn one folder's classification into a project-wide rule.
+ * An offer to turn one classification into a project-wide rule about a **name**.
  *
- * Raised the moment the user classifies a folder whose name repeats, because
+ * Raised the moment the user classifies something whose name repeats, because
  * that is the moment they have the knowledge: they just said what `POS` is, and
- * there are ten more folders called `POS`. It carries the paths rather than only
- * a count so the confirmation can name what it would touch.
+ * there are ten more folders — or thirty more files — with `POS` in the name. It
+ * carries the paths rather than only a count so the offer can name what it would
+ * touch, and both lists rather than one so the choice between "folders", "files"
+ * and "both" is made with the numbers in view.
  */
 export interface AliasOffer {
-  /** The folder name the rule would be about. */
+  /** Which classification raised it — it decides what the rule defaults to. */
+  kind: AliasOfferKind;
+  /** The name the rule would be about. */
   name: string;
   /** The engine the user just declared, when that is what they declared. */
   engine: FolderEngine | null;
-  /** The role they just declared, when that is what they declared. */
+  /** The role they just declared. Folders only — a file has no role. */
   role: FolderRole | null;
-  /** Every folder the rule would reach, in tree order — including the first. */
-  paths: string[];
+  /** Every folder of that name, in tree order. The backend's own answer. */
+  folderPaths: string[];
+  /** Every file with that word in its name; absent for a folder-born offer. */
+  filePaths?: string[];
   /** The one they classified, so the offer can talk about "the other ten". */
   origin: string;
+  /**
+   * Other words of the file's name.
+   *
+   * A folder's name is the whole name and there is nothing to choose. A file's
+   * is a sentence, so the word carrying the meaning is a **guess**, and a guess
+   * the user cannot correct is one they have to decline.
+   */
+  alternatives?: string[];
 }
 
 function createPicusUiStore() {
@@ -87,6 +104,17 @@ function createPicusUiStore() {
    */
   let folderClassifyPath = $state<string | null>(null);
   /**
+   * File whose own engine is being set; `null` means closed, `''` means "open,
+   * nothing picked yet".
+   *
+   * A separate dialog from the folder one rather than a mode of it: they offer
+   * different answers (a file has no role), they are reached from different
+   * rows, and the file one exists for a case the folder one cannot express. They
+   * are owned here for the same reason, though — both are reachable from the
+   * tree, the palette and a keystroke.
+   */
+  let fileClassifyPath = $state<string | null>(null);
+  /**
    * The "…and every folder named POS" offer, waiting on an answer.
    *
    * A **second, distinct** action rather than a side effect of the classification
@@ -105,6 +133,8 @@ function createPicusUiStore() {
   let declinedAliases = $state<string[]>([]);
   /** Settings page to open on; `''` means "wherever it was". */
   let settingsSection = $state('');
+  /** Docs topic to open on; `''` means "the panel's own first page". */
+  let docsSection = $state('');
 
   return {
     get sidebarSection() { return sidebarSection; },
@@ -124,15 +154,17 @@ function createPicusUiStore() {
     get addDestinationOpen() { return addDestinationOpen; },
     get scriptRootPickerId() { return scriptRootPickerId; },
     get folderClassifyPath() { return folderClassifyPath; },
+    get fileClassifyPath() { return fileClassifyPath; },
     get aliasOffer() { return aliasOffer; },
     get settingsSection() { return settingsSection; },
+    get docsSection() { return docsSection; },
 
     /** True while any dialog owns the keyboard — the shell's shortcuts stand down. */
     get anyModalOpen() {
       return settingsOpen || shortcutsOpen || aboutOpen || connectionEditorOpen
         || connectionDetailsId !== null || connectionDeleteId !== null
         || addDestinationOpen || paletteOpen || scriptRootPickerId !== null
-        || folderClassifyPath !== null || aliasOffer !== null;
+        || folderClassifyPath !== null || fileClassifyPath !== null || aliasOffer !== null;
     },
 
     /** Rail click: same section → collapse; different section → switch + open. */
@@ -174,8 +206,20 @@ function createPicusUiStore() {
     closeShortcuts() { shortcutsOpen = false; },
     openAbout() { aboutOpen = true; },
     closeAbout() { aboutOpen = false; },
-    toggleDocs() { docsOpen = !docsOpen; },
-    closeDocs() { docsOpen = false; },
+    toggleDocs() {
+      docsSection = '';
+      docsOpen = !docsOpen;
+    },
+    /** `section` lands the panel on one topic — the palette addresses them by name,
+     *  the way a feature nobody would guess at gets found. */
+    openDocs(section = '') {
+      docsSection = section;
+      docsOpen = true;
+    },
+    closeDocs() {
+      docsOpen = false;
+      docsSection = '';
+    },
 
     openConnectionEditor(id: string | null = null) {
       // Opening the editor from the inspector replaces it rather than stacking
@@ -210,21 +254,26 @@ function createPicusUiStore() {
     openFolderClassify(path = '') { folderClassifyPath = path; },
     closeFolderClassify() { folderClassifyPath = null; },
 
+    /** Say what one file is. `''` opens the dialog on its own file picker. */
+    openFileClassify(path = '') { fileClassifyPath = path; },
+    closeFileClassify() { fileClassifyPath = null; },
+
     /**
-     * Offer to turn what was just decided about one folder into a rule about its
-     * name. Ignored when the user already declined that name this session.
+     * Offer to turn what was just decided about one folder — or one file — into
+     * a rule about a name. Ignored when the user already declined that name this
+     * session.
      */
-    offerFolderAlias(offer: AliasOffer) {
+    offerAlias(offer: AliasOffer) {
       if (declinedAliases.includes(offer.name.toLowerCase())) return;
       aliasOffer = offer;
     },
     /** They said no. Do not ask about this name again while the window is open. */
-    declineFolderAlias() {
+    declineAlias() {
       if (aliasOffer) declinedAliases = [...declinedAliases, aliasOffer.name.toLowerCase()];
       aliasOffer = null;
     },
     /** They said yes, or the offer is otherwise finished with. */
-    closeFolderAlias() { aliasOffer = null; },
+    closeAlias() { aliasOffer = null; },
   };
 }
 

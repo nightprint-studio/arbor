@@ -168,6 +168,72 @@ export interface FolderAlias {
   engine?: string | null;
   /** A `FolderRole` wire word, or absent. */
   role?: string | null;
+  /**
+   * An {@link AliasScope} wire word, or absent — absent means `folders`, which
+   * is what every alias written before file matching existed says.
+   *
+   * A wire string like its siblings, and read through {@link aliasScope} so a
+   * typo degrades to the default instead of un-declaring the engine beside it.
+   */
+  appliesTo?: string | null;
+}
+
+/**
+ * Where an alias's name is looked for: folder names, file names, or both.
+ *
+ * Folder names by default, and file names strictly **opt-in**. Not timidity —
+ * arithmetic. A repository has a dozen folder names and hundreds of file names,
+ * and a file name is a sentence rather than a label: `ORA` is Italian for *now*,
+ * `POS` sits inside `POSIZIONI`, `DB` inside half the vocabulary. A rule that is
+ * merely *usually* right costs far more on the file axis, so file matching is
+ * always something the repository's owner asked for and never something Picus
+ * inferred.
+ *
+ * A **role** is unaffected by this: a role is what a directory of scripts is
+ * *for*, and the file beside another in the same directory is for the same
+ * thing. The engine is the only axis that genuinely varies file by file.
+ */
+export type AliasScope = 'folders' | 'files' | 'both';
+
+/** What an alias means when it never mentions where it applies. */
+export const DEFAULT_ALIAS_SCOPE: AliasScope = 'folders';
+
+export const ALIAS_SCOPE_CHOICES: AliasScope[] = ['folders', 'files', 'both'];
+
+/** How each scope reads in a picker. */
+export const ALIAS_SCOPE_LABELS: Record<AliasScope, string> = {
+  folders: 'Folder names',
+  files: 'File names',
+  both: 'Folder and file names',
+};
+
+/** The same, in the words a sentence about one alias wants. */
+export const ALIAS_SCOPE_PHRASES: Record<AliasScope, string> = {
+  folders: 'every folder of this name',
+  files: 'every file with this name in it',
+  both: 'every folder of this name, and every file with it in its name',
+};
+
+/**
+ * Where this alias applies. An unreadable value degrades to the **default**
+ * rather than to nothing — mirroring the backend, where a typo in `applies_to`
+ * must not silently un-declare an engine that was spelled correctly.
+ */
+export function aliasScope(alias: FolderAlias): AliasScope {
+  const wire = alias.appliesTo ?? '';
+  return ALIAS_SCOPE_CHOICES.includes(wire as AliasScope)
+    ? (wire as AliasScope)
+    : DEFAULT_ALIAS_SCOPE;
+}
+
+/** Does this alias answer about folder names? */
+export function scopeCoversFolders(scope: AliasScope): boolean {
+  return scope === 'folders' || scope === 'both';
+}
+
+/** Does this alias answer about file names? */
+export function scopeCoversFiles(scope: AliasScope): boolean {
+  return scope === 'files' || scope === 'both';
 }
 
 // ── Connections ──────────────────────────────────────────────────────────────
@@ -341,8 +407,101 @@ export interface ScriptFile {
    * `ENC001` finding.
    */
   expectedEncoding: string;
+  /**
+   * Engine declared **on this file**; `null` means "whatever my folder is".
+   *
+   * `null` is the ordinary case — essentially every file in a tidy repository —
+   * and that is the point: the engine belongs to the folder, and a file only
+   * says something when its folder cannot. Untidy repositories are the reason it
+   * exists at all: one directory holding `4_12_ORA.sql` beside `4_12_POS.sql`
+   * can say nothing true about either, and neither a folder declaration nor a
+   * name rule fits a one-off.
+   *
+   * Same four answers as {@link FolderNode.engine}, unsupported engines
+   * included, for the single T-SQL script that wandered in.
+   */
+  engine: FolderEngine | null;
+  /**
+   * The engine after falling back to the folder — what actually applies here.
+   *
+   * **This**, not the folder's, decides how the file is parsed, which lane it
+   * counts in, and whether it is read at all. `null` is a real answer and means
+   * nobody has said: not here, and not anywhere above.
+   */
+  effectiveEngine: FolderEngine | null;
+  /**
+   * Declared **on this file**: leave this one script out of the project.
+   * `null` means "inherit from the folder", which is what every file says.
+   *
+   * Three-valued rather than a flag because of the one case that matters:
+   * `false` **rescues** a single script from an excluded folder. A folder full
+   * of migrations that are none of Picus's business often holds one that is,
+   * and without this the only way to keep it would be to move it on disk.
+   *
+   * See {@link FolderNode.excluded} for why this is not a role.
+   */
+  excluded: boolean | null;
+  /**
+   * After inheritance — whether this script is part of the project at all.
+   *
+   * `true` means not parsed, not indexed, no coverage, no findings, never a
+   * destination. It is still **read**: it opens in the editor like any other
+   * file, and the tree still shows its row.
+   */
+  effectiveExcluded: boolean;
   /** Working-copy marker shown on the tree row. */
   status?: 'modified' | 'new' | 'error';
+}
+
+/** What this file **declares**; `null` = it says nothing and follows its folder. */
+export function declaredFileEngine(file: ScriptFile): FolderEngine | null {
+  return file.engine ?? null;
+}
+
+/** What applies to this file after falling back to its folder. */
+export function fileEngine(file: ScriptFile): FolderEngine | null {
+  return file.effectiveEngine ?? null;
+}
+
+/**
+ * Does this file answer for itself rather than take its folder's word?
+ *
+ * The question the tree row asks: a declaring file carries information its
+ * folder's own chip does not, and is the only kind of file row worth a chip.
+ */
+export function fileDeclaresEngine(file: ScriptFile): boolean {
+  return declaredFileEngine(file) !== null;
+}
+
+/** Nobody knows what engine this file is — the state that is asked about. */
+export function fileEngineIsUnknown(file: ScriptFile): boolean {
+  return fileEngine(file) === null;
+}
+
+/** Does content in this file count as present for `dialect`? Both, if portable. */
+export function fileCovers(file: ScriptFile, dialect: Dialect): boolean {
+  return enginesCovered(fileEngine(file)).includes(dialect);
+}
+
+/**
+ * Can generated SQL be written into this file?
+ *
+ * The file-level twin of {@link folderAcceptsGeneration}, and the one a
+ * destination picker must ask. A folder holding `4_12_ORA.sql` beside
+ * `4_12_POS.sql` has no engine of its own and never will, but both files do —
+ * asking the folder would refuse two perfectly good destinations.
+ *
+ * A portable file qualifies: the backend restricts what may be written into it
+ * to the intersection of the dialects, which is the payoff — one file instead of
+ * two for a plain INSERT.
+ *
+ * An **excluded** file never does, whatever its engine says: it is not in the
+ * project, and *never a destination* is exactly what that means.
+ */
+export function fileAcceptsGeneration(file: ScriptFile): boolean {
+  if (isExcluded(file)) return false;
+  const engine = fileEngine(file);
+  return isDialect(engine) || isGenericEngine(engine);
 }
 
 /**
@@ -391,8 +550,80 @@ export interface FolderNode {
   effectiveEngine: FolderEngine | null;
   /** Role after inheritance. `ignored` when nobody said. */
   effectiveRole: FolderRole;
+  /**
+   * Declared here: leave this folder — and everything under it — out of the
+   * project. `null` means "inherit"; a descendant may set it back to `false`.
+   *
+   * ## Not the same as `role = "ignored"`, and they must not be confused
+   *
+   * `ignored` says **this is not an installation folder**: nothing is generated
+   * into it and it takes part in no cross-dialect comparison, but it is still
+   * read, its objects still appear in the inventory, and its files are still
+   * checked. That is deliberate — knowing that `MIGRAZIONE_2019` creates a
+   * table is worth having.
+   *
+   * `excluded` says **pretend this is not in the repository**: not parsed, not
+   * indexed, no coverage column, no findings, never a destination.
+   *
+   * They cannot be merged, because `ignored` is also the **fallback** for a
+   * folder nobody has classified. Making the fallback mean "excluded" would
+   * silently drop from the report exactly the folders that need attention.
+   * Nothing in the interface may word one as the other.
+   */
+  excluded: boolean | null;
+  /** After inheritance — whether this folder is part of the project at all. */
+  effectiveExcluded: boolean;
   children: FolderNode[];
   files: ScriptFile[];
+}
+
+/**
+ * Anything the project can be told to leave out — a folder, or one script.
+ *
+ * One shape for both because it is one decision taken about one row, and the
+ * backend answers it with one verb. Every question below is asked of either.
+ */
+export interface Excludable {
+  /** Declared here; `null` = inherit. `false` on a file rescues it. */
+  excluded: boolean | null;
+  /** After inheritance. */
+  effectiveExcluded: boolean;
+}
+
+/** Is this outside the project? The gate every consumer goes through. */
+export function isExcluded(subject: Excludable): boolean {
+  return subject.effectiveExcluded;
+}
+
+/** Does this row say it itself, rather than inherit it? */
+export function declaresExclusion(subject: Excludable): boolean {
+  return subject.excluded !== null;
+}
+
+/**
+ * Excluded **because something above it is**, having said nothing itself.
+ *
+ * The distinction the row menu rests on: putting back a folder that excluded
+ * itself is clearing its own decision, while putting back a script inside an
+ * excluded folder is *rescuing* it — a different sentence and a different write
+ * ({@link ScriptFile.excluded} `= false`).
+ */
+export function excludedByAncestor(subject: Excludable): boolean {
+  return subject.effectiveExcluded && subject.excluded === null;
+}
+
+/**
+ * Has Picus anything at all to say about this folder or file?
+ *
+ * The two states that stop the pipeline, in one question, because every caller
+ * that skips one skips the other: excluded means *not ours to look at*, an
+ * engine Picus cannot read means *not ours to read*. Different reasons,
+ * identical consequences — the interface twin of `ScriptFile::is_out_of_scope`.
+ */
+export function isOutOfScope(
+  subject: Excludable & { effectiveEngine: FolderEngine | null },
+): boolean {
+  return isExcluded(subject) || isForeignEngine(subject.effectiveEngine);
 }
 
 /** What this folder **declares**; `null` = it says nothing and inherits. */
@@ -443,8 +674,9 @@ export function engineIsUnknown(node: FolderNode): boolean {
   return node.effectiveEngine === null;
 }
 
-/** Can a generation be written into this folder? */
+/** Can a generation be written into this folder? Never into an excluded one. */
 export function folderAcceptsGeneration(node: FolderNode): boolean {
+  if (isExcluded(node)) return false;
   return isDialect(node.effectiveEngine) || isGeneric(node);
 }
 

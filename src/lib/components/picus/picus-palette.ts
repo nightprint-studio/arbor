@@ -19,9 +19,9 @@
  */
 
 import {
-  BookOpen, Check, Command, Database, FileCode2, FolderCog, FolderOpen, FolderTree, FormInput,
-  Info, Keyboard, Layers, PanelBottom, PanelLeft, Pencil, Play, Plus, RefreshCw,
-  Settings, Table2, Tags, Trash2, TriangleAlert, Wrench,
+  BookOpen, Check, Command, Database, FileCode2, FileCog, FolderCog, FolderOpen, FolderTree,
+  FormInput, Info, Keyboard, Layers, PackageMinus, PackagePlus, PanelBottom, PanelLeft, Pencil,
+  Play, Plus, RefreshCw, Settings, Table2, Tags, Trash2, TriangleAlert, Wrench, Zap,
 } from 'lucide-svelte';
 
 import type { IconComponent } from '$lib/types/icon';
@@ -32,6 +32,14 @@ import { picusProjectStore } from '$lib/stores/picus/project.svelte';
 import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
 import { picusUiStore, type SidebarSection } from '$lib/stores/picus/ui.svelte';
 import { schemaStore } from '$lib/stores/picus/schema.svelte';
+import { engineLabel } from '$lib/types/picus';
+import {
+  exclusionAction,
+  fileTarget,
+  folderTarget,
+  setExcluded,
+  type ExclusionTarget,
+} from './exclude';
 
 const ICONS: Record<string, IconComponent> = {
   command: Command as unknown as IconComponent,
@@ -54,10 +62,14 @@ const ICONS: Record<string, IconComponent> = {
   check: Check as unknown as IconComponent,
   wrench: Wrench as unknown as IconComponent,
   folderCog: FolderCog as unknown as IconComponent,
+  fileCog: FileCog as unknown as IconComponent,
   tags: Tags as unknown as IconComponent,
   pencil: Pencil as unknown as IconComponent,
   info: Info as unknown as IconComponent,
   trash: Trash2 as unknown as IconComponent,
+  outOfProject: PackageMinus as unknown as IconComponent,
+  intoProject: PackagePlus as unknown as IconComponent,
+  zap: Zap as unknown as IconComponent,
 };
 
 export function picusPaletteIcon(name: string): IconComponent {
@@ -114,6 +126,28 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
   const tab = picusTabsStore.active;
   const activeConnectionId = connectionsStore.activeId;
   const attached = picusProjectStore.attached;
+  /** The script in front of the user, when a script is what is in front of them. */
+  const currentFile =
+    tab?.kind === 'file' && tab.file ? picusProjectStore.fileByPath(tab.file) : null;
+
+  /**
+   * One palette entry for the exclusion switch of a row.
+   *
+   * Built from {@link exclusionAction} rather than worded here, so the palette
+   * and the tree's row menu say the same thing about the same row — including
+   * "keep this one", which is a rescue and not a put-back.
+   */
+  const exclusionEntry = (id: string, target: ExclusionTarget, subtitle: string): Raw => {
+    const action = exclusionAction(target);
+    return {
+      id,
+      title: action.label(target.name),
+      subtitle: action.detail ? `${subtitle} · ${action.detail}` : subtitle,
+      icon: action.excluded ? 'outOfProject' : 'intoProject',
+      when: true,
+      action: () => a.run(() => void setExcluded(target, action.excluded)),
+    };
+  };
 
   const generateItems: Raw[] = [
     { id: 'gen', title: 'Generate DML', icon: 'form', shortcut: 'Ctrl+G', when: true, action: () => a.run(a.generate) },
@@ -136,6 +170,18 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
     { id: 'newconn', title: 'Add a connection…', icon: 'plus', shortcut: 'Ctrl+Shift+N', when: true, action: () => a.run(() => picusUiStore.openConnectionEditor(null)) },
     { id: 'cycleconn', title: 'Switch to the next connection', icon: 'database', shortcut: 'Ctrl+Shift+D', when: connectionsStore.connections.length > 1, action: () => a.run(() => connectionsStore.cycle(1)) },
     { id: 'editconn', title: 'Edit the active connection…', icon: 'pencil', shortcut: 'F4', when: !!connectionsStore.active, action: () => a.run(() => picusUiStore.openConnectionEditor(activeConnectionId)) },
+    // Nobody discovers a shorthand by typing into an editor and hoping. The entry
+    // carries the example rather than a name, because the example *is* the
+    // explanation — and it is here rather than under Application because it only
+    // works against a live schema, which is what makes it more than a snippet.
+    {
+      id: 'abbrev',
+      title: 'SQL abbreviations — expand s#table(cols)[filter] into a statement',
+      subtitle: "s#localstrings(keycode,value)[keycode='ita'] → SELECT … FROM LOCALSTRINGS WHERE KEYCODE = 'ita'. Type it in a query, press Tab.",
+      icon: 'zap',
+      when: true,
+      action: () => a.run(() => picusUiStore.openDocs('abbreviations')),
+    },
     // Every connection is addressable by name for each of the things you can do to
     // it — the keyboard path to what the sidebar row's menu offers to the mouse.
     ...connectionsStore.connections.flatMap((c): Raw[] => {
@@ -219,6 +265,20 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       action: () => a.run(() => picusUiStore.openFolderClassify()),
     },
     {
+      // The exception the folder dialog cannot express: a directory holding
+      // `4_12_ORA.sql` beside `4_12_POS.sql` can say nothing true about either,
+      // so the answer goes on the file.
+      id: 'classify-file',
+      title: 'Classify a script — set the engine of one file…',
+      subtitle: picusProjectStore.declaredFiles.length
+        ? `${picusProjectStore.declaredFiles.length} script(s) declare their own engine`
+        : 'Every script takes its engine from its folder',
+      icon: 'fileCog',
+      shortcut: 'F6',
+      when: attached && picusProjectStore.fileCount > 0,
+      action: () => a.run(() => picusUiStore.openFileClassify()),
+    },
+    {
       // The other half of classifying, and the half that scales: this one is
       // about a NAME, and answers for every folder that has it — including the
       // ones the next release will add. Addressable by name because a rule
@@ -247,6 +307,38 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       icon: 'folderCog',
       when: true,
       action: () => a.run(() => picusUiStore.openFolderClassify(e.node.path)),
+    })),
+    // The script in front of you, taken out of the project or put back. Deliberately
+    // without a shortcut: excluding is a once-per-repository decision, and the free
+    // chords left in this window are worth more to something done daily.
+    //
+    // The wording is not fixed here — a script inside an excluded folder is being
+    // *rescued* rather than put back, and it says so.
+    ...(currentFile
+      ? [exclusionEntry('exclude-current', fileTarget(currentFile), currentFile.path)]
+      : []),
+    // Everything declared out of the project, addressable one by one — the way
+    // back for a decision whose row is, by design, inside a collapsed folder.
+    // Only the rows that *declared* it: a whole excluded subtree enumerated here
+    // would bury the one entry that can undo it.
+    ...picusProjectStore.excludedFolders.map((e): Raw =>
+      exclusionEntry(`include:${e.node.path}`, folderTarget(e.node), e.node.path)),
+    ...picusProjectStore.excludedFiles
+      // The open script already has its own entry above; two rows offering the
+      // same write would read as a bug.
+      .filter((f) => f.path !== currentFile?.path)
+      .map((f): Raw => exclusionEntry(`include-file:${f.path}`, fileTarget(f), f.path)),
+    // Scripts that answer for themselves are addressable one by one, for the
+    // same reason: a short list by construction, and the only files carrying an
+    // answer their folder does not — so the only ones worth revisiting or
+    // clearing without going through a filter first.
+    ...picusProjectStore.declaredFiles.map((f): Raw => ({
+      id: `classify-file:${f.path}`,
+      title: `Set the engine of ${f.name}…`,
+      subtitle: f.engine ? `${f.path} · declares ${engineLabel(f.engine)} of its own` : f.path,
+      icon: 'fileCog',
+      when: true,
+      action: () => a.run(() => picusUiStore.openFileClassify(f.path)),
     })),
   ];
 

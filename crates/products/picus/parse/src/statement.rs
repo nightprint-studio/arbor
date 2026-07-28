@@ -116,9 +116,67 @@ pub struct ParsedFile {
     pub source_len: usize,
     pub statements: Vec<Statement>,
     pub errors: Vec<ParseError>,
+    /// Byte offset of the start of every line, `[0, …]`, ascending.
+    ///
+    /// The one piece of derived state this crate keeps, and it is here for a
+    /// measured reason. Line numbers are only ever wanted when a message is being
+    /// written for a human, so the obvious design is to count newlines on demand
+    /// — which is what [`line_col`](crate::range::line_col) does, in time linear
+    /// in the offset. Every inventory site, every finding and every suppression
+    /// asks for one, so "on demand" turned into **O(bytes²) per file**: on a real
+    /// repository whose 11 MB sat in a few large scripts, indexing took over five
+    /// minutes, of which twenty-five seconds out of twenty-nine were this.
+    ///
+    /// Built once here, it is a binary search per question and a `Vec<u32>` per
+    /// file — a few kilobytes against the megabytes of source it maps.
+    ///
+    /// Skipped by serde: it is reconstructible from the source in one pass, and
+    /// shipping it over the wire would double a `ParsedFile` for no reader.
+    #[serde(skip)]
+    pub line_starts: Vec<u32>,
 }
 
 impl ParsedFile {
+    /// The line-start index for a source. Ascending, always beginning with `0`,
+    /// so line `n` (1-based) starts at `line_starts[n - 1]`.
+    pub fn index_lines(source: &str) -> Vec<u32> {
+        let mut out = Vec::with_capacity(source.len() / 32 + 1);
+        out.push(0);
+        out.extend(
+            source
+                .bytes()
+                .enumerate()
+                .filter(|(_, byte)| *byte == b'\n')
+                .map(|(offset, _)| (offset + 1) as u32),
+        );
+        out
+    }
+
+    /// 1-based line and column (column in bytes) for a byte offset.
+    ///
+    /// The same answer [`line_col`](crate::range::line_col) gives, in a binary
+    /// search instead of a scan from byte zero — see [`ParsedFile::line_starts`]
+    /// for what that cost. Every caller that has a `ParsedFile` should use this;
+    /// `line_col` remains for the ones that do not.
+    ///
+    /// Degrades rather than panicking on an offset past the end or on a file
+    /// whose index was never built (a hand-constructed `ParsedFile` in a test):
+    /// the answer is line 1, which is wrong but harmless, and a parser must never
+    /// be the thing that panics.
+    pub fn line_col_at(&self, offset: usize) -> (usize, usize) {
+        let clamped = offset.min(self.source_len) as u32;
+        // `partition_point` gives the count of starts at or before the offset,
+        // which is the 1-based line number.
+        let line = self.line_starts.partition_point(|start| *start <= clamped).max(1);
+        let start = self.line_starts.get(line - 1).copied().unwrap_or(0);
+        (line, (clamped.saturating_sub(start) + 1) as usize)
+    }
+
+    /// The 1-based line a byte offset falls on.
+    pub fn line_of(&self, offset: usize) -> usize {
+        self.line_col_at(offset).0
+    }
+
     /// Statements and gaps, in source order, covering `[0, source_len)` exactly
     /// once and with no overlap.
     pub fn segments(&self) -> Vec<Segment<'_>> {
@@ -153,5 +211,66 @@ impl ParsedFile {
     /// Every foreign construct in the file, in source order.
     pub fn foreign(&self) -> impl Iterator<Item = &ForeignConstruct> {
         self.statements.iter().flat_map(|s| s.foreign.iter())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::range::line_col;
+
+    /// The index and the scan must give the same answer for every offset, or the
+    /// speed-up is a silent renumbering of every finding in the report.
+    #[test]
+    fn the_line_index_agrees_with_counting_from_the_start() {
+        for source in [
+            "",
+            "\n",
+            "SELECT 1;",
+            "a\nbc\n",
+            "-- perché\r\nINSERT INTO T VALUES ('x');\r\n\r\nUPDATE T SET A = 1;\r\n",
+            "no trailing newline\nlast line",
+        ] {
+            let parsed = ParsedFile {
+                scope: picus_types::prelude::DialectScope::Portable,
+                source_len: source.len(),
+                statements: Vec::new(),
+                errors: Vec::new(),
+                line_starts: ParsedFile::index_lines(source),
+            };
+            // Past the end as well: both clamp, and callers do hand it ranges
+            // from a file that was truncated under them.
+            for offset in 0..=source.len() + 3 {
+                assert_eq!(
+                    parsed.line_col_at(offset),
+                    line_col(source, offset),
+                    "{source:?} at {offset}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_parsed_file_with_no_index_answers_line_one_rather_than_panicking() {
+        // Hand-constructed in a test, or arriving from serde, which skips the
+        // index. Wrong but harmless beats a panic in a parser.
+        let bare = ParsedFile {
+            scope: picus_types::prelude::DialectScope::Portable,
+            source_len: 100,
+            statements: Vec::new(),
+            errors: Vec::new(),
+            line_starts: Vec::new(),
+        };
+        assert_eq!(bare.line_of(0), 1);
+        assert_eq!(bare.line_of(99), 1);
+    }
+
+    #[test]
+    fn the_index_is_one_entry_per_line() {
+        assert_eq!(ParsedFile::index_lines(""), [0]);
+        assert_eq!(ParsedFile::index_lines("a\nb"), [0, 2]);
+        assert_eq!(ParsedFile::index_lines("a\r\nb"), [0, 3]);
+        // A trailing newline opens a line that happens to be empty.
+        assert_eq!(ParsedFile::index_lines("a\n"), [0, 2]);
     }
 }

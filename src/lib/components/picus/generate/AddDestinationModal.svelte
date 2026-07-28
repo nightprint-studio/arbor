@@ -5,18 +5,30 @@
    * The list is the repository itself, one group per folder that holds scripts,
    * so the choice carries its engine and its role with it: picking a file inside
    * `AGGIORNAMENTO/4.13.2/ORA` gives you an Oracle update destination with the
-   * update preset already applied, and nothing has to be re-stated. The engine
-   * and the role are the folder's **effective** ones — inherited from wherever
-   * they were declared, which is the whole point of the inheritance rule.
+   * update preset already applied, and nothing has to be re-stated.
    *
-   * A folder with no engine cannot become a destination: there is no form to
-   * write the statements in. Rather than hide it, the group says so and offers
-   * the one action that fixes it.
+   * ## The engine is the file's, the role is the folder's
+   *
+   * Both after inheritance — which for the engine usually means the folder's
+   * anyway. The distinction earns its keep in an untidy repository: a directory
+   * holding `4_12_ORA.sql` beside `4_12_POS.sql` has no engine of its own and
+   * never will, and asking *it* would refuse two destinations that each know
+   * exactly what they are. So each row is judged on its own file.
+   *
+   * A file with no engine cannot become a destination: there is no form to write
+   * the statements in. Rather than hide it, the row says so and offers the one
+   * action that fixes it. The same is true of a **new** file, except that a new
+   * file has no name yet for anything to read an engine out of, so that
+   * affordance still asks the folder — the only thing that can answer for a file
+   * that does not exist.
    *
    * Files already among the destinations are shown as such rather than hidden —
    * "why is it not in the list" is a worse question than "it is already there".
+   * Excluded folders and scripts are listed for the same reason and stated the
+   * same way an unsupported engine is: a decision already taken, so there is
+   * nothing here to fix and no call to action to offer.
    */
-  import { FilePlus2, FileCode2, Check, FolderCog, Search } from 'lucide-svelte';
+  import { FilePlus2, FileCode2, FileCog, Check, FolderCog, Search } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
@@ -33,10 +45,15 @@
   import {
     declaredEngine,
     engineIsUnsupported,
+    fileAcceptsGeneration,
+    fileDeclaresEngine,
+    fileEngine,
     folderAcceptsGeneration,
     folderEngine,
     isDialect,
+    isExcluded,
     isGenericEngine,
+    type FolderEngine,
     type FolderRole,
   } from '$lib/types/picus';
 
@@ -67,15 +84,19 @@
     return bits.join(' · ');
   }
 
-  function add(entry: FolderEntry, file: string) {
-    const engine = folderEngine(entry.node);
-    // A portable folder is a destination like any other; the backend restricts
-    // what may be written into it to the intersection of the two dialects, which
-    // is the whole payoff — one file instead of two for a plain INSERT.
+  /**
+   * Add one destination, in the engine `engine` — the file's own where there is
+   * a file, the folder's where the file does not exist yet.
+   *
+   * A portable engine is a destination like any other; the backend restricts what
+   * may be written into it to the intersection of the two dialects, which is the
+   * whole payoff — one file instead of two for a plain INSERT.
+   */
+  function add(entry: FolderEntry, file: string, engine: FolderEngine | null) {
     if (!isDialect(engine) && !isGenericEngine(engine)) {
       // Should be unreachable — the rows are disabled — but a destination with no
       // engine would silently emit nothing, so it is refused rather than trusted.
-      toastStore.show(`${entry.node.path} has no engine. Say which database it is for first.`, 'warning');
+      toastStore.show(`${file} has no engine. Say which database it is for first.`, 'warning');
       return;
     }
     dmlStore.addTarget({ file, dialect: engine, role: entry.node.effectiveRole });
@@ -86,7 +107,11 @@
   function addNew() {
     if (!newFileFolder || !newFileName.trim()) return;
     const name = newFileName.trim().endsWith('.sql') ? newFileName.trim() : `${newFileName.trim()}.sql`;
-    add(newFileFolder, `${newFileFolder.node.path}/${name}`);
+    // The folder's, and it has to be: a file that does not exist has no name on
+    // disk for a rule to read an engine out of, and the folder is the only thing
+    // that can answer for it. Which is why the affordance below is gated on the
+    // folder rather than on the row.
+    add(newFileFolder, `${newFileFolder.node.path}/${name}`, folderEngine(newFileFolder.node));
   }
 </script>
 
@@ -112,6 +137,10 @@
         {@const folder = entry.node}
         {@const files = folder.files.filter((f) => matches(f.path, f.name))}
         {@const writable = folderAcceptsGeneration(folder)}
+        <!-- A folder that cannot answer for itself may still be full of files
+             that can. It is then not a folder to ask about — the question, if
+             there is one, belongs to the rows that are still unclassified. -->
+        {@const anyWritable = writable || folder.files.some(fileAcceptsGeneration)}
         {#if files.length || !needle}
           <div class="ad-group">
             <span class="ad-group-name" title={folder.path}>{folder.path}</span>
@@ -128,7 +157,13 @@
               from={entry.roleFrom ?? ''}
             />
             <span class="ad-spacer"></span>
-            {#if writable}
+            {#if isExcluded(folder)}
+              <!-- Outside the project by somebody's decision, so — like an engine
+                   Picus does not read — it gets a statement and no call to
+                   action. Putting it back belongs to the tree, where the decision
+                   was taken. -->
+              <span class="ad-preset">Outside the project</span>
+            {:else if anyWritable}
               <span class="ad-preset">{presetSummary(folder.effectiveRole)}</span>
             {:else if engineIsUnsupported(folder)}
               <!-- An engine Picus does not read is not an unanswered question, so
@@ -151,22 +186,55 @@
 
           {#each files as file (file.path)}
             {@const already = existingFiles.has(file.path)}
-            <button
-              class="ad-row"
-              class:ad-already={already || !writable}
-              disabled={already || !writable}
-              onclick={() => add(entry, file.path)}
-            >
-              <FileCode2 size={13} />
-              <span class="ad-name">{file.name}</span>
-              <span class="ad-path">{file.path}</span>
-              <span class="ad-spacer"></span>
-              {#if already}
-                <Badge variant="tone" tone="neutral" size="sm" label="already a destination" />
-              {:else if writable}
-                <Check size={13} class="ad-tick" />
-              {/if}
-            </button>
+            {@const canWrite = fileAcceptsGeneration(file)}
+            {#if canWrite || already}
+              <button
+                class="ad-row"
+                class:ad-already={already}
+                disabled={already}
+                onclick={() => add(entry, file.path, fileEngine(file))}
+              >
+                <FileCode2 size={13} />
+                <span class="ad-name">{file.name}</span>
+                <span class="ad-path">{file.path}</span>
+                <span class="ad-spacer"></span>
+                <!-- Shown only where it differs from the folder's, which is the
+                     only case where the row carries something the group header
+                     above it does not already say. -->
+                {#if fileDeclaresEngine(file) && fileEngine(file) !== folderEngine(folder)}
+                  <PicusDialectChip engine={fileEngine(file)} subject="file" terse />
+                {/if}
+                {#if already}
+                  <Badge variant="tone" tone="neutral" size="sm" label="already a destination" />
+                {:else}
+                  <Check size={13} class="ad-tick" />
+                {/if}
+              </button>
+            {:else}
+              <!-- Not a dead disabled row: the reason, and the one action that
+                   removes it — the same shape the group header uses, one level
+                   down, because here the unanswered question is the file's. -->
+              <div class="ad-row ad-row-static">
+                <FileCode2 size={13} />
+                <span class="ad-name">{file.name}</span>
+                <span class="ad-path">{file.path}</span>
+                <span class="ad-spacer"></span>
+                {#if isExcluded(file)}
+                  <span class="ad-preset">Outside the project</span>
+                {:else if engineIsUnsupported(folder)}
+                  <span class="ad-preset">Picus does not generate this engine</span>
+                {:else}
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onclick={() => picusUiStore.openFileClassify(file.path)}
+                  >
+                    {#snippet iconStart()}<FileCog size={12} />{/snippet}
+                    No engine — say which…
+                  </Button>
+                {/if}
+              </div>
+            {/if}
           {/each}
 
           {#if !needle && writable}
@@ -274,6 +342,11 @@
   }
   .ad-row:hover:not(:disabled) { background: var(--bg-hover); }
   .ad-row:disabled { cursor: default; opacity: 0.55; }
+  /* The unclassified row is a `div`, not a button — the row itself does nothing
+     and the button inside it does. It keeps full opacity on purpose: it is the
+     only row carrying a question, so it has to stay the most legible one. */
+  .ad-row-static { cursor: default; }
+  .ad-row-static:hover { background: none; }
   .ad-row :global(svg) { color: var(--text-disabled); flex-shrink: 0; }
   .ad-row:hover:not(:disabled) :global(.ad-tick) { color: var(--success); }
   .ad-row :global(.ad-tick) { color: transparent; }

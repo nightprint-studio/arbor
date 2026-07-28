@@ -18,6 +18,7 @@ use picus_db_api::prelude::DbProviderRegistry;
 use serde_json::Value;
 
 use crate::connections::SessionPool;
+use crate::schema::SchemaCache;
 use crate::scripts::ScriptCache;
 
 /// The state every picus-be handler gets, `Arc`-shared across the dispatcher and
@@ -44,6 +45,10 @@ pub struct PicusState {
     /// explicit refresh or a write. The other half of the studio: `sessions` is
     /// what a live database is doing, this is what the files on disk say.
     scripts: ScriptCache,
+    /// What each connection last said its schema was. Held because the SQL
+    /// abbreviation expander asks on every keystroke, and a round trip per
+    /// keystroke would make a typing aid the slowest thing in the window.
+    schemas: SchemaCache,
 }
 
 impl PicusState {
@@ -56,6 +61,7 @@ impl PicusState {
             providers: DbProviderRegistry::new(),
             sessions: SessionPool::new(),
             scripts: ScriptCache::new(),
+            schemas: SchemaCache::new(),
         }
     }
 
@@ -84,6 +90,11 @@ impl PicusState {
     /// The script repositories read so far.
     pub fn scripts(&self) -> &ScriptCache {
         &self.scripts
+    }
+
+    /// The schemas read so far, by connection id.
+    pub fn schemas(&self) -> &SchemaCache {
+        &self.schemas
     }
 
     /// Emit a frontend event. The shell re-emits the topic to the Picus window.
