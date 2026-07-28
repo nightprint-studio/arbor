@@ -72,6 +72,8 @@ mod apply;
 // The SQL abbreviation expander, joined to a live connection: the language is a
 // foundation crate, this supplies the schema, the dialect and the emitter.
 mod abbrev;
+// Where one statement ends and the next begins, so Run can execute exactly one.
+mod statements;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, any

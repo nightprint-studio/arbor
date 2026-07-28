@@ -514,6 +514,7 @@ mod tests {
             version_table: Default::default(),
             generation: Default::default(),
             naming: NamingScheme::default(),
+            analysis: Default::default(),
             folders: Vec::new(),
             files: Vec::new(),
             aliases: Vec::new(),

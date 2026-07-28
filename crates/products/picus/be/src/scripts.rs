@@ -39,8 +39,8 @@ use std::sync::Arc;
 use arbor_fs::prelude::encoding::{decode_in_context, EncodingContext};
 use picus_analyze::prelude::{analyze, Finding, RejectedSuppression, SkippedRule};
 use picus_core::prelude::{digest, CachedSource, PicusState, ScriptSnapshot};
-use picus_inventory::prelude::{Inventory, InventoryObject, ParsedProject, ParsedScript};
-use picus_parse::prelude::{DialectScope, EngineKind, ParsedFile, SqlParser};
+use picus_inventory::prelude::{Inventory, InventoryKind, InventoryObject, ParsedProject, ParsedScript};
+use picus_parse::prelude::{DialectScope, EngineKind, ParsedFile, SqlParser, StatementKind};
 use picus_project::prelude::{discover, label_to_encoding, LineEnding, ScriptFile};
 use serde::Serialize;
 
@@ -127,6 +127,99 @@ fn picus_analyze_scripts(state: &PicusState, root: String) -> Result<AnalyzedScr
     })
 }
 
+/// One place an object is named — a row of the drill-down behind a coverage cell.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectUsage {
+    /// Project-relative path.
+    pub path: String,
+    /// The folder whose coverage column this counts under.
+    pub folder: String,
+    /// 1-based line of the name.
+    pub line: usize,
+    /// The statement creates or redefines the object, rather than merely using it.
+    pub defining: bool,
+    /// …and it is a `CREATE`, not an `ALTER`.
+    pub creating: bool,
+    /// `select`, `insert`, `create`, … — what the statement holding it does.
+    pub statement: StatementKind,
+}
+
+/// Every place one object is named.
+///
+/// A separate call rather than a field on the inventory, and the reason is size:
+/// the inventory has a row per object and this has a row per *mention*, which in
+/// a real repository is one or two orders of magnitude more. Shipping them with
+/// the table would make opening the Inventory tab pay for a drill-down nobody has
+/// asked for yet.
+///
+/// The question it answers is the one the coverage matrix raises and could not
+/// previously settle: the cell says three, and the only useful next thought is
+/// *which three*. Ordered by file then line, so the answer reads like the
+/// repository.
+///
+/// `folder` restricts the answer to one coverage column — what clicking a single
+/// cell asks. Omitted, it covers the whole repository, which is what clicking the
+/// row asks.
+#[arbor_rpc::handler]
+fn picus_object_usages(
+    state: &PicusState,
+    root: String,
+    kind: InventoryKind,
+    name: String,
+    folder: Option<String>,
+) -> Result<Vec<ObjectUsage>, String> {
+    let snapshot = snapshot_for(state, &root)?;
+    let parses = parse_all(&snapshot);
+    let scripts: Vec<ParsedScript<'_>> = parses
+        .iter()
+        .filter_map(|(path, parsed)| {
+            snapshot.source(path).map(|source| ParsedScript {
+                path: path.as_str(),
+                source: source.text.as_str(),
+                parsed,
+            })
+        })
+        .collect();
+
+    let joined = ParsedProject::new(&snapshot.project, scripts);
+    let inventory = Inventory::build(&joined);
+    let Some(entry) = inventory.find(kind, &name) else { return Ok(Vec::new()) };
+
+    let mut usages: Vec<ObjectUsage> = entry
+        .sites
+        .iter()
+        .filter(|site| folder.as_deref().is_none_or(|want| site.folder_path == want))
+        .map(|site| ObjectUsage {
+            path: site.path.clone(),
+            folder: site.folder_path.clone(),
+            line: site.line,
+            defining: site.defining,
+            creating: site.creating,
+            statement: statement_kind_at(&joined, &site.path, site.statement_index),
+        })
+        .collect();
+    usages.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
+    Ok(usages)
+}
+
+/// What the statement holding a site actually does.
+///
+/// `Unknown` when the statement cannot be found, which cannot happen — the site
+/// came from that very parse — but is answered rather than panicked on: an
+/// inventory drill-down is not worth taking the backend down for.
+fn statement_kind_at(
+    project: &ParsedProject<'_>,
+    path: &str,
+    index: usize,
+) -> StatementKind {
+    project
+        .script_of(path)
+        .and_then(|script| script.parsed.statements.get(index))
+        .map(|s| s.kind)
+        .unwrap_or(StatementKind::Unknown)
+}
+
 /// One script file's decoded contents, for the editor.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -176,7 +269,7 @@ pub(crate) fn snapshot_for(
 /// Discover a repository and decode every script in it.
 pub(crate) fn read(root: &Path) -> Result<ScriptSnapshot, String> {
     let proposal = discover(root).map_err(|e| e.to_string())?;
-    let mut problems = proposal.config.problems();
+    let mut problems = crate::project::config_problems(&proposal.config);
     let mut sources = BTreeMap::new();
 
     for file in proposal.project.all_files() {

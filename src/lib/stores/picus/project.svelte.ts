@@ -82,7 +82,7 @@ import {
   type ScriptFile,
   aliasScope,
   declaresExclusion,
-  engineIsUnknown,
+  folderHasUnclassifiedScripts,
   engineIsUnsupported,
   fileDeclaresEngine,
   fileEngine,
@@ -273,15 +273,22 @@ function createProjectStore() {
   });
 
   /**
-   * Folders that declare nothing anywhere up their chain — the ones to classify.
+   * Folders that still contain a script with no engine — the ones to classify.
    *
    * A folder whose engine Picus does not support is **not** one of these. It has
    * an answer, and listing it here would put it in the "needs an answer" banner,
    * in the palette's per-folder entries and in the tree's warning icon — three
    * places asking a question the user settled the moment they said "SQL Server".
+   *
+   * Nor is a folder whose own engine is unknown but whose **files** all answer
+   * for themselves. That is the shape of an untidy repository — `4_12_ORA.sql`
+   * beside `4_12_POS.sql`, told apart by the file names — and the folder above
+   * them is not one thing and never will be. Once every script in it has an
+   * engine there is no question left, and asking about the container anyway is
+   * asking for an answer that would change nothing.
    */
   const unclassifiedFolders = $derived(
-    entries.filter((e) => e.node.files.length > 0 && engineIsUnknown(e.node) && !isExcluded(e.node)),
+    entries.filter((e) => !isExcluded(e.node) && folderHasUnclassifiedScripts(e.node)),
   );
 
   /** Folders written in an engine Picus recognises and does not read. */

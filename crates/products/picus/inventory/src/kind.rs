@@ -10,11 +10,23 @@
 //! (`src/lib/types/picus/index.ts`), and everything else is deliberately absent.
 
 use picus_parse::prelude::ObjectKind;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+/// Where a name is looked up — see [`InventoryKind::namespace`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Namespace {
+    /// Tables, views, sequences, packages, procedures, functions: one name, one
+    /// object.
+    Schema,
+    /// Triggers, which have a namespace of their own in both engines.
+    Trigger,
+}
 
 /// A kind of object the inventory indexes. Field-for-field with the frontend's
 /// `ObjectKind` union — a new member has to be added on both sides.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+/// `Deserialize` as well as `Serialize`: the drill-down asks for one object's
+/// usages by `(kind, name)`, so the kind travels back the other way too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum InventoryKind {
     Table,
@@ -75,6 +87,37 @@ impl InventoryKind {
             // Indexes, types, schemas, synonyms, columns, constraints, roles,
             // databases, tablespaces, domains, extensions and the unclassified.
             _ => None,
+        }
+    }
+
+    /// Whether two objects of the same name are the same object.
+    ///
+    /// A trigger has its own namespace in both engines, so `TRG_ORDINI` the
+    /// trigger and `TRG_ORDINI` the table can both exist and are unrelated.
+    /// Everything else shares one namespace: a name is a table **or** a view
+    /// **or** a sequence, never two of them.
+    ///
+    /// This matters because a *reference* carries no kind. `FROM V_ORDINI` is
+    /// parsed as a table reference — the grammar cannot know what `V_ORDINI`
+    /// turned out to be — so a view that is created once and read fifty times
+    /// would otherwise produce two rows: a `view` with one statement in it and a
+    /// `table` with fifty. Both wrong, and the second one is what a reader sees.
+    pub fn namespace(self) -> Namespace {
+        match self {
+            InventoryKind::Trigger => Namespace::Trigger,
+            _ => Namespace::Schema,
+        }
+    }
+
+    /// How much a mention of this kind is worth believing.
+    ///
+    /// `Table` is what the grammar falls back to for every reference, so it is
+    /// the *absence* of information rather than a claim. Anything else was
+    /// spelled out — `CREATE VIEW`, `CREATE SEQUENCE` — and wins.
+    pub fn confidence(self) -> u8 {
+        match self {
+            InventoryKind::Table => 0,
+            _ => 1,
         }
     }
 

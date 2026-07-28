@@ -112,10 +112,15 @@ fn a_project_with_no_version_table_skips_both_guard_rules_out_loud() {
     assert!(open_of(&report, RuleId::Ver001).is_empty());
     assert!(report.was_skipped(RuleId::Ver001));
     assert!(report.was_skipped(RuleId::Ver002));
-    assert!(report
-        .skipped
-        .iter()
-        .all(|s| s.reason.contains("version table") && !s.reason.is_empty()));
+    // Each of the two says *why*, in terms of the thing that is missing. Scoped to
+    // these two rules on purpose: other rules stand down for reasons of their own —
+    // `CONS002` is not a question under the default initialisation model — and a
+    // blanket assertion over every skipped line would be a test about a list that
+    // has nothing to do with version tables.
+    for rule in [RuleId::Ver001, RuleId::Ver002] {
+        let line = report.skipped.iter().find(|s| s.rule == rule).expect("skipped");
+        assert!(line.reason.contains("version table"), "{rule}: {}", line.reason);
+    }
 }
 
 // ── VER003 ───────────────────────────────────────────────────────────────────

@@ -90,7 +90,9 @@ export interface PicusPaletteActions {
   run: (fn: () => void) => void;
   generate: () => void;
   requestWrite: () => void;
-  runQuery: () => void;
+  /** `'statement'` is the selection or the statement at the caret; `'buffer'` is
+   *  every statement in the tab, in order. */
+  runQuery: (scope: 'statement' | 'buffer') => void;
   /** Step to the next / previous finding and open it. */
   stepFinding: (delta: number) => void;
 }
@@ -166,7 +168,8 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
     // the moment a tab is rebound to another database, and using the sidebar
     // highlight here would run the statement against a different server than the
     // one named above the editor.
-    { id: 'runquery', title: 'Run the current query', icon: 'play', shortcut: 'Ctrl+Enter', when: tab?.kind === 'query', action: () => a.run(a.runQuery) },
+    { id: 'runquery', title: 'Run the selection, or the statement under the cursor', icon: 'play', shortcut: 'Ctrl+Enter', when: tab?.kind === 'query', action: () => a.run(() => a.runQuery('statement')) },
+    { id: 'runall', title: 'Run every statement in this tab', subtitle: 'In order, stopping at the first failure', icon: 'play', shortcut: 'Ctrl+Shift+Enter', when: tab?.kind === 'query', action: () => a.run(() => a.runQuery('buffer')) },
     { id: 'newconn', title: 'Add a connection…', icon: 'plus', shortcut: 'Ctrl+Shift+N', when: true, action: () => a.run(() => picusUiStore.openConnectionEditor(null)) },
     { id: 'cycleconn', title: 'Switch to the next connection', icon: 'database', shortcut: 'Ctrl+Shift+D', when: connectionsStore.connections.length > 1, action: () => a.run(() => connectionsStore.cycle(1)) },
     { id: 'editconn', title: 'Edit the active connection…', icon: 'pencil', shortcut: 'F4', when: !!connectionsStore.active, action: () => a.run(() => picusUiStore.openConnectionEditor(activeConnectionId)) },

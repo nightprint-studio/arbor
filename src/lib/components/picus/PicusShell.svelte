@@ -220,9 +220,19 @@
     );
   }
 
-  function runActiveQuery() {
+  /**
+   * Run what the user is pointing at, and reveal the answer.
+   *
+   * `'statement'` is the selection if there is one and the statement under the
+   * caret otherwise; `'buffer'` is every statement in the tab, in order. Never
+   * "send the file" by default: a query tab is a scratchpad that keeps
+   * yesterday's INSERTs above today's SELECT.
+   */
+  function runActiveQuery(scope: 'statement' | 'buffer' = 'statement') {
     const conn = picusTabsStore.activeConnection;
-    if (tab?.kind === 'query' && conn) void queryStore.run(tab.id, conn.id);
+    if (tab?.kind !== 'query' || !conn) return;
+    picusUiStore.showBottom('results');
+    void queryStore.run(tab.id, conn.id, scope);
   }
 
   function generate() {
@@ -331,7 +341,7 @@
       run,
       generate,
       requestWrite: () => void requestWrite(),
-      runQuery: runActiveQuery,
+      runQuery: (scope) => runActiveQuery(scope),
       stepFinding,
     }),
   );
@@ -373,7 +383,7 @@
     // cancelling one — against a connection the user is not looking at is the worst
     // kind of wrong, so the keyboard resolves it exactly as the buttons do.
     if (mod && key === 'enter') {
-      runActiveQuery();
+      runActiveQuery(e.shiftKey ? 'buffer' : 'statement');
       e.preventDefault();
       return;
     }

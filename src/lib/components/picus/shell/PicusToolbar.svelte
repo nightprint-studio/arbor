@@ -13,6 +13,7 @@
    */
   import {
     Play, Square, Save, GitCompare, Download, Plus, FormInput, RefreshCw, Check, Search,
+    ListOrdered,
   } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -83,6 +84,13 @@
   function notYet(what: string) {
     toastStore.show(`${what} arrives with the backend milestone.`, 'info');
   }
+
+  /** Run, and reveal the answer — the dock is where every answer in this window is. */
+  function runQuery(scope: 'statement' | 'buffer') {
+    if (!tab || !conn) return;
+    picusUiStore.showBottom('results');
+    void queryStore.run(tab.id, conn.id, scope);
+  }
 </script>
 
 <div class="ptb" role="toolbar" aria-label="Document actions" tabindex="-1">
@@ -132,12 +140,28 @@
       variant="ghost"
       size="sm"
       disabled={queryState?.running}
-      tooltip={{ content: 'Run the statement under the cursor', shortcut: 'Ctrl+Enter' }}
+      tooltip={{
+        content: 'Run the selection, or the statement under the cursor',
+        shortcut: 'Ctrl+Enter',
+      }}
       ariaLabel="Run"
-      onclick={() => { if (tab && conn) void queryStore.run(tab.id, conn.id); }}
+      onclick={() => runQuery('statement')}
     >
       {#snippet iconStart()}<Play size={13} />{/snippet}
       Run
+    </Button>
+    <Button
+      variant="icon"
+      size="sm"
+      disabled={queryState?.running}
+      tooltip={{
+        content: 'Run every statement in this tab, in order, stopping at the first failure',
+        shortcut: 'Ctrl+Shift+Enter',
+      }}
+      ariaLabel="Run all"
+      onclick={() => runQuery('buffer')}
+    >
+      {#snippet iconStart()}<ListOrdered size={13} />{/snippet}
     </Button>
     <Button
       variant="icon"

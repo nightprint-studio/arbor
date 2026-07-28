@@ -45,8 +45,8 @@ use std::path::{Path, PathBuf};
 use picus_core::prelude::PicusState;
 use picus_project::prelude::{
     alias_key, discover, file_stem, name_matches, parent_of, AliasScope, FileDeclaration,
-    FolderDeclaration, FolderEngine, FolderRole, InferenceAlias, Project, ProjectConfig,
-    ProposalNote,
+    FolderDeclaration, FolderEngine, FolderRole, InferenceAlias, InitialisationModel, LineEnding,
+    Project, ProjectConfig, ProposalNote,
 };
 use serde::{Deserialize, Serialize};
 
@@ -146,7 +146,7 @@ fn picus_open_project(_state: &PicusState, root: String) -> Result<OpenedProject
     let root = PathBuf::from(&root);
     let proposal = discover(&root).map_err(|e| e.to_string())?;
     Ok(OpenedProject {
-        problems: proposal.config.problems(),
+        problems: config_problems(&proposal.config),
         aliases: proposal.config.aliases.clone(),
         project: proposal.project,
         notes: proposal.notes,
@@ -288,6 +288,154 @@ fn picus_folders_named(
     Ok(folders_matching(&proposal.project, &name))
 }
 
+// ── The settings that belong to the repository ────────────────────────────────
+
+/// The project-wide settings the interface edits, flattened for the wire.
+///
+/// Every one of these is a fact about **the repository**, not about this machine:
+/// a colleague opening the same folder has to inherit them, or the same scripts
+/// are judged differently per person — which is the class of surprise Picus
+/// exists to remove. They live in `.arbor/picus/project.toml`, which is committed;
+/// the profile's `picus/config.toml` holds only what is genuinely per-user (row
+/// limits, whether to confirm before writing).
+///
+/// Flat and `camelCase` rather than a mirror of the TOML shape, for the reason the
+/// module header gives: the file's shape is `snake_case` because a person edits
+/// it by hand, and neither convention is allowed to leak into the other.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSettings {
+    /// The encoding folders are expected to be in unless one overrides it.
+    pub encoding: String,
+    /// `CRLF` or `LF` — what generated content is written with.
+    pub eol: String,
+    /// Where the installed version is recorded. **Empty switches the version
+    /// guards off**, which the report then states out loud rather than passing.
+    pub version_table: String,
+    pub version_column: String,
+    /// Empty means the project stamps no date, and the closing `UPDATE` leaves
+    /// the column out rather than inventing one. That is why it is a plain string
+    /// here and an `Option` in the file: the wire has no room for the difference
+    /// between "absent" and "named the empty string", and only one of them is a
+    /// real answer.
+    pub date_column: String,
+    /// Extra predicate, for a version table holding one row per module.
+    pub version_filter: String,
+    /// What the initialisation folders are, relative to the updates —
+    /// [`InitialisationModel`]'s wire word.
+    pub initialisation: String,
+    /// Rule ids this repository does not want run.
+    pub disabled_rules: Vec<String>,
+}
+
+impl ProjectSettings {
+    fn read(config: &ProjectConfig) -> ProjectSettings {
+        ProjectSettings {
+            encoding: config.encoding.default.clone(),
+            eol: match config.encoding.eol {
+                LineEnding::Crlf => "CRLF".to_string(),
+                LineEnding::Lf => "LF".to_string(),
+            },
+            version_table: config.version_table.table.clone(),
+            version_column: config.version_table.version_column.clone(),
+            date_column: config.version_table.date_column.clone().unwrap_or_default(),
+            version_filter: config.version_table.filter.clone(),
+            initialisation: config.analysis.initialisation.as_wire().to_string(),
+            disabled_rules: config.analysis.disabled_rules.clone(),
+        }
+    }
+
+    /// Write these onto a configuration, leaving everything else — the folder
+    /// declarations, the vocabulary, the naming scheme — exactly as it was.
+    ///
+    /// An unreadable initialisation model keeps the current one rather than
+    /// silently resetting it to the default: this arrives from a select with three
+    /// options, so an unknown value means something is wrong on the wire, and
+    /// quietly changing which rules run is the worst available response to that.
+    fn write(&self, config: &mut ProjectConfig) {
+        config.encoding.default = self.encoding.trim().to_string();
+        config.encoding.eol =
+            if self.eol.eq_ignore_ascii_case("LF") { LineEnding::Lf } else { LineEnding::Crlf };
+
+        config.version_table.table = self.version_table.trim().to_string();
+        config.version_table.version_column = self.version_column.trim().to_string();
+        let date = self.date_column.trim();
+        config.version_table.date_column =
+            (!date.is_empty()).then(|| date.to_string());
+        config.version_table.filter = self.version_filter.trim().to_string();
+
+        if let Some(model) = initialisation_from_wire(&self.initialisation) {
+            config.analysis.initialisation = model;
+        }
+        // Trimmed, folded to the canonical spelling and de-duplicated on the way
+        // in. The list is committed and read by people, and three spellings of one
+        // rule in it is three chances to think a rule is off twice.
+        let mut rules: Vec<String> = Vec::new();
+        for written in &self.disabled_rules {
+            let Some(rule) = picus_analyze::prelude::RuleId::parse(written.trim()) else {
+                continue;
+            };
+            let id = rule.as_str().to_string();
+            if !rules.contains(&id) {
+                rules.push(id);
+            }
+        }
+        rules.sort();
+        config.analysis.disabled_rules = rules;
+    }
+}
+
+fn initialisation_from_wire(wire: &str) -> Option<InitialisationModel> {
+    [
+        InitialisationModel::Cumulative,
+        InitialisationModel::Mirrored,
+        InitialisationModel::Independent,
+    ]
+    .into_iter()
+    .find(|m| m.as_wire() == wire.trim())
+}
+
+/// What this repository currently says about itself.
+#[arbor_rpc::handler]
+fn picus_project_settings(_state: &PicusState, root: String) -> Result<ProjectSettings, String> {
+    let proposal = discover(&PathBuf::from(&root)).map_err(|e| e.to_string())?;
+    Ok(ProjectSettings::read(&proposal.config))
+}
+
+/// Write the project-wide settings and answer with the repository as it now reads.
+///
+/// The whole set is replaced rather than patched field by field: these come from
+/// one form the user pressed Save on, and a partial write would leave the file
+/// describing a state nobody chose. Everything the form does not cover — the
+/// folder declarations, the aliases, the naming scheme — is untouched, because it
+/// is re-read from disk here and only these fields are assigned.
+#[arbor_rpc::handler]
+fn picus_set_project_settings(
+    _state: &PicusState,
+    root: String,
+    settings: ProjectSettings,
+) -> Result<ConfirmedProject, String> {
+    let root = PathBuf::from(&root);
+    let proposal = discover(&root).map_err(|e| e.to_string())?;
+    let mut config = proposal.config;
+    settings.write(&mut config);
+    save_and_replan(&root, &config)
+}
+
+/// Everything wrong with a project file, from both crates that can judge it.
+///
+/// `picus-project` validates what it owns — the patterns, the marker, the
+/// vocabulary. It deliberately does not know what an analysis *rule* is, so
+/// `[analysis] disabled_rules` holds plain strings and a typo in one degrades to
+/// a line that silences nothing. `picus-analyze` owns that closed set and is
+/// asked here, so the two halves of a project file's validity arrive together
+/// rather than one of them being reported nowhere.
+pub(crate) fn config_problems(config: &ProjectConfig) -> Vec<String> {
+    let mut out = config.problems();
+    out.extend(picus_analyze::prelude::rule_settings_problems(&config.analysis));
+    out
+}
+
 /// Write the configuration and answer with the repository as it now reads.
 ///
 /// Discovery is re-run rather than the in-memory tree being patched: a
@@ -300,7 +448,7 @@ fn save_and_replan(root: &Path, config: &ProjectConfig) -> Result<ConfirmedProje
     Ok(ConfirmedProject {
         config_path: path.display().to_string(),
         aliases: confirmed.config.aliases.clone(),
-        problems: confirmed.config.problems(),
+        problems: config_problems(&confirmed.config),
         project: confirmed.project,
     })
 }
@@ -525,6 +673,7 @@ mod tests {
             version_table: Default::default(),
             generation: Default::default(),
             naming: NamingScheme::default(),
+            analysis: Default::default(),
             folders: vec![FolderDeclaration {
                 path: "AGGIORNAMENTO".to_string(),
                 role: Some(FolderRole::Update),
@@ -691,6 +840,53 @@ mod tests {
         let matched = folders_matching(&project, "POS");
         assert!(matched.contains(&"01_POS".to_string()));
         assert!(!matched.contains(&"POSIZIONI".to_string()));
+    }
+
+    #[test]
+    fn the_project_settings_round_trip_without_touching_anything_else() {
+        let mut c = config();
+        c.alias_mut("POS").engine = Some("postgres".to_string());
+        let declarations = c.folders.clone();
+
+        let mut settings = ProjectSettings::read(&c);
+        settings.version_table = " VERSIONE_MODULO ".to_string();
+        settings.date_column = "  ".to_string();
+        settings.initialisation = "mirrored".to_string();
+        settings.disabled_rules = vec!["cons001".into(), "CONS001".into(), "nonsense".into()];
+        settings.write(&mut c);
+
+        assert_eq!(c.version_table.table, "VERSIONE_MODULO", "trimmed on the way in");
+        // Blank is the project stamping no date, which is a different fact from a
+        // column literally called "".
+        assert_eq!(c.version_table.date_column, None);
+        assert_eq!(c.analysis.initialisation, InitialisationModel::Mirrored);
+        // Folded to the canonical spelling, de-duplicated, and the id that names
+        // no rule is dropped rather than written into a committed file.
+        assert_eq!(c.analysis.disabled_rules, vec!["CONS001".to_string()]);
+
+        // The half the form does not cover is untouched.
+        assert_eq!(c.alias("POS").unwrap().engine.as_deref(), Some("postgres"));
+        assert_eq!(c.folders, declarations, "the folder declarations are not this form's business");
+
+        // Reading it back gives the normalised answer, not what was typed — which
+        // is what the form will show the next time it opens.
+        let again = ProjectSettings::read(&c);
+        assert_eq!(again.version_table, "VERSIONE_MODULO");
+        assert_eq!(again.date_column, "");
+        assert_eq!(again.disabled_rules, vec!["CONS001".to_string()]);
+    }
+
+    #[test]
+    fn an_unreadable_initialisation_model_keeps_the_one_already_declared() {
+        // It arrives from a select with three options, so an unknown value means
+        // something is wrong on the wire — and quietly changing which rules run is
+        // the worst available response to that.
+        let mut c = config();
+        c.analysis.initialisation = InitialisationModel::Mirrored;
+        let mut settings = ProjectSettings::read(&c);
+        settings.initialisation = "whatever".to_string();
+        settings.write(&mut c);
+        assert_eq!(c.analysis.initialisation, InitialisationModel::Mirrored);
     }
 
     #[test]

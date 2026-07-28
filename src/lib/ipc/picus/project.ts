@@ -98,6 +98,69 @@ export function confirmProject(root: string, edits: ProjectEdit[]): Promise<Conf
 }
 
 /**
+ * The project-wide settings — everything that is a fact about **the repository**
+ * rather than about this machine.
+ *
+ * They live in `.arbor/picus/project.toml`, which is committed: a colleague
+ * opening the same folder inherits the version table, the expected encoding and
+ * which rules the team decided not to run. Putting any of these in the profile
+ * would make the same scripts judged differently per person, which is the class
+ * of surprise Picus exists to remove.
+ */
+export interface ProjectSettings {
+  /** The encoding folders are expected to be in unless one overrides it. */
+  encoding: string;
+  eol: 'CRLF' | 'LF';
+  /** **Empty switches the version guards off** — and the report says so. */
+  versionTable: string;
+  versionColumn: string;
+  /** Empty means the project stamps no date; the closing UPDATE leaves it out. */
+  dateColumn: string;
+  /** Extra predicate, for a version table holding one row per module. */
+  versionFilter: string;
+  /** What the initialisation folders are, relative to the updates. */
+  initialisation: InitialisationModel;
+  /** Rule ids this repository does not want run, e.g. `['CONS001']`. */
+  disabledRules: string[];
+}
+
+/**
+ * How a repository's initialisation folders relate to its update folders.
+ *
+ * Not derivable from the SQL — it is a fact about how the team works — and the
+ * two propagation rules each only make sense under one reading of it.
+ */
+export type InitialisationModel =
+  /** Kept at the latest version: it holds rows no update carries, and that is
+   *  correct. Only "an update adds a row the initialisation never seeds" is
+   *  reported. */
+  | 'cumulative'
+  /** Two accounts of the same changes, which must agree in both directions. */
+  | 'mirrored'
+  /** Maintained separately; comparing them says nothing. */
+  | 'independent';
+
+/** What this repository currently says about itself. */
+export function projectSettings(root: string): Promise<ProjectSettings> {
+  return picus('picus_project_settings', { root });
+}
+
+/**
+ * Write the project-wide settings.
+ *
+ * The whole set is replaced rather than patched field by field: these come from
+ * one form the user pressed Save on, and a partial write would leave the file
+ * describing a state nobody chose. Everything the form does not cover — the
+ * folder declarations, the aliases, the naming scheme — is untouched.
+ */
+export function setProjectSettings(
+  root: string,
+  settings: ProjectSettings,
+): Promise<ConfirmedProject> {
+  return picus('picus_set_project_settings', { root, settings });
+}
+
+/**
  * Declare — or forget — the engine of **one file**.
  *
  * The leaf of the same chain {@link confirmProject} and {@link setFolderAlias}

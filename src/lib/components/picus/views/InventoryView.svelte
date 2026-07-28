@@ -22,14 +22,15 @@
    * landed outside the columns entirely is counted rather than rounded off, so a
    * folded matrix can never look complete when it is not.
    */
-  import { Table2, Package, TriangleAlert, CheckCircle2, ChevronRight } from 'lucide-svelte';
+  import { TriangleAlert, CheckCircle2, ChevronRight } from 'lucide-svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
-  import Badge from '$lib/components/shared/ui/Badge.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import PicusDialectChip from '../PicusDialectChip.svelte';
   import PicusRoleChip from '../PicusRoleChip.svelte';
+  import ObjectKindIcon, { OBJECT_KIND_LABELS as KIND_LABELS } from '../PicusObjectKindIcon.svelte';
+  import InventoryUsages from '../panels/InventoryUsages.svelte';
   import NoticeList from '../panels/NoticeList.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
@@ -41,7 +42,7 @@
     folderBreakdown,
     ignoredFileCount,
   } from '$lib/utils/picus/coverage';
-  import type { InventoryObject } from '$lib/types/picus';
+  import type { InventoryObject, ObjectKind } from '$lib/types/picus';
 
   let query = $state('');
   const needle = $derived(query.trim().toLowerCase());
@@ -58,9 +59,56 @@
     picusProjectStore.inventory.filter((o) => buckets.some((b) => bucketCoverage(o, b) === 0)).length,
   );
 
-  /** Which object's folder-by-folder detail is open. One at a time — it is deep. */
+  /**
+   * Rows grouped by what they are.
+   *
+   * A flat list of four hundred names, tables and triggers and sequences mixed
+   * together, is a list you can only search — and searching is what the filter
+   * above is for. Grouped, the same list can be *read*: the twelve views are
+   * twelve rows in one place, and "do we have a PostgreSQL counterpart for every
+   * Oracle package" becomes a question you can answer by looking.
+   */
+  const groups = $derived.by(() => {
+    const by = new Map<ObjectKind, InventoryObject[]>();
+    for (const obj of rows) {
+      const list = by.get(obj.kind);
+      if (list) list.push(obj);
+      else by.set(obj.kind, [obj]);
+    }
+    // The backend already orders rows by kind then name; this keeps that order
+    // rather than imposing a second one that could disagree with it.
+    return [...by.entries()].map(([kind, objects]) => ({ kind, objects }));
+  });
+
+  /**
+   * Which object's detail is open, and what kind of detail.
+   *
+   * One at a time, because both are deep. `bucket` set means the user clicked a
+   * *cell* and wants the mentions behind that number; `bucket` null means they
+   * clicked the twisty and want the folder-by-folder breakdown.
+   */
   let openObject = $state<string | null>(null);
+  let openBucket = $state<string | null>(null);
   function objectKey(obj: InventoryObject) { return `${obj.kind}/${obj.name}`; }
+
+  /** Clicking a cell opens what it counts; clicking it again closes it. */
+  function toggleCell(obj: InventoryObject, bucketKey: string) {
+    const key = objectKey(obj);
+    if (openObject === key && openBucket === bucketKey) {
+      openObject = null;
+      openBucket = null;
+      return;
+    }
+    openObject = key;
+    openBucket = bucketKey;
+  }
+
+  function toggleRow(obj: InventoryObject) {
+    const key = objectKey(obj);
+    const showing = openObject === key && openBucket === null;
+    openObject = showing ? null : key;
+    openBucket = null;
+  }
 </script>
 
 <div class="iv">
@@ -128,92 +176,134 @@
           <tr>
             <th class="iv-obj-th" scope="col">Object</th>
             {#each buckets as bucket (bucket.key)}
+              <!-- Spelled out rather than left to two terse chips. `ORA · init`
+                   assumes the reader already knows both vocabularies, and the
+                   number underneath is a count of *statements*, which is not
+                   what "3 folders" led anyone to expect. Both are said. -->
               <th scope="col" class="iv-slot-th">
                 <span class="iv-slot">
                   <PicusDialectChip dialect={bucket.dialect} terse />
                   <PicusRoleChip role={bucket.role} terse />
                 </span>
+                <span class="iv-slot-label">{bucket.label}</span>
                 <span
                   class="iv-slot-name"
                   use:tooltip={{
-                    content: `${bucket.folders.length} folder(s), ${bucket.fileCount} file(s)`,
+                    content: `Statements under ${bucket.folders.length} folder(s), ${bucket.fileCount} file(s)`,
                     description: bucket.folders.slice(0, 12).join('\n')
                       + (bucket.folders.length > 12 ? `\n… and ${bucket.folders.length - 12} more` : ''),
                   }}
                 >
-                  {bucket.folders.length} folder{bucket.folders.length === 1 ? '' : 's'}
+                  {bucket.folders.length} folder{bucket.folders.length === 1 ? '' : 's'} · statements
                 </span>
               </th>
             {/each}
           </tr>
         </thead>
-        <tbody>
-          <!-- Kind AND name — see the note in `InventoryPanel`: a name alone is
-               not unique, and a duplicate key is a hard error, not a glitch. -->
-          {#each rows as obj (objectKey(obj))}
-            {@const key = objectKey(obj)}
-            {@const expanded = openObject === key}
-            {@const stray = elsewhereCount(obj, buckets)}
-            <tr>
-              <th scope="row" class="iv-obj">
-                <button
-                  class="iv-twist"
-                  class:iv-open={expanded}
-                  aria-expanded={expanded}
-                  aria-label={`Folder detail for ${obj.name}`}
-                  onclick={() => (openObject = expanded ? null : key)}
-                >
-                  <ChevronRight size={12} />
-                </button>
-                {#if obj.kind === 'table'}<Table2 size={13} />{:else}<Package size={13} />{/if}
-                <span class="iv-obj-name">{obj.name}</span>
-                <Badge variant="tone" tone="neutral" size="sm" label={obj.kind} />
-                {#if stray}
-                  <span
-                    class="iv-stray"
-                    use:tooltip={'Statements in folders no column covers — an ignored folder, or one with no engine'}
-                  >
-                    +{stray} elsewhere
-                  </span>
-                {/if}
+        {#each groups as group (group.kind)}
+          <tbody>
+            <!-- A heading row rather than a separate table per kind: the columns
+                 have to line up across the whole matrix, or comparing an Oracle
+                 package against a PostgreSQL function stops being a glance. -->
+            <tr class="iv-group-row">
+              <th class="iv-group" scope="colgroup" colspan={buckets.length + 1}>
+                <ObjectKindIcon kind={group.kind} />
+                <span class="iv-group-name">{KIND_LABELS[group.kind] ?? group.kind}</span>
+                <span class="iv-group-n">{group.objects.length}</span>
               </th>
-              {#each buckets as bucket (bucket.key)}
-                {@const n = bucketCoverage(obj, bucket)}
-                <td class="iv-cell" class:iv-zero={n === 0} class:iv-many={n > 1}>
-                  <span
-                    use:tooltip={n === 0
-                      ? `${obj.name} is never touched under ${bucket.label}`
-                      : `${n} statement${n === 1 ? '' : 's'} under ${bucket.label}`}
-                  >
-                    {n === 0 ? '—' : n}
-                  </span>
-                </td>
-              {/each}
             </tr>
 
-            {#if expanded}
-              <tr class="iv-detail-row">
-                <td class="iv-detail" colspan={buckets.length + 1}>
-                  <!-- The folded detail, for this object only: which folder in each
-                       column says something, and which stays quiet. -->
-                  <div class="iv-detail-grid">
-                    {#each buckets as bucket (bucket.key)}
-                      <div class="iv-detail-col">
-                        <span class="iv-detail-head">{bucket.label}</span>
-                        {#each folderBreakdown(obj, bucket) as line (line.path)}
-                          <span class="iv-detail-line" class:iv-detail-zero={line.count === 0}>
-                            <span class="iv-detail-path">{line.path}</span>
-                            <span class="iv-detail-n">{line.count === 0 ? '—' : line.count}</span>
-                          </span>
-                        {/each}
-                      </div>
-                    {/each}
-                  </div>
-                </td>
+            <!-- Kind AND name — see the note in `InventoryPanel`: a name alone is
+                 not unique, and a duplicate key is a hard error, not a glitch. -->
+            {#each group.objects as obj (objectKey(obj))}
+              {@const key = objectKey(obj)}
+              {@const showingFolders = openObject === key && openBucket === null}
+              {@const stray = elsewhereCount(obj, buckets)}
+              <tr>
+                <th scope="row" class="iv-obj">
+                  <button
+                    class="iv-twist"
+                    class:iv-open={showingFolders}
+                    aria-expanded={showingFolders}
+                    aria-label={`Folder detail for ${obj.name}`}
+                    onclick={() => toggleRow(obj)}
+                  >
+                    <ChevronRight size={12} />
+                  </button>
+                  <ObjectKindIcon kind={obj.kind} />
+                  <span class="iv-obj-name">{obj.name}</span>
+                  {#if stray}
+                    <span
+                      class="iv-stray"
+                      use:tooltip={'Statements in folders no column covers — an ignored folder, or one with no engine'}
+                    >
+                      +{stray} elsewhere
+                    </span>
+                  {/if}
+                </th>
+                {#each buckets as bucket (bucket.key)}
+                  {@const n = bucketCoverage(obj, bucket)}
+                  {@const open = openObject === key && openBucket === bucket.key}
+                  <td class="iv-cell" class:iv-zero={n === 0} class:iv-many={n > 1}>
+                    <!-- Clickable including the zeroes: "nothing here" is the
+                         answer people most want to check, and being able to open
+                         it and see an empty list is what turns a suspicion into a
+                         fact. -->
+                    <button
+                      class="iv-cell-btn"
+                      class:iv-cell-open={open}
+                      aria-expanded={open}
+                      use:tooltip={n === 0
+                        ? `${obj.name} is never touched under ${bucket.label} — open to check`
+                        : `${n} statement${n === 1 ? '' : 's'} under ${bucket.label} — open to see where`}
+                      onclick={() => toggleCell(obj, bucket.key)}
+                    >
+                      {n === 0 ? '—' : n}
+                    </button>
+                  </td>
+                {/each}
               </tr>
-            {/if}
-          {/each}
-        </tbody>
+
+              {#if showingFolders}
+                <tr class="iv-detail-row">
+                  <td class="iv-detail" colspan={buckets.length + 1}>
+                    <!-- The folded detail, for this object only: which folder in each
+                         column says something, and which stays quiet. -->
+                    <div class="iv-detail-grid">
+                      {#each buckets as bucket (bucket.key)}
+                        <div class="iv-detail-col">
+                          <span class="iv-detail-head">{bucket.label}</span>
+                          {#each folderBreakdown(obj, bucket) as line (line.path)}
+                            <span class="iv-detail-line" class:iv-detail-zero={line.count === 0}>
+                              <span class="iv-detail-path">{line.path}</span>
+                              <span class="iv-detail-n">{line.count === 0 ? '—' : line.count}</span>
+                            </span>
+                          {/each}
+                        </div>
+                      {/each}
+                    </div>
+                  </td>
+                </tr>
+              {:else if openObject === key && openBucket}
+                {@const bucket = buckets.find((b) => b.key === openBucket)}
+                {#if bucket}
+                  <tr class="iv-detail-row">
+                    <td class="iv-detail" colspan={buckets.length + 1}>
+                      {#key `${key}/${bucket.key}`}
+                        <InventoryUsages
+                          name={obj.name}
+                          kind={obj.kind}
+                          folders={bucket.folders}
+                          label={bucket.label}
+                        />
+                      {/key}
+                    </td>
+                  </tr>
+                {/if}
+              {/if}
+            {/each}
+          </tbody>
+        {/each}
       </table>
     </div>
 
@@ -284,7 +374,42 @@
     white-space: nowrap;
   }
   .iv-slot { display: flex; align-items: center; gap: 4px; margin-bottom: 3px; }
+  /* The column said in words, under the two chips: the chips are the shorthand
+     and this is what they stand for. */
+  .iv-slot-label {
+    display: block;
+    font-size: 10.5px;
+    color: var(--text-secondary);
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 600;
+  }
   .iv-slot-name { font-size: 10px; color: var(--text-disabled); text-transform: none; letter-spacing: 0; }
+
+  /* Kind headings inside the one matrix — the columns still line up across them. */
+  .iv-group-row th { border-bottom: 1px solid var(--border); }
+  .iv-group {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 10px 5px;
+    background: var(--bg-elevated);
+    text-align: left;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .iv-group :global(svg) { color: var(--text-secondary); }
+  .iv-group-name { letter-spacing: 0.07em; }
+  .iv-group-n {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0;
+    color: var(--text-disabled);
+    font-variant-numeric: tabular-nums;
+  }
 
   .iv-obj {
     display: flex;
@@ -320,11 +445,25 @@
   }
 
   .iv-cell {
-    padding: 6px 10px;
+    padding: 0;
     text-align: center;
     font-variant-numeric: tabular-nums;
     color: var(--text-secondary);
   }
+  /* The number IS the control: every cell opens what it counts, zeroes included —
+     "nothing here" is the answer people most want to check. */
+  .iv-cell-btn {
+    width: 100%;
+    padding: 6px 10px;
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+  }
+  .iv-cell-btn:hover { background: var(--bg-hover); }
+  .iv-cell-open { background: var(--bg-active); box-shadow: inset 0 -2px 0 var(--accent); }
   /* A gap is the thing worth seeing: something one side never mentions. */
   .iv-zero { color: var(--error); font-weight: 700; background: var(--error-subtle); }
   /* More than one statement is not wrong, but it is worth a glance (DUP002). */

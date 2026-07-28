@@ -13,7 +13,7 @@ use picus_parse::prelude::{ObjectRef, Statement, StatementKind};
 
 use crate::entry::{ObjectEntry, ObjectSite};
 use crate::input::{ParsedProject, ParsedScript, Placement};
-use crate::kind::InventoryKind;
+use crate::kind::{InventoryKind, Namespace};
 use crate::wire::InventoryObject;
 
 /// The whole index.
@@ -30,7 +30,7 @@ pub struct Inventory {
 impl Inventory {
     pub fn build(project: &ParsedProject<'_>) -> Inventory {
         let keys = project.coverage_keys();
-        let mut rows: BTreeMap<(InventoryKind, String), ObjectEntry> = BTreeMap::new();
+        let mut rows: BTreeMap<(Namespace, String), ObjectEntry> = BTreeMap::new();
 
         for (script, placement) in project.placed() {
             for (index, statement) in script.parsed.statements.iter().enumerate() {
@@ -38,7 +38,13 @@ impl Inventory {
             }
         }
 
-        Inventory { keys, objects: rows.into_values().collect() }
+        // Ordered by kind then name, which is the order the view groups them in.
+        // Done here rather than by the map's key so the *resolved* kind decides:
+        // a row that started as a table reference and turned out to be a view has
+        // to sit with the views.
+        let mut objects: Vec<ObjectEntry> = rows.into_values().collect();
+        objects.sort_by(|a, b| (a.kind, &a.name).cmp(&(b.kind, &b.name)));
+        Inventory { keys, objects }
     }
 
     pub fn find(&self, kind: InventoryKind, name: &str) -> Option<&ObjectEntry> {
@@ -54,7 +60,7 @@ impl Inventory {
 /// Index one statement's objects. Split out because the outer loop is only a
 /// walk and this is where every decision is.
 fn index_statement(
-    rows: &mut BTreeMap<(InventoryKind, String), ObjectEntry>,
+    rows: &mut BTreeMap<(Namespace, String), ObjectEntry>,
     keys: &[String],
     script: &ParsedScript<'_>,
     placement: Placement<'_>,
@@ -65,8 +71,8 @@ fn index_statement(
     // A statement counts once per object however many times it names it, so the
     // coverage cell is a count of statements and stays comparable between a
     // terse Oracle script and a chatty PostgreSQL one.
-    let mut counted: BTreeSet<(InventoryKind, String)> = BTreeSet::new();
-    let mut sited: BTreeSet<(InventoryKind, String, bool)> = BTreeSet::new();
+    let mut counted: BTreeSet<(Namespace, String)> = BTreeSet::new();
+    let mut sited: BTreeSet<(Namespace, String, bool)> = BTreeSet::new();
 
     let creating = statement.kind == StatementKind::Create;
     let occurrences = statement
@@ -81,18 +87,29 @@ fn index_statement(
         if name.is_empty() {
             continue;
         }
+        let space = kind.namespace();
         // Both sets are consulted before the row is touched, so a statement that
         // names the same object again — the common case in a real script — costs
         // two lookups and no allocation at all. Reaching for the row first would
         // clone the name on every mention rather than on every new fact.
-        let counts = counted.insert((kind, name.clone()));
-        let sites = sited.insert((kind, name.clone(), defining));
+        let counts = counted.insert((space, name.clone()));
+        let sites = sited.insert((space, name.clone(), defining));
         if !counts && !sites {
             continue;
         }
         let row = rows
-            .entry((kind, name.clone()))
+            .entry((space, name.clone()))
             .or_insert_with(|| new_entry(kind, &name, keys));
+
+        // A reference carries no kind — the grammar reports every `FROM x` as a
+        // table — so the row takes the most informative mention it has seen. A
+        // definition settles it outright; short of one, anything that is not the
+        // `table` fallback beats the fallback. Without this a view read fifty
+        // times and created once is two rows, and the fifty-strong one says
+        // `table`.
+        if defining || kind.confidence() > row.kind.confidence() {
+            row.kind = kind;
+        }
 
         if counts {
             *row.coverage.entry(coverage_key.clone()).or_insert(0) += 1;
@@ -199,6 +216,52 @@ mod tests {
         assert_eq!(row.kind, InventoryKind::Table);
         assert_eq!(row.coverage_in("ORACLE/INIZIALIZZAZIONE"), 1);
         assert_eq!(row.coverage_in("POSTGRES/INIZIALIZZAZIONE"), 1);
+    }
+
+    #[test]
+    fn a_view_is_one_row_however_many_times_it_is_read() {
+        // The grammar reports every `FROM x` as a *table* reference, because at
+        // that point it cannot know what `x` turned out to be. Keying rows on that
+        // kind gave a view created once and read three times two rows: a `view`
+        // with one statement in it and a `table` with three — and the second one,
+        // the wrong one, is the one a reader sees.
+        let f = Fixture::new(&[(
+            "ORACLE/INIZIALIZZAZIONE/01_TABELLE.sql",
+            "CREATE VIEW V_ORDINI AS SELECT * FROM ORDINI;\n\
+             SELECT * FROM V_ORDINI;\n\
+             SELECT COUNT(*) FROM V_ORDINI;",
+            EngineKind::Oracle,
+        )]);
+        let project = project();
+        let joined = ParsedProject::new(&project, f.scripts());
+        let inventory = Inventory::build(&joined);
+
+        let view = inventory.find(InventoryKind::View, "V_ORDINI").expect("one row for the view");
+        assert_eq!(view.coverage_in("ORACLE/INIZIALIZZAZIONE"), 3, "every mention counts on it");
+        assert!(
+            inventory.find(InventoryKind::Table, "V_ORDINI").is_none(),
+            "and there is no second row calling it a table"
+        );
+        // The table it is built over is still its own row, and still a table.
+        assert!(inventory.find(InventoryKind::Table, "ORDINI").is_some());
+    }
+
+    #[test]
+    fn a_trigger_may_share_a_name_with_a_table() {
+        // Triggers have their own namespace in both engines, so these are two
+        // objects and folding them into one row would hide whichever came second.
+        let f = Fixture::new(&[(
+            "ORACLE/INIZIALIZZAZIONE/01_TABELLE.sql",
+            "CREATE TABLE AUDIT_ORDINI (ID NUMBER);\n\
+             CREATE TRIGGER AUDIT_ORDINI BEFORE INSERT ON ORDINI BEGIN NULL; END;",
+            EngineKind::Oracle,
+        )]);
+        let project = project();
+        let joined = ParsedProject::new(&project, f.scripts());
+        let inventory = Inventory::build(&joined);
+
+        assert!(inventory.find(InventoryKind::Table, "AUDIT_ORDINI").is_some());
+        assert!(inventory.find(InventoryKind::Trigger, "AUDIT_ORDINI").is_some());
     }
 
     #[test]

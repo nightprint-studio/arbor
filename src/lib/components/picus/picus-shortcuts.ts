@@ -43,8 +43,8 @@ export const PICUS_SHORTCUTS: PicusShortcutGroup[] = [
   {
     label: 'Database',
     shortcuts: [
-      { keys: ['Ctrl', 'Enter'], description: 'Run the statement under the cursor (or the selection)' },
-      { keys: ['Ctrl', 'Shift', 'Enter'], description: 'Run the whole script' },
+      { keys: ['Ctrl', 'Enter'], description: 'Run the selection, or the statement under the cursor' },
+      { keys: ['Ctrl', 'Shift', 'Enter'], description: 'Run every statement in the tab, in order, stopping at the first failure' },
       { keys: ['Ctrl', 'Shift', 'C'], description: 'Cancel the running query, or the exact row count running behind it' },
       { keys: ['Ctrl', 'T'], description: 'New query tab on the active connection' },
       { keys: ['Ctrl', 'Shift', 'D'], description: 'Cycle the active connection' },

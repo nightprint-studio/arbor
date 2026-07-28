@@ -262,6 +262,35 @@ export function execute(
   return picus('picus_execute', { connectionId, sql, window });
 }
 
+/** One statement in a buffer, addressed the way the editor addresses text. */
+export interface StatementSpan {
+  /** First UTF-16 code unit of the statement — a CodeMirror position. */
+  start: number;
+  /** One past the last. */
+  end: number;
+  /** 1-based line it starts on. */
+  line: number;
+  /** `select`, `insert`, `block`, … Labels a run; decides nothing. */
+  kind: string;
+}
+
+/**
+ * Where the statements are in a buffer.
+ *
+ * Asked of the backend rather than worked out here, and the reason is not tidiness:
+ * a semicolon is a statement boundary *unless* it is inside a string literal, a
+ * comment, a dollar-quoted body or an Oracle `DECLARE … BEGIN … END;` — and in
+ * that last case there are several, none of which ends anything. A regular
+ * expression gets all of those wrong, and a wrong answer here is half a statement
+ * sent to a production database. `picus-parse` already knows, in both dialects.
+ *
+ * The offsets are **UTF-16 code units**, so they can be used as CodeMirror
+ * positions directly. Never throws on half-typed SQL.
+ */
+export function sqlStatements(sql: string, dialect: Dialect): Promise<StatementSpan[]> {
+  return picus('picus_sql_statements', { sql, dialect });
+}
+
 /** Open a relation's rows as a held result — the table tab's Data view. */
 export function openRelation(
   connectionId: string,

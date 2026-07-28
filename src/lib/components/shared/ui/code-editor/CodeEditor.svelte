@@ -392,6 +392,29 @@
     return view.state.sliceDoc(s.from, s.to);
   }
 
+  /** Where the caret is and what, if anything, is selected — in CodeMirror positions
+   *  (UTF-16 code units). `empty` distinguishes "the user highlighted a range" from
+   *  "the caret happens to sit somewhere", which is a different instruction for any
+   *  command that acts on a region. Zeroes when unmounted. */
+  export function selectionRange(): { from: number; to: number; head: number; empty: boolean } {
+    if (!view) return { from: 0, to: 0, head: 0, empty: true };
+    const s = view.state.selection.main;
+    return { from: s.from, to: s.to, head: s.head, empty: s.empty };
+  }
+
+  /** Highlight `[from, to)` and scroll it into view — how a command shows *which*
+   *  region it is about to act on, in the buffer rather than in a message. */
+  export function selectRange(from: number, to: number) {
+    if (!view) return;
+    const len = view.state.doc.length;
+    const anchor = Math.max(0, Math.min(from, len));
+    const head = Math.max(anchor, Math.min(to, len));
+    view.dispatch({
+      selection: { anchor, head },
+      effects: EditorView.scrollIntoView(anchor, { y: 'nearest' }),
+    });
+  }
+
   /** Copy the current selection to the clipboard (no-op when nothing is selected). */
   export function copySelection() {
     if (!view) return;

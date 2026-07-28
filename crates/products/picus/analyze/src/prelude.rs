@@ -10,5 +10,5 @@ pub use crate::context::{
 };
 pub use crate::finding::{Anchor, Finding, FindingDraft};
 pub use crate::report::{analyze, Report, SkippedRule};
-pub use crate::rule::{RuleId, Severity};
+pub use crate::rule::{rule_settings_problems, RuleId, Severity};
 pub use crate::suppress::{RejectedSuppression, Scope, Suppression};

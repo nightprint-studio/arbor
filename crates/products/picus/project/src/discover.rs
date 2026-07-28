@@ -33,8 +33,8 @@ use picus_types::prelude::{FolderEngine, FolderRole};
 
 use crate::alias::AliasVocabulary;
 use crate::config::{
-    EncodingSettings, FolderDeclaration, GenerationSettings, ProjectConfig, VersionTableSettings,
-    CURRENT_VERSION, DEFAULT_ENCODING,
+    AnalysisSettings, EncodingSettings, FolderDeclaration, GenerationSettings, ProjectConfig,
+    VersionTableSettings, CURRENT_VERSION, DEFAULT_ENCODING,
 };
 use crate::error::ProjectError;
 use crate::infer::{infer_engine_in, infer_file_engine_in, infer_role_in};
@@ -334,6 +334,10 @@ fn proposed_config(name: &str, tree: &[FolderNode], default_encoding: &str) -> P
         version_table: VersionTableSettings::default(),
         generation: GenerationSettings::default(),
         naming: NamingScheme::default(),
+        // Nothing is switched off on a first read, and the initialisation model
+        // takes its default: it is a fact about how the team works, and guessing
+        // it from a directory listing would be a guess dressed up as a setting.
+        analysis: AnalysisSettings::default(),
         folders,
         // Nothing classifies a single file on a first read. A `[[file]]`
         // declaration is a correction to a file Picus placed wrongly, and there is
@@ -912,6 +916,7 @@ mod tests {
             version_table: VersionTableSettings::default(),
             generation: GenerationSettings::default(),
             naming: NamingScheme::default(),
+            analysis: AnalysisSettings::default(),
             folders: Vec::new(),
             files: Vec::new(),
             aliases: Vec::new(),

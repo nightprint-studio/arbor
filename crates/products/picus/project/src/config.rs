@@ -126,6 +126,10 @@ pub struct ProjectConfig {
     pub generation: GenerationSettings,
     #[serde(default)]
     pub naming: NamingScheme,
+    /// What the analysis is allowed to assume about this repository, and which
+    /// rules it has been told not to run.
+    #[serde(default)]
+    pub analysis: AnalysisSettings,
     /// What each folder declares, keyed by its project-relative path. `folder`
     /// singular in the file because TOML spells an array of tables `[[folder]]`.
     ///
@@ -240,6 +244,125 @@ impl GenerationSettings {
     /// finally to [`InsertionRule::default_for`].
     pub fn insertion_for(&self, role: FolderRole) -> Option<InsertionRule> {
         self.insertion.get(role.as_str()).and_then(|wire| InsertionRule::from_wire(wire))
+    }
+}
+
+/// What the **initialisation folders are**, relative to the update folders.
+///
+/// Two folders can both hold `INSERT`s and mean completely different things, and
+/// no amount of reading the SQL settles which: it is a fact about how the team
+/// works, so the project states it. `CONS002` and `CONS003` — the two rules that
+/// compare one dialect's install half against its upgrade half — are the only
+/// readers, and each of them is meaningful under exactly one reading of this.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InitialisationModel {
+    /// The initialisation is **kept at the latest version**: it is a photograph of
+    /// the database as it should be today, and the update folder carries every
+    /// change since the first release.
+    ///
+    /// The default, because it is what regenerated install scripts almost always
+    /// are, and because the other reading is expensive to be wrong about: on a
+    /// repository of this shape it reports every row that predates the update
+    /// folder — hundreds of them — and a first report that is mostly noise is a
+    /// report nobody reads a second time.
+    ///
+    /// What follows, and it is not symmetric:
+    ///
+    /// * a row an update inserts **must** also be in the initialisation, or a
+    ///   fresh install comes up missing something every older database has. That
+    ///   is `CONS003`, and it stays on;
+    /// * a row the initialisation inserts need **not** be in any update — it was
+    ///   in the first release, and there is no update for the beginning. That is
+    ///   `CONS002`, and it goes off.
+    ///
+    /// The cost of switching `CONS002` off is worth stating plainly: adding a row
+    /// to the initialisation and forgetting the matching update script is a real
+    /// mistake, and under this model nothing here catches it. Nothing readable
+    /// from the tree tells that mistake apart from an ordinary first-release row,
+    /// so the choice is between missing one and reporting all of them.
+    #[default]
+    Cumulative,
+    /// The two halves are **two accounts of the same thing** and must agree in
+    /// both directions: everything installed is also carried forward, and
+    /// everything carried forward was also installed.
+    ///
+    /// Both rules on. Right for a repository whose initialisation is frozen at
+    /// the first release and whose updates are the only way anything changes.
+    Mirrored,
+    /// The two halves are maintained separately and comparing them says nothing.
+    /// Both rules off.
+    Independent,
+}
+
+impl InitialisationModel {
+    /// Must a row the initialisation writes also appear in some update? (`CONS002`)
+    pub fn expects_installed_rows_in_updates(self) -> bool {
+        matches!(self, InitialisationModel::Mirrored)
+    }
+
+    /// Must a row an update writes also appear in the initialisation? (`CONS003`)
+    pub fn expects_updated_rows_in_the_initialisation(self) -> bool {
+        matches!(self, InitialisationModel::Cumulative | InitialisationModel::Mirrored)
+    }
+
+    /// The wire word, which is also what the TOML file holds.
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            InitialisationModel::Cumulative => "cumulative",
+            InitialisationModel::Mirrored => "mirrored",
+            InitialisationModel::Independent => "independent",
+        }
+    }
+
+    /// Written for the person reading a skipped-rule line, and for the settings
+    /// panel: one sentence, in the present tense, about the repository.
+    pub fn describe(self) -> &'static str {
+        match self {
+            InitialisationModel::Cumulative => {
+                "the initialisation is kept at the latest version, so it holds rows no update \
+                 carries"
+            }
+            InitialisationModel::Mirrored => {
+                "the initialisation and the updates are two accounts of the same changes and must \
+                 agree in both directions"
+            }
+            InitialisationModel::Independent => {
+                "the initialisation and the updates are maintained separately"
+            }
+        }
+    }
+}
+
+/// What the analysis may assume, and what it has been told not to look at.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AnalysisSettings {
+    /// See [`InitialisationModel`].
+    #[serde(default)]
+    pub initialisation: InitialisationModel,
+    /// Rules this repository does not want run, by id (`"CONS001"`).
+    ///
+    /// Held as **strings** rather than as a parsed enum for the same reason the
+    /// insertion rules are: an id from a newer build, or a typo, must degrade to
+    /// "this line does nothing" rather than fail the parse and take every other
+    /// setting in the file down with it. `picus-analyze` owns the closed set and
+    /// reports the ones it does not recognise — see `rule_settings_problems`
+    /// there, because this crate deliberately does not know what a rule is.
+    ///
+    /// A disabled rule is never silently absent: it is reported in the analysis
+    /// as a rule that did not run, with this file named as the reason. A report
+    /// that cannot be told apart from a clean one is the failure this whole
+    /// product exists to prevent.
+    #[serde(default)]
+    pub disabled_rules: Vec<String>,
+}
+
+impl AnalysisSettings {
+    /// Is this rule id switched off? Case-insensitive: the value is typed by a
+    /// person into a TOML file, and `cons001` unmistakably means `CONS001`.
+    pub fn disables(&self, rule: &str) -> bool {
+        self.disabled_rules.iter().any(|d| d.trim().eq_ignore_ascii_case(rule))
     }
 }
 
@@ -483,6 +606,12 @@ impl ProjectConfig {
     ///
     /// So: `3` exactly when something here classifies an individual file, `2`
     /// otherwise.
+    ///
+    /// `[analysis]` deliberately does **not** bump it. An older build that ignores
+    /// the section runs the two propagation rules and honours no disabled rule, so
+    /// it reports *more* than it was asked to — noisy, and visibly so. The version
+    /// number exists to stop a build from silently reporting **less**, and this
+    /// section cannot cause that.
     pub fn required_version(&self) -> u32 {
         // Exclusion counts for the same reason file classification does: a build
         // that silently ignored it would analyse and report on scripts their
@@ -637,6 +766,7 @@ mod tests {
             version_table: VersionTableSettings::default(),
             generation: GenerationSettings::default(),
             naming: NamingScheme::default(),
+            analysis: AnalysisSettings::default(),
             folders: vec![
                 FolderDeclaration {
                     path: "AGGIORNAMENTO".to_string(),
@@ -659,6 +789,57 @@ mod tests {
         let text = toml::to_string_pretty(&sample()).expect("serialises");
         let back = ProjectConfig::parse(&text).expect("parses");
         assert_eq!(back, sample());
+    }
+
+    #[test]
+    fn the_analysis_section_round_trips_and_defaults_to_a_cumulative_initialisation() {
+        // The default is the reading real repositories have: the initialisation is
+        // regenerated to the current state, so it holds rows no update carries.
+        assert_eq!(AnalysisSettings::default().initialisation, InitialisationModel::Cumulative);
+
+        let mut config = sample();
+        config.analysis.initialisation = InitialisationModel::Mirrored;
+        config.analysis.disabled_rules = vec!["CONS001".to_string()];
+
+        let text = toml::to_string_pretty(&config).expect("serialises");
+        assert!(text.contains(r#"initialisation = "mirrored""#), "{text}");
+        assert_eq!(ProjectConfig::parse(&text).expect("parses"), config);
+    }
+
+    #[test]
+    fn a_project_file_written_before_the_analysis_section_still_loads() {
+        // Every project file already on disk predates it, and a section that made
+        // them unreadable would be a section that emptied somebody's settings.
+        let mut older = sample();
+        older.analysis = AnalysisSettings::default();
+        let text = toml::to_string_pretty(&older).expect("serialises");
+        let without: String =
+            text.lines().filter(|l| !l.contains("initialisation")).collect::<Vec<_>>().join("\n");
+
+        let back = ProjectConfig::parse(&without).expect("parses");
+        assert_eq!(back.analysis.initialisation, InitialisationModel::Cumulative);
+    }
+
+    #[test]
+    fn the_analysis_section_does_not_raise_the_version_a_reader_needs() {
+        // An older build that ignores it runs MORE rules than it was asked to,
+        // which is noisy and visible. The version number exists to stop a build
+        // reporting LESS, and this section cannot cause that.
+        let mut config = sample();
+        let before = config.required_version();
+        config.analysis.initialisation = InitialisationModel::Independent;
+        config.analysis.disabled_rules = vec!["CONS001".to_string(), "DML002".to_string()];
+        assert_eq!(config.required_version(), before);
+    }
+
+    #[test]
+    fn a_disabled_rule_is_recognised_however_it_was_typed() {
+        let settings = AnalysisSettings {
+            disabled_rules: vec!["  cons001 ".to_string()],
+            ..AnalysisSettings::default()
+        };
+        assert!(settings.disables("CONS001"));
+        assert!(!settings.disables("CONS002"));
     }
 
     #[test]

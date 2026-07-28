@@ -7,5 +7,5 @@
 pub use crate::build::Inventory;
 pub use crate::entry::{ObjectEntry, ObjectSite};
 pub use crate::input::{ParsedProject, ParsedScript, Placement};
-pub use crate::kind::InventoryKind;
+pub use crate::kind::{InventoryKind, Namespace};
 pub use crate::wire::InventoryObject;

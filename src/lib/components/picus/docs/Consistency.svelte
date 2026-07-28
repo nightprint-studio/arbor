@@ -40,6 +40,54 @@
   Oracle ones would report every object in the repository as missing from it.
 </p>
 
+<h2>What your initialisation folders are</h2>
+<p>
+  Two folders can both hold <code>INSERT</code>s and mean completely different things, and no
+  amount of reading the SQL settles which. So the project says it, on
+  <b>Settings → Analysis</b>, and the choice decides which half of the install-versus-upgrade
+  check is even a question:
+</p>
+<ul>
+  <li>
+    <b>Cumulative</b> — the initialisation is kept at the latest version. A row it holds that no
+    update carries is a first-release row, and there is no update for the beginning, so
+    <code>CONS002</code> does not run. <code>CONS003</code> does: a row an update adds must also be
+    seeded, or a fresh install comes up missing something every older database has.
+  </li>
+  <li>
+    <b>Mirrored</b> — the two halves are two accounts of the same changes and must agree in both
+    directions. Both rules run.
+  </li>
+  <li>
+    <b>Independent</b> — the two halves are maintained separately and comparing them says nothing.
+    Neither runs.
+  </li>
+</ul>
+<p>
+  Cumulative is the default, and the cost of it is worth knowing: adding a row to the
+  initialisation and forgetting the matching update script is a real mistake, and nothing readable
+  from the tree tells that mistake apart from an ordinary first-release row. Choose
+  <b>Mirrored</b> if your initialisation is frozen at the first release.
+</p>
+
+<h2>Switching a rule off</h2>
+<p>
+  A repository can decide a rule has nothing useful to say about it — views that reference tables
+  installed from another repository make <code>CONS001</code> noise rather than signal. Turn it off
+  on <b>Settings → Analysis</b>; the decision is written into the project's configuration, so
+  everyone working on the repository gets the same report.
+</p>
+<p>
+  A rule that is off is <b>never silently absent</b>. It appears among the rules that could not run,
+  naming this setting as the reason, for the same reason everything else here does: a report that
+  found nothing has to be distinguishable from a report that did not look.
+</p>
+<p>
+  This is a decision about the whole repository. To excuse <i>one</i> statement, write a suppression
+  comment next to it instead — it carries a reason, and the finding stays visible with the reason
+  attached.
+</p>
+
 <h2>The rules</h2>
 <table>
   <thead>

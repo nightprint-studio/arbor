@@ -11,7 +11,8 @@
    * initialisation and not in updates. That is the `CONS001`/`CONS002` family,
    * surfaced here as a marker before the analysis has even been asked for.
    */
-  import { Layers, Table2, Package, RefreshCw, TriangleAlert } from 'lucide-svelte';
+  import { Layers, RefreshCw, TriangleAlert } from 'lucide-svelte';
+  import ObjectKindIcon from '../PicusObjectKindIcon.svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
@@ -87,7 +88,7 @@
       {@const missing = coverageGaps(obj, buckets)}
       <SidebarItem onclick={() => picusTabsStore.openInventory()}>
         {#snippet icon()}
-          {#if obj.kind === 'table'}<Table2 size={13} />{:else}<Package size={13} />{/if}
+          <ObjectKindIcon kind={obj.kind} />
         {/snippet}
         <span class="ip-name">{obj.name}</span>
         {#snippet badges()}

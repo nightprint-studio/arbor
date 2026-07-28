@@ -182,6 +182,45 @@ impl std::fmt::Display for RuleId {
     }
 }
 
+/// What is wrong with a project's `[analysis] disabled_rules`, in the words of
+/// the person who could fix it.
+///
+/// Lives here because this crate owns the closed set and `picus-project`
+/// deliberately does not know what a rule is — it holds the ids as plain strings
+/// so an unrecognised one degrades to "this line does nothing" instead of failing
+/// the parse and resetting every other setting in the file. That degradation is
+/// only honest if somebody is told, which is what this is for: a line that looks
+/// like it silences a rule and does not is exactly the kind of thing whose absence
+/// is discovered during a review.
+pub fn rule_settings_problems(analysis: &picus_project::prelude::AnalysisSettings) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    for written in &analysis.disabled_rules {
+        let text = written.trim();
+        if text.is_empty() {
+            continue;
+        }
+        match RuleId::parse(text) {
+            None => out.push(format!(
+                "`[analysis] disabled_rules` names `{text}`, which is not a Picus rule — it \
+                 switches nothing off"
+            )),
+            Some(rule) => {
+                let key = rule.as_str().to_string();
+                if seen.contains(&key) {
+                    out.push(format!(
+                        "`[analysis] disabled_rules` names {rule} more than once — the extra \
+                         entries do nothing"
+                    ));
+                } else {
+                    seen.push(key);
+                }
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -9,7 +9,15 @@
    * would touch, before it touches them.
    */
   import { untrack } from 'svelte';
-  import { TriangleAlert, Terminal, GitCompare, RefreshCw, EyeOff, Eye } from 'lucide-svelte';
+  import {
+    TriangleAlert,
+    Terminal,
+    GitCompare,
+    RefreshCw,
+    EyeOff,
+    Eye,
+    TableProperties,
+  } from 'lucide-svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
@@ -20,7 +28,9 @@
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import FindingList from './FindingList.svelte';
+  import QueryResultPanel from './QueryResultPanel.svelte';
   import PatchDiffCard from '../generate/PatchDiffCard.svelte';
+  import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
   import { consistencyStore, type FindingGrouping } from '$lib/stores/picus/consistency.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
@@ -47,6 +57,17 @@
   });
 
   const tabs = $derived<TabItem[]>([
+    // Results comes first because it is what the window is doing *right now*:
+    // running a statement reveals this tab, and it is where the eye goes back to
+    // on every Ctrl+Enter. Consistency is the panel the product is judged on, but
+    // it is judged over a session, not over a keystroke.
+    {
+      id: 'results',
+      label: 'Results',
+      icon: TableProperties,
+      iconSize: 13,
+      badge: queryStore.read(picusTabsStore.active?.id ?? '').running ? '…' : undefined,
+    },
     {
       id: 'consistency',
       label: 'Consistency',
@@ -143,8 +164,11 @@
     {/snippet}
   </BottomPanelHeader>
 
-  <div class="bd-body">
-    {#if picusUiStore.bottomTab === 'consistency'}
+  <div class="bd-body" class:bd-flush={picusUiStore.bottomTab === 'results'}>
+    {#if picusUiStore.bottomTab === 'results'}
+      <QueryResultPanel />
+
+    {:else if picusUiStore.bottomTab === 'consistency'}
       {#if !picusProjectStore.attached}
         <StateBlock
           tone="info"
@@ -265,6 +289,10 @@
 <style>
   .bd { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
   .bd-body { flex: 1; min-height: 0; overflow: auto; }
+  /* The result grid is virtualised and owns its own scrolling, so the dock must
+     not offer a second scrollbar around it. */
+  .bd-flush { overflow: hidden; display: flex; }
+  .bd-flush > :global(*) { flex: 1; min-width: 0; min-height: 0; }
 
   .bd-filter { width: 180px; }
 

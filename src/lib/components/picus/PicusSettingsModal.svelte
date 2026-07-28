@@ -9,7 +9,10 @@
    * for adding a setting — make an assumption visible, don't defer a design
    * choice.
    */
-  import { Settings, FileType, PenLine, FormInput, Database, FolderCog, Hash, Tags, Wand2 } from 'lucide-svelte';
+  import {
+    Settings, FileType, PenLine, FormInput, Database, FolderCog, Hash, Tags, Wand2,
+    ShieldCheck, Save,
+  } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import SettingsShell, { type SettingsNavGroup } from '$lib/components/shared/ui/SettingsShell.svelte';
@@ -21,6 +24,8 @@
   import Input from '$lib/components/shared/ui/Input.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import ProjectAliases from './settings/ProjectAliases.svelte';
+  import { RULE_FAMILIES } from './settings/rule-catalogue';
+  import type { InitialisationModel } from '$lib/ipc/picus/project';
   import {
     picusSettingsStore,
     INSERTION_RULE_LABELS,
@@ -48,6 +53,7 @@
         { id: 'project', label: 'Project', icon: FolderCog },
         { id: 'aliases', label: 'Folder names', icon: Tags },
         { id: 'version', label: 'Version table', icon: Hash },
+        { id: 'analysis', label: 'Analysis', icon: ShieldCheck },
       ],
     },
     {
@@ -140,6 +146,61 @@
     value: k,
     label: INSERTION_RULE_LABELS[k],
   }));
+
+  // ── The project half ────────────────────────────────────────────────────────
+  //
+  // Everything under the "Project" group lands in `.arbor/picus/project.toml`,
+  // which is committed into the user's repository. So it is written on an
+  // explicit Save and never as you type — the same rule that governs every other
+  // write Picus makes to somebody's tree.
+
+  /** Which pages edit the project file, and therefore show the save bar. */
+  const PROJECT_PAGES = ['project', 'version', 'analysis'];
+  const editingProject = $derived(PROJECT_PAGES.includes(active));
+
+  $effect(() => {
+    void picusSettingsStore.loadProject(picusProjectStore.root);
+  });
+
+  const initialisationOptions = [
+    {
+      value: 'cumulative',
+      label: 'Cumulative — the initialisation is kept at the latest version',
+    },
+    {
+      value: 'mirrored',
+      label: 'Mirrored — the two halves must agree in both directions',
+    },
+    {
+      value: 'independent',
+      label: 'Independent — the two halves are maintained separately',
+    },
+  ];
+
+  /** What the chosen model actually does to the report, spelled out. */
+  const initialisationEffect = $derived.by(() => {
+    switch (picusSettingsStore.initialisation) {
+      case 'mirrored':
+        return 'CONS002 and CONS003 both run: every row installed must also be carried forward by an update, and every row an update adds must also be seeded.';
+      case 'independent':
+        return 'Neither CONS002 nor CONS003 runs. The report says so rather than looking clean.';
+      default:
+        return 'CONS003 runs — a row an update adds must also be in the initialisation, or a fresh install comes up missing something every older database has. CONS002 does not: a row the initialisation holds and no update carries is a first-release row, and there is no update for the beginning. The cost is real and worth knowing: adding a row to the initialisation and forgetting the matching update script is a genuine mistake, and under this model nothing catches it.';
+    }
+  });
+
+  async function saveProject() {
+    const outcome = await picusSettingsStore.saveProject(picusProjectStore.root);
+    if (typeof outcome === 'string') {
+      toastStore.show(`The project settings were not saved — ${outcome}`, 'error');
+      return;
+    }
+    toastStore.show(`Project settings saved in ${outcome.configPath}.`, 'success');
+    for (const problem of outcome.problems) toastStore.show(problem, 'warning');
+    // What the rules are allowed to look at changed, so the verdict on screen
+    // describes a configuration that no longer exists.
+    void picusProjectStore.analyze();
+  }
 </script>
 
 <Modal {onClose} width="900px" height="620px" padBody={false} ariaLabel="Picus settings">
@@ -181,22 +242,11 @@
               onchange={(v) => picusSettingsStore.setProjectEol(v as 'CRLF' | 'LF')}
             />
           </FormRow>
-          <FormRow
-            label="Lowercase identifiers on PostgreSQL"
-            description="PostgreSQL folds unquoted identifiers to lowercase; emitting them that way keeps generated scripts consistent with what the server reports back."
-          >
-            <Toggle
-              checked={picusSettingsStore.lowercasePostgres}
-              size="sm"
-              ariaLabel="Lowercase identifiers on PostgreSQL"
-              onchange={(v) => picusSettingsStore.setLowercasePostgres(v)}
-            />
-          </FormRow>
         </div>
         <Alert
           variant="info"
           compact
-          text="These belong to the project, not to Picus: they will live in the project's own configuration file, so a colleague opening the same repository inherits them."
+          text="These belong to the project, not to this machine: they live in the repository's own .arbor/picus/project.toml, so a colleague opening the same folder inherits them."
         />
 
       {:else if active === 'aliases'}
@@ -220,9 +270,16 @@
             description="Leave empty to disable version guards entirely for this project."
           >
             <div class="ps-row">
+              <!-- Filterable and full width, because a real schema has hundreds
+                   of tables and the answer is one the user can already name.
+                   Sized to the container rather than to the selected label: a
+                   picker that collapses to the width of `T1` cannot be read. -->
               <Select
                 value={picusSettingsStore.versionTable.table}
                 options={tableOptions}
+                searchable
+                fill
+                searchPlaceholder="Filter tables…"
                 onchange={(v) => picusSettingsStore.setVersionTable({ table: v })}
               />
               <Button
@@ -241,6 +298,8 @@
             <Select
               value={picusSettingsStore.versionTable.versionColumn}
               options={versionColumnOptions}
+              searchable={versionColumnOptions.length > 12}
+              fill
               onchange={(v) => picusSettingsStore.setVersionTable({ versionColumn: v })}
             />
           </FormRow>
@@ -252,6 +311,7 @@
             <Select
               value={picusSettingsStore.versionTable.dateColumn ?? ''}
               options={dateColumnOptions}
+              fill
               onchange={(v) => picusSettingsStore.setVersionTable({ dateColumn: v || null })}
             />
           </FormRow>
@@ -272,6 +332,65 @@
           <strong>What the guard will emit</strong>
           <pre class="ps-preview">{versionPreview}</pre>
         </div>
+
+      {:else if active === 'analysis'}
+        <div class="section-header">
+          <h2>Analysis</h2>
+          <p>
+            What the consistency check is allowed to assume about this repository, and which
+            rules it runs. Both belong to the project: a colleague opening the same folder must
+            get the same verdict you do.
+          </p>
+        </div>
+
+        <div class="card">
+          <FormRow
+            label="What the initialisation folders are"
+            description="Not derivable from the SQL — it is a fact about how the team works, and each half of the install-versus-upgrade check only makes sense under one reading of it."
+          >
+            <Select
+              value={picusSettingsStore.initialisation}
+              options={initialisationOptions}
+              fill
+              onchange={(v) => picusSettingsStore.setInitialisation(v as InitialisationModel)}
+            />
+          </FormRow>
+        </div>
+        <Alert variant="info" compact text={initialisationEffect} />
+
+        <div class="section-header ps-sub">
+          <h3>Rules</h3>
+          <p>
+            A rule you switch off is never silently absent: it is reported in the check as a rule
+            that did not run, with this page named as the reason. A clean report has to keep
+            meaning something.
+          </p>
+        </div>
+
+        {#each RULE_FAMILIES as family (family.label)}
+          <div class="card">
+            <div class="ps-family">
+              <span class="ps-family-name">{family.label}</span>
+              <span class="ps-family-blurb">{family.blurb}</span>
+            </div>
+            {#each family.rules as rule (rule.id)}
+              <!-- The id is part of the label rather than a chip beside it: it is
+                   what a `-- picus: ignore CONS002 — …` comment names and what the
+                   report prints, so it has to be readable and copyable from here. -->
+              <FormRow
+                label={`${rule.id} · ${rule.title}`}
+                description={rule.offWhen ? `Reasonable to switch off when: ${rule.offWhen}` : undefined}
+              >
+                <Toggle
+                  checked={picusSettingsStore.ruleEnabled(rule.id)}
+                  size="sm"
+                  ariaLabel={`Run ${rule.id}`}
+                  onchange={(on) => picusSettingsStore.setRuleEnabled(rule.id, on)}
+                />
+              </FormRow>
+            {/each}
+          </div>
+        {/each}
 
       {:else if active === 'encoding'}
         <div class="section-header">
@@ -360,6 +479,22 @@
               onchange={(v) => picusSettingsStore.setInsertionRuleUpdate(v as InsertionRule)}
             />
           </FormRow>
+          <!-- Here rather than on the Project page: this is *your* preference and
+               it is stored in your profile, while everything under Project is
+               stored in the repository. A setting filed under the wrong one of
+               those is how a team ends up with two people generating differently
+               shaped SQL and no idea why. -->
+          <FormRow
+            label="Lowercase identifiers on PostgreSQL"
+            description="PostgreSQL folds unquoted identifiers to lowercase; emitting them that way keeps generated scripts consistent with what the server reports back."
+          >
+            <Toggle
+              checked={picusSettingsStore.lowercasePostgres}
+              size="sm"
+              ariaLabel="Lowercase identifiers on PostgreSQL"
+              onchange={(v) => picusSettingsStore.setLowercasePostgres(v)}
+            />
+          </FormRow>
         </div>
         <Alert
           variant="info"
@@ -387,12 +522,79 @@
           </FormRow>
         </div>
       {/if}
+
+      <!-- The project file is committed into somebody's repository, so it is
+           written on an explicit Save and never as you type. The bar stays out of
+           the way until something has actually changed — a permanently visible
+           Save button teaches people to press it without reading. -->
+      {#if editingProject && picusSettingsStore.projectDirty}
+        <div class="ps-save">
+          <span class="ps-save-text">
+            Unsaved changes to <code>.arbor/picus/project.toml</code> — this file is committed, so
+            nothing is written until you say so.
+          </span>
+          <Button
+            variant="secondary"
+            size="xs"
+            onclick={() => void picusSettingsStore.loadProject(picusProjectStore.root)}
+          >
+            Discard
+          </Button>
+          <Button
+            variant="primary"
+            size="xs"
+            disabled={picusSettingsStore.projectSaving || !picusProjectStore.attached}
+            onclick={() => void saveProject()}
+          >
+            {#snippet iconStart()}<Save size={12} />{/snippet}
+            Save and re-check
+          </Button>
+        </div>
+      {/if}
     {/snippet}
   </SettingsShell>
 </Modal>
 
 <style>
   .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+
+  /* Sticks to the bottom of the scrolling page: the rule list is long, and a Save
+     button you have to scroll back up to find is a Save button people forget. */
+  .ps-save {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-md);
+  }
+  .ps-save-text { flex: 1; font-size: 11.5px; line-height: 1.5; color: var(--text-secondary); }
+  .ps-save-text code { font-family: var(--font-code); font-size: 11px; }
+
+  /* A second-level heading inside a page that already has one. */
+  .ps-sub { margin-top: 18px; }
+  .ps-sub h3 { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+
+  .ps-family {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 2px 0 8px;
+    border-bottom: 1px solid var(--border-subtle);
+    margin-bottom: 4px;
+  }
+  .ps-family-name {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .ps-family-blurb { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
 
   /* Table picker + Detect on one line: the button acts on the field beside it. */
   .ps-row { display: flex; align-items: center; gap: 8px; }

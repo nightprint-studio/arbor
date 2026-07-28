@@ -22,8 +22,12 @@
 //! nothing but noise is a tool nobody opens twice.
 
 use picus_inventory::prelude::{Inventory, ParsedProject};
-use picus_project::prelude::{EngineKind, FolderDeclaration, FolderNode, NamingScheme, ProjectConfig};
+use picus_project::prelude::{
+    EngineKind, FolderDeclaration, FolderNode, InitialisationModel, NamingScheme, ProjectConfig,
+};
 use picus_types::prelude::FolderRole;
+
+use crate::rule::RuleId;
 
 /// What the whole analysis works against.
 #[derive(Debug)]
@@ -96,6 +100,22 @@ impl<'a> Context<'a> {
     /// project's.
     pub fn naming_for(&self, folder: &FolderNode) -> &'a NamingScheme {
         self.config.naming_for(&folder.path)
+    }
+
+    /// What this repository says its initialisation folders are, relative to its
+    /// updates. Read by [`crate::rules::propagation`] and by nothing else.
+    pub fn initialisation_model(&self) -> InitialisationModel {
+        self.config.analysis.initialisation
+    }
+
+    /// Has the project switched this rule off?
+    ///
+    /// Asked once, by [`crate::rules::run_all`], rather than by each rule: a rule
+    /// that had to remember to check would eventually be a rule that forgot, and
+    /// the failure mode of forgetting is a report full of the exact findings
+    /// somebody has already said they do not want.
+    pub fn is_disabled(&self, rule: RuleId) -> bool {
+        self.config.analysis.disables(rule.as_str())
     }
 }
 

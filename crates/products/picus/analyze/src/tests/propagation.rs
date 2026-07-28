@@ -11,11 +11,16 @@ use crate::tests::open_of;
 
 /// The shape both rules need: a table the initialisation seeds *and* an update
 /// maintains, which is the only case either of them speaks about.
+///
+/// Declared `mirrored` — the reading in which **both** directions are questions —
+/// because that is what the bulk of this module is about. The default reading asks
+/// only one of them, and it has its own tests at the bottom.
 fn maintained(init: &str, update: &str) -> Fixture {
     Fixture::build(&[
         ("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", init),
         ("ORACLE/AGGIORNAMENTO/4_12__4_13.sql", update),
     ])
+    .mirrored()
 }
 
 // ── CONS002 — seeded on install, never propagated ────────────────────────────
@@ -64,7 +69,8 @@ fn a_dialect_with_no_update_folder_has_nothing_to_compare() {
     let repo = Fixture::build(&[(
         "ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql",
         "INSERT INTO PARAMETRI (COD, VALORE) VALUES ('SOGLIA_SCONTO', 15);",
-    )]);
+    )])
+    .mirrored();
     let report = repo.report();
     assert!(open_of(&report, RuleId::Cons002).is_empty());
     assert!(open_of(&report, RuleId::Cons003).is_empty());
@@ -206,10 +212,80 @@ fn the_two_halves_are_never_read_across_dialects() {
             "POSTGRES/AGGIORNAMENTO/4_12__4_13.sql",
             "insert into parametri (cod, valore) values ('SOGLIA_SCONTO', 15);",
         ),
-    ]);
+    ])
+    .mirrored();
     let report = repo.report();
     assert!(open_of(&report, RuleId::Cons002).is_empty());
     assert!(open_of(&report, RuleId::Cons003).is_empty());
+}
+
+// ── which direction is even a question ───────────────────────────────────────
+
+/// The fixture that fires in both directions under `mirrored`: one row only the
+/// initialisation has, one row only the update has.
+fn diverged() -> Fixture {
+    Fixture::build(&[
+        (
+            "ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql",
+            "INSERT INTO PARAMETRI (COD, VALORE) VALUES ('SOGLIA_SCONTO', 15);\n\
+             INSERT INTO PARAMETRI (COD, VALORE) VALUES ('SOLO_INIT', 1);",
+        ),
+        (
+            "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
+            "INSERT INTO PARAMETRI (COD, VALORE) VALUES ('SOGLIA_SCONTO', 15);\n\
+             INSERT INTO PARAMETRI (COD, VALORE) VALUES ('SOLO_UPDATE', 2);",
+        ),
+    ])
+}
+
+#[test]
+fn by_default_only_the_direction_that_is_always_a_bug_is_checked() {
+    // The default reading: the initialisation is kept at the latest version. A row
+    // it holds that no update carries is a first-release row and there is no update
+    // for the beginning — reporting those is what produced hundreds of findings on
+    // a real repository, all of them describing correct behaviour.
+    //
+    // The reverse is never correct behaviour and stays on.
+    let report = diverged().report();
+    assert!(open_of(&report, RuleId::Cons002).is_empty(), "the install-only row is not a finding");
+
+    let backwards = open_of(&report, RuleId::Cons003);
+    assert_eq!(backwards.len(), 1, "{backwards:?}");
+    assert!(backwards[0].title.contains("SOLO_UPDATE"), "{}", backwards[0].title);
+
+    // …and the same repository read the other way reports both, so the test above
+    // is not passing because the comparison is broken.
+    let both = diverged().mirrored().report();
+    assert_eq!(open_of(&both, RuleId::Cons002).len(), 1);
+    assert_eq!(open_of(&both, RuleId::Cons003).len(), 1);
+}
+
+#[test]
+fn a_direction_that_is_not_checked_is_reported_rather_than_silently_absent() {
+    // The whole value of the report is that a clean one means something. A rule
+    // that produced nothing because it was told not to run must never be
+    // indistinguishable from one that ran and found nothing.
+    let report = diverged().report();
+    assert!(report.was_skipped(RuleId::Cons002), "{:?}", report.skipped);
+    assert!(!report.was_skipped(RuleId::Cons003));
+
+    let reason = &report.skipped.iter().find(|s| s.rule == RuleId::Cons002).expect("skipped").reason;
+    // Written for the person who could turn it back on: it has to name both what
+    // the project declared and where to change it.
+    assert!(reason.contains("latest version"), "{reason}");
+    assert!(reason.contains("project settings"), "{reason}");
+}
+
+#[test]
+fn a_project_that_maintains_the_two_halves_separately_checks_neither() {
+    use picus_project::prelude::InitialisationModel;
+    let report = diverged()
+        .configured(|c| c.analysis.initialisation = InitialisationModel::Independent)
+        .report();
+    assert!(open_of(&report, RuleId::Cons002).is_empty());
+    assert!(open_of(&report, RuleId::Cons003).is_empty());
+    assert!(report.was_skipped(RuleId::Cons002));
+    assert!(report.was_skipped(RuleId::Cons003));
 }
 
 #[test]

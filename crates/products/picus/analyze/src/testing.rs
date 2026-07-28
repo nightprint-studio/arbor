@@ -17,8 +17,9 @@ use arbor_fs::prelude::encoding::EncodingSource;
 use picus_inventory::prelude::{Inventory, ParsedProject, ParsedScript};
 use picus_parse::prelude::{DialectScope, EngineKind, ParsedFile, SqlParser};
 use picus_project::prelude::{
-    resolve, EncodingSettings, FolderDeclaration, FolderNode, GenerationSettings, LineEnding,
-    NamingScheme, Project, ProjectConfig, ScriptFile, VersionTableSettings, CURRENT_VERSION,
+    resolve, AnalysisSettings, EncodingSettings, FolderDeclaration, FolderNode, GenerationSettings,
+    InitialisationModel, LineEnding, NamingScheme, Project, ProjectConfig, ScriptFile,
+    VersionTableSettings, CURRENT_VERSION,
 };
 use picus_types::prelude::{FolderEngine, FolderRole};
 
@@ -134,6 +135,18 @@ impl Fixture {
         self
     }
 
+    /// Declare that the two halves of the install story must agree in **both**
+    /// directions.
+    ///
+    /// `CONS002` — a row the initialisation writes and no update carries — is only
+    /// a question under this reading, and the default reading is the other one, so
+    /// every test about that rule has to say so out loud. That is the intended
+    /// cost: which direction is meaningful is a property of the repository, and a
+    /// test that did not state it would be testing a repository nobody has.
+    pub fn mirrored(self) -> Fixture {
+        self.configured(|c| c.analysis.initialisation = InitialisationModel::Mirrored)
+    }
+
     fn scripts(&self) -> Vec<ParsedScript<'_>> {
         self.parses
             .iter()
@@ -233,6 +246,10 @@ fn config_for(project: &Project) -> ProjectConfig {
         version_table: VersionTableSettings::default(),
         generation: GenerationSettings::default(),
         naming: NamingScheme::default(),
+        // The product's own default, not a test-friendly one: a fixture that quietly
+        // ran a stricter analysis than a real project does would let a rule pass its
+        // tests and never fire in anger.
+        analysis: AnalysisSettings::default(),
         folders: project
             .walk()
             .filter(|node| node.engine.is_some() || node.role.is_some())

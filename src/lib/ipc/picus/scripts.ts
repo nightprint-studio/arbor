@@ -29,6 +29,7 @@ import type {
   FolderAlias,
   InventoryObject,
   LineEnding,
+  ObjectKind,
   Project,
   RuleId,
   Target,
@@ -182,6 +183,41 @@ export function suppressionNote(s: RejectedSuppression): ProjectNote {
 /** Run the rules over the repository. Slow by nature — never awaited on a paint. */
 export function analyzeScripts(root: string): Promise<AnalyzeScriptsResult> {
   return picus('picus_analyze_scripts', { root });
+}
+
+// ── Where one object is named ────────────────────────────────────────────────
+
+/** One place an object appears — a row of the drill-down behind a coverage cell. */
+export interface ObjectUsage {
+  /** Project-relative path. */
+  path: string;
+  /** The folder whose coverage column this counts under. */
+  folder: string;
+  line: number;
+  /** The statement creates or redefines the object, rather than merely using it. */
+  defining: boolean;
+  /** …and it is a CREATE, not an ALTER. */
+  creating: boolean;
+  /** `select`, `insert`, `create`, … — what the statement holding it does. */
+  statement: string;
+}
+
+/**
+ * Every place one object is named, optionally restricted to one folder.
+ *
+ * A separate call rather than a field on the inventory, because this has a row
+ * per *mention* where the inventory has one per object — one or two orders of
+ * magnitude more in a real repository. Asked when a cell is clicked, and not
+ * before: it answers the question the matrix raises and could not settle, which
+ * is that the cell says three and the only useful next thought is *which three*.
+ */
+export function objectUsages(
+  root: string,
+  kind: ObjectKind,
+  name: string,
+  folder?: string,
+): Promise<ObjectUsage[]> {
+  return picus('picus_object_usages', { root, kind, name, folder });
 }
 
 // ── One file's text ──────────────────────────────────────────────────────────

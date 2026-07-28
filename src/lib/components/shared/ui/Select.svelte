@@ -27,6 +27,24 @@
      * value when items render taller (subtitle, avatar, …).
      */
     maxHeight?: number;
+    /**
+     * Put a filter field at the top of the menu.
+     *
+     * Worth setting the moment the list can hold more than a screenful and the
+     * user knows the name of what they want — a schema's tables, a font, a
+     * timezone. Scrolling a hundred entries to find `VERSIONE_DB` is not a list,
+     * it is a haystack.
+     */
+    searchable?: boolean;
+    searchPlaceholder?: string;
+    /**
+     * Take the full width of the container instead of sizing to the trigger.
+     *
+     * The default is `inline-block`, which collapses to the *selected label* —
+     * fine for `CRLF / LF`, and unreadable for anything whose values are long
+     * enough to matter. In a form row, this is almost always what you want.
+     */
+    fill?: boolean;
     onchange?: (value: string) => void;
   }
 
@@ -36,13 +54,19 @@
     disabled  = false,
     narrow    = false,
     maxHeight,
+    searchable = false,
+    searchPlaceholder = 'Search…',
+    fill = false,
     onchange,
   }: Props = $props();
 
   /** Tight bound on the menu height so the upward-flip placement doesn't
    *  reserve room for a phantom 420px menu. Caller can override. */
   const derivedMaxHeight = $derived(
-    maxHeight ?? Math.min(420, options.length * 32 + 16),
+    // The filter field lives inside the menu, so it has to be in the height the
+    // placement reserves — otherwise a searchable menu opening upward is cut off
+    // by exactly the height of its own search box.
+    maxHeight ?? Math.min(420, options.length * 32 + 16 + (searchable ? 44 : 0)),
   );
 
   const items = $derived<DropdownItem[]>(
@@ -64,12 +88,14 @@
   );
 </script>
 
-<div class="select-wrap" class:narrow>
+<div class="select-wrap" class:narrow class:fill>
   <Dropdown
     position="fixed"
     direction="down"
     matchTriggerWidth
     maxHeight={derivedMaxHeight}
+    {searchable}
+    {searchPlaceholder}
     {items}
   >
     {#snippet trigger({ open, toggle })}
@@ -92,6 +118,9 @@
 <style>
   .select-wrap { display: inline-block; }
   .select-wrap.narrow { width: 120px; }
+  /* Sizes to the container rather than to the selected label — which otherwise
+     collapses a table picker down to the width of one short name. */
+  .select-wrap.fill { display: block; width: 100%; }
   .select-wrap :global(.dd-root) { width: 100%; }
 
   .select-input {

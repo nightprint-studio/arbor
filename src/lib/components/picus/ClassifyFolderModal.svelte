@@ -55,7 +55,7 @@
     FOLDER_ROLE_LABELS,
     FOREIGN_ENGINES,
     declaredEngine,
-    engineIsUnknown,
+    folderHasUnclassifiedScripts,
     folderEngine,
     isDialect,
     isForeignEngine,
@@ -164,11 +164,13 @@
         {@const entry = picusProjectStore.entryFor(item.id)}
         {#if entry}
           {@const folder = entry.node}
-          <!-- The warning triangle is for the folders nobody could identify — the
-               ones this dialog exists for. Never for an unsupported engine: that
-               is answered, and a permanent warning on an answered row is how a
-               warning stops meaning anything. -->
-          {#if folder.files.length > 0 && engineIsUnknown(folder)}
+          <!-- The warning triangle is for the folders that still hold a script
+               with no engine — the ones this dialog exists for. Never for an
+               unsupported engine: that is answered, and a permanent warning on an
+               answered row is how a warning stops meaning anything. Nor for a
+               folder whose files all name themselves, which is an untidy layout
+               rather than an open question. -->
+          {#if folderHasUnclassifiedScripts(folder)}
             <span class="cf-warn"><TriangleAlert size={12} /></span>
           {:else if selectedPath === folder.path}
             <span class="cf-tick"><Check size={12} /></span>

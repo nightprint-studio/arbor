@@ -8,6 +8,7 @@
 
 mod consistency;
 mod dialect;
+mod disabled;
 mod dml;
 mod duplicate;
 mod encoding;

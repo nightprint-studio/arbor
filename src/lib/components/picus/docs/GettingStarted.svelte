@@ -45,7 +45,9 @@
     consistency indicator sits apart at the bottom: it opens the bottom panel, not a sidebar.</li>
   <li><b>Sidebar</b> — the active section's tree.</li>
   <li><b>Centre</b> — tabs: the generator, query editors, tables, script files, the inventory.</li>
-  <li><b>Bottom panel</b> — Consistency, Output, Changes.</li>
+  <li><b>Bottom panel</b> — Results, Consistency, Output, Changes. Every answer the window
+    produces arrives here, the rows a query returned included; running a statement reveals it,
+    and it closes like any other panel.</li>
   <li><b>Status bar</b> — connection, engine, database version, the open file's encoding,
     the open-findings counter (click it to jump to the report), and the project path.</li>
 </ul>

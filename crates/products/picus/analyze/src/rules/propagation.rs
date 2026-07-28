@@ -27,6 +27,23 @@
 //! is already there, and the question this pair of rules asks is whether the row
 //! is there at all.
 //!
+//! ## Which of the two is even a question
+//!
+//! That depends on what the initialisation folders *are*, and no amount of reading
+//! the SQL settles it — it is a fact about how the team works, so the project
+//! states it (`[analysis] initialisation`, see
+//! [`InitialisationModel`](picus_project::prelude::InitialisationModel)).
+//!
+//! On the default reading — the initialisation is kept at the latest version —
+//! only `CONS003` is a question. A row the initialisation holds and no update
+//! carries is simply a row from the first release, and there is no update for the
+//! beginning; reporting those is what makes a first run print hundreds of findings
+//! that are all correct behaviour. The reverse stays on, because it is never
+//! correct behaviour: a row only an update writes means the newest installation is
+//! the one missing something every older one has.
+//!
+//! A direction that is off is **reported as not run**, never quietly absent.
+//!
 //! ## Where it stands down, and why
 //!
 //! The install half is cumulative and the update half is a chain of deltas, so
@@ -63,9 +80,37 @@ use crate::report::Output;
 use crate::rule::RuleId;
 
 pub(crate) fn run(context: &Context<'_>, output: &mut Output) {
-    for (_, pair) in collect(context) {
-        compare_halves(&pair, output);
+    // Which of the two directions is meaningful is a fact about how the team
+    // works, not about the SQL — see `InitialisationModel`. The project states it,
+    // and a direction that is off is *reported* as not run rather than quietly
+    // absent, so a report of a repository whose halves are deliberately unequal
+    // can never be mistaken for a clean one.
+    let model = context.initialisation_model();
+    let forward = model.expects_installed_rows_in_updates();
+    let backward = model.expects_updated_rows_in_the_initialisation();
+    if !forward {
+        output.skip(RuleId::Cons002, "", stood_down(model, "the initialisation writes"));
     }
+    if !backward {
+        output.skip(RuleId::Cons003, "", stood_down(model, "an update writes"));
+    }
+    if !forward && !backward {
+        return;
+    }
+
+    for (_, pair) in collect(context) {
+        compare_halves(&pair, forward, backward, output);
+    }
+}
+
+/// Why one direction is not being checked, written for the person who could turn
+/// it back on.
+fn stood_down(model: picus_project::prelude::InitialisationModel, writes: &str) -> String {
+    format!(
+        "this project declares that {} — so a row {writes} is not expected on the other side. \
+         Change the initialisation model in the project settings to check it.",
+        model.describe()
+    )
 }
 
 /// Which way into a database a folder serves.
@@ -181,7 +226,7 @@ fn collect<'a>(context: &Context<'a>) -> BTreeMap<(EngineKind, String), Pair<'a>
     tables
 }
 
-fn compare_halves(pair: &Pair<'_>, output: &mut Output) {
+fn compare_halves(pair: &Pair<'_>, forward: bool, backward: bool, output: &mut Output) {
     if !pair.install.readable || !pair.upgrade.readable {
         return;
     }
@@ -211,17 +256,21 @@ fn compare_halves(pair: &Pair<'_>, output: &mut Output) {
     let upgraded = reduce(&pair.upgrade.rows, &shared);
 
     let label = engine_label(pair.dialect);
-    for (datum, anchor) in &installed {
-        if upgraded.contains_key(datum) {
-            continue;
+    if forward {
+        for (datum, anchor) in &installed {
+            if upgraded.contains_key(datum) {
+                continue;
+            }
+            output.findings.push(never_propagated(pair, label, datum, anchor, upgrade_folder));
         }
-        output.findings.push(never_propagated(pair, label, datum, anchor, upgrade_folder));
     }
-    for (datum, anchor) in &upgraded {
-        if installed.contains_key(datum) {
-            continue;
+    if backward {
+        for (datum, anchor) in &upgraded {
+            if installed.contains_key(datum) {
+                continue;
+            }
+            output.findings.push(never_seeded(pair, label, datum, anchor, install_folder));
         }
-        output.findings.push(never_seeded(pair, label, datum, anchor, install_folder));
     }
 }
 

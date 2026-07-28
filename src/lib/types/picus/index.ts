@@ -674,6 +674,25 @@ export function engineIsUnknown(node: FolderNode): boolean {
   return node.effectiveEngine === null;
 }
 
+/**
+ * Does this folder still hold a script nobody can name an engine for?
+ *
+ * The question worth putting in front of a user, and it is deliberately **not**
+ * {@link engineIsUnknown}. A folder holding `4_12_ORA.sql` beside `4_12_POS.sql`
+ * has no engine of its own and never will — it is not one thing — but once the
+ * files inside it answer for themselves, every script in the repository has an
+ * engine and there is nothing left to ask. Asking anyway puts a folder in the
+ * "needs an answer" banner, in the palette and behind a warning icon in the
+ * tree, for a question with no answer that would change anything.
+ *
+ * Asked of the direct files only: a parent whose children are separate rows has
+ * its own row, and a container with no scripts of its own is nothing to classify.
+ * Excluded scripts do not count — they are not in the project.
+ */
+export function folderHasUnclassifiedScripts(node: FolderNode): boolean {
+  return node.files.some((file) => !isExcluded(file) && fileEngineIsUnknown(file));
+}
+
 /** Can a generation be written into this folder? Never into an excluded one. */
 export function folderAcceptsGeneration(node: FolderNode): boolean {
   if (isExcluded(node)) return false;
