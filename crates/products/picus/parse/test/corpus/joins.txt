@@ -1,0 +1,435 @@
+================================================================================
+comma join
+================================================================================
+
+SELECT a FROM t1, t2 WHERE t1.id = t2.id;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier)))
+          (table_reference
+            (object_name
+              (identifier))))
+        (where_clause
+          (binary_expression
+            (object_name
+              (identifier)
+              (identifier))
+            (object_name
+              (identifier)
+              (identifier))))))))
+
+================================================================================
+inner join
+================================================================================
+
+SELECT a FROM t1 INNER JOIN t2 ON t1.id = t2.id;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (join_clause
+            (table_reference
+              (object_name
+                (identifier)))
+            (table_reference
+              (object_name
+                (identifier)))
+            (binary_expression
+              (object_name
+                (identifier)
+                (identifier))
+              (object_name
+                (identifier)
+                (identifier)))))))))
+
+================================================================================
+plain join
+================================================================================
+
+SELECT a FROM t1 JOIN t2 ON t1.id = t2.id;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (join_clause
+            (table_reference
+              (object_name
+                (identifier)))
+            (table_reference
+              (object_name
+                (identifier)))
+            (binary_expression
+              (object_name
+                (identifier)
+                (identifier))
+              (object_name
+                (identifier)
+                (identifier)))))))))
+
+================================================================================
+left outer join
+================================================================================
+
+SELECT a FROM t1 LEFT OUTER JOIN t2 ON t1.id = t2.id;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (join_clause
+            (table_reference
+              (object_name
+                (identifier)))
+            (table_reference
+              (object_name
+                (identifier)))
+            (binary_expression
+              (object_name
+                (identifier)
+                (identifier))
+              (object_name
+                (identifier)
+                (identifier)))))))))
+
+================================================================================
+right join
+================================================================================
+
+SELECT a FROM t1 RIGHT JOIN t2 ON t1.id = t2.id;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (join_clause
+            (table_reference
+              (object_name
+                (identifier)))
+            (table_reference
+              (object_name
+                (identifier)))
+            (binary_expression
+              (object_name
+                (identifier)
+                (identifier))
+              (object_name
+                (identifier)
+                (identifier)))))))))
+
+================================================================================
+full outer join
+================================================================================
+
+SELECT a FROM t1 FULL OUTER JOIN t2 ON t1.id = t2.id;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (join_clause
+            (table_reference
+              (object_name
+                (identifier)))
+            (table_reference
+              (object_name
+                (identifier)))
+            (binary_expression
+              (object_name
+                (identifier)
+                (identifier))
+              (object_name
+                (identifier)
+                (identifier)))))))))
+
+================================================================================
+cross join
+================================================================================
+
+SELECT a FROM t1 CROSS JOIN t2;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (join_clause
+            (table_reference
+              (object_name
+                (identifier)))
+            (table_reference
+              (object_name
+                (identifier)))))))))
+
+================================================================================
+natural join
+================================================================================
+
+SELECT a FROM t1 NATURAL JOIN t2;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (join_clause
+            (table_reference
+              (object_name
+                (identifier)))
+            (table_reference
+              (object_name
+                (identifier)))))))))
+
+================================================================================
+join using
+================================================================================
+
+SELECT a FROM t1 JOIN t2 USING (id, code);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (join_clause
+            (table_reference
+              (object_name
+                (identifier)))
+            (table_reference
+              (object_name
+                (identifier)))
+            (identifier)
+            (identifier)))))))
+
+================================================================================
+three way join
+================================================================================
+
+SELECT a FROM t1 JOIN t2 ON t1.id = t2.id JOIN t3 ON t2.id = t3.id;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (join_clause
+            (join_clause
+              (table_reference
+                (object_name
+                  (identifier)))
+              (table_reference
+                (object_name
+                  (identifier)))
+              (binary_expression
+                (object_name
+                  (identifier)
+                  (identifier))
+                (object_name
+                  (identifier)
+                  (identifier))))
+            (table_reference
+              (object_name
+                (identifier)))
+            (binary_expression
+              (object_name
+                (identifier)
+                (identifier))
+              (object_name
+                (identifier)
+                (identifier)))))))))
+
+================================================================================
+join to a derived table
+================================================================================
+
+SELECT a FROM t1 JOIN (SELECT id FROM t2) d ON t1.id = d.id;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (join_clause
+            (table_reference
+              (object_name
+                (identifier)))
+            (derived_table
+              (subquery
+                (select_statement
+                  (select_core
+                    (select_list
+                      (select_item
+                        (object_name
+                          (identifier))))
+                    (from_clause
+                      (table_reference
+                        (object_name
+                          (identifier)))))))
+              (identifier))
+            (binary_expression
+              (object_name
+                (identifier)
+                (identifier))
+              (object_name
+                (identifier)
+                (identifier)))))))))
+
+================================================================================
+lateral join
+================================================================================
+
+SELECT a FROM t1, LATERAL (SELECT x FROM t2 WHERE t2.id = t1.id) l;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier)))
+          (lateral_table
+            (subquery
+              (select_statement
+                (select_core
+                  (select_list
+                    (select_item
+                      (object_name
+                        (identifier))))
+                  (from_clause
+                    (table_reference
+                      (object_name
+                        (identifier))))
+                  (where_clause
+                    (binary_expression
+                      (object_name
+                        (identifier)
+                        (identifier))
+                      (object_name
+                        (identifier)
+                        (identifier)))))))
+            (identifier)))))))
+
+================================================================================
+oracle outer join marker
+================================================================================
+
+SELECT e.ename, m.ename FROM emp e, emp m WHERE e.mgr = m.empno(+);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier)
+              (identifier)))
+          (select_item
+            (object_name
+              (identifier)
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))
+            (identifier))
+          (table_reference
+            (object_name
+              (identifier))
+            (identifier)))
+        (where_clause
+          (binary_expression
+            (object_name
+              (identifier)
+              (identifier))
+            (oracle_outer_join
+              (object_name
+                (identifier)
+                (identifier)))))))))

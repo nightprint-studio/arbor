@@ -1,0 +1,563 @@
+================================================================================
+create view
+================================================================================
+
+CREATE VIEW v AS SELECT a FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_view_statement
+      (object_name
+        (identifier))
+      (select_statement
+        (select_core
+          (select_list
+            (select_item
+              (object_name
+                (identifier))))
+          (from_clause
+            (table_reference
+              (object_name
+                (identifier)))))))))
+
+================================================================================
+create or replace view with check option
+================================================================================
+
+CREATE OR REPLACE VIEW v (a) AS SELECT a FROM t WITH CHECK OPTION;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_view_statement
+      (object_name
+        (identifier))
+      (column_aliases
+        (identifier))
+      (select_statement
+        (select_core
+          (select_list
+            (select_item
+              (object_name
+                (identifier))))
+          (from_clause
+            (table_reference
+              (object_name
+                (identifier)))))))))
+
+================================================================================
+create view with read only
+================================================================================
+
+CREATE OR REPLACE FORCE VIEW v AS SELECT a FROM t WITH READ ONLY;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_view_statement
+      (object_name
+        (identifier))
+      (select_statement
+        (select_core
+          (select_list
+            (select_item
+              (object_name
+                (identifier))))
+          (from_clause
+            (table_reference
+              (object_name
+                (identifier)))))))))
+
+================================================================================
+create materialized view
+================================================================================
+
+CREATE MATERIALIZED VIEW mv AS SELECT a FROM t WITH DATA;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_materialized_view_statement
+      (object_name
+        (identifier))
+      (select_statement
+        (select_core
+          (select_list
+            (select_item
+              (object_name
+                (identifier))))
+          (from_clause
+            (table_reference
+              (object_name
+                (identifier)))))))))
+
+================================================================================
+create materialized view refresh
+================================================================================
+
+CREATE MATERIALIZED VIEW mv REFRESH FAST ON COMMIT AS SELECT a FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_materialized_view_statement
+      (object_name
+        (identifier))
+      (select_statement
+        (select_core
+          (select_list
+            (select_item
+              (object_name
+                (identifier))))
+          (from_clause
+            (table_reference
+              (object_name
+                (identifier)))))))))
+
+================================================================================
+create index
+================================================================================
+
+CREATE INDEX ix ON t (a, b);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_index_statement
+      (object_name
+        (identifier))
+      (object_name
+        (identifier))
+      (index_element
+        (object_name
+          (identifier)))
+      (index_element
+        (object_name
+          (identifier))))))
+
+================================================================================
+create unique index desc
+================================================================================
+
+CREATE UNIQUE INDEX ix ON t (a DESC, b ASC NULLS LAST);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_index_statement
+      (object_name
+        (identifier))
+      (object_name
+        (identifier))
+      (index_element
+        (object_name
+          (identifier)))
+      (index_element
+        (object_name
+          (identifier))))))
+
+================================================================================
+create index on an expression
+================================================================================
+
+CREATE INDEX ix ON t (lower(a));
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_index_statement
+      (object_name
+        (identifier))
+      (object_name
+        (identifier))
+      (index_element
+        (function_call
+          (object_name
+            (identifier))
+          (object_name
+            (identifier)))))))
+
+================================================================================
+create index using and where
+================================================================================
+
+CREATE INDEX ix ON t USING btree (a) WHERE a IS NOT NULL;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_index_statement
+      (object_name
+        (identifier))
+      (object_name
+        (identifier))
+      (identifier)
+      (index_element
+        (object_name
+          (identifier)))
+      (where_clause
+        (is_expression
+          (object_name
+            (identifier))
+          (null_literal))))))
+
+================================================================================
+create index concurrently
+================================================================================
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS ix ON t (a);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_index_statement
+      (object_name
+        (identifier))
+      (object_name
+        (identifier))
+      (index_element
+        (object_name
+          (identifier))))))
+
+================================================================================
+create sequence
+================================================================================
+
+CREATE SEQUENCE s;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_sequence_statement
+      (object_name
+        (identifier)))))
+
+================================================================================
+create sequence oracle options
+================================================================================
+
+CREATE SEQUENCE s START WITH 1 INCREMENT BY 1 NOMAXVALUE NOCACHE NOCYCLE;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_sequence_statement
+      (object_name
+        (identifier))
+      (sequence_option
+        (number_literal))
+      (sequence_option
+        (number_literal))
+      (sequence_option)
+      (sequence_option)
+      (sequence_option))))
+
+================================================================================
+create sequence postgres options
+================================================================================
+
+CREATE SEQUENCE s AS integer START 1 OWNED BY t.id;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_sequence_statement
+      (object_name
+        (identifier))
+      (sequence_option
+        (data_type
+          (object_name
+            (identifier))))
+      (sequence_option
+        (number_literal))
+      (sequence_option
+        (object_name
+          (identifier)
+          (identifier))))))
+
+================================================================================
+alter sequence
+================================================================================
+
+ALTER SEQUENCE s RESTART WITH 100;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (alter_sequence_statement
+      (object_name
+        (identifier))
+      (sequence_option
+        (number_literal)))))
+
+================================================================================
+create schema
+================================================================================
+
+CREATE SCHEMA app AUTHORIZATION owner_role;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_schema_statement
+      (object_name
+        (identifier))
+      (identifier))))
+
+================================================================================
+create synonym
+================================================================================
+
+CREATE OR REPLACE PUBLIC SYNONYM p FOR app.parametri;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_synonym_statement
+      (object_name
+        (identifier))
+      (object_name
+        (identifier)
+        (identifier)))))
+
+================================================================================
+comment on table and column
+================================================================================
+
+COMMENT ON TABLE t IS 'la tabella';
+COMMENT ON COLUMN t.a IS 'la colonna';
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (comment_statement
+      (object_name
+        (identifier))
+      (string_literal)))
+  (statement
+    (comment_statement
+      (object_name
+        (identifier)
+        (identifier))
+      (string_literal))))
+
+================================================================================
+comment set to null
+================================================================================
+
+COMMENT ON TABLE t IS NULL;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (comment_statement
+      (object_name
+        (identifier))
+      (null_literal))))
+
+================================================================================
+grant
+================================================================================
+
+GRANT SELECT, INSERT, UPDATE ON t TO app_role;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (grant_statement
+      (privilege)
+      (privilege)
+      (privilege)
+      (object_name
+        (identifier))
+      (object_name
+        (identifier)))))
+
+================================================================================
+grant all with option
+================================================================================
+
+GRANT ALL PRIVILEGES ON t TO PUBLIC WITH GRANT OPTION;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (grant_statement
+      (privilege)
+      (object_name
+        (identifier)))))
+
+================================================================================
+grant column privileges
+================================================================================
+
+GRANT UPDATE (a, b) ON t TO app_role;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (grant_statement
+      (privilege
+        (identifier)
+        (identifier))
+      (object_name
+        (identifier))
+      (object_name
+        (identifier)))))
+
+================================================================================
+revoke
+================================================================================
+
+REVOKE DELETE ON t FROM app_role CASCADE;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (revoke_statement
+      (privilege)
+      (object_name
+        (identifier))
+      (object_name
+        (identifier)))))
+
+================================================================================
+drop objects of every kind
+================================================================================
+
+DROP VIEW v;
+DROP MATERIALIZED VIEW mv;
+DROP INDEX ix;
+DROP SEQUENCE s;
+DROP TRIGGER trg;
+DROP FUNCTION f;
+DROP PROCEDURE p;
+DROP PACKAGE BODY pkg;
+DROP TYPE ty;
+DROP SYNONYM syn;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (drop_statement
+      (object_name
+        (identifier))))
+  (statement
+    (drop_statement
+      (object_name
+        (identifier))))
+  (statement
+    (drop_statement
+      (object_name
+        (identifier))))
+  (statement
+    (drop_statement
+      (object_name
+        (identifier))))
+  (statement
+    (drop_statement
+      (object_name
+        (identifier))))
+  (statement
+    (drop_statement
+      (object_name
+        (identifier))))
+  (statement
+    (drop_statement
+      (object_name
+        (identifier))))
+  (statement
+    (drop_statement
+      (object_name
+        (identifier))))
+  (statement
+    (drop_statement
+      (object_name
+        (identifier))))
+  (statement
+    (drop_statement
+      (object_name
+        (identifier)))))
+
+================================================================================
+set statements
+================================================================================
+
+SET search_path TO app, public;
+SET DEFINE OFF;
+SET SERVEROUTPUT ON SIZE 1000000;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (set_statement
+      (object_name
+        (identifier))
+      (object_name
+        (identifier))
+      (object_name
+        (identifier))))
+  (statement
+    (set_statement
+      (object_name
+        (identifier))
+      (object_name
+        (identifier))))
+  (statement
+    (set_statement
+      (object_name
+        (identifier))
+      (object_name
+        (identifier))
+      (number_literal))))
+
+================================================================================
+transaction control
+================================================================================
+
+COMMIT;
+ROLLBACK;
+SAVEPOINT sp;
+ROLLBACK TO SAVEPOINT sp;
+COMMIT WORK;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (transaction_statement))
+  (statement
+    (transaction_statement))
+  (statement
+    (transaction_statement
+      (identifier)))
+  (statement
+    (transaction_statement
+      (identifier)))
+  (statement
+    (transaction_statement)))

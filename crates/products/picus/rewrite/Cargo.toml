@@ -1,0 +1,16 @@
+[package]
+name         = "picus-rewrite"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The only part of Picus that writes into a user's repository. Byte-range splicing over the original file — never a re-print — with a round-trip guard that refuses to touch a file it cannot reproduce, line-ending conversion to the destination's own, and an all-or-nothing apply that rolls back on failure."
+
+[dependencies]
+# Encoding detection, the strict encoder that refuses to substitute, and the
+# folder-inheritance context. The mechanism is arbor-fs's; the policy is Picus's.
+arbor-fs    = { path = "../../../foundation/fs" }
+# Needed to name an encoding and to hold one on a file being created; same version
+# arbor-fs and the shell pin, so Cargo unifies a single copy.
+encoding_rs = "0.8"

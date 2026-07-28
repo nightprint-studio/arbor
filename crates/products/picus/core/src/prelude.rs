@@ -14,3 +14,7 @@ pub use crate::config::{
 pub use crate::connections::{
     connections_path, load_connections, save_connections, ConnectionFile, SessionPool,
 };
+
+pub use crate::digest::digest;
+
+pub use crate::scripts::{cache_key, CachedSource, ScriptCache, ScriptSnapshot};

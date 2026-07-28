@@ -173,5 +173,19 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
+    /* A flex container, not just a flex item.
+       Without this it is a plain block box, so a child written the obvious way
+       — `flex: 1; min-height: 0`, the idiom used everywhere else in the app —
+       constrains nothing: it grows to its content's full height and this rule's
+       `overflow: hidden` silently CLIPS it. A virtualised grid inside then has no
+       scrollbar at all, which is how it presented. The convention that happened to
+       work was `height: 100%` on the child, which is not discoverable and which
+       half the call sites did not follow.
+
+       Both idioms work now. A child that opts into neither still sizes to its
+       content exactly as it did under block layout, and `align-items: stretch`
+       keeps it full-width, so nothing that worked before changes. */
+    display: flex;
+    flex-direction: column;
   }
 </style>

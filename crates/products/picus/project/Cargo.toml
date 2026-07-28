@@ -1,0 +1,31 @@
+[package]
+name         = "picus-project"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "What a Picus script repository IS: discovery of its per-dialect branches and their folders, the per-project settings in .arbor/picus/project.toml, the update-file naming scheme and the generated-block marker. Pure planning plus a thin filesystem scan; writes nothing without an explicit confirmation from the caller."
+
+[dependencies]
+# The shared vocabulary: the engine a branch is written in, and what a folder is
+# for. Both are read by the generator half too, which is why they live in the leaf
+# crate rather than here.
+picus-types = { path = "../types" }
+# Encoding detection (BOM → UTF-8 → the folder's dominant encoding → heuristic).
+# Picus supplies the policy — which files vote — and arbor-fs owns the mechanism.
+arbor-fs    = { path = "../../../foundation/fs" }
+# Needed only to name an encoding by label and to hold the workspace's default;
+# same version arbor-fs and the shell pin, so Cargo unifies a single copy.
+encoding_rs = "0.8"
+serde       = { workspace = true }
+# The per-project update-file naming pattern is a user-supplied regex — a project
+# whose files are not named `4_12__4_13.sql` declares its own shape.
+regex       = { workspace = true }
+# `.arbor/picus/project.toml` is round-tripped through `toml`, exactly as the
+# per-profile `picus/config.toml` is in picus-core.
+toml        = "0.8"
+
+[dev-dependencies]
+# The wire shapes are asserted against the words the frontend expects.
+serde_json  = { workspace = true }

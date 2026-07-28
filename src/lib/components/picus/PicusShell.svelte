@@ -16,11 +16,7 @@
    * Every action here is reachable from the keyboard; the canonical list lives
    * in `picus-shortcuts.ts` and this file's `onKeyDown` must stay in step with it.
    */
-  import {
-    Database, FolderTree, FormInput, Layers, TriangleAlert,
-    Command, Play, Table2, FileCode2, Settings, Keyboard, BookOpen, Plus,
-    RefreshCw, PanelLeft, PanelBottom, Check, Wrench,
-  } from 'lucide-svelte';
+  import { Database, FolderTree, FormInput, Layers, TriangleAlert } from 'lucide-svelte';
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
   import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
   import ActivityBar, { type ActivityRailItem } from '$lib/components/shared/ui/ActivityBar.svelte';
@@ -28,6 +24,7 @@
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
+  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import FeedbackHost from '$lib/feedback/FeedbackHost.svelte';
   import FeedbackStatusButtons from '$lib/feedback/FeedbackStatusButtons.svelte';
   import type { IconComponent } from '$lib/types/icon';
@@ -50,15 +47,20 @@
   import PicusShortcutsModal from './PicusShortcutsModal.svelte';
   import PicusAboutModal from './PicusAboutModal.svelte';
   import PicusConnectionModal from './PicusConnectionModal.svelte';
+  import PicusConnectionDetailsModal from './PicusConnectionDetailsModal.svelte';
   import PicusDocsPanel from './PicusDocsPanel.svelte';
   import AddDestinationModal from './generate/AddDestinationModal.svelte';
+  import {
+    PICUS_SECTIONS,
+    buildPicusPalette,
+    picusPaletteIcon,
+  } from './picus-palette';
 
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { picusUiStore, type SidebarSection } from '$lib/stores/picus/ui.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
-  import { schemaStore } from '$lib/stores/picus/schema.svelte';
   import { consistencyStore } from '$lib/stores/picus/consistency.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import { queryStore } from '$lib/stores/picus/query.svelte';
@@ -72,17 +74,17 @@
   const tab = $derived(picusTabsStore.active);
 
   // ── Activity rail ───────────────────────────────────────────────────────────
-  const SECTIONS: { id: SidebarSection; icon: any; label: string; shortcut: string }[] = [
-    { id: 'connections', icon: Database, label: 'Connections', shortcut: 'Ctrl+1' },
-    { id: 'scripts', icon: FolderTree, label: 'Scripts on disk', shortcut: 'Ctrl+2' },
-    { id: 'generate', icon: FormInput, label: 'Generate DML', shortcut: 'Ctrl+3' },
-    { id: 'inventory', icon: Layers, label: 'Inventory', shortcut: 'Ctrl+4' },
-  ];
+  const SECTION_ICONS: Record<SidebarSection, IconComponent> = {
+    connections: Database as unknown as IconComponent,
+    scripts: FolderTree as unknown as IconComponent,
+    generate: FormInput as unknown as IconComponent,
+    inventory: Layers as unknown as IconComponent,
+  };
 
   const railTop = $derived<ActivityRailItem[]>(
-    SECTIONS.map((s) => ({
+    PICUS_SECTIONS.map((s) => ({
       id: s.id,
-      icon: s.icon,
+      icon: SECTION_ICONS[s.id],
       tooltip: s.label,
       shortcut: s.shortcut,
       active: picusUiStore.sidebarOpen && picusUiStore.sidebarSection === s.id,
@@ -95,14 +97,20 @@
     {
       id: 'consistency',
       icon: TriangleAlert,
-      tooltip: consistencyStore.blockingCount
-        ? `Consistency — ${consistencyStore.blockingCount} blocking`
-        : consistencyStore.reviewCount
-          ? `Consistency — ${consistencyStore.reviewCount} to check`
-          : 'Consistency — no problem found',
+      tooltip: consistencyStore.running
+        ? 'Consistency — checking the repository…'
+        : consistencyStore.blockingCount
+          ? `Consistency — ${consistencyStore.blockingCount} blocking`
+          : consistencyStore.reviewCount
+            ? `Consistency — ${consistencyStore.reviewCount} to check`
+            : consistencyStore.hasRun
+              ? 'Consistency — no problem found'
+              : 'Consistency — not checked yet',
       shortcut: 'Ctrl+J',
       active: picusUiStore.bottomOpen && picusUiStore.bottomTab === 'consistency',
-      // Blockers are red, "worth checking" amber, clean shows nothing.
+      // Blockers are red, "worth checking" amber, clean shows nothing. A run in
+      // flight keeps the previous dot rather than flickering to none — the status
+      // bar is where "it is working" is stated.
       dot: consistencyStore.blockingCount
         ? 'error'
         : consistencyStore.reviewCount
@@ -113,168 +121,202 @@
   ]);
 
   // ── Write flow ──────────────────────────────────────────────────────────────
-  function requestWrite() {
-    if (!dmlStore.generated || dmlStore.applied) return;
-    if (!picusSettingsStore.confirmBeforeWrite) { applyWrite(); return; }
+  //
+  // Two steps, always in this order: compute the exact bytes, show them, and only
+  // then write — handing the digests back so the backend can refuse if any of
+  // those files moved since they were reviewed. "Skip the confirmation" is a
+  // setting about the DIALOG, never about the preview: nothing is written that
+  // was not first computed and checked against disk.
+
+  /** The preview is being built because the user asked to write, not to browse. */
+  let preparingWrite = $state(false);
+
+  async function requestWrite() {
+    if (!dmlStore.generated || dmlStore.applied || preparingWrite) return;
+    if (!picusProjectStore.attached) {
+      toastStore.show('This connection has no script repository attached.', 'warning');
+      return;
+    }
+    preparingWrite = true;
+    picusUiStore.showBottom('changes');
+    await dmlStore.ensurePreview();
+    preparingWrite = false;
+
+    if (dmlStore.previewError) {
+      toastStore.show(`Nothing was written — ${dmlStore.previewError}`, 'error');
+      return;
+    }
+    if (!dmlStore.changedFiles.length) {
+      toastStore.show('Nothing to write — the destinations already contain this change.', 'info');
+      return;
+    }
+    if (!picusSettingsStore.confirmBeforeWrite) { void applyWrite(); return; }
     confirmWrite = true;
   }
 
-  function applyWrite() {
+  async function applyWrite() {
     confirmWrite = false;
-    dmlStore.markApplied();
-    toastStore.show(
-      `${dmlStore.enabledTargets.length} file(s) written — encoding and line endings preserved.`,
-      'success',
+    const res = await dmlStore.apply();
+    if (!res) {
+      // The backend's refusal names the file that changed underneath the preview.
+      // That sentence IS the useful part — it is passed through untouched, and the
+      // Changes dock keeps it on screen next to the button that rebuilds the patch.
+      picusUiStore.showBottom('changes');
+      toastStore.show(dmlStore.applyError ?? 'The write was refused.', 'error');
+      return;
+    }
+    // The backend answers with the paths, not with counts — so the message can be
+    // specific about what happened rather than "3 files written".
+    const parts = [`${res.written.length} file(s) written`];
+    if (res.created.length) parts.push(`${res.created.length} created`);
+    if (res.unchanged.length) parts.push(`${res.unchanged.length} already up to date`);
+    toastStore.show(`${parts.join(', ')} — encoding and line endings preserved.`, 'success');
+    // What is on disk changed, so the tree and the verdict both describe the past.
+    void picusProjectStore.refresh();
+  }
+
+  /**
+   * Bind a folder of scripts to a connection.
+   *
+   * The binding is saved with the connection, so the repository is back the next
+   * time that database is opened — including in another window. The window's own
+   * effect notices the new root and reads it; nothing here has to.
+   */
+  async function attachScriptRoot(path: string) {
+    const id = picusUiStore.scriptRootPickerId;
+    picusUiStore.closeScriptRootPicker();
+    if (!id || !path) return;
+    try {
+      await connectionsStore.setScriptRoot(id, path);
+      // Attaching is always "show me these scripts" — including from the palette,
+      // where the connection picked may not be the one currently selected. The
+      // window reads the repository off the ACTIVE connection, so making it active
+      // is what turns the choice into something on screen.
+      connectionsStore.setActive(id);
+      picusUiStore.showSection('scripts');
+    } catch (e) {
+      toastStore.show(`The folder could not be attached — ${e}`, 'error');
+    }
+  }
+
+  /** Step to a finding and open it where it lives — the F8 pair. */
+  function stepFinding(delta: number) {
+    const finding = delta > 0 ? consistencyStore.next() : consistencyStore.previous();
+    if (!finding) {
+      toastStore.show('No finding to step to.', 'info');
+      return;
+    }
+    picusUiStore.showBottom('consistency');
+    const file = picusProjectStore.fileByPath(finding.file);
+    if (!file) return;
+    picusTabsStore.openFile(
+      file.path,
+      file.name,
+      picusProjectStore.dialectOfFile(file.path),
+      finding.line,
     );
   }
 
+  function runActiveQuery() {
+    const conn = picusTabsStore.activeConnection;
+    if (tab?.kind === 'query' && conn) void queryStore.run(tab.id, conn.id);
+  }
+
   function generate() {
-    if (!dmlStore.canGenerate) {
-      toastStore.show('Nothing to generate: check the values and enable at least one destination.', 'warning');
+    // Reached from the keyboard, where the disabled button that would have said
+    // the same thing is not in the way — so the toast has to carry the reason.
+    const blocked = dmlStore.generateBlockedReason;
+    if (blocked) {
+      toastStore.show(`Nothing to generate — ${blocked.replace(/\.$/, '').toLowerCase()}.`, 'warning');
       return;
     }
     picusTabsStore.openGenerate();
     dmlStore.markGenerated();
   }
 
-  /** The confirmation says exactly what will change — and what will not. */
+  // ── Deleting a connection ───────────────────────────────────────────────────
+  //
+  // Owned by the shell rather than by the connections panel: deleting is offered
+  // from the sidebar, from the details dialog and from the palette, and a
+  // destructive confirmation must not depend on which of the three is on screen.
+  const pendingDelete = $derived(
+    picusUiStore.connectionDeleteId
+      ? connectionsStore.specById(picusUiStore.connectionDeleteId)
+      : null,
+  );
+  let deleting = $state(false);
+
+  /**
+   * Say what goes with the connection — before the user agrees, not after.
+   *
+   * Deleting one is not only forgetting a row: the open session is closed and the
+   * password Arbor keeps for it is removed from the keychain. Neither comes back,
+   * and a user who expected "remove it from the list" would find out by having to
+   * type a password they may no longer have.
+   */
+  const deleteDetail = $derived.by(() => {
+    const c = pendingDelete;
+    if (!c) return '';
+    const lines = [
+      c.state === 'disconnected'
+        ? 'It is not open, so nothing in flight is interrupted.'
+        : 'Its open session is closed first — anything still running on it is cut off.',
+      c.hasSecret
+        ? "The password saved for it in Arbor's keychain is deleted with it. Configuring this connection again later means typing that password again."
+        : "No password is stored for it, so there is nothing to remove from Arbor's keychain.",
+      'Scripts on disk, and anything already generated, are untouched.',
+    ];
+    return lines.join('\n\n');
+  });
+
+  async function confirmDelete() {
+    const c = pendingDelete;
+    if (!c || deleting) return;
+    deleting = true;
+    try {
+      await connectionsStore.remove(c.id);
+      picusUiStore.cancelConnectionDelete();
+      toastStore.show(`${c.name} deleted.`, 'success');
+    } catch (e) {
+      toastStore.show(`${c.name} could not be deleted — ${e}`, 'error');
+    } finally {
+      deleting = false;
+    }
+  }
+
+  /**
+   * The confirmation names exactly the files the PREVIEW says would change — not
+   * the enabled destinations, which is a different list the moment one of them
+   * already contains the change.
+   */
   const writeDetail = $derived(
-    dmlStore.enabledTargets.map((t) => t.file).join('\n') +
+    dmlStore.changedFiles
+      .map((f) => `${f.path}${f.createsFile ? '  (new file)' : ''}`)
+      .join('\n') +
       '\n\nEncoding and line endings stay as they are.' +
+      '\nThe write is refused if any of these files changed since the diff above was computed.' +
       (picusSettingsStore.backupBeforeWrite
         ? '\nOriginals are copied to .arbor/backup first; if any file fails, all of them are rolled back.'
         : '\nBackups are disabled: a failed write cannot be rolled back.'),
   );
 
   // ── Command palette ─────────────────────────────────────────────────────────
-  const ICONS: Record<string, IconComponent> = {
-    command: Command as unknown as IconComponent,
-    database: Database as unknown as IconComponent,
-    folder: FolderTree as unknown as IconComponent,
-    form: FormInput as unknown as IconComponent,
-    layers: Layers as unknown as IconComponent,
-    alert: TriangleAlert as unknown as IconComponent,
-    play: Play as unknown as IconComponent,
-    table: Table2 as unknown as IconComponent,
-    file: FileCode2 as unknown as IconComponent,
-    settings: Settings as unknown as IconComponent,
-    keyboard: Keyboard as unknown as IconComponent,
-    docs: BookOpen as unknown as IconComponent,
-    plus: Plus as unknown as IconComponent,
-    refresh: RefreshCw as unknown as IconComponent,
-    panelLeft: PanelLeft as unknown as IconComponent,
-    panelBottom: PanelBottom as unknown as IconComponent,
-    check: Check as unknown as IconComponent,
-    wrench: Wrench as unknown as IconComponent,
-  };
-  function iconResolver(name: string): IconComponent { return ICONS[name] ?? ICONS.command; }
-
+  //
+  // The catalogue itself lives in `picus-palette.ts`: it grows with every verb the
+  // product gains, and a window shell that doubles in length each release stops
+  // reading as a layout. What stays here is what the shell owns — closing the
+  // palette before acting, and the actions the entries borrow.
   function run(fn: () => void) { picusUiStore.closePalette(); queueMicrotask(fn); }
 
-  const paletteSections = $derived.by<PaletteSection[]>(() => {
-    const q = paletteQuery.trim().toLowerCase();
-
-    const generateItems = [
-      { id: 'gen', title: 'Generate DML', icon: 'form', shortcut: 'Ctrl+G', when: true, action: () => run(generate) },
-      { id: 'write', title: 'Write the generated SQL to the scripts', icon: 'check', shortcut: 'Ctrl+Shift+W', when: dmlStore.generated && !dmlStore.applied, action: () => run(requestWrite) },
-      { id: 'src-form', title: 'Source: guided form', icon: 'form', shortcut: 'Alt+1', when: true, action: () => run(() => { dmlStore.setSource('form'); picusTabsStore.openGenerate(); }) },
-      { id: 'src-paste', title: 'Source: paste SQL', icon: 'form', shortcut: 'Alt+2', when: true, action: () => run(() => { dmlStore.setSource('paste'); picusTabsStore.openGenerate(); }) },
-      { id: 'src-csv', title: 'Source: CSV', icon: 'form', shortcut: 'Alt+3', when: true, action: () => run(() => { dmlStore.setSource('csv'); picusTabsStore.openGenerate(); }) },
-    ];
-
-    const databaseItems = [
-      { id: 'newquery', title: 'New query', icon: 'play', shortcut: 'Ctrl+T', when: true, action: () => run(() => picusTabsStore.openQuery()) },
-      { id: 'runquery', title: 'Run the current query', icon: 'play', shortcut: 'Ctrl+Enter', when: tab?.kind === 'query', action: () => run(() => { if (tab && connectionsStore.active) void queryStore.run(tab.id, connectionsStore.active.id); }) },
-      { id: 'newconn', title: 'Add a connection…', icon: 'plus', shortcut: 'Ctrl+Shift+N', when: true, action: () => run(() => picusUiStore.openConnectionEditor(null)) },
-      { id: 'cycleconn', title: 'Switch to the next connection', icon: 'database', shortcut: 'Ctrl+Shift+D', when: connectionsStore.connections.length > 1, action: () => run(() => connectionsStore.cycle(1)) },
-      ...connectionsStore.connections.map((c) => ({
-        id: `conn:${c.id}`,
-        title: `Connect to ${c.name}`,
-        subtitle: `${c.alias} · ${c.schema}@${c.host}`,
-        icon: 'database',
-        when: true,
-        action: () => run(() => connectionsStore.setActive(c.id)),
-      })),
-      // Every schema object is reachable by name, whatever kind it is: the
-      // palette is where "I know what it's called" turns into "it's open".
-      ...schemaStore.relations.map((t) => ({
-        id: `object:${t.name}`,
-        title: `Open ${t.kind} ${t.name}`,
-        icon: 'table',
-        when: true,
-        action: () => run(() => picusTabsStore.openObject(t.name, t.kind)),
-      })),
-      ...schemaStore.sequences.map((s) => ({
-        id: `sequence:${s.name}`,
-        title: `Open sequence ${s.name}`,
-        icon: 'table',
-        when: true,
-        action: () => run(() => picusTabsStore.openObject(s.name, 'sequence')),
-      })),
-      ...schemaStore.triggers.map((t) => ({
-        id: `trigger:${t.name}`,
-        title: `Open trigger ${t.name}`,
-        subtitle: `on ${t.table}`,
-        icon: 'table',
-        when: true,
-        action: () => run(() => picusTabsStore.openObject(t.name, 'trigger')),
-      })),
-    ];
-
-    const scriptItems = [
-      ...picusProjectStore.allFiles.map((f) => ({
-        id: `file:${f.path}`,
-        title: `Open ${f.name}`,
-        subtitle: f.path,
-        icon: 'file',
-        when: true,
-        action: () => run(() => picusTabsStore.openFile(f.path, f.name, picusProjectStore.dialectOfFile(f.path))),
-      })),
-      { id: 'rescan', title: 'Re-scan the project', icon: 'refresh', when: true, action: () => run(() => toastStore.show('Project re-scanned.', 'success')) },
-    ];
-
-    const checkItems = [
-      { id: 'check', title: 'Run the consistency check', icon: 'alert', shortcut: 'Ctrl+Shift+K', when: true, action: () => run(() => { picusUiStore.showBottom('consistency'); consistencyStore.run(); }) },
-      { id: 'findings', title: 'Show the consistency report', icon: 'alert', when: true, action: () => run(() => picusUiStore.showBottom('consistency')) },
-      { id: 'changes', title: 'Show pending changes', icon: 'wrench', when: true, action: () => run(() => picusUiStore.showBottom('changes')) },
-      { id: 'inventory', title: 'Open the inventory', icon: 'layers', shortcut: 'Ctrl+4', when: true, action: () => run(() => picusTabsStore.openInventory()) },
-    ];
-
-    const viewItems = [
-      { id: 'sidebar', title: 'Toggle the sidebar', icon: 'panelLeft', shortcut: 'Ctrl+B', when: true, action: () => run(() => picusUiStore.toggleSidebar()) },
-      { id: 'bottom', title: 'Toggle the bottom panel', icon: 'panelBottom', shortcut: 'Ctrl+J', when: true, action: () => run(() => picusUiStore.toggleBottom()) },
-      ...SECTIONS.map((s) => ({
-        id: `sec:${s.id}`,
-        title: `Show ${s.label}`,
-        icon: 'folder',
-        shortcut: s.shortcut,
-        when: true,
-        action: () => run(() => picusUiStore.showSection(s.id)),
-      })),
-    ];
-
-    const appItems = [
-      { id: 'settings', title: 'Settings…', icon: 'settings', shortcut: 'Ctrl+,', when: true, action: () => run(() => picusUiStore.openSettings()) },
-      { id: 'shortcuts', title: 'Keyboard shortcuts…', icon: 'keyboard', shortcut: 'Shift+F1', when: true, action: () => run(() => picusUiStore.openShortcuts()) },
-      { id: 'docs', title: 'Documentation', icon: 'docs', shortcut: 'F1', when: true, action: () => run(() => picusUiStore.toggleDocs()) },
-      { id: 'about', title: 'About Picus', icon: 'command', when: true, action: () => run(() => picusUiStore.openAbout()) },
-    ];
-
-    type Raw = { id: string; title: string; subtitle?: string; icon: string; shortcut?: string; when: boolean; action: () => void };
-    const pack = (items: Raw[]) =>
-      items
-        .filter((c) => c.when && (!q || c.title.toLowerCase().includes(q) || (c.subtitle ?? '').toLowerCase().includes(q)))
-        .map((c) => ({ id: c.id, title: c.title, subtitle: c.subtitle, icon: c.icon, shortcut: c.shortcut, action: c.action }));
-
-    const out: PaletteSection[] = [];
-    const gen = pack(generateItems); if (gen.length) out.push({ id: 'generate', label: 'Generate', items: gen });
-    const db = pack(databaseItems); if (db.length) out.push({ id: 'database', label: 'Database', items: db });
-    const sc = pack(scriptItems); if (sc.length) out.push({ id: 'scripts', label: 'Scripts', items: sc });
-    const ck = pack(checkItems); if (ck.length) out.push({ id: 'consistency', label: 'Consistency', items: ck });
-    const vw = pack(viewItems); if (vw.length) out.push({ id: 'view', label: 'View', items: vw });
-    const ap = pack(appItems); if (ap.length) out.push({ id: 'app', label: 'Application', items: ap });
-    return out;
-  });
+  const paletteSections = $derived<PaletteSection[]>(
+    buildPicusPalette(paletteQuery, {
+      run,
+      generate,
+      requestWrite: () => void requestWrite(),
+      runQuery: runActiveQuery,
+      stepFinding,
+    }),
+  );
 
   // ── Keyboard ────────────────────────────────────────────────────────────────
   function onKeyDown(e: KeyboardEvent) {
@@ -307,23 +349,44 @@
     if (mod && key === 'w' && !e.shiftKey) { if (tab) picusTabsStore.close(tab.id); e.preventDefault(); return; }
     if (mod && key === 't') { picusTabsStore.openQuery(); e.preventDefault(); return; }
 
-    // Database.
+    // Database. The TAB's connection, never the sidebar's selection: a query tab
+    // can be bound to another database than the one highlighted in the sidebar, and
+    // the bar above the editor names the former. Running a statement — or
+    // cancelling one — against a connection the user is not looking at is the worst
+    // kind of wrong, so the keyboard resolves it exactly as the buttons do.
     if (mod && key === 'enter') {
-      if (tab?.kind === 'query' && connectionsStore.active) void queryStore.run(tab.id, connectionsStore.active.id);
+      runActiveQuery();
       e.preventDefault();
       return;
     }
     if (mod && e.shiftKey && key === 'c') {
-      if (tab && connectionsStore.active) void queryStore.cancel(tab.id, connectionsStore.active.id);
+      const conn = picusTabsStore.activeConnection;
+      if (tab && conn) void queryStore.cancel(tab.id, conn.id);
       e.preventDefault();
       return;
     }
     if (mod && e.shiftKey && key === 'd') { connectionsStore.cycle(1); e.preventDefault(); return; }
     if (mod && e.shiftKey && key === 'n') { picusUiStore.openConnectionEditor(null); e.preventDefault(); return; }
+    if (e.key === 'F4' && !mod && !e.shiftKey && !e.altKey) {
+      // Nothing selected means nothing to edit — silently, because the palette
+      // and the sidebar both already say there is no connection.
+      if (connectionsStore.activeId) picusUiStore.openConnectionEditor(connectionsStore.activeId);
+      e.preventDefault();
+      return;
+    }
+
+    // Scripts on disk. F5 is the universal "re-read", and Picus has a genuine use
+    // for it: files change under the tool constantly (a colleague's pull, an
+    // external editor), and the tree is a snapshot until asked otherwise.
+    if (e.key === 'F5' && !mod && !e.shiftKey && !e.altKey) {
+      if (picusProjectStore.attached) void picusProjectStore.refresh();
+      e.preventDefault();
+      return;
+    }
 
     // Generation.
     if (mod && !e.shiftKey && key === 'g') { generate(); e.preventDefault(); return; }
-    if (mod && e.shiftKey && key === 'w') { requestWrite(); e.preventDefault(); return; }
+    if (mod && e.shiftKey && key === 'w') { void requestWrite(); e.preventDefault(); return; }
     if (e.altKey && e.code === 'Digit1') { dmlStore.setSource('form'); picusTabsStore.openGenerate(); e.preventDefault(); return; }
     if (e.altKey && e.code === 'Digit2') { dmlStore.setSource('paste'); picusTabsStore.openGenerate(); e.preventDefault(); return; }
     if (e.altKey && e.code === 'Digit3') { dmlStore.setSource('csv'); picusTabsStore.openGenerate(); e.preventDefault(); return; }
@@ -341,7 +404,15 @@
     // Consistency.
     if (mod && e.shiftKey && key === 'k') {
       picusUiStore.showBottom('consistency');
-      consistencyStore.run();
+      void picusProjectStore.analyze();
+      e.preventDefault();
+      return;
+    }
+    // F8 / Shift+F8 walk the report and open each finding where it lives — the
+    // pair the shortcuts reference has always listed, now that findings have a
+    // file and a line to go to.
+    if (e.key === 'F8' && !mod && !e.altKey) {
+      stepFinding(e.shiftKey ? -1 : 1);
       e.preventDefault();
       return;
     }
@@ -418,7 +489,7 @@
 {#if picusUiStore.paletteOpen}
   <CommandPaletteShell
     onClose={() => picusUiStore.closePalette()}
-    {iconResolver}
+    iconResolver={picusPaletteIcon}
     sections={paletteSections}
     bind:query={paletteQuery}
     placeholder="Search a command, a table or a file…"
@@ -426,13 +497,17 @@
 {/if}
 
 {#if confirmWrite}
+  <!-- The counts and the file list come from the PREVIEW, which is already on
+       screen in the Changes dock: the dialog confirms what was reviewed, it does
+       not describe something else. -->
   <ConfirmModal
     title="Write to the scripts"
-    message={`${dmlStore.enabledTargets.length} file(s) will be rewritten.`}
+    message={`${dmlStore.changedFiles.length} file(s) will be written, exactly as shown in Changes.`}
     detail={writeDetail}
     variant="warning"
     confirmLabel="Write"
-    onConfirm={applyWrite}
+    busy={dmlStore.applying}
+    onConfirm={() => void applyWrite()}
     onCancel={() => (confirmWrite = false)}
   />
 {/if}
@@ -455,10 +530,45 @@
   <AddDestinationModal onClose={() => picusUiStore.closeAddDestination()} />
 {/if}
 
+{#if picusUiStore.scriptRootPickerId}
+  <!-- Attaching a repository to a connection. Arbor's own folder picker, never a
+       native dialog and never an <input type="file">; the shell owns it because
+       the same action is offered from the scripts panel, the connection list and
+       the palette. -->
+  <FileExplorerModal
+    mode="folder"
+    title="Choose the folder of SQL scripts"
+    initialPath={connectionsStore.scriptRootFor(picusUiStore.scriptRootPickerId) || undefined}
+    onConfirm={(path) => void attachScriptRoot(path)}
+    onCancel={() => picusUiStore.closeScriptRootPicker()}
+    onClose={() => picusUiStore.closeScriptRootPicker()}
+  />
+{/if}
+
 {#if picusUiStore.connectionEditorOpen}
   <PicusConnectionModal
     connectionId={picusUiStore.connectionEditorId}
     onClose={() => picusUiStore.closeConnectionEditor()}
+  />
+{/if}
+
+{#if picusUiStore.connectionDetailsId}
+  <PicusConnectionDetailsModal
+    connectionId={picusUiStore.connectionDetailsId}
+    onClose={() => picusUiStore.closeConnectionDetails()}
+  />
+{/if}
+
+{#if pendingDelete}
+  <ConfirmModal
+    title="Delete this connection"
+    message={`“${pendingDelete.name}” is removed from Picus.`}
+    detail={deleteDetail}
+    variant="danger"
+    confirmLabel="Delete"
+    busy={deleting}
+    onConfirm={() => void confirmDelete()}
+    onCancel={() => picusUiStore.cancelConnectionDelete()}
   />
 {/if}
 

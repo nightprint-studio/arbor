@@ -55,6 +55,18 @@ mod secrets;
 // Deterministic SQL generation — one dialect-free model in, one statement per
 // destination out. Thin wrappers over `picus-emit`, which owns the golden tests.
 mod emit;
+// Opening a repository of scripts: propose what it is, let the user correct it,
+// write `.arbor/picus/project.toml` only once they have confirmed.
+mod project;
+// Reading that repository and holding it: every script decoded once, then parsed,
+// indexed and measured against the fourteen consistency rules.
+mod scripts;
+// Where a generated block goes in a destination file, and which bytes it replaces
+// when Picus has written into that file before. Pure.
+mod placement;
+// The two calls that write: a preview that returns the exact bytes, and an apply
+// that refuses if any of them moved in between.
+mod apply;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, any

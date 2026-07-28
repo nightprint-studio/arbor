@@ -54,20 +54,61 @@
   }: Props = $props();
 
   const tipInput = $derived<TooltipInput>(tooltip ?? title ?? '');
+
+  /** Unavailable, for either reason. */
+  const inert = $derived(disabled || loading);
+
+  /** Is there actually something to say if the user asks why it is greyed out? */
+  const hasExplanation = $derived.by(() => {
+    if (typeof tipInput === 'string') return tipInput.trim().length > 0;
+    if (!tipInput || tipInput.disabled) return false;
+    return typeof tipInput.content === 'string' && tipInput.content.trim().length > 0;
+  });
+
+  /**
+   * A greyed-out button that can explain itself uses `aria-disabled` instead of
+   * the native attribute — and that is the whole point of this component.
+   *
+   * A `disabled` control dispatches **no** mouse events and cannot be focused, so
+   * its tooltip is unreachable by mouse *and* by keyboard: every "why is this
+   * greyed out?" in Arbor was silently dead. `aria-disabled` keeps the button in
+   * the accessibility tree and in the tab order, which is also what WAI-ARIA
+   * recommends for exactly this reason, so the explanation can be read by hovering
+   * **or** by tabbing to it — the keyboard-first rule applies to finding out why
+   * you cannot do something, not only to doing it.
+   *
+   * Inertness is then enforced here rather than by the browser: the click handler
+   * refuses and stops propagation (so delegated handlers upstream see nothing),
+   * and `type` drops to `button` so an inert submit cannot submit its form.
+   *
+   * With no tooltip there is nothing to reach, so the native attribute stays — it
+   * is stricter, and strictness is free when it costs no information.
+   */
+  const ariaInert = $derived(inert && hasExplanation);
+
+  function handleClick(e: MouseEvent) {
+    if (inert) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    onclick?.(e);
+  }
 </script>
 
 <button
   bind:this={element}
-  {type}
+  type={inert ? 'button' : type}
   use:tooltipAction={tipInput}
   aria-label={ariaLabel}
   aria-busy={loading || undefined}
-  disabled={disabled || loading}
+  aria-disabled={inert || undefined}
+  disabled={inert && !ariaInert}
   class="btn btn-{variant} sz-{size}"
   class:block
   class:has-color={!!color}
   style={color ? `--btn-color:${color}` : undefined}
-  onclick={onclick}
+  onclick={handleClick}
 >
   {#if loading}
     <Loader2 size={size === 'xs' ? 11 : size === 'sm' ? 12 : size === 'lg' ? 16 : 14} class="btn-spin" />
@@ -125,7 +166,9 @@
       color: oklch(from var(--btn-color) clamp(0, (l - 0.6) * -10, 1) 0 0);
     }
   }
-  .btn-primary.has-color:hover:not(:disabled) { filter: brightness(1.12); }
+  /* Same guard as the variant rules in app.css: `aria-disabled` buttons are not
+     `:disabled`, so the hover affordance has to be excluded explicitly. */
+  .btn-primary.has-color:hover:not(:disabled):not([aria-disabled='true']) { filter: brightness(1.12); }
 
   .btn-ghost.has-color,
   .btn-icon.has-color  { color: var(--btn-color); }
@@ -138,10 +181,10 @@
     color: var(--btn-color);
     border-color: color-mix(in srgb, var(--btn-color) 32%, transparent);
   }
-  .btn-tonal.has-color:hover:not(:disabled) { filter: brightness(1.12); }
+  .btn-tonal.has-color:hover:not(:disabled):not([aria-disabled='true']) { filter: brightness(1.12); }
 
   .btn-danger.has-color { color: var(--btn-color); }
-  .btn-danger.has-color:hover:not(:disabled) {
+  .btn-danger.has-color:hover:not(:disabled):not([aria-disabled='true']) {
     background: color-mix(in srgb, var(--btn-color) 15%, transparent);
     border-color: var(--btn-color);
   }
@@ -149,7 +192,7 @@
   /* Outline + colour = the "destructive but not shouting" button: neutral at
      rest, the colour appears only under the pointer. `Disconnect` on a
      connected provider is the canonical use. */
-  .btn-outline.has-color:hover:not(:disabled) {
+  .btn-outline.has-color:hover:not(:disabled):not([aria-disabled='true']) {
     background: color-mix(in srgb, var(--btn-color) 15%, transparent);
     color: var(--btn-color);
     border-color: var(--btn-color);

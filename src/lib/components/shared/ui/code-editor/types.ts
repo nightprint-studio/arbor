@@ -20,6 +20,7 @@ import type { CompletionSource } from '@codemirror/autocomplete';
 import type { Extension } from '@codemirror/state';
 import type { StreamParser } from '@codemirror/language';
 import type { EditorView, Tooltip } from '@codemirror/view';
+import type { InlineCompletionSource } from './inline-completion';
 
 /** The generic highlight-class vocabulary. A language's {@link LanguageDescriptor.classify}
  *  maps its concrete CST node types onto one of these; the highlighter then emits a
@@ -205,7 +206,21 @@ export interface CodeEditorIntel {
     pos: number,
     side: -1 | 1,
   ) => Tooltip | null | Promise<Tooltip | null>;
+
+  /**
+   * Ghost text: the greyed continuation shown at the caret, Tab to accept.
+   *
+   * Return the text that **certainly** follows this position, or `null`. The
+   * distinction matters: elsewhere ghost text means a language model guessing,
+   * whereas here it is meant to be derived from what the tool already knows —
+   * the column list after `INSERT INTO t (` is a fact, not a prediction. A
+   * source that is unsure should return `null`; absent is always better than
+   * plausibly wrong, and one product (Picus) forbids model-generated content
+   * outright.
+   */
+  inlineCompletion?: InlineCompletionSource;
 }
 
 export type { Parser, Tree, Node };
 export type { CompletionSource };
+export type { InlineCompletionSource };

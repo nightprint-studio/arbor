@@ -43,7 +43,10 @@
   const objectKind = $derived(tab.objectKind ?? 'table');
   const lowercase = $derived(conn?.dialect === 'postgres');
   const ident = (name: string) => (lowercase ? name.toLowerCase() : name);
-  const language = $derived(sqlLanguage(conn?.dialect));
+  // Bound to the connection so the read-only DDL and view-definition panes still
+  // answer a hover with the column's type — the same facts, in the place you are
+  // most likely to want them.
+  const language = $derived(sqlLanguage(conn?.dialect, conn?.id));
 
   const relation = $derived(
     tab.table && (objectKind === 'table' || objectKind === 'view')
@@ -84,6 +87,13 @@
   let totalRows = $state<number | null>(null);
   let rowsLoading = $state(false);
   let rowsError = $state('');
+
+  // A page is a server-side OFFSET, and PostgreSQL reaches offset N by walking N
+  // rows: page 5 000 of 500 is a 2.5-million-row walk for every turn. That is a
+  // property of the mechanism, not a bug, but it is invisible — so it is said out
+  // loud once the walk gets long enough to feel.
+  const DEEP_OFFSET = 100_000;
+  const deepOffset = $derived((page - 1) * pageSize >= DEEP_OFFSET);
 
   /**
    * Fetch the current page.
@@ -270,6 +280,16 @@
         <span>{rowsError}</span>
       </div>
     {/if}
+    {#if deepOffset}
+      <div class="tv-note">
+        <Badge variant="tone" tone="warning" size="sm" label="deep page" />
+        <span>
+          Reaching row {((page - 1) * pageSize).toLocaleString()} means the server walks every
+          row before it, so pages this far in keep getting slower. A query with its own
+          <code>WHERE</code> on an indexed column gets there in one step.
+        </span>
+      </div>
+    {/if}
     <DataGrid
       columns={dataColumns}
       rows={pageRows}
@@ -450,6 +470,11 @@
     border-bottom: 1px solid color-mix(in srgb, var(--warning) 28%, transparent);
     font-size: 11.5px;
     color: var(--text-secondary);
+  }
+  .tv-note code {
+    font-family: var(--font-code);
+    font-size: 10.5px;
+    color: var(--text-primary);
   }
   .tv-trailing { color: var(--text-disabled); }
 

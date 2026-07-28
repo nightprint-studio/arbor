@@ -15,25 +15,36 @@
    * and stay visible with their reason attached: silencing a rule without saying
    * why is not possible.
    */
-  import { TriangleAlert, CircleAlert, Wrench, MessageSquareOff, ArrowRight } from 'lucide-svelte';
+  import { TriangleAlert, CircleAlert, Wrench, MessageSquareOff, ArrowRight, CircleSlash } from 'lucide-svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
+  import Alert from '$lib/components/shared/ui/Alert.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { consistencyStore } from '$lib/stores/picus/consistency.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
+  import NoticeList from './NoticeList.svelte';
   import type { Finding } from '$lib/types/picus';
+
+  /** `path` or `path:line` — the shape `alsoAt` arrives in. */
+  function openLocation(location: string) {
+    const match = /^(.*?):(\d+)$/.exec(location);
+    const path = match ? match[1] : location;
+    const line = match ? Number(match[2]) : undefined;
+    const file = picusProjectStore.fileByPath(path);
+    if (!file) {
+      toastStore.show(`${path} is not in the repository index.`, 'error');
+      return;
+    }
+    picusTabsStore.openFile(file.path, file.name, picusProjectStore.dialectOfFile(file.path), line);
+  }
 
   /** Jump to the exact place — the whole point of a location being clickable. */
   function open(finding: Finding) {
-    const file = picusProjectStore.fileByPath(finding.file);
-    if (!file) {
-      toastStore.show(`${finding.file} is not in the project index.`, 'error');
-      return;
-    }
-    picusTabsStore.openFile(file.path, file.name, picusProjectStore.dialectOfFile(file.path));
+    consistencyStore.focus(finding.id);
+    openLocation(finding.line ? `${finding.file}:${finding.line}` : finding.file);
   }
 
   function fix(finding: Finding) {
@@ -42,25 +53,49 @@
       'info',
     );
   }
+
+  /**
+   * Keep the finding F8 landed on in view.
+   *
+   * Stepping through a long report with the keyboard is useless if the row you
+   * are on is off screen; the highlight and this are the same feature.
+   */
+  let listEl = $state<HTMLDivElement | undefined>();
+  $effect(() => {
+    const id = consistencyStore.focusedId;
+    if (!id || !listEl) return;
+    listEl.querySelector(`[data-finding="${CSS.escape(id)}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  });
 </script>
 
-{#if !consistencyStore.visible.length}
-  <StateBlock tone="success">
+{#if consistencyStore.error}
+  <div class="fl-pad">
+    <Alert variant="error" title="The rules could not be run" text={consistencyStore.error} />
+  </div>
+{:else if !consistencyStore.visible.length}
+  <StateBlock tone={consistencyStore.skipped.length ? 'info' : 'success'}>
     <div class="fl-clean">
-      <strong>No consistency problem.</strong>
+      <strong>
+        {consistencyStore.hasRun ? 'No consistency problem found.' : 'The rules have not been run yet.'}
+      </strong>
       <span>
-        {consistencyStore.lastRunAt
-          ? `Last checked at ${consistencyStore.lastRunAt}.`
-          : 'The rules have not been run yet.'}
+        {#if consistencyStore.lastRunAt}
+          Last checked at {consistencyStore.lastRunAt}.
+        {/if}
         {#if consistencyStore.suppressedCount}
           {consistencyStore.suppressedCount} finding{consistencyStore.suppressedCount === 1 ? ' is' : 's are'}
           silenced by a declared suppression.
+        {/if}
+        {#if consistencyStore.skipped.length}
+          {consistencyStore.skipped.length} rule{consistencyStore.skipped.length === 1 ? '' : 's'}
+          could not run — see below. Nothing found is not the same as nothing wrong.
         {/if}
       </span>
     </div>
   </StateBlock>
 {:else}
-  <div class="fl">
+  <div class="fl" bind:this={listEl}>
     {#each consistencyStore.groups as group (group.key)}
       <div class="fl-group-head">
         <span>{group.label}</span>
@@ -68,7 +103,12 @@
       </div>
 
       {#each group.items as finding (finding.id)}
-        <div class="fl-row" class:fl-suppressed={!!finding.suppressedBecause}>
+        <div
+          class="fl-row"
+          class:fl-suppressed={!!finding.suppressedBecause}
+          class:fl-focused={consistencyStore.focusedId === finding.id}
+          data-finding={finding.id}
+        >
           <span class="fl-sev" class:fl-blocking={finding.severity === 'blocking'}>
             {#if finding.severity === 'blocking'}
               <TriangleAlert size={14} />
@@ -102,7 +142,16 @@
                 <ArrowRight size={10} />
               </button>
               {#if finding.alsoAt}
-                <span class="fl-also">also at {finding.alsoAt}</span>
+                <!-- The second half of a paired rule: a duplicate is only readable
+                     when both places are one click away, not one of them. -->
+                <button
+                  class="fl-loc fl-also"
+                  use:tooltip={'The other place this rule pairs with'}
+                  onclick={() => openLocation(finding.alsoAt!)}
+                >
+                  also at {finding.alsoAt}
+                  <ArrowRight size={10} />
+                </button>
               {/if}
             </div>
           </div>
@@ -122,6 +171,38 @@
       {/each}
     {/each}
   </div>
+{/if}
+
+<!-- Below the findings, always: a rule that could not run is part of the verdict.
+     Reporting "clean" while VER003 stood down for want of readable version bounds
+     would be claiming something nobody checked. -->
+{#if consistencyStore.skipped.length}
+  <div class="fl-skipped">
+    <div class="fl-group-head">
+      <CircleSlash size={11} />
+      <span>Rules that could not run</span>
+      <Badge variant="count" label={String(consistencyStore.skipped.length)} />
+    </div>
+    {#each consistencyStore.skipped as s, i (`${s.rule}:${s.scope}:${i}`)}
+      <div class="fl-skip-row">
+        <Badge variant="tone" tone="neutral" size="sm" label={s.rule} />
+        <div class="fl-skip-body">
+          <span class="fl-skip-reason">{s.reason}</span>
+          {#if s.scope}<span class="fl-skip-scope">{s.scope}</span>{/if}
+        </div>
+      </div>
+    {/each}
+  </div>
+{/if}
+
+<!-- A suppression comment the analysis refused: it named nothing, or named a rule
+     that never fired there. The user believes that line is silencing something. -->
+{#if consistencyStore.rejectedSuppressions.length}
+  <NoticeList
+    notes={consistencyStore.rejectedSuppressions}
+    label="Suppressions that did not apply"
+    onOpen={openLocation}
+  />
 {/if}
 
 <style>
@@ -152,7 +233,14 @@
     border-bottom: 1px solid var(--border-subtle);
   }
   .fl-row:hover { background: var(--bg-hover); }
+  /* Suppressed: visible, and unmistakably silenced. Hiding it would defeat the
+     point of requiring a written reason. */
   .fl-suppressed { opacity: 0.62; }
+  /* Where F8 last landed — the keyboard walk needs somewhere to be. */
+  .fl-focused {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
 
   .fl-sev { display: inline-flex; padding-top: 1px; color: var(--warning); flex-shrink: 0; }
   .fl-sev.fl-blocking { color: var(--error); }
@@ -198,9 +286,24 @@
     cursor: pointer;
   }
   .fl-loc:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
-  .fl-also { font-family: var(--font-code); font-size: 10.5px; color: var(--text-disabled); }
+  .fl-also { color: var(--text-disabled); }
 
   .fl-clean { display: flex; flex-direction: column; gap: 3px; text-align: left; }
   .fl-clean strong { font-size: 12px; }
   .fl-clean span { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+
+  .fl-pad { padding: 10px 12px; }
+
+  .fl-skipped { display: flex; flex-direction: column; }
+  .fl-skipped .fl-group-head :global(svg) { color: var(--text-disabled); }
+  .fl-skip-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .fl-skip-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .fl-skip-reason { font-size: 11.5px; line-height: 1.5; color: var(--text-secondary); max-width: 100ch; }
+  .fl-skip-scope { font-family: var(--font-code); font-size: 10.5px; color: var(--text-disabled); }
 </style>

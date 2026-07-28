@@ -14,19 +14,11 @@ use picus_types::prelude::EngineKind;
 use serde::{Deserialize, Serialize};
 
 /// What a folder of scripts is FOR. Drives which rules a target defaults to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum FolderRole {
-    /// Runs on a fresh install. Bare statements, no guards.
-    Init,
-    /// Runs on an existing database. Guarded, and carries the version forward.
-    Update,
-    /// Packages, procedures, functions, triggers.
-    Routines,
-    /// Reference rows loaded alongside the schema.
-    Data,
-    Ignored,
-}
+///
+/// Defined in the leaf crate, not here: the script half *discovers* a folder's
+/// role and this half *reads* it, so neither owns it. Re-exported so call sites
+/// already inside `picus_ast::prelude` do not have to name a third crate.
+pub use picus_types::prelude::FolderRole;
 
 /// How a target wraps the statements it receives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

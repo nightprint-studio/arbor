@@ -22,6 +22,7 @@
 //! it and the value survives as a number rather than a string. Text columns are
 //! never parsed as numbers: an account code of `007` must not become `7`.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -31,7 +32,7 @@ use tokio_postgres::{Client, SimpleQueryMessage};
 
 use crate::catalog;
 use crate::error::map_pg;
-use crate::sql::{guard_read_only, quote_ident, quote_qualified};
+use crate::sql::{capped_statement, guard_read_only, quote_ident, quote_qualified};
 use crate::tls::TlsChoice;
 
 /// A live session. Shared behind an `Arc`: the handler serving a query and the one
@@ -48,6 +49,18 @@ pub struct PgSession {
     server_version: String,
     /// Set when the connection is torn down, so `status()` stops claiming health.
     closed: Mutex<bool>,
+    /// Ordinal of the statement currently being executed (0 = none yet).
+    run_seq: AtomicU64,
+    /// The highest ordinal a cancellation has covered.
+    ///
+    /// The server's cancel key only interrupts what is running **at the instant it
+    /// arrives**, and `execute` is more than one round trip: a Cancel landing in a
+    /// gap between them would hit nothing and be lost, and the statement would then
+    /// run in full with the user watching a button that did nothing. These two
+    /// counters remember the request instead. Scoping it to an ordinal (rather than
+    /// a bare flag) is what stops a cancel arriving after a query already finished
+    /// from killing the *next* one.
+    cancelled_seq: AtomicU64,
 }
 
 impl PgSession {
@@ -58,7 +71,29 @@ impl PgSession {
         server_version: String,
     ) -> Self {
         let cancel_token = client.cancel_token();
-        Self { client, cancel_token, tls, spec, server_version, closed: Mutex::new(false) }
+        Self {
+            client,
+            cancel_token,
+            tls,
+            spec,
+            server_version,
+            closed: Mutex::new(false),
+            run_seq: AtomicU64::new(0),
+            cancelled_seq: AtomicU64::new(0),
+        }
+    }
+
+    /// Claim the next statement ordinal.
+    fn begin_run(&self) -> u64 {
+        self.run_seq.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Fail when a cancellation has covered this run.
+    fn check_cancelled(&self, seq: u64) -> DbResult<()> {
+        if self.cancelled_seq.load(Ordering::SeqCst) >= seq {
+            return Err(DbError::Cancelled);
+        }
+        Ok(())
     }
 
     /// The schema this session browses: the configured one, or PostgreSQL's default.
@@ -112,11 +147,10 @@ impl DbSession for PgSession {
 
     async fn table_detail(&self, name: &str) -> DbResult<TableInfo> {
         let schema = self.schema();
-        let (tables, views) = catalog::read_relations(&self.client, schema).await?;
-        let mut info = tables
-            .into_iter()
-            .chain(views)
-            .find(|t| t.name == name)
+        // Pinned to this relation: reading the whole catalogue to find one of
+        // several hundred is what made opening a tab slow.
+        let mut info = catalog::read_relation(&self.client, schema, name)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("relation {name}")))?;
 
         match info.kind {
@@ -149,12 +183,14 @@ impl DbSession for PgSession {
         let (columns, rows) = self.run_simple(&sql, types, limit).await?;
 
         // The row estimate, not a `count(*)`: drawing a page number is not worth
-        // scanning a hundred-million-row table.
-        let total = catalog::read_relations(&self.client, self.schema())
+        // scanning a hundred-million-row table. A single-relation lookup, not the
+        // whole catalogue — this runs on every page turn, and asking for all of a
+        // several-hundred-relation schema each time made turning a page cost more
+        // than reading the rows.
+        let total = catalog::read_estimated_rows(&self.client, self.schema(), name)
             .await
             .ok()
-            .and_then(|(t, v)| t.into_iter().chain(v).find(|r| r.name == name))
-            .and_then(|r| r.estimated_rows);
+            .flatten();
 
         Ok(RowPage { columns, rows, offset, total })
     }
@@ -165,10 +201,42 @@ impl DbSession for PgSession {
         // transaction mode, so anything this misses is refused there.
         guard_read_only(sql, self.spec.read_only)?;
 
+        let seq = self.begin_run();
         let started = std::time::Instant::now();
-        let types = self.column_types(sql).await;
-        let (columns, rows) = self.run_simple(sql, types, limit).await?;
+
+        // Ask for one row more than the cap. "Exactly `limit` rows" and "more than
+        // we are showing" are then two facts we can tell apart, instead of a guess
+        // that calls every full page truncated.
+        let probe_limit = limit.saturating_add(1);
+
+        // Bound the result at the SERVER where the statement allows it, so a
+        // `SELECT * FROM orders` on a large table stops there instead of crossing
+        // the wire in full to be cut down here.
+        //
+        // The `prepare` doubles as the validity probe: if the wrapped form does not
+        // prepare, the wrap is wrong for this statement (or the statement is wrong
+        // full stop) and we run the user's own text — which also means any error
+        // they see quotes their SQL, never Picus's rewrite of it.
+        let capped = capped_statement(sql, probe_limit);
+        let (effective, types) = match &capped {
+            Some(wrapped) => match self.column_types(wrapped).await {
+                Some(types) => (wrapped.as_str(), Some(types)),
+                None => (sql, self.column_types(sql).await),
+            },
+            None => (sql, self.column_types(sql).await),
+        };
+
+        // The prepares above are round trips of their own; a Cancel that landed
+        // during one of them has nothing to interrupt on the server.
+        self.check_cancelled(seq)?;
+
+        let (columns, mut rows) = self.run_simple(effective, types, probe_limit).await?;
         let elapsed_ms = started.elapsed().as_millis() as u64;
+
+        // The extra probe row is evidence, not data: it says there is more, and is
+        // never shown.
+        let truncated = rows.len() as u32 > limit;
+        rows.truncate(limit as usize);
 
         let row_count = rows.len();
         Ok(QueryResult {
@@ -176,12 +244,16 @@ impl DbSession for PgSession {
             rows,
             elapsed_ms,
             row_count,
-            truncated: row_count as u32 >= limit,
+            truncated,
             command_tag: String::new(),
         })
     }
 
     async fn cancel(&self) -> DbResult<()> {
+        // Record the request before sending it: between `execute`'s round trips
+        // there are instants where the server has nothing to cancel, and without
+        // this the click would simply be lost.
+        self.cancelled_seq.store(self.run_seq.load(Ordering::SeqCst), Ordering::SeqCst);
         match &self.tls {
             TlsChoice::Plain(connector) => {
                 self.cancel_token.cancel_query(connector.clone()).await.map_err(map_pg)
@@ -234,6 +306,12 @@ impl PgSession {
     ///
     /// `types` (from a best-effort `prepare`) decides only which columns are
     /// numeric; the values themselves are always the server's own text.
+    ///
+    /// `limit` here is the **backstop**, not the mechanism: the statement has
+    /// normally already been bounded at the server by
+    /// [`capped_statement`](crate::sql::capped_statement). It still matters for the
+    /// statements that cannot be wrapped, where it is all that keeps an
+    /// unbounded result from being held in memory.
     async fn run_simple(
         &self,
         sql: &str,

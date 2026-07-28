@@ -21,6 +21,11 @@
     subtitle?: Snippet;
     /** Right-side always-visible badges */
     badges?: Snippet;
+    /** Reveal `badges` only while the row is hovered or selected, like `actions`.
+     *  For dense lists whose secondary metadata must not compete with the name
+     *  it sits next to — the label is what the eye scans, the metadata answers
+     *  a question you only ask about one row at a time. */
+    badgesOnHover?: boolean;
     /** Action buttons revealed on hover */
     actions?: Snippet;
   }
@@ -37,6 +42,7 @@
     children,
     subtitle,
     badges,
+    badgesOnHover = false,
     actions,
   }: Props = $props();
 
@@ -71,7 +77,7 @@
   </span>
 
   {#if badges}
-    <span class="item-badges">
+    <span class="item-badges" class:on-hover={badgesOnHover}>
       {@render badges()}
     </span>
   {/if}
@@ -148,6 +154,14 @@
     gap: 3px;
     flex-shrink: 0;
   }
+  /* Same reveal rule as `.item-actions`, so a row never shows one of the two
+     without the other and dense lists stay a plain column of names at rest. */
+  .item-badges.on-hover {
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+  }
+  .sidebar-item:hover .item-badges.on-hover,
+  .sidebar-item.selected .item-badges.on-hover { opacity: 1; }
 
   /* Actions: hidden until row is hovered or selected */
   .item-actions {

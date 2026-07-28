@@ -49,6 +49,34 @@ export const PICUS_SHORTCUTS: PicusShortcutGroup[] = [
       { keys: ['Ctrl', 'T'], description: 'New query tab on the active connection' },
       { keys: ['Ctrl', 'Shift', 'D'], description: 'Cycle the active connection' },
       { keys: ['Ctrl', 'Shift', 'N'], description: 'New connection' },
+      // F4 rather than a Ctrl+Shift letter: it is the IDE verb for "properties of
+      // the thing selected", and `Ctrl+Shift+E` is already Arbor's opt-in
+      // OS-global accelerator for the File Explorer — a window-local binding
+      // underneath it would simply never fire for anyone who enabled it.
+      { keys: ['F4'], description: 'Edit the active connection' },
+    ],
+  },
+  {
+    // These are the editor's own bindings (CodeMirror), not the shell's — they only
+    // apply while the caret is in a query tab or a script file. Listed here anyway
+    // because the reference is the user's map of the keyboard, not of the code.
+    label: 'SQL editor',
+    shortcuts: [
+      { keys: ['Ctrl', 'Space'], description: 'Completion — tables, columns, keywords for the tab’s dialect' },
+      { keys: ['Tab'], description: 'Accept the completion, or the greyed continuation at the caret' },
+      { keys: ['Esc'], description: 'Dismiss the completion or the greyed continuation' },
+      { keys: ['Ctrl', '/'], description: 'Comment or uncomment the selected lines' },
+      { keys: ['Ctrl', 'Y'], description: 'Delete the current line' },
+    ],
+  },
+  {
+    label: 'Scripts on disk',
+    shortcuts: [
+      // F5 rather than a Ctrl+Shift letter: "re-read from disk" is what F5 means
+      // everywhere, and the two obvious alternatives are taken elsewhere in Arbor
+      // (Ctrl+Shift+E is the global File Explorer, Ctrl+Shift+R is Tyto's global
+      // record) — a window-local binding underneath either would never fire.
+      { keys: ['F5'], description: 'Re-read the script repository from disk' },
     ],
   },
   {
@@ -67,8 +95,8 @@ export const PICUS_SHORTCUTS: PicusShortcutGroup[] = [
     label: 'Consistency',
     shortcuts: [
       { keys: ['Ctrl', 'Shift', 'K'], description: 'Re-run the consistency check' },
-      { keys: ['F8'], description: 'Jump to the next finding' },
-      { keys: ['Shift', 'F8'], description: 'Jump to the previous finding' },
+      { keys: ['F8'], description: 'Go to the next finding — opens the file at its line' },
+      { keys: ['Shift', 'F8'], description: 'Go to the previous finding' },
     ],
   },
   {

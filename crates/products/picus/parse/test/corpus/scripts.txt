@@ -1,0 +1,252 @@
+================================================================================
+oracle upgrade script
+================================================================================
+
+-- Aggiornamento 4.12 -> 4.13
+-- Parametri di sconto introdotti con la revisione listini.
+
+DECLARE
+  v_versione VARCHAR2(10);
+  v_presenti NUMBER;
+BEGIN
+  SELECT VERSIONE INTO v_versione FROM VERSIONE_DB;
+  IF v_versione <> '4.12' THEN
+    RETURN;
+  END IF;
+
+  SELECT COUNT(*) INTO v_presenti FROM PARAMETRI
+   WHERE COD_PARAMETRO = 'SOGLIA_SCONTO';
+  IF v_presenti = 0 THEN
+    INSERT INTO PARAMETRI (COD_PARAMETRO, VALORE, DESCRIZIONE, DATA_MOD)
+    VALUES ('SOGLIA_SCONTO', '15', 'Soglia sconto massimo applicabile', SYSDATE);
+  END IF;
+
+  UPDATE VERSIONE_DB SET VERSIONE = '4.13', DATA_AGG = SYSDATE;
+  COMMIT;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (line_comment)
+  (line_comment)
+  (statement
+    (plsql_block
+      (declare_section
+        (variable_declaration
+          (identifier)
+          (data_type
+            (object_name
+              (identifier))
+            (type_arguments
+              (number_literal))))
+        (variable_declaration
+          (identifier)
+          (data_type
+            (object_name
+              (identifier)))))
+      (plsql_body
+        (select_statement
+          (select_core
+            (select_list
+              (select_item
+                (object_name
+                  (identifier))))
+            (into_clause
+              (object_name
+                (identifier)))
+            (from_clause
+              (table_reference
+                (object_name
+                  (identifier))))))
+        (if_statement
+          (binary_expression
+            (object_name
+              (identifier))
+            (string_literal))
+          (return_statement))
+        (select_statement
+          (select_core
+            (select_list
+              (select_item
+                (function_call
+                  (object_name
+                    (identifier))
+                  (star_argument))))
+            (into_clause
+              (object_name
+                (identifier)))
+            (from_clause
+              (table_reference
+                (object_name
+                  (identifier))))
+            (where_clause
+              (binary_expression
+                (object_name
+                  (identifier))
+                (string_literal)))))
+        (if_statement
+          (binary_expression
+            (object_name
+              (identifier))
+            (number_literal))
+          (insert_statement
+            (object_name
+              (identifier))
+            (column_list
+              (identifier)
+              (identifier)
+              (identifier)
+              (identifier))
+            (values_clause
+              (value_row
+                (string_literal)
+                (string_literal)
+                (string_literal)
+                (object_name
+                  (identifier))))))
+        (update_statement
+          (object_name
+            (identifier))
+          (assignment
+            (object_name
+              (identifier))
+            (string_literal))
+          (assignment
+            (object_name
+              (identifier))
+            (object_name
+              (identifier))))
+        (transaction_statement)))
+    (slash_terminator)))
+
+================================================================================
+postgres upgrade script
+================================================================================
+
+-- Aggiornamento 4.12 -> 4.13
+-- Stessa modifica del ramo Oracle, in sintassi PostgreSQL.
+
+DO $$
+DECLARE
+  v_versione varchar(10);
+BEGIN
+  SELECT versione INTO v_versione FROM versione_db;
+  IF v_versione <> '4.12' THEN
+    RETURN;
+  END IF;
+
+  INSERT INTO parametri (cod_parametro, valore, descrizione, data_mod)
+  VALUES ('SOGLIA_SCONTO', '15', 'Soglia sconto massimo applicabile', now())
+  ON CONFLICT (cod_parametro) DO NOTHING;
+
+  UPDATE versione_db SET versione = '4.13', data_agg = now();
+END
+$$;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (line_comment)
+  (line_comment)
+  (statement
+    (do_statement
+      (dollar_quoted_string))))
+
+================================================================================
+oracle install script
+================================================================================
+
+CREATE TABLE PARAMETRI (
+  COD_PARAMETRO VARCHAR2(30) NOT NULL,
+  VALORE        VARCHAR2(200),
+  DESCRIZIONE   VARCHAR2(400),
+  DATA_MOD      DATE DEFAULT SYSDATE,
+  CONSTRAINT PK_PARAMETRI PRIMARY KEY (COD_PARAMETRO)
+) TABLESPACE USERS;
+
+COMMENT ON TABLE PARAMETRI IS 'Parametri di configurazione';
+
+CREATE INDEX IX_PARAMETRI_DATA ON PARAMETRI (DATA_MOD);
+
+INSERT INTO PARAMETRI (COD_PARAMETRO, VALORE, DESCRIZIONE, DATA_MOD)
+VALUES ('SOGLIA_SCONTO', '15', 'Soglia sconto', SYSDATE);
+
+COMMIT;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))
+          (type_arguments
+            (number_literal)))
+        (column_constraint
+          (not_null_constraint)))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))
+          (type_arguments
+            (number_literal))))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))
+          (type_arguments
+            (number_literal))))
+      (column_definition
+        (identifier)
+        (data_type)
+        (column_constraint
+          (default_clause
+            (object_name
+              (identifier)))))
+      (table_constraint
+        (identifier)
+        (primary_key_constraint
+          (identifier)))
+      (table_option
+        (identifier))))
+  (statement
+    (comment_statement
+      (object_name
+        (identifier))
+      (string_literal)))
+  (statement
+    (create_index_statement
+      (object_name
+        (identifier))
+      (object_name
+        (identifier))
+      (index_element
+        (object_name
+          (identifier)))))
+  (statement
+    (insert_statement
+      (object_name
+        (identifier))
+      (column_list
+        (identifier)
+        (identifier)
+        (identifier)
+        (identifier))
+      (values_clause
+        (value_row
+          (string_literal)
+          (string_literal)
+          (string_literal)
+          (object_name
+            (identifier))))))
+  (statement
+    (transaction_statement)))

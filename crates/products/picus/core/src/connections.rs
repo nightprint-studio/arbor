@@ -121,6 +121,7 @@ mod tests {
             color_idx: 3,
             read_only: true,
             tls: false,
+            script_root: Some(r"C:\progetti\prod-core".to_string()),
             params: Default::default(),
         }
     }
@@ -135,6 +136,24 @@ mod tests {
         assert_eq!(back.connections[0].id, "a");
         assert!(back.connections[0].read_only);
         assert_eq!(back.connections[0].engine, EngineKind::Postgres);
+        // A connection's script repository travels with it: opening the
+        // connection is what puts that repository in view.
+        assert_eq!(back.connections[0].script_root.as_deref(), Some(r"C:\progetti\prod-core"));
+    }
+
+    #[test]
+    fn a_connection_without_a_repository_stays_without_one() {
+        // Absent and empty are different: `Some("")` would send the script half
+        // off to open the current directory.
+        let mut without = spec("a");
+        without.script_root = None;
+        let text = toml::to_string_pretty(&ConnectionFile { connections: vec![without] })
+            .expect("serialize");
+        // `camelCase` on the wire and in the file — one rename rule for the one
+        // struct that is both.
+        assert!(!text.contains("scriptRoot"), "{text}");
+        let back: ConnectionFile = toml::from_str(&text).expect("deserialize");
+        assert_eq!(back.connections[0].script_root, None);
     }
 
     #[test]

@@ -1,0 +1,32 @@
+[package]
+name         = "picus-inventory"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "picus — an index of every database object a script repository names: where it is defined, where it is referenced, and how many statements touch it in each branch/folder. Pure: parsed files in, coverage out, no filesystem."
+
+# Pure by construction: no filesystem, no clock, no driver. Reading files belongs
+# to the caller, which is also what keeps this crate wasm-clean (docs/picus-design.md §6.4).
+[dependencies]
+# The statements, the objects they define and reference, and the fold rule that
+# makes an Oracle `PARAMETRI` and a PostgreSQL `parametri` one object.
+picus-parse   = { path = "../parse" }
+# The tree that gives a file its branch, its folder and that folder's role — the
+# coordinates coverage is counted in.
+picus-project = { path = "../project" }
+# `FolderRole`, carried on every site so the rules can apply policy per role.
+picus-types   = { path = "../types" }
+serde         = { workspace = true }
+
+[dev-dependencies]
+# The wire shape is asserted against the keys and words the frontend reads.
+serde_json    = { workspace = true }
+# Only to build a `ScriptFile` fixture: its `encoding_source` field is an
+# `arbor-fs` type that `picus-project`'s prelude does not re-export, so a
+# consumer that constructs one has to name the crate. Test-only here.
+arbor-fs      = { path = "../../../foundation/fs" }
+
+[lints.rust]
+missing_debug_implementations = "warn"

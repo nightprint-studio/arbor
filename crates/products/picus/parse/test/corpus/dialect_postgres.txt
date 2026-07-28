@@ -1,0 +1,304 @@
+================================================================================
+limit offset
+================================================================================
+
+SELECT a FROM t LIMIT 10 OFFSET 5;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier)))))
+      (limit_clause
+        (number_literal))
+      (offset_clause
+        (number_literal)))))
+
+================================================================================
+cast operator
+================================================================================
+
+SELECT a::text, b::numeric(10,2) FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (postgres_cast_expression
+              (object_name
+                (identifier))
+              (data_type
+                (object_name
+                  (identifier)))))
+          (select_item
+            (postgres_cast_expression
+              (object_name
+                (identifier))
+              (data_type
+                (object_name
+                  (identifier))
+                (type_arguments
+                  (number_literal)
+                  (number_literal))))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+json operators
+================================================================================
+
+SELECT j -> 'k', j ->> 'k', j #> '{a,b}', j #>> '{a}', j @> '{}', j <@ '{}' FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (postgres_operator_expression
+              (object_name
+                (identifier))
+              (string_literal)))
+          (select_item
+            (postgres_operator_expression
+              (object_name
+                (identifier))
+              (string_literal)))
+          (select_item
+            (postgres_operator_expression
+              (object_name
+                (identifier))
+              (string_literal)))
+          (select_item
+            (postgres_operator_expression
+              (object_name
+                (identifier))
+              (string_literal)))
+          (select_item
+            (postgres_operator_expression
+              (object_name
+                (identifier))
+              (string_literal)))
+          (select_item
+            (postgres_operator_expression
+              (object_name
+                (identifier))
+              (string_literal))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+array constructor and subscript
+================================================================================
+
+SELECT ARRAY[1, 2, 3], a[1], b[1:2] FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (array_constructor
+              (number_literal)
+              (number_literal)
+              (number_literal)))
+          (select_item
+            (subscript_expression
+              (object_name
+                (identifier))
+              (number_literal)))
+          (select_item
+            (subscript_expression
+              (object_name
+                (identifier))
+              (number_literal)
+              (number_literal))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+ilike and regex operators
+================================================================================
+
+SELECT a FROM t WHERE a ILIKE 'x%' AND b ~ '^y' AND c !~* 'z';
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))
+        (where_clause
+          (binary_expression
+            (binary_expression
+              (like_expression
+                (object_name
+                  (identifier))
+                (string_literal))
+              (like_expression
+                (object_name
+                  (identifier))
+                (string_literal)))
+            (like_expression
+              (object_name
+                (identifier))
+              (string_literal))))))))
+
+================================================================================
+on conflict
+================================================================================
+
+INSERT INTO t (a) VALUES (1) ON CONFLICT (a) DO NOTHING;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (insert_statement
+      (object_name
+        (identifier))
+      (column_list
+        (identifier))
+      (values_clause
+        (value_row
+          (number_literal)))
+      (on_conflict_clause
+        (object_name
+          (identifier))))))
+
+================================================================================
+returning
+================================================================================
+
+UPDATE t SET a = 1 RETURNING a, b;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (update_statement
+      (object_name
+        (identifier))
+      (assignment
+        (object_name
+          (identifier))
+        (number_literal))
+      (returning_clause
+        (select_item
+          (object_name
+            (identifier)))
+        (select_item
+          (object_name
+            (identifier)))))))
+
+================================================================================
+generate series
+================================================================================
+
+SELECT * FROM generate_series(1, 10);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (all_columns)))
+        (from_clause
+          (function_table
+            (function_call
+              (object_name
+                (identifier))
+              (number_literal)
+              (number_literal))))))))
+
+================================================================================
+now and coalesce
+================================================================================
+
+SELECT COALESCE(a, 0), now() FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (function_call
+              (object_name
+                (identifier))
+              (object_name
+                (identifier))
+              (number_literal)))
+          (select_item
+            (function_call
+              (object_name
+                (identifier)))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+serial and text types
+================================================================================
+
+CREATE TABLE t (id serial PRIMARY KEY, nome text NOT NULL);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier)))
+        (column_constraint
+          (primary_key_constraint)))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier)))
+        (column_constraint
+          (not_null_constraint))))))

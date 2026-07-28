@@ -8,11 +8,18 @@
    * and PostgreSQL forms of the same change are one keystroke apart
    * (Alt+←/Alt+→).
    *
+   * The SQL comes from `picus-emit` in the backend, so "regenerates" means a
+   * debounced round trip rather than a recomputation. Far too fast to earn a
+   * spinner — what it earns is honesty: while the shown SQL predates the current
+   * model the code is dimmed, so nothing here is ever read as current when it
+   * isn't.
+   *
    * Read-only, highlighted with the selected destination's own dialect mode.
    */
   import { Copy, Code2 } from 'lucide-svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import Alert from '$lib/components/shared/ui/Alert.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import CodeEditor from '$lib/components/shared/ui/code-editor/CodeEditor.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -37,6 +44,8 @@
 
   const sql = $derived(target ? dmlStore.sqlFor(target) : '');
   const language = $derived(sqlLanguage(target?.dialect));
+  /** This destination's own rules contradict each other — stated, not swallowed. */
+  const conflict = $derived(target ? dmlStore.ruleConflictFor(target.id) : null);
 
   async function copy() {
     try {
@@ -69,7 +78,24 @@
     {/if}
   </div>
 
-  <div class="sp-code">
+  {#if dmlStore.emitError}
+    <div class="sp-banner">
+      <Alert
+        variant="error"
+        compact
+        title="The generator could not produce this SQL"
+        text={dmlStore.emitError}
+      />
+    </div>
+  {:else if conflict}
+    <!-- A rule that cannot hold on this destination. Reported next to the SQL it
+         is missing from, because the SQL alone looks perfectly fine. -->
+    <div class="sp-banner">
+      <Alert variant="warning" compact title="This destination's rules disagree" text={conflict} />
+    </div>
+  {/if}
+
+  <div class="sp-code" class:sp-dim={dmlStore.previewStale}>
     {#if !target}
       <StateBlock tone="info" label="No destination is enabled — nothing to preview." />
     {:else}
@@ -115,13 +141,20 @@
     white-space: nowrap;
   }
 
+  .sp-banner { padding: 8px 10px 0; }
+
   .sp-code {
     display: flex;
     height: 300px;
     min-height: 0;
     overflow: hidden;
+    transition: opacity var(--transition-fast);
   }
   .sp-code > :global(*) { flex: 1; min-width: 0; min-height: 0; }
+  /* Showing SQL for a model that has moved on. Dimmed rather than blanked or
+     spun over: the previous text is still the best answer available, and the
+     replacement is milliseconds away. */
+  .sp-dim { opacity: 0.5; }
 
   .sp-note {
     display: flex;

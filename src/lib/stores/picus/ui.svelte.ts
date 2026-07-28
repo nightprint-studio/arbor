@@ -33,8 +33,26 @@ function createPicusUiStore() {
   let connectionEditorOpen = $state(false);
   /** Connection being edited; `null` means "new connection". */
   let connectionEditorId = $state<string | null>(null);
+  /** Connection whose read-only inspector is up; `null` means closed. */
+  let connectionDetailsId = $state<string | null>(null);
+  /**
+   * Connection the user asked to delete, waiting on the confirmation.
+   *
+   * The dialog is owned here rather than by the sidebar because deleting is
+   * reachable from the command palette too, and a destructive confirmation must
+   * not depend on which panel happens to be on screen.
+   */
+  let connectionDeleteId = $state<string | null>(null);
   /** The destination picker — reachable from the generator AND the sidebar. */
   let addDestinationOpen = $state(false);
+  /**
+   * Connection whose script repository is being attached; `null` means closed.
+   *
+   * Owned here rather than by the scripts panel because attaching is offered from
+   * that panel, from the connection editor and from the palette, and the folder
+   * picker must not depend on which of the three is on screen.
+   */
+  let scriptRootPickerId = $state<string | null>(null);
 
   return {
     get sidebarSection() { return sidebarSection; },
@@ -49,12 +67,16 @@ function createPicusUiStore() {
     get docsOpen() { return docsOpen; },
     get connectionEditorOpen() { return connectionEditorOpen; },
     get connectionEditorId() { return connectionEditorId; },
+    get connectionDetailsId() { return connectionDetailsId; },
+    get connectionDeleteId() { return connectionDeleteId; },
     get addDestinationOpen() { return addDestinationOpen; },
+    get scriptRootPickerId() { return scriptRootPickerId; },
 
     /** True while any dialog owns the keyboard — the shell's shortcuts stand down. */
     get anyModalOpen() {
       return settingsOpen || shortcutsOpen || aboutOpen || connectionEditorOpen
-        || addDestinationOpen || paletteOpen;
+        || connectionDetailsId !== null || connectionDeleteId !== null
+        || addDestinationOpen || paletteOpen || scriptRootPickerId !== null;
     },
 
     /** Rail click: same section → collapse; different section → switch + open. */
@@ -93,6 +115,9 @@ function createPicusUiStore() {
     closeDocs() { docsOpen = false; },
 
     openConnectionEditor(id: string | null = null) {
+      // Opening the editor from the inspector replaces it rather than stacking
+      // two dialogs about the same connection on top of each other.
+      connectionDetailsId = null;
       connectionEditorId = id;
       connectionEditorOpen = true;
     },
@@ -101,8 +126,22 @@ function createPicusUiStore() {
       connectionEditorId = null;
     },
 
+    openConnectionDetails(id: string) { connectionDetailsId = id; },
+    closeConnectionDetails() { connectionDetailsId = null; },
+
+    /** Ask for a connection to be deleted — the shell puts the confirmation up. */
+    requestConnectionDelete(id: string) {
+      connectionDetailsId = null;
+      connectionDeleteId = id;
+    },
+    cancelConnectionDelete() { connectionDeleteId = null; },
+
     openAddDestination() { addDestinationOpen = true; },
     closeAddDestination() { addDestinationOpen = false; },
+
+    /** Attach (or re-point) the script repository of one connection. */
+    openScriptRootPicker(connectionId: string) { scriptRootPickerId = connectionId; },
+    closeScriptRootPicker() { scriptRootPickerId = null; },
   };
 }
 

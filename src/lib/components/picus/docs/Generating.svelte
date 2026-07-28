@@ -62,6 +62,12 @@
   initialisation script inheriting an update script's version guard would be nonsense, so
   it cannot happen.
 </p>
+<p>
+  When a destination ends up with rules that contradict each other — a version guard with no
+  procedural block to return from — it says so, on its own row and above the preview. The
+  guard is never quietly dropped: a destination that looks guarded while running
+  unconditionally is the one failure you would not notice.
+</p>
 
 <h2>What the dialects disagree about</h2>
 <p>
@@ -74,13 +80,35 @@
 
 <h2>Preview and writing</h2>
 <p>
-  The preview regenerates as you change values or rules — there is no refresh button,
-  because a stale preview is worse than none. <kbd>Alt</kbd>+<kbd>←</kbd> and
+  There are two previews, and they answer different questions. <b>Generated SQL</b> is what
+  each destination's rules produce; it regenerates as you change values or rules, with no
+  refresh button, because a stale preview is worse than none, and dims for the moment it is
+  behind what you have just typed. <kbd>Alt</kbd>+<kbd>←</kbd> and
   <kbd>Alt</kbd>+<kbd>→</kbd> step between destinations.
 </p>
 <p>
-  Writing shows a diff per file first, states where each block will be inserted, and asks
-  for confirmation naming exactly which files it will touch. The write is
-  <b>transactional across all of them</b>: if the tenth file fails, the first nine are
-  restored from the backup taken beforehand.
+  <b>Changes to the scripts</b> is what each <i>file</i> would look like afterwards. It
+  reads the destinations from disk, so it is asked for rather than computed continuously —
+  the bottom panel's Changes tab builds it when you look at it, and the write action builds
+  it before anything else. What it shows is the exact bytes that would land, produced by
+  the same code that performs the write: a diff per file, with the insertion rule stated in
+  words, the file's encoding and line ending beside it, and a marker for a file that would
+  be created rather than edited. A destination the change would leave untouched says so
+  instead of showing an empty diff.
+</p>
+
+<h2>Nothing is written that was not reviewed</h2>
+<p>
+  The confirmation names exactly the files the preview says would change, and writing hands
+  the preview's own fingerprints back to the backend. If any of those files moved on
+  disk in between — a colleague's pull, an editor still holding the file — the write is
+  <b>refused, naming the file that changed</b>, and nothing at all is written. That message
+  stays on screen in the Changes tab next to the button that reads the files again, because
+  it is the part that tells you what to do next.
+</p>
+<p>
+  When the write does go through it is <b>transactional across all the files</b>: if the
+  tenth fails, the first nine are restored from the backup taken beforehand. Encoding and
+  line endings are preserved throughout — a windows-1252 file stays windows-1252, a CRLF
+  file stays CRLF.
 </p>

@@ -18,7 +18,7 @@
    * Keyboard-first: the first field is focused on open, Tab walks the form in
    * reading order, Ctrl+Enter saves, Esc cancels.
    */
-  import { Database, KeyRound, Plug, ShieldCheck, CircleAlert, CheckCircle2 } from 'lucide-svelte';
+  import { Database, KeyRound, Plug, ShieldCheck, CircleAlert, CheckCircle2, FolderOpen, X } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
@@ -31,6 +31,7 @@
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import ColorPalettePicker from '$lib/components/shared/ui/ColorPalettePicker.svelte';
+  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import PicusDialectChip from './PicusDialectChip.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
@@ -78,9 +79,23 @@
   let colorIdx = $state(existing?.colorIdx ?? 2);
   let readOnly = $state(existing?.readOnly ?? false);
   let tls = $state(existing?.tls ?? false);
+  /** The free-form driver parameters. The script root is not among them — it is a
+   *  field of the spec in its own right, edited below with a folder picker. */
   let extraParams = $state(
-    Object.entries(existing?.params ?? {}).map(([k, v]) => `${k}=${v}`).join('\n'),
+    Object.entries(existing?.params ?? {})
+      .map(([k, v]) => `${k}=${v}`)
+      .join('\n'),
   );
+
+  /**
+   * The folder of SQL scripts this database is installed from.
+   *
+   * A repository belongs to a connection: Picus is database-oriented, so opening
+   * this connection is what brings these scripts into view. Optional by design —
+   * a connection used only to run queries never needs one.
+   */
+  let scriptRoot = $state(existing?.scriptRoot ?? '');
+  let rootPickerOpen = $state(false);
 
   /**
    * The password.
@@ -170,9 +185,32 @@
     return out;
   }
 
+  /** The attached repository, or `undefined` when there is none.
+   *
+   *  `undefined` rather than `''`: the backend's field is an `Option`, and
+   *  detaching a repository means absent, not "attached to nowhere". */
+  function scriptRootOrNone(): string | undefined {
+    return scriptRoot.trim() || undefined;
+  }
+
+  /**
+   * The id a **new** connection will get, decided once when the modal opens.
+   *
+   * It used to be computed inside `toSpec()`, which is called by Save *and* by
+   * Test — and Test saves the connection first, because the backend resolves the
+   * password from the keychain by id rather than receiving it over the wire. So
+   * testing and then saving minted two ids and left two connections behind. An id
+   * is identity: it has to be decided once, not derived from the clock every time
+   * somebody asks what the form contains.
+   *
+   * The random suffix guards the other way two could collide: creating two
+   * connections inside the same millisecond.
+   */
+  const draftId = `conn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
   function toSpec(): ConnectionSpec {
     return {
-      id: existing?.id ?? `conn-${Date.now().toString(36)}`,
+      id: existing?.id ?? draftId,
       name: name.trim(),
       alias: alias.trim() || 'unnamed',
       engine: dialect,
@@ -184,6 +222,7 @@
       colorIdx,
       readOnly,
       tls,
+      scriptRoot: scriptRootOrNone(),
       params: parseParams(),
     };
   }
@@ -329,6 +368,44 @@
     </section>
 
     <section class="cm-section">
+      <h2>Scripts</h2>
+      <FormField
+        label="Script repository"
+        hint="The folder this database is installed from — one branch per dialect. Opening this connection brings its scripts, its inventory and its consistency report into the window. Optional: a connection used only for queries needs none."
+      >
+        <div class="cm-root">
+          <Input
+            value={scriptRoot}
+            placeholder="C:\projects\prod-core\database"
+            ariaLabel="Script repository folder"
+            oninput={(v) => (scriptRoot = v)}
+          />
+          <Button
+            variant="secondary"
+            size="sm"
+            ariaLabel="Choose the script folder"
+            onclick={() => (rootPickerOpen = true)}
+          >
+            {#snippet iconStart()}<FolderOpen size={13} />{/snippet}
+            Choose…
+          </Button>
+          {#if scriptRoot}
+            <Button
+              variant="ghost"
+              size="sm"
+              ariaLabel="Detach the script repository"
+              tooltip={'Stop showing scripts for this connection. Nothing on disk is touched.'}
+              onclick={() => (scriptRoot = '')}
+            >
+              {#snippet iconStart()}<X size={13} />{/snippet}
+              Detach
+            </Button>
+          {/if}
+        </div>
+      </FormField>
+    </section>
+
+    <section class="cm-section">
       <h2>Session</h2>
       <FormField label="Read-only">
         <Toggle
@@ -469,6 +546,20 @@
   {/snippet}
 </Modal>
 
+{#if rootPickerOpen}
+  <!-- Arbor's own folder picker, never the native dialog and never an
+       <input type="file">. Stacked over the editor rather than replacing it: the
+       rest of the form is half-filled and must survive the choice. -->
+  <FileExplorerModal
+    mode="folder"
+    title="Choose the folder of SQL scripts"
+    initialPath={scriptRoot || undefined}
+    onConfirm={(path) => { scriptRoot = path; rootPickerOpen = false; }}
+    onCancel={() => (rootPickerOpen = false)}
+    onClose={() => (rootPickerOpen = false)}
+  />
+{/if}
+
 <style>
   .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
 
@@ -525,6 +616,11 @@
     color: var(--text-secondary);
   }
   .cm-nondefault { color: var(--warning); }
+
+  /* Path field first, then the picker and the detach — the typed path stays the
+     source of truth, the picker is the convenient way to fill it. */
+  .cm-root { display: flex; align-items: center; gap: 8px; }
+  .cm-root > :global(:first-child) { flex: 1; min-width: 0; }
 
   .cm-advanced { display: flex; flex-direction: column; gap: 12px; padding-top: 4px; }
   .cm-advanced-head { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); }

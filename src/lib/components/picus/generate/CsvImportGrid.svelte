@@ -20,7 +20,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
-  import { parseCsv } from '$lib/ipc/picus/mock-emit';
+  import { parseCsv } from '$lib/utils/picus/csv';
 
   const parsed = $derived(parseCsv(dmlStore.csvText));
 

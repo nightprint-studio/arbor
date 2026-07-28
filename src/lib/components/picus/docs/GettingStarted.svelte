@@ -23,6 +23,21 @@
   one, it doesn't belong here.
 </p>
 
+<h2>Where to start</h2>
+<p>
+  Picus is <b>database-oriented</b>: you open a database, and its scripts are what you see.
+  So the first step is a connection — and a connection can carry the folder of SQL scripts
+  that database is installed from. Attach one from the connection editor, from the Scripts
+  panel, or from the command palette, and opening that connection brings its repository,
+  its inventory and its consistency report into the window. A connection you only run
+  queries against needs none.
+</p>
+<p>
+  Reading the folder is immediate; checking it is not, so the two are separate. The tree
+  appears as soon as the folder is read, and the consistency report fills in behind it
+  without ever holding the window. <kbd>F5</kbd> re-reads the folder from disk.
+</p>
+
 <h2>The five zones</h2>
 <ul>
   <li><b>Title bar</b> — project, and the connection every new tab binds to.</li>

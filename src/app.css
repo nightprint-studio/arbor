@@ -349,15 +349,31 @@ body {
   color: var(--text-on-accent);
   border-color: var(--accent);
 }
-.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-.btn-primary:active { background: var(--accent-active); }
+/* Unavailable. Both forms, because a button that has something to say about why
+   it is unavailable uses `aria-disabled` rather than the native attribute — a
+   `disabled` control dispatches no mouse events and cannot be focused, so its
+   tooltip is unreachable by mouse and by keyboard alike. See Button.svelte.
+
+   Every `:hover` / `:active` rule below carries the same guard for the same
+   reason: an unavailable button must not light up under the pointer, and with
+   `aria-disabled` the browser no longer suppresses that for us. Spelled out at
+   each site rather than hidden behind a helper class, because a hover rule that
+   silently stops applying is worse to debug than a verbose selector. */
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn-primary:hover:not(:disabled):not([aria-disabled='true']) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-primary:active:not(:disabled):not([aria-disabled='true']) { background: var(--accent-active); }
 
 .btn-ghost {
   background: transparent;
   color: var(--text-secondary);
   border-color: transparent;
 }
-.btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+.btn-ghost:hover:not(:disabled):not([aria-disabled='true']) { background: var(--bg-hover); color: var(--text-primary); }
 
 /* Outline — a ghost that keeps its border. The low-emphasis action that still
    needs to read as a button when it sits next to text or a status badge
@@ -369,14 +385,14 @@ body {
   color: var(--text-muted);
   border-color: var(--border);
 }
-.btn-outline:hover { background: var(--bg-hover); color: var(--text-primary); }
+.btn-outline:hover:not(:disabled):not([aria-disabled='true']) { background: var(--bg-hover); color: var(--text-primary); }
 
 .btn-danger {
   background: transparent;
   color: var(--error);
   border-color: transparent;
 }
-.btn-danger:hover { background: var(--error-subtle); border-color: var(--error); }
+.btn-danger:hover:not(:disabled):not([aria-disabled='true']) { background: var(--error-subtle); border-color: var(--error); }
 
 /* Tonal — soft accent-tinted fill (translucent bg + accent text/border). The
    default uses the theme accent; pass `color` on <Button> to recolour it (see
@@ -386,7 +402,7 @@ body {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 32%, transparent);
 }
-.btn-tonal:hover { filter: brightness(1.12); }
+.btn-tonal:hover:not(:disabled):not([aria-disabled='true']) { filter: brightness(1.12); }
 
 /* ---- Mac-style close button (red dot) ────────────────────────────────
    Default look — small coloured circle in modal / panel headers. Behavior
@@ -715,7 +731,7 @@ input[type="radio"]:disabled {
   color: var(--text-secondary);
   border-color: var(--border);
 }
-.btn-secondary:hover { background: var(--bg-hover); color: var(--text-primary); }
+.btn-secondary:hover:not(:disabled):not([aria-disabled='true']) { background: var(--bg-hover); color: var(--text-primary); }
 
 /* ---- Icon-only button (24×24, no background) ---- */
 .btn-icon {
@@ -732,8 +748,8 @@ input[type="radio"]:disabled {
   transition: background var(--transition-fast), color var(--transition-fast);
   flex-shrink: 0;
 }
-.btn-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
-.btn-icon.danger:hover { color: var(--error); }
+.btn-icon:hover:not(:disabled):not([aria-disabled='true']) { background: var(--bg-hover); color: var(--text-primary); }
+.btn-icon.danger:hover:not(:disabled):not([aria-disabled='true']) { color: var(--error); }
 
 /* ---- Spin utility ---- */
 .spin { animation: spin 1.2s linear infinite; }

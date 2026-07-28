@@ -1,0 +1,127 @@
+================================================================================
+do block
+================================================================================
+
+DO $$
+BEGIN
+  NULL;
+END
+$$;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (do_statement
+      (dollar_quoted_string))))
+
+================================================================================
+do block with language
+================================================================================
+
+DO LANGUAGE plpgsql $$ BEGIN NULL; END $$;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (do_statement
+      (language_clause
+        (identifier))
+      (dollar_quoted_string))))
+
+================================================================================
+raise notice
+================================================================================
+
+CREATE FUNCTION f () RETURNS void LANGUAGE plpgsql AS $body$
+BEGIN
+  RAISE NOTICE 'valore = %', 1;
+END;
+$body$;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_function_statement
+      (object_name
+        (identifier))
+      (parameter_list)
+      (data_type
+        (object_name
+          (identifier)))
+      (language_clause
+        (identifier))
+      (routine_body
+        (dollar_quoted_string)))))
+
+================================================================================
+perform
+================================================================================
+
+CREATE FUNCTION f () RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM 1 FROM t WHERE a = 1;
+END;
+$$;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_function_statement
+      (object_name
+        (identifier))
+      (parameter_list)
+      (data_type
+        (object_name
+          (identifier)))
+      (language_clause
+        (identifier))
+      (routine_body
+        (dollar_quoted_string)))))
+
+================================================================================
+dollar quoted body containing a semicolon
+================================================================================
+
+CREATE FUNCTION f () RETURNS void AS $$ BEGIN INSERT INTO t VALUES (1); END; $$ LANGUAGE plpgsql;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_function_statement
+      (object_name
+        (identifier))
+      (parameter_list)
+      (data_type
+        (object_name
+          (identifier)))
+      (routine_body
+        (dollar_quoted_string))
+      (language_clause
+        (identifier)))))
+
+================================================================================
+tagged dollar quote
+================================================================================
+
+CREATE FUNCTION f () RETURNS void AS $fn$ BEGIN NULL; END; $fn$ LANGUAGE plpgsql;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_function_statement
+      (object_name
+        (identifier))
+      (parameter_list)
+      (data_type
+        (object_name
+          (identifier)))
+      (routine_body
+        (dollar_quoted_string))
+      (language_clause
+        (identifier)))))

@@ -1,0 +1,715 @@
+================================================================================
+string with doubled quote
+================================================================================
+
+SELECT 'l''ora' FROM DUAL;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (string_literal)))
+        (from_clause
+          (dual_reference))))))
+
+================================================================================
+string containing a line comment marker
+================================================================================
+
+SELECT '-- not a comment' FROM DUAL;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (string_literal)))
+        (from_clause
+          (dual_reference))))))
+
+================================================================================
+string containing a block comment marker
+================================================================================
+
+SELECT '/* not a comment */' FROM DUAL;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (string_literal)))
+        (from_clause
+          (dual_reference))))))
+
+================================================================================
+string spanning lines
+================================================================================
+
+SELECT 'riga uno
+riga due' FROM DUAL;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (string_literal)))
+        (from_clause
+          (dual_reference))))))
+
+================================================================================
+q quoting with brackets
+================================================================================
+
+SELECT q'[it's here]' FROM DUAL;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (q_string)))
+        (from_clause
+          (dual_reference))))))
+
+================================================================================
+q quoting with braces parens angles bang
+================================================================================
+
+SELECT q'{a}', q'(b)', q'<c>', q'!d!' FROM DUAL;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (q_string))
+          (select_item
+            (q_string))
+          (select_item
+            (q_string))
+          (select_item
+            (q_string)))
+        (from_clause
+          (dual_reference))))))
+
+================================================================================
+q quoting uppercase
+================================================================================
+
+SELECT Q'#x#' FROM DUAL;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (q_string)))
+        (from_clause
+          (dual_reference))))))
+
+================================================================================
+q as an ordinary alias
+================================================================================
+
+SELECT a q FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))
+            (identifier)))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+q as a table alias followed by a string
+================================================================================
+
+SELECT q.a FROM t q WHERE q.b = 'x';
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier)
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))
+            (identifier)))
+        (where_clause
+          (binary_expression
+            (object_name
+              (identifier)
+              (identifier))
+            (string_literal)))))))
+
+================================================================================
+escape string
+================================================================================
+
+SELECT E'a\nb' FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (escape_string)))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+unicode string
+================================================================================
+
+SELECT U&'\0041' FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (unicode_string)))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+national and hex strings
+================================================================================
+
+SELECT N'abc', X'1F' FROM DUAL;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (national_string))
+          (select_item
+            (bit_string)))
+        (from_clause
+          (dual_reference))))))
+
+================================================================================
+dollar quoted with a semicolon inside
+================================================================================
+
+SELECT $$a; b$$;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (dollar_quoted_string)))))))
+
+================================================================================
+dollar quoted with a tag
+================================================================================
+
+SELECT $tag$body$tag$;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (dollar_quoted_string)))))))
+
+================================================================================
+dollar quoted containing another dollar pair
+================================================================================
+
+SELECT $t$a$$b$t$;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (dollar_quoted_string)))))))
+
+================================================================================
+positional parameter is not a dollar quote
+================================================================================
+
+SELECT $1, $2 FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (bind_parameter))
+          (select_item
+            (bind_parameter)))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+numbers
+================================================================================
+
+SELECT 1, 1.5, .5, 1.5e3, 1e-3 FROM DUAL;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (number_literal))
+          (select_item
+            (number_literal))
+          (select_item
+            (number_literal))
+          (select_item
+            (number_literal))
+          (select_item
+            (number_literal)))
+        (from_clause
+          (dual_reference))))))
+
+================================================================================
+bind parameters
+================================================================================
+
+SELECT a FROM t WHERE b = :name AND c = :1 AND d = ?;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))
+        (where_clause
+          (binary_expression
+            (binary_expression
+              (binary_expression
+                (object_name
+                  (identifier))
+                (bind_parameter))
+              (binary_expression
+                (object_name
+                  (identifier))
+                (bind_parameter)))
+            (binary_expression
+              (object_name
+                (identifier))
+              (bind_parameter))))))))
+
+================================================================================
+line comment
+================================================================================
+
+-- prima
+SELECT 1;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (line_comment)
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (number_literal)))))))
+
+================================================================================
+block comment
+================================================================================
+
+/* prima */ SELECT 1;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (block_comment)
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (number_literal)))))))
+
+================================================================================
+nested block comment
+================================================================================
+
+/* fuori /* dentro */ ancora fuori */ SELECT 1;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (block_comment)
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (number_literal)))))))
+
+================================================================================
+block comment containing a quote
+================================================================================
+
+/* l'apostrofo */ SELECT 1;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (block_comment)
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (number_literal)))))))
+
+================================================================================
+comment between clauses
+================================================================================
+
+SELECT a -- la colonna
+ FROM t /* la tabella */ WHERE a = 1;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (line_comment)
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))
+        (block_comment)
+        (where_clause
+          (binary_expression
+            (object_name
+              (identifier))
+            (number_literal)))))))
+
+================================================================================
+oracle hint looks like a comment
+================================================================================
+
+SELECT /*+ INDEX(t ix) */ a FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (block_comment)
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+division is not a terminator
+================================================================================
+
+SELECT a / b FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (binary_expression
+              (object_name
+                (identifier))
+              (object_name
+                (identifier)))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+division at the start of a continuation line
+================================================================================
+
+SELECT a
+/ b FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (binary_expression
+              (object_name
+                (identifier))
+              (object_name
+                (identifier)))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+slash terminator after a block
+================================================================================
+
+BEGIN
+  NULL;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (null_statement)))
+    (slash_terminator)))
+
+================================================================================
+slash terminator indented
+================================================================================
+
+BEGIN
+  NULL;
+END;
+  /
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (null_statement)))
+    (slash_terminator)))
+
+================================================================================
+quoted identifier with doubled quote
+================================================================================
+
+SELECT "he said ""hi""" FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (quoted_identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+identifier with dollar and hash
+================================================================================
+
+SELECT sys$col, emp# FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier)))
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+keywords in mixed case
+================================================================================
+
+select A from T where B = 1;
+SeLeCt a FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))
+        (where_clause
+          (binary_expression
+            (object_name
+              (identifier))
+            (number_literal))))))
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+unreserved words as identifiers
+================================================================================
+
+SELECT type, key, data, action FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier)))
+          (select_item
+            (object_name
+              (identifier)))
+          (select_item
+            (object_name
+              (identifier)))
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+column named like a keyword prefix
+================================================================================
+
+INSERT INTO t (DATA_MOD, TYPE_ID) VALUES (SYSDATE, 1);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (insert_statement
+      (object_name
+        (identifier))
+      (column_list
+        (identifier)
+        (identifier))
+      (values_clause
+        (value_row
+          (object_name
+            (identifier))
+          (number_literal))))))

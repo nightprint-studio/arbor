@@ -75,8 +75,23 @@
   const hamburgerMenu = $derived<DropdownItem[]>([
     { kind: 'separator', label: 'Project' },
     {
-      kind: 'item', id: 'open', label: 'Open script project…', icon: FolderOpen, shortcut: 'Ctrl+O',
-      onclick: () => toastStore.show('Project opening lands with the filesystem milestone.', 'info'),
+      // A repository belongs to a connection, so "open" is "attach a folder to the
+      // connection I am on" — there is nothing to open without one, and saying so
+      // is better than a picker that would have nowhere to put the answer.
+      kind: 'item',
+      id: 'open',
+      label: picusProjectStore.attached ? 'Change the script folder…' : 'Attach a script folder…',
+      icon: FolderOpen,
+      disabled: !connectionsStore.activeId,
+      onclick: () => {
+        if (connectionsStore.activeId) picusUiStore.openScriptRootPicker(connectionsStore.activeId);
+        else toastStore.show('Select a connection first — a repository belongs to a database.', 'info');
+      },
+    },
+    {
+      kind: 'item', id: 'rescan', label: 'Re-read the scripts from disk', icon: RefreshCw, shortcut: 'F5',
+      disabled: !picusProjectStore.attached,
+      onclick: () => void picusProjectStore.refresh(),
     },
     {
       kind: 'item', id: 'newconn', label: 'Add a connection…', icon: Database, shortcut: 'Ctrl+Shift+N',

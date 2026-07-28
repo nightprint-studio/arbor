@@ -106,6 +106,11 @@
     font-size: var(--font-size-xs);
     color: var(--text-muted);
     line-height: 1.5;
+    /* Callers compose `detail` as text with line breaks — a list of files, or the
+       consequences of agreeing, one per paragraph. Collapsing those into a single
+       run (the HTML default) is how a confirmation stops being readable exactly
+       where it matters most. */
+    white-space: pre-line;
   }
 
 </style>

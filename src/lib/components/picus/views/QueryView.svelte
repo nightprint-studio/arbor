@@ -17,11 +17,13 @@
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
+  import Alert from '$lib/components/shared/ui/Alert.svelte';
   import DataGrid, { type DataGridColumn } from '$lib/components/shared/ui/DataGrid.svelte';
   import CodeEditor from '$lib/components/shared/ui/code-editor/CodeEditor.svelte';
   import ResizablePanel from '$lib/components/shared/ui/ResizablePanel.svelte';
   import PicusDialectChip from '../PicusDialectChip.svelte';
   import { sqlLanguage } from '../picus-sql-language';
+  import { sqlDiagnostics } from '../sql-intel';
   import { tooltip } from '$lib/actions/tooltip';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { connectionColorVar } from '$lib/stores/picus/connections.svelte';
@@ -42,7 +44,14 @@
   // effect (a write during `$derived` evaluation is a Svelte 5 hard error).
   $effect(() => { queryStore.ensure(tab.id); });
   const state = $derived(queryStore.read(tab.id));
-  const language = $derived(sqlLanguage(conn?.dialect));
+  // Bound to the connection, so completion, hover and the diagnostics all measure
+  // this buffer against THIS database's catalogue and no other.
+  const language = $derived(sqlLanguage(conn?.dialect, conn?.id));
+  // Re-runs on the text, the connection and the schema; the analysis is a linear
+  // scan and returns nothing at all while the catalogue is unread.
+  const diagnostics = $derived(
+    sqlDiagnostics(state.sql, conn?.dialect ?? 'postgres', conn?.id),
+  );
 
   const paneTabs: TabItem[] = [
     { id: 'results', label: 'Results' },
@@ -108,11 +117,17 @@
   </div>
 
   <div class="qv-editor">
-    <CodeEditor
-      value={state.sql}
-      {language}
-      oninput={(v) => queryStore.setSql(tab.id, v)}
-    />
+    <!-- Keyed on the descriptor: the editor builds its extensions once, at mount, so
+         rebinding the tab to another database has to rebuild them — otherwise the
+         completion would keep offering the previous connection's tables. -->
+    {#key language}
+      <CodeEditor
+        value={state.sql}
+        {language}
+        {diagnostics}
+        oninput={(v) => queryStore.setSql(tab.id, v)}
+      />
+    {/key}
   </div>
 
   <ResizablePanel direction="vertical" initialSize={260} minSize={120} maxSize={620} reverse>
@@ -130,7 +145,17 @@
         {#if state.running}
           <span class="qv-running"><Spinner size={11} /> running…</span>
         {:else if state.result}
-          <span class="qv-stats">{state.result.rowCount} rows · {state.result.elapsedMs} ms</span>
+          <span class="qv-stats">
+            {#if state.result.truncated}first {state.result.rowCount}{:else}{state.result.rowCount}{/if}
+            rows · {state.result.elapsedMs} ms
+          </span>
+          {#if state.result.truncated}
+            <!-- A cut result and a short one must never look alike: without this the
+                 user cannot tell an empty tail from one that was never fetched. -->
+            <span use:tooltip={`Stopped at the row limit of ${queryStore.rowLimit}. Change it in Settings → Queries.`}>
+              <Badge variant="tone" tone="warning" size="sm" label="capped" />
+            </span>
+          {/if}
         {/if}
         <Button
           variant="icon"
@@ -170,12 +195,28 @@
           {:else if !state.result}
             <StateBlock tone="info" label="Run the query to see its rows." />
           {:else}
-            <DataGrid
-              columns={gridColumns}
-              rows={state.result.rows}
-              filterable
-              ariaLabel="Query results"
-            />
+            <div class="qv-grid">
+              {#if state.result.truncated}
+                <!-- Stated where the rows are, not only in Messages: landing on the
+                     Results tab is exactly when believing you saw everything is
+                     expensive. Sorting and filtering below apply to these rows
+                     only, which is the part that misleads. -->
+                <div class="qv-cap">
+                  <Alert variant="warning" compact>
+                    Showing the first {state.result.rowCount.toLocaleString()} rows — the statement
+                    returned more. Sorting and filtering apply to these rows only. Raise the limit in
+                    Settings → Queries, or narrow the statement with its own <code>WHERE</code> /
+                    <code>LIMIT</code>.
+                  </Alert>
+                </div>
+              {/if}
+              <DataGrid
+                columns={gridColumns}
+                rows={state.result.rows}
+                filterable
+                ariaLabel="Query results"
+              />
+            </div>
           {/if}
         {:else}
           <div class="qv-log">
@@ -244,6 +285,15 @@
   }
   .qv-result-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
   .qv-result-body > :global(*) { flex: 1; min-width: 0; min-height: 0; }
+
+  /* The cap notice sits above the grid and does not scroll with it. */
+  .qv-grid { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .qv-cap { flex-shrink: 0; padding: 6px 8px 0; }
+  .qv-grid code {
+    font-family: var(--font-code);
+    font-size: 10.5px;
+    color: var(--text-primary);
+  }
 
   .qv-stats, .qv-running {
     display: inline-flex;

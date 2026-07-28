@@ -25,7 +25,6 @@
     INSERTION_RULE_LABELS,
     type InsertionRule,
   } from '$lib/stores/picus/settings.svelte';
-  import { queryStore } from '$lib/stores/picus/query.svelte';
   import { schemaStore } from '$lib/stores/picus/schema.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -361,14 +360,14 @@
         <div class="card">
           <FormRow
             label="Row limit"
-            description="Rows a query fetches before you ask for more. Table data is paged instead, and every page is rendered through the virtualised grid — so a large page costs no more to display than a small one."
+            description="Rows a query fetches. Applied by the server wherever the statement allows, so the rest never crosses the network; a result that reaches the limit says so above its rows. Table data is paged instead, and every page is rendered through the virtualised grid — so a large page costs no more to display than a small one."
           >
             <NumberStepper
               value={picusSettingsStore.rowLimit}
               min={10}
               max={100000}
               step={100}
-              onchange={(v) => { picusSettingsStore.setRowLimit(v); queryStore.setRowLimit(v); }}
+              onchange={(v) => picusSettingsStore.setRowLimit(v)}
             />
           </FormRow>
         </div>

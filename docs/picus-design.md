@@ -47,8 +47,9 @@ Which is which, precisely — this is the thing to know before touching anything
 | Connections, schema tree, table tab, query editor | **Real.** `stores/picus/{connections,schema,query}.svelte.ts` → `ipc/picus/db.ts` → `picus-be`. |
 | Connection modal | **Real and data-driven** — fields, labels, defaults, capabilities from `picus_providers`; an engine with no driver says so instead of disappearing. |
 | Settings | **Real** (product half). Project-level settings (encoding, EOL, version table) are still in memory by design — they belong to the project's config. |
-| Generator (form / paste / CSV / preview / diff) | **Still on `ipc/picus/mock-emit.ts`.** The Rust emitter and its handlers exist and are tested; nothing calls them yet. ← *first thing to do next* |
-| Script tree, inventory, consistency findings, file text | **Still on `ipc/picus/mock.ts`** until the parse/inventory/analyze crates land. |
+| Generator (form / paste / CSV / preview / diff) | **Real emission.** `stores/picus/dml.svelte.ts` → `picus_emit` / `picus_validate_rows`, debounced and cached. Reading a *paste* is the one piece still frontend-side (`utils/picus/paste-sql.ts`) until `picus-parse` serves it. |
+| Script tree, inventory, consistency findings, file text | **Real.** `picus_open_scripts` / `picus_analyze_scripts` / `picus_script_text`, driven by `picusProjectStore`. A repository belongs to a **connection** (`ConnectionSpec.scriptRoot`): you open a database and its scripts are what you see. |
+| Writing generated SQL into files | **Real, and two-step.** `picus_preview_apply` returns the exact bytes; `picus_apply` re-plans through the *same* code path and refuses if a file changed since the preview. |
 
 **The frontend has not been type-checked.** `svelte-check` is the user's step (project rule), so
 every frontend change in this session is un-compiled. If the first run after a compact shows
@@ -87,10 +88,11 @@ Svelte/TS errors in Picus, that is where they come from — not from something m
 
 ### Temporary code — delete when the backend lands
 
-- `src/lib/ipc/picus/mock.ts` — fixtures standing in for every read.
-- `src/lib/ipc/picus/mock-emit.ts` — a TypeScript stand-in for the `picus-emit` crate.
-  Deterministic and dialect-aware, but in the wrong language and the wrong process. The real
-  emitter owns the golden tests; nothing here should grow a second home.
+- ~~`src/lib/ipc/picus/mock.ts`~~ — **deleted.** Nothing in Picus reads a fixture any more.
+- `src/lib/utils/picus/paste-sql.ts` — a regex reader for pasted INSERTs, all that survives of
+  the emitter stand-in. It is the one piece of that file that genuinely *was* SQL parsing, so
+  it goes the moment `picus-parse` serves a `picus_parse_inserts` handler. Its neighbours are
+  permanent: `csv.ts` is file handling, `sql-values.ts` is a display marker.
 
 ### Backend — the database half is live
 
@@ -145,6 +147,11 @@ three password calls, which are Tauri commands straight to the shell.
 | `picus_read_schema` / `picus_table_detail` / `picus_fetch_page` | `schema` | tree vs detail: constraints only when a tab opens |
 | `picus_execute` / `picus_cancel` | `query` | cancel opens a second connection, hence it works mid-query |
 | `picus_emit` / `picus_validate_rows` / `picus_validate_value` | `emit` | **served but not yet called by the frontend** |
+| `picus_open_project` / `picus_confirm_project` / `picus_is_project` / `picus_propose_update_file` | `project` | discovery proposes; nothing is written before the confirmation |
+| `picus_open_scripts` / `picus_refresh_scripts` | `scripts` | reads, decodes and holds the whole repository; same reply shape as `picus_open_project` |
+| `picus_analyze_scripts` | `scripts` | inventory + the fourteen rules + skipped rules + rejected suppressions, all in the crates' own wire types |
+| `picus_script_text` | `scripts` | one file's decoded text, its encoding and its line ending |
+| `picus_preview_apply` / `picus_apply` | `apply` | the preview returns the exact bytes plus a digest per file; the apply refuses if any digest moved |
 | `picus_store_secret` / `picus_delete_secret` / `picus_has_secret` | shell command | `commands/picus_commands.rs` — never the backend |
 
 Events: `arbor://picus-be-up` / `-down` (shell), `picus://connection-changed` (backend).
@@ -181,6 +188,40 @@ A **script project's** own settings — declared encoding, line ending, version 
 memory for now and belong to the *project's* config, never to this file: a colleague opening
 the same repository must inherit them, or the same repo behaves differently per user, which is
 the class of surprise Picus exists to remove.
+
+#### The project's own config (decided 2026-07-27)
+
+Everything that describes *a repository of scripts* rather than *this user's preferences* lives
+with the repository, at **`<root>/.arbor/picus/project.toml`** — inside the existing `.arbor/`
+directory, namespaced per product. (The user intends to move Corvus's per-repo config to
+`.arbor/corvus/` on the same principle eventually; Picus is the first to use the shape, so get
+it right here.)
+
+What it holds: each branch and its dialect, each folder and its role, the expected encoding and
+line ending, the version table, the update-file naming pattern, and the generated-block marker
+template.
+
+Two rules about how it comes into existence:
+
+- **It is proposed, shown, and only written after an explicit confirmation.** Picus infers the
+  whole thing from the tree — folder names, the dominant encoding per folder, the shape of the
+  update filenames — and presents it. Nothing reaches the disk until the user agrees. This is
+  the app-wide rule (no automatic writes) and it matters more than usual here, because the file
+  lands in someone's repository and gets committed.
+- **It is the reason these settings are not in `PicusConfig`.** A colleague opening the same
+  repository must inherit them, or the same repo behaves differently per user — which is the
+  class of surprise Picus exists to remove.
+
+#### The generated-block marker (decided 2026-07-27)
+
+A block Picus writes into a file is **marked, and the marker is a configurable template**. The
+default sits in the `-- picus:` namespace already used by suppressions, and the template accepts
+placeholders (`{from_version}`, `{to_version}`, `{table}`, `{hash}`) because projects want
+different things in that line — several want the version transition spelled out on every block.
+
+The marker is what makes an apply **idempotent**: Picus can recognise a block it wrote and
+regenerate it in place instead of appending a second copy. A project that wants its files free
+of tool markers can empty the template, and loses exactly that.
 
 Two shapes worth keeping when extending it: the insertion rules are stored as **wire strings**
 with typed accessors (an unknown value must degrade to the default, not fail the file's parse
@@ -226,7 +267,23 @@ trusted (a hand-edited `0` would mean "fetch nothing" and read as a broken produ
 - **Sequences and triggers share the `table` tab kind** (`objectKind` discriminates). They
   share the frame — name, connection, sub-views — and differ only in contents.
 - **Table data is paged AND virtualised.** Paging bounds what is fetched, virtualisation
-  bounds what is drawn; that is why page sizes go up to 10 000.
+  bounds what is drawn; that is why page sizes go up to 10 000. Corollaries paid for on a
+  695-table database: a page's row total is a **single-relation** `reltuples` lookup, never
+  a catalogue read (it runs on every page turn), and `table_detail` pins its query to the
+  one relation — reading all of a several-hundred-relation schema to find one returns a row
+  per *column* of every one of them.
+- **A capped result must say it is capped.** The query row limit is applied by the *server*
+  (`sql::capped_statement` wraps a single read in `SELECT * FROM (…) LIMIT n+1`, so the rows
+  nobody will see never leave the database), one row beyond the limit is fetched so
+  "there is more" is a fact rather than a guess, and the UI states it beside the row count
+  *and* above the grid. A silently truncated result is a correctness bug, not a cosmetic
+  one: the tail cannot be distinguished from an end, and the grid's sort and filters apply
+  only to what was fetched.
+- **Cancellation is remembered, not merely sent.** `picus_execute` is more than one round
+  trip (a `prepare`, then the statement); the server's cancel key only interrupts what is
+  running at the instant it arrives, so a Cancel landing in a gap hit nothing and was lost.
+  `PgSession` pairs a run ordinal with a cancelled ordinal — scoped to an ordinal so a
+  cancel arriving after a query finished cannot kill the next one.
 - **Generator layout** breaks on a **container query** against the panel, not a media query
   against the viewport: the same window is wide with the sidebar closed and narrow with it
   open.
@@ -332,7 +389,7 @@ Migration targets — where the hardcoded branching lives today:
 |---|---|
 | `types/picus/index.ts` → `DIALECTS` | labels, short names, colour tokens |
 | `PicusConnectionModal.svelte` | service-vs-database label, default port, placeholders |
-| `ipc/picus/mock-emit.ts` | every dialect difference in emission |
+| `picus-emit` (`block.rs` / `statement.rs` / `literal.rs`) | every dialect difference in emission, as `match` arms |
 | `picus-sql-language.ts` | which CodeMirror mode to use |
 | `TargetEditor.svelte` | the "what this rule becomes" hints (`USER_TABLES` vs `to_regclass`) |
 | `ConnectionsPanel.svelte` | identifier casing on display |
@@ -421,24 +478,60 @@ which is the same grammar decision as §6.5, and should be made once for both.
 
 ## 5. What is left to do
 
-### Start here
+### The plan of 2026-07-27 (evening), in waves
 
-Two pieces, in this order.
+Three cantieri that touch disjoint files run together, then two dependent waves.
 
-**1. Wire the generator to the backend emitter.** `picus-emit` is done and covered by 29 golden
-tests; `picus_emit` / `picus_validate_rows` / `picus_validate_value` are served; nothing calls
-them. The work is `stores/picus/dml.svelte.ts` plus `generate/{DmlValueGrid,SqlPreview,CsvImportGrid}.svelte`,
-then deleting `ipc/picus/mock-emit.ts`.
+**Wave A, parallel.**
+- ~~**A1 — the generator on the real emitter.**~~ **Done.** `stores/picus/dml.svelte.ts` calls
+  `picus_emit` / `picus_validate_rows` from a debounced effect and caches the result per target,
+  so `sqlFor()` stays a pure read — the preview has no refresh button, and materialising the
+  cache inside a `$derived` is the `state_unsafe_mutation` trap `queryStore` already paid for.
+  `canGenerate` additionally requires the current model to have *been checked*: with the check
+  on the far side of an IPC call, "nothing reported" is also what an unexamined model looks
+  like. `ruleConflict` — which the stand-in had no concept of — is surfaced on the target's row
+  and above the preview. `parseCsv` / `proposeCsvMapping` moved to `utils/picus/csv.ts` and
+  `parsePastedInserts` parked in `utils/picus/paste-sql.ts` until A2 serves it;
+  `mock-emit.ts` is deleted.
+- **A2 — `picus-parse`.** The grammar (see the reasoning in §6).
+- **A3 — encoding in `arbor-fs`.** The detection chain plus the folder-inheritance context.
 
-Two things to carry across rather than re-invent: the model the frontend builds must map onto
-`picus_ast::DmlModel` (snake_case on the wire, `dateColumn: null` meaning "this project stamps
-no date"), and `parsePastedInserts` / `parseCsv` / `proposeCsvMapping` are still frontend-only —
-they belong to `picus-parse` later, so leave them where they are rather than half-moving them.
+**Wave B, on top of the parse.** `picus-project` (discovery + `.arbor/picus/project.toml`),
+`picus-inventory` (object → file → coverage), `picus-analyze` (the twelve real rules plus
+declared suppressions).
 
-**2. `picus-parse`** — full Tree-sitter grammar (decision §6.5), Arbor's own pattern: own
-grammar, generated `parser.c` committed, no Node at build time, as Merula does. Explicit user
-direction: **a very large body of unit tests over every kind of SQL that can be thought of**,
-with permission already given to run the `tree-sitter` generation commands.
+**Wave C, the part that writes.** `picus-rewrite` — **byte splicing over the original bytes,
+never re-printing the file**, which is what makes the byte-identical round trip a theorem rather
+than a hope — with transactional apply and rollback; then the script half of the frontend on
+real RPC (`mock.ts` deleted); then docs, changelog and a keyboard pass.
+
+**The seam, done (2026-07-28).** `picus-be` links parse / inventory / analyze / rewrite and
+serves the six methods above. What was decided while wiring it:
+
+- **Read once, invalidate by hand.** `PicusState` holds one snapshot per repository — every
+  script decoded once, each entry carrying the SHA-256 of its bytes — and nothing expires on
+  its own: a refresh or a write, and nothing else. A report that changes while nobody changed
+  anything is a report people stop believing.
+- **The parse is not cached**, because `ParsedFile` borrows its source and caching one beside
+  its own source is self-referential. It is produced by one isolated function, which is also
+  the only thing a future on-disk tier (content-addressed by that same digest) would replace.
+  Measured on 400 files / 1.4 MiB: read+decode 117 ms, parse 848 ms, inventory 41 ms,
+  analyse 170 ms — so the parse is two thirds of the cost and the obvious first lever, either
+  a disk tier or `std::thread::scope` over the file list.
+- **A write is two calls with a staleness check.** The preview returns the exact bytes and a
+  digest per file; the apply re-prepares and refuses if any digest moved, naming the file. What
+  was approved is what gets written, or nothing is.
+- **The insertion point is a stated rule per role**, resolved repository (`[generation.insertion]`
+  in `project.toml`) → user (`config.toml`) → built-in (update appends, everything else groups
+  by table), and written into the diff's hunk header. A block Picus already wrote is found by
+  its marker and **replaced**; its extent stops at the first statement about another table, so a
+  hand-written statement below a generated block is never swallowed.
+- **A script repository belongs to a connection** — `ConnectionSpec.scriptRoot`, persisted in
+  `connections.toml`. Those scripts install *that* database.
+
+One thing known in advance: `picus_emit` currently takes `model` and `targets` and knows nothing
+about the marker template or the naming scheme, so its signature grows in Wave C. Better to
+expect it than to watch it change twice.
 
 
 ### Backend
@@ -468,9 +561,10 @@ with permission already given to run the `tree-sitter` generation commands.
   connection modal now reads its fields, labels, defaults and capabilities from
   `picus_providers` rather than branching on the engine, and an engine with no driver says so
   instead of disappearing. `mock.ts` is down to the script-side fixtures plus
-  `DEFAULT_QUERY_TEXT`; `mock-emit.ts` is untouched and goes with `picus-emit`.
-- Replace the remaining `ipc/picus/mock.ts` (project tree, inventory, findings) and
-  `mock-emit.ts` with real RPC as the script crates land.
+  `DEFAULT_QUERY_TEXT`.
+- ~~The generator on `picus_emit` / `picus_validate_rows`.~~ **Done** — see A1 above.
+- Replace the remaining `ipc/picus/mock.ts` (project tree, inventory, findings) with real RPC as
+  the script crates land, and `utils/picus/paste-sql.ts` with `picus_parse_inserts`.
 - ~~Settings persist to `…/picus/config.toml` via `get_picus_config` / `set_picus_config`.~~
   **Done** for the product settings (never `localStorage`).
 - Project-level settings (encoding, EOL, version table) are still in memory: they belong in the
@@ -479,16 +573,42 @@ with permission already given to run the `tree-sitter` generation commands.
 
 ### Editor intelligence (§4.4)
 
-1. **Ghost text in the shared core** — `intel.inlineCompletion` hook + a `ViewPlugin` widget
-   decoration + keymap in `shared/ui/code-editor/`. Nothing to generalise from Bennu: it does
-   not exist there either. Bennu adopts it once it lands.
-2. **A SQL completion source** — tables / views / sequences / columns / keywords, alias-aware,
-   fed by `schemaStore` (later by the backend). Wired through `descriptor.intel.completion`.
-3. **A SQL hover source** — column type, nullability, default, FK target; table row estimate.
-4. **Live diagnostics** — unknown table or column, ambiguous unqualified column, writes on a
-   read-only connection. Byte offsets in, the core maps them.
-5. **Deterministic ghost-text rules** — column list after `INSERT INTO t (`, the `VALUES`
-   skeleton, FK-implied join predicates, block closers. Schema-derived, never predicted.
+1. ~~**Ghost text in the shared core.**~~ **Done (2026-07-27):**
+   `shared/ui/code-editor/inline-completion.ts` — the `intel.inlineCompletion` hook, a widget
+   decoration, and the Tab/Esc keymap, installed by `createCodeEditorExtensions`. Bennu can
+   adopt it by filling in one field. Three decisions worth knowing before using it:
+   - the source is a **facet**, not module state, because two editors are alive at once in a
+     tabbed window and module state would give whichever mounted last to both;
+   - ghost text **never appears while the completion popup is open** — both want Tab, and the
+     popup is the more specific intent, so ghost text stands down rather than competing;
+   - a reply is dropped unless the caret is still exactly where the question was asked. A
+     stale suggestion arriving late is worse than none.
+   Still to write for Picus: the source itself (the deterministic rules below).
+2. ~~**A SQL completion source**~~ ~~**A SQL hover source**~~ ~~**Live diagnostics**~~
+   ~~**Deterministic ghost-text rules**~~ **All four done (2026-07-27):**
+   `components/picus/sql-intel/` — a scanner (`tokens.ts`), one-statement analysis with alias
+   resolution (`analysis.ts`), per-dialect vocabularies (`keywords.ts`), the catalogue gate
+   (`schema-view.ts`), and the four sources. `picus-sql-language.ts` stays a descriptor and
+   caches one per `(dialect, connection)` pair; the views pass the tab's connection, so both
+   the dialect and the catalogue come from the tab and never from a global. Decisions worth
+   knowing:
+   - **`SchemaView.known` is the single gate** between "does not exist" and "not read yet". It
+     is false unless the snapshot in the store describes *this* connection, is not loading,
+     carries no error and is not empty — and then no object diagnostic is emitted at all.
+   - **DDL is never measured against the live schema**, and anything the buffer creates
+     earlier counts as existing. Otherwise an initialisation script — the kind of file Picus
+     exists for — would be one long list of "unknown table".
+   - **Unqualified names are never reported as unknown**, only as ambiguous. A bare word can
+     be an output alias, a function or a PL/SQL variable; the scanner cannot tell.
+   - A **script file borrows the active connection's catalogue only when the dialects agree**;
+     with no match it completes keywords and closes blocks and says nothing about objects.
+   - Ghost text implements the four rules from §4.4 and stops there. Rejected as guesses: the
+     `SELECT` column list, a PK predicate after `DELETE FROM t`, every column after
+     `UPDATE t SET`, and `$$ LANGUAGE plpgsql;` (a `DO $$` block's `$$;` *is* offered).
+   - The hover card classes moved from `.bennu-hover` / `.bh-*` to `.cm-hover-card` /
+     `.cm-hc-*` in the shared theme, so Picus composes the same card instead of forking it.
+   Still open: the editors have **no Find panel** — `Ctrl+F` is host-routed (`openSearch()`
+   via `bind:this`) and Picus never wires it, unlike Bennu.
 
 ### Known frontend debt
 
@@ -528,15 +648,23 @@ fail, not hang CI): `cargo nextest run`. Everything below is still owed:
 
 ## 6. Still open
 
-1. **`NamingScheme`** for update scripts — versioned (`4_12__4_13.sql`) vs dated. The real
-   questions are (a) where the "next version" comes from (the connected database, the highest
-   file on disk, or typed by hand) and (b) what happens to `VER003` (unbroken version chain)
-   under the dated scheme, where it arguably has no meaning. **Needed before `picus-rewrite`
-   writes its first file** — not before then.
+1. ~~**`NamingScheme`** for update scripts.~~ **Decided (2026-07-27):** a **default scheme plus a
+   configurable regex**. The default is versioned — `4_12__4_13.sql`, the "from" read as the
+   highest version present in the update folder and the "to" proposed by incrementing the last
+   segment, both editable. A project whose files are named otherwise declares its own pattern in
+   `.arbor/picus/project.toml` (named capture groups `from` / `to`, plus a template for new
+   files), so no repository is locked out by a convention it never adopted. When a connection is
+   open, the database's own version is shown next to the proposal and a mismatch is *reported*,
+   never enforced. `VER003` (unbroken version chain) is only meaningful when the pattern yields
+   both bounds, so it is skipped — with a visible reason — when it does not.
 2. ~~**Crate granularity.**~~ **Decided (2026-07-27):** create each crate as it is activated,
    the way Bennu and Merula grew. No empty scaffolds.
-3. **Encoding detection placement** — extend `arbor-fs` (shared benefit, changes existing
-   products' behaviour) or layer it for Picus only.
+3. ~~**Encoding detection placement.**~~ **Decided (2026-07-27):** all of it in **`arbor-fs`**,
+   including the folder-inheritance rule for ASCII-ambiguous files. The user chose the shared
+   home over a Picus-local layer. The containment condition: the additions are **additive** and
+   existing callers (Bennu, Corvus) keep byte-identical behaviour unless they opt in — the
+   folder context is an explicit object the caller builds, not a new implicit step in the
+   existing read path.
 4. **WASM tier** — `types` / `ast` / `emit` are wasm-clean **today** (serde only, no I/O),
    which is exactly the slice a "generate SQL" plugin would need; `analyze` / `inventory`
    should stay that way. `parse` is the awkward one: the Tree-sitter runtime needs a C
@@ -560,3 +688,28 @@ fail, not hang CI): `cargo nextest run`. Everything below is still owed:
 | Crate granularity | one at a time, as activated |
 | Generated SQL identifiers | **English** (`before_changes`, `v_version`, `v_existing`, `v_object`) |
 | Parsing strategy | full Tree-sitter grammar, with a very large test suite |
+| What a "branch" is | **folders in one checkout** (`ORACLE/`, `POSTGRES/` under the project root), not git branches — both dialects must be readable at once for the comparison to be instant |
+| Project config location | `<root>/.arbor/picus/project.toml`, proposed and written only on confirmation |
+| One grammar or two | **one**, permissive superset — see below |
+| Parse depth | **expression level**, including inside procedural blocks |
+| Update-file naming | default versioned scheme + a per-project regex |
+| Generated-block marker | configurable template with placeholders, `-- picus:` namespace |
+| Encoding detection | entirely in `arbor-fs`, additive so Bennu/Corvus are unaffected |
+| Scope of the 2026-07-27 evening wave | parse + project + inventory + analyze **and** rewrite/apply |
+
+#### Why one grammar and not two
+
+The reasoning, because it will look like a shortcut later and it is not: the two dialects
+diverge almost always **by addition** (`MERGE … FROM DUAL` and `ON CONFLICT`, `CONNECT BY` and
+`WITH RECURSIVE`, `q'[…]'` and `$$…$$`) and almost never **by collision** — the cases where the
+same syntax means different things are few and all resolvable in the external scanner. At
+expression level, two grammars would mean duplicating ~90 % of the rules (every operator, every
+type, every expression) and fixing every bug twice.
+
+But the deciding argument is diagnostic quality. With two strict grammars, an Oracle-ism inside
+a PostgreSQL file is a parser `ERROR`, and the best message available is *"syntax error at line
+12"*. With one permissive grammar it is **a node with a name**, and the message becomes
+*"`MERGE … FROM DUAL` is Oracle syntax; PostgreSQL wants `INSERT … ON CONFLICT`"*. Diagnosing
+cross-dialect drift is the product's entire reason to exist, so the grammar has to make that
+drift **nameable** rather than make it explode. Consequence for the grammar's design: every
+single-dialect construct gets its **own named node**, never folded into a generic one.

@@ -1,0 +1,742 @@
+================================================================================
+create table simple
+================================================================================
+
+CREATE TABLE t (id NUMBER, nome VARCHAR2(30));
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))
+          (type_arguments
+            (number_literal)))))))
+
+================================================================================
+create table if not exists
+================================================================================
+
+CREATE TABLE IF NOT EXISTS t (id integer);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier)))))))
+
+================================================================================
+column constraints
+================================================================================
+
+CREATE TABLE t (
+  id NUMBER(10) NOT NULL,
+  cod VARCHAR2(30 CHAR) DEFAULT 'X' NOT NULL,
+  val NUMBER DEFAULT 0,
+  note VARCHAR2(4000) NULL
+);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))
+          (type_arguments
+            (number_literal)))
+        (column_constraint
+          (not_null_constraint)))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))
+          (type_arguments
+            (number_literal)))
+        (column_constraint
+          (default_clause
+            (string_literal)))
+        (column_constraint
+          (not_null_constraint)))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier)))
+        (column_constraint
+          (default_clause
+            (number_literal))))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))
+          (type_arguments
+            (number_literal)))
+        (column_constraint
+          (null_constraint))))))
+
+================================================================================
+inline primary key
+================================================================================
+
+CREATE TABLE t (id NUMBER PRIMARY KEY);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier)))
+        (column_constraint
+          (primary_key_constraint))))))
+
+================================================================================
+named table constraints
+================================================================================
+
+CREATE TABLE t (
+  id NUMBER,
+  p NUMBER,
+  CONSTRAINT pk_t PRIMARY KEY (id),
+  CONSTRAINT uq_t UNIQUE (p),
+  CONSTRAINT ck_t CHECK (id > 0),
+  CONSTRAINT fk_t FOREIGN KEY (p) REFERENCES padre (id) ON DELETE CASCADE
+);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))))
+      (table_constraint
+        (identifier)
+        (primary_key_constraint
+          (identifier)))
+      (table_constraint
+        (identifier)
+        (unique_constraint
+          (identifier)))
+      (table_constraint
+        (identifier)
+        (check_constraint
+          (binary_expression
+            (object_name
+              (identifier))
+            (number_literal))))
+      (table_constraint
+        (identifier)
+        (foreign_key_constraint
+          (identifier)
+          (references_clause
+            (object_name
+              (identifier))
+            (identifier)
+            (on_delete_action)))))))
+
+================================================================================
+references on delete set null
+================================================================================
+
+CREATE TABLE t (p NUMBER REFERENCES padre (id) ON DELETE SET NULL);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier)))
+        (column_constraint
+          (references_clause
+            (object_name
+              (identifier))
+            (identifier)
+            (on_delete_action)))))))
+
+================================================================================
+references on update cascade
+================================================================================
+
+CREATE TABLE t (p integer REFERENCES padre (id) ON UPDATE CASCADE ON DELETE NO ACTION);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier)))
+        (column_constraint
+          (references_clause
+            (object_name
+              (identifier))
+            (identifier)
+            (on_update_action)
+            (on_delete_action)))))))
+
+================================================================================
+deferrable constraint
+================================================================================
+
+CREATE TABLE t (id integer, CONSTRAINT pk PRIMARY KEY (id) DEFERRABLE INITIALLY DEFERRED);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))))
+      (table_constraint
+        (identifier)
+        (primary_key_constraint
+          (identifier))))))
+
+================================================================================
+generated identity
+================================================================================
+
+CREATE TABLE t (id NUMBER GENERATED ALWAYS AS IDENTITY, x NUMBER);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier)))
+        (column_constraint
+          (generated_clause)))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier)))))))
+
+================================================================================
+generated stored column
+================================================================================
+
+CREATE TABLE t (a integer, b integer GENERATED ALWAYS AS (a * 2) STORED);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier)))
+        (column_constraint
+          (generated_clause
+            (binary_expression
+              (object_name
+                (identifier))
+              (number_literal))))))))
+
+================================================================================
+array and timestamp types
+================================================================================
+
+CREATE TABLE t (tags text[], d timestamp WITH TIME ZONE, e timestamp WITHOUT TIME ZONE);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))))
+      (column_definition
+        (identifier)
+        (data_type))
+      (column_definition
+        (identifier)
+        (data_type)))))
+
+================================================================================
+numeric and double precision
+================================================================================
+
+CREATE TABLE t (a NUMBER(10,2), b DOUBLE PRECISION, c CHARACTER VARYING(10));
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))
+          (type_arguments
+            (number_literal)
+            (number_literal))))
+      (column_definition
+        (identifier)
+        (data_type))
+      (column_definition
+        (identifier)
+        (data_type
+          (type_arguments
+            (number_literal)))))))
+
+================================================================================
+create table as select
+================================================================================
+
+CREATE TABLE t2 AS SELECT * FROM t1;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (select_statement
+        (select_core
+          (select_list
+            (select_item
+              (all_columns)))
+          (from_clause
+            (table_reference
+              (object_name
+                (identifier)))))))))
+
+================================================================================
+temporary table
+================================================================================
+
+CREATE GLOBAL TEMPORARY TABLE t (id NUMBER) ON COMMIT DELETE ROWS;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))))
+      (table_option))))
+
+================================================================================
+oracle storage options
+================================================================================
+
+CREATE TABLE t (id NUMBER) TABLESPACE users PCTFREE 10 NOLOGGING;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))))
+      (table_option
+        (identifier))
+      (table_option
+        (number_literal))
+      (table_option))))
+
+================================================================================
+postgres with options
+================================================================================
+
+CREATE UNLOGGED TABLE t (id integer) WITH (fillfactor = 70);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_table_statement
+      (object_name
+        (identifier))
+      (column_definition
+        (identifier)
+        (data_type
+          (object_name
+            (identifier))))
+      (table_option
+        (object_name
+          (identifier))
+        (number_literal)))))
+
+================================================================================
+alter table add column
+================================================================================
+
+ALTER TABLE t ADD COLUMN c NUMBER DEFAULT 0 NOT NULL;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (alter_table_statement
+      (object_name
+        (identifier))
+      (alter_table_action
+        (column_definition
+          (identifier)
+          (data_type
+            (object_name
+              (identifier)))
+          (column_constraint
+            (default_clause
+              (number_literal)))
+          (column_constraint
+            (not_null_constraint)))))))
+
+================================================================================
+alter table add column oracle
+================================================================================
+
+ALTER TABLE t ADD c NUMBER;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (alter_table_statement
+      (object_name
+        (identifier))
+      (alter_table_action
+        (column_definition
+          (identifier)
+          (data_type
+            (object_name
+              (identifier))))))))
+
+================================================================================
+alter table add several columns oracle
+================================================================================
+
+ALTER TABLE t ADD (a NUMBER, b VARCHAR2(10));
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (alter_table_statement
+      (object_name
+        (identifier))
+      (alter_table_action
+        (column_definition
+          (identifier)
+          (data_type
+            (object_name
+              (identifier))))
+        (column_definition
+          (identifier)
+          (data_type
+            (object_name
+              (identifier))
+            (type_arguments
+              (number_literal))))))))
+
+================================================================================
+alter table add constraint
+================================================================================
+
+ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY (p) REFERENCES padre (id);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (alter_table_statement
+      (object_name
+        (identifier))
+      (alter_table_action
+        (table_constraint
+          (identifier)
+          (foreign_key_constraint
+            (identifier)
+            (references_clause
+              (object_name
+                (identifier))
+              (identifier))))))))
+
+================================================================================
+alter table drop column
+================================================================================
+
+ALTER TABLE t DROP COLUMN c;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (alter_table_statement
+      (object_name
+        (identifier))
+      (alter_table_action
+        (identifier)))))
+
+================================================================================
+alter table drop constraint
+================================================================================
+
+ALTER TABLE t DROP CONSTRAINT fk;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (alter_table_statement
+      (object_name
+        (identifier))
+      (alter_table_action
+        (identifier)))))
+
+================================================================================
+alter table alter column
+================================================================================
+
+ALTER TABLE t ALTER COLUMN c SET DEFAULT 0;
+ALTER TABLE t ALTER COLUMN c DROP NOT NULL;
+ALTER TABLE t ALTER COLUMN c TYPE integer;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (alter_table_statement
+      (object_name
+        (identifier))
+      (alter_table_action
+        (identifier)
+        (number_literal))))
+  (statement
+    (alter_table_statement
+      (object_name
+        (identifier))
+      (alter_table_action
+        (identifier))))
+  (statement
+    (alter_table_statement
+      (object_name
+        (identifier))
+      (alter_table_action
+        (identifier)
+        (data_type
+          (object_name
+            (identifier)))))))
+
+================================================================================
+alter table modify oracle
+================================================================================
+
+ALTER TABLE t MODIFY (c VARCHAR2(50));
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (alter_table_statement
+      (object_name
+        (identifier))
+      (alter_table_action
+        (column_definition
+          (identifier)
+          (data_type
+            (object_name
+              (identifier))
+            (type_arguments
+              (number_literal))))))))
+
+================================================================================
+alter table rename
+================================================================================
+
+ALTER TABLE t RENAME TO t2;
+ALTER TABLE t RENAME COLUMN a TO b;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (alter_table_statement
+      (object_name
+        (identifier))
+      (alter_table_action
+        (identifier))))
+  (statement
+    (alter_table_statement
+      (object_name
+        (identifier))
+      (alter_table_action
+        (identifier)
+        (identifier)))))
+
+================================================================================
+alter table enable disable constraint
+================================================================================
+
+ALTER TABLE t DISABLE CONSTRAINT fk;
+ALTER TABLE t ENABLE VALIDATE CONSTRAINT fk;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (alter_table_statement
+      (object_name
+        (identifier))
+      (alter_table_action
+        (identifier))))
+  (statement
+    (alter_table_statement
+      (object_name
+        (identifier))
+      (alter_table_action
+        (identifier)))))
+
+================================================================================
+drop table
+================================================================================
+
+DROP TABLE t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (drop_statement
+      (object_name
+        (identifier)))))
+
+================================================================================
+drop table if exists cascade
+================================================================================
+
+DROP TABLE IF EXISTS t CASCADE;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (drop_statement
+      (object_name
+        (identifier)))))
+
+================================================================================
+drop table cascade constraints purge
+================================================================================
+
+DROP TABLE t CASCADE CONSTRAINTS PURGE;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (drop_statement
+      (object_name
+        (identifier)))))
+
+================================================================================
+drop several tables
+================================================================================
+
+DROP TABLE a, b, c;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (drop_statement
+      (object_name
+        (identifier))
+      (object_name
+        (identifier))
+      (object_name
+        (identifier)))))

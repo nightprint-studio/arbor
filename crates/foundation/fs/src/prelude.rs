@@ -5,6 +5,9 @@
 //! per-feature submodules. The submodules stay `pub` for rustdoc navigation.
 
 pub use crate::copy::{CancelToken, NoopSink, ProgressSink};
+pub use crate::encoding::{
+    Detection, EncodingContext, EncodingEvidence, EncodingSource, UnrepresentableChar,
+};
 pub use crate::entry::{DirSize, DriveUsage, FsEntry, FsRoot, OverviewStats, TrashEntry};
 pub use crate::error::{FsError, Result};
 pub use crate::mutate::RenamePair;

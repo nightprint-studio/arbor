@@ -19,7 +19,7 @@ export type HoverFetch = (file: string, source: string, byteOffset: number) => P
 const WORD = /[A-Za-z0-9_$]/;
 
 /** Build a `hoverTooltip` source that resolves the identifier under the pointer through `fetchInfo`
- *  and renders it as a `.bennu-hover` card (styled in the editor theme). Returns `null` gracefully
+ *  and renders it as a `.cm-hover-card` (the shared card styled in the editor theme). Returns `null` gracefully
  *  when there's no active file, no word under the pointer, or the backend has nothing to say. */
 export function makeHoverSource(fetchInfo: HoverFetch) {
   return async function hoverSource(view: EditorView, pos: number, _side: -1 | 1): Promise<Tooltip | null> {
@@ -58,9 +58,9 @@ export function makeHoverSource(fetchInfo: HoverFetch) {
       above: true,
       create() {
         const dom = document.createElement('div');
-        dom.className = 'bennu-hover';
+        dom.className = 'cm-hover-card';
         const sig = document.createElement('div');
-        sig.className = 'bh-sig';
+        sig.className = 'cm-hc-title';
         sig.textContent = resolved.signature;
         dom.appendChild(sig);
         const meta: string[] = [];
@@ -68,13 +68,13 @@ export function makeHoverSource(fetchInfo: HoverFetch) {
         if (resolved.kind) meta.push(resolved.kind);
         if (meta.length) {
           const m = document.createElement('div');
-          m.className = 'bh-meta';
+          m.className = 'cm-hc-meta';
           m.textContent = meta.join('  ·  ');
           dom.appendChild(m);
         }
         if (resolved.doc) {
           const d = document.createElement('div');
-          d.className = 'bh-doc';
+          d.className = 'cm-hc-doc';
           d.textContent = resolved.doc;
           dom.appendChild(d);
         }

@@ -1,0 +1,589 @@
+================================================================================
+insert with column list
+================================================================================
+
+INSERT INTO PARAMETRI (COD, VALORE) VALUES ('A', '1');
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (insert_statement
+      (object_name
+        (identifier))
+      (column_list
+        (identifier)
+        (identifier))
+      (values_clause
+        (value_row
+          (string_literal)
+          (string_literal))))))
+
+================================================================================
+insert without column list
+================================================================================
+
+INSERT INTO PARAMETRI VALUES ('A', '1');
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (insert_statement
+      (object_name
+        (identifier))
+      (values_clause
+        (value_row
+          (string_literal)
+          (string_literal))))))
+
+================================================================================
+insert multiple rows
+================================================================================
+
+INSERT INTO t (a, b) VALUES (1, 'x'), (2, 'y'), (3, 'z');
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (insert_statement
+      (object_name
+        (identifier))
+      (column_list
+        (identifier)
+        (identifier))
+      (values_clause
+        (value_row
+          (number_literal)
+          (string_literal))
+        (value_row
+          (number_literal)
+          (string_literal))
+        (value_row
+          (number_literal)
+          (string_literal))))))
+
+================================================================================
+insert select
+================================================================================
+
+INSERT INTO t (a, b) SELECT x, y FROM u WHERE z = 1;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (insert_statement
+      (object_name
+        (identifier))
+      (column_list
+        (identifier)
+        (identifier))
+      (select_statement
+        (select_core
+          (select_list
+            (select_item
+              (object_name
+                (identifier)))
+            (select_item
+              (object_name
+                (identifier))))
+          (from_clause
+            (table_reference
+              (object_name
+                (identifier))))
+          (where_clause
+            (binary_expression
+              (object_name
+                (identifier))
+              (number_literal))))))))
+
+================================================================================
+insert default values
+================================================================================
+
+INSERT INTO t DEFAULT VALUES;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (insert_statement
+      (object_name
+        (identifier)))))
+
+================================================================================
+insert with default in a row
+================================================================================
+
+INSERT INTO t (a, b) VALUES (1, DEFAULT);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (insert_statement
+      (object_name
+        (identifier))
+      (column_list
+        (identifier)
+        (identifier))
+      (values_clause
+        (value_row
+          (number_literal))))))
+
+================================================================================
+insert returning
+================================================================================
+
+INSERT INTO t (a) VALUES (1) RETURNING id;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (insert_statement
+      (object_name
+        (identifier))
+      (column_list
+        (identifier))
+      (values_clause
+        (value_row
+          (number_literal)))
+      (returning_clause
+        (select_item
+          (object_name
+            (identifier)))))))
+
+================================================================================
+insert on conflict do nothing
+================================================================================
+
+INSERT INTO t (a) VALUES (1) ON CONFLICT DO NOTHING;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (insert_statement
+      (object_name
+        (identifier))
+      (column_list
+        (identifier))
+      (values_clause
+        (value_row
+          (number_literal)))
+      (on_conflict_clause))))
+
+================================================================================
+insert on conflict do update
+================================================================================
+
+INSERT INTO t (a, b) VALUES (1, 2) ON CONFLICT (a) DO UPDATE SET b = EXCLUDED.b;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (insert_statement
+      (object_name
+        (identifier))
+      (column_list
+        (identifier)
+        (identifier))
+      (values_clause
+        (value_row
+          (number_literal)
+          (number_literal)))
+      (on_conflict_clause
+        (object_name
+          (identifier))
+        (assignment
+          (object_name
+            (identifier))
+          (object_name
+            (identifier)
+            (identifier)))))))
+
+================================================================================
+insert on conflict on constraint
+================================================================================
+
+INSERT INTO t (a) VALUES (1) ON CONFLICT ON CONSTRAINT pk_t DO NOTHING;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (insert_statement
+      (object_name
+        (identifier))
+      (column_list
+        (identifier))
+      (values_clause
+        (value_row
+          (number_literal)))
+      (on_conflict_clause
+        (identifier)))))
+
+================================================================================
+update simple
+================================================================================
+
+UPDATE t SET a = 1 WHERE id = 2;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (update_statement
+      (object_name
+        (identifier))
+      (assignment
+        (object_name
+          (identifier))
+        (number_literal))
+      (where_clause
+        (binary_expression
+          (object_name
+            (identifier))
+          (number_literal))))))
+
+================================================================================
+update several columns
+================================================================================
+
+UPDATE t SET a = 1, b = 'x', c = DEFAULT WHERE id = 2;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (update_statement
+      (object_name
+        (identifier))
+      (assignment
+        (object_name
+          (identifier))
+        (number_literal))
+      (assignment
+        (object_name
+          (identifier))
+        (string_literal))
+      (assignment
+        (object_name
+          (identifier)))
+      (where_clause
+        (binary_expression
+          (object_name
+            (identifier))
+          (number_literal))))))
+
+================================================================================
+update without where
+================================================================================
+
+UPDATE VERSIONE_DB SET VERSIONE = '4.13';
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (update_statement
+      (object_name
+        (identifier))
+      (assignment
+        (object_name
+          (identifier))
+        (string_literal)))))
+
+================================================================================
+update from
+================================================================================
+
+UPDATE t SET a = u.a FROM u WHERE u.id = t.id;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (update_statement
+      (object_name
+        (identifier))
+      (assignment
+        (object_name
+          (identifier))
+        (object_name
+          (identifier)
+          (identifier)))
+      (from_clause
+        (table_reference
+          (object_name
+            (identifier))))
+      (where_clause
+        (binary_expression
+          (object_name
+            (identifier)
+            (identifier))
+          (object_name
+            (identifier)
+            (identifier)))))))
+
+================================================================================
+update with subquery value
+================================================================================
+
+UPDATE t SET a = (SELECT MAX(x) FROM u) WHERE id = 1;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (update_statement
+      (object_name
+        (identifier))
+      (assignment
+        (object_name
+          (identifier))
+        (subquery
+          (select_statement
+            (select_core
+              (select_list
+                (select_item
+                  (function_call
+                    (object_name
+                      (identifier))
+                    (object_name
+                      (identifier)))))
+              (from_clause
+                (table_reference
+                  (object_name
+                    (identifier))))))))
+      (where_clause
+        (binary_expression
+          (object_name
+            (identifier))
+          (number_literal))))))
+
+================================================================================
+delete with where
+================================================================================
+
+DELETE FROM t WHERE a = 1;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (delete_statement
+      (object_name
+        (identifier))
+      (where_clause
+        (binary_expression
+          (object_name
+            (identifier))
+          (number_literal))))))
+
+================================================================================
+delete without from
+================================================================================
+
+DELETE t WHERE a = 1;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (delete_statement
+      (object_name
+        (identifier))
+      (where_clause
+        (binary_expression
+          (object_name
+            (identifier))
+          (number_literal))))))
+
+================================================================================
+delete everything
+================================================================================
+
+DELETE FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (delete_statement
+      (object_name
+        (identifier)))))
+
+================================================================================
+delete using
+================================================================================
+
+DELETE FROM t USING u WHERE t.id = u.id;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (delete_statement
+      (object_name
+        (identifier))
+      (using_clause
+        (table_reference
+          (object_name
+            (identifier))))
+      (where_clause
+        (binary_expression
+          (object_name
+            (identifier)
+            (identifier))
+          (object_name
+            (identifier)
+            (identifier)))))))
+
+================================================================================
+merge from dual
+================================================================================
+
+MERGE INTO PARAMETRI d USING (SELECT 'A' COD, '1' VALORE FROM DUAL) s ON (d.COD = s.COD) WHEN MATCHED THEN UPDATE SET d.VALORE = s.VALORE WHEN NOT MATCHED THEN INSERT (COD, VALORE) VALUES (s.COD, s.VALORE);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (merge_statement
+      (object_name
+        (identifier))
+      (identifier)
+      (subquery
+        (select_statement
+          (select_core
+            (select_list
+              (select_item
+                (string_literal)
+                (identifier))
+              (select_item
+                (string_literal)
+                (identifier)))
+            (from_clause
+              (dual_reference)))))
+      (identifier)
+      (parenthesized_expression
+        (binary_expression
+          (object_name
+            (identifier)
+            (identifier))
+          (object_name
+            (identifier)
+            (identifier))))
+      (merge_when_clause
+        (assignment
+          (object_name
+            (identifier)
+            (identifier))
+          (object_name
+            (identifier)
+            (identifier))))
+      (merge_when_clause
+        (column_list
+          (identifier)
+          (identifier))
+        (values_clause
+          (value_row
+            (object_name
+              (identifier)
+              (identifier))
+            (object_name
+              (identifier)
+              (identifier))))))))
+
+================================================================================
+merge with delete branch
+================================================================================
+
+MERGE INTO t USING u ON (t.id = u.id) WHEN MATCHED THEN DELETE;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (merge_statement
+      (object_name
+        (identifier))
+      (object_name
+        (identifier))
+      (parenthesized_expression
+        (binary_expression
+          (object_name
+            (identifier)
+            (identifier))
+          (object_name
+            (identifier)
+            (identifier))))
+      (merge_when_clause))))
+
+================================================================================
+truncate
+================================================================================
+
+TRUNCATE TABLE t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (truncate_statement
+      (object_name
+        (identifier)))))
+
+================================================================================
+truncate restart identity cascade
+================================================================================
+
+TRUNCATE TABLE t RESTART IDENTITY CASCADE;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (truncate_statement
+      (object_name
+        (identifier)))))
+
+================================================================================
+with clause before insert
+================================================================================
+
+WITH s AS (SELECT 1 a) INSERT INTO t (a) SELECT a FROM s;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (insert_statement
+      (with_clause
+        (common_table_expression
+          (identifier)
+          (select_statement
+            (select_core
+              (select_list
+                (select_item
+                  (number_literal)
+                  (identifier)))))))
+      (object_name
+        (identifier))
+      (column_list
+        (identifier))
+      (select_statement
+        (select_core
+          (select_list
+            (select_item
+              (object_name
+                (identifier))))
+          (from_clause
+            (table_reference
+              (object_name
+                (identifier)))))))))

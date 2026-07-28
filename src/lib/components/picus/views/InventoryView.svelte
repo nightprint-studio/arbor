@@ -13,8 +13,11 @@
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import Alert from '$lib/components/shared/ui/Alert.svelte';
   import PicusDialectChip from '../PicusDialectChip.svelte';
   import PicusRoleChip from '../PicusRoleChip.svelte';
+  import NoticeList from '../panels/NoticeList.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
@@ -54,7 +57,9 @@
       </p>
     </div>
     <div class="iv-summary">
-      {#if gapCount}
+      {#if picusProjectStore.analyzing}
+        <span class="iv-working"><Spinner size={12} /> Indexing…</span>
+      {:else if gapCount}
         <span class="iv-gaps"><TriangleAlert size={13} /> {gapCount} object{gapCount === 1 ? '' : 's'} with gaps</span>
       {:else}
         <span class="iv-ok"><CheckCircle2 size={13} /> Branches agree</span>
@@ -69,11 +74,23 @@
     <SearchBar bind:query showRegex={false} placeholder="Filter objects" ariaLabel="Filter objects" />
   </div>
 
-  {#if !rows.length}
+  {#if picusProjectStore.analysisError}
+    <Alert
+      variant="error"
+      title="The index could not be built"
+      text={picusProjectStore.analysisError}
+    />
+  {:else if !rows.length}
     <StateBlock
       tone="info"
       fill={false}
-      label={picusProjectStore.inventory.length ? `Nothing matches “${query}”.` : 'Nothing indexed yet.'}
+      label={!picusProjectStore.attached
+        ? 'No repository attached to this connection — there is nothing to index.'
+        : picusProjectStore.inventory.length
+          ? `Nothing matches “${query}”.`
+          : picusProjectStore.analyzing
+            ? 'Indexing the repository…'
+            : 'Nothing indexed yet.'}
     />
   {:else}
     <div class="iv-scroll">
@@ -118,6 +135,10 @@
       </table>
     </div>
   {/if}
+
+  <!-- Indexed, but claimed by no branch: not a gap between the two, a place
+       outside the model. Hiding it would make the matrix above look complete. -->
+  <NoticeList notes={picusProjectStore.orphans} label="Outside every branch" />
 </div>
 
 <style>
@@ -139,6 +160,7 @@
   .iv-summary { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; margin-left: auto; }
   .iv-gaps { display: inline-flex; align-items: center; gap: 5px; color: var(--error); font-size: 12px; font-weight: 600; }
   .iv-ok { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-size: 12px; font-weight: 600; }
+  .iv-working { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 12px; }
   .iv-link {
     background: none;
     border: none;

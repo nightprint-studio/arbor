@@ -1,0 +1,10 @@
+# Artifacts of `tree-sitter parse` / `tree-sitter test`, which compile the
+# grammar in place on Windows. The GENERATED SOURCES (src/parser.c,
+# src/grammar.json, src/node-types.json, src/tree_sitter/) are committed on
+# purpose — that is what lets `cargo build` work without Node.
+*.obj
+*.lib
+*.exp
+*.so
+*.dylib
+*.dll

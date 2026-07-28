@@ -5974,6 +5974,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "picus-analyze"
+version = "0.3.0"
+dependencies = [
+ "arbor-fs",
+ "picus-inventory",
+ "picus-parse",
+ "picus-project",
+ "picus-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "picus-ast"
 version = "0.3.0"
 dependencies = [
@@ -5988,13 +6001,19 @@ version = "0.3.0"
 dependencies = [
  "arbor-be",
  "arbor-core",
+ "arbor-fs",
  "arbor-ipc",
  "arbor-rpc",
+ "picus-analyze",
  "picus-ast",
  "picus-core",
  "picus-db-api",
  "picus-db-postgres",
  "picus-emit",
+ "picus-inventory",
+ "picus-parse",
+ "picus-project",
+ "picus-rewrite",
  "serde",
  "serde_json",
  "tokio",
@@ -6007,6 +6026,7 @@ dependencies = [
  "arbor-core",
  "arbor-ipc",
  "picus-db-api",
+ "picus-project",
  "serde",
  "serde_json",
  "toml 0.8.23",
@@ -6045,6 +6065,49 @@ dependencies = [
  "picus-ast",
  "picus-types",
  "serde",
+]
+
+[[package]]
+name = "picus-inventory"
+version = "0.3.0"
+dependencies = [
+ "arbor-fs",
+ "picus-parse",
+ "picus-project",
+ "picus-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "picus-parse"
+version = "0.3.0"
+dependencies = [
+ "cc",
+ "picus-types",
+ "serde",
+ "tree-sitter",
+]
+
+[[package]]
+name = "picus-project"
+version = "0.3.0"
+dependencies = [
+ "arbor-fs",
+ "encoding_rs",
+ "picus-types",
+ "regex",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "picus-rewrite"
+version = "0.3.0"
+dependencies = [
+ "arbor-fs",
+ "encoding_rs",
 ]
 
 [[package]]

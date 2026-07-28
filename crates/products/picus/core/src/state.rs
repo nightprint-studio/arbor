@@ -18,6 +18,7 @@ use picus_db_api::prelude::DbProviderRegistry;
 use serde_json::Value;
 
 use crate::connections::SessionPool;
+use crate::scripts::ScriptCache;
 
 /// The state every picus-be handler gets, `Arc`-shared across the dispatcher and
 /// any background workers (a long query, an inventory index build).
@@ -39,6 +40,10 @@ pub struct PicusState {
     /// The sessions currently open. In memory only: a database session's lifetime
     /// is the backend process, never the disk.
     sessions: SessionPool,
+    /// The script repositories read so far, decoded once and held until an
+    /// explicit refresh or a write. The other half of the studio: `sessions` is
+    /// what a live database is doing, this is what the files on disk say.
+    scripts: ScriptCache,
 }
 
 impl PicusState {
@@ -50,6 +55,7 @@ impl PicusState {
             host: None,
             providers: DbProviderRegistry::new(),
             sessions: SessionPool::new(),
+            scripts: ScriptCache::new(),
         }
     }
 
@@ -73,6 +79,11 @@ impl PicusState {
     /// The live-session pool.
     pub fn sessions(&self) -> &SessionPool {
         &self.sessions
+    }
+
+    /// The script repositories read so far.
+    pub fn scripts(&self) -> &ScriptCache {
+        &self.scripts
     }
 
     /// Emit a frontend event. The shell re-emits the topic to the Picus window.

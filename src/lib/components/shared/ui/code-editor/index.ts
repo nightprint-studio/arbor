@@ -22,7 +22,14 @@ export type {
   Tree,
   Node,
   CompletionSource,
+  InlineCompletionSource,
 } from './types';
+export {
+  inlineCompletion,
+  acceptInlineCompletion,
+  dismissInlineCompletion,
+  inlineCompletionActive,
+} from './inline-completion';
 export { codeEditorTheme } from './theme';
 export { createCodeEditorExtensions, refTextAt, type CodeEditorExtensionsOptions } from './extensions';
 export { createHighlightPlugin, makeByteToU16, makeU16ToByte, parserReady } from './highlight';

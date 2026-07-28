@@ -1,0 +1,33 @@
+[package]
+name         = "picus-analyze"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "picus — the fourteen rules over a repository of SQL install scripts: cross-branch coverage, install-to-update propagation, dialect, version guards, duplicates, encoding drift and unguarded DML, plus the declared suppressions that silence a finding without hiding it."
+
+# Pure, like the two crates below it: parsed files and a project description in,
+# findings out. No filesystem, no clock, no driver.
+[dependencies]
+# Statements, DML shape, literals and the constructs foreign to a file's dialect.
+picus-parse     = { path = "../parse" }
+# The tree, the version table, the update-file naming scheme.
+picus-project   = { path = "../project" }
+# `ParsedProject` (the parse joined to the tree) and the object index CONS001
+# and DUP002 are computed from. Building it is shared work: the interface
+# renders the inventory as well, so it is a parameter rather than something this
+# crate rebuilds behind the caller's back.
+picus-inventory = { path = "../inventory" }
+picus-types     = { path = "../types" }
+# `check_representable` — the mechanism behind ENC002. Picus supplies the policy
+# (which encoding a folder expects); arbor-fs owns the encoding tables.
+arbor-fs        = { path = "../../../foundation/fs" }
+serde           = { workspace = true }
+
+[dev-dependencies]
+# The wire shape is asserted against the field names the frontend reads.
+serde_json      = { workspace = true }
+
+[lints.rust]
+missing_debug_implementations = "warn"

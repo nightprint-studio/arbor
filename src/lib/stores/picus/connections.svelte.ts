@@ -14,6 +14,15 @@
  * a connection is listed, editable and complete with no server reachable. That is
  * not an edge case — a project routinely has an Oracle branch nobody can connect
  * to, and Picus maintains its scripts anyway.
+ *
+ * ## A connection carries its script repository
+ *
+ * Picus is database-oriented, not project-oriented: you open a database, and *its*
+ * scripts are what you see. The folder that database is installed from is
+ * therefore a property of the connection — `ConnectionSpec.scriptRoot`, a field of
+ * its own that the backend declares and reads. The connection editor renders it
+ * with a folder picker, separately from the raw "extra parameters" box, which is
+ * for driver settings.
  */
 
 import type { Connection, Dialect } from '$lib/types/picus';
@@ -33,6 +42,13 @@ import { picusSettingsStore } from './settings.svelte';
 /** Resolve a connection's palette slot to the CSS variable holding its colour. */
 export function connectionColorVar(conn: Pick<Connection, 'colorIdx'> | null | undefined): string {
   return `var(--ws-color-${conn?.colorIdx ?? 0})`;
+}
+
+/** Strip the live-state fields a row carries on top of its editable spec. */
+function toSpec(row: ConnectionRow): ConnectionSpec {
+  const { state: _state, serverVersion: _version, hasSecret: _secret, ...spec } =
+    $state.snapshot(row) as ConnectionRow;
+  return spec;
 }
 
 /**
@@ -108,6 +124,34 @@ function createConnectionsStore() {
     /** The editable spec behind a row — what the connection modal opens. */
     specById(id: string): ConnectionRow | null {
       return rows.find((r) => r.id === id) ?? null;
+    },
+
+    /** The script repository attached to a connection; empty when it has none. */
+    scriptRootFor(id: string | undefined): string {
+      if (!id) return '';
+      return rows.find((r) => r.id === id)?.scriptRoot ?? '';
+    },
+
+    /** The repository the window should be showing — the active connection's. */
+    get activeScriptRoot(): string {
+      return this.scriptRootFor(activeId);
+    },
+
+    /**
+     * Attach (or, with an empty path, detach) a repository.
+     *
+     * Goes through `save` so it lands in `connections.toml` like every other
+     * property of the connection; the password is untouched, which is what
+     * passing `undefined` means.
+     */
+    async setScriptRoot(id: string, path: string): Promise<void> {
+      const row = rows.find((r) => r.id === id);
+      if (!row) return;
+      const spec = toSpec(row);
+      // `undefined`, not `''`: the backend's field is an `Option`, and detaching
+      // means absent rather than "attached to nowhere".
+      await saveConnection({ ...spec, scriptRoot: path || undefined });
+      await this.load();
     },
 
     setActive(id: string) {

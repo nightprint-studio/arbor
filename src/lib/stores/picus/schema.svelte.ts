@@ -68,12 +68,18 @@ function createSchemaStore() {
       return snapshot.tables.find((t) => t.name.toUpperCase() === upper) ?? null;
     },
 
+    /** Case-insensitive for the same reason as `relation` — these two used to be
+     *  exact-match while every one of their siblings folded, so a sequence looked
+     *  up by a caller that spelled it differently from the server simply did not
+     *  exist. Same engines, same rule: PostgreSQL folds, Oracle shouts. */
     sequence(name: string): SequenceInfo | null {
-      return snapshot.sequences.find((s) => s.name === name) ?? null;
+      const upper = name.toUpperCase();
+      return snapshot.sequences.find((s) => s.name.toUpperCase() === upper) ?? null;
     },
 
     trigger(name: string): TriggerInfo | null {
-      return snapshot.triggers.find((t) => t.name === name) ?? null;
+      const upper = name.toUpperCase();
+      return snapshot.triggers.find((t) => t.name.toUpperCase() === upper) ?? null;
     },
 
     /** Triggers attached to one table — shown on that table's structure tab. */

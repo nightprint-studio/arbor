@@ -1,0 +1,6 @@
+{
+  "name": "tree-sitter-picus-sql",
+  "private": true,
+  "type": "commonjs",
+  "description": "Tree-sitter grammar for Picus — ONE permissive superset of Oracle SQL/PL-SQL and PostgreSQL SQL/PL-pgSQL. `type: commonjs` is load-bearing: the tree-sitter CLI requires grammar.js with require()."
+}

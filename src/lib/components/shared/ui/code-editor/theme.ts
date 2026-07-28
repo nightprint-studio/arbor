@@ -129,14 +129,18 @@ export const codeEditorTheme = EditorView.theme(
     },
     '.cm-tooltip.cm-tooltip-lint': { padding: '2px 6px' },
 
-    // ── Hover card (a language `intel.hover` source, e.g. a symbol signature) ──
-    '.cm-tooltip .bennu-hover': { padding: '6px 9px', maxWidth: '440px' },
-    '.bennu-hover .bh-sig': {
+    // ── Hover card (a language `intel.hover` source) ──────────────────────────
+    // One card shape for every product: a monospaced title (a signature, a column
+    // name), a muted meta line, and an optional wrapped body. Bennu renders symbol
+    // signatures into it and Picus renders column facts; keeping the class names
+    // product-neutral is what stops the second one from forking the CSS.
+    '.cm-tooltip .cm-hover-card': { padding: '6px 9px', maxWidth: '440px' },
+    '.cm-hover-card .cm-hc-title': {
       fontFamily: 'var(--font-code)', fontSize: '11.5px', color: 'var(--text-primary)',
       whiteSpace: 'pre-wrap', wordBreak: 'break-word',
     },
-    '.bennu-hover .bh-meta': { fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '3px' },
-    '.bennu-hover .bh-doc': {
+    '.cm-hover-card .cm-hc-meta': { fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '3px' },
+    '.cm-hover-card .cm-hc-doc': {
       fontFamily: 'var(--font-ui-sans)', fontSize: '11px', color: 'var(--text-secondary)',
       marginTop: '5px', paddingTop: '5px', borderTop: '1px solid var(--border-subtle)', whiteSpace: 'pre-wrap',
     },

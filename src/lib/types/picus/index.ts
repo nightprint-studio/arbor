@@ -12,8 +12,9 @@
  * property of the FOLDER, never a global "current dialect"**. Every type that
  * can produce or analyse SQL carries its `Dialect` explicitly.
  *
- * These mirror the eventual `picus-be` wire types; until that backend exists the
- * stores fill them from `components/picus/mock` (see the note there).
+ * These are the `picus-be` wire types: the Rust side serialises camelCase field
+ * for field, so nothing translates between the backend and what is rendered.
+ * The request/response envelopes around them live in `ipc/picus/{db,scripts}.ts`.
  */
 
 // ── Dialects ─────────────────────────────────────────────────────────────────
@@ -301,7 +302,8 @@ export type Severity = 'blocking' | 'review';
 
 /** Stable rule identifiers (§4.3). Kept as a union so a typo can't invent one. */
 export type RuleId =
-  | 'CONS001' | 'CONS002' | 'CONS003'
+  | 'CONS001' | 'CONS002' | 'CONS003' | 'CONS004'
+  | 'DIA001'
   | 'VER001' | 'VER002' | 'VER003'
   | 'DUP001' | 'DUP002'
   | 'ENC001' | 'ENC002'
@@ -427,4 +429,14 @@ export interface PicusTab {
   dialect?: Dialect;
   /** Unsaved changes marker. */
   dirty?: boolean;
+  /**
+   * 1-based line the view should reveal — set when a finding, or any other
+   * located thing, opens the file at a place rather than at the top.
+   */
+  revealLine?: number;
+  /**
+   * Bumped on every reveal request. Two consecutive jumps to the same line are
+   * two jumps, and without this the second would look like it was ignored.
+   */
+  revealNonce?: number;
 }

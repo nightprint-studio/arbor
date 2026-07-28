@@ -4,13 +4,12 @@
    * studio). Mirrors TytoWindow / MerulaWindow: it is NOT the full Arbor app, it
    * only boots the theme / appearance / animation config and mounts `PicusShell`.
    *
-   * `picus-be` serves the studio's settings today; the database and script domains
-   * land in the following waves, so the rest still falls back to the fixtures in
-   * `ipc/picus/mock` — the same staging Tyto's control panel went through before
-   * its capture engine landed. Each window is its own JS context, so these stores
-   * are independent of the main window's.
+   * `picus-be` serves both halves: the studio's settings and connections, and the
+   * script repository — its tree, its inventory and its consistency findings. Each
+   * window is its own JS context, so these stores are independent of the main
+   * window's.
    */
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
   import { themeStore } from '$lib/stores/theme.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
@@ -18,6 +17,8 @@
   import { picusSettingsStore } from '$lib/stores/picus/settings.svelte';
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
   import { schemaStore } from '$lib/stores/picus/schema.svelte';
+  import { picusProjectStore } from '$lib/stores/picus/project.svelte';
+  import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import PicusShell from './PicusShell.svelte';
 
   onMount(() => {
@@ -54,6 +55,29 @@
     } else if (!active || active.state === 'disconnected') {
       if (schemaStore.connectionId) schemaStore.clear();
     }
+  });
+
+  /**
+   * Keep the script repository pointed at the active connection's.
+   *
+   * Picus is database-oriented: you open a database and *its* scripts are what you
+   * see. Unlike the schema, this does NOT require an open session — a repository
+   * with an Oracle branch is maintained, checked and generated into with no Oracle
+   * driver in existence, which is exactly the case the product was built for.
+   *
+   * `open()` is a no-op when the root is already the one loaded, so this settles
+   * after one pass; the read is deliberately not awaited, so nothing here can
+   * block a paint.
+   */
+  $effect(() => {
+    const root = connectionsStore.activeScriptRoot;
+    untrack(() => {
+      if (root === picusProjectStore.root) return;
+      // The destinations name files inside the repository being left behind.
+      dmlStore.resetTargets();
+      if (root) void picusProjectStore.open(root);
+      else picusProjectStore.close();
+    });
   });
 </script>
 

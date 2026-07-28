@@ -1,0 +1,775 @@
+================================================================================
+anonymous block
+================================================================================
+
+BEGIN
+  NULL;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (null_statement)))
+    (slash_terminator)))
+
+================================================================================
+declare block
+================================================================================
+
+DECLARE
+  v NUMBER;
+BEGIN
+  v := 1;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (declare_section
+        (variable_declaration
+          (identifier)
+          (data_type
+            (object_name
+              (identifier)))))
+      (plsql_body
+        (assignment_statement
+          (object_name
+            (identifier))
+          (number_literal))))
+    (slash_terminator)))
+
+================================================================================
+select into
+================================================================================
+
+DECLARE
+  v NUMBER;
+BEGIN
+  SELECT COUNT(*) INTO v FROM t;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (declare_section
+        (variable_declaration
+          (identifier)
+          (data_type
+            (object_name
+              (identifier)))))
+      (plsql_body
+        (select_statement
+          (select_core
+            (select_list
+              (select_item
+                (function_call
+                  (object_name
+                    (identifier))
+                  (star_argument))))
+            (into_clause
+              (object_name
+                (identifier)))
+            (from_clause
+              (table_reference
+                (object_name
+                  (identifier))))))))
+    (slash_terminator)))
+
+================================================================================
+if elsif else
+================================================================================
+
+BEGIN
+  IF a = 1 THEN
+    NULL;
+  ELSIF a = 2 THEN
+    NULL;
+  ELSE
+    NULL;
+  END IF;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (if_statement
+          (binary_expression
+            (object_name
+              (identifier))
+            (number_literal))
+          (null_statement)
+          (elsif_clause
+            (binary_expression
+              (object_name
+                (identifier))
+              (number_literal))
+            (null_statement))
+          (else_clause
+            (null_statement)))))
+    (slash_terminator)))
+
+================================================================================
+nested if
+================================================================================
+
+BEGIN
+  IF a = 1 THEN
+    IF b = 2 THEN
+      NULL;
+    END IF;
+  END IF;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (if_statement
+          (binary_expression
+            (object_name
+              (identifier))
+            (number_literal))
+          (if_statement
+            (binary_expression
+              (object_name
+                (identifier))
+              (number_literal))
+            (null_statement)))))
+    (slash_terminator)))
+
+================================================================================
+basic loop with exit when
+================================================================================
+
+BEGIN
+  LOOP
+    EXIT WHEN a > 10;
+  END LOOP;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (loop_statement
+          (exit_statement
+            (binary_expression
+              (object_name
+                (identifier))
+              (number_literal))))))
+    (slash_terminator)))
+
+================================================================================
+while loop
+================================================================================
+
+BEGIN
+  WHILE a < 10 LOOP
+    a := a + 1;
+  END LOOP;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (while_statement
+          (binary_expression
+            (object_name
+              (identifier))
+            (number_literal))
+          (assignment_statement
+            (object_name
+              (identifier))
+            (binary_expression
+              (object_name
+                (identifier))
+              (number_literal))))))
+    (slash_terminator)))
+
+================================================================================
+numeric for loop
+================================================================================
+
+BEGIN
+  FOR i IN 1..10 LOOP
+    NULL;
+  END LOOP;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (for_statement
+          (identifier)
+          (numeric_range
+            (number_literal)
+            (number_literal))
+          (null_statement))))
+    (slash_terminator)))
+
+================================================================================
+reverse for loop
+================================================================================
+
+BEGIN
+  FOR i IN REVERSE 1..10 LOOP
+    NULL;
+  END LOOP;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (for_statement
+          (identifier)
+          (numeric_range
+            (number_literal)
+            (number_literal))
+          (null_statement))))
+    (slash_terminator)))
+
+================================================================================
+cursor for loop
+================================================================================
+
+BEGIN
+  FOR r IN (SELECT a FROM t) LOOP
+    NULL;
+  END LOOP;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (for_statement
+          (identifier)
+          (subquery
+            (select_statement
+              (select_core
+                (select_list
+                  (select_item
+                    (object_name
+                      (identifier))))
+                (from_clause
+                  (table_reference
+                    (object_name
+                      (identifier)))))))
+          (null_statement))))
+    (slash_terminator)))
+
+================================================================================
+labelled loop
+================================================================================
+
+BEGIN
+  <<outer>>
+  LOOP
+    EXIT outer;
+  END LOOP outer;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (loop_statement
+          (statement_label
+            (identifier))
+          (exit_statement
+            (identifier))
+          (identifier))))
+    (slash_terminator)))
+
+================================================================================
+explicit cursor
+================================================================================
+
+DECLARE
+  CURSOR c IS SELECT a FROM t;
+  v t.a%TYPE;
+BEGIN
+  OPEN c;
+  FETCH c INTO v;
+  CLOSE c;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (declare_section
+        (cursor_declaration
+          (identifier)
+          (select_statement
+            (select_core
+              (select_list
+                (select_item
+                  (object_name
+                    (identifier))))
+              (from_clause
+                (table_reference
+                  (object_name
+                    (identifier)))))))
+        (variable_declaration
+          (identifier)
+          (percent_type
+            (object_name
+              (identifier)
+              (identifier)))))
+      (plsql_body
+        (open_statement
+          (object_name
+            (identifier)))
+        (fetch_statement
+          (object_name
+            (identifier))
+          (object_name
+            (identifier)))
+        (close_statement
+          (object_name
+            (identifier)))))
+    (slash_terminator)))
+
+================================================================================
+cursor with parameters
+================================================================================
+
+DECLARE
+  CURSOR c (p NUMBER) IS SELECT a FROM t WHERE b = p;
+BEGIN
+  OPEN c (1);
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (declare_section
+        (cursor_declaration
+          (identifier)
+          (parameter_list
+            (parameter
+              (identifier)
+              (data_type
+                (object_name
+                  (identifier)))))
+          (select_statement
+            (select_core
+              (select_list
+                (select_item
+                  (object_name
+                    (identifier))))
+              (from_clause
+                (table_reference
+                  (object_name
+                    (identifier))))
+              (where_clause
+                (binary_expression
+                  (object_name
+                    (identifier))
+                  (object_name
+                    (identifier))))))))
+      (plsql_body
+        (open_statement
+          (object_name
+            (identifier))
+          (number_literal))))
+    (slash_terminator)))
+
+================================================================================
+rowtype variable
+================================================================================
+
+DECLARE
+  r t%ROWTYPE;
+BEGIN
+  NULL;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (declare_section
+        (variable_declaration
+          (identifier)
+          (percent_rowtype
+            (object_name
+              (identifier)))))
+      (plsql_body
+        (null_statement)))
+    (slash_terminator)))
+
+================================================================================
+exception section
+================================================================================
+
+BEGIN
+  NULL;
+EXCEPTION
+  WHEN NO_DATA_FOUND THEN
+    NULL;
+  WHEN OTHERS THEN
+    NULL;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (null_statement)
+        (exception_section
+          (exception_handler
+            (object_name
+              (identifier))
+            (null_statement))
+          (exception_handler
+            (null_statement)))))
+    (slash_terminator)))
+
+================================================================================
+user defined exception
+================================================================================
+
+DECLARE
+  e_troppo EXCEPTION;
+BEGIN
+  RAISE e_troppo;
+EXCEPTION
+  WHEN e_troppo THEN
+    NULL;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (declare_section
+        (exception_declaration
+          (identifier)))
+      (plsql_body
+        (raise_statement
+          (object_name
+            (identifier)))
+        (exception_section
+          (exception_handler
+            (object_name
+              (identifier))
+            (null_statement)))))
+    (slash_terminator)))
+
+================================================================================
+execute immediate
+================================================================================
+
+BEGIN
+  EXECUTE IMMEDIATE 'ALTER TABLE t ADD c NUMBER';
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (execute_immediate_statement
+          (string_literal))))
+    (slash_terminator)))
+
+================================================================================
+execute immediate into using
+================================================================================
+
+DECLARE
+  v NUMBER;
+BEGIN
+  EXECUTE IMMEDIATE 'SELECT COUNT(*) FROM t WHERE a = :1' INTO v USING 1;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (declare_section
+        (variable_declaration
+          (identifier)
+          (data_type
+            (object_name
+              (identifier)))))
+      (plsql_body
+        (execute_immediate_statement
+          (string_literal)
+          (into_clause
+            (object_name
+              (identifier)))
+          (number_literal))))
+    (slash_terminator)))
+
+================================================================================
+nested block
+================================================================================
+
+BEGIN
+  BEGIN
+    NULL;
+  END;
+  NULL;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (plsql_block
+          (plsql_body
+            (null_statement)))
+        (null_statement)))
+    (slash_terminator)))
+
+================================================================================
+constant and default declarations
+================================================================================
+
+DECLARE
+  c CONSTANT NUMBER := 10;
+  d NUMBER DEFAULT 5;
+  e VARCHAR2(10) NOT NULL := 'x';
+BEGIN
+  NULL;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (declare_section
+        (variable_declaration
+          (identifier)
+          (data_type
+            (object_name
+              (identifier)))
+          (number_literal))
+        (variable_declaration
+          (identifier)
+          (data_type
+            (object_name
+              (identifier)))
+          (number_literal))
+        (variable_declaration
+          (identifier)
+          (data_type
+            (object_name
+              (identifier))
+            (type_arguments
+              (number_literal)))
+          (not_null_constraint)
+          (string_literal)))
+      (plsql_body
+        (null_statement)))
+    (slash_terminator)))
+
+================================================================================
+record and table types
+================================================================================
+
+DECLARE
+  TYPE r_t IS RECORD (a NUMBER, b VARCHAR2(10));
+  TYPE t_t IS TABLE OF NUMBER INDEX BY BINARY_INTEGER;
+BEGIN
+  NULL;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (declare_section
+        (record_type_declaration
+          (identifier)
+          (identifier)
+          (data_type
+            (object_name
+              (identifier)))
+          (identifier)
+          (data_type
+            (object_name
+              (identifier))
+            (type_arguments
+              (number_literal))))
+        (record_type_declaration
+          (identifier)
+          (data_type
+            (object_name
+              (identifier)))
+          (data_type
+            (object_name
+              (identifier)))))
+      (plsql_body
+        (null_statement)))
+    (slash_terminator)))
+
+================================================================================
+case statement
+================================================================================
+
+BEGIN
+  CASE a
+    WHEN 1 THEN NULL;
+    ELSE NULL;
+  END CASE;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (case_statement
+          (object_name
+            (identifier))
+          (case_statement_when
+            (number_literal)
+            (null_statement))
+          (null_statement))))
+    (slash_terminator)))
+
+================================================================================
+dml inside a block
+================================================================================
+
+BEGIN
+  INSERT INTO t (a) VALUES (1);
+  UPDATE t SET a = 2 WHERE a = 1;
+  DELETE FROM t WHERE a = 2;
+  COMMIT;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (insert_statement
+          (object_name
+            (identifier))
+          (column_list
+            (identifier))
+          (values_clause
+            (value_row
+              (number_literal))))
+        (update_statement
+          (object_name
+            (identifier))
+          (assignment
+            (object_name
+              (identifier))
+            (number_literal))
+          (where_clause
+            (binary_expression
+              (object_name
+                (identifier))
+              (number_literal))))
+        (delete_statement
+          (object_name
+            (identifier))
+          (where_clause
+            (binary_expression
+              (object_name
+                (identifier))
+              (number_literal))))
+        (transaction_statement)))
+    (slash_terminator)))
+
+================================================================================
+procedure call
+================================================================================
+
+BEGIN
+  pkg.go(1);
+  dbms_output.put_line('x');
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (procedure_call_statement
+          (function_call
+            (object_name
+              (identifier)
+              (identifier))
+            (number_literal)))
+        (procedure_call_statement
+          (function_call
+            (object_name
+              (identifier)
+              (identifier))
+            (string_literal)))))
+    (slash_terminator)))

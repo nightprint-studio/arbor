@@ -1,0 +1,279 @@
+================================================================================
+from dual
+================================================================================
+
+SELECT SYSDATE FROM DUAL;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (dual_reference))))))
+
+================================================================================
+rownum
+================================================================================
+
+SELECT a FROM t WHERE ROWNUM <= 10;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))
+        (where_clause
+          (binary_expression
+            (rownum)
+            (number_literal)))))))
+
+================================================================================
+connect by
+================================================================================
+
+SELECT ename FROM emp START WITH mgr IS NULL CONNECT BY PRIOR empno = mgr;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))
+        (start_with_clause
+          (is_expression
+            (object_name
+              (identifier))
+            (null_literal)))
+        (connect_by_clause
+          (binary_expression
+            (prior_expression
+              (object_name
+                (identifier)))
+            (object_name
+              (identifier))))))))
+
+================================================================================
+connect by nocycle order siblings
+================================================================================
+
+SELECT ename FROM emp CONNECT BY NOCYCLE PRIOR empno = mgr ORDER SIBLINGS BY ename;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))
+        (connect_by_clause
+          (binary_expression
+            (prior_expression
+              (object_name
+                (identifier)))
+            (object_name
+              (identifier)))))
+      (order_by_clause
+        (order_by_item
+          (object_name
+            (identifier)))))))
+
+================================================================================
+nvl decode
+================================================================================
+
+SELECT NVL(a, 0), DECODE(b, 1, 'x', 'y') FROM t;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (function_call
+              (object_name
+                (identifier))
+              (object_name
+                (identifier))
+              (number_literal)))
+          (select_item
+            (function_call
+              (object_name
+                (identifier))
+              (object_name
+                (identifier))
+              (number_literal)
+              (string_literal)
+              (string_literal))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier))))))))
+
+================================================================================
+percent type and rowtype
+================================================================================
+
+DECLARE
+  v t.a%TYPE;
+  r t%ROWTYPE;
+BEGIN
+  NULL;
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (declare_section
+        (variable_declaration
+          (identifier)
+          (percent_type
+            (object_name
+              (identifier)
+              (identifier))))
+        (variable_declaration
+          (identifier)
+          (percent_rowtype
+            (object_name
+              (identifier)))))
+      (plsql_body
+        (null_statement)))
+    (slash_terminator)))
+
+================================================================================
+minus
+================================================================================
+
+SELECT a FROM t1 MINUS SELECT a FROM t2;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (set_operation
+        (select_core
+          (select_list
+            (select_item
+              (object_name
+                (identifier))))
+          (from_clause
+            (table_reference
+              (object_name
+                (identifier)))))
+        (select_core
+          (select_list
+            (select_item
+              (object_name
+                (identifier))))
+          (from_clause
+            (table_reference
+              (object_name
+                (identifier)))))))))
+
+================================================================================
+database link
+================================================================================
+
+SELECT a FROM t@remoto;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (select_statement
+      (select_core
+        (select_list
+          (select_item
+            (object_name
+              (identifier))))
+        (from_clause
+          (table_reference
+            (object_name
+              (identifier)
+              (identifier))))))))
+
+================================================================================
+bitmap index
+================================================================================
+
+CREATE BITMAP INDEX ix ON t (a);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (create_index_statement
+      (object_name
+        (identifier))
+      (object_name
+        (identifier))
+      (index_element
+        (object_name
+          (identifier))))))
+
+================================================================================
+forall
+================================================================================
+
+BEGIN
+  FORALL i IN 1..10
+    INSERT INTO t (a) VALUES (i);
+END;
+/
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (statement
+    (plsql_block
+      (plsql_body
+        (forall_statement
+          (identifier)
+          (numeric_range
+            (number_literal)
+            (number_literal))
+          (insert_statement
+            (object_name
+              (identifier))
+            (column_list
+              (identifier))
+            (values_clause
+              (value_row
+                (object_name
+                  (identifier))))))))
+    (slash_terminator)))

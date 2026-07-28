@@ -8,27 +8,45 @@
    * the folder, and every file row carries its encoding and line ending, because
    * a file silently rewritten as UTF-8 is one of the failures Picus exists to
    * catch.
+   *
+   * The repository shown is **the active connection's**: Picus is database
+   * oriented, so you open a database and its scripts are what you get. A
+   * connection with none attached is offered a folder to point at, rather than
+   * leaving the panel to look broken.
    */
-  import { FolderTree, ChevronRight, Folder, FileCode2, RefreshCw, FolderOpen } from 'lucide-svelte';
+  import { FolderTree, ChevronRight, Folder, FileCode2, RefreshCw, FolderOpen, Database } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import Alert from '$lib/components/shared/ui/Alert.svelte';
   import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
   import PicusDialectChip from '../PicusDialectChip.svelte';
   import PicusRoleChip from '../PicusRoleChip.svelte';
-  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+  import NoticeList from './NoticeList.svelte';
+  import { connectionsStore } from '$lib/stores/picus/connections.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
+  import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import type { ScriptFile } from '$lib/types/picus';
 
   let query = $state('');
   const needle = $derived(query.trim().toLowerCase());
 
+  const connection = $derived(connectionsStore.active);
+  const attached = $derived(picusProjectStore.attached);
+
   function matches(f: ScriptFile): boolean {
     return !needle || f.name.toLowerCase().includes(needle) || f.path.toLowerCase().includes(needle);
+  }
+
+  function openFile(path: string) {
+    const file = picusProjectStore.fileByPath(path);
+    if (!file) return;
+    picusTabsStore.openFile(file.path, file.name, picusProjectStore.dialectOfFile(file.path));
   }
 
   /** Marker meaning for the coloured dot on a file row. */
@@ -46,18 +64,22 @@
     <Button
       variant="icon"
       size="xs"
-      title="Re-scan the project"
-      ariaLabel="Re-scan the project"
-      onclick={() => toastStore.show('Project re-scanned.', 'success')}
+      tooltip={{ content: 'Re-read the repository from disk', shortcut: 'F5' }}
+      ariaLabel="Re-read the repository from disk"
+      disabled={!attached || picusProjectStore.loading}
+      onclick={() => void picusProjectStore.refresh()}
     >
       {#snippet iconStart()}<RefreshCw size={13} />{/snippet}
     </Button>
     <Button
       variant="icon"
       size="xs"
-      tooltip={{ content: 'Open a script project', shortcut: 'Ctrl+O' }}
-      ariaLabel="Open a script project"
-      onclick={() => toastStore.show('Project opening lands with the filesystem milestone.', 'info')}
+      tooltip={attached
+        ? 'Point this connection at another folder of scripts'
+        : 'Attach the folder of scripts this database is installed from'}
+      ariaLabel="Attach a script repository"
+      disabled={!connection}
+      onclick={() => connection && picusUiStore.openScriptRootPicker(connection.id)}
     >
       {#snippet iconStart()}<FolderOpen size={13} />{/snippet}
     </Button>
@@ -67,9 +89,73 @@
     <SearchBar bind:query showRegex={false} placeholder="Filter files" ariaLabel="Filter files" />
   {/snippet}
 
-  {#if !picusProjectStore.branches.length}
-    <StateBlock tone="info" fill={false} label="No project open. Open a folder of SQL scripts to index it." />
+  {#if !connection}
+    <StateBlock
+      tone="info"
+      fill={false}
+      label="No connection selected. A repository of scripts belongs to the database it installs — pick one under Connections."
+    />
+  {:else if !attached}
+    <div class="sp-attach">
+      <StateBlock tone="info" fill={false}>
+        <div class="sp-attach-text">
+          <strong>{connection.name} has no scripts attached.</strong>
+          <span>
+            Point it at the folder this database is installed from — the one holding a
+            branch per dialect. Picus reads the layout, indexes the objects and checks the
+            branches against each other.
+          </span>
+        </div>
+      </StateBlock>
+      <Button
+        variant="primary"
+        size="sm"
+        onclick={() => picusUiStore.openScriptRootPicker(connection.id)}
+      >
+        {#snippet iconStart()}<FolderOpen size={13} />{/snippet}
+        Attach a folder…
+      </Button>
+    </div>
+  {:else if picusProjectStore.loading && !picusProjectStore.branches.length}
+    <StateBlock tone="loading">
+      {#snippet spinner()}<Spinner size={14} />{/snippet}
+      <span>Reading {picusProjectStore.root}…</span>
+    </StateBlock>
+  {:else if picusProjectStore.error}
+    <div class="sp-error">
+      <Alert variant="error" compact title="This folder could not be read" text={picusProjectStore.error} />
+      <div class="sp-error-actions">
+        <Button variant="secondary" size="xs" onclick={() => void picusProjectStore.refresh()}>Try again</Button>
+        <Button
+          variant="ghost"
+          size="xs"
+          onclick={() => picusUiStore.openScriptRootPicker(connection.id)}
+        >
+          Choose another folder…
+        </Button>
+      </div>
+    </div>
+  {:else if !picusProjectStore.branches.length}
+    <StateBlock
+      tone="info"
+      fill={false}
+      label="Nothing that looks like a script branch was found under this folder."
+    />
   {:else}
+    <!-- The reader's questions come before the tree: a folder it could not
+         classify changes what every row below it means. -->
+    <NoticeList notes={picusProjectStore.problems} label="Needs an answer" onOpen={openFile} />
+
+    {#if picusProjectStore.isNew}
+      <div class="sp-inferred">
+        <Alert
+          variant="info"
+          compact
+          text="This layout was inferred from the folder names — nothing has been written into the repository. Branches, roles and encodings below are Picus's reading of it."
+        />
+      </div>
+    {/if}
+
     {#each picusProjectStore.branches as branch (branch.id)}
       <SidebarItem onclick={() => picusProjectStore.toggle(branch.id)}>
         {#snippet icon()}
@@ -130,9 +216,15 @@
       {/if}
     {/each}
 
+    <NoticeList notes={picusProjectStore.notes} label="What Picus inferred" onOpen={openFile} />
+
     <p class="sp-hint">
       The dialect is a property of the folder: the same data is written in two different
       forms, once per branch.
+    </p>
+    <p class="sp-root" title={picusProjectStore.root}>
+      <Database size={11} />
+      {connection.name} · {picusProjectStore.root}
     </p>
   {/if}
 </PanelShell>
@@ -185,6 +277,36 @@
     line-height: 1.5;
     color: var(--text-muted);
   }
+
+  /* Which database's repository this is — the panel's whole framing in one line. */
+  .sp-root {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 12px 10px;
+    font-family: var(--font-code);
+    font-size: 10px;
+    color: var(--text-disabled);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sp-attach {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 4px 12px 12px;
+  }
+  .sp-attach-text { display: flex; flex-direction: column; gap: 4px; text-align: left; }
+  .sp-attach-text strong { font-size: 12px; }
+  .sp-attach-text span { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+
+  .sp-error { display: flex; flex-direction: column; gap: 8px; padding: 8px 12px; }
+  .sp-error-actions { display: flex; gap: 6px; }
+
+  .sp-inferred { padding: 4px 12px 8px; }
 
   :global(.sp-folder-icon) { color: var(--text-muted); flex-shrink: 0; }
 </style>

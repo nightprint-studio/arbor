@@ -11,9 +11,9 @@
  */
 
 import type { QueryLogEntry, QueryResult } from '$lib/types/picus';
-import { DEFAULT_QUERY_TEXT } from '$lib/ipc/picus/mock';
 import { cancel as rpcCancel, execute } from '$lib/ipc/picus/db';
 import { connectionsStore } from './connections.svelte';
+import { picusSettingsStore } from './settings.svelte';
 
 export interface HistoryEntry {
   id: string;
@@ -37,7 +37,9 @@ interface QueryTabState {
 }
 
 function emptyTab(): QueryTabState {
-  return { sql: DEFAULT_QUERY_TEXT, result: null, messages: [], running: false, pane: 'results', error: null };
+  // A new tab starts empty. A pre-filled sample would be a statement the user did
+  // not write, one Ctrl+Enter away from running against a real database.
+  return { sql: '', result: null, messages: [], running: false, pane: 'results', error: null };
 }
 
 /**
@@ -59,9 +61,16 @@ function createQueryStore() {
   let tabs = $state<Record<string, QueryTabState>>({});
   let history = $state<HistoryEntry[]>([]);
   let historyFilter = $state('');
-  /** Row cap; the rest is fetched on demand. */
-  let rowLimit = $state(500);
   let seq = 0;
+
+  /**
+   * The row cap, from the user's settings — one source, not two.
+   *
+   * This used to be a second `$state(500)` living here, which meant the number in
+   * the settings modal was persisted, displayed, and then ignored: every query ran
+   * at 500 whatever the user had chosen.
+   */
+  const rowLimit = $derived(picusSettingsStore.rowLimit);
 
   function ensure(tabId: string): QueryTabState {
     if (!tabs[tabId]) tabs = { ...tabs, [tabId]: emptyTab() };
@@ -80,7 +89,6 @@ function createQueryStore() {
     get filteredHistory() { return filteredHistory; },
     get historyFilter() { return historyFilter; },
 
-    setRowLimit(n: number) { rowLimit = Math.max(1, n); },
     setHistoryFilter(v: string) { historyFilter = v; },
 
     /** Pure read — safe inside a `$derived`. Returns the shared default until
@@ -131,7 +139,9 @@ function createQueryStore() {
         };
         const summary = res.commandTag
           ? res.commandTag
-          : `${res.rowCount} row(s)${res.truncated ? ` (capped at ${rowLimit})` : ''}`;
+          : res.truncated
+            ? `first ${res.rowCount} row(s) — the statement returned more, and the rest was not fetched`
+            : `${res.rowCount} row(s)`;
         state.messages = [
           {
             time: startedAt,

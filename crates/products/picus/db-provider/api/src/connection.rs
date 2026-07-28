@@ -45,6 +45,20 @@ pub struct ConnectionSpec {
     /// trusted network; a managed cloud database will refuse a plaintext session.
     #[serde(default)]
     pub tls: bool,
+    /// The repository of install scripts this database is built from — an
+    /// absolute path, in the platform's own form. Absent when the connection has
+    /// none yet.
+    ///
+    /// This is the product's spine rather than a convenience: those scripts
+    /// install *this* database, and the generator only makes sense with that
+    /// schema in front of it. Opening the connection is what puts its repository
+    /// in view, which is why the path belongs to the connection and not to a
+    /// separate "recent projects" list that could point somewhere else.
+    ///
+    /// Safe to persist for the same reason as everything else here — a path is
+    /// not a secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script_root: Option<String>,
     /// Engine-specific extras declared by the descriptor but with no named field
     /// here — so a new engine can ask for something without changing this type.
     #[serde(default)]

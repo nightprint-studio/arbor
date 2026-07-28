@@ -1,0 +1,28 @@
+[package]
+name         = "picus-parse"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "picus — one permissive Tree-sitter grammar for Oracle and PostgreSQL SQL, plus a byte-range-oriented reader over it: statements, the objects they define and reference, DML shape, and the constructs foreign to the file's declared dialect."
+
+# `picus-types` for `EngineKind` — the dialect is always an explicit parameter,
+# never ambient (docs/picus-design.md §1). `tree-sitter` is the runtime that
+# drives the committed `src/parser.c`, and `cc` compiles that C in `build.rs`.
+# Both pins match `merula-lang`, the other hand-written grammar in the workspace,
+# so Cargo builds one artifact for each.
+#
+# What this crate deliberately does NOT depend on: `picus-db-api`, any driver,
+# anything Tauri. The script half of Picus has to work for Oracle with no Oracle
+# connection in sight.
+[dependencies]
+picus-types = { path = "../types" }
+serde       = { workspace = true }
+tree-sitter = "0.25"
+
+[build-dependencies]
+cc = "1"
+
+[lints.rust]
+missing_debug_implementations = "warn"

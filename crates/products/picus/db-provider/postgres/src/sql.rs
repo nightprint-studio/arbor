@@ -70,11 +70,7 @@ impl StatementKind {
 /// verb is treated as a write, so a gap in this list can only ever be too strict.
 pub fn statement_kind(sql: &str) -> StatementKind {
     let s = strip_leading_noise(sql);
-    let head = s
-        .split(|c: char| c.is_whitespace() || c == '(' || c == ';')
-        .find(|w| !w.is_empty())
-        .unwrap_or("")
-        .to_ascii_uppercase();
+    let head = leading_keyword(s);
 
     match head.as_str() {
         "SELECT" | "SHOW" | "EXPLAIN" | "TABLE" | "VALUES" | "FETCH" => StatementKind::Read,
@@ -93,6 +89,14 @@ pub fn statement_kind(sql: &str) -> StatementKind {
         }
         _ => StatementKind::Write,
     }
+}
+
+/// The first real keyword of a statement, upper-cased. `""` when there is none.
+fn leading_keyword(s: &str) -> String {
+    s.split(|c: char| c.is_whitespace() || c == '(' || c == ';')
+        .find(|w| !w.is_empty())
+        .unwrap_or("")
+        .to_ascii_uppercase()
 }
 
 /// Drop leading whitespace and comments so the first real keyword is reachable.
@@ -163,6 +167,152 @@ pub fn guard_read_only(sql: &str, read_only: bool) -> Result<(), DbError> {
         }
         _ => Ok(()),
     }
+}
+
+// ── Bounding a result set at the server ────────────────────────────────────────
+
+/// The single statement `sql` contains, trimmed and without its terminating `;` —
+/// or `None` when it holds none, or more than one.
+///
+/// "More than one" has to be decided by a real scan, not by looking for a `;`:
+/// semicolons live quite legitimately inside string literals, quoted identifiers,
+/// dollar-quoted bodies and comments, and mistaking one of those for a statement
+/// boundary would mean rewriting a statement we do not actually understand. Every
+/// ambiguity here resolves to `None`, which costs only the server-side cap.
+pub fn single_statement(sql: &str) -> Option<&str> {
+    let bytes = sql.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        let rest = &sql[i..];
+
+        if rest.starts_with("--") {
+            i = match rest.find('\n') {
+                Some(n) => i + n + 1,
+                None => bytes.len(),
+            };
+            continue;
+        }
+        if rest.starts_with("/*") {
+            i = block_comment_end(sql, i)?;
+            continue;
+        }
+
+        match bytes[i] {
+            // A string literal or a quoted identifier; `''` / `""` escape the quote.
+            q if q == b'\'' || q == b'"' => {
+                let mut j = i + 1;
+                loop {
+                    if j >= bytes.len() {
+                        return None; // unterminated — not ours to rewrite
+                    }
+                    if bytes[j] == q {
+                        if bytes.get(j + 1) == Some(&q) {
+                            j += 2;
+                            continue;
+                        }
+                        j += 1;
+                        break;
+                    }
+                    j += 1;
+                }
+                i = j;
+            }
+            b'$' => match dollar_tag_end(sql, i) {
+                Some(tag_end) => {
+                    let tag = &sql[i..tag_end];
+                    let close = sql[tag_end..].find(tag)?;
+                    i = tag_end + close + tag.len();
+                }
+                // Not a dollar-quote opener: a `$1` parameter, or bare punctuation.
+                None => i += 1,
+            },
+            b';' => {
+                // A terminator is only a terminator if nothing but whitespace and
+                // comments follows it; otherwise this is a multi-statement script.
+                return strip_leading_noise(&sql[i + 1..])
+                    .is_empty()
+                    .then(|| sql[..i].trim())
+                    .filter(|s| !s.is_empty());
+            }
+            _ => i += 1,
+        }
+    }
+
+    let trimmed = sql.trim();
+    (!trimmed.is_empty()).then_some(trimmed)
+}
+
+/// End index of the (possibly nested) block comment starting at `at`, or `None`
+/// when it is unterminated.
+fn block_comment_end(sql: &str, at: usize) -> Option<usize> {
+    let b = sql.as_bytes();
+    let mut depth = 0usize;
+    let mut i = at;
+    while i + 1 < b.len() {
+        if b[i] == b'/' && b[i + 1] == b'*' {
+            depth += 1;
+            i += 2;
+        } else if b[i] == b'*' && b[i + 1] == b'/' {
+            depth -= 1;
+            i += 2;
+            if depth == 0 {
+                return Some(i);
+            }
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+/// Index just past the opening dollar-quote tag at `at` (`$$` → `at + 2`,
+/// `$body$` → `at + 6`), or `None` when this `$` opens no tag.
+///
+/// `$1` is a bind parameter, not a tag — a tag may not start with a digit, and
+/// that one rule is what keeps a parameterised statement from being misread.
+fn dollar_tag_end(sql: &str, at: usize) -> Option<usize> {
+    let b = sql.as_bytes();
+    if b.get(at + 1).is_some_and(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let mut j = at + 1;
+    while j < b.len() {
+        if b[j] == b'$' {
+            return Some(j + 1);
+        }
+        if !(b[j].is_ascii_alphanumeric() || b[j] == b'_') {
+            return None;
+        }
+        j += 1;
+    }
+    None
+}
+
+/// Wrap a statement so the **server** stops at `limit` rows, or `None` when it
+/// cannot safely be wrapped.
+///
+/// This is the difference between reading a page of a table and reading the table.
+/// Without it a `SELECT * FROM orders` on a few million rows crosses the wire in
+/// full and is only then cut down to the display cap — the user waits for, and this
+/// process holds, every row they will never see.
+///
+/// Wrapping rather than appending `LIMIT` is what makes it correct in the presence
+/// of the user's own `LIMIT`, `ORDER BY` or `UNION`: the inner statement keeps its
+/// own meaning and the cap applies to whatever it produced. Only a single read
+/// beginning `SELECT` or `WITH` qualifies — `SHOW`, `EXPLAIN` and `TABLE t` are not
+/// valid in a `FROM`, and a write must never be silently reshaped.
+pub fn capped_statement(sql: &str, limit: u32) -> Option<String> {
+    let body = single_statement(sql)?;
+    if statement_kind(body) != StatementKind::Read {
+        return None;
+    }
+    if !matches!(leading_keyword(strip_leading_noise(body)).as_str(), "SELECT" | "WITH") {
+        return None;
+    }
+    // The trailing newline matters: a statement ending in a `--` comment would
+    // otherwise swallow the closing parenthesis.
+    Some(format!("SELECT * FROM (\n{body}\n) AS \"picus_capped\"\nLIMIT {limit}"))
 }
 
 // ── pg_trigger.tgtype bit decoding ─────────────────────────────────────────────
@@ -287,6 +437,92 @@ mod tests {
         assert!(guard_read_only("SET search_path TO x", true).is_ok());
         assert!(guard_read_only("DELETE FROM t", true).is_err());
         assert!(guard_read_only("DELETE FROM t", false).is_ok(), "not read-only: allowed");
+    }
+
+    #[test]
+    fn one_statement_is_recognised_and_its_terminator_dropped() {
+        assert_eq!(single_statement("SELECT 1"), Some("SELECT 1"));
+        assert_eq!(single_statement("  SELECT 1 ;  "), Some("SELECT 1"));
+        assert_eq!(single_statement("SELECT 1; -- done\n"), Some("SELECT 1"));
+        assert_eq!(single_statement("   "), None);
+    }
+
+    #[test]
+    fn two_statements_are_refused() {
+        assert_eq!(single_statement("SELECT 1; SELECT 2"), None);
+        assert_eq!(single_statement("SELECT 1; SELECT 2;"), None);
+    }
+
+    #[test]
+    fn a_semicolon_inside_a_literal_is_not_a_terminator() {
+        // The whole reason this is a scan and not a `find(';')`.
+        assert_eq!(
+            single_statement("SELECT 'a;b' AS x"),
+            Some("SELECT 'a;b' AS x"),
+            "a semicolon in a string is data"
+        );
+        assert_eq!(single_statement(r#"SELECT "we;ird" FROM t"#), Some(r#"SELECT "we;ird" FROM t"#));
+        assert_eq!(single_statement("SELECT 1 -- ; not a statement\n"), Some("SELECT 1 -- ; not a statement"));
+        assert_eq!(single_statement("SELECT /* ; */ 1"), Some("SELECT /* ; */ 1"));
+        assert_eq!(single_statement("SELECT $$a;b$$"), Some("SELECT $$a;b$$"));
+        assert_eq!(single_statement("SELECT $tag$a;b$tag$"), Some("SELECT $tag$a;b$tag$"));
+    }
+
+    #[test]
+    fn a_doubled_quote_does_not_end_the_literal() {
+        assert_eq!(single_statement("SELECT 'it''s; fine'"), Some("SELECT 'it''s; fine'"));
+    }
+
+    #[test]
+    fn a_bind_parameter_is_not_a_dollar_quote() {
+        // Misreading `$1` as a tag would swallow the rest of the statement.
+        assert_eq!(single_statement("SELECT * FROM t WHERE a = $1"), Some("SELECT * FROM t WHERE a = $1"));
+    }
+
+    #[test]
+    fn an_unterminated_literal_is_left_alone() {
+        assert_eq!(single_statement("SELECT 'oops"), None);
+        assert_eq!(single_statement("SELECT /* oops"), None);
+    }
+
+    #[test]
+    fn a_read_is_capped_at_the_server() {
+        let out = capped_statement("SELECT * FROM orders", 501).expect("wrappable");
+        assert!(out.starts_with("SELECT * FROM ("), "{out}");
+        assert!(out.ends_with("LIMIT 501"), "{out}");
+        assert!(out.contains("SELECT * FROM orders"));
+    }
+
+    #[test]
+    fn the_users_own_limit_survives_being_capped() {
+        // Wrapping (rather than appending) is what makes this correct: the inner
+        // LIMIT still means what it said.
+        let out = capped_statement("SELECT a FROM t ORDER BY a LIMIT 10", 501).expect("wrappable");
+        assert!(out.contains("ORDER BY a LIMIT 10"));
+        assert!(out.ends_with("LIMIT 501"));
+    }
+
+    #[test]
+    fn a_cte_is_wrappable_and_a_write_is_never_reshaped() {
+        assert!(capped_statement("WITH x AS (SELECT 1) SELECT * FROM x", 10).is_some());
+        assert_eq!(capped_statement("UPDATE t SET a = 1", 10), None);
+        assert_eq!(capped_statement("WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d", 10), None);
+    }
+
+    #[test]
+    fn statements_that_cannot_sit_in_a_from_are_left_alone() {
+        assert_eq!(capped_statement("SHOW search_path", 10), None);
+        assert_eq!(capped_statement("EXPLAIN SELECT 1", 10), None);
+        assert_eq!(capped_statement("TABLE orders", 10), None);
+        assert_eq!(capped_statement("SET search_path TO x", 10), None);
+        assert_eq!(capped_statement("SELECT 1; SELECT 2", 10), None, "multi-statement");
+    }
+
+    #[test]
+    fn a_trailing_comment_cannot_swallow_the_closing_parenthesis() {
+        let out = capped_statement("SELECT 1 -- trailing", 5).expect("wrappable");
+        // The newline before `)` is the whole point.
+        assert!(out.contains("-- trailing\n)"), "{out}");
     }
 
     #[test]

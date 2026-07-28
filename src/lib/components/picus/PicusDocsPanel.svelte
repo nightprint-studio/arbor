@@ -4,19 +4,24 @@
    * panel the rest of the suite uses. Topics live in `./docs/`; this file only
    * wires the navigation.
    */
-  import { BookOpen, Rocket, Database, FolderTree, FormInput, TriangleAlert, Keyboard } from 'lucide-svelte';
+  import { BookOpen, Rocket, Database, FolderTree, FormInput, TriangleAlert, Keyboard, Lightbulb } from 'lucide-svelte';
   import DocsShell, { type DocsNavItem, type DocsNavGroup } from '$lib/components/shared/DocsShell.svelte';
   import GettingStarted from './docs/GettingStarted.svelte';
   import Connections from './docs/Connections.svelte';
   import Scripts from './docs/Scripts.svelte';
   import Generating from './docs/Generating.svelte';
   import Consistency from './docs/Consistency.svelte';
+  import Editing from './docs/Editing.svelte';
   import Shortcuts from './docs/Shortcuts.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
   const topItems: DocsNavItem[] = [
     { id: 'getting-started', label: 'Getting Started', icon: Rocket },
+    // The editor spans both halves of the product — a query tab and a script file
+    // behave the same — so it sits above the Database / Scripts split rather than
+    // being filed under one of them.
+    { id: 'editing', label: 'The SQL editor', icon: Lightbulb },
   ];
 
   const navGroups: DocsNavGroup[] = [
@@ -41,6 +46,7 @@
 
   const sections = {
     'getting-started': GettingStarted,
+    'editing': Editing,
     'connections': Connections,
     'scripts': Scripts,
     'generating': Generating,

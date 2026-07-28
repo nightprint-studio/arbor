@@ -861,11 +861,19 @@ pub fn write_to_disk(
                 .map_err(|e| AppError::Other(format!("mkdir {parent:?}: {e}")))?;
         }
     }
-    let bytes = arbor_fs::prelude::encoding::encode_for_disk_with_bom(
-        contents,
+    // Strict, not the lossy sibling: `encoding_rs` has no UTF-16 encoder and
+    // quietly redirects to UTF-8, so the lossy path wrote UTF-8 bytes under a
+    // UTF-16 BOM — a corrupt file — and it substituted an HTML numeric reference
+    // for any character the target encoding could not hold. Both silently.
+    // …and the BOM comes from `had_bom` alone: if it were also still present in
+    // the text (a reader that left it there), the file would gain a second one,
+    // and the next save a third.
+    let bytes = arbor_fs::prelude::encoding::encode_for_disk_strict(
+        arbor_studio_core::persist::body_without_bom(contents, had_bom),
         Some(encoding_label),
         had_bom,
-    );
+    )
+    .map_err(|e| AppError::Other(format!("write {path}: {e}")))?;
     std::fs::write(path, &bytes).map_err(|e| AppError::Other(format!("write {path}: {e}")))
 }
 

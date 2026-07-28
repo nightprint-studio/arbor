@@ -11,6 +11,8 @@
 //! * [`kind::EngineKind`] — the engine a connection speaks and the dialect a
 //!   folder is written in. One type, because those must never drift apart.
 //! * [`schema`] — what a database says about itself.
+//! * [`role::FolderRole`] — what a folder of scripts is for. Discovered by the
+//!   script half, read by the generator half; the same reasoning as `EngineKind`.
 //!
 //! ## What it deliberately is not
 //!
@@ -26,4 +28,5 @@
 
 pub mod kind;
 pub mod prelude;
+pub mod role;
 pub mod schema;

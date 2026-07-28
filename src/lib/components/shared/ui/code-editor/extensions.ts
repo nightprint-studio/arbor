@@ -39,6 +39,9 @@ import { indentGuides } from './indent-guides';
 import { stickyScroll } from './sticky-scroll';
 import { scrollbarOverview } from './scrollbar-overview';
 import { codeEditorTheme, codeEditorHighlightStyle } from './theme';
+import {
+  inlineCompletion, acceptInlineCompletion, dismissInlineCompletion,
+} from './inline-completion';
 
 /** The search keymap minus the bindings the host owns. The host routes `Ctrl+F` to the
  *  focused editor via `openSearch()` (so it removes `Mod-f`), and owns `Ctrl+G` as a
@@ -226,6 +229,25 @@ export function createCodeEditorExtensions(
       });
       if (typedDot) startCompletion(u.view);
     }));
+  }
+
+  // Ghost text — the greyed continuation at the caret, Tab to accept. Installed
+  // AFTER the completion keymap above and at the same precedence, so within that
+  // group `acceptCompletion` is tried first: while the popup is open it owns Tab,
+  // and it returns false the rest of the time, letting the ghost text have it.
+  // (The plugin also refuses to show anything while the popup is open, so the two
+  // never actually contend — the ordering is belt and braces.)
+  const inlineSource = lang.intel?.inlineCompletion;
+  if (inlineSource && !opts.readOnly) {
+    exts.push(inlineCompletion({ source: inlineSource }));
+    exts.push(
+      Prec.highest(
+        keymap.of([
+          { key: 'Tab', run: acceptInlineCompletion },
+          { key: 'Escape', run: dismissInlineCompletion },
+        ]),
+      ),
+    );
   }
 
   // Hover docs — a `hoverTooltip` source (e.g. a symbol signature via IPC). Installed

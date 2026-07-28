@@ -17,6 +17,7 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import DmlValueGrid from '../generate/DmlValueGrid.svelte';
   import PasteSqlPanel from '../generate/PasteSqlPanel.svelte';
   import CsvImportGrid from '../generate/CsvImportGrid.svelte';
@@ -26,6 +27,7 @@
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
+  import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { schemaStore } from '$lib/stores/picus/schema.svelte';
   import { DML_OPERATION_LABELS, type DmlOperation, type DmlSource } from '$lib/types/picus';
 
@@ -114,7 +116,13 @@
             variant="primary"
             size="sm"
             disabled={!dmlStore.canGenerate}
-            tooltip={{ content: 'Build the SQL for every enabled destination', shortcut: 'Ctrl+G' }}
+            tooltip={{
+              // A disabled button that says why beats one that only greys out —
+              // especially here, where "the values have not been checked yet" is a
+              // legitimate and very short-lived reason.
+              content: dmlStore.generateBlockedReason ?? 'Build the SQL for every enabled destination',
+              shortcut: 'Ctrl+G',
+            }}
             onclick={() => dmlStore.markGenerated()}
           >
             {#snippet iconStart()}<Play size={13} />{/snippet}
@@ -183,12 +191,44 @@
   </Card>
 
   <!-- ── 4. What changes on disk ───────────────────────────────────────────── -->
+  <!-- The preview is what the backend would actually write, so it costs a disk
+       read and is asked for rather than assumed. The section says which of the
+       three states it is in instead of appearing and disappearing. -->
   {#if dmlStore.generated && dmlStore.enabledTargets.length}
     <section class="gv-patches" aria-label="Changes to the scripts">
-      <h2 class="gv-section"><GitCompare size={13} /> Changes to the scripts</h2>
-      {#each dmlStore.enabledTargets as target (target.id)}
-        <PatchDiffCard {target} sql={dmlStore.sqlFor(target)} />
-      {/each}
+      <h2 class="gv-section">
+        <GitCompare size={13} /> Changes to the scripts
+        {#if dmlStore.previewing}<Spinner size={11} />{/if}
+      </h2>
+
+      {#if dmlStore.previewError}
+        <Alert variant="error" title="The patch could not be computed" text={dmlStore.previewError} />
+      {:else if !dmlStore.previewFiles.length}
+        <Card variant="subtle">
+          <div class="gv-preview-ask">
+            <span>
+              The exact bytes each destination would receive are read from disk — ask for them
+              and review the result before anything is written.
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={dmlStore.previewing || !picusProjectStore.attached}
+              tooltip={picusProjectStore.attached
+                ? undefined
+                : { content: 'This connection has no script repository attached' }}
+              onclick={() => void dmlStore.ensurePreview()}
+            >
+              {#snippet iconStart()}<GitCompare size={13} />{/snippet}
+              Show what would change
+            </Button>
+          </div>
+        </Card>
+      {:else}
+        {#each dmlStore.previewFiles as file (file.path)}
+          <PatchDiffCard {file} target={dmlStore.targets.find((t) => t.file === file.path) ?? null} />
+        {/each}
+      {/if}
     </section>
   {/if}
 
@@ -203,8 +243,8 @@
             in <code>.arbor/backup</code>.
           {:else}
             {dmlStore.enabledTargets.length} file{dmlStore.enabledTargets.length === 1 ? '' : 's'},
-            {blockTargets} with a procedural block. Encoding and line endings stay as they are,
-            and every file is backed up first.
+            {blockTargets} with a procedural block. You review the exact bytes first; the write
+            then refuses if any of those files moved in the meantime.
           {/if}
         </span>
       </div>
@@ -303,6 +343,14 @@
   }
 
   .gv-patches { display: flex; flex-direction: column; gap: 8px; }
+  .gv-preview-ask { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .gv-preview-ask span {
+    flex: 1;
+    min-width: 240px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--text-muted);
+  }
   .gv-section {
     display: flex;
     align-items: center;

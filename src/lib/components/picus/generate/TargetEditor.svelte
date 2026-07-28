@@ -18,14 +18,21 @@
    *  • "Copy these rules" only reaches destinations with the **same role** —
    *    never from initialisation to update, where a version guard would be
    *    nonsense.
+   *  • A rule set the emitter **cannot honour** says so, on the row it belongs
+   *    to. One rule genuinely constrains another — a version guard needs a block
+   *    to return from — and the emitter reports the clash rather than quietly
+   *    dropping the guard, which would leave a destination looking guarded while
+   *    running unconditionally.
    */
   import { ChevronRight, Check, Copy, Eye, RotateCcw, Trash2 } from 'lucide-svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
+  import Alert from '$lib/components/shared/ui/Alert.svelte';
   import PicusDialectChip from '../PicusDialectChip.svelte';
   import PicusRoleChip from '../PicusRoleChip.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import type { Target } from '$lib/types/picus';
@@ -46,6 +53,7 @@
 
 {#each dmlStore.targets as target (target.id)}
   {@const expanded = dmlStore.expandedTargetId === target.id}
+  {@const conflict = dmlStore.ruleConflictFor(target.id)}
   <div class="te-row" class:te-off={!target.enabled}>
     <!-- Collapsed head: the whole row expands; the checkbox arms the target. -->
     <div class="te-head">
@@ -87,6 +95,11 @@
           {#if target.guards.skipIfPresent}
             <Badge variant="tone" tone="neutral" size="sm" label="skip existing" />
           {/if}
+          {#if conflict}
+            <span use:tooltip={conflict}>
+              <Badge variant="tone" tone="error" size="sm" label="rule conflict" />
+            </span>
+          {/if}
         </span>
         <span class="te-twist" class:te-twist-open={expanded}><ChevronRight size={13} /></span>
       </button>
@@ -94,6 +107,12 @@
 
     {#if expanded}
       <div class="te-rules">
+        {#if conflict}
+          <div class="te-conflict">
+            <Alert variant="warning" compact text={conflict} />
+          </div>
+        {/if}
+
         <div class="te-rule">
           <Toggle
             checked={target.wrap === 'block'}
@@ -302,6 +321,10 @@
     background: var(--bg-input);
     border-top: 1px dashed var(--border-subtle);
   }
+
+  /* The emitter's own verdict on this rule set — above the switches that caused
+     it, so the fix is the next thing under the cursor. */
+  .te-conflict { padding: 6px 0 2px; }
 
   .te-rule {
     display: flex;

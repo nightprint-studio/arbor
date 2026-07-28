@@ -55,6 +55,15 @@ src-tauri/target/release/bundle/
 npm-debug.log*
 *.pem
 
+# ── Tree-sitter grammars ──────────────────────────────────────────────────────
+# The generated `parser.c` / `scanner.c` ARE committed on purpose (no Node at
+# build time). What must not be are the objects the `tree-sitter` CLI leaves
+# behind when it compiles a grammar to run its own corpus tests on Windows —
+# they are per-machine build output that happened to land beside the source.
+*.obj
+*.exp
+crates/**/parser.lib
+
 # ── OS artefacts ──────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db

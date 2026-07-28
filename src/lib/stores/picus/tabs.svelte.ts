@@ -150,14 +150,28 @@ function createTabsStore() {
       this.openObject(table, 'table', connectionId);
     },
 
-    openFile(path: string, name: string, dialect: Dialect | null) {
+    /**
+     * Open a script file, optionally at a line.
+     *
+     * `line` is what turns a finding's location from a label into navigation: the
+     * view reads it off the tab and asks the editor to reveal it. The nonce is
+     * bumped every time so stepping twice onto the same line moves the caret both
+     * times instead of looking ignored.
+     */
+    openFile(path: string, name: string, dialect: Dialect | null, line?: number) {
+      const id = `file:${path}`;
       open({
-        id: `file:${path}`,
+        id,
         kind: 'file',
         title: name,
         file: path,
         dialect: dialect ?? undefined,
       });
+      if (!line) return;
+      const tab = tabs.find((t) => t.id === id);
+      if (!tab) return;
+      tab.revealLine = line;
+      tab.revealNonce = (tab.revealNonce ?? 0) + 1;
     },
 
     /** Rebind a tab to another connection — the tab re-runs on the new database. */

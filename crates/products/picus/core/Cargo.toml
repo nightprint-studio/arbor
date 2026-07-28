@@ -16,6 +16,11 @@ arbor-core = { path = "../../../foundation/core" }
 # pool, so the handlers in picus-be reach both through the state they already get.
 # This is the API crate only — it carries no driver, so picus-core stays light.
 picus-db-api = { path = "../db-provider/api" }
+# The script half's vocabulary: what a repository of scripts IS (`Project`,
+# `ProjectConfig`) — held by the read cache on `PicusState` — and `InsertionRule`,
+# which the project file can override per folder role and this crate's own config
+# carries the user's default for. One type for both tiers, so they cannot disagree.
+picus-project = { path = "../project" }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 # The typed product config (`config.toml`) is round-tripped through `toml`.

@@ -23,7 +23,7 @@
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
-  import { looksLikeExpression, nowFunction } from '$lib/ipc/picus/mock-emit';
+  import { looksLikeExpression, nowFunction } from '$lib/utils/picus/sql-values';
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
 
   const columns = $derived(dmlStore.columns);

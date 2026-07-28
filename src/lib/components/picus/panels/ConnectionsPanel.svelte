@@ -1,35 +1,34 @@
 <script lang="ts">
   /**
-   * Connections panel — every open database session, expandable into its schema.
+   * Connections panel — every configured database session, expandable into its
+   * schema.
    *
-   * Each connection row carries its identity colour, the dialect, and a lock when
-   * the session is read-only. Expanding one shows the schema it is pinned to and
-   * four groups — tables, views, sequences, triggers — because "what is actually
-   * in this database" is not answerable from tables alone: a missing sequence or
-   * a disabled trigger breaks an installation just as thoroughly.
+   * Three files, three questions: this one owns *which* connections there are and
+   * what can be done to one, `ConnectionRow` draws a connection, and
+   * `ConnectionSchemaTree` draws what is inside it.
    *
-   * Every connection row also carries the fastest way to use it: a query tab
-   * bound to that session, one click (or Ctrl+T for the active one).
+   * A connection is a thing you keep, not only a thing you create: it can be
+   * opened and closed, edited, inspected and deleted. The two everyday verbs sit
+   * on the row; the rest live in the row menu — right-click, or the ⋯ button —
+   * and every one of them is also in the command palette, so none of this needs a
+   * mouse. Deleting asks first, and says what goes with the connection.
    */
   import {
-    Database, ChevronRight, Table2, Eye, ListOrdered, Zap,
-    Plus, RefreshCw, Lock, Play, Plug, PlugZap,
+    Database, Plus, RefreshCw, Play, Plug, PlugZap, Pencil, Info, Trash2,
   } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
-  import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
-  import Badge from '$lib/components/shared/ui/Badge.svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
-  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
-  import PicusDialectChip from '../PicusDialectChip.svelte';
-  import { tooltip } from '$lib/actions/tooltip';
-  import { connectionsStore, connectionColorVar } from '$lib/stores/picus/connections.svelte';
+  import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
+  import ConnectionRow from './ConnectionRow.svelte';
+  import ConnectionSchemaTree from './ConnectionSchemaTree.svelte';
+  import { connectionsStore } from '$lib/stores/picus/connections.svelte';
   import { schemaStore } from '$lib/stores/picus/schema.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
-  import { SCHEMA_GROUP_LABELS, type SchemaGroup } from '$lib/types/picus';
+  import type { Connection } from '$lib/types/picus';
 
   /**
    * Open a session and surface the failure where the click was.
@@ -43,56 +42,25 @@
   }
 
   let query = $state('');
-  /** Expansion is keyed `connId` and `connId/group` — one tree, flat keys. */
-  let expanded = $state<Record<string, boolean>>({ dev: true, 'dev/tables': true });
+  let searchBar: SearchBar | undefined = $state();
+  /** Which connections are expanded. The active one starts open; the rest closed. */
+  let expanded = $state<Record<string, boolean>>({});
 
   const needle = $derived(query.trim().toLowerCase());
-  const matches = (name: string) => !needle || name.toLowerCase().includes(needle);
 
-  const GROUP_ICONS: Record<SchemaGroup, any> = {
-    tables: Table2,
-    views: Eye,
-    sequences: ListOrdered,
-    triggers: Zap,
-  };
-
-  const GROUPS: SchemaGroup[] = ['tables', 'views', 'sequences', 'triggers'];
-
-  /** Object names in a group, filtered — the tree only ever renders names. */
-  function namesIn(group: SchemaGroup): string[] {
-    const list =
-      group === 'tables' ? schemaStore.tables.map((t) => t.name)
-      : group === 'views' ? schemaStore.views.map((v) => v.name)
-      : group === 'sequences' ? schemaStore.sequences.map((s) => s.name)
-      : schemaStore.triggers.map((t) => t.name);
-    return list.filter(matches);
-  }
-
-  /** The tab kind an object of this group opens as. */
-  function objectKindOf(group: SchemaGroup) {
-    return group === 'tables' ? 'table' as const
-      : group === 'views' ? 'view' as const
-      : group === 'sequences' ? 'sequence' as const
-      : 'trigger' as const;
-  }
-
-  /** Secondary line for a row — what the object is, in its own terms. */
-  function detailFor(group: SchemaGroup, name: string): string | null {
-    if (group === 'tables' || group === 'views') {
-      const rel = schemaStore.relation(name);
-      if (!rel) return null;
-      const parts = [`${rel.columns.length} columns`];
-      if (rel.foreignKeys?.length) parts.push(`${rel.foreignKeys.length} FK`);
-      if (rel.estimatedRows != null) parts.push(`~${rel.estimatedRows.toLocaleString()} rows`);
-      return parts.join(' · ');
-    }
-    if (group === 'sequences') {
-      const seq = schemaStore.sequence(name);
-      return seq ? `last ${seq.lastValue.toLocaleString()} · step ${seq.incrementBy}` : null;
-    }
-    const trg = schemaStore.trigger(name);
-    return trg ? `${trg.timing} ${trg.events.join('/')} on ${trg.table}${trg.enabled ? '' : ' · disabled'}` : null;
-  }
+  /**
+   * Whether the loaded catalogue has anything matching the filter.
+   *
+   * Answered with `some` rather than by building the four lists: on a schema with
+   * hundreds of tables this runs on every keystroke, and the panel only needs a
+   * yes or a no.
+   */
+  const schemaMatches = $derived.by(() => {
+    if (!needle) return false;
+    const has = (list: { name: string }[]) => list.some((o) => o.name.toLowerCase().includes(needle));
+    return has(schemaStore.tables) || has(schemaStore.views)
+      || has(schemaStore.sequences) || has(schemaStore.triggers);
+  });
 
   const visible = $derived(
     connectionsStore.connections.filter((c) => {
@@ -101,13 +69,62 @@
         c.name.toLowerCase().includes(needle) ||
         c.alias.toLowerCase().includes(needle) ||
         c.schema.toLowerCase().includes(needle) ||
-        GROUPS.some((g) => namesIn(g).length > 0)
+        // Objects belong to the connection whose catalogue is loaded — never to
+        // every row on screen.
+        (c.id === schemaStore.connectionId && schemaMatches)
       );
     }),
   );
 
-  function toggle(key: string) {
-    expanded = { ...expanded, [key]: !expanded[key] };
+  /** A filter reveals what it found; otherwise only the active connection is open. */
+  function isOpen(conn: Connection): boolean {
+    if (needle) return true;
+    return expanded[conn.id] ?? conn.id === connectionsStore.activeId;
+  }
+
+  function toggle(conn: Connection, open: boolean) {
+    expanded = { ...expanded, [conn.id]: !open };
+  }
+
+  // ── Row menu ────────────────────────────────────────────────────────────────
+  let menu = $state<{ x: number; y: number; conn: Connection } | null>(null);
+
+  const menuItems = $derived.by<MenuItem[]>(() => {
+    const conn = menu?.conn;
+    if (!conn) return [];
+    const isActive = conn.id === connectionsStore.activeId;
+    const live = conn.state !== 'disconnected';
+    return [
+      { id: 'query', label: 'New query on this connection', icon: Play,
+        shortcut: isActive ? 'Ctrl+T' : undefined },
+      live
+        ? { id: 'disconnect', label: 'Disconnect', icon: PlugZap, disabled: conn.state === 'connecting' }
+        : { id: 'connect', label: 'Connect', icon: Plug },
+      { id: 'refresh', label: 'Refresh the schema', icon: RefreshCw, disabled: !live },
+      { id: 'sep1', label: '', separator: true },
+      { id: 'edit', label: 'Edit…', icon: Pencil, shortcut: isActive ? 'F4' : undefined },
+      { id: 'details', label: 'Details', icon: Info },
+      { id: 'sep2', label: '', separator: true },
+      { id: 'delete', label: 'Delete…', icon: Trash2, danger: true },
+    ];
+  });
+
+  function onMenuSelect(id: string) {
+    const conn = menu?.conn;
+    menu = null;
+    if (!conn) return;
+    switch (id) {
+      case 'query': picusTabsStore.openQuery(conn.id); break;
+      case 'connect': void openConnection(conn.id); break;
+      case 'disconnect': void connectionsStore.disconnect(conn.id); break;
+      case 'refresh':
+        connectionsStore.setActive(conn.id);
+        void schemaStore.load(conn.id);
+        break;
+      case 'edit': picusUiStore.openConnectionEditor(conn.id); break;
+      case 'details': picusUiStore.openConnectionDetails(conn.id); break;
+      case 'delete': picusUiStore.requestConnectionDelete(conn.id); break;
+    }
   }
 </script>
 
@@ -145,7 +162,14 @@
   {/snippet}
 
   {#snippet toolbar()}
-    <SearchBar bind:query showRegex={false} placeholder="Filter connections and objects" ariaLabel="Filter connections" />
+    <SearchBar
+      bind:this={searchBar}
+      bind:query
+      showRegex={false}
+      showCounter={false}
+      placeholder="Filter connections and objects"
+      ariaLabel="Filter connections"
+    />
   {/snippet}
 
   {#if !visible.length}
@@ -164,103 +188,21 @@
     </StateBlock>
   {:else}
     {#each visible as conn (conn.id)}
-      <SidebarItem
-        selected={conn.id === connectionsStore.activeId}
-        current={conn.id === connectionsStore.activeId}
-        currentColor={connectionColorVar(conn)}
-        onclick={() => { connectionsStore.setActive(conn.id); toggle(conn.id); }}
-      >
-        {#snippet icon()}
-          <span class="cp-twist" class:cp-open={expanded[conn.id]}><ChevronRight size={12} /></span>
-        {/snippet}
-        <span class="cp-name">{conn.name}</span>
-        {#snippet badges()}
-          {#if conn.readOnly}
-            <span class="cp-ro" use:tooltip={'Read-only: the backend refuses write statements'}><Lock size={11} /></span>
-          {/if}
-          <PicusDialectChip dialect={conn.dialect} terse />
-        {/snippet}
-        {#snippet actions()}
-          <!-- Connect / disconnect. A connection can be configured, listed and
-               edited with no server reachable — opening it is a separate act, so
-               it gets its own control rather than happening on selection. -->
-          {#if conn.state === 'disconnected'}
-            <button
-              class="cp-act"
-              aria-label={`Connect to ${conn.name}`}
-              use:tooltip={`Connect to ${conn.name}`}
-              onclick={(e) => { e.stopPropagation(); void openConnection(conn.id); }}
-            >
-              <Plug size={11} />
-            </button>
-          {:else if conn.state === 'connecting'}
-            <span class="cp-act cp-act-busy"><Spinner size={11} /></span>
-          {:else}
-            <button
-              class="cp-act"
-              aria-label={`Disconnect ${conn.name}`}
-              use:tooltip={`Disconnect ${conn.name}`}
-              onclick={(e) => { e.stopPropagation(); void connectionsStore.disconnect(conn.id); }}
-            >
-              <PlugZap size={11} />
-            </button>
-          {/if}
-          <!-- Hover action: the fastest path from "this database" to "a query on it". -->
-          <button
-            class="cp-act"
-            aria-label={`New query on ${conn.name}`}
-            use:tooltip={`New query on ${conn.name}`}
-            onclick={(e) => { e.stopPropagation(); picusTabsStore.openQuery(conn.id); }}
-          >
-            <Play size={11} />
-          </button>
-        {/snippet}
-      </SidebarItem>
+      {@const open = isOpen(conn)}
+      <ConnectionRow
+        connection={conn}
+        {open}
+        onToggle={() => toggle(conn, open)}
+        onMenu={(x, y) => (menu = { x, y, conn })}
+        onConnect={() => void openConnection(conn.id)}
+      />
 
-      {#if expanded[conn.id]}
-        <div class="cp-meta" style:--conn-color={connectionColorVar(conn)}>
-          {conn.schema}
-          {#if conn.dbVersion}· database version {conn.dbVersion}{/if}
-          {#if schemaStore.loading}
-            <span class="cp-loading"><Spinner size={10} /> reading schema…</span>
-          {:else if schemaStore.loadedAt}
-            <span class="cp-stamp">cached {schemaStore.loadedAt}</span>
-          {/if}
-        </div>
-
-        {#each GROUPS as group (group)}
-          {@const names = namesIn(group)}
-          {@const key = `${conn.id}/${group}`}
-          <SidebarItem indent={22} onclick={() => toggle(key)}>
-            {#snippet icon()}
-              <span class="cp-twist" class:cp-open={expanded[key]}><ChevronRight size={12} /></span>
-            {/snippet}
-            {@const Icon = GROUP_ICONS[group]}
-            <Icon size={12} class="cp-group-icon" />
-            <span class="cp-group">{SCHEMA_GROUP_LABELS[group]}</span>
-            {#snippet badges()}
-              <Badge variant="count" label={String(names.length)} />
-            {/snippet}
-          </SidebarItem>
-
-          {#if expanded[key]}
-            {#each names as name (name)}
-              <SidebarItem
-                indent={40}
-                selected={picusTabsStore.active?.table === name}
-                onclick={() => picusTabsStore.openObject(name, objectKindOf(group), conn.id)}
-              >
-                <span class="cp-object">
-                  {conn.dialect === 'postgres' ? name.toLowerCase() : name}
-                </span>
-                {#snippet subtitle()}{detailFor(group, name) ?? ''}{/snippet}
-              </SidebarItem>
-            {/each}
-            {#if !names.length}
-              <p class="cp-none">Nothing in this group.</p>
-            {/if}
-          {/if}
-        {/each}
+      {#if open}
+        <ConnectionSchemaTree
+          connection={conn}
+          {needle}
+          onNarrow={() => searchBar?.focus()}
+        />
       {/if}
     {/each}
 
@@ -271,68 +213,17 @@
   {/if}
 </PanelShell>
 
+{#if menu}
+  <ContextMenu
+    items={menuItems}
+    x={menu.x}
+    y={menu.y}
+    onSelect={onMenuSelect}
+    onClose={() => (menu = null)}
+  />
+{/if}
+
 <style>
-  .cp-twist {
-    display: inline-flex;
-    color: var(--text-disabled);
-    transition: transform var(--transition-fast);
-  }
-  .cp-twist.cp-open { transform: rotate(90deg); }
-
-  .cp-name { overflow: hidden; text-overflow: ellipsis; }
-  .cp-group {
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-secondary);
-  }
-  .cp-object {
-    font-family: var(--font-code);
-    font-size: 11.5px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .cp-ro { display: inline-flex; color: var(--warning); }
-
-  /* Hover-revealed row action (SidebarItem shows `actions` on hover). */
-  .cp-act {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    padding: 0;
-    background: none;
-    border: none;
-    border-radius: var(--radius-sm);
-    color: var(--text-muted);
-    cursor: pointer;
-  }
-  .cp-act:hover { background: var(--bg-overlay); color: var(--success); }
-
-  .cp-meta {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    padding: 3px 12px 5px 34px;
-    margin-left: 10px;
-    border-left: 2px solid var(--conn-color);
-    font-size: 10.5px;
-    color: var(--text-muted);
-  }
-  .cp-loading { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); }
-  .cp-stamp { color: var(--text-disabled); }
-
-  .cp-none {
-    padding: 4px 12px 4px 46px;
-    font-size: 11px;
-    color: var(--text-disabled);
-    font-style: italic;
-  }
-
   .cp-hint {
     padding: 10px 12px;
     font-size: 11px;
@@ -349,6 +240,4 @@
     text-align: left;
   }
   .cp-empty p { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
-
-  :global(.cp-group-icon) { color: var(--text-muted); flex-shrink: 0; }
 </style>

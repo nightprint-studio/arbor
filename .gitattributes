@@ -1,0 +1,15 @@
+# Generated Tree-sitter parsers.
+#
+# These are committed on purpose — the build must not need Node — but they are
+# machine output, not source: a diff of one is thousands of lines of state tables
+# that no one can read, and a merge of two is never resolvable by hand. Marking
+# them `linguist-generated` keeps them out of language statistics and collapses
+# them in review; `-diff` stops Git printing them; `-merge` makes a conflict fail
+# loudly so it is settled by regenerating the grammar, which is the only correct
+# resolution.
+#
+# Picus's is the extreme case at ~32 MB (a full SQL + PL/SQL grammar parsed to
+# expression depth); Merula's and Bennu's are a couple of hundred KB.
+**/src/parser.c   linguist-generated=true -diff -merge
+**/src/grammar.json      linguist-generated=true -diff -merge
+**/src/node-types.json   linguist-generated=true -diff -merge

@@ -14,6 +14,7 @@
   import { FolderTree, TriangleAlert, CheckCircle2, Files } from 'lucide-svelte';
   import type { Snippet } from 'svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
   import PicusConnectionPill from '../PicusConnectionPill.svelte';
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
@@ -37,6 +38,7 @@
 
   const blocking = $derived(consistencyStore.blockingCount);
   const review = $derived(consistencyStore.reviewCount);
+  const checking = $derived(consistencyStore.running);
 </script>
 
 <div class="pf">
@@ -66,26 +68,36 @@
     <span class="pf-sep"></span>
   {/if}
 
-  <!-- Findings counter: the single click that gets you to what is wrong. -->
+  <!-- Findings counter: the single click that gets you to what is wrong.
+       Checking a real repository takes about a second, so the working state has to
+       be visible HERE — the dock that shows it in detail is often closed, and a
+       counter that silently reads "Consistent" mid-analysis is a lie with a
+       plausible face. -->
   <button
     class="pf-item pf-btn"
-    class:pf-bad={blocking > 0}
-    class:pf-ok={blocking === 0 && review === 0}
+    class:pf-bad={blocking > 0 && !checking}
+    class:pf-ok={blocking === 0 && review === 0 && !checking}
     onclick={() => picusUiStore.showBottom('consistency')}
     use:tooltip={{
-      content: blocking > 0
-        ? `${blocking} blocking · ${review} to check`
-        : review > 0 ? `${review} finding(s) worth checking` : 'No consistency problems',
+      content: checking
+        ? 'Checking the repository…'
+        : blocking > 0
+          ? `${blocking} blocking · ${review} to check`
+          : review > 0 ? `${review} finding(s) worth checking` : 'No consistency problems',
       description: consistencyStore.lastRunAt ? `Last checked at ${consistencyStore.lastRunAt}` : 'Never checked',
     }}
   >
-    {#if blocking > 0}
+    {#if checking}
+      <Spinner size={11} /> Checking…
+    {:else if blocking > 0}
       <TriangleAlert size={12} /> {blocking} blocking
       {#if review > 0}<span class="pf-sub">· {review}</span>{/if}
     {:else if review > 0}
       <TriangleAlert size={12} /> {review} to check
-    {:else}
+    {:else if consistencyStore.hasRun}
       <CheckCircle2 size={12} /> Consistent
+    {:else}
+      <TriangleAlert size={12} /> Not checked
     {/if}
   </button>
 

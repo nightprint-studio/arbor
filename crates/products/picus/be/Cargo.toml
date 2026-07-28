@@ -32,9 +32,26 @@ picus-db-api = { path = "../db-provider/api" }
 # plus one `.with(...)` in `main` — nothing else in the backend changes.
 picus-db-postgres = { path = "../db-provider/postgres" }
 # The script half, so far: the dialect-free change model and the emitter that turns
-# one model into one correct statement per destination.
+# one model into one correct statement per destination…
 picus-ast  = { path = "../ast" }
 picus-emit = { path = "../emit" }
+# …and what a repository of scripts IS: its per-dialect branches, each folder's
+# purpose and expected encoding, the update-file naming and the block marker.
+picus-project = { path = "../project" }
+# The rest of the script half, driven from `scripts.rs` and `apply.rs`:
+#   parse     — one permissive grammar for both dialects; statements as byte ranges
+#   inventory — object → file → coverage, the join of the parses to the tree
+#   analyze   — the fourteen rules and the declared suppressions
+#   rewrite   — the only part of Picus that writes: byte splicing, never a re-print
+# All four are pure (rewrite aside, which reads and writes files); the reading, the
+# caching and the ordering are this binary's job.
+picus-parse     = { path = "../parse" }
+picus-inventory = { path = "../inventory" }
+picus-analyze   = { path = "../analyze" }
+picus-rewrite   = { path = "../rewrite" }
+# The encoding context a folder's files are decoded in. Picus supplies the policy
+# (which encoding a folder expects); arbor-fs owns the mechanism.
+arbor-fs   = { path = "../../../foundation/fs" }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 # Drives the serve loop / async domain handlers as the database + script waves land.

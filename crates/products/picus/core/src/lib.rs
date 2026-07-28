@@ -7,8 +7,10 @@
 //! SQL studio's heavy lifting (driver sessions, statement parsing, per-dialect
 //! emission, script rewriting) lives in the leaf crates the domain handlers drive
 //! (`picus-db-api` + one crate per engine, then `picus-ast` / `picus-parse` /
-//! `picus-emit` / …); this state holds only the BE→FE event egress + the reverse
-//! channel back to the shell.
+//! `picus-emit` / …); this state holds only the BE→FE event egress, the reverse
+//! channel back to the shell, and the two things whose lifetime *is* the process:
+//! the open database sessions ([`connections::SessionPool`]) and the script
+//! repositories read so far ([`scripts::ScriptCache`]).
 //!
 //! ## The structural invariant, restated for the backend
 //!
@@ -28,5 +30,7 @@
 
 pub mod config;
 pub mod connections;
+pub mod digest;
 pub mod prelude;
+pub mod scripts;
 pub mod state;

@@ -236,7 +236,14 @@
     {/if}
 
   {:else if kind === 'inventory'}
-    <Button variant="icon" size="sm" title="Re-index the project" ariaLabel="Re-index the project" onclick={() => notYet('Re-indexing')}>
+    <Button
+      variant="icon"
+      size="sm"
+      tooltip={{ content: 'Re-index and re-check the repository', shortcut: 'Ctrl+Shift+K' }}
+      ariaLabel="Re-index the repository"
+      disabled={!picusProjectStore.attached || picusProjectStore.analyzing}
+      onclick={() => void picusProjectStore.analyze()}
+    >
       {#snippet iconStart()}<RefreshCw size={14} />{/snippet}
     </Button>
     <span class="ptb-spacer"></span>

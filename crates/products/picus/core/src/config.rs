@@ -28,6 +28,14 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// Where a generated block lands in a destination file.
+///
+/// Defined in `picus-project`, which owns the project file that can override it
+/// per folder role, and re-exported here because this file holds the *user's*
+/// default for the same setting. One type, so the two tiers cannot disagree about
+/// what `"end-of-file"` means.
+pub use picus_project::prelude::InsertionRule;
+
 /// Persisted picus settings (product, per-profile `…/picus/config.toml`).
 ///
 /// Field order matters for TOML serialization: every scalar field must be declared
@@ -88,6 +96,11 @@ impl Default for PicusWritingConfig {
 /// [`InsertionRule`]. Read them through [`insertion_rule_init`](Self::insertion_rule_init)
 /// / [`insertion_rule_update`](Self::insertion_rule_update), which give the typed
 /// value with a defined fallback.
+///
+/// These are *this user's* defaults. A repository that states its own rule in
+/// `.arbor/picus/project.toml` outranks them, because where a block lands is
+/// visible in every colleague's diff and therefore belongs to the repository.
+/// The resolution order is: project file → here → [`InsertionRule::default_for`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PicusGenerationConfig {
@@ -157,46 +170,6 @@ pub const DEFAULT_ROW_LIMIT: u32 = 500;
 
 /// Accepted range for the query row limit.
 pub const ROW_LIMIT_RANGE: std::ops::RangeInclusive<u32> = 1..=100_000;
-
-/// Where a generated block is inserted into a destination file.
-///
-/// Deliberately dull, and *stated*: the rule is shown in the diff hunk header, so a
-/// predictable rule the user can read beats a clever one they cannot.
-///
-/// Stored in the config as its wire string rather than as a serde enum: an unknown
-/// value must degrade to the default, not fail the whole file's parse and silently
-/// reset every other setting the user had.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InsertionRule {
-    /// Append at the end of the file.
-    EndOfFile,
-    /// After the last statement touching the same table.
-    AfterLastOnTable,
-    /// Immediately before the file's final `COMMIT`.
-    BeforeFinalCommit,
-}
-
-impl InsertionRule {
-    /// The stable wire string (also the value the frontend sends).
-    pub fn as_wire(self) -> &'static str {
-        match self {
-            Self::EndOfFile => "end-of-file",
-            Self::AfterLastOnTable => "after-last-on-table",
-            Self::BeforeFinalCommit => "before-final-commit",
-        }
-    }
-
-    /// Parse a wire string; `None` for anything unrecognised (the caller picks the
-    /// fallback appropriate to its role).
-    pub fn from_wire(s: &str) -> Option<Self> {
-        match s {
-            "end-of-file" => Some(Self::EndOfFile),
-            "after-last-on-table" => Some(Self::AfterLastOnTable),
-            "before-final-commit" => Some(Self::BeforeFinalCommit),
-            _ => None,
-        }
-    }
-}
 
 // ── Persistence ────────────────────────────────────────────────────────────────
 

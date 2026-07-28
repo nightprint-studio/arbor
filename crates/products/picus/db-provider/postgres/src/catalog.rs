@@ -25,6 +25,52 @@ pub async fn read_relations(
     client: &Client,
     schema: &str,
 ) -> DbResult<(Vec<TableInfo>, Vec<TableInfo>)> {
+    read_relations_where(client, schema, None).await
+}
+
+/// One relation with its columns, or `None` when the schema has no such name.
+///
+/// The same query as [`read_relations`] with the name pinned. Worth having as its
+/// own entry point rather than filtering the full read in Rust: on a catalogue of
+/// several hundred relations the full read returns a row per *column* of every one
+/// of them — tens of thousands of rows — to answer a question about one.
+pub async fn read_relation(
+    client: &Client,
+    schema: &str,
+    name: &str,
+) -> DbResult<Option<TableInfo>> {
+    let (tables, views) = read_relations_where(client, schema, Some(name)).await?;
+    Ok(tables.into_iter().chain(views).next())
+}
+
+/// The planner's row estimate for one relation, when it has one.
+///
+/// `reltuples` is a single catalogue lookup and is what makes a page number cheap:
+/// a `count(*)` would scan the table, and on the tables Picus is pointed at that is
+/// the difference between a page turn and a coffee break. `None` covers both "never
+/// analysed" (`-1`) and "no such relation", which are the same thing to the caller:
+/// no number worth showing.
+pub async fn read_estimated_rows(
+    client: &Client,
+    schema: &str,
+    name: &str,
+) -> DbResult<Option<i64>> {
+    const SQL: &str = "
+        SELECT c.reltuples::bigint
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('r', 'p', 'v', 'm')";
+
+    let rows = client.query(SQL, &[&schema, &name]).await.map_err(map_pg)?;
+    Ok(rows.first().map(|r| r.get::<_, i64>(0)).filter(|n| *n >= 0))
+}
+
+/// The shared body: every relation in `schema`, or just the one named.
+async fn read_relations_where(
+    client: &Client,
+    schema: &str,
+    only: Option<&str>,
+) -> DbResult<(Vec<TableInfo>, Vec<TableInfo>)> {
     const SQL: &str = "
         SELECT c.relname,
                c.relkind::text,
@@ -46,9 +92,10 @@ pub async fn read_relations(
           ) pk ON true
          WHERE n.nspname = $1
            AND c.relkind IN ('r', 'p', 'v', 'm')
+           AND ($2::text IS NULL OR c.relname = $2)
       ORDER BY c.relname, a.attnum";
 
-    let rows = client.query(SQL, &[&schema]).await.map_err(map_pg)?;
+    let rows = client.query(SQL, &[&schema, &only]).await.map_err(map_pg)?;
 
     let mut tables: Vec<TableInfo> = Vec::new();
     let mut views: Vec<TableInfo> = Vec::new();
