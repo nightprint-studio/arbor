@@ -58,6 +58,7 @@
     buildPicusPalette,
     picusPaletteIcon,
   } from './picus-palette';
+  import { findingsToText } from './panels/finding-text';
 
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { picusUiStore, type SidebarSection } from '$lib/stores/picus/ui.svelte';
@@ -235,6 +236,32 @@
     void queryStore.run(tab.id, conn.id, scope);
   }
 
+  /**
+   * Put the findings currently shown on the clipboard.
+   *
+   * Reached from the palette as well as from the panel's own button, because
+   * "copy the report" is a verb somebody looks for when they are already halfway
+   * into a ticket, not something they go hunting for in a panel header.
+   */
+  async function copyFindings() {
+    const count = consistencyStore.visible.length;
+    if (!count) {
+      toastStore.show('There is nothing in the report to copy.', 'info');
+      return;
+    }
+    const project = picusProjectStore.project?.name ?? 'this project';
+    const filter = consistencyStore.filter.trim();
+    const heading = `Picus — ${count} finding${count === 1 ? '' : 's'}${
+      filter ? ` matching “${filter}”` : ''
+    } in ${project}`;
+    try {
+      await navigator.clipboard.writeText(findingsToText(consistencyStore.visible, heading));
+      toastStore.show(`${count} finding${count === 1 ? '' : 's'} copied.`, 'success');
+    } catch {
+      toastStore.show('The clipboard refused the copy.', 'error');
+    }
+  }
+
   function generate() {
     // Reached from the keyboard, where the disabled button that would have said
     // the same thing is not in the way — so the toast has to carry the reason.
@@ -343,6 +370,7 @@
       requestWrite: () => void requestWrite(),
       runQuery: (scope) => runActiveQuery(scope),
       stepFinding,
+      copyFindings,
     }),
   );
 

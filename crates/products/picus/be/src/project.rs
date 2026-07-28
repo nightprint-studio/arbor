@@ -162,7 +162,7 @@ fn picus_open_project(_state: &PicusState, root: String) -> Result<OpenedProject
 /// asking again.
 #[arbor_rpc::handler]
 fn picus_confirm_project(
-    _state: &PicusState,
+    state: &PicusState,
     root: String,
     edits: Vec<ProjectEdit>,
 ) -> Result<ConfirmedProject, String> {
@@ -170,7 +170,7 @@ fn picus_confirm_project(
     let proposal = discover(&root).map_err(|e| e.to_string())?;
     let mut config = proposal.config;
     apply_edits(&mut config, &edits);
-    save_and_replan(&root, &config)
+    save_and_replan(state, &root, &config)
 }
 
 /// Declare — or forget — what a folder **name** means in this repository.
@@ -192,7 +192,7 @@ fn picus_confirm_project(
 /// a repository has hundreds of file names to a dozen folder names.
 #[arbor_rpc::handler]
 fn picus_set_folder_alias(
-    _state: &PicusState,
+    state: &PicusState,
     root: String,
     name: String,
     engine: Option<FolderEngine>,
@@ -225,7 +225,7 @@ fn picus_set_folder_alias(
         }
     }
     config.tidy();
-    save_and_replan(&root, &config)
+    save_and_replan(state, &root, &config)
 }
 
 /// Declare — or forget — the engine of **one file**.
@@ -241,7 +241,7 @@ fn picus_set_folder_alias(
 /// express — not calling it is what leaves it alone.
 #[arbor_rpc::handler]
 fn picus_set_file_engine(
-    _state: &PicusState,
+    state: &PicusState,
     root: String,
     path: String,
     dialect: Option<FolderEngine>,
@@ -267,7 +267,7 @@ fn picus_set_file_engine(
         }
     }
     config.tidy();
-    save_and_replan(&root, &config)
+    save_and_replan(state, &root, &config)
 }
 
 /// Every folder whose name this alias would apply to, in tree order.
@@ -321,11 +321,24 @@ pub struct ProjectSettings {
     pub date_column: String,
     /// Extra predicate, for a version table holding one row per module.
     pub version_filter: String,
+    /// Other tables that also record a version in this repository.
+    ///
+    /// Names only. They satisfy the guard rules — a repository installing more
+    /// than one product has a version table per module, and a script belonging to
+    /// the second module guards against the second table — but generation still
+    /// stamps the primary, because something has to be stamped.
+    pub other_version_tables: Vec<String>,
     /// What the initialisation folders are, relative to the updates —
     /// [`InitialisationModel`]'s wire word.
     pub initialisation: String,
+    /// Compare one dialect's scripts against the other's at all. See
+    /// [`AnalysisSettings::compare_dialects`].
+    pub compare_dialects: bool,
     /// Rule ids this repository does not want run.
     pub disabled_rules: Vec<String>,
+    /// Object names the rules say nothing about. See
+    /// [`AnalysisSettings::excluded_objects`].
+    pub excluded_objects: Vec<String>,
 }
 
 impl ProjectSettings {
@@ -340,8 +353,11 @@ impl ProjectSettings {
             version_column: config.version_table.version_column.clone(),
             date_column: config.version_table.date_column.clone().unwrap_or_default(),
             version_filter: config.version_table.filter.clone(),
+            other_version_tables: config.version_table.also.clone(),
             initialisation: config.analysis.initialisation.as_wire().to_string(),
+            compare_dialects: config.analysis.compare_dialects,
             disabled_rules: config.analysis.disabled_rules.clone(),
+            excluded_objects: config.analysis.excluded_objects.clone(),
         }
     }
 
@@ -363,7 +379,23 @@ impl ProjectSettings {
         config.version_table.date_column =
             (!date.is_empty()).then(|| date.to_string());
         config.version_table.filter = self.version_filter.trim().to_string();
+        // Trimmed, de-duplicated, and never repeating the primary — the list is
+        // committed and read by people, and the same table named twice reads as a
+        // second module that is not there.
+        let mut others: Vec<String> = Vec::new();
+        for written in &self.other_version_tables {
+            let name = written.trim();
+            if name.is_empty()
+                || name.eq_ignore_ascii_case(config.version_table.table.as_str())
+                || others.iter().any(|seen| seen.eq_ignore_ascii_case(name))
+            {
+                continue;
+            }
+            others.push(name.to_string());
+        }
+        config.version_table.also = others;
 
+        config.analysis.compare_dialects = self.compare_dialects;
         if let Some(model) = initialisation_from_wire(&self.initialisation) {
             config.analysis.initialisation = model;
         }
@@ -382,6 +414,24 @@ impl ProjectSettings {
         }
         rules.sort();
         config.analysis.disabled_rules = rules;
+
+        // Folded to the comparison form on the way in, so the committed file holds
+        // the name the rules will actually compare against rather than however it
+        // was typed — and a reader of the TOML sees the same spelling the report
+        // uses.
+        let mut objects: Vec<String> = Vec::new();
+        for written in &self.excluded_objects {
+            let name = written.trim();
+            if name.is_empty() {
+                continue;
+            }
+            let folded = picus_analyze::prelude::fold_identifier(name);
+            if !objects.contains(&folded) {
+                objects.push(folded);
+            }
+        }
+        objects.sort();
+        config.analysis.excluded_objects = objects;
     }
 }
 
@@ -411,7 +461,7 @@ fn picus_project_settings(_state: &PicusState, root: String) -> Result<ProjectSe
 /// is re-read from disk here and only these fields are assigned.
 #[arbor_rpc::handler]
 fn picus_set_project_settings(
-    _state: &PicusState,
+    state: &PicusState,
     root: String,
     settings: ProjectSettings,
 ) -> Result<ConfirmedProject, String> {
@@ -419,7 +469,7 @@ fn picus_set_project_settings(
     let proposal = discover(&root).map_err(|e| e.to_string())?;
     let mut config = proposal.config;
     settings.write(&mut config);
-    save_and_replan(&root, &config)
+    save_and_replan(state, &root, &config)
 }
 
 /// Everything wrong with a project file, from both crates that can judge it.
@@ -442,8 +492,19 @@ pub(crate) fn config_problems(config: &ProjectConfig) -> Vec<String> {
 /// declaration changes what every descendant *effectively* is, and re-resolving
 /// is the only thing that knows the inheritance rule. Shared by both writers so
 /// the two can never answer with differently-shaped truth.
-fn save_and_replan(root: &Path, config: &ProjectConfig) -> Result<ConfirmedProject, String> {
+fn save_and_replan(
+    state: &PicusState,
+    root: &Path,
+    config: &ProjectConfig,
+) -> Result<ConfirmedProject, String> {
     let path = config.save(root).map_err(|e| e.to_string())?;
+    // The held snapshot carries the configuration the repository was *opened*
+    // with. Leaving it there is how switching a rule off, or changing the
+    // initialisation model, or classifying a folder changed nothing until the
+    // user re-read the whole repository from disk — and "re-run the check"
+    // answered exactly as before, which reads as a broken button rather than as a
+    // stale cache. The decoded text is kept; only the configuration is re-read.
+    crate::scripts::refresh_configuration(state, root);
     let confirmed = discover(root).map_err(|e| e.to_string())?;
     Ok(ConfirmedProject {
         config_path: path.display().to_string(),
@@ -484,7 +545,7 @@ fn folders_matching(project: &Project, name: &str) -> Vec<String> {
 /// user no way to change their mind.
 #[arbor_rpc::handler]
 fn picus_set_excluded(
-    _state: &PicusState,
+    state: &PicusState,
     root: String,
     path: String,
     excluded: bool,
@@ -514,7 +575,7 @@ fn picus_set_excluded(
         ));
     }
     config.tidy();
-    save_and_replan(&root, &config)
+    save_and_replan(state, &root, &config)
 }
 
 /// What a folder at `path` would be if it declared nothing — its parent's answer.

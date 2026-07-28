@@ -62,6 +62,23 @@ const COMPARED_ROLES: [FolderRole; 4] =
     [FolderRole::Init, FolderRole::Data, FolderRole::Update, FolderRole::Routines];
 
 pub(crate) fn run(context: &Context<'_>, output: &mut Output) {
+    // Whether the two dialects are comparable at all is a fact about the
+    // repository, and on some there is no honest answer but "no": two halves that
+    // have diverged in layout, in table names, in who generated them. Both rules
+    // then produce a wall of findings that is accurate and unactionable, while the
+    // rest of the report — the version chain, the duplicates, the dangerous DML,
+    // the encodings — is worth having on its own.
+    if !context.config.analysis.compare_dialects {
+        for rule in [RuleId::Cons001, RuleId::Cons004] {
+            output.skip(
+                rule,
+                "",
+                "this project does not compare its two dialects against each other — turn the \
+                 comparison back on in the project settings",
+            );
+        }
+        return;
+    }
     coverage_gaps(context, output);
     divergent_content(context, output);
 }
@@ -74,7 +91,7 @@ fn coverage_gaps(context: &Context<'_>, output: &mut Output) {
         // A package has no PostgreSQL counterpart to be missing from. Reporting
         // one would put a permanent, unfixable finding at the top of every
         // report of every Oracle-first repository.
-        if !entry.kind.exists_in_both_engines() {
+        if !entry.kind.exists_in_both_engines() || context.excludes(&entry.name) {
             continue;
         }
         // One finding per object per dialect, at the most significant role where
@@ -129,12 +146,23 @@ fn missing_finding(
     // dressed up as advice. The jump the user wants is `alsoAt`, which points at
     // the dialect that does do it.
     let path = lane.first().map(|f| f.path.as_str()).unwrap_or("");
-    let elsewhere = entry.sites_in(covering, role).next().map(|s| s.location());
+    let elsewhere = entry.writes_in(covering, role).next().map(|s| s.location());
 
+    // The kind is named, and it is not decoration. A repository whose folders are
+    // called `AGGIORNAMENTO` can perfectly well have a *table* called
+    // `AGGIORNAMENTO` — an update log is exactly the sort of thing that gets that
+    // name — and "AGGIORNAMENTO is not touched by the Oracle scripts", anchored at
+    // a folder path ending in `AGGIORNAMENTO/DBPORT/ORA`, reads as a claim about
+    // the folder. It is a claim about the table, and one word settles it.
     let mut draft = Finding::new(
         RuleId::Cons001,
         Anchor::file(path),
-        format!("{} is not touched by the {} scripts", entry.name, engine_label(missing)),
+        format!(
+            "The {kind} {name} is not touched by the {engine} scripts",
+            kind = entry.kind.as_str(),
+            name = entry.name,
+            engine = engine_label(missing)
+        ),
         gap_consequence(entry, missing, covering, role),
     )
     .fix(format!("Generate for {} too", engine_label(missing)));
@@ -212,6 +240,9 @@ fn divergent_content(context: &Context<'_>, output: &mut Output) {
         }
         for statement in &script.parsed.statements {
             for shape in statement.dml.iter().filter(|d| d.operation == DmlOperation::Insert) {
+                if context.excludes(&shape.table.folded_name()) {
+                    continue;
+                }
                 let key = (shape.table.folded_name(), placement.effective_role().as_str());
                 let per_dialect = written.entry(key).or_default();
                 let slot = per_dialect.entry(dialect).or_insert_with(|| Written {
@@ -340,7 +371,7 @@ fn divergence(
 /// never added together, and one portable `INSERT` genuinely does put the row in
 /// both installations.
 fn lane_touches(entry: &ObjectEntry, dialect: EngineKind, role: FolderRole) -> bool {
-    entry.sites_in(dialect, role).next().is_some()
+    entry.writes_in(dialect, role).next().is_some()
 }
 
 /// How many statements the lane runs against this object — for the sentence that
@@ -353,7 +384,7 @@ fn lane_touches(entry: &ObjectEntry, dialect: EngineKind, role: FolderRole) -> b
 /// and only ever needs to know whether the answer is zero.
 fn lane_statements(entry: &ObjectEntry, dialect: EngineKind, role: FolderRole) -> usize {
     entry
-        .sites_in(dialect, role)
+        .writes_in(dialect, role)
         .map(|site| (site.path.as_str(), site.statement_index))
         .collect::<BTreeSet<_>>()
         .len()

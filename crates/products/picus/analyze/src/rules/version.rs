@@ -32,7 +32,17 @@ pub(crate) fn run(context: &Context<'_>, output: &mut Output) {
 // ── VER001 / VER002 — per update file ────────────────────────────────────────
 
 fn guards(context: &Context<'_>, output: &mut Output) {
-    let Some(version_table) = context.version_table.as_deref() else {
+    let version_tables = context.version_tables.as_slice();
+    // How the tables are named in a message. A repository with one reads exactly
+    // as before; one with several says so, because "it never reads VERSIONE_DB"
+    // is not useful advice to somebody whose script correctly reads
+    // VERSIONE_PORTALE.
+    let named = match version_tables {
+        [] => String::new(),
+        [only] => only.clone(),
+        [first @ .., last] => format!("{} or {last}", first.join(", ")),
+    };
+    if version_tables.is_empty() {
         // Not a pass. A project that has emptied the version-table name has
         // switched these two rules off, and a report that stayed silent about it
         // would look like a project whose update scripts are all guarded.
@@ -49,7 +59,7 @@ fn guards(context: &Context<'_>, output: &mut Output) {
              carry forward — set one in the project settings to turn this rule on",
         );
         return;
-    };
+    }
 
     for (script, placement) in context.project.placed() {
         if placement.effective_role() != picus_types::prelude::FolderRole::Update {
@@ -65,14 +75,14 @@ fn guards(context: &Context<'_>, output: &mut Output) {
             Anchor::at(script.path, script.parsed.line_of(offset))
         };
 
-        if !reads_version(statements, version_table) {
+        if !reads_version(statements, version_tables) {
             output.findings.push(
                 Finding::new(
                     RuleId::Ver001,
                     anchor(first_change.range.start),
                     "This update script never checks which version it is starting from",
                     format!(
-                        "It writes without reading {version_table} first, so running it a second \
+                        "It writes without reading {named} first, so running it a second \
                          time re-applies everything: on a database already upgraded, the changes \
                          land again and overwrite values that were correct.",
                     ),
@@ -82,7 +92,7 @@ fn guards(context: &Context<'_>, output: &mut Output) {
             );
         }
 
-        if !writes_version(statements, version_table) {
+        if !writes_version(statements, version_tables) {
             let last = statements.last().map(|s| s.range.start).unwrap_or(0);
             output.findings.push(
                 Finding::new(
@@ -90,7 +100,7 @@ fn guards(context: &Context<'_>, output: &mut Output) {
                     anchor(last),
                     "This update script never carries the version forward",
                     format!(
-                        "It applies its changes and leaves {version_table} on the old value, so the \
+                        "It applies its changes and leaves {named} on the old value, so the \
                          next update refuses to start and the installation stalls one version \
                          behind — with the changes already applied.",
                     ),
@@ -129,20 +139,27 @@ fn changes_something(statement: &Statement) -> bool {
 /// names it without writing it and does. Without the subtraction, `VER002` being
 /// satisfied would silently satisfy `VER001` too, and the two would never be able
 /// to disagree — which is exactly what a real half-guarded script looks like.
-fn reads_version(statements: &[Statement], version_table: &str) -> bool {
-    let mentions: usize = statements
-        .iter()
-        .flat_map(|s| s.references.iter())
-        .filter(|r| r.folded_name() == version_table)
-        .count();
-    mentions > writes(statements, version_table)
+/// Satisfied by **any** of the declared version tables, and that is the point of
+/// the list. A repository installing more than one product has a version table
+/// per module, and a script belonging to the second module guards against the
+/// second table — perfectly correctly. Asked about one name, this rule reported
+/// every one of those scripts as unguarded.
+fn reads_version(statements: &[Statement], version_tables: &[String]) -> bool {
+    version_tables.iter().any(|table| {
+        let mentions: usize = statements
+            .iter()
+            .flat_map(|s| s.references.iter())
+            .filter(|r| r.folded_name() == *table)
+            .count();
+        mentions > writes_one(statements, table)
+    })
 }
 
-fn writes_version(statements: &[Statement], version_table: &str) -> bool {
-    writes(statements, version_table) > 0
+fn writes_version(statements: &[Statement], version_tables: &[String]) -> bool {
+    version_tables.iter().any(|table| writes_one(statements, table) > 0)
 }
 
-fn writes(statements: &[Statement], version_table: &str) -> usize {
+fn writes_one(statements: &[Statement], version_table: &str) -> usize {
     statements
         .iter()
         .flat_map(|s| s.dml.iter())

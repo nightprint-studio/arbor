@@ -20,6 +20,8 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
+  import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
+  import { findingToText } from './finding-text';
   import { tooltip } from '$lib/actions/tooltip';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { consistencyStore } from '$lib/stores/picus/consistency.svelte';
@@ -155,6 +157,16 @@
               {/if}
             </div>
           </div>
+
+          <!-- A report is rarely the end of the conversation: it goes into a
+               ticket, a commit message, a chat with whoever wrote the other
+               dialect's half. Retyping a rule id and a path is exactly the kind
+               of transcription that arrives one character wrong. -->
+          <CopyButton
+            value={() => findingToText(finding)}
+            title="Copy this finding"
+            toastSuccess="Finding copied."
+          />
 
           {#if finding.fixLabel && !finding.suppressedBecause}
             <Button

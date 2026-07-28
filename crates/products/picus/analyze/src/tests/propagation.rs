@@ -277,6 +277,169 @@ fn a_direction_that_is_not_checked_is_reported_rather_than_silently_absent() {
 }
 
 #[test]
+fn a_value_that_drifted_is_not_described_as_a_row_nobody_wrote() {
+    // The asymmetry the initialisation model introduces. With both directions on,
+    // a changed value produces two findings and the pair makes it obvious the row
+    // exists on both sides. Under the default only one direction runs, and the
+    // survivor used to say "the initialisation never inserts it" about a row the
+    // initialisation plainly does insert — which reads as a lie to anyone who
+    // opens the file, and there were a great many of them.
+    let repo = Fixture::build(&[
+        (
+            "ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, ETICHETTA, CONFIG) \
+             VALUES ('ricerca_avanzata', 'Ricerca', '{\"v\":1}');",
+        ),
+        (
+            "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, ETICHETTA, CONFIG) \
+             VALUES ('ricerca_avanzata', 'Ricerca', '{\"v\":2}');",
+        ),
+    ]);
+    let report = repo.report();
+    let findings = open_of(&report, RuleId::Cons003);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+
+    let finding = findings[0];
+    // The title names the column the two halves disagree about, and does not
+    // claim the row is absent.
+    assert!(finding.title.contains("CONFIG"), "{}", finding.title);
+    assert!(!finding.title.contains("alone"), "{}", finding.title);
+    // The consequence says what actually happens: which value you end up with
+    // depends on when you installed.
+    assert!(
+        finding.consequence.contains("installed before or after"),
+        "{}",
+        finding.consequence
+    );
+    assert!(finding.consequence.contains("drifted"), "{}", finding.consequence);
+    // …and it points at the other row rather than at the folder, because the
+    // other row is the thing to go and look at.
+    assert_eq!(
+        finding.also_at.as_deref(),
+        Some("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql:1")
+    );
+}
+
+#[test]
+fn a_row_the_other_half_has_nothing_like_is_still_reported_as_missing() {
+    // The other branch, so the wording above is a distinction and not a rename.
+    let repo = Fixture::build(&[
+        (
+            "ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, ETICHETTA) VALUES ('ricerca', 'Ricerca');",
+        ),
+        (
+            "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, ETICHETTA) VALUES ('ricerca', 'Ricerca');\n\
+             INSERT INTO CATALOGO_WIDGET (CHIAVE, ETICHETTA) VALUES ('esporta', 'Esporta');",
+        ),
+    ]);
+    let report = repo.report();
+    let findings = open_of(&report, RuleId::Cons003);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert!(findings[0].title.contains("by an update alone"), "{}", findings[0].title);
+    assert!(findings[0].consequence.contains("never inserts it"), "{}", findings[0].consequence);
+}
+
+#[test]
+fn two_rows_that_share_nothing_are_not_called_a_drift() {
+    // The near-match is "shares at least one column value". Two unrelated rows in
+    // the same table share none, and pairing them would invent a relationship —
+    // and point the reader at a line that has nothing to do with the finding.
+    let repo = Fixture::build(&[
+        (
+            "ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, ETICHETTA) VALUES ('ricerca', 'Ricerca');",
+        ),
+        (
+            "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, ETICHETTA) VALUES ('ricerca', 'Ricerca');\n\
+             INSERT INTO CATALOGO_WIDGET (CHIAVE, ETICHETTA) VALUES ('stampa', 'Stampa');",
+        ),
+    ]);
+    let report = repo.report();
+    let findings = open_of(&report, RuleId::Cons003);
+    assert_eq!(findings.len(), 1);
+    assert!(findings[0].title.contains("alone"), "{}", findings[0].title);
+}
+
+#[test]
+fn a_row_a_later_update_rewrote_is_not_reported_against_the_initialisation() {
+    // The update half is a chain of deltas, not a bag of INSERTs. Version 1.11
+    // writes a row, 1.13 rewrites it, and the initialisation — kept at the latest
+    // version — carries what 1.13 left. The 1.11 row is in no initialisation, and
+    // it should not be: it has not existed since 1.13.
+    let repo = Fixture::build(&[
+        (
+            "ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, CONFIG) VALUES ('ricerca', '{\"v\":3}');",
+        ),
+        (
+            "ORACLE/AGGIORNAMENTO/4_11__4_12.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, CONFIG) VALUES ('ricerca', '{\"v\":1}');",
+        ),
+        (
+            "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
+            "DELETE FROM CATALOGO_WIDGET WHERE CHIAVE = 'ricerca';\n\
+             INSERT INTO CATALOGO_WIDGET (CHIAVE, CONFIG) VALUES ('ricerca', '{\"v\":3}');",
+        ),
+    ]);
+    let report = repo.report();
+    let findings = open_of(&report, RuleId::Cons003);
+    assert!(findings.is_empty(), "the 4.11 value was superseded by 4.13: {findings:?}");
+}
+
+#[test]
+fn the_last_word_of_the_updates_is_still_checked() {
+    // The other way round: the newest update leaves a value the initialisation
+    // does not have. Nothing supersedes it, so it is a real divergence and the
+    // rule has to keep reporting it — otherwise the fix above is a way of
+    // switching CONS003 off.
+    let repo = Fixture::build(&[
+        (
+            "ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, CONFIG) VALUES ('ricerca', '{\"v\":1}');",
+        ),
+        (
+            "ORACLE/AGGIORNAMENTO/4_11__4_12.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, CONFIG) VALUES ('ricerca', '{\"v\":1}');",
+        ),
+        (
+            "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, CONFIG) VALUES ('ricerca', '{\"v\":3}');",
+        ),
+    ]);
+    let report = repo.report();
+    let findings = open_of(&report, RuleId::Cons003);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert!(findings[0].file.ends_with("4_12__4_13.sql"), "{}", findings[0].file);
+    assert!(findings[0].title.contains("CONFIG"), "{}", findings[0].title);
+}
+
+#[test]
+fn two_unrelated_rows_do_not_supersede_each_other() {
+    // The near-match alone is not enough — the later row also has to be one the
+    // initialisation actually has. Without that condition, two different rows
+    // that happen to share a column value would silence each other and the rule
+    // would go quiet on exactly the repositories it is for.
+    let repo = Fixture::build(&[
+        (
+            "ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, GRUPPO) VALUES ('ricerca', 'base');",
+        ),
+        (
+            "ORACLE/AGGIORNAMENTO/4_11__4_12.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, GRUPPO) VALUES ('esporta', 'base');\n\
+             INSERT INTO CATALOGO_WIDGET (CHIAVE, GRUPPO) VALUES ('stampa', 'base');",
+        ),
+    ]);
+    let report = repo.report();
+    // Both are genuinely absent from the initialisation; neither replaced the other.
+    assert_eq!(open_of(&report, RuleId::Cons003).len(), 2);
+}
+
+#[test]
 fn a_project_that_maintains_the_two_halves_separately_checks_neither() {
     use picus_project::prelude::InitialisationModel;
     let report = diverged()

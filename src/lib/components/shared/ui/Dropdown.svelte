@@ -107,6 +107,17 @@
     maxHeight?: number;
     /** When true (with position='fixed'), menu width equals trigger width. */
     matchTriggerWidth?: boolean;
+    /**
+     * Floor for the menu's width, in pixels.
+     *
+     * Only meaningful with {@link matchTriggerWidth}, and it exists because that
+     * option is a *promise about alignment* that turns into a trap when the
+     * trigger is narrow: a picker sitting in a flex row, or one whose selected
+     * label happens to be empty, can be thirty pixels wide, and a menu obeying it
+     * is an unreadable vertical strip. Set this on any menu whose items are names
+     * the user has to read.
+     */
+    minMenuWidth?: number;
     /** 'single' (default) closes on item click; 'multiple' stays open and renders checkboxes. */
     selectionMode?: 'single' | 'multiple';
     /** Override the default close-on-select behavior derived from `selectionMode`. */
@@ -140,6 +151,7 @@
     width,
     maxHeight,
     matchTriggerWidth = false,
+    minMenuWidth,
     selectionMode     = 'single',
     closeOnSelect,
     loading           = false,
@@ -249,7 +261,12 @@
     }
     const GAP   = 6, MARGIN = 8;
     const explicitW = width ? parseInt(width) : null;
-    const matchedW  = matchTriggerWidth ? r.width : null;
+    // The floor applies to the *matched* width only. An explicit `width` is the
+    // caller stating a number, and second-guessing that would make the prop a
+    // suggestion rather than a setting.
+    const matchedW  = matchTriggerWidth
+      ? Math.max(r.width, minMenuWidth ?? 0)
+      : null;
     const menuW     = explicitW ?? matchedW ?? 260;
     const isHoriz   = direction === 'right' || direction === 'left';
     let style: string;

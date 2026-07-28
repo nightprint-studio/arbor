@@ -13,14 +13,17 @@ use crate::report::Output;
 use crate::rule::RuleId;
 
 pub(crate) fn run(context: &Context<'_>, output: &mut Output) {
-    let version_table = context.version_table.as_deref();
+    let version_tables = context.version_tables.as_slice();
     for (script, _) in context.project.placed() {
         for statement in &script.parsed.statements {
             for shape in &statement.dml {
+                if context.excludes(&shape.table.folded_name()) {
+                    continue;
+                }
                 let line = script.parsed.line_of(shape.table.range.start);
                 let anchor = || Anchor::at(script.path, line);
 
-                if unguarded_write(shape, version_table) {
+                if unguarded_write(shape, version_tables) {
                     output.findings.push(unguarded_write_finding(anchor(), shape));
                 }
                 if column_less_insert(shape) {
@@ -40,10 +43,10 @@ pub(crate) fn run(context: &Context<'_>, output: &mut Output) {
 ///
 /// `TRUNCATE` is deliberately not included: it is a different statement, it says
 /// what it does in its own name, and nobody writes it by accident.
-fn unguarded_write(shape: &DmlShape, version_table: Option<&str>) -> bool {
+fn unguarded_write(shape: &DmlShape, version_tables: &[String]) -> bool {
     matches!(shape.operation, DmlOperation::Delete | DmlOperation::Update)
         && shape.where_clause.is_none()
-        && !is_version_bump(shape, version_table)
+        && !is_version_bump(shape, version_tables)
 }
 
 /// The closing `UPDATE VERSIONE_DB SET VERSIONE = '4.13'` of an update script.
@@ -53,9 +56,9 @@ fn unguarded_write(shape: &DmlShape, version_table: Option<&str>) -> bool {
 /// exemption, turning `DML001` on for `UPDATE` would put a finding on every
 /// correctly written update script in the repository, which is the fastest way
 /// to teach somebody that the report is wrong.
-fn is_version_bump(shape: &DmlShape, version_table: Option<&str>) -> bool {
+fn is_version_bump(shape: &DmlShape, version_tables: &[String]) -> bool {
     shape.operation == DmlOperation::Update
-        && version_table.is_some_and(|table| shape.table.folded_name() == table)
+        && version_tables.iter().any(|table| shape.table.folded_name() == *table)
 }
 
 fn unguarded_write_finding(anchor: Anchor, shape: &DmlShape) -> Finding {

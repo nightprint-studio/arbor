@@ -4,11 +4,23 @@
   interface Props {
     label: string;
     description?: string;
+    /**
+     * Give the control the row's remaining width instead of sizing it to its
+     * own content.
+     *
+     * Off by default, because the common control is a toggle or a short select
+     * and stretching those would leave a switch marooned at the end of a long
+     * empty strip. Set it for anything that holds *text the user has to read* —
+     * a picker over a schema's tables, a select whose options are sentences. The
+     * default costs nothing until the content happens to be short or empty, at
+     * which point the control collapses to the width of its own chevron.
+     */
+    wideControl?: boolean;
     /** Right-aligned control (toggle, input, select, button…). */
     children: Snippet;
   }
 
-  let { label, description, children }: Props = $props();
+  let { label, description, wideControl = false, children }: Props = $props();
 </script>
 
 <div class="fr-row">
@@ -16,9 +28,9 @@
        Keeping the label compact (no description here) prevents narrow controls
        like a Toggle from being stuck in a half-row "second column" while the
        description tries to wrap into a tiny strip on the left. -->
-  <div class="fr-header">
+  <div class="fr-header" class:fr-wide-header={wideControl}>
     <span class="fr-title">{label}</span>
-    <div class="fr-control">
+    <div class="fr-control" class:fr-wide={wideControl}>
       {@render children()}
     </div>
   </div>
@@ -65,6 +77,12 @@
     gap: 8px;
     flex-shrink: 0;
   }
+  /* Opt-in: the control takes what the title leaves. `min-width: 0` lets it
+     shrink past its content instead of pushing the title out of the row. */
+  .fr-control.fr-wide { flex: 1 1 auto; min-width: 0; }
+  /* …and the title stops competing for it: without this the two split the row
+     evenly and a one-word label reserves half of it. */
+  .fr-header.fr-wide-header .fr-title { flex: 0 1 auto; }
 
   .fr-desc {
     margin: 0;

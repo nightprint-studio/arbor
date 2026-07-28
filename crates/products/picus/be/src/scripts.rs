@@ -266,6 +266,67 @@ pub(crate) fn snapshot_for(
     Ok(snapshot)
 }
 
+/// Re-read what the **project file** says, and keep the text that was already
+/// decoded.
+///
+/// Called after every write to `project.toml`. Without it the held snapshot keeps
+/// the configuration it was opened with, so switching a rule off, changing the
+/// initialisation model or classifying a folder changed nothing until the user
+/// hit "re-read the repository from disk" — and "re-run the check" gave the same
+/// answer as before, which reads as a broken button rather than as a stale cache.
+///
+/// The decoded text is reused rather than re-read, and that is the point: a
+/// configuration write does not change a single byte on disk, and re-reading four
+/// hundred files off a network share to learn that a rule is off would make every
+/// classification click cost seconds.
+///
+/// A file whose **expected encoding** changed is re-read, because its text is
+/// genuinely different now — that is the one project setting which does change
+/// what the bytes mean.
+pub(crate) fn reconfigure(root: &Path, held: &ScriptSnapshot) -> Result<ScriptSnapshot, String> {
+    let proposal = discover(root).map_err(|e| e.to_string())?;
+    let mut problems = crate::project::config_problems(&proposal.config);
+    let mut sources = BTreeMap::new();
+
+    for file in proposal.project.all_files() {
+        match held.source(&file.path).filter(|held| held.encoding == file.encoding) {
+            Some(reused) => {
+                sources.insert(reused.path.clone(), reused.clone());
+            }
+            None => match read_one(root, &file.path, &file.encoding) {
+                Ok(source) => {
+                    sources.insert(source.path.clone(), source);
+                }
+                Err(reason) => problems.push(reason),
+            },
+        }
+    }
+
+    Ok(ScriptSnapshot {
+        root: root.to_path_buf(),
+        project: proposal.project,
+        config: proposal.config,
+        notes: proposal.notes,
+        is_new: proposal.is_new,
+        problems,
+        sources,
+    })
+}
+
+/// Swap in a snapshot that reflects the project file as it now stands.
+///
+/// A no-op when nothing is held — there is then nothing stale to correct, and the
+/// next open reads the new configuration anyway. Best-effort: a repository that
+/// cannot be re-read must not turn a successful settings write into a failure,
+/// since the write already landed.
+pub(crate) fn refresh_configuration(state: &PicusState, root: &Path) {
+    let key = root_of(&root.display().to_string());
+    let Some(held) = state.scripts().get(&key) else { return };
+    if let Ok(fresh) = reconfigure(&key, &held) {
+        state.scripts().put(Arc::new(fresh));
+    }
+}
+
 /// Discover a repository and decode every script in it.
 pub(crate) fn read(root: &Path) -> Result<ScriptSnapshot, String> {
     let proposal = discover(root).map_err(|e| e.to_string())?;

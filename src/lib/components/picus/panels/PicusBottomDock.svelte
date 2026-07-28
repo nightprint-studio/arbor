@@ -27,8 +27,10 @@
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
+  import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
   import FindingList from './FindingList.svelte';
   import QueryResultPanel from './QueryResultPanel.svelte';
+  import { findingsToText } from './finding-text';
   import PatchDiffCard from '../generate/PatchDiffCard.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
@@ -85,6 +87,22 @@
     },
   ]);
 
+  /**
+   * What a copied report says it is.
+   *
+   * Names the repository and the filter, because the copy almost always ends up
+   * somewhere the reader cannot see this panel — a ticket, a message — and
+   * "12 findings" with no idea which twelve is a paste that has to be explained
+   * in the next line anyway.
+   */
+  function copyHeading(): string {
+    const count = consistencyStore.visible.length;
+    const project = picusProjectStore.project?.name ?? 'this project';
+    const filter = consistencyStore.filter.trim();
+    const scope = filter ? ` matching “${filter}”` : '';
+    return `Picus — ${count} finding${count === 1 ? '' : 's'}${scope} in ${project}`;
+  }
+
   /** The destination a previewed file belongs to — for its dialect and role chips. */
   function targetFor(path: string) {
     return dmlStore.targets.find((t) => t.file === path) ?? null;
@@ -125,6 +143,15 @@
           options={groupOptions}
           narrow
           onchange={(v) => consistencyStore.setGrouping(v as FindingGrouping)}
+        />
+        <!-- The list as it stands on screen, filter and grouping included — a
+             pasted excerpt that looks like the whole report is worse than one
+             that says what it is, so the heading names the count and the
+             filter. -->
+        <CopyButton
+          value={() => findingsToText(consistencyStore.visible, copyHeading())}
+          title="Copy the findings shown"
+          toastSuccess="Findings copied."
         />
         <Button
           variant="icon"

@@ -23,6 +23,10 @@ pub struct InventoryObject {
     /// Keyed by the folder's project-relative path. `0` means the folder exists
     /// and does nothing with this object, which is the value the interface highlights.
     pub coverage: BTreeMap<String, usize>,
+    /// This repository only ever **reads** this object — see
+    /// [`ObjectEntry::is_external`]. Its zeroes are the boundary of the
+    /// repository, not a difference between the two engines.
+    pub external: bool,
 }
 
 impl InventoryObject {
@@ -31,6 +35,7 @@ impl InventoryObject {
             name: entry.name.clone(),
             kind: entry.kind,
             coverage: entry.coverage.clone(),
+            external: entry.is_external(),
         }
     }
 }
@@ -50,11 +55,12 @@ mod tests {
             ]
             .into_iter()
             .collect(),
+            external: false,
         };
         let json = serde_json::to_string(&object).unwrap();
         assert_eq!(
             json,
-            r#"{"name":"PARAMETRI","kind":"table","coverage":{"AGGIORNAMENTO/2024/ORA":1,"AGGIORNAMENTO/2024/POS":0}}"#
+            r#"{"name":"PARAMETRI","kind":"table","coverage":{"AGGIORNAMENTO/2024/ORA":1,"AGGIORNAMENTO/2024/POS":0},"external":false}"#
         );
     }
 }

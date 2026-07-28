@@ -20,6 +20,7 @@
 //! everything else here depends on.
 
 pub mod build;
+pub mod builtin;
 pub mod entry;
 pub mod input;
 pub mod kind;

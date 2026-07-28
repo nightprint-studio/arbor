@@ -107,3 +107,73 @@ fn an_id_that_silences_nothing_is_reported_to_whoever_wrote_it() {
 
     assert!(rule_settings_problems(&AnalysisSettings::default()).is_empty());
 }
+
+// ── Objects excluded from the rules ──────────────────────────────────────────
+
+/// One table that is a special case, and one that is not — so a test can show
+/// the exclusion reaching the first and leaving the second alone.
+fn two_tables() -> Fixture {
+    Fixture::build(&[
+        (
+            "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
+            "INSERT INTO STAGING_IMPORT (COD) VALUES ('X');\n\
+             INSERT INTO CATALOGO_WIDGET (CHIAVE) VALUES ('ricerca');\n\
+             DELETE FROM STAGING_IMPORT;\n\
+             UPDATE CATALOGO_WIDGET SET ORDINE = 1;",
+        ),
+        (
+            "POSTGRES/AGGIORNAMENTO/4_12__4_13.sql",
+            "insert into parametri (cod) values ('X');",
+        ),
+    ])
+}
+
+#[test]
+fn an_excluded_object_produces_no_findings_of_any_rule() {
+    let before = two_tables().report();
+    assert!(
+        before.findings.iter().any(|f| f.title.contains("STAGING_IMPORT")
+            || f.consequence.contains("STAGING_IMPORT")),
+        "the fixture has to say something about it first"
+    );
+
+    let after = two_tables()
+        .configured(|c| c.analysis.excluded_objects = vec!["staging_import".to_string()])
+        .report();
+    assert!(
+        !after.findings.iter().any(|f| f.title.contains("STAGING_IMPORT")
+            || f.consequence.contains("STAGING_IMPORT")),
+        "{:?}",
+        after.findings.iter().map(|f| &f.title).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn excluding_one_object_leaves_every_other_one_checked() {
+    // The reason this exists rather than "switch the rule off": silencing one
+    // table must not stop the rule watching the rest.
+    let report = two_tables()
+        .configured(|c| c.analysis.excluded_objects = vec!["STAGING_IMPORT".to_string()])
+        .report();
+    assert!(
+        report.findings.iter().any(|f| f.title.contains("CATALOGO_WIDGET")
+            || f.consequence.contains("CATALOGO_WIDGET")),
+        "{:?}",
+        report.findings.iter().map(|f| &f.title).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn the_name_is_matched_the_way_the_scripts_are_compared() {
+    // Folded like every other identifier in the product: an unquoted name given
+    // in either case matches, and a quoted one keeps its contents exactly.
+    for written in ["STAGING_IMPORT", "staging_import", " Staging_Import "] {
+        let report = two_tables()
+            .configured(|c| c.analysis.excluded_objects = vec![written.to_string()])
+            .report();
+        assert!(
+            !report.findings.iter().any(|f| f.title.contains("STAGING_IMPORT")),
+            "{written:?} should have excluded it"
+        );
+    }
+}

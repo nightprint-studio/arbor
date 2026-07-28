@@ -721,10 +721,19 @@ fn the_postgres_upgrade_script_parses_and_yields_the_same_change() {
     assert_eq!(parsed.reassemble(POSTGRES_UPGRADE), POSTGRES_UPGRADE);
     assert_eq!(kinds(&parsed), vec![StatementKind::Block]);
     assert_eq!(parsed.foreign().count(), 0);
-    // The body is a dollar-quoted string, so its DML is not visible from the
-    // outside — a caller that wants it re-parses the inner range. This test
-    // pins that documented limit so it cannot change silently.
-    assert!(parsed.statements[0].dml.is_empty());
+    // The body is a dollar-quoted string, and the walker reads it. This used to
+    // assert the opposite — that the DML was invisible and "a caller that wants
+    // it re-parses the inner range" — which was true, documented, and the cause
+    // of a whole class of wrong findings: no caller ever did, so a PostgreSQL
+    // repository that does its work inside `DO` blocks and functions contributed
+    // nothing to the inventory, and `CONS001` reported the Oracle side as having
+    // changes the PostgreSQL side lacked.
+    let insert = parsed.statements[0]
+        .dml
+        .iter()
+        .find(|d| d.operation == DmlOperation::Insert)
+        .expect("the INSERT inside the DO block is this statement's DML");
+    assert_eq!(insert.table.folded_name(), "PARAMETRI");
 }
 
 #[test]
@@ -732,12 +741,9 @@ fn the_two_branches_of_the_same_change_agree_on_table_and_key() {
     let oracle_parsed = oracle(ORACLE_UPGRADE);
     let oracle_insert = &oracle_parsed.statements[0].dml[0];
 
-    // Re-parse the PostgreSQL body: the DO block's payload is one token, so the
-    // caller peels it. This is the flow `picus-analyze` will use.
-    let body_start = POSTGRES_UPGRADE.find("$$").expect("the block opens with $$") + 2;
-    let body_end = POSTGRES_UPGRADE.rfind("$$").expect("and closes with $$");
-    let body = &POSTGRES_UPGRADE[body_start..body_end];
-    let postgres_parsed = postgres(body);
+    // No peeling: the walker descends into the `DO` block's body itself, so the
+    // two branches are compared exactly as `picus-analyze` compares them.
+    let postgres_parsed = postgres(POSTGRES_UPGRADE);
     let postgres_insert = postgres_parsed
         .statements
         .iter()
@@ -768,4 +774,85 @@ fn the_oracle_script_read_as_postgres_names_every_divergence() {
     assert!(found.contains(&"slash_terminator"), "{found:?}");
     // And it is a report, not a parse failure: the statements are still there.
     assert_eq!(kinds(&parsed), vec![StatementKind::Block]);
+}
+
+// ── Dollar-quoted bodies ─────────────────────────────────────────────────────
+//
+// PostgreSQL's `$$ … $$` is a single token to the scanner, body and all. That is
+// right for a string literal and wrong for the two places the language uses it to
+// hold code — and being wrong there made a whole repository's PostgreSQL half
+// invisible: no objects, no DML, no coverage. The same change written as an
+// Oracle `DECLARE … BEGIN … END` (which the walker reads) and as a PostgreSQL
+// function then looked like a change one engine had and the other did not.
+
+#[test]
+fn a_do_block_reports_what_its_body_touches() {
+    let parsed = SqlParser::new().parse(
+        "DO $$\nBEGIN\n  INSERT INTO parametri (cod) VALUES ('X');\nEND $$;",
+        DialectScope::One(EngineKind::Postgres),
+    );
+    let statement = &parsed.statements[0];
+    assert_eq!(statement.kind, StatementKind::Block);
+    assert!(
+        statement.references.iter().any(|r| r.folded_name() == "PARAMETRI"),
+        "{:?}",
+        statement.references
+    );
+    assert_eq!(statement.dml.len(), 1, "the INSERT inside the body is DML of this statement");
+    assert_eq!(statement.dml[0].table.folded_name(), "PARAMETRI");
+}
+
+#[test]
+fn a_function_body_reports_what_it_touches_without_losing_the_function() {
+    let parsed = SqlParser::new().parse(
+        "CREATE OR REPLACE FUNCTION f() RETURNS void AS $$\nBEGIN\n  INSERT INTO parametri (cod) VALUES ('X');\nEND;\n$$ LANGUAGE plpgsql;",
+        DialectScope::One(EngineKind::Postgres),
+    );
+    let statement = &parsed.statements[0];
+    assert!(statement.defines.iter().any(|d| d.folded_name() == "F"), "the function is still defined");
+    assert!(statement.references.iter().any(|r| r.folded_name() == "PARAMETRI"));
+    assert_eq!(statement.dml[0].table.folded_name(), "PARAMETRI");
+}
+
+#[test]
+fn the_positions_inside_a_body_are_the_files_own() {
+    // Everything downstream — the inventory's sites, "go to this line", the
+    // rewriter that must reproduce the file byte for byte — measures against the
+    // file on disk. A range from the nested parse that kept its own coordinates
+    // would point somewhere near the top of the file, silently.
+    let source = "DO $$\nBEGIN\n  INSERT INTO parametri (cod) VALUES ('X');\nEND $$;";
+    let parsed = SqlParser::new().parse(source, DialectScope::One(EngineKind::Postgres));
+    let table = &parsed.statements[0].dml[0].table;
+    assert_eq!(table.range.slice(source), "parametri");
+    assert_eq!(parsed.line_of(table.range.start), 3);
+}
+
+#[test]
+fn a_dollar_quoted_value_is_a_string_and_not_code() {
+    // The failure that would be worse than the one this feature fixes: inventing
+    // a reference to a table nobody named. `$$…$$` in a value position is prose,
+    // however SQL-shaped the prose happens to be.
+    let parsed = SqlParser::new().parse(
+        "insert into note (testo) values ($$select name from list$$);",
+        DialectScope::One(EngineKind::Postgres),
+    );
+    let names: Vec<String> =
+        parsed.statements[0].references.iter().map(|r| r.folded_name()).collect();
+    assert!(names.contains(&"NOTE".to_string()), "{names:?}");
+    assert!(!names.contains(&"LIST".to_string()), "the sentence is not SQL: {names:?}");
+    assert_eq!(parsed.statements[0].dml.len(), 1, "one INSERT, not two");
+}
+
+#[test]
+fn an_empty_or_unreadable_body_is_simply_not_reported_on() {
+    for source in [
+        "DO $$$$;",
+        "DO $$ this is not sql at all $$;",
+    ] {
+        let parsed = SqlParser::new().parse(source, DialectScope::One(EngineKind::Postgres));
+        assert!(
+            parsed.statements.iter().all(|s| s.dml.is_empty()),
+            "{source}: nothing should be claimed"
+        );
+    }
 }

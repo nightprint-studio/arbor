@@ -23,6 +23,32 @@ use picus_parse::prelude::{ColumnRef, DmlShape, LiteralValue, ValueRow};
 /// they should, since the database does not care either.
 pub type RowFingerprint = Vec<(String, String)>;
 
+/// A column's name in the form two **scripts** are compared by.
+///
+/// Case-insensitive, quoting included, and that is a deliberate departure from
+/// how `picus-parse` folds an *object* name. There, `"parametri"` and `parametri`
+/// are genuinely different tables in both engines and folding them together would
+/// hide a real bug. A column inside an `INSERT` is not an identity to be resolved
+/// — it is a name in a list that has to line up with the same list in the other
+/// dialect's copy of the same script.
+///
+/// The case that forced it: PostgreSQL folds an unquoted identifier to lower case
+/// and Oracle to upper, so a team writing `"name"` on the PostgreSQL side and
+/// `NAME` on the Oracle side has written the same column twice — each in its own
+/// engine's canonical form. Comparing the two spellings produced `CONS004` on
+/// every such table, saying one dialect wrote a column the other "never does",
+/// with the two spellings visible side by side in the message for anyone who
+/// looked closely enough.
+///
+/// The cost, stated: a PostgreSQL table with both a `"Name"` and a `"name"`
+/// column — legal, and something nobody does on purpose — has two columns this
+/// cannot tell apart. That is the right trade against reporting every quoted
+/// column list in a repository as a divergence.
+pub fn column_key(column: &ColumnRef) -> String {
+    let name = column.folded_name();
+    name.to_uppercase()
+}
+
 /// The fingerprint of one row, or `None` when the row cannot be compared.
 pub fn row_fingerprint(shape: &DmlShape, row: &ValueRow) -> Option<RowFingerprint> {
     if row.values.is_empty() {
@@ -33,7 +59,7 @@ pub fn row_fingerprint(shape: &DmlShape, row: &ValueRow) -> Option<RowFingerprin
     for (index, cell) in row.values.iter().enumerate() {
         let value = normalise(cell.literal.as_ref()?);
         let key = if named {
-            shape.columns[index].folded_name()
+            column_key(&shape.columns[index])
         } else {
             // Zero-padded so `#10` sorts after `#2` — a positional comparison
             // that reordered itself at ten columns would be a delightful bug.
@@ -69,8 +95,8 @@ pub fn written_columns(shape: &DmlShape) -> Vec<String> {
     let mut out: Vec<String> = shape
         .columns
         .iter()
-        .map(ColumnRef::folded_name)
-        .chain(shape.assignments.iter().map(|a| a.column.folded_name()))
+        .map(column_key)
+        .chain(shape.assignments.iter().map(|a| column_key(&a.column)))
         .collect();
     out.sort();
     out.dedup();

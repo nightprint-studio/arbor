@@ -36,8 +36,47 @@ fn name_parts(node: Node, source: &str) -> Vec<String> {
 pub(crate) fn object_ref(node: Node, source: &str, kind: ObjectKind) -> Option<ObjectRef> {
     let mut parts = name_parts(node, source);
     let name = parts.pop()?;
+    if is_bare_keyword(&name) {
+        return None;
+    }
     let schema = parts.pop();
     Some(ObjectRef { kind, schema, name, range: range_of(node) })
+}
+
+/// Words that arrive as an object name only when the parse has gone wrong.
+///
+/// Every one of these is a keyword in a position where a name is expected, and
+/// the way they get here is parse **recovery**: a construct the grammar cannot
+/// assemble becomes an error node, the walk carries on inside it, and whatever
+/// token sits where a name would have gone is read as one. `ON DELETE CASCADE`
+/// parses perfectly well on its own — but let something earlier in the file
+/// derail, and `CASCADE` becomes a table that one dialect "never touches".
+///
+/// A net rather than a fix: the right repair is always in the grammar, and this
+/// does not excuse leaving one unmade. What it does is bound the damage, because
+/// a wrong *object* propagates further than a wrong parse — into the inventory,
+/// into the coverage matrix, into a blocking finding about a table that does not
+/// exist, which is the kind of thing that costs someone an afternoon.
+///
+/// **Unquoted only.** `"cascade"` is somebody deliberately naming a table that,
+/// and it survives — [`ObjectRef::folded_name`] keeps a quoted name verbatim, so
+/// the two can never be confused.
+fn is_bare_keyword(name: &str) -> bool {
+    if name.starts_with('"') {
+        return false;
+    }
+    const KEYWORDS: &[&str] = &[
+        // Referential actions and constraint clauses — where this was first seen.
+        "CASCADE", "RESTRICT", "ACTION", "NO", "MATCH", "SIMPLE", "PARTIAL", "FULL",
+        "DEFERRABLE", "INITIALLY", "DEFERRED", "IMMEDIATE", "ONLY",
+        // Words that end or begin a clause, and so sit next to a name.
+        "SET", "NULL", "DEFAULT", "VALUES", "INTO", "FROM", "WHERE", "SELECT", "TABLE",
+        "AND", "OR", "NOT", "EXISTS", "AS", "IS", "IN",
+        // Block structure, for the procedural bodies this walks into.
+        "BEGIN", "END", "THEN", "ELSE", "LOOP", "DECLARE",
+    ];
+    let upper = name.to_uppercase();
+    KEYWORDS.contains(&upper.as_str())
 }
 
 /// The `object_name` in a named field, as an [`ObjectRef`].

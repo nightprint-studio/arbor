@@ -41,9 +41,9 @@ export const RULE_FAMILIES: RuleFamily[] = [
     rules: [
       {
         id: 'CONS001',
-        title: 'An object one dialect touches and the other never does',
+        title: 'An object one dialect changes and the other never does',
         offWhen:
-          'Your scripts reference objects that live in another repository — views over tables somebody else installs — so “absent here” is not a gap.',
+          'Rarely — a table your scripts only read is already exempt, so views over tables another repository installs raise nothing.',
         severity: 'blocking',
       },
       {
@@ -81,6 +81,8 @@ export const RULE_FAMILIES: RuleFamily[] = [
       {
         id: 'VER001',
         title: 'An update script that writes without checking where it started from',
+        offWhen:
+          'Nothing, usually — if scripts for a second module guard against a second table, declare that table on the Version table page instead of switching this off.',
         severity: 'blocking',
       },
       {
@@ -106,11 +108,18 @@ export const RULE_FAMILIES: RuleFamily[] = [
         title: 'A statement written in the dialect the folder is not',
         severity: 'blocking',
       },
-      { id: 'DUP001', title: 'The same row inserted twice in one script', severity: 'blocking' },
+      {
+        id: 'DUP001',
+        title: 'The same row inserted twice in one script',
+        offWhen:
+          'Nothing in a normal repository — a DELETE or TRUNCATE of the table between the two INSERTs already excuses the second one.',
+        severity: 'blocking',
+      },
       {
         id: 'DUP002',
-        title: 'The same object created in two places for one dialect',
-        offWhen: 'Your layout deliberately redefines objects per delivered version.',
+        title: 'The same object created twice in one half of the install story',
+        offWhen:
+          'Rarely — a CREATE OR REPLACE is already exempt, so a wrapper function every update script redefines does not reach this rule.',
         severity: 'review',
       },
       {

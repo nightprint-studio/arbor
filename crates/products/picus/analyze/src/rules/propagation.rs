@@ -194,6 +194,9 @@ fn collect<'a>(context: &Context<'a>) -> BTreeMap<(EngineKind, String), Pair<'a>
         for statement in &script.parsed.statements {
             for shape in statement.dml.iter().filter(|d| d.operation == DmlOperation::Insert) {
                 let table = shape.table.folded_name();
+                if context.excludes(&table) {
+                    continue;
+                }
                 for dialect in placement.dialects().iter().copied() {
                     let key = (dialect, table.clone());
                     let pair =
@@ -261,16 +264,154 @@ fn compare_halves(pair: &Pair<'_>, forward: bool, backward: bool, output: &mut O
             if upgraded.contains_key(datum) {
                 continue;
             }
-            output.findings.push(never_propagated(pair, label, datum, anchor, upgrade_folder));
+            let drift = disagreement(datum, &upgraded);
+            output.findings.push(never_propagated(pair, label, datum, anchor, upgrade_folder, drift));
         }
     }
     if backward {
-        for (datum, anchor) in &upgraded {
+        // In the order the installer applies them, because the upgrade half is a
+        // *sequence* and not a set — see `superseded`.
+        let sequence = reduce_in_order(&pair.upgrade.rows, &shared);
+        for (position, (datum, anchor)) in sequence.iter().enumerate() {
             if installed.contains_key(datum) {
                 continue;
             }
-            output.findings.push(never_seeded(pair, label, datum, anchor, install_folder));
+            if superseded(position, datum, &sequence, &installed) {
+                continue;
+            }
+            let drift = disagreement(datum, &installed);
+            output.findings.push(never_seeded(pair, label, datum, anchor, install_folder, drift));
         }
+    }
+}
+
+/// Has a later update already replaced this row with the one the initialisation
+/// has?
+///
+/// The update half is a **chain of deltas applied in order**, and reading it as a
+/// bag of INSERTs reports every intermediate value a row has ever had. The shape
+/// is completely ordinary: version 1.11 inserts a row, version 1.13 rewrites it,
+/// and the initialisation — kept at the latest version — carries what 1.13 left.
+/// The 1.11 row is then in no initialisation, and it should not be: it has not
+/// existed since 1.13.
+///
+/// So a row is only reported when it is still the upgrade half's **last word**
+/// about itself. "About itself" is the same near-match used for the drift wording
+/// — a later row sharing a column value and differing on another — and the extra
+/// condition is what makes it safe: the later row has to be one the
+/// initialisation actually has. Without that, two genuinely different rows that
+/// happen to share a value would silence each other.
+fn superseded(
+    position: usize,
+    datum: &RowFingerprint,
+    sequence: &[(RowFingerprint, Anchor)],
+    installed: &BTreeMap<RowFingerprint, Anchor>,
+) -> bool {
+    sequence[position + 1..].iter().any(|(later, _)| {
+        later != datum
+            && installed.contains_key(later)
+            && datum.iter().any(|pair| later.contains(pair))
+            && datum.iter().any(|(column, value)| {
+                later.iter().any(|(other, theirs)| other == column && theirs != value)
+            })
+    })
+}
+
+/// The upgrade half's rows reduced to the shared columns, **in source order**,
+/// with the first occurrence of each row kept.
+///
+/// The ordered twin of [`reduce`]. The order is the one the rows were collected
+/// in — repository tree order, then source order within a file — which is the
+/// order an installer runs them in, because these files are named to sort that
+/// way and that is how they are applied.
+fn reduce_in_order(
+    rows: &[(RowFingerprint, Anchor)],
+    shared: &BTreeSet<&str>,
+) -> Vec<(RowFingerprint, Anchor)> {
+    let mut out: Vec<(RowFingerprint, Anchor)> = Vec::new();
+    for (fingerprint, anchor) in rows {
+        let datum: RowFingerprint = fingerprint
+            .iter()
+            .filter(|(column, _)| shared.contains(column.as_str()))
+            .cloned()
+            .collect();
+        if datum.is_empty() || out.iter().any(|(seen, _)| *seen == datum) {
+            continue;
+        }
+        out.push((datum, anchor.clone()));
+    }
+    out
+}
+
+/// The columns on which the nearest row in the other half disagrees, if there is
+/// a row near enough to be the same one.
+///
+/// **This changes no verdict — only the sentence.** A row the other half does not
+/// have and a row the other half has with a different value are both worth
+/// reporting, but they are not the same problem and the fix is not the same
+/// either: one is a missing statement, the other is a value that drifted.
+///
+/// It matters more than it looks, because of an asymmetry the initialisation
+/// model introduces. When both directions are checked, a changed value shows up
+/// as two findings — one from each end — and the pair makes it obvious that the
+/// row exists on both sides. Under a cumulative initialisation only one direction
+/// runs, so the surviving finding said "the initialisation never inserts it"
+/// about a row the initialisation plainly does insert, with one column different.
+/// That reads as a lie to anyone who opens the file.
+///
+/// "Near enough to be the same one" is the row sharing the most column *values*,
+/// and at least one. With no primary key to go on that is a heuristic, which is
+/// exactly why it is confined to the wording.
+fn disagreement<'a>(
+    datum: &RowFingerprint,
+    others: &'a BTreeMap<RowFingerprint, Anchor>,
+) -> Option<Drift<'a>> {
+    let mut best: Option<(usize, &RowFingerprint, &Anchor)> = None;
+    for (candidate, anchor) in others {
+        let agreed = datum.iter().filter(|pair| candidate.contains(pair)).count();
+        if agreed == 0 || agreed == datum.len() {
+            continue;
+        }
+        if best.is_none_or(|(most, _, _)| agreed > most) {
+            best = Some((agreed, candidate, anchor));
+        }
+    }
+    let (_, candidate, anchor) = best?;
+
+    // The columns present on both sides with different values. A column only one
+    // side writes is not a disagreement about a value — that is `CONS004`'s
+    // subject — and naming it here would send the reader looking for a difference
+    // they cannot see.
+    let differing: Vec<String> = datum
+        .iter()
+        .filter(|(column, value)| {
+            candidate.iter().any(|(other, theirs)| other == column && theirs != value)
+        })
+        .map(|(column, _)| column.clone())
+        .collect();
+    if differing.is_empty() {
+        return None;
+    }
+    Some(Drift { columns: differing, anchor })
+}
+
+/// The other half's version of a row that is nearly this one.
+struct Drift<'a> {
+    /// Columns both sides write, with different values.
+    columns: Vec<String>,
+    anchor: &'a Anchor,
+}
+
+impl Drift<'_> {
+    /// The clause appended to a finding's consequence.
+    fn describe(&self, half: &str) -> String {
+        let columns = self.columns.join(", ");
+        format!(
+            " The {half} does have a row that matches on every other column and differs on \
+             {columns} ({where_it_is}) — so this is a value that drifted rather than a row that \
+             was never written, and the fix is to agree on which one is right.",
+            where_it_is = self.anchor.location()
+        )
     }
 }
 
@@ -306,18 +447,24 @@ fn never_propagated(
     datum: &RowFingerprint,
     anchor: &Anchor,
     upgrade_folder: &FolderNode,
+    drift: Option<Drift<'_>>,
 ) -> Finding {
     let row = compare::render(datum);
+    let title = match &drift {
+        Some(_) => format!("{row} is written differently by the updates", ),
+        None => format!("{row} is inserted into {} by the initialisation alone", pair.table),
+    };
     Finding::new(
         RuleId::Cons002,
         anchor.clone(),
-        format!("{row} is inserted into {} by the initialisation alone", pair.table),
+        title,
         format!(
             "A {label} database created from scratch has this row. One that was already running \
              gets here through `{upgrade}`, where nothing inserts it, so it never arrives — and the \
              same query answers differently depending on how old the installation is. A row that \
-             predates the update folder is fine: declare it with `-- picus: ignore CONS002 — why`.",
-            upgrade = upgrade_folder.path
+             predates the update folder is fine: declare it with `-- picus: ignore CONS002 — why`.{extra}",
+            upgrade = upgrade_folder.path,
+            extra = drift.map(|d| d.describe("update scripts")).unwrap_or_default(),
         ),
     )
     .also_at(upgrade_folder.path.clone())
@@ -332,20 +479,44 @@ fn never_seeded(
     datum: &RowFingerprint,
     anchor: &Anchor,
     install_folder: &FolderNode,
+    drift: Option<Drift<'_>>,
 ) -> Finding {
     let row = compare::render(datum);
-    Finding::new(
-        RuleId::Cons003,
-        anchor.clone(),
-        format!("{row} is inserted into {} by an update alone", pair.table),
-        format!(
-            "This update adds the row to a {label} database that already exists. A database \
-             installed from scratch runs `{install}`, which never inserts it, and never runs this \
-             update either — so the newest installation is the one missing a row every older one \
-             has, and it stays missing until somebody notices.",
-            install = install_folder.path
+    // Two different problems, and they read differently because they are fixed
+    // differently: one is a statement nobody wrote, the other is a value the two
+    // halves disagree about.
+    let (title, consequence) = match &drift {
+        Some(found) => (
+            format!(
+                "{} disagrees with the initialisation about {}",
+                pair.table,
+                found.columns.join(", ")
+            ),
+            format!(
+                "This update writes {row} into a {label} database that already exists. A database \
+                 installed from scratch runs `{install}`, which writes the same row with a \
+                 different value — so which value an installation ends up with depends on whether \
+                 it was installed before or after this update.{extra}",
+                install = install_folder.path,
+                extra = found.describe("initialisation"),
+            ),
         ),
-    )
-    .also_at(install_folder.path.clone())
-    .build()
+        None => (
+            format!("{row} is inserted into {} by an update alone", pair.table),
+            format!(
+                "This update adds the row to a {label} database that already exists. A database \
+                 installed from scratch runs `{install}`, which never inserts it, and never runs \
+                 this update either — so the newest installation is the one missing a row every \
+                 older one has, and it stays missing until somebody notices.",
+                install = install_folder.path
+            ),
+        ),
+    };
+    Finding::new(RuleId::Cons003, anchor.clone(), title, consequence)
+        .also_at(
+            drift
+                .map(|d| d.anchor.location())
+                .unwrap_or_else(|| install_folder.path.clone()),
+        )
+        .build()
 }

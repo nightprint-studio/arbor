@@ -230,3 +230,70 @@ fn an_invalid_pattern_is_skipped_with_the_users_own_pattern_in_the_reason() {
     let skipped = report.skipped.iter().find(|s| s.rule == RuleId::Ver003).expect("skipped");
     assert!(skipped.reason.contains("[unclosed"), "{}", skipped.reason);
 }
+
+#[test]
+fn a_script_guarding_against_a_second_version_table_is_guarded() {
+    // A repository installing more than one product has a version table per
+    // module. With one name declared, every script belonging to the second module
+    // was reported as unguarded — hundreds of findings about scripts that guard
+    // perfectly well.
+    let repo = Fixture::build(&[(
+        "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
+        "DECLARE v VARCHAR2(10);\n\
+         BEGIN\n\
+           SELECT VERSIONE INTO v FROM VERSIONE_PORTALE;\n\
+           IF v <> '4.12' THEN RETURN; END IF;\n\
+           INSERT INTO PARAMETRI (COD) VALUES ('X');\n\
+           UPDATE VERSIONE_PORTALE SET VERSIONE = '4.13';\n\
+         END;",
+    )])
+    .configured(|c| c.version_table.also = vec!["VERSIONE_PORTALE".to_string()]);
+    let report = repo.report();
+    assert!(open_of(&report, RuleId::Ver001).is_empty(), "{:?}", open_of(&report, RuleId::Ver001));
+    assert!(open_of(&report, RuleId::Ver002).is_empty(), "{:?}", open_of(&report, RuleId::Ver002));
+}
+
+#[test]
+fn a_script_guarding_against_no_declared_table_is_still_reported() {
+    // The list widens what counts, it does not switch the rules off.
+    let repo = Fixture::build(&[(
+        "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
+        "INSERT INTO PARAMETRI (COD) VALUES ('X');",
+    )])
+    .configured(|c| c.version_table.also = vec!["VERSIONE_PORTALE".to_string()]);
+    let report = repo.report();
+    assert_eq!(open_of(&report, RuleId::Ver001).len(), 1);
+    // …and the message names both, or it is advice about the wrong table.
+    let consequence = &open_of(&report, RuleId::Ver001)[0].consequence;
+    assert!(consequence.contains("VERSIONE_DB"), "{consequence}");
+    assert!(consequence.contains("VERSIONE_PORTALE"), "{consequence}");
+}
+
+#[test]
+fn a_guard_inside_a_postgresql_function_body_counts() {
+    // The house style of a real repository: every update script wraps its work in
+    // a throwaway function, and the version guard is inside the body. The body is
+    // a dollar-quoted token, and a walker that gave up on it because plpgsql is
+    // only partly modelled saw no guard at all — so VER001 reported every one of
+    // these scripts as unguarded, which is the opposite of true.
+    let repo = Fixture::build(&[(
+        "POSTGRES/AGGIORNAMENTO/4_12__4_13.sql",
+        "CREATE OR REPLACE FUNCTION aggiornamento()\n\
+         RETURNS void AS\n\
+         $$\n\
+         BEGIN\n\
+         \tIF (select count(*) = 1 from eldaver where codapp = 'WSPA' AND numver = '4.12') THEN\n\
+         \t\tINSERT INTO parametri (cod) VALUES ('X');\n\
+         \t\tUPDATE eldaver SET numver = '4.13' WHERE codapp = 'WSPA';\n\
+         \tEND IF;\n\
+         END;\n\
+         $$ LANGUAGE plpgsql;",
+    )])
+    .configured(|c| {
+        c.version_table.table = "PPCOMMON_VER".to_string();
+        c.version_table.also = vec!["ELDAVER".to_string()];
+    });
+    let report = repo.report();
+    assert!(open_of(&report, RuleId::Ver001).is_empty(), "{:?}", open_of(&report, RuleId::Ver001));
+    assert!(open_of(&report, RuleId::Ver002).is_empty(), "{:?}", open_of(&report, RuleId::Ver002));
+}

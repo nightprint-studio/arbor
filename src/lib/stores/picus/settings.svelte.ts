@@ -80,8 +80,14 @@ function createSettingsStore() {
    * `InitialisationModel` doc in `ipc/picus/project.ts`.
    */
   let initialisation = $state<InitialisationModel>('cumulative');
+  /** Compare one dialect's scripts against the other's at all. */
+  let compareDialects = $state(true);
   /** Rule ids this repository has decided not to run. */
   let disabledRules = $state<string[]>([]);
+  /** Object names the rules say nothing about. */
+  let excludedObjects = $state<string[]>([]);
+  /** Other tables that also record a version — one per installed module. */
+  let otherVersionTables = $state<string[]>([]);
   /** The project settings differ from what is on disk. */
   let projectDirty = $state(false);
   let projectSaving = $state(false);
@@ -95,8 +101,11 @@ function createSettingsStore() {
       versionColumn: versionTable.versionColumn,
       dateColumn: versionTable.dateColumn ?? '',
       versionFilter: versionTable.filter,
+      otherVersionTables,
       initialisation,
+      compareDialects,
       disabledRules,
+      excludedObjects,
     };
   }
 
@@ -111,8 +120,11 @@ function createSettingsStore() {
       dateColumn: s.dateColumn ? s.dateColumn : null,
       filter: s.versionFilter,
     };
+    otherVersionTables = [...s.otherVersionTables];
     initialisation = s.initialisation;
+    compareDialects = s.compareDialects;
     disabledRules = [...s.disabledRules];
+    excludedObjects = [...s.excludedObjects];
     projectDirty = false;
   }
 
@@ -177,7 +189,10 @@ function createSettingsStore() {
     get projectEol() { return projectEol; },
     get versionTable() { return versionTable; },
     get initialisation() { return initialisation; },
+    get compareDialects() { return compareDialects; },
     get disabledRules() { return disabledRules; },
+    get excludedObjects() { return excludedObjects; },
+    get otherVersionTables() { return otherVersionTables; },
     get projectDirty() { return projectDirty; },
     get projectSaving() { return projectSaving; },
     get defaultEncoding() { return defaultEncoding; },
@@ -202,6 +217,22 @@ function createSettingsStore() {
     },
 
     setInitialisation(v: InitialisationModel) { initialisation = v; projectDirty = true; },
+    setCompareDialects(v: boolean) { compareDialects = v; projectDirty = true; },
+
+    /** Declare the objects the rules should say nothing about. The backend folds
+     *  and de-duplicates them, so the caller can be careless. */
+    setExcludedObjects(names: string[]) { excludedObjects = names; projectDirty = true; },
+
+    /**
+     * Declare — or forget — another table that records a version.
+     *
+     * Names only, and the backend drops blanks, duplicates and anything equal to
+     * the primary, so the caller can be careless and the committed file cannot.
+     */
+    setOtherVersionTables(names: string[]) {
+      otherVersionTables = names;
+      projectDirty = true;
+    },
 
     /** Switch one rule off, or back on. */
     setRuleEnabled(rule: string, enabled: boolean) {

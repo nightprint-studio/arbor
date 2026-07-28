@@ -75,6 +75,17 @@ fn index_statement(
     let mut sited: BTreeSet<(Namespace, String, bool)> = BTreeSet::new();
 
     let creating = statement.kind == StatementKind::Create;
+    // Which mentions actually *change* the object. Matched by byte range against
+    // the DML shapes' target tables, because the grammar reports an INSERT's
+    // target and a view's `FROM` as the same kind of reference — and only one of
+    // them is something the other dialect ought to be doing too.
+    let write_targets: BTreeSet<(usize, usize)> =
+        statement.dml.iter().map(|d| (d.table.range.start, d.table.range.end)).collect();
+    // `DROP` and `TRUNCATE` name their target and nothing else, so everything they
+    // mention is something they change.
+    let statement_changes_everything =
+        matches!(statement.kind, StatementKind::Drop | StatementKind::Truncate);
+
     let occurrences = statement
         .defines
         .iter()
@@ -85,6 +96,14 @@ fn index_statement(
         let Some(kind) = InventoryKind::from_parse(object.kind) else { continue };
         let name = folded(object);
         if name.is_empty() {
+            continue;
+        }
+        // The engine's own objects are not this repository's to install. A script
+        // asking Oracle about itself through `user_tab_cols` has no PostgreSQL
+        // counterpart and never will — PostgreSQL answers the same question from
+        // `information_schema` — so indexing it can only ever produce a gap
+        // nobody is able to close.
+        if crate::builtin::is_engine_provided(object.schema.as_deref(), &name) {
             continue;
         }
         let space = kind.namespace();
@@ -125,7 +144,11 @@ fn index_statement(
                 line: script.parsed.line_of(object.range.start),
                 declared_kind: object.kind,
                 defining,
+                writing: defining
+                    || statement_changes_everything
+                    || write_targets.contains(&(object.range.start, object.range.end)),
                 creating: defining && creating,
+                replacing: defining && creating && statement.replaces,
             });
         }
     }

@@ -92,14 +92,44 @@
   );
 
   /** The date column is optional — "none" is a real, and common, answer. */
-  const dateColumnOptions = $derived([
-    { value: '', label: '— this project stamps no date —' },
-    ...versionTableColumns
-      .filter((c) => /DATE|TIME/i.test(c.type))
-      .map((c) => ({ value: c.name, label: `${c.name}  (${c.type})` })),
-  ]);
+  const dateColumnOptions = $derived.by(() => {
+    const configured = picusSettingsStore.versionTable.dateColumn ?? '';
+    const dated = versionTableColumns.filter((c) => /DATE|TIME/i.test(c.type));
+    const out = [{ value: '', label: '— this project stamps no date —' }];
+    // Same reasoning as the table picker: the column is the project's answer and
+    // the catalogue is the connection's, so a setting must not vanish from the
+    // list because nobody is connected.
+    if (configured && !dated.some((c) => c.name.toLowerCase() === configured.toLowerCase())) {
+      out.push({ value: configured, label: `${configured}  (not on this connection)` });
+    }
+    return out.concat(dated.map((c) => ({ value: c.name, label: `${c.name}  (${c.type})` })));
+  });
 
-  const tableOptions = $derived(schemaStore.tables.map((t) => ({ value: t.name, label: t.name })));
+  /**
+   * What the table picker offers.
+   *
+   * Three things, and each is there because leaving it out broke something:
+   *
+   * * **"none"**, because emptying the name is a documented, meaningful answer —
+   *   it switches the version guards off — and the picker previously had no way
+   *   to express it, so the description said "leave empty" next to a control that
+   *   could not be left empty;
+   * * **the configured table**, even when this connection's catalogue does not
+   *   contain it. The table name belongs to the *project* and the catalogue
+   *   belongs to the *connection*: opening the settings with no connection, or on
+   *   another database, must not make a perfectly good setting look unset — or,
+   *   worse, let a stray click erase it;
+   * * **the catalogue**, which is the useful case and the only one that was here.
+   */
+  const tableOptions = $derived.by(() => {
+    const configured = picusSettingsStore.versionTable.table.trim();
+    const known = schemaStore.tables.map((t) => t.name);
+    const out = [{ value: '', label: '— none: switch the version guards off —' }];
+    if (configured && !known.some((n) => n.toLowerCase() === configured.toLowerCase())) {
+      out.push({ value: configured, label: `${configured}  (not on this connection)` });
+    }
+    return out.concat(known.map((name) => ({ value: name, label: name })));
+  });
 
   /**
    * The guard as it will actually be emitted, from the current configuration.
@@ -268,6 +298,7 @@
           <FormRow
             label="Table"
             description="Leave empty to disable version guards entirely for this project."
+            wideControl
           >
             <div class="ps-row">
               <!-- Filterable and full width, because a real schema has hundreds
@@ -280,6 +311,8 @@
                 searchable
                 fill
                 searchPlaceholder="Filter tables…"
+                placeholder="— none: version guards are off —"
+                emptyMessage="No table on this connection — connect to one, or type the name into the project file directly."
                 onchange={(v) => picusSettingsStore.setVersionTable({ table: v })}
               />
               <Button
@@ -294,7 +327,11 @@
             </div>
           </FormRow>
 
-          <FormRow label="Version column" description="Holds the version string the guard compares against.">
+          <FormRow
+            label="Version column"
+            description="Holds the version string the guard compares against."
+            wideControl
+          >
             <Select
               value={picusSettingsStore.versionTable.versionColumn}
               options={versionColumnOptions}
@@ -307,6 +344,7 @@
           <FormRow
             label="Date column"
             description="Optional. Plenty of version tables hold nothing but the version string — with no date column, the closing UPDATE simply doesn't mention one instead of failing on a column that isn't there."
+            wideControl
           >
             <Select
               value={picusSettingsStore.versionTable.dateColumn ?? ''}
@@ -328,6 +366,27 @@
           </FormRow>
         </div>
 
+        <!-- A repository that installs more than one product has a version table
+             per module, and an update script belonging to the second module
+             guards against the second table — perfectly correctly. With one name
+             declared, every one of those scripts was reported as unguarded. -->
+        <div class="card">
+          <FormRow
+            label="Other version tables"
+            description="One per module, when this repository installs more than one product. An update script that guards against any of them counts as guarded. Generation still stamps the table above — something has to be stamped, and that is the one the project named first."
+            wideControl
+          >
+            <Input
+              value={picusSettingsStore.otherVersionTables.join(', ')}
+              placeholder="VERSIONE_PORTALE, VERSIONE_DBPORT"
+              oninput={(v) =>
+                picusSettingsStore.setOtherVersionTables(
+                  v.split(',').map((n) => n.trim()).filter(Boolean),
+                )}
+            />
+          </FormRow>
+        </div>
+
         <div class="info-box">
           <strong>What the guard will emit</strong>
           <pre class="ps-preview">{versionPreview}</pre>
@@ -344,9 +403,24 @@
         </div>
 
         <div class="card">
+          <!-- First, because it decides whether two of the fourteen rules run at
+               all — and on a repository whose halves have genuinely diverged it
+               is the difference between a usable report and a wall. -->
+          <FormRow
+            label="Compare the two dialects against each other"
+            description="The comparison Picus exists for: an object one engine's scripts change and the other's never do, and a table the two fill in differently. Switch it off for a repository whose two halves have drifted far enough apart that the comparison says nothing you can act on — the version chain, the duplicates, the dangerous DML and the encodings all keep working."
+          >
+            <Toggle
+              checked={picusSettingsStore.compareDialects}
+              size="sm"
+              ariaLabel="Compare the two dialects"
+              onchange={(v) => picusSettingsStore.setCompareDialects(v)}
+            />
+          </FormRow>
           <FormRow
             label="What the initialisation folders are"
             description="Not derivable from the SQL — it is a fact about how the team works, and each half of the install-versus-upgrade check only makes sense under one reading of it."
+            wideControl
           >
             <Select
               value={picusSettingsStore.initialisation}
@@ -357,6 +431,25 @@
           </FormRow>
         </div>
         <Alert variant="info" compact text={initialisationEffect} />
+
+        <div class="card">
+          <!-- Named objects rather than a whole rule, because silencing one table
+               by switching a rule off stops it watching the other four hundred. -->
+          <FormRow
+            label="Objects the rules say nothing about"
+            description="For the handful of tables that are a special case for a reason nothing in the scripts can express — a staging table one dialect fills, a log the installer writes, a legacy table kept for one customer. Matched on the name whatever kind of object carries it. They stay in the Inventory with their coverage: what is in the repository and what should be checked are different questions."
+            wideControl
+          >
+            <Input
+              value={picusSettingsStore.excludedObjects.join(', ')}
+              placeholder="MECATALOGO, STAGING_IMPORT"
+              oninput={(v) =>
+                picusSettingsStore.setExcludedObjects(
+                  v.split(',').map((n) => n.trim()).filter(Boolean),
+                )}
+            />
+          </FormRow>
+        </div>
 
         <div class="section-header ps-sub">
           <h3>Rules</h3>
@@ -597,7 +690,10 @@
   .ps-family-blurb { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
 
   /* Table picker + Detect on one line: the button acts on the field beside it. */
-  .ps-row { display: flex; align-items: center; gap: 8px; }
+  /* Table picker + Detect on one line. `flex: 1` because this sits inside a
+     `wideControl` row, which is itself a flex box: every link in the chain has to
+     grow, or the width stops at whichever one forgets to. */
+  .ps-row { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
 
   /* The emitted-guard preview — the reason the four fields above are legible. */
   .ps-preview {

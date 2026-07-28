@@ -1,5 +1,6 @@
 //! CONS001 / CONS004 — one dialect against the other.
 
+use crate::compare::column_key;
 use crate::rule::RuleId;
 use crate::testing::Fixture;
 use crate::tests::open_of;
@@ -302,4 +303,228 @@ fn a_portable_folder_alone_leaves_no_dialect_uncovered() {
     let report = repo.report();
     let findings = open_of(&report, RuleId::Cons001);
     assert!(findings.is_empty(), "{findings:?}");
+}
+
+// ── How a column name is matched across the two dialects ─────────────────────
+
+#[test]
+fn a_quoted_column_on_one_side_is_the_same_column_as_an_unquoted_one_on_the_other() {
+    // PostgreSQL folds an unquoted identifier to lower case and Oracle to upper,
+    // so a team writing `"etichetta"` on one side and `ETICHETTA` on the other has
+    // written the same column twice, each in its own engine's canonical form.
+    // Comparing the spellings reported CONS004 on every such table — and the give
+    // away was in the message, which printed the table upper case and the columns
+    // lower case, side by side.
+    let repo = Fixture::build(&[
+        (
+            "ORACLE/DATI/widget.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, ETICHETTA, ORDINE) \
+             VALUES ('ricerca', 'Ricerca', 10);",
+        ),
+        (
+            "POSTGRES/DATI/widget.sql",
+            "insert into catalogo_widget (\"chiave\", \"etichetta\", \"ordine\") \
+             values ('ricerca', 'Ricerca', 10);",
+        ),
+    ]);
+    let report = repo.report();
+    let findings = open_of(&report, RuleId::Cons004);
+    assert!(findings.is_empty(), "{findings:?}");
+}
+
+#[test]
+fn a_column_only_one_dialect_writes_is_still_reported() {
+    // The rule still has to work, or the fix above is just a way of switching it
+    // off quietly.
+    let repo = Fixture::build(&[
+        (
+            "ORACLE/DATI/widget.sql",
+            "INSERT INTO CATALOGO_WIDGET (CHIAVE, ETICHETTA) VALUES ('ricerca', 'Ricerca');",
+        ),
+        (
+            "POSTGRES/DATI/widget.sql",
+            "insert into catalogo_widget (\"chiave\", \"etichetta\", \"ordine\") \
+             values ('ricerca', 'Ricerca', 10);",
+        ),
+    ]);
+    let report = repo.report();
+    let findings = open_of(&report, RuleId::Cons004);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    // Named in the comparison form, so the reader is not left wondering whether
+    // the case is the difference.
+    assert!(findings[0].consequence.contains("ORDINE"), "{}", findings[0].consequence);
+}
+
+#[test]
+fn the_comparison_form_of_a_column_ignores_quoting_and_case() {
+    use picus_parse::prelude::{ByteRange, ColumnRef};
+    let column = |name: &str| ColumnRef { name: name.to_string(), range: ByteRange::new(0, 0) };
+    assert_eq!(column_key(&column("etichetta")), "ETICHETTA");
+    assert_eq!(column_key(&column("ETICHETTA")), "ETICHETTA");
+    assert_eq!(column_key(&column("\"etichetta\"")), "ETICHETTA");
+    assert_eq!(column_key(&column("\"Etichetta\"")), "ETICHETTA");
+}
+
+#[test]
+fn a_finding_says_what_kind_of_thing_it_is_about() {
+    // A repository whose folders are called AGGIORNAMENTO can have a table called
+    // AGGIORNAMENTO too — an update log is exactly the sort of thing that gets
+    // that name. "AGGIORNAMENTO is not touched by the Oracle scripts", anchored at
+    // a folder path ending in AGGIORNAMENTO, read as a claim about the folder.
+    let repo = Fixture::build(&[
+        (
+            "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
+            "INSERT INTO PARAMETRI (COD) VALUES ('A');",
+        ),
+        (
+            "POSTGRES/AGGIORNAMENTO/4_12__4_13.sql",
+            "insert into parametri (cod) values ('A');\n\
+             insert into aggiornamento (versione) values ('4.13');",
+        ),
+    ]);
+    let report = repo.report();
+    let findings = open_of(&report, RuleId::Cons001);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert!(
+        findings[0].title.starts_with("The table AGGIORNAMENTO"),
+        "{}",
+        findings[0].title
+    );
+}
+
+#[test]
+fn a_table_a_view_only_reads_is_not_a_gap() {
+    // The case this exists for: a view over a table that another repository
+    // installs. The PostgreSQL views read it, the Oracle ones do not happen to,
+    // and CONS001 reported it as a table the Oracle scripts never touch — a gap
+    // in scripts that never installed it in the first place, and one nobody could
+    // close by writing anything.
+    let repo = Fixture::build(&[
+        (
+            "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
+            "CREATE VIEW V_APPALTI AS SELECT ID FROM APPALTI;",
+        ),
+        (
+            "POSTGRES/AGGIORNAMENTO/4_12__4_13.sql",
+            "create view v_appalti as select a.id, m.descr from mecatalogo m join appalti a on a.cat = m.id;",
+        ),
+    ]);
+    let report = repo.report();
+    let titles: Vec<&str> =
+        open_of(&report, RuleId::Cons001).iter().map(|f| f.title.as_str()).collect();
+    assert!(!titles.iter().any(|t| t.contains("MECATALOGO")), "{titles:?}");
+}
+
+#[test]
+fn a_table_one_dialect_writes_and_the_other_does_not_is_still_a_gap() {
+    // The rule has to keep working, or the exemption above is a way of switching
+    // CONS001 off for every table.
+    let repo = Fixture::build(&[
+        (
+            "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
+            "INSERT INTO MECATALOGO (ID) VALUES (1);",
+        ),
+        (
+            "POSTGRES/AGGIORNAMENTO/4_12__4_13.sql",
+            "select id from mecatalogo;",
+        ),
+    ]);
+    let report = repo.report();
+    let findings = open_of(&report, RuleId::Cons001);
+    assert!(
+        findings.iter().any(|f| f.title.contains("MECATALOGO") && f.title.contains("PostgreSQL")),
+        "{:?}",
+        findings.iter().map(|f| &f.title).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn a_drop_or_a_truncate_counts_as_touching_the_table() {
+    // Neither leaves DML behind and neither defines anything, so both arrive as
+    // plain references — but emptying a table on one engine and not the other is
+    // exactly the divergence this rule is for.
+    let repo = Fixture::build(&[
+        (
+            "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
+            "TRUNCATE TABLE MECATALOGO;",
+        ),
+        (
+            "POSTGRES/AGGIORNAMENTO/4_12__4_13.sql",
+            "select id from mecatalogo;",
+        ),
+    ]);
+    let report = repo.report();
+    let findings = open_of(&report, RuleId::Cons001);
+    assert!(
+        findings.iter().any(|f| f.title.contains("MECATALOGO")),
+        "{:?}",
+        findings.iter().map(|f| &f.title).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn an_engine_dictionary_view_is_not_an_object_this_repository_owns() {
+    // `user_tab_cols` is an Oracle script asking Oracle about itself. Nobody wrote
+    // a CREATE for it, no PostgreSQL script will ever have a counterpart —
+    // PostgreSQL answers the same question from information_schema — so a row for
+    // it in the inventory could only ever read as an unclosable gap.
+    let repo = Fixture::build(&[
+        (
+            "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
+            "DECLARE n NUMBER;\n\
+             BEGIN\n\
+               SELECT COUNT(*) INTO n FROM user_tab_cols WHERE table_name = 'CATALOGO_WIDGET';\n\
+               IF n = 0 THEN\n\
+                 EXECUTE IMMEDIATE 'ALTER TABLE CATALOGO_WIDGET ADD (ORDINE NUMBER)';\n\
+               END IF;\n\
+             END;",
+        ),
+        (
+            "POSTGRES/AGGIORNAMENTO/4_12__4_13.sql",
+            "alter table catalogo_widget add column ordine integer;",
+        ),
+    ]);
+    let report = repo.report();
+    let titles: Vec<&str> =
+        open_of(&report, RuleId::Cons001).iter().map(|f| f.title.as_str()).collect();
+    assert!(
+        !titles.iter().any(|t| t.to_uppercase().contains("USER_TAB_COLS")),
+        "{titles:?}"
+    );
+}
+
+#[test]
+fn a_project_that_does_not_compare_its_dialects_says_so_rather_than_going_quiet() {
+    use picus_project::prelude::AnalysisSettings;
+    let repo = || {
+        Fixture::build(&[
+            (
+                "ORACLE/INIZIALIZZAZIONE/01_TABELLE.sql",
+                "CREATE TABLE CATALOGO_WIDGET (CHIAVE VARCHAR2(30));",
+            ),
+            (
+                "POSTGRES/INIZIALIZZAZIONE/01_tabelle.sql",
+                "create table parametri (cod varchar(30));",
+            ),
+        ])
+    };
+    // It fires by default: this is what the product is for.
+    assert!(!open_of(&repo().report(), RuleId::Cons001).is_empty());
+
+    let report = repo()
+        .configured(|c| {
+            c.analysis = AnalysisSettings { compare_dialects: false, ..c.analysis.clone() }
+        })
+        .report();
+    assert!(open_of(&report, RuleId::Cons001).is_empty());
+    assert!(open_of(&report, RuleId::Cons004).is_empty());
+    // …and both are listed as rules that did not run, naming the setting, because
+    // a report that quietly stopped comparing reads exactly like a clean one.
+    assert!(report.was_skipped(RuleId::Cons001));
+    assert!(report.was_skipped(RuleId::Cons004));
+    let reason = &report.skipped.iter().find(|s| s.rule == RuleId::Cons001).expect("skipped").reason;
+    assert!(reason.contains("project settings"), "{reason}");
+
+    // The rest of the report is untouched — that is the whole point of the switch.
+    assert!(!report.skipped.iter().any(|s| s.rule == RuleId::Dup001));
 }

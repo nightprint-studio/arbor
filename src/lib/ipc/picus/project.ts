@@ -118,10 +118,39 @@ export interface ProjectSettings {
   dateColumn: string;
   /** Extra predicate, for a version table holding one row per module. */
   versionFilter: string;
+  /**
+   * Other tables that also record a version in this repository.
+   *
+   * Names only. A repository installing more than one product has a version
+   * table per module, and an update script belonging to the second module
+   * guards against the second table — perfectly correctly. These satisfy the
+   * guard rules; generation still stamps the primary, because something has to
+   * be stamped.
+   */
+  otherVersionTables: string[];
   /** What the initialisation folders are, relative to the updates. */
   initialisation: InitialisationModel;
+  /**
+   * Compare one dialect's scripts against the other's at all.
+   *
+   * On by default — it is what Picus is for. Off for a repository whose two
+   * halves have diverged far enough that the comparison says nothing usable;
+   * the version chain, the duplicates, the dangerous DML and the encodings are
+   * worth having on their own.
+   */
+  compareDialects: boolean;
   /** Rule ids this repository does not want run, e.g. `['CONS001']`. */
   disabledRules: string[];
+  /**
+   * Object names the rules say nothing about.
+   *
+   * The escape hatch for the handful of tables in every real repository that are
+   * a special case for a reason nothing in the scripts can express. Matched on
+   * the name, case-insensitively, whatever kind of object carries it — and it
+   * excludes them from the **rules**, not from the index: they still appear in
+   * the Inventory with their coverage.
+   */
+  excludedObjects: string[];
 }
 
 /**

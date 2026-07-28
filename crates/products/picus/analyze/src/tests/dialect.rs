@@ -121,3 +121,18 @@ fn the_same_statement_is_fine_in_its_own_dialects_folder() {
     )]);
     assert!(open_of(&repo.report(), RuleId::Dia001).is_empty());
 }
+
+#[test]
+fn to_number_is_not_oracle_only() {
+    // PostgreSQL has `to_number(text, text)` and always has. Telling somebody
+    // their script "stops here with a syntax error" about a function that runs
+    // perfectly well is the most expensive kind of wrong this rule can be: it
+    // sends them to rewrite working SQL.
+    let repo = Fixture::build(&[(
+        "POSTGRES/INIZIALIZZAZIONE/01_viste.sql",
+        "create view v_importi as select to_number(importo, '999999.99') as n from movimenti;",
+    )]);
+    let report = repo.report();
+    let findings = open_of(&report, RuleId::Dia001);
+    assert!(findings.is_empty(), "{findings:?}");
+}

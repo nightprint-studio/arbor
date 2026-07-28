@@ -35,10 +35,19 @@ pub struct Context<'a> {
     pub project: &'a ParsedProject<'a>,
     pub config: &'a ProjectConfig,
     pub inventory: &'a Inventory,
-    /// The version table in comparison form, or `None` when the project has
-    /// switched version guards off by leaving the name empty. The version rules
-    /// report themselves as skipped in that state rather than passing.
-    pub version_table: Option<String>,
+    /// The tables that record a version, in comparison form, primary first.
+    ///
+    /// **Empty** when the project has switched version guards off by leaving the
+    /// name blank; the version rules report themselves as skipped in that state
+    /// rather than passing.
+    ///
+    /// A list rather than one name because a repository that installs more than
+    /// one product has a version table per module, and an update script belonging
+    /// to the second module guards against the second table. With one name, every
+    /// one of those scripts was reported as unguarded.
+    pub version_tables: Vec<String>,
+    /// Objects the project has excluded from the rules, in comparison form.
+    excluded: Vec<String>,
     /// Every dialect the repository answers for, resolved once.
     dialects: Vec<EngineKind>,
     /// Every lane, resolved once — `(dialect, role)` to the folders in it.
@@ -58,8 +67,8 @@ impl<'a> Context<'a> {
         config: &'a ProjectConfig,
         inventory: &'a Inventory,
     ) -> Context<'a> {
-        let table = config.version_table.table.trim();
-        let version_table = (!table.is_empty()).then(|| fold_identifier(table));
+        let version_tables: Vec<String> =
+            config.version_table.all().into_iter().map(fold_identifier).collect();
         let dialects = project.project().dialects();
         let lanes = dialects
             .iter()
@@ -69,7 +78,14 @@ impl<'a> Context<'a> {
                 })
             })
             .collect();
-        Context { project, config, inventory, version_table, dialects, lanes }
+        let excluded = config
+            .analysis
+            .excluded_objects
+            .iter()
+            .map(|name| fold_identifier(name))
+            .filter(|name| !name.is_empty())
+            .collect();
+        Context { project, config, inventory, version_tables, excluded, dialects, lanes }
     }
 
     /// Every dialect the repository declares somewhere, in a stable order.
@@ -106,6 +122,22 @@ impl<'a> Context<'a> {
     /// updates. Read by [`crate::rules::propagation`] and by nothing else.
     pub fn initialisation_model(&self) -> InitialisationModel {
         self.config.analysis.initialisation
+    }
+
+    /// Has the project excluded this object from the rules?
+    ///
+    /// Asked with a name already in comparison form — the one the inventory keys
+    /// on and the one `ObjectRef::folded_name` produces — so the two sides of the
+    /// comparison are folded by the same rule and a quoted name in the settings
+    /// behaves exactly as it does in a script.
+    ///
+    /// Every rule that speaks about an object asks this. It is not filtered
+    /// centrally like a disabled rule is, because the rules do not share one
+    /// object list: half of them read the inventory and half walk the statements,
+    /// and a filter over the findings would have to un-pick a name out of a
+    /// sentence.
+    pub fn excludes(&self, folded_name: &str) -> bool {
+        self.excluded.iter().any(|name| name == folded_name)
     }
 
     /// Has the project switched this rule off?

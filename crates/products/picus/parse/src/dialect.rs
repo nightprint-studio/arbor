@@ -206,11 +206,12 @@ const FUNCTION_TABLE: &[(&str, EngineKind, &str)] = &[
     ),
     ("LISTAGG", EngineKind::Oracle, "`LISTAGG` is Oracle; PostgreSQL uses string_agg"),
     ("INSTR", EngineKind::Oracle, "`INSTR` is Oracle; PostgreSQL uses position() or strpos()"),
-    (
-        "TO_NUMBER",
-        EngineKind::Oracle,
-        "`TO_NUMBER` is Oracle; PostgreSQL casts with ::numeric",
-    ),
+    // `TO_NUMBER` was listed here and should not have been: PostgreSQL has
+    // `to_number(text, text)` and always has. Claiming a script "stops here with
+    // a syntax error" about a function that runs perfectly well is the most
+    // expensive kind of wrong this table can be — it sends somebody to rewrite
+    // working SQL. The same goes for `TO_CHAR` and `TO_DATE`, which is why
+    // neither is here either.
     ("NOW", EngineKind::Postgres, "`now()` is PostgreSQL; Oracle uses SYSDATE"),
     (
         "STRING_AGG",

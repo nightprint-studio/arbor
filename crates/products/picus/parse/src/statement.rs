@@ -74,6 +74,14 @@ pub struct Statement {
     /// only looked at top-level INSERTs would see nothing at all in the files
     /// this product exists to maintain.
     pub dml: Vec<DmlShape>,
+    /// The statement was written `CREATE OR REPLACE …`.
+    ///
+    /// Worth a field of its own because it is a **statement of intent**, not a
+    /// spelling: the author has said "whatever was there, this is the definition
+    /// now". Two files that both create an object are usually a race whose winner
+    /// is decided by file order; two files that both `CREATE OR REPLACE` it are
+    /// doing exactly what the syntax is for.
+    pub replaces: bool,
     /// Constructs inside this statement that do not belong to the file's
     /// declared dialect.
     pub foreign: Vec<ForeignConstruct>,
@@ -139,6 +147,20 @@ pub struct ParsedFile {
 impl ParsedFile {
     /// The line-start index for a source. Ascending, always beginning with `0`,
     /// so line `n` (1-based) starts at `line_starts[n - 1]`.
+    /// A parse that found nothing, for a source that could not be handed to the
+    /// grammar at all. Not an error: the caller that needs one of these is the
+    /// nested-body walk, and a body it cannot read is simply a body it does not
+    /// report on.
+    pub fn empty(source: &str, scope: picus_types::prelude::DialectScope) -> ParsedFile {
+        ParsedFile {
+            scope,
+            source_len: source.len(),
+            statements: Vec::new(),
+            errors: Vec::new(),
+            line_starts: ParsedFile::index_lines(source),
+        }
+    }
+
     pub fn index_lines(source: &str) -> Vec<u32> {
         let mut out = Vec::with_capacity(source.len() / 32 + 1);
         out.push(0);

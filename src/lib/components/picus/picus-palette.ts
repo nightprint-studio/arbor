@@ -95,6 +95,8 @@ export interface PicusPaletteActions {
   runQuery: (scope: 'statement' | 'buffer') => void;
   /** Step to the next / previous finding and open it. */
   stepFinding: (delta: number) => void;
+  /** Put the findings currently shown on the clipboard. */
+  copyFindings: () => Promise<void>;
 }
 
 type Raw = {
@@ -348,6 +350,16 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
   const checkItems: Raw[] = [
     { id: 'check', title: 'Run the consistency check', icon: 'alert', shortcut: 'Ctrl+Shift+K', when: attached, action: () => a.run(() => { picusUiStore.showBottom('consistency'); void picusProjectStore.analyze(); }) },
     { id: 'findings', title: 'Show the consistency report', icon: 'alert', when: true, action: () => a.run(() => picusUiStore.showBottom('consistency')) },
+    // Discoverable by verb, because "copy the report" is what somebody about to
+    // paste it into a ticket goes looking for — not a button in a panel header.
+    {
+      id: 'copyfindings',
+      title: 'Copy the consistency report',
+      subtitle: 'The findings currently shown, as text',
+      icon: 'alert',
+      when: consistencyStore.visible.length > 0,
+      action: () => a.run(() => void a.copyFindings()),
+    },
     { id: 'next-finding', title: 'Go to the next finding', icon: 'alert', shortcut: 'F8', when: consistencyStore.visible.length > 0, action: () => a.run(() => a.stepFinding(1)) },
     { id: 'prev-finding', title: 'Go to the previous finding', icon: 'alert', shortcut: 'Shift+F8', when: consistencyStore.visible.length > 0, action: () => a.run(() => a.stepFinding(-1)) },
     {

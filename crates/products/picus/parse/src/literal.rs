@@ -100,14 +100,33 @@ fn q_string(text: &str) -> Option<String> {
     Some(body.get(..closing.0)?.to_string())
 }
 
-/// PostgreSQL `$tag$…$tag$`.
-fn dollar_quoted(text: &str) -> Option<String> {
+/// Where the body of a `$tag$…$tag$` literal starts and ends, as byte offsets
+/// into `text`.
+///
+/// Public because the walker needs the **offsets**, not the contents: a `$$ … $$`
+/// holding a function body is re-parsed as SQL, and every position that comes
+/// back has to be reported against the file on disk. Given the string, the caller
+/// would have to work the delimiter length out a second time, and a second
+/// implementation of "how long is the opening tag" is a second chance to be off
+/// by one in the middle of somebody's source file.
+///
+/// The opener and the closer are the same length by construction, which is what
+/// makes this a pair of offsets rather than a search.
+pub fn dollar_body_span(text: &str) -> Option<(usize, usize)> {
     let after_first = text.strip_prefix('$')?;
     let tag_end = after_first.find('$')?;
     let opener_len = tag_end + 2; // `$` + tag + `$`
-    let body = text.get(opener_len..)?;
-    let body = body.get(..body.len().checked_sub(opener_len)?)?;
-    Some(body.to_string())
+    let end = text.len().checked_sub(opener_len)?;
+    if end < opener_len {
+        return None;
+    }
+    Some((opener_len, end))
+}
+
+/// PostgreSQL `$tag$…$tag$`.
+fn dollar_quoted(text: &str) -> Option<String> {
+    let (start, end) = dollar_body_span(text)?;
+    Some(text.get(start..end)?.to_string())
 }
 
 #[cfg(test)]

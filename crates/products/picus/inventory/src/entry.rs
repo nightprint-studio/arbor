@@ -50,6 +50,30 @@ pub struct ObjectSite {
     /// ordinary repository, and counting the ALTERs as definitions would report
     /// every long-lived table as defined four times.
     pub creating: bool,
+    /// The statement **changes** the object, rather than merely reading it.
+    ///
+    /// True for a `CREATE`/`ALTER`, for the target of an `INSERT`/`UPDATE`/
+    /// `DELETE`/`MERGE`, and for what a `DROP` or `TRUNCATE` names. False for a
+    /// table read in a `FROM`, a `JOIN`, a subquery, or named as the parent of a
+    /// foreign key.
+    ///
+    /// The distinction the grammar does not make: `CREATE VIEW v AS SELECT … FROM
+    /// mecatalogo` and `INSERT INTO mecatalogo …` both leave a plain reference,
+    /// and only one of them is something the other dialect's scripts ought to be
+    /// doing too. Without this, a view reading a table installed by *another*
+    /// repository made `CONS001` report that table as untouched by whichever
+    /// dialect happened not to read it — a gap in scripts that never installed it
+    /// in the first place, and one nobody could close.
+    pub writing: bool,
+    /// …and it was written `CREATE OR REPLACE`.
+    ///
+    /// Kept apart from [`creating`](Self::creating), which stays true: the
+    /// statement does create the object, and the drill-down is right to say so.
+    /// What this adds is the author's stated **intent** — "whatever was there,
+    /// this is the definition now" — which is what stops `DUP002` reporting the
+    /// throwaway wrapper function that every update script in a repository
+    /// defines, calls and replaces.
+    pub replacing: bool,
 }
 
 impl ObjectSite {
@@ -78,13 +102,45 @@ impl ObjectEntry {
         self.coverage.get(folder_path).copied().unwrap_or(0)
     }
 
+    /// Does this repository only ever **read** this object?
+    ///
+    /// Nothing anywhere creates it, alters it, writes to it, drops it or empties
+    /// it — every mention is a `FROM`, a `JOIN` or a foreign key pointing at it.
+    /// Which means it is somebody else's: a table installed by another repository,
+    /// read here by a view.
+    ///
+    /// Reported rather than hidden, because "we read a table we do not own" is
+    /// worth being able to see — and it is one of the more useful things this
+    /// index knows. What it must not do is **count as a gap**: a column of zeroes
+    /// on an object no engine's scripts were ever going to install is not a
+    /// difference between the two engines, it is a fact about the boundary of the
+    /// repository.
+    pub fn is_external(&self) -> bool {
+        !self.sites.is_empty() && !self.sites.iter().any(|s| s.writing)
+    }
+
     /// Sites where the object is created — never where it is altered.
     pub fn creations(&self) -> impl Iterator<Item = &ObjectSite> {
         self.sites.iter().filter(|s| s.creating)
     }
 
-    /// Sites in one `(dialect, role)` lane — the unit every cross-dialect rule
-    /// compares.
+    /// Sites in one `(dialect, role)` lane where the scripts **change** the
+    /// object — the unit the cross-dialect gap rule compares.
+    ///
+    /// Reads are deliberately not here. `CONS001` exists to say "this change
+    /// landed in one engine's scripts and not the other's", and its own
+    /// consequence is written in terms of shape and data; a table a view happens
+    /// to read is neither, and is very often installed by a repository these
+    /// scripts do not own.
+    pub fn writes_in(
+        &self,
+        dialect: EngineKind,
+        role: FolderRole,
+    ) -> impl Iterator<Item = &ObjectSite> {
+        self.sites_in(dialect, role).filter(|s| s.writing)
+    }
+
+    /// Sites in one `(dialect, role)` lane — every mention, reads included.
     pub fn sites_in(
         &self,
         dialect: EngineKind,

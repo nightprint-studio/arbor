@@ -762,6 +762,17 @@ export interface InventoryObject {
   name: string;
   kind: ObjectKind;
   coverage: Record<string, number>;
+  /**
+   * The repository only ever **reads** this object — nothing anywhere creates
+   * it, alters it, writes to it or drops it.
+   *
+   * Which means it belongs to somebody else: a table another repository
+   * installs, read here by a view. Worth seeing, and specifically **not** worth
+   * counting as a gap — a column of zeroes on an object no engine's scripts were
+   * ever going to install is the boundary of the repository, not a difference
+   * between the two engines.
+   */
+  external: boolean;
 }
 
 // ── Consistency ──────────────────────────────────────────────────────────────

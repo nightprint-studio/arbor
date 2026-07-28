@@ -33,6 +33,15 @@
   reading either half alone would report the other as a gap.
 </p>
 <p>
+  Two kinds of object are left out of all of this. The <b>engine's own</b> —
+  <code>user_tab_cols</code>, <code>dual</code>, <code>v$…</code>, <code>pg_…</code>, anything
+  under <code>sys</code> or <code>information_schema</code> — are never indexed at all: nobody
+  installs them and no counterpart is coming. And an object this repository <b>only reads</b> is
+  indexed, marked in the Inventory, and never counted as a gap: a table another repository
+  installs and a view here reads is the boundary of the project, not a difference between the
+  two engines.
+</p>
+<p>
   Which engine a script belongs to is the <b>file's</b> answer, not its folder's, so a directory
   holding both <code>4_12_ORA.sql</code> and <code>4_12_POS.sql</code> takes part in both engines'
   comparisons, and each side is credited only with what its own scripts do. A script no folder and
@@ -64,10 +73,44 @@
   </li>
 </ul>
 <p>
+  The update folder is read as a <b>chain applied in order</b>, not as a set: a row version 1.11
+  wrote and version 1.13 replaced is not reported, because it has not existed since 1.13. Only
+  the updates' last word about a row is compared with the initialisation.
+</p>
+<p>
   Cumulative is the default, and the cost of it is worth knowing: adding a row to the
   initialisation and forgetting the matching update script is a real mistake, and nothing readable
   from the tree tells that mistake apart from an ordinary first-release row. Choose
   <b>Mirrored</b> if your initialisation is frozen at the first release.
+</p>
+
+<h2>When the two dialects are not comparable</h2>
+<p>
+  Some repositories have drifted far enough that comparing their two halves says nothing anyone
+  can act on — different layouts, different table names, one side generated and the other
+  written by hand. <b>Settings → Analysis</b> has a switch for it: with the comparison off,
+  <code>CONS001</code> and <code>CONS004</code> stand down and report themselves as not run,
+  while the version chain, the duplicates, the dangerous DML and the encodings carry on. It is
+  one decision about the repository, so it is one switch rather than two rules to remember.
+</p>
+
+<h2>Excusing one object</h2>
+<p>
+  Every real repository has a handful of tables that are a special case for a reason nothing in
+  the scripts can express — a staging table one dialect fills and the other does not need, a log
+  the installer writes to, a table kept alive for one customer. List them under
+  <b>Settings → Analysis</b> and no rule will say anything about them.
+</p>
+<p>
+  Prefer this to switching a rule off. A rule silenced to quieten one table stops watching the
+  other four hundred; a named object costs exactly what it says. The name is matched the way
+  every identifier here is matched — case-insensitively when unquoted — and whatever kind of
+  object carries it.
+</p>
+<p>
+  An excluded object still appears in the <b>Inventory</b> with its coverage. What is in the
+  repository and what should be checked are different questions, and answering the first one
+  wrongly would hide the very thing you reasoned about when you excluded it.
 </p>
 
 <h2>Switching a rule off</h2>
@@ -94,16 +137,16 @@
     <tr><th>Id</th><th>Rule</th><th>Severity</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>CONS001</code></td><td>Statement present for one engine and absent from the other engine's scripts at the same role</td><td>blocking</td></tr>
+    <tr><td><code>CONS001</code></td><td>An object one engine's scripts <b>change</b> — create, alter, write to, drop, truncate — and the other's never do at the same role. A table merely <i>read</i> in a <code>FROM</code> does not count, so a view over tables another repository installs raises nothing</td><td>blocking</td></tr>
     <tr><td><code>CONS002</code></td><td>Datum in the initialisation, never propagated to the updates</td><td>blocking</td></tr>
     <tr><td><code>CONS003</code></td><td>Datum in an update, missing from the initialisation — a fresh install ends up incomplete</td><td>blocking</td></tr>
     <tr><td><code>CONS004</code></td><td>Object filled in differently for the two engines — same row, different columns or different values</td><td>blocking</td></tr>
     <tr><td><code>DIA001</code></td><td>Statement written in the other dialect's syntax, in a folder that will run against this one</td><td>blocking</td></tr>
-    <tr><td><code>VER001</code></td><td>Update block with no starting-version guard</td><td>blocking</td></tr>
-    <tr><td><code>VER002</code></td><td>Block that changes data without carrying the version forward</td><td>blocking</td></tr>
+    <tr><td><code>VER001</code></td><td>Update block that guards against none of the project's version tables</td><td>blocking</td></tr>
+    <tr><td><code>VER002</code></td><td>Block that changes data without carrying a version forward</td><td>blocking</td></tr>
     <tr><td><code>VER003</code></td><td>Version chain with holes or overlaps between update files</td><td>blocking</td></tr>
-    <tr><td><code>DUP001</code></td><td>Same key inserted twice in one script</td><td>blocking</td></tr>
-    <tr><td><code>DUP002</code></td><td>Object (package, procedure) defined in more than one file</td><td>worth checking</td></tr>
+    <tr><td><code>DUP001</code></td><td>Same row inserted twice in one script, with no <code>DELETE</code> or <code>TRUNCATE</code> of that table between them</td><td>blocking</td></tr>
+    <tr><td><code>DUP002</code></td><td>Object created in more than one file that the same half of the install story runs. <code>CREATE OR REPLACE</code> is exempt — replacing is what it is for</td><td>worth checking</td></tr>
     <tr><td><code>ENC001</code></td><td>File whose encoding changed from the expected one</td><td>worth checking</td></tr>
     <tr><td><code>ENC002</code></td><td>Character not representable in the destination encoding</td><td>blocking</td></tr>
     <tr><td><code>DML001</code></td><td>DELETE or UPDATE with no WHERE, not marked as intentional</td><td>worth checking</td></tr>
@@ -144,6 +187,16 @@
   <i>unchecked</i>, not sound. Every such rule is listed at the foot of the report with its
   scope and its reason, and an otherwise empty report says plainly that finding nothing is
   not the same as nothing being wrong.
+</p>
+
+<h2>Taking it elsewhere</h2>
+<p>
+  A report usually ends up somewhere else — a ticket, a commit message, a conversation with
+  whoever wrote the other dialect's half. Every row has a copy button, and the panel header
+  copies the whole list <b>as it is filtered</b>, with a heading saying how many findings that
+  is and which filter produced them. The text carries the rule id, the severity, the
+  <code>path:line</code> and, crucially, the consequence — the sentence about what actually
+  goes wrong, which is the part worth pasting.
 </p>
 
 <h2>Getting around</h2>

@@ -45,6 +45,12 @@
      * enough to matter. In a form row, this is almost always what you want.
      */
     fill?: boolean;
+    /** Shown when nothing is selected at all. Not shown for a value whose label
+     *  is merely unknown — that renders the value itself. */
+    placeholder?: string;
+    /** Shown inside the menu when there is nothing to choose from — far more
+     *  useful than an empty box, which reads as a broken control. */
+    emptyMessage?: string;
     onchange?: (value: string) => void;
   }
 
@@ -57,8 +63,23 @@
     searchable = false,
     searchPlaceholder = 'Search…',
     fill = false,
+    placeholder = '',
+    emptyMessage,
     onchange,
   }: Props = $props();
+
+  /**
+   * The menu never gets narrower than this, however narrow the trigger is.
+   *
+   * A select's menu holds the things you are choosing between, and it is aligned
+   * to the trigger for tidiness — not because the trigger's width says anything
+   * about how long an option's label is. Without a floor, a picker squeezed into
+   * a flex row opens a strip you cannot read a single character in.
+   *
+   * `narrow` opts out: at 120px it is a deliberate, self-describing size (a
+   * grouping switch, a unit), and widening its menu would misalign it for no gain.
+   */
+  const MENU_FLOOR = $derived(narrow ? 0 : 240);
 
   /** Tight bound on the menu height so the upward-flip placement doesn't
    *  reserve room for a phantom 420px menu. Caller can override. */
@@ -83,9 +104,24 @@
     })),
   );
 
-  const selectedLabel = $derived(
-    options.find(o => String(o.value) === String(value))?.label ?? '',
-  );
+  /**
+   * What the trigger shows.
+   *
+   * The fallback to the raw value is the important half. A select whose options
+   * are loaded from somewhere — a live catalogue, a directory listing — has a
+   * window in which it holds a perfectly good value and knows no option matching
+   * it, and rendering the empty string there tells the user their setting is
+   * gone. It is not gone; it is just not in this list yet.
+   */
+  const selectedLabel = $derived.by(() => {
+    const match = options.find(o => String(o.value) === String(value));
+    if (match) return match.label;
+    return String(value ?? '');
+  });
+
+  /** True when there is genuinely nothing selected, as opposed to a value whose
+   *  label has not arrived. Only then is the placeholder shown. */
+  const isEmpty = $derived(String(value ?? '') === '');
 </script>
 
 <div class="select-wrap" class:narrow class:fill>
@@ -94,8 +130,10 @@
     direction="down"
     matchTriggerWidth
     maxHeight={derivedMaxHeight}
+    minMenuWidth={MENU_FLOOR}
     {searchable}
     {searchPlaceholder}
+    {emptyMessage}
     {items}
   >
     {#snippet trigger({ open, toggle })}
@@ -108,7 +146,9 @@
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span class="select-input-label">{selectedLabel}</span>
+        <span class="select-input-label" class:select-placeholder={isEmpty}>
+          {isEmpty ? placeholder : selectedLabel}
+        </span>
         <ChevronDown size={11} />
       </button>
     {/snippet}
@@ -118,9 +158,14 @@
 <style>
   .select-wrap { display: inline-block; }
   .select-wrap.narrow { width: 120px; }
-  /* Sizes to the container rather than to the selected label — which otherwise
-     collapses a table picker down to the width of one short name. */
-  .select-wrap.fill { display: block; width: 100%; }
+  /* Sizes to the container rather than to the selected label.
+     `flex` and `min-width` are both load-bearing, not belt-and-braces: this
+     usually sits in a flex row next to a button, and there `width: 100%` alone
+     is only a *preferred* size — a flex item still shrinks to its content, so a
+     picker whose label happened to be empty collapsed to the width of its own
+     chevron. `min-width: 0` then lets it shrink below the label's length instead
+     of pushing the button off the row. */
+  .select-wrap.fill { display: block; width: 100%; flex: 1 1 auto; min-width: 0; }
   .select-wrap :global(.dd-root) { width: 100%; }
 
   .select-input {
@@ -147,8 +192,15 @@
   .select-input:disabled { opacity: 0.45; cursor: not-allowed; }
   .select-input-label {
     flex: 1;
+    /* `min-width: 0` so a long label truncates instead of forcing the trigger
+       wider than the row that holds it. */
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    text-align: left;
   }
+  /* Nothing chosen — as opposed to a value whose label has not loaded, which is
+     rendered as the value itself and in the ordinary colour. */
+  .select-placeholder { color: var(--text-disabled); }
 </style>

@@ -22,8 +22,9 @@
    * landed outside the columns entirely is counted rather than rounded off, so a
    * folded matrix can never look complete when it is not.
    */
-  import { TriangleAlert, CheckCircle2, ChevronRight } from 'lucide-svelte';
+  import { TriangleAlert, CheckCircle2, ChevronRight, Eye, EyeOff } from 'lucide-svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
+  import Button from '$lib/components/shared/ui/Button.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
@@ -51,12 +52,30 @@
   const buckets = $derived(coverageBuckets(picusProjectStore.tree));
   const hidden = $derived(ignoredFileCount(picusProjectStore.tree));
 
+  /**
+   * Objects this repository only reads — a table another repository installs,
+   * read here by a view.
+   *
+   * Shown by default because "we read something we do not own" is worth knowing,
+   * and hideable because on a repository full of views it is most of the list.
+   */
+  let showExternal = $state(true);
+  const externalCount = $derived(picusProjectStore.inventory.filter((o) => o.external).length);
+
   const rows = $derived(
-    picusProjectStore.inventory.filter((o) => !needle || o.name.toLowerCase().includes(needle)),
+    picusProjectStore.inventory.filter(
+      (o) =>
+        (showExternal || !o.external) && (!needle || o.name.toLowerCase().includes(needle)),
+    ),
   );
 
+  // External objects are deliberately not counted. Their zeroes are the boundary
+  // of the repository, not a difference between the two engines, and letting them
+  // into this number made "12 objects with gaps" a figure nobody could act on.
   const gapCount = $derived(
-    picusProjectStore.inventory.filter((o) => buckets.some((b) => bucketCoverage(o, b) === 0)).length,
+    picusProjectStore.inventory.filter(
+      (o) => !o.external && buckets.some((b) => bucketCoverage(o, b) === 0),
+    ).length,
   );
 
   /**
@@ -137,6 +156,19 @@
 
   <div class="iv-search">
     <SearchBar bind:query showRegex={false} placeholder="Filter objects" ariaLabel="Filter objects" />
+    {#if externalCount}
+      <Button
+        variant={showExternal ? 'secondary' : 'primary'}
+        size="xs"
+        tooltip={'Objects nothing here creates, alters or writes to — a table another repository installs, read by a view. They are never counted as gaps, whether they are shown or not.'}
+        onclick={() => (showExternal = !showExternal)}
+      >
+        {#snippet iconStart()}
+          {#if showExternal}<EyeOff size={12} />{:else}<Eye size={12} />{/if}
+        {/snippet}
+        {showExternal ? `Hide ${externalCount} read from elsewhere` : `Show ${externalCount} read from elsewhere`}
+      </Button>
+    {/if}
   </div>
 
   {#if picusProjectStore.unclassifiedFolders.length}
@@ -231,7 +263,18 @@
                     <ChevronRight size={12} />
                   </button>
                   <ObjectKindIcon kind={obj.kind} />
-                  <span class="iv-obj-name">{obj.name}</span>
+                  <span class="iv-obj-name" class:iv-obj-external={obj.external}>{obj.name}</span>
+                  {#if obj.external}
+                    <!-- Said on the row, because otherwise a line of dashes is
+                         indistinguishable from a real gap — and it is the reader
+                         noticing the difference that this whole view is for. -->
+                    <span
+                      class="iv-external"
+                      use:tooltip={'Nothing here creates, alters or writes to it — another repository installs it and this one reads it. Never counted as a gap.'}
+                    >
+                      read only
+                    </span>
+                  {/if}
                   {#if stray}
                     <span
                       class="iv-stray"
@@ -435,6 +478,19 @@
   }
   .iv-twist.iv-open { transform: rotate(90deg); }
   .iv-twist:hover { color: var(--text-primary); }
+
+  /* An object this repository only reads: dimmed, because its zeroes are the
+     boundary of the repository rather than something to go and fix. */
+  .iv-obj-external { color: var(--text-muted); }
+  .iv-external {
+    font-size: 10px;
+    color: var(--text-disabled);
+    text-transform: none;
+    letter-spacing: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 0 4px;
+  }
 
   /* Statements the columns do not account for — never rounded away. */
   .iv-stray {
