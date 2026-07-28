@@ -89,7 +89,7 @@ fn the_same_row_in_two_different_scripts_is_not_this_rule() {
 // ── DUP002 ───────────────────────────────────────────────────────────────────
 
 #[test]
-fn an_object_created_in_two_files_of_one_branch_is_reported() {
+fn an_object_created_in_two_files_of_one_dialect_is_reported() {
     let repo = Fixture::build(&[
         (
             "ORACLE/PROCEDURE/PKG_CLIENTI.sql",
@@ -108,7 +108,7 @@ fn an_object_created_in_two_files_of_one_branch_is_reported() {
 }
 
 #[test]
-fn the_same_table_created_in_both_branches_is_the_point_not_a_duplicate() {
+fn the_same_table_created_in_both_dialects_is_the_point_not_a_duplicate() {
     // If this fired, every object in every Picus repository would be a finding.
     let repo = Fixture::build(&[
         (

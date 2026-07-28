@@ -31,9 +31,9 @@
   folder, it touches nothing on disk.
 </p>
 <p>
-  A repository does not need a reachable server. An Oracle branch is read, checked and
-  generated into with no Oracle session in existence, which is exactly what a branch of a
-  dialect Picus has no driver for requires.
+  A repository does not need a reachable server. An Oracle folder is read, checked and
+  generated into with no Oracle session in existence, which is exactly what a folder
+  written for an engine Picus has no driver for requires.
 </p>
 
 <h2>Read-only connections</h2>
@@ -114,7 +114,8 @@
 <ul>
   <li><kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs the statement under the cursor, or the selection.</li>
   <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> runs the whole script.</li>
-  <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> cancels a running query.</li>
+  <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> cancels a running query, or the row count
+    running behind one.</li>
   <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> cycles the active connection.</li>
 </ul>
 
@@ -126,35 +127,56 @@
   a null with an empty string is expensive when you are about to write DML from what you
   see.
 </p>
+<h2>Scrolling a result</h2>
 <p>
-  Table data is <b>paged</b>, and each page is rendered through the same virtualised
-  viewport: paging bounds what is fetched, virtualisation bounds what is drawn. That is why
-  the page sizes go up to ten thousand — a large page costs no more to display than a small
-  one, and "1–500 of 4,210" is an answer where an endless scrollbar is not.
+  A query result and a table's data behave identically: one <b>continuous scroll</b> over
+  the whole thing. The scrollbar is the length of the result from the first frame, and rows
+  arrive in windows as you approach them — you scroll, and the next stretch is already being
+  fetched before you reach the edge of what is loaded. Rows that have not arrived yet draw
+  as quiet placeholder bars, so the scrollbar never lies about how much there is.
 </p>
 <p>
-  The row count beside a table is the server's <b>estimate</b>, marked with a <code>~</code>.
-  Picus never runs a <code>count(*)</code> to label a page: on the tables it is pointed at,
-  counting them would cost more than reading them.
+  This works because a read leaves a <b>cursor open on the server</b> and Picus reads
+  forward through it, rather than re-running the statement with a new
+  <code>OFFSET</code> each time. Scrolling therefore never repeats a row and never skips
+  one, even on a table being written to while you read it. The cursor is released when you
+  close the tab, when you run another statement in it, and when the connection is closed.
 </p>
 <p>
-  A page is an <code>OFFSET</code> on the server, and the server reaches a given offset by
-  walking the rows before it — so pages deep into a large table keep getting slower. Picus
-  says so when you get there. To land on a distant row directly, query it with a
-  <code>WHERE</code> on an indexed column instead of paging to it.
+  <b>Settings → Queries → row limit</b> is how many rows come back per window. It is not a
+  ceiling any more: a bigger number means fewer, larger trips, a smaller one means more,
+  smaller trips.
 </p>
 
-<h2>The row limit on query results</h2>
+<h2>How long is it, really</h2>
 <p>
-  A query tab fetches at most <b>Settings → Queries → row limit</b> rows. Wherever the
-  statement allows it, that limit is applied by the <b>server</b>: a
-  <code>SELECT * FROM orders</code> on a few million rows stops at the limit there, instead
-  of crossing the network in full to be cut down afterwards.
+  The total appears in the <b>status bar</b>, and starts as the server's <b>estimate</b>.
+  An estimate is marked with a <code>~</code> everywhere it is shown — beside the result,
+  in the status bar, in the query history. Meanwhile Picus counts the result exactly, in the
+  background; when that count lands the <code>~</code> disappears and the number is the real
+  one. Nothing waits for it, and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> stops it if
+  you would rather not pay for a count on a very large table.
 </p>
 <p>
-  When a result hits the limit, the grid says so — a <b>capped</b> marker beside the row
-  count and a banner above the rows. This matters more than it looks: a result cut at the
-  limit and a result that genuinely ended are otherwise identical on screen, and the
-  sorting and per-column filters in the grid apply only to the rows that were fetched, not
-  to the rest of the table. Raise the limit, or narrow the statement.
+  The number is never quietly promoted from guess to fact: for as long as it carries the
+  <code>~</code>, it can be out — sometimes considerably, on a table that has just been
+  written to.
+</p>
+
+<h2>Sorting and filtering a result you only partly hold</h2>
+<p>
+  While a result is still filling, the column sort and the per-column filters are
+  <b>visible and unavailable</b>, and say why when you point at them. Sorting a tenth of a
+  result looks exactly like sorting the whole one, and the row you were looking for is
+  simply not in the part that was in memory.
+</p>
+<p>
+  As soon as the whole result is loaded — which for most queries is immediately, on the
+  first window — both come back and behave as they always have. A note above the rows says
+  how many of how many are loaded while that is not yet the case, and leaves when it is.
+</p>
+<p>
+  To reach a specific distant row, query it with a <code>WHERE</code> on an indexed column
+  rather than scrolling to it: that lands in one step, where scrolling to row four million
+  makes the server walk there.
 </p>

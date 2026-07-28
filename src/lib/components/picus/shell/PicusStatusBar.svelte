@@ -4,7 +4,8 @@
    *
    * Left: the active connection (colour + schema), its engine and the database
    * version the version table reports.
-   * Right: the open file's encoding and line ending, the open-findings counter
+   * Right: how long the result on screen is, the open file's encoding and line
+   * ending, the open-findings counter
    * (a button — it reveals the Consistency dock), the project path and its
    * counters, then the shared feedback badges injected by the window.
    *
@@ -22,6 +23,7 @@
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { consistencyStore } from '$lib/stores/picus/consistency.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
+  import { formatRowTotal, picusResultsStore } from '$lib/stores/picus/result.svelte';
   import { DIALECTS } from '$lib/types/picus';
 
   let { footerExtra }: { footerExtra?: Snippet } = $props();
@@ -35,6 +37,15 @@
     if (tab?.kind !== 'file' || !tab.file) return null;
     return picusProjectStore.fileByPath(tab.file);
   });
+
+  /**
+   * How long the result on screen is.
+   *
+   * This is where a table's row count lives now that browsing data is a
+   * continuous scroll: a page selector used to carry it, and an infinite
+   * scrollbar carries nothing. `~` while it is the planner's estimate.
+   */
+  const result = $derived(picusResultsStore.forOwner(picusTabsStore.activeId));
 
   const blocking = $derived(consistencyStore.blockingCount);
   const review = $derived(consistencyStore.reviewCount);
@@ -57,6 +68,21 @@
   {/if}
 
   <span class="pf-spacer"></span>
+
+  {#if result}
+    <span
+      class="pf-item"
+      use:tooltip={{
+        content: result.approximate
+          ? `Estimated by the planner${result.counting ? ' — counting the exact number now' : ''}`
+          : 'Counted on the server',
+        description: `${result.loaded.toLocaleString()} row(s) loaded so far`,
+      }}
+    >
+      {formatRowTotal(result)} rows
+    </span>
+    <span class="pf-sep"></span>
+  {/if}
 
   {#if openFile}
     <EncodingPill
@@ -103,7 +129,7 @@
 
   {#if project}
     <span class="pf-sep"></span>
-    <span class="pf-item" use:tooltip={`${picusProjectStore.branches.length} branches · ${picusProjectStore.fileCount} files`}>
+    <span class="pf-item" use:tooltip={`${picusProjectStore.folderCount} folders · ${picusProjectStore.fileCount} files`}>
       <Files size={12} /> {picusProjectStore.fileCount}
     </span>
     <span class="pf-sep"></span>

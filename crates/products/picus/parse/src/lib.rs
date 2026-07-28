@@ -36,10 +36,10 @@
 //!
 //! ```no_run
 //! use picus_parse::prelude::*;
-//! use picus_types::prelude::EngineKind;
+//! use picus_types::prelude::{DialectScope, EngineKind};
 //!
 //! let sql = "INSERT INTO PARAMETRI (COD, VAL) VALUES ('A', '1');";
-//! let parsed = parse(sql, EngineKind::Postgres);
+//! let parsed = parse(sql, DialectScope::One(EngineKind::Postgres));
 //!
 //! assert_eq!(parsed.reassemble(sql), sql);
 //! for statement in &parsed.statements {

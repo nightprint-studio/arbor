@@ -230,10 +230,10 @@ fn line_start(source: &str, at: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use picus_parse::prelude::{EngineKind, SqlParser};
+    use picus_parse::prelude::{DialectScope, EngineKind, SqlParser};
 
     fn parse(source: &str) -> ParsedFile {
-        SqlParser::new().parse(source, EngineKind::Oracle)
+        SqlParser::new().parse(source, DialectScope::One(EngineKind::Oracle))
     }
 
     fn marker() -> MarkerTemplate {

@@ -3,11 +3,11 @@
 //! Two fields carry the weight and they are not interchangeable:
 //!
 //! * **`title`** names *what* was found, in the vocabulary of the repository —
-//!   the object, the file, the branch.
+//!   the object, the file, the folder.
 //! * **`consequence`** says *what goes wrong in practice* if it is left alone.
-//!   Never a restatement of the rule. "the two branches diverge from 4.13 and a
+//!   Never a restatement of the rule. "the two dialects diverge from 4.13 and a
 //!   PostgreSQL install ends up without the parameter" — not "objects should be
-//!   consistent between branches". A report whose messages are rule names is a
+//!   consistent between dialects". A report whose messages are rule names is a
 //!   report people learn to close.
 
 use serde::Serialize;
@@ -15,23 +15,28 @@ use serde::Serialize;
 use crate::rule::{RuleId, Severity};
 
 /// Where a finding points.
+///
+/// A **path**, and that is the whole of it. The path locates the finding in the
+/// tree, and the tree is where its folder, its role and its dialect are — so a
+/// finding that also carried the dialect would be carrying a second copy of a
+/// fact, and second copies drift. The report groups by walking from the path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Anchor {
-    /// Project-relative path, POSIX separators.
+    /// Project-relative path, POSIX separators. A file, or — for the rules that
+    /// are about a folder rather than anything in it — a folder.
     pub file: String,
-    pub branch_id: String,
     /// 1-based line, when the rule can point at one. `None` for the rules that
     /// are about a whole file or a whole folder.
     pub line: Option<usize>,
 }
 
 impl Anchor {
-    pub fn file(file: &str, branch_id: &str) -> Anchor {
-        Anchor { file: file.to_string(), branch_id: branch_id.to_string(), line: None }
+    pub fn file(file: &str) -> Anchor {
+        Anchor { file: file.to_string(), line: None }
     }
 
-    pub fn at(file: &str, branch_id: &str, line: usize) -> Anchor {
-        Anchor { file: file.to_string(), branch_id: branch_id.to_string(), line: Some(line) }
+    pub fn at(file: &str, line: usize) -> Anchor {
+        Anchor { file: file.to_string(), line: Some(line) }
     }
 
     /// `path:line`, or just `path` when there is no line. The form `alsoAt`
@@ -60,7 +65,6 @@ pub struct Finding {
     /// The second place, for rules that pair two locations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub also_at: Option<String>,
-    pub branch_id: String,
     /// Label of the corrective action, when the rule can propose a patch.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fix_label: Option<String>,
@@ -136,7 +140,6 @@ impl FindingDraft {
             file: self.anchor.file,
             line: self.anchor.line,
             also_at: self.also_at,
-            branch_id: self.anchor.branch_id,
             fix_label: self.fix_label,
             suppressed_because: None,
         }
@@ -179,7 +182,7 @@ mod tests {
     fn draft() -> FindingDraft {
         Finding::new(
             RuleId::Dml001,
-            Anchor::at("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", "ora", 8),
+            Anchor::at("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", 8),
             "DELETE without a WHERE clause",
             "The statement empties the whole table rather than a subset.",
         )
@@ -197,7 +200,7 @@ mod tests {
         // like a different finding and throw the user's place away.
         let reworded = Finding::new(
             RuleId::Dml001,
-            Anchor::at("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", "ora", 8),
+            Anchor::at("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", 8),
             "DELETE without a WHERE clause",
             "Something else entirely.",
         );
@@ -208,7 +211,7 @@ mod tests {
     fn two_findings_in_different_places_get_different_ids() {
         let elsewhere = Finding::new(
             RuleId::Dml001,
-            Anchor::at("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", "ora", 9),
+            Anchor::at("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", 9),
             "DELETE without a WHERE clause",
             "The statement empties the whole table rather than a subset.",
         );
@@ -220,7 +223,7 @@ mod tests {
         let json = serde_json::to_value(draft().build()).unwrap();
         assert_eq!(json["rule"], "DML001");
         assert_eq!(json["severity"], "review");
-        assert_eq!(json["branchId"], "ora");
+        assert_eq!(json["file"], "ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql");
         assert_eq!(json["line"], 8);
         // Absent, not null: the frontend's fields are optional, not nullable.
         assert!(json.get("alsoAt").is_none());
@@ -230,7 +233,7 @@ mod tests {
 
     #[test]
     fn an_anchor_with_no_line_still_has_a_location() {
-        assert_eq!(Anchor::file("A/b.sql", "ora").location(), "A/b.sql");
-        assert_eq!(Anchor::at("A/b.sql", "ora", 3).location(), "A/b.sql:3");
+        assert_eq!(Anchor::file("A/b.sql").location(), "A/b.sql");
+        assert_eq!(Anchor::at("A/b.sql", 3).location(), "A/b.sql:3");
     }
 }

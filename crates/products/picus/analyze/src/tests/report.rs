@@ -88,9 +88,7 @@ fn every_finding_points_at_a_real_place_in_the_project() {
     let report = repo.report();
     let known: Vec<&str> = repo
         .project
-        .branches
-        .iter()
-        .flat_map(|b| b.folders.iter())
+        .walk()
         .flat_map(|f| f.files.iter().map(|x| x.path.as_str()).chain(std::iter::once(f.path.as_str())))
         .collect();
     for finding in &report.findings {
@@ -99,12 +97,6 @@ fn every_finding_points_at_a_real_place_in_the_project() {
             "{} anchors at {:?}, which is not in the tree",
             finding.rule,
             finding.file
-        );
-        assert!(
-            repo.project.branches.iter().any(|b| b.id == finding.branch_id),
-            "{} anchors at branch {:?}",
-            finding.rule,
-            finding.branch_id
         );
     }
 }

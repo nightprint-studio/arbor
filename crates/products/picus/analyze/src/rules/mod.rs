@@ -6,8 +6,8 @@
 //! neighbour's threshold moved.
 //!
 //! The two consistency modules are the two axes a repository can drift along,
-//! and keeping them apart is the point: [`consistency`] compares one branch
-//! against the other, [`propagation`] compares one branch's initialisation
+//! and keeping them apart is the point: [`consistency`] compares one dialect
+//! against the other, [`propagation`] compares one dialect's initialisation
 //! against its own updates.
 
 use crate::context::Context;

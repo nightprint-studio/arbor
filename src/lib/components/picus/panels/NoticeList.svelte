@@ -3,8 +3,8 @@
    * The things the reader wants to say about a repository, as a list.
    *
    * Opening a project is not a yes/no operation: a folder whose role could not be
-   * decided from its name, a branch whose dialect is a guess, an object indexed
-   * outside every branch — each is a **question to the user**, and burying it
+   * decided from its name, a folder whose engine is a guess, an object indexed
+   * outside every classified folder — each is a **question to the user**, and burying it
    * would make Picus quietly wrong about the one thing it exists to be right
    * about. So they get a place on screen, sorted with the questions first.
    *

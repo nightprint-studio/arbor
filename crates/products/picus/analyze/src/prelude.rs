@@ -6,7 +6,7 @@
 
 pub use crate::compare::{comparable_rows, render as render_row, row_fingerprint, RowFingerprint};
 pub use crate::context::{
-    branch_label, engine_label, fold_identifier, folders_with_role, Context,
+    engine_label, fold_identifier, Context,
 };
 pub use crate::finding::{Anchor, Finding, FindingDraft};
 pub use crate::report::{analyze, Report, SkippedRule};

@@ -9,7 +9,7 @@
 mod dml;
 mod names;
 
-use picus_types::prelude::EngineKind;
+use picus_types::prelude::DialectScope;
 use tree_sitter::Node;
 
 use crate::dialect::{self, ForeignConstruct};
@@ -19,7 +19,7 @@ use crate::object::{ObjectKind, ObjectRef};
 use crate::statement::{ParsedFile, Statement, StatementKind};
 use names::{field_ref, leading_keywords, object_kind_from_keywords, object_ref, range_of, text_of};
 
-pub(crate) fn walk_file(root: Node, source: &str, engine: EngineKind) -> ParsedFile {
+pub(crate) fn walk_file(root: Node, source: &str, scope: DialectScope) -> ParsedFile {
     let mut statements = Vec::new();
     let mut errors = Vec::new();
 
@@ -27,7 +27,7 @@ pub(crate) fn walk_file(root: Node, source: &str, engine: EngineKind) -> ParsedF
     for child in root.children(&mut cursor) {
         match child.kind() {
             "statement" | "slash_terminator" | "ERROR" => {
-                let statement = statement_of(child, source, engine, &mut errors);
+                let statement = statement_of(child, source, scope, &mut errors);
                 statements.push(statement);
             }
             // Comments and whitespace: they belong to the gaps.
@@ -35,13 +35,13 @@ pub(crate) fn walk_file(root: Node, source: &str, engine: EngineKind) -> ParsedF
         }
     }
 
-    ParsedFile { engine, source_len: source.len(), statements, errors }
+    ParsedFile { scope, source_len: source.len(), statements, errors }
 }
 
 fn statement_of(
     node: Node,
     source: &str,
-    engine: EngineKind,
+    scope: DialectScope,
     file_errors: &mut Vec<ParseError>,
 ) -> Statement {
     // The body is the first named child; the `;` is anonymous and the Oracle `/`
@@ -49,7 +49,7 @@ fn statement_of(
     let body = if node.kind() == "statement" { node.named_child(0) } else { Some(node) };
     let node_kind = body.map(|b| b.kind().to_string()).unwrap_or_else(|| node.kind().to_string());
 
-    let mut collector = Collector::new(source, engine);
+    let mut collector = Collector::new(source, scope);
     collector.visit(node, None);
 
     let before = file_errors.len();
@@ -130,7 +130,7 @@ const FIELD_REFERENCES: &[(&str, &str, ObjectKind)] = &[
 
 struct Collector<'a> {
     source: &'a str,
-    engine: EngineKind,
+    scope: DialectScope,
     defines: Vec<ObjectRef>,
     references: Vec<ObjectRef>,
     dml: Vec<DmlShape>,
@@ -139,10 +139,10 @@ struct Collector<'a> {
 }
 
 impl<'a> Collector<'a> {
-    fn new(source: &'a str, engine: EngineKind) -> Self {
+    fn new(source: &'a str, scope: DialectScope) -> Self {
         Self {
             source,
-            engine,
+            scope,
             defines: Vec::new(),
             references: Vec::new(),
             dml: Vec::new(),
@@ -189,7 +189,7 @@ impl<'a> Collector<'a> {
 
     fn record_foreign(&mut self, node: Node) {
         if let Some((belongs_to, construct, message)) = dialect::classify_node(node.kind()) {
-            if belongs_to != self.engine {
+            if !self.scope.permits_syntax_of(belongs_to) {
                 self.foreign.push(ForeignConstruct {
                     construct,
                     belongs_to,
@@ -203,7 +203,7 @@ impl<'a> Collector<'a> {
                 if let Some((belongs_to, construct, message)) =
                     dialect::classify_function(text_of(name, self.source))
                 {
-                    if belongs_to != self.engine {
+                    if !self.scope.permits_syntax_of(belongs_to) {
                         self.foreign.push(ForeignConstruct {
                             construct,
                             belongs_to,
@@ -220,7 +220,8 @@ impl<'a> Collector<'a> {
             if let Some((belongs_to, construct, message)) =
                 dialect::classify_function(text_of(node, self.source))
             {
-                if belongs_to != self.engine && node.parent().map(|p| p.kind()) != Some("function_call")
+                if !self.scope.permits_syntax_of(belongs_to)
+                    && node.parent().map(|p| p.kind()) != Some("function_call")
                 {
                     self.foreign.push(ForeignConstruct {
                         construct,

@@ -40,10 +40,24 @@ fn picus_emit(
 ) -> Result<Vec<EmittedTarget>, String> {
     Ok(targets
         .iter()
-        .map(|t| EmittedTarget {
-            target_id: t.id.clone(),
-            sql: emit_for_target(&model, t),
-            rule_conflict: t.rule_conflict().map(str::to_string),
+        .map(|t| {
+            // The emitter's own refusal and the target's stated conflict are one
+            // field on purpose: to the user they are the same sentence — "this
+            // destination cannot take this" — and splitting them would put two
+            // half-explanations in two places. `Target::refuses` covers both, so
+            // the preview and the write cannot disagree about why.
+            match emit_for_target(&model, t) {
+                Ok(sql) => EmittedTarget {
+                    target_id: t.id.clone(),
+                    sql,
+                    rule_conflict: t.rule_conflict().map(str::to_string),
+                },
+                Err(refusal) => EmittedTarget {
+                    target_id: t.id.clone(),
+                    sql: format!("-- nothing generated: {refusal}"),
+                    rule_conflict: Some(refusal.to_string()),
+                },
+            }
         })
         .collect())
 }

@@ -38,7 +38,7 @@ export type { SchemaView } from './schema-view';
  * The `intel` bag for one dialect, bound to one connection.
  *
  * Both are fixed here and never read from a global. The dialect comes from the tab
- * — a connection's engine for a query, the folder's branch for a script — because
+ * — a connection's engine for a query, the folder's engine for a script — because
  * "the dialect is a property of the folder, never a current mode" is the product's
  * one structural invariant. The connection decides which catalogue, if any, this
  * buffer may be measured against; without one every feature quietly degrades to

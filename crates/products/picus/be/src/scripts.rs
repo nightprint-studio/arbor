@@ -32,7 +32,7 @@
 //! produced inside the call that needs it, by [`parse_all`] and nowhere else,
 //! which is also the single function a future on-disk parse cache would replace.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -40,7 +40,7 @@ use arbor_fs::prelude::encoding::{decode_in_context, EncodingContext};
 use picus_analyze::prelude::{analyze, Finding, RejectedSuppression, SkippedRule};
 use picus_core::prelude::{digest, CachedSource, PicusState, ScriptSnapshot};
 use picus_inventory::prelude::{Inventory, InventoryObject, ParsedProject, ParsedScript};
-use picus_parse::prelude::{EngineKind, ParsedFile, SqlParser};
+use picus_parse::prelude::{DialectScope, EngineKind, ParsedFile, SqlParser};
 use picus_project::prelude::{discover, label_to_encoding, LineEnding, Project};
 use serde::Serialize;
 
@@ -80,7 +80,7 @@ fn picus_refresh_scripts(state: &PicusState, root: String) -> Result<OpenedProje
 #[serde(rename_all = "camelCase")]
 pub struct AnalyzedScripts {
     /// One row per database object the repository names, with its coverage per
-    /// branch and folder. The interesting cell is the zero.
+    /// folder. The interesting cell is the zero.
     pub inventory: Vec<InventoryObject>,
     /// Suppressed findings included, and marked as such.
     pub findings: Vec<Finding>,
@@ -231,30 +231,128 @@ fn read_one(root: &Path, relative: &str, discovered: &str) -> Result<CachedSourc
 /// Isolated on purpose: an on-disk parse cache is a change to this function's
 /// body — look the digest up, parse and store on a miss — and to nothing else.
 /// See `picus_core::scripts` for what such a tier has to provide.
+///
+/// ## Files in an engine Picus does not support are not parsed
+///
+/// Not "parsed and then ignored" — **not parsed**. Handing T-SQL or DB2 SQL to a
+/// grammar built for Oracle and PostgreSQL does not fail; it succeeds, and
+/// produces a plausible-looking tree of statements that mean nothing. Everything
+/// downstream then has to be trusted to throw that away, and the day one rule
+/// forgets, the report is confidently wrong about somebody else's scripts.
+///
+/// It is also the cheapest speed there is on a real repository. Parsing is two
+/// thirds of an analysis, and in the repository this was built for the SQL Server
+/// and DB2 folders are roughly half the files — none of which anyone will ever
+/// look at a finding for.
 fn parse_all(snapshot: &ScriptSnapshot) -> Vec<(String, ParsedFile)> {
-    // One parser for the whole repository: loading the grammar is the expensive
-    // part, and `SqlParser` is reusable precisely so a folder scan pays it once.
-    let mut parser = SqlParser::new();
-    snapshot
-        .sources
-        .values()
-        .map(|source| {
-            let engine = dialect_of(&snapshot.project, &source.path);
-            (source.path.clone(), parser.parse(&source.text, engine))
-        })
+    // The skip list is built once, from the tree. Asking the tree per file would
+    // be a linear walk per file — quadratic on exactly the large repositories
+    // this skip exists to speed up, which would be a fine joke to leave in.
+    let skip = unparsable_paths(&snapshot.project);
+    let sources: Vec<&CachedSource> =
+        snapshot.sources.values().filter(|s| !skip.contains(s.path.as_str())).collect();
+    // Below this, threads cost more than they save — and it keeps the common case
+    // of a handful of files on one obvious code path.
+    if sources.len() < PARALLEL_PARSE_THRESHOLD {
+        let mut parser = SqlParser::new();
+        return sources.iter().map(|s| parse_one(&mut parser, snapshot, s)).collect();
+    }
+
+    // Parsing is two thirds of an analysis and the files are completely
+    // independent — nothing here reads another file's tree — so this is the one
+    // place in the backend where threads pay for themselves. Contiguous chunks
+    // rather than a work queue: no shared state at all, so there is no lock to
+    // contend on and the result order is deterministic, which matters because a
+    // report whose findings reorder between runs is one nobody can diff.
+    //
+    // A parser per thread, not per file: loading the grammar is the expensive part
+    // of `SqlParser::new()`, which is why it is reusable in the first place.
+    let threads = parse_threads(sources.len());
+    let chunk = sources.len().div_ceil(threads);
+    let mut parsed: Vec<(String, ParsedFile)> = Vec::with_capacity(sources.len());
+
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = sources
+            .chunks(chunk)
+            .map(|slice| {
+                scope.spawn(move || {
+                    let mut parser = SqlParser::new();
+                    slice.iter().map(|s| parse_one(&mut parser, snapshot, s)).collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for handle in handles {
+            // A panic in a parse thread is a bug in the grammar, not a user error.
+            // Re-raising it here loses nothing: `join` already carries the payload,
+            // and swallowing it would report a repository as clean because part of
+            // it silently failed to parse — the exact failure this product exists
+            // to prevent.
+            parsed.extend(handle.join().expect("a parse thread panicked"));
+        }
+    });
+    parsed
+}
+
+/// Files below which parsing stays on one thread.
+const PARALLEL_PARSE_THRESHOLD: usize = 24;
+
+/// How many threads to split a parse across.
+///
+/// Capped well under the core count: this runs inside a backend that is also
+/// serving the interface, and a repository scan that saturates every core makes
+/// the window it is meant to be filling stutter.
+fn parse_threads(files: usize) -> usize {
+    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    cores.saturating_sub(1).clamp(1, 8).min(files)
+}
+
+fn parse_one(
+    parser: &mut SqlParser,
+    snapshot: &ScriptSnapshot,
+    source: &CachedSource,
+) -> (String, ParsedFile) {
+    let scope = scope_of(&snapshot.project, &source.path);
+    (source.path.clone(), parser.parse(&source.text, scope))
+}
+
+/// The files Picus should not read the SQL of at all.
+///
+/// Only the folders written in an engine Picus **recognises and does not
+/// support**. A folder nobody has classified yet is still parsed: it is a
+/// question, not an answer, and its inventory is part of what makes the question
+/// answerable — the user is choosing between engines partly on what the files say.
+///
+/// The distinction is the whole reason those two states are not one value.
+fn unparsable_paths(project: &Project) -> HashSet<&str> {
+    project
+        .walk()
+        .filter(|folder| folder.engine_is_unsupported())
+        .flat_map(|folder| folder.files.iter().map(|file| file.path.as_str()))
         .collect()
 }
 
-/// The dialect a file is parsed as — its branch's, always.
+/// What a file is parsed as — its folder's scope, always, inherited from wherever
+/// in the tree it was declared.
 ///
-/// A branch nobody could identify has none, and the fallback is genuinely
+/// **A portable folder is parsed as `Portable`**, not as one of its dialects, and
+/// that is the whole of what `DIA001`'s inversion needs from this layer: under
+/// `Portable` the parser accepts the syntax of neither engine, so a construct
+/// belonging to either lands in `foreign` and the rule reports the broken promise.
+/// Parsing such a file as Oracle would silently hide every Oracle-ism in it —
+/// exactly the ones the folder must not contain.
+///
+/// A folder nobody could identify has no scope, and the fallback is genuinely
 /// arbitrary rather than a guess: the grammar is one permissive superset of both
 /// dialects, so the statements, the objects and the DML come out the same either
 /// way. The engine decides only which constructs count as *foreign*, and `DIA001`
-/// refuses to report those for a branch with no dialect — so nothing a user ever
+/// refuses to report those for a folder with no engine — so nothing a user ever
 /// sees depends on this choice.
-fn dialect_of(project: &Project, path: &str) -> EngineKind {
-    project.dialect_of(path).unwrap_or(EngineKind::Postgres)
+///
+/// It is a fallback for the **unclassified** case only. A folder in an engine
+/// Picus does not support never reaches here, because [`unparsable_paths`] kept it
+/// out — the fallback above would be a real guess there, and a wrong one.
+fn scope_of(project: &Project, path: &str) -> DialectScope {
+    project.scope_of(path).unwrap_or(DialectScope::One(EngineKind::Postgres))
 }
 
 /// The reply both `picus_open_scripts` and `picus_refresh_scripts` give.
@@ -264,6 +362,7 @@ fn opened(snapshot: &ScriptSnapshot) -> OpenedProject {
         notes: snapshot.notes.clone(),
         is_new: snapshot.is_new,
         problems: snapshot.problems.clone(),
+        aliases: snapshot.config.aliases.clone(),
     }
 }
 
@@ -309,7 +408,7 @@ mod tests {
         label_to_encoding(label).encode(text).0.into_owned()
     }
 
-    /// A two-branch repository shaped like the ones this product was built for:
+    /// A two-dialect repository shaped like the ones this product was built for:
     /// windows-1252, CRLF, accents, an update folder and an initialisation one.
     fn repository(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("picus-be-{name}"));
@@ -371,9 +470,8 @@ mod tests {
         Target {
             id: file.to_string(),
             file: file.to_string(),
-            dialect: EngineKind::Oracle,
+            dialect: DialectScope::One(EngineKind::Oracle),
             role,
-            branch_id: "oracle".to_string(),
             enabled: true,
             wrap: TargetWrap::Plain,
             guards: Default::default(),
@@ -411,6 +509,74 @@ mod tests {
     }
 
     #[test]
+    fn a_repository_with_the_dialect_at_the_bottom_reads_as_the_tree_it_is() {
+        // The shape a real repository has: the role three levels above the
+        // dialect, and one leaf nobody can classify. Asserted through the whole
+        // seam — a real directory, discovery, resolution — because everything
+        // under it is tested without a filesystem.
+        let root = std::env::temp_dir().join("picus-be-deep");
+        let _ = std::fs::remove_dir_all(&root);
+        for relative in [
+            "AGGIORNAMENTO/2024/ORA/4_11__4_12.sql",
+            "AGGIORNAMENTO/2024/POS/4_11__4_12.sql",
+            "AGGIORNAMENTO/2025/ORA/4_12__4_13.sql",
+        ] {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).expect("mkdir");
+            std::fs::write(&path, cp1252("UPDATE PARAMETRI SET VALORE = 1;\r\n")).expect("write");
+        }
+
+        let snapshot = read(&root).expect("reads");
+        let tree = &snapshot.project;
+
+        // The role is declared once, at the top, and reaches every leaf.
+        for path in ["AGGIORNAMENTO/2024", "AGGIORNAMENTO/2024/ORA", "AGGIORNAMENTO/2025/ORA"] {
+            assert_eq!(
+                tree.folder_at(path).expect(path).effective_role,
+                picus_project::prelude::FolderRole::Update,
+                "{path}"
+            );
+        }
+        // The dialect is declared at the leaves, independently.
+        assert_eq!(
+            tree.dialect_of("AGGIORNAMENTO/2024/ORA/4_11__4_12.sql"),
+            Some(EngineKind::Oracle)
+        );
+        assert_eq!(
+            tree.dialect_of("AGGIORNAMENTO/2025/ORA/4_12__4_13.sql"),
+            Some(EngineKind::Oracle)
+        );
+        // …and `POS` matches nothing Picus knows, so it has none and is asked
+        // about rather than guessed at.
+        assert_eq!(tree.dialect_of("AGGIORNAMENTO/2024/POS/4_11__4_12.sql"), None);
+        let note = snapshot
+            .notes
+            .iter()
+            .find(|n| n.path == "AGGIORNAMENTO/2024/POS")
+            .expect("a note about the folder nobody could identify");
+        assert!(note.needs_attention);
+
+        // The proposed file says the two things the tree could not have known,
+        // and nothing else.
+        let declared: Vec<(&str, bool, bool)> = snapshot
+            .config
+            .folders
+            .iter()
+            .map(|f| (f.path.as_str(), f.dialect.is_some(), f.role.is_some()))
+            .collect();
+        assert_eq!(
+            declared,
+            [
+                ("AGGIORNAMENTO", false, true),
+                ("AGGIORNAMENTO/2024/ORA", true, false),
+                ("AGGIORNAMENTO/2025/ORA", true, false),
+            ]
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn the_rules_run_over_what_was_read() {
         let root = repository("analyze");
         let snapshot = read(&root).expect("reads");
@@ -441,6 +607,95 @@ mod tests {
         // version table — the two rules this repository exists to demonstrate.
         assert!(report.of_rule(RuleId::Ver001).count() > 0, "{:?}", report.findings);
         assert!(report.of_rule(RuleId::Ver002).count() > 0);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_projects_own_vocabulary_classifies_the_whole_repository_and_stops_the_parse() {
+        // The real repository, in miniature: one folder set per delivered version,
+        // with POS for PostgreSQL and MSQ for SQL Server — neither of which any
+        // global vocabulary can be allowed to know. The project says so once, and
+        // everything follows: eleven folders classified by one line, and the SQL
+        // Server files never handed to a grammar that would parse them into
+        // plausible nonsense.
+        let root = std::env::temp_dir().join("picus-be-alias");
+        let _ = std::fs::remove_dir_all(&root);
+        for version in ["4_11", "4_12"] {
+            for engine in ["ORA", "POS", "MSQ"] {
+                let path = root.join(format!("AGGIORNAMENTO/{version}/{engine}/{version}.sql"));
+                std::fs::create_dir_all(path.parent().unwrap()).expect("mkdir");
+                std::fs::write(&path, cp1252("UPDATE PARAMETRI SET VALORE = 1;\r\n"))
+                    .expect("write");
+            }
+        }
+
+        // Without the vocabulary: four questions, and every file parsed.
+        let bare = read(&root).expect("reads");
+        assert_eq!(bare.notes.iter().filter(|n| n.needs_attention).count(), 4);
+        assert_eq!(parse_all(&bare).len(), 6);
+
+        let project_toml = root.join(".arbor/picus/project.toml");
+        std::fs::create_dir_all(project_toml.parent().unwrap()).expect("mkdir");
+        std::fs::write(
+            &project_toml,
+            "version = 2\nname = \"PROD_CORE\"\n\n\
+             [[alias]]\nname = \"POS\"\nengine = \"postgres\"\n\n\
+             [[alias]]\nname = \"MSQ\"\nengine = \"sqlserver\"\n",
+        )
+        .expect("write");
+
+        let snapshot = read(&root).expect("re-reads");
+        let tree = &snapshot.project;
+
+        // One line classified both POS folders…
+        for version in ["4_11", "4_12"] {
+            assert_eq!(
+                tree.dialect_of(&format!("AGGIORNAMENTO/{version}/POS/{version}.sql")),
+                Some(EngineKind::Postgres),
+                "{version}"
+            );
+            // …and the other said "SQL Server", which is an answer and not a
+            // dialect: no parse, no lane, no question.
+            let msq = tree.folder_at(&format!("AGGIORNAMENTO/{version}/MSQ")).expect("in the tree");
+            assert!(msq.engine_is_unsupported() && !msq.engine_is_unknown(), "{version}");
+            assert_eq!(msq.effective_dialect(), None, "{version}");
+        }
+
+        // Nothing left to ask about, and nothing wrong with the file.
+        assert!(snapshot.notes.iter().all(|n| !n.needs_attention), "{:?}", snapshot.notes);
+        assert!(snapshot.problems.is_empty(), "{:?}", snapshot.problems);
+
+        // Every file is still READ — an MSQ script opens in the editor like any
+        // other — but only the four Picus can speak for are parsed.
+        assert_eq!(snapshot.sources.len(), 6);
+        let parsed: Vec<String> =
+            parse_all(&snapshot).into_iter().map(|(path, _)| path).collect();
+        assert_eq!(parsed.len(), 4, "{parsed:?}");
+        assert!(parsed.iter().all(|p| !p.contains("/MSQ/")), "{parsed:?}");
+
+        // …and the skipped files are not reported as orphans: an orphan is a
+        // parse the tree does not know about, which is the opposite problem.
+        let parses = parse_all(&snapshot);
+        let scripts: Vec<ParsedScript<'_>> = parses
+            .iter()
+            .filter_map(|(path, parsed)| {
+                snapshot.source(path).map(|s| ParsedScript {
+                    path: path.as_str(),
+                    source: s.text.as_str(),
+                    parsed,
+                })
+            })
+            .collect();
+        let joined = ParsedProject::new(&snapshot.project, scripts);
+        assert!(joined.orphans().is_empty(), "{:?}", joined.orphans());
+        // The coverage matrix leaves the SQL Server folders out rather than
+        // showing them as a permanent column of zeroes.
+        assert!(
+            joined.coverage_keys().iter().all(|k| !k.contains("/MSQ")),
+            "{:?}",
+            joined.coverage_keys()
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

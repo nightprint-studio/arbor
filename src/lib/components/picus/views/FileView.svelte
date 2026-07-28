@@ -7,7 +7,7 @@
    * preserves both; a character that cannot be represented in the destination
    * encoding blocks the save rather than being replaced by `?`.
    *
-   * The buffer is highlighted with the branch's own dialect, because the same
+   * The buffer is highlighted with its folder's own dialect, because the same
    * text means different things in PL/SQL and PL/pgSQL.
    */
   import { TriangleAlert, FileCode2 } from 'lucide-svelte';
@@ -23,7 +23,7 @@
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
-  import type { PicusTab } from '$lib/types/picus';
+  import { isDialect, type PicusTab } from '$lib/types/picus';
 
   interface Props {
     tab: PicusTab;
@@ -32,7 +32,15 @@
   let { tab }: Props = $props();
 
   const file = $derived(tab.file ? picusProjectStore.fileByPath(tab.file) : null);
-  const dialect = $derived(tab.file ? picusProjectStore.dialectOfFile(tab.file) : null);
+  const engine = $derived(tab.file ? picusProjectStore.dialectOfFile(tab.file) : null);
+  /**
+   * The single dialect to highlight and check against, if there is one.
+   *
+   * `null` for a portable file as well as for an unclassified one. In both cases
+   * the editor still completes keywords and closes blocks — the grammar is one
+   * permissive superset — it simply does not claim a dialect it does not have.
+   */
+  const dialect = $derived(isDialect(engine) ? engine : null);
 
   /**
    * The text arrives from `picus_script_text`, not from the tree.
@@ -133,7 +141,7 @@
     <div class="fv-bar" class:fv-bad={drifted}>
       <FileCode2 size={13} />
       <span class="fv-path">{file.path}</span>
-      {#if dialect}<PicusDialectChip {dialect} />{/if}
+      {#if engine}<PicusDialectChip {engine} />{/if}
       <EncodingPill
         {encoding}
         expected={file.expectedEncoding}

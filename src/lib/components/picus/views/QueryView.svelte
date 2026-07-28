@@ -10,6 +10,12 @@
    *
    * From a result you can jump straight into the generator with those columns —
    * the bridge between querying a database and writing scripts for it.
+   *
+   * The grid is a **window onto a held cursor**, not a block of fetched rows: the
+   * scrollbar is scaled to the result's length from the first frame and the rest
+   * arrives as you approach it. That length starts as the planner's estimate and
+   * is therefore marked `~` everywhere it appears, until the background count
+   * replaces it with the real number.
    */
   import { Play, Square, FormInput, Download, Lock, History } from 'lucide-svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -30,6 +36,7 @@
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import { queryStore } from '$lib/stores/picus/query.svelte';
+  import { formatRowTotal, picusResultsStore } from '$lib/stores/picus/result.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import type { PicusTab } from '$lib/types/picus';
 
@@ -58,8 +65,13 @@
     { id: 'messages', label: 'Messages' },
   ];
 
+  // The held cursor this tab is showing. It lives in the results registry rather
+  // than in the query store, because its lifetime is the TAB's — closing the tab,
+  // running a second statement or dropping the connection all have to release it.
+  const result = $derived(picusResultsStore.forOwner(tab.id));
+
   const gridColumns = $derived<DataGridColumn[]>(
-    (state.result?.columns ?? []).map((c) => ({
+    (result?.columns ?? []).map((c) => ({
       id: c.name,
       label: c.name,
       hint: c.type,
@@ -70,7 +82,7 @@
 
   /** Prefill the generator with this result's table and columns. */
   function toGenerator() {
-    const first = state.result?.columns[0];
+    const first = result?.columns[0];
     if (!first) return;
     // MOCK: the real bridge carries the result's table identity from the server.
     dmlStore.setTable(dmlStore.table);
@@ -105,8 +117,16 @@
         {#snippet iconStart()}<Play size={12} />{/snippet}
         Run
       </Button>
-      {#if state.running}
-        <Button variant="secondary" size="xs" onclick={() => void queryStore.cancel(tab.id, conn.id)}>
+      {#if state.running || result?.counting}
+        <!-- Also while only the background count is running: that count is the
+             expensive part on a large table, and a Cancel that could not stop it
+             would be a button for the cheap half of the work. -->
+        <Button
+          variant="secondary"
+          size="xs"
+          tooltip={{ content: state.running ? 'Stop the statement' : 'Stop counting the exact number of rows', shortcut: 'Ctrl+Shift+C' }}
+          onclick={() => void queryStore.cancel(tab.id, conn.id)}
+        >
           {#snippet iconStart()}<Square size={12} />{/snippet}
           Cancel
         </Button>
@@ -144,25 +164,27 @@
         <span class="qv-spacer"></span>
         {#if state.running}
           <span class="qv-running"><Spinner size={11} /> running…</span>
-        {:else if state.result}
-          <span class="qv-stats">
-            {#if state.result.truncated}first {state.result.rowCount}{:else}{state.result.rowCount}{/if}
-            rows · {state.result.elapsedMs} ms
+        {:else if result}
+          <!-- The total is the server's ESTIMATE until the background count lands,
+               and carries a `~` for exactly as long as that is true. Precision the
+               product does not have must not be implied by the way it is printed. -->
+          <span
+            class="qv-stats"
+            use:tooltip={result.approximate
+              ? `Estimated by the planner${result.counting ? ' — counting the exact number now' : ''}. ${result.loaded.toLocaleString()} row(s) loaded.`
+              : `${result.loaded.toLocaleString()} of ${result.total.toLocaleString()} row(s) loaded.`}
+          >
+            {formatRowTotal(result)} rows · {result.elapsedMs} ms
           </span>
-          {#if state.result.truncated}
-            <!-- A cut result and a short one must never look alike: without this the
-                 user cannot tell an empty tail from one that was never fetched. -->
-            <span use:tooltip={`Stopped at the row limit of ${queryStore.rowLimit}. Change it in Settings → Queries.`}>
-              <Badge variant="tone" tone="warning" size="sm" label="capped" />
-            </span>
-          {/if}
+        {:else if state.affected !== null}
+          <span class="qv-stats">{state.affected.toLocaleString()} rows affected</span>
         {/if}
         <Button
           variant="icon"
           size="xs"
           tooltip={'Generate DML from this result'}
           ariaLabel="Generate DML from this result"
-          disabled={!state.result}
+          disabled={!result}
           onclick={toGenerator}
         >
           {#snippet iconStart()}<FormInput size={13} />{/snippet}
@@ -172,7 +194,7 @@
           size="xs"
           title="Export CSV"
           ariaLabel="Export CSV"
-          disabled={!state.result}
+          disabled={!result}
           onclick={() => toastStore.show('CSV export arrives with the driver milestone.', 'info')}
         >
           {#snippet iconStart()}<Download size={13} />{/snippet}
@@ -192,31 +214,40 @@
         {#if state.pane === 'results'}
           {#if state.error}
             <StateBlock tone="error" label={state.error} />
-          {:else if !state.result}
-            <StateBlock tone="info" label="Run the query to see its rows." />
-          {:else}
+          {:else if result}
             <div class="qv-grid">
-              {#if state.result.truncated}
-                <!-- Stated where the rows are, not only in Messages: landing on the
-                     Results tab is exactly when believing you saw everything is
-                     expensive. Sorting and filtering below apply to these rows
-                     only, which is the part that misleads. -->
+              {#if !result.complete}
+                <!-- Said on the Results tab, not only in Messages: landing here is
+                     exactly when believing you are looking at the whole thing is
+                     expensive. The counter climbs as windows arrive and the notice
+                     leaves of its own accord once there is nothing left to say. -->
                 <div class="qv-cap">
-                  <Alert variant="warning" compact>
-                    Showing the first {state.result.rowCount.toLocaleString()} rows — the statement
-                    returned more. Sorting and filtering apply to these rows only. Raise the limit in
-                    Settings → Queries, or narrow the statement with its own <code>WHERE</code> /
-                    <code>LIMIT</code>.
+                  <Alert variant="info" compact>
+                    Showing {result.loaded.toLocaleString()} of {formatRowTotal(result)} rows — the
+                    rest arrives as you scroll. Sorting and the per-column filters wait until the
+                    whole result is loaded: over a window they would order and hide a fraction of it
+                    while looking like they had done all of it.
                   </Alert>
                 </div>
               {/if}
               <DataGrid
                 columns={gridColumns}
-                rows={state.result.rows}
+                source={result ?? undefined}
                 filterable
                 ariaLabel="Query results"
               />
             </div>
+          {:else if state.affected !== null}
+            <!-- A write has no rows to show, and an empty grid would suggest it
+                 returned none rather than that it returns none. -->
+            <StateBlock
+              tone="success"
+              label={`${state.affected.toLocaleString()} row(s) affected. This statement returns no rows.`}
+            />
+          {:else if state.hasRun}
+            <StateBlock tone="info" label="The statement completed and returned no rows." />
+          {:else}
+            <StateBlock tone="info" label="Run the query to see its rows." />
           {/if}
         {:else}
           <div class="qv-log">
@@ -286,14 +317,9 @@
   .qv-result-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
   .qv-result-body > :global(*) { flex: 1; min-width: 0; min-height: 0; }
 
-  /* The cap notice sits above the grid and does not scroll with it. */
+  /* The "still filling" notice sits above the grid and does not scroll with it. */
   .qv-grid { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   .qv-cap { flex-shrink: 0; padding: 6px 8px 0; }
-  .qv-grid code {
-    font-family: var(--font-code);
-    font-size: 10.5px;
-    color: var(--text-primary);
-  }
 
   .qv-stats, .qv-running {
     display: inline-flex;

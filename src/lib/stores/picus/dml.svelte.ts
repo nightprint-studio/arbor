@@ -4,9 +4,9 @@
  *
  * The shape of the whole feature: a form / a pasted set of INSERTs / a CSV all
  * collapse into `{ table, operation, keyColumns, rows }`, and from there the
- * source no longer matters. Each **target** is one file in one branch, with its
- * own dialect and its own rules, so the same logical change becomes a bare
- * INSERT in the Oracle init script and a guarded PL/SQL block in the update one.
+ * source no longer matters. Each **target** is one file, with its own dialect and
+ * its own rules, so the same logical change becomes a bare INSERT in the Oracle
+ * init script and a guarded PL/SQL block in the update one.
  *
  * Rule coherence is enforced HERE, not in the markup, so every entry point
  * (form, palette, preset) gets the same behaviour:
@@ -42,14 +42,15 @@
  * file look like once that SQL is spliced in".
  */
 
-import type {
-  Column,
-  DmlOperation,
-  DmlRow,
-  DmlSource,
-  FolderRole,
-  Target,
-  TargetGuards,
+import {
+  GENERIC_ENGINE,
+  type Column,
+  type DmlOperation,
+  type DmlRow,
+  type DmlSource,
+  type FolderRole,
+  type Target,
+  type TargetGuards,
 } from '$lib/types/picus';
 import {
   emit as rpcEmit,
@@ -583,7 +584,7 @@ function createDmlStore() {
      * Re-adding an existing file focuses it instead of duplicating: two
      * destinations writing the same file would each think they own it.
      */
-    addTarget(input: { file: string; dialect: Target['dialect']; role: FolderRole; branchId: string }): Target {
+    addTarget(input: { file: string; dialect: Target['dialect']; role: FolderRole }): Target {
       const existing = targets.find((t) => t.file === input.file);
       if (existing) {
         existing.enabled = true;
@@ -591,15 +592,30 @@ function createDmlStore() {
         return existing;
       }
       const preset = presetForRole(input.role);
+      // A **portable** destination takes the intersection of the two dialects,
+      // and the intersection contains no procedural block — so no version guard,
+      // no existence check and no savepoint either, since all three live in one.
+      // The role's preset is narrowed here rather than left to conflict: a
+      // destination that arrives already broken teaches the user that the
+      // conflict banner is noise, and the very first portable update folder they
+      // add would do exactly that.
+      const portable = input.dialect === GENERIC_ENGINE;
       const target: Target = {
-        id: `t-${input.branchId}-${input.file.replace(/[^\w]+/g, '-').toLowerCase()}`,
+        // The file IS the identity of a destination — two targets writing the
+        // same path would each think they own it, which is why the add above
+        // focuses the existing one instead of making a second.
+        id: `t-${input.file.replace(/[^\w]+/g, '-').toLowerCase()}`,
         file: input.file,
         dialect: input.dialect,
         role: input.role,
-        branchId: input.branchId,
         enabled: true,
-        wrap: preset.wrap,
-        guards: { ...preset.guards, version: preset.guards.version ? { ...preset.guards.version } : null },
+        wrap: portable ? 'plain' : preset.wrap,
+        guards: portable
+          ? { version: null, skipIfPresent: false, requireObject: false, transactional: false }
+          : {
+              ...preset.guards,
+              version: preset.guards.version ? { ...preset.guards.version } : null,
+            },
       };
       targets = [...targets, target];
       expandedTargetId = target.id;

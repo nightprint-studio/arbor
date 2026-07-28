@@ -1,5 +1,5 @@
 /**
- * Picus query editor — per-tab SQL text, results, messages and history.
+ * Picus query editor — per-tab SQL text, messages and history.
  *
  * State is keyed by tab id so several query tabs can sit on several databases at
  * once without leaking each other's results. History is per CONNECTION, not per
@@ -8,11 +8,20 @@
  * Execution goes to `picus-be`. Cancellation is real: the backend holds the
  * server's cancellation key and opens a second connection to use it, which is why
  * Cancel stops a running statement instead of merely abandoning its result.
+ *
+ * ## The rows are not here
+ *
+ * A read opens a **held cursor**, and the window onto it lives in
+ * `picusResultsStore` keyed by the tab. This store therefore keeps the text, the
+ * messages and the outcome of a write, and asks the registry to adopt or release
+ * the result — which is what makes "a second query in the same tab closes the
+ * first one's cursor" a single line rather than a thing to remember.
  */
 
-import type { QueryLogEntry, QueryResult } from '$lib/types/picus';
+import type { QueryLogEntry } from '$lib/types/picus';
 import { cancel as rpcCancel, execute } from '$lib/ipc/picus/db';
 import { connectionsStore } from './connections.svelte';
+import { createResult, formatRowTotal, picusResultsStore } from './result.svelte';
 import { picusSettingsStore } from './settings.svelte';
 
 export interface HistoryEntry {
@@ -21,6 +30,8 @@ export interface HistoryEntry {
   sql: string;
   at: string;
   rowCount: number;
+  /** `rowCount` was the planner's estimate — the entry must be marked `~`. */
+  approximate: boolean;
   elapsedMs: number;
   ok: boolean;
 }
@@ -28,18 +39,29 @@ export interface HistoryEntry {
 /** Everything one query tab owns. */
 interface QueryTabState {
   sql: string;
-  result: QueryResult | null;
   messages: QueryLogEntry[];
   running: boolean;
   /** Result grid vs the server messages/plan. */
   pane: 'results' | 'messages';
   error: string | null;
+  /** Rows a write touched — a write's outcome, where a read has a grid. */
+  affected: number | null;
+  /** A statement has run here. Distinguishes "nothing yet" from "a write". */
+  hasRun: boolean;
 }
 
 function emptyTab(): QueryTabState {
   // A new tab starts empty. A pre-filled sample would be a statement the user did
   // not write, one Ctrl+Enter away from running against a real database.
-  return { sql: '', result: null, messages: [], running: false, pane: 'results', error: null };
+  return {
+    sql: '',
+    messages: [],
+    running: false,
+    pane: 'results',
+    error: null,
+    affected: null,
+    hasRun: false,
+  };
 }
 
 /**
@@ -63,15 +85,6 @@ function createQueryStore() {
   let historyFilter = $state('');
   let seq = 0;
 
-  /**
-   * The row cap, from the user's settings — one source, not two.
-   *
-   * This used to be a second `$state(500)` living here, which meant the number in
-   * the settings modal was persisted, displayed, and then ignored: every query ran
-   * at 500 whatever the user had chosen.
-   */
-  const rowLimit = $derived(picusSettingsStore.rowLimit);
-
   function ensure(tabId: string): QueryTabState {
     if (!tabs[tabId]) tabs = { ...tabs, [tabId]: emptyTab() };
     return tabs[tabId];
@@ -83,8 +96,12 @@ function createQueryStore() {
     return history.filter((h) => h.sql.toLowerCase().includes(q));
   });
 
+  function remember(entry: Omit<HistoryEntry, 'id'>) {
+    seq += 1;
+    history = [{ id: `h${seq}`, ...entry }, ...history].slice(0, 100);
+  }
+
   return {
-    get rowLimit() { return rowLimit; },
     get history() { return history; },
     get filteredHistory() { return filteredHistory; },
     get historyFilter() { return historyFilter; },
@@ -126,22 +143,32 @@ function createQueryStore() {
 
       state.error = null;
       state.running = true;
+      state.affected = null;
+      // Release the previous cursor BEFORE opening the next one. Running a second
+      // statement in the same tab looks like nothing was discarded, which is
+      // exactly how a server ends up holding cursors nobody can reach any more.
+      picusResultsStore.adopt(tabId, null);
       const startedAt = stamp();
 
       try {
-        const res = await execute(connectionId, state.sql, rowLimit);
-        state.result = {
-          columns: res.columns,
-          rows: res.rows,
-          elapsedMs: res.elapsedMs,
-          rowCount: res.rowCount,
-          truncated: res.truncated,
-        };
-        const summary = res.commandTag
-          ? res.commandTag
-          : res.truncated
-            ? `first ${res.rowCount} row(s) — the statement returned more, and the rest was not fetched`
-            : `${res.rowCount} row(s)`;
+        // The user's own "rows per window" governs the FIRST window too, not only
+        // the ones fetched while scrolling — otherwise the setting is half-honoured
+        // and the first window is a different size from every other.
+        const res = await execute(connectionId, state.sql, picusSettingsStore.rowLimit);
+        const result = createResult(connectionId, res);
+        // The tab can be closed while the statement runs. `forget` released what
+        // the tab held at the time, so adopting now would file a cursor under an
+        // owner nothing will ever release again — close it instead.
+        if (!tabs[tabId]) { void result?.close(); return; }
+        picusResultsStore.adopt(tabId, result);
+        state.affected = res.affected ?? null;
+        state.hasRun = true;
+
+        const summary = result
+          ? `${formatRowTotal(result)} row(s)`
+          : res.affected !== null
+            ? `${res.affected.toLocaleString()} row(s) affected`
+            : 'statement completed';
         state.messages = [
           {
             time: startedAt,
@@ -151,36 +178,41 @@ function createQueryStore() {
           ...state.messages,
         ];
         state.pane = 'results';
-        seq += 1;
-        history = [
-          {
-            id: `h${seq}`,
-            connectionId,
-            sql: state.sql,
-            at: startedAt,
-            rowCount: res.rowCount,
-            elapsedMs: res.elapsedMs,
-            ok: true,
-          },
-          ...history,
-        ].slice(0, 100);
+        remember({
+          connectionId,
+          sql: state.sql,
+          at: startedAt,
+          rowCount: result ? result.total : (res.affected ?? 0),
+          approximate: !!result && result.approximate,
+          elapsedMs: res.elapsedMs,
+          ok: true,
+        });
       } catch (e) {
         const message = String(e);
         state.error = message;
         state.messages = [{ time: startedAt, text: message, level: 'error' }, ...state.messages];
         state.pane = 'messages';
-        seq += 1;
-        history = [
-          { id: `h${seq}`, connectionId, sql: state.sql, at: startedAt, rowCount: 0, elapsedMs: 0, ok: false },
-          ...history,
-        ].slice(0, 100);
+        remember({
+          connectionId,
+          sql: state.sql,
+          at: startedAt,
+          rowCount: 0,
+          approximate: false,
+          elapsedMs: 0,
+          ok: false,
+        });
       } finally {
         state.running = false;
       }
     },
 
     /**
-     * Stop a running query.
+     * Stop what is running on this connection.
+     *
+     * Covers the background row count as well as the statement itself — both are
+     * work the server is doing for this session, and "cancel" that left a
+     * `count(*)` grinding on a hundred-million-row table would be a cancel in
+     * name only.
      *
      * Sends the cancel and stops there: the running flag is cleared by whichever
      * outcome `run` receives, because the server decides whether the statement
@@ -189,7 +221,8 @@ function createQueryStore() {
      */
     async cancel(tabId: string, connectionId: string) {
       const state = ensure(tabId);
-      if (!state.running || !connectionId) return;
+      const result = picusResultsStore.forOwner(tabId);
+      if ((!state.running && !result?.counting) || !connectionId) return;
       state.messages = [
         { time: stamp(), text: 'Cancellation requested…', level: 'info' },
         ...state.messages,
@@ -202,6 +235,14 @@ function createQueryStore() {
     },
 
     clearMessages(tabId: string) { ensure(tabId).messages = []; },
+
+    /** The tab is gone: drop its text and close the cursor it was holding. */
+    forget(tabId: string) {
+      picusResultsStore.release(tabId);
+      if (!tabs[tabId]) return;
+      const { [tabId]: _gone, ...rest } = tabs;
+      tabs = rest;
+    },
   };
 }
 

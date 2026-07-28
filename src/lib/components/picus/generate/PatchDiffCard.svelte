@@ -48,7 +48,7 @@
     {#if file.createsFile}<FilePlus2 size={13} />{:else}<FileCode2 size={13} />{/if}
     <span class="pd-path">{file.path}</span>
     {#if target}
-      <PicusDialectChip dialect={target.dialect} terse />
+      <PicusDialectChip engine={target.dialect} terse />
       <PicusRoleChip role={target.role} terse />
     {/if}
     <EncodingPill encoding={file.encoding} {expected} eol={file.eol} compact />

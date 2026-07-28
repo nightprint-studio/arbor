@@ -9,7 +9,7 @@
    * for adding a setting — make an assumption visible, don't defer a design
    * choice.
    */
-  import { Settings, FileType, PenLine, FormInput, Database, FolderCog, Hash, Wand2 } from 'lucide-svelte';
+  import { Settings, FileType, PenLine, FormInput, Database, FolderCog, Hash, Tags, Wand2 } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import SettingsShell, { type SettingsNavGroup } from '$lib/components/shared/ui/SettingsShell.svelte';
@@ -20,6 +20,7 @@
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import ProjectAliases from './settings/ProjectAliases.svelte';
   import {
     picusSettingsStore,
     INSERTION_RULE_LABELS,
@@ -29,15 +30,23 @@
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 
-  let { onClose }: { onClose: () => void } = $props();
+  /**
+   * `initialSection` lets a caller address one page by name — the command palette
+   * does, because "Folder names in this project…" is a verb of the product and
+   * making the user find it inside a dialog would be exactly the mouse detour the
+   * palette exists to remove.
+   */
+  let { onClose, initialSection = '' }: { onClose: () => void; initialSection?: string } = $props();
 
-  let active = $state('project');
+  // svelte-ignore state_referenced_locally
+  let active = $state(initialSection || 'project');
 
   const groups: SettingsNavGroup[] = [
     {
       label: 'Project',
       items: [
         { id: 'project', label: 'Project', icon: FolderCog },
+        { id: 'aliases', label: 'Folder names', icon: Tags },
         { id: 'version', label: 'Version table', icon: Hash },
       ],
     },
@@ -189,6 +198,12 @@
           compact
           text="These belong to the project, not to Picus: they will live in the project's own configuration file, so a colleague opening the same repository inherits them."
         />
+
+      {:else if active === 'aliases'}
+        <!-- A page of its own rather than another branch in here: this one owns a
+             list, a write and an async count, and the settings dialog is a layout,
+             not a place for a feature to live. -->
+        <ProjectAliases />
 
       {:else if active === 'version'}
         <div class="section-header">
@@ -355,12 +370,12 @@
       {:else}
         <div class="section-header">
           <h2>Queries</h2>
-          <p>How much a query brings back before you ask for the rest.</p>
+          <p>How much of a result comes back at a time.</p>
         </div>
         <div class="card">
           <FormRow
-            label="Row limit"
-            description="Rows a query fetches. Applied by the server wherever the statement allows, so the rest never crosses the network; a result that reaches the limit says so above its rows. Table data is paged instead, and every page is rendered through the virtualised grid — so a large page costs no more to display than a small one."
+            label="Rows per window"
+            description="Rows fetched in one trip. Results and table data are scrolled continuously over a cursor the server keeps open, so this is not a ceiling on what a query returns: a larger number means fewer, bigger trips, a smaller one means more, smaller ones. The next window is asked for before the viewport reaches the edge of the one you are reading."
           >
             <NumberStepper
               value={picusSettingsStore.rowLimit}

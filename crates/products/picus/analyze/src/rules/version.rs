@@ -15,7 +15,9 @@
 use std::collections::BTreeMap;
 
 use picus_parse::prelude::{line_col, DmlOperation, Statement, StatementKind};
-use picus_project::prelude::{Branch, CompiledNaming, ScriptFile, ScriptFolder, Version, VersionRange};
+use picus_project::prelude::{
+    CompiledNaming, FolderNode, ScriptFile, Version, VersionRange,
+};
 
 use crate::context::Context;
 use crate::finding::{Anchor, Finding};
@@ -50,7 +52,7 @@ fn guards(context: &Context<'_>, output: &mut Output) {
     };
 
     for (script, placement) in context.project.placed() {
-        if placement.folder.role != picus_types::prelude::FolderRole::Update {
+        if placement.effective_role() != picus_types::prelude::FolderRole::Update {
             continue;
         }
         let statements = &script.parsed.statements;
@@ -60,7 +62,7 @@ fn guards(context: &Context<'_>, output: &mut Output) {
             continue;
         };
         let anchor = |offset: usize| {
-            Anchor::at(script.path, &placement.branch.id, line_col(script.source, offset).0)
+            Anchor::at(script.path, line_col(script.source, offset).0)
         };
 
         if !reads_version(statements, version_table) {
@@ -157,20 +159,18 @@ fn writes(statements: &[Statement], version_table: &str) -> usize {
 // ── VER003 — the chain across the files ──────────────────────────────────────
 
 fn chain(context: &Context<'_>, output: &mut Output) {
-    for branch in &context.project.project().branches {
-        for folder in branch.folders.iter().filter(|f| f.role == picus_types::prelude::FolderRole::Update)
-        {
-            check_folder(context, branch, folder, output);
-        }
+    // Every update folder in the tree, at whatever depth and whatever dialect —
+    // including one no ancestor declares a dialect for. A hole in a version chain
+    // is a fact about the files' own names, and it is just as wrong in a folder
+    // nobody has classified yet.
+    for folder in
+        context.folders().filter(|f| f.effective_role == picus_types::prelude::FolderRole::Update)
+    {
+        check_folder(context, folder, output);
     }
 }
 
-fn check_folder(
-    context: &Context<'_>,
-    branch: &Branch,
-    folder: &ScriptFolder,
-    output: &mut Output,
-) {
+fn check_folder(context: &Context<'_>, folder: &FolderNode, output: &mut Output) {
     if folder.files.is_empty() {
         return;
     }
@@ -193,7 +193,7 @@ fn check_folder(
                 "the naming pattern for `{}` records only the version a file installs, not the one \
                  it starts from, so there is no chain to find a hole in — add a (?P<from>…) group \
                  to the pattern if these files do carry both",
-                folder.label
+                folder.path
             ),
         );
         return;
@@ -211,7 +211,7 @@ fn check_folder(
             format!(
                 "no file in `{}` matches the project's update-file pattern, so the version chain \
                  could not be read at all — check the pattern in the project settings",
-                folder.label
+                folder.path
             ),
         );
         return;
@@ -221,7 +221,7 @@ fn check_folder(
     let mut installs: BTreeMap<String, &ScriptFile> = BTreeMap::new();
     for (file, range) in &ordered {
         if let Some(previous) = installs.insert(range.to.to_string(), file) {
-            output.findings.push(duplicate_target(branch, file, previous, &range.to));
+            output.findings.push(duplicate_target(file, previous, &range.to));
         }
     }
 
@@ -232,19 +232,18 @@ fn check_folder(
         if *from == previous_range.to {
             continue;
         }
-        output.findings.push(broken_link(branch, file, previous, from, &previous_range.to));
+        output.findings.push(broken_link(file, previous, from, &previous_range.to));
     }
 }
 
 fn duplicate_target(
-    branch: &Branch,
     file: &ScriptFile,
     previous: &ScriptFile,
     version: &Version,
 ) -> Finding {
     Finding::new(
         RuleId::Ver003,
-        Anchor::file(&file.path, &branch.id),
+        Anchor::file(&file.path),
         format!("Two update files both install {version}"),
         format!(
             "`{}` and `{}` both claim to bring the database to {version}. Whichever runs second \
@@ -258,7 +257,6 @@ fn duplicate_target(
 }
 
 fn broken_link(
-    branch: &Branch,
     file: &ScriptFile,
     previous: &ScriptFile,
     from: &Version,
@@ -285,7 +283,7 @@ fn broken_link(
             ),
         )
     };
-    Finding::new(RuleId::Ver003, Anchor::file(&file.path, &branch.id), title, consequence)
+    Finding::new(RuleId::Ver003, Anchor::file(&file.path), title, consequence)
         .also_at(previous.path.clone())
         .build()
 }

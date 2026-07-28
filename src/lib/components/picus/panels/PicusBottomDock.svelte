@@ -3,7 +3,7 @@
    * Bottom dock — Consistency (default), Output, Changes.
    *
    * Consistency comes first because it is the panel Picus is judged on: the
-   * whole product exists to stop a change from landing in one branch and not the
+   * whole product exists to stop a change from landing in one engine's scripts and not the
    * other. Output is the running log of what the tool actually did — queries,
    * scans, writes. Changes is the pending write set: which files a generation
    * would touch, before it touches them.
@@ -71,7 +71,9 @@
 
   const groupOptions = [
     { value: 'severity', label: 'Group by severity' },
-    { value: 'branch', label: 'Group by branch' },
+    // Folder rather than "branch": there is no branch level any more, and the
+    // folder is where a finding's engine and role actually come from.
+    { value: 'folder', label: 'Group by folder' },
     { value: 'file', label: 'Group by file' },
   ];
 
@@ -182,7 +184,11 @@
             <div class="bd-log">
               <span class="bd-log-time">{entry.at}</span>
               <span class="bd-log-sql">{entry.sql.replace(/\s+/g, ' ').slice(0, 140)}</span>
-              <span class="bd-log-meta">{entry.rowCount} rows · {entry.elapsedMs} ms</span>
+              <!-- `~` where the number was the planner's estimate at the time: a
+                   history line is read long after the count could have settled it. -->
+              <span class="bd-log-meta">
+                {entry.approximate ? '~' : ''}{entry.rowCount.toLocaleString()} rows · {entry.elapsedMs} ms
+              </span>
             </div>
           {/each}
         {/if}

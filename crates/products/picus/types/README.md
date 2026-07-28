@@ -10,8 +10,50 @@ the type the generated statement must respect.
 
 | Module | What it holds |
 |---|---|
-| `kind` | `EngineKind` — the engine a connection speaks and the dialect a folder is written in. **One** type, because those must never drift apart. |
+| `kind` | `EngineKind` — the engine a connection speaks and the dialect a folder is written in. **One** type, because those must never drift apart. Plus `ForeignEngine` / `FolderEngine` — see below. |
+| `role` | `FolderRole` — what a folder of scripts is for. Discovered by the script half, read by the generator half. |
 | `schema` | `Column`, `TableInfo`, `ForeignKey`, `IndexInfo`, `SequenceInfo`, `TriggerInfo`, `SchemaSnapshot` — serialised camelCase to match `src/lib/types/picus/index.ts` field-for-field. |
+
+## Four engine states
+
+A folder is not simply "a Picus dialect" or "unclassified". `FolderEngine` is the one slot a
+folder's engine lives in, and it has four answers:
+
+| State | Means | What happens |
+|---|---|---|
+| `Some(Supported(_))` | Oracle / PostgreSQL | read, parsed, analysed, generated into |
+| `Some(Generic)` | **portable** SQL, valid on both | parsed against both, counts for both, generated into with the intersection |
+| `Some(Unsupported(_))` | recognised, unsupported | named on screen, **never asked about, never parsed** |
+| `None` | nobody knows | the interface asks |
+
+One wire word per value in one key: `dialect = "oracle"`, `"generic"`, `"sqlserver"`. The serde
+is hand-written rather than `untagged` because a unit variant would otherwise spell itself
+`null`, and `null` already means "nobody knows" here.
+
+`ForeignEngine` is a separate type from `EngineKind` on purpose: `EngineKind` is what a
+driver connects with and what an emitter writes, and folding the two would give every
+`match` an arm claiming Picus can emit T-SQL.
+
+`Generic` is **never inferred** — a promise that these scripts run on both engines is something
+a person makes, not something a folder name implies.
+
+## `DialectScope`: two dual questions
+
+`FolderEngine::scope() -> Option<DialectScope>` is the single bridge from "what a folder is" to
+"what may be parsed and emitted". `DialectScope` is `One(EngineKind) | Portable` — with **no**
+unsupported member and **no** unknown one, so a parse or generation target in such a folder is
+unrepresentable rather than merely unchecked.
+
+Two predicates hang off it, and the whole portable feature lives in the gap between them:
+
+| | `covers(d)` — "does content here count for `d`?" | `permits_syntax_of(d)` — "may syntax specific to `d` appear?" |
+|---|---|---|
+| `One(Oracle)` | Oracle only | Oracle only |
+| `Portable` | **both** | **neither** |
+
+The first is why a portable folder is in every lane and can never be reported as a gap. The
+second is why `DIA001` inverts there: a construct belonging to *either* engine is a broken
+promise.
 
 ## What it deliberately is not
 

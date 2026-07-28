@@ -20,16 +20,57 @@ database feeds the generation forms, and what is generated lands in the scripts 
 
 ## 1. The structural invariant
 
-**The dialect is a property of the FOLDER, never a global "current dialect".** Every branch
-of the repository declares its own; every function that generates, analyses or rewrites SQL
-takes it as an explicit parameter. There is no ambient dialect anywhere in the design, and
-adding one would break the product's single reason to exist.
+**The dialect is a property of the FOLDER, never a global "current dialect".** Every function
+that generates, analyses or rewrites SQL takes it as an explicit parameter. There is no ambient
+dialect anywhere in the design, and adding one would break the product's single reason to exist.
 
-Two corollaries the code already honours:
+> **Corrected on 2026-07-28, and worth reading before touching the tree.** The implementation
+> first translated "the folder" into "the *top-level* folder": discovery assumed level 1 was a
+> branch carrying a dialect, level 2 a folder carrying a role, and flattened everything below.
+> A real repository proved it wrong — `AGGIORNAMENTO/…/ORA` and `…/POS` put the **dialect at the
+> bottom and the role at the top**, and the panel showed a flat list of eleven identical `ORA`
+> rows. `Branch` is gone. The tree is the real directory hierarchy; a folder may *declare* a
+> dialect and/or a role, and descendants **inherit** the nearest declaration until one overrides
+> it. That is the literal reading of the invariant, and the one the product needed all along.
+
+Three corollaries the code honours:
 
 - one generation produces N files, each correct on its own terms;
 - a rule that makes sense for one role (a version guard on an update script) must never
-  propagate to another (an initialisation script).
+  propagate to another (an initialisation script);
+- a folder nobody could classify has **no** dialect, and nothing is generated into it. Never a
+  default — guessing here writes Oracle syntax into a PostgreSQL file, which is the failure the
+  whole product exists to catch. The interface asks instead.
+
+> **Extended on 2026-07-28: four engine states, not one and a hole.** "No dialect" was doing the
+> work of three different facts. `picus_types::FolderEngine` is now the one slot a folder's
+> engine lives in, and it has all four answers:
+>
+> | | Means | Behaviour |
+> |---|---|---|
+> | `Supported(EngineKind)` | Oracle / PostgreSQL | parsed, analysed, compared, generated into |
+> | `Generic` | **portable** SQL, valid on both | parsed against both, counts for both, generated into with the intersection |
+> | `Unsupported(ForeignEngine)` | recognised, unsupported | named, **never asked about, never parsed** |
+> | *(absent)* | nobody knows | the interface asks |
+>
+> **Unsupported** exists because `AGGIORNAMENTO/2024/MSQ` is SQL Server and `…/DB` is DB2, and
+> asking about them forever is how a panel teaches people to stop reading it. Never being able
+> to answer a question is a different fact from not knowing the answer.
+>
+> **Generic** exists because the same repository has folders of plain `INSERT`/`UPDATE`/`DELETE`
+> meant to run on *both* engines, and declaring them Oracle or PostgreSQL was a lie either way —
+> one whose cost was that the engine they were *not* got reported as missing everything they
+> contained. It is **never inferred**: a promise of portability is something a person makes.
+>
+> The mechanism that carries all four is `FolderEngine::scope() -> Option<DialectScope>`, where
+> `DialectScope` is `One(EngineKind) | Portable` — deliberately with no unsupported and no
+> unknown member, so a parse or generation target in such a folder is *unrepresentable*. Two
+> dual predicates hang off it and the whole feature lives in the gap between them:
+> `covers(dialect)` (does content here count for that engine — **true of both** under
+> `Portable`) and `permits_syntax_of(dialect)` (may syntax specific to it appear — **false for
+> both** under `Portable`). The first puts a portable folder in every lane; the second inverts
+> `DIA001`. `FolderNode` carries one `engine` field and one `effective_engine` field, read
+> through `scope()` / `covers()` / `effective_dialect()`.
 
 ---
 
@@ -64,15 +105,14 @@ Svelte/TS errors in Picus, that is where they come from — not from something m
 | Bottom dock | `panels/{PicusBottomDock,FindingList}` |
 | Modals | `PicusSettingsModal`, `PicusConnectionModal`, `PicusShortcutsModal`, `PicusAboutModal`, `PicusDocsPanel` (+ `docs/*`) |
 | Small shared bits | `PicusConnectionPill`, `PicusDialectChip`, `PicusRoleChip`, `picus-shortcuts.ts`, `picus-sql-language.ts` |
-| Stores | `stores/picus/{ui,connections,schema,project,tabs,dml,query,consistency,settings}.svelte.ts` |
+| Stores | `stores/picus/{ui,connections,schema,project,tabs,dml,query,result,consistency,settings}.svelte.ts` |
 | Types | `types/picus/index.ts` |
 
 ### Widgets contributed to the shared library
 
 | Widget | Why it is shared |
 |---|---|
-| `shared/ui/DataGrid.svelte` | Virtualised, sortable, filterable, resizable. NULL ≠ empty string; numbers right-aligned with tabular figures |
-| `shared/ui/Pagination.svelte` | Page controls; summary before buttons |
+| `shared/ui/DataGrid.svelte` | Virtualised, sortable, filterable, resizable. NULL ≠ empty string; numbers right-aligned with tabular figures. Takes either a plain array or a `DataGridWindowSource` — a total, a `rowAt(i)` and a `request(start, count)` — so a grid can be a window onto something far larger than memory, with no Arbor concept inside the widget |
 | `shared/ui/ColorPalettePicker.svelte` | Extracted from the pattern duplicated inline in `CreateWorkspaceModal` / `GroupFormModal` |
 | `shared/ui/ShortcutsReference.svelte` | Extracted so Picus didn't fork `TytoShortcutsModal` |
 | `shared/ui/ActivityBar.svelte` | Extended with a `dot` prop (marker for open findings) |
@@ -97,9 +137,9 @@ Svelte/TS errors in Picus, that is where they come from — not from something m
 ### Backend — the database half is live
 
 `picus-be` runs and talks to PostgreSQL. Serving today: the typed product config, the
-per-engine descriptors, connections, schema, paged rows, statement execution and
-server-side cancellation. The script half lands in the following waves against the same
-`PicusState`.
+per-engine descriptors, connections, schema, statement execution over **held results** —
+a server-side cursor whose windows are fetched as the user scrolls — and server-side
+cancellation. The script half lands in the following waves against the same `PicusState`.
 
 | Crate | What it holds |
 |---|---|
@@ -144,10 +184,13 @@ three password calls, which are Tauri commands straight to the shell.
 | `picus_list_connections` / `picus_save_connection` / `picus_delete_connection` | `connections` | list carries live state + `hasSecret` |
 | `picus_connect` / `picus_disconnect` / `picus_test_connection` | `connections` | test opens+closes without touching the pool |
 | `picus_read_db_version` | `connections` | empty string when the table isn't there — not an error |
-| `picus_read_schema` / `picus_table_detail` / `picus_fetch_page` | `schema` | tree vs detail: constraints only when a tab opens |
-| `picus_execute` / `picus_cancel` | `query` | cancel opens a second connection, hence it works mid-query |
+| `picus_read_schema` / `picus_table_detail` | `schema` | tree vs detail: constraints only when a tab opens |
+| `picus_execute` / `picus_open_relation` | `query` | one door for every statement: a read opens a held cursor and returns its first window, a write returns `affected` and holds nothing. Opening a relation is the same path — a table tab is a read, not a mechanism of its own |
+| `picus_result_window` / `picus_count_result` / `picus_close_result` | `query` | any offset, forwards or backwards; the count rewinds the *same* cursor rather than re-running the query; closing is idempotent |
+| `picus_cancel` | `query` | opens a second connection, so it works mid-query — and records the run ordinal, so a cancel landing between round trips is honoured instead of lost |
 | `picus_emit` / `picus_validate_rows` / `picus_validate_value` | `emit` | **served but not yet called by the frontend** |
-| `picus_open_project` / `picus_confirm_project` / `picus_is_project` / `picus_propose_update_file` | `project` | discovery proposes; nothing is written before the confirmation |
+| `picus_open_project` / `picus_confirm_project` / `picus_is_project` / `picus_propose_update_file` | `project` | discovery proposes; nothing is written before the confirmation. `confirm` edits **paths** |
+| `picus_set_folder_alias` / `picus_folders_named` | `project` | the other half of classifying: edits a **name**, so it answers for every folder called `POS` including the ones that do not exist yet. `folders_named` is what lets the offer state its blast radius before the user agrees |
 | `picus_open_scripts` / `picus_refresh_scripts` | `scripts` | reads, decodes and holds the whole repository; same reply shape as `picus_open_project` |
 | `picus_analyze_scripts` | `scripts` | inventory + the fourteen rules + skipped rules + rejected suppressions, all in the crates' own wire types |
 | `picus_script_text` | `scripts` | one file's decoded text, its encoding and its line ending |
@@ -197,9 +240,79 @@ directory, namespaced per product. (The user intends to move Corvus's per-repo c
 `.arbor/corvus/` on the same principle eventually; Picus is the first to use the shape, so get
 it right here.)
 
-What it holds: each branch and its dialect, each folder and its role, the expected encoding and
-line ending, the version table, the update-file naming pattern, and the generated-block marker
-template.
+What it holds: a **flat list of declarations keyed by folder path** — a dialect, a role, an
+encoding, a naming scheme, any of them, on any folder — plus the version table, the update-file
+naming default and the generated-block marker template.
+
+Flat and by path, rather than the nested branch/folder arrays it started as, for a concrete
+reason: adding a subdirectory used to invalidate the shape, and now it does not. A declaration
+is written only where it says something the folder would not inherit anyway, so a repository
+that agrees with the inference writes almost nothing. `version = 2`; a `version = 1` file is
+migrated on read rather than rejected, and the migration reproduces v1's semantics exactly
+through the inheritance rule.
+
+A folder's `dialect` key may name an engine Picus does **not** read (`dialect = "sqlserver"`):
+a folder has one engine, so it has one key.
+
+#### Per-project inference aliases (decided 2026-07-28)
+
+The same file also carries a **vocabulary** — folder *names* that mean something in this
+repository:
+
+```toml
+[[alias]]
+name = "POS"
+engine = "postgres"
+
+[[alias]]
+name = "MSQ"
+engine = "sqlserver"
+
+[[alias]]
+name = "CONSEGNE"
+role = "update"
+```
+
+The problem it solves is not "Picus's keyword list is too short". It is that a declaration
+answers for one *path*, and the repository this product was built for ships a folder set per
+delivered version: eleven folders called `POS`, eleven `ORA`, eleven `MSQ`, eleven `DB`, and
+another set next release. Declaring folder by folder does not scale to that and never will. One
+alias covers all eleven **and every one added later**, which is the only property that makes the
+repository describable once instead of every release.
+
+Why per-project and not global: `pos` is far too generic — point-of-sale, `POSIZIONI` — and `DB`
+means nothing at all. Adding either to the built-in list would misclassify folders in other
+people's repositories, which is precisely the failure mode the whole-word tightening of the
+dialect keywords was for. The built-in vocabulary is a **global heuristic** and can only hold
+names that mean one thing everywhere; an alias is a **local fact its owner knows**. So the
+built-in list only gained the unsupported engines' real names (`sqlserver`, `mssql`, `tsql`,
+`db2`, `mysql`, `mariadb`, `sqlite`) — a folder called `DB2` is DB2 in every repository on earth
+— and the abbreviations stay per-project.
+
+Four properties, each of them a trap avoided:
+
+- It **adds to** the built-in vocabulary. Declaring one alias must not cost a repository the
+  defaults it was already relying on.
+- It matches **exactly the way a built-in keyword does**: whole word, case-insensitively,
+  through `alias::name_matches`, which is also what the "how many folders would this affect"
+  count goes through. A second implementation of that rule would be a second one that drifts.
+- It covers **roles** as well as engines — a repository whose update folder is called
+  `CONSEGNE` has the same problem one axis over.
+- A bad value **degrades**: `engine` and `role` are wire strings read through typed accessors,
+  exactly like `[generation.insertion]`, so a typo costs that one entry and is reported by
+  `ProjectConfig::problems` instead of failing the parse and resetting the file.
+
+**Precedence: `[[folder]]` beats `[[alias]]` beats the built-in vocabulary.** A specific answer
+beats a general rule; a local fact beats a global heuristic. Including the awkward corner — a
+declaration that *clears* an engine is authoritative and is not re-inferred from the alias on
+the next scan, exactly as it is not re-inferred from the keyword list. Aliases apply at
+**discovery**, so a `POS` folder created next month is classified without anyone touching the
+file.
+
+Where they come from and where they are reviewed: classifying a folder whose name repeats raises
+a **second, distinct** confirmation offering to make it a rule, naming the count before the user
+agrees (`picus_folders_named`); and the accumulated vocabulary is listed, editable and removable
+under Settings ▸ Project ▸ **Folder names**, with each row's current reach shown.
 
 Two rules about how it comes into existence:
 
@@ -266,19 +379,33 @@ trusted (a hand-edited `0` would mean "fetch nothing" and read as a broken produ
   asked the project for column types).
 - **Sequences and triggers share the `table` tab kind** (`objectKind` discriminates). They
   share the frame — name, connection, sub-views — and differ only in contents.
-- **Table data is paged AND virtualised.** Paging bounds what is fetched, virtualisation
-  bounds what is drawn; that is why page sizes go up to 10 000. Corollaries paid for on a
-  695-table database: a page's row total is a **single-relation** `reltuples` lookup, never
-  a catalogue read (it runs on every page turn), and `table_detail` pins its query to the
-  one relation — reading all of a several-hundred-relation schema to find one returns a row
-  per *column* of every one of them.
-- **A capped result must say it is capped.** The query row limit is applied by the *server*
-  (`sql::capped_statement` wraps a single read in `SELECT * FROM (…) LIMIT n+1`, so the rows
-  nobody will see never leave the database), one row beyond the limit is fetched so
-  "there is more" is a fact rather than a guess, and the UI states it beside the row count
-  *and* above the grid. A silently truncated result is a correctness bug, not a cosmetic
-  one: the tail cannot be distinguished from an end, and the grid's sort and filters apply
-  only to what was fetched.
+- **Table data is one continuous scroll, like a query result.** There is no page selector
+  and no page size; the row total lives in the status bar. Opening a relation is a *read*
+  that goes down the same path as a typed statement, holds the same kind of result and is
+  closed the same way — making it a mechanism of its own is how a product ends up with two
+  scrolling behaviours in two panels that both show rows, which is exactly what made this
+  one feel inconsistent. Windows arrive before the viewport reaches them: the grid asks for
+  the first *gap* in a band widened by a margin (a fifth of the window, so "start fetching
+  around row 400 of 500" scales instead of being a constant), and deriving the request from
+  the gap rather than from the scroll position is what makes a repeated ask harmless.
+  A corollary paid for on a 695-table database: `table_detail` pins its query to the one
+  relation, because reading all of a several-hundred-relation schema to find one returns a
+  row per *column* of every one of them.
+- **Nothing is capped, so what must be said out loud changed.** The row limit is no longer a
+  ceiling — it is the number of rows in one window — and a result is never truncated, which
+  removes the correctness bug the cap had (a cut tail is indistinguishable from an end). Two
+  things take its place, and both are about not implying precision Picus does not have:
+  - **The length is an estimate until it isn't.** The scrollbar is scaled immediately by the
+    planner's guess and every total is written `~` until a background `picus_count_result`
+    replaces it. That count rewinds the *same* cursor rather than running `count(*)`, which
+    would re-execute the query and so answer about a different moment — a total disagreeing
+    with the result being scrolled gives the grid a length that is simply false, and it then
+    asks for rows that are not there.
+  - **Sorting and the per-column filters are disabled while the result is partial**, visibly,
+    with the reason stated — not hidden, because a missing control reads as "this grid does
+    not sort", a different and untrue statement. They were already acting on fetched rows
+    only under the cap; with a window open that silence would have become a bigger lie. Both
+    return the moment the whole result is loaded.
 - **Cancellation is remembered, not merely sent.** `picus_execute` is more than one round
   trip (a `prepare`, then the statement); the server's cancel key only interrupts what is
   running at the instant it arrives, so a Cancel landing in a gap hit nothing and was lost.
@@ -676,7 +803,25 @@ fail, not hang CI): `cargo nextest run`. Everything below is still owed:
    of SQL that can be thought of**, and permission to run the `tree-sitter` generation
    commands.
 
-### Decisions taken on 2026-07-27 (this session)
+### Decisions taken on 2026-07-28
+
+| Question | Decision |
+|---|---|
+| The repository's shape | the **real directory tree**; dialect and role are declared on any folder and **inherited** by descendants. `Branch` deleted |
+| What the rules compare | a **lane** = (effective dialect, effective role). Coverage is summed across a lane's folders, so `2024/ORA` and `2025/ORA` never report each other as gaps |
+| Inventory columns | folded to **engine × role** for display, never one per folder — a repository has hundreds, eleven of them called `ORA`. Expanding a row gives the per-folder detail |
+| Dialect inference | **whole-word** matching, not substring: every folder in the tree is now asked, and substring `ora` would have declared Oracle folders in the middle of other people's repositories (`LAVORAZIONE`, `ORARI`) |
+| `POS` / `MSQ` as **built-in** keywords | **no** — too generic to guess safely. They would misclassify `POSIZIONI` in somebody else's repository, which is exactly what the whole-word tightening was for |
+| …so how does a real repository say it | a **per-project vocabulary** (`[[alias]]` in `project.toml`), keyed by folder **name**. One line covers all eleven `POS` folders *and every one added later*, which folder-by-folder declaration can never do |
+| Alias precedence | `[[folder]]` **>** `[[alias]]` **>** built-in keywords. A specific answer beats a general rule; a local fact beats a global heuristic |
+| Engines Picus cannot read (`MSQ` = SQL Server, `DB` = DB2) | a **third state**, `ForeignEngine` — recognised, not supported. Named on screen, never asked about, and **never parsed**: a permissive grammar turns T-SQL into plausible nonsense. Standard names (`sqlserver`, `mssql`, `db2`, …) are built in; abbreviations stay per-project |
+| Folders of portable SQL, valid on both engines | a **fourth state**, `Generic`. **Never inferred** — only declared, per path or by name. It **counts for every dialect** (in both lanes, satisfies `CONS001` on both sides), `DIA001` **inverts** there (a construct belonging to *either* engine is a broken promise), and generation is **allowed but restricted to the intersection** |
+| Generation into a portable folder | **allowed**, not refused — the payoff is one file where two were needed. `Target.dialect` became a `DialectScope`, so there is no `EngineKind` to default to and every dialect-dependent decision in the emitter grew a portable answer or an `Err`. Refused: procedural block, version guard, upsert. Portable "now" is `CURRENT_TIMESTAMP`; identifiers are never folded |
+| The portable coverage column | its **own** column in the inventory matrix rather than being counted into both dialects', so one INSERT never reads as two. `coverageGaps` knows a covered portable column at the same role means the dialect columns are not gaps — it has to agree with `CONS001`, which is read beside it |
+| Offering the alias | a **second, distinct** confirmation right after a folder is classified, naming how many folders it would reach. Never a silent side effect of the first action, and declining costs the user nothing they just did |
+| Where a repository is opened from | a **connection** owns it (`ConnectionSpec.scriptRoot`): Picus is database-oriented, so those scripts install *that* database |
+
+### Decisions taken on 2026-07-27
 
 | Question | Decision |
 |---|---|
@@ -688,7 +833,7 @@ fail, not hang CI): `cargo nextest run`. Everything below is still owed:
 | Crate granularity | one at a time, as activated |
 | Generated SQL identifiers | **English** (`before_changes`, `v_version`, `v_existing`, `v_object`) |
 | Parsing strategy | full Tree-sitter grammar, with a very large test suite |
-| What a "branch" is | **folders in one checkout** (`ORACLE/`, `POSTGRES/` under the project root), not git branches — both dialects must be readable at once for the comparison to be instant |
+| What a "branch" is | **folders in one checkout**, not git branches — both dialects must be readable at once for the comparison to be instant. *Superseded 2026-07-28: there is no "branch" level at all; see §1* |
 | Project config location | `<root>/.arbor/picus/project.toml`, proposed and written only on confirmation |
 | One grammar or two | **one**, permissive superset — see below |
 | Parse depth | **expression level**, including inside procedural blocks |

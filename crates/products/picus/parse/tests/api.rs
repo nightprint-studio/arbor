@@ -4,11 +4,11 @@
 use picus_parse::prelude::*;
 
 fn oracle(sql: &str) -> ParsedFile {
-    parse(sql, EngineKind::Oracle)
+    parse(sql, DialectScope::One(EngineKind::Oracle))
 }
 
 fn postgres(sql: &str) -> ParsedFile {
-    parse(sql, EngineKind::Postgres)
+    parse(sql, DialectScope::One(EngineKind::Postgres))
 }
 
 fn kinds(file: &ParsedFile) -> Vec<StatementKind> {
@@ -401,6 +401,57 @@ fn a_construct_in_its_own_dialect_is_never_flagged() {
         oracle("BEGIN\n  EXECUTE IMMEDIATE 'x';\nEND;\n/").foreign().count(),
         0
     );
+}
+
+// ── Portable scripts: the rule inverts ──────────────────────────────────────
+
+fn portable(sql: &str) -> ParsedFile {
+    parse(sql, DialectScope::Portable)
+}
+
+#[test]
+fn in_a_portable_script_both_dialects_constructs_are_flagged() {
+    // The inversion, and the reason it is a better check than the one it
+    // replaces: a file that promises to run on both engines may use only what
+    // both understand, so `SYSDATE` and `now()` are *both* wrong here.
+    let sql = "INSERT INTO t (a, b) VALUES (SYSDATE, now()) ON CONFLICT DO NOTHING;";
+    let parsed = portable(sql);
+    let found: Vec<&str> = parsed.foreign().map(|f| f.construct).collect();
+    assert!(found.contains(&"SYSDATE"), "{found:?}");
+    assert!(found.contains(&"NOW"), "{found:?}");
+    assert!(found.contains(&"on_conflict_clause"), "{found:?}");
+    // Both engines are represented, which never happens in a single-dialect file.
+    assert!(parsed.foreign().any(|f| f.belongs_to == EngineKind::Oracle));
+    assert!(parsed.foreign().any(|f| f.belongs_to == EngineKind::Postgres));
+}
+
+#[test]
+fn a_portable_script_using_only_what_both_engines_accept_is_clean() {
+    // The shape this feature exists for: plain inserts and updates, one file,
+    // valid on Oracle and PostgreSQL alike.
+    for sql in [
+        "INSERT INTO PARAMETRI (COD, VALORE) VALUES ('SOGLIA', 10);",
+        "UPDATE PARAMETRI SET VALORE = 11 WHERE COD = 'SOGLIA';",
+        "DELETE FROM PARAMETRI WHERE COD = 'VECCHIA';",
+        // `CURRENT_TIMESTAMP` is standard and valid on both — which is exactly
+        // why it is what the emitter writes for a portable target.
+        "INSERT INTO LOG (QUANDO) VALUES (CURRENT_TIMESTAMP);",
+    ] {
+        let parsed = portable(sql);
+        let found: Vec<&str> = parsed.foreign().map(|f| f.construct).collect();
+        assert!(found.is_empty(), "{sql} — {found:?}");
+    }
+}
+
+#[test]
+fn the_oracle_upsert_idiom_is_a_finding_in_a_portable_script() {
+    // `MERGE … FROM DUAL` is fine in an Oracle folder and a broken promise here.
+    let sql = "MERGE INTO t d USING (SELECT 1 AS k FROM DUAL) s ON (d.k = s.k) \
+               WHEN NOT MATCHED THEN INSERT (k) VALUES (1);";
+    let found: Vec<&str> = portable(sql).foreign().map(|f| f.construct).collect();
+    assert!(found.contains(&"dual_reference"), "{found:?}");
+    // …and the same text in an Oracle folder says nothing.
+    assert_eq!(oracle(sql).foreign().count(), 0);
 }
 
 #[test]

@@ -8,10 +8,12 @@
 //! The generated identifiers (`before_changes`, `v_version`, …) are English, like
 //! the rest of Arbor's code.
 
-use picus_ast::prelude::{DmlModel, DmlOperation, EngineKind, Target, VersionTableConfig};
+use picus_ast::prelude::{
+    DialectScope, DmlModel, DmlOperation, EngineKind, Target, VersionTableConfig,
+};
 
 use crate::literal::{ident, literal};
-use crate::statement::plain_statement;
+use crate::statement::{plain_statement, EmitResult};
 
 const INDENT: &str = "    ";
 
@@ -32,15 +34,23 @@ fn version_filter(v: &VersionTableConfig) -> String {
     }
 }
 
-/// Emit the block for one target. Dispatches on the **target's** dialect.
-pub fn block(model: &DmlModel, target: &Target) -> String {
-    match target.dialect {
-        EngineKind::Oracle => oracle_block(model, target),
-        EngineKind::Postgres => postgres_block(model, target),
+/// Emit the block for one target. Dispatches on the **target's** scope.
+///
+/// A portable target never reaches here — `Target::rule_conflict` refuses the
+/// combination, because the two engines spell a procedural block with constructs
+/// the other cannot parse and there is no third spelling. The `None` arm says so
+/// rather than picking one, which is the same refusal the caller already got.
+pub fn block(model: &DmlModel, target: &Target) -> EmitResult {
+    match target.dialect.dialect() {
+        Some(EngineKind::Oracle) => oracle_block(model, target),
+        Some(EngineKind::Postgres) => postgres_block(model, target),
+        None => Err(PORTABLE_BLOCK),
     }
 }
 
-fn oracle_block(model: &DmlModel, target: &Target) -> String {
+const PORTABLE_BLOCK: &str = "a portable script cannot use a procedural block: Oracle spells \n    it `DECLARE … BEGIN … END; /` and PostgreSQL `DO $$ … $$`, and no form runs on both";
+
+fn oracle_block(model: &DmlModel, target: &Target) -> EmitResult {
     let g = &target.guards;
     let v = &model.version_table;
     let mut out = String::from("DECLARE\n");
@@ -78,14 +88,14 @@ fn oracle_block(model: &DmlModel, target: &Target) -> String {
 
     let last = model.rows.len().saturating_sub(1);
     for (i, row) in model.rows.iter().enumerate() {
-        let body = indent(&plain_statement(model, row, EngineKind::Oracle));
+        let body = indent(&plain_statement(model, row, DialectScope::One(EngineKind::Oracle))?);
         // A delete is skip-if-present's own no-op: deleting a row that isn't there
         // already does nothing, so guarding it would only add noise.
         if g.skip_if_present && model.operation != DmlOperation::Delete {
             let predicate = model
                 .key_columns
                 .iter()
-                .map(|c| format!("{} = {}", c.name, literal(row.get(&c.name).map(String::as_str), c, EngineKind::Oracle)))
+                .map(|c| format!("{} = {}", c.name, literal(row.get(&c.name).map(String::as_str), c, DialectScope::One(EngineKind::Oracle))))
                 .collect::<Vec<_>>()
                 .join(" AND ");
             out.push_str(&format!(
@@ -124,16 +134,16 @@ fn oracle_block(model: &DmlModel, target: &Target) -> String {
         ));
     }
     out.push_str("END;\n/");
-    out
+    Ok(out)
 }
 
-fn postgres_block(model: &DmlModel, target: &Target) -> String {
+fn postgres_block(model: &DmlModel, target: &Target) -> EmitResult {
     let g = &target.guards;
     let lc = model.lowercase_postgres;
     let v = &model.version_table;
-    let table = ident(&model.table, EngineKind::Postgres, lc);
-    let v_table = ident(&v.table, EngineKind::Postgres, lc);
-    let v_column = ident(&v.version_column, EngineKind::Postgres, lc);
+    let table = ident(&model.table, DialectScope::One(EngineKind::Postgres), lc);
+    let v_table = ident(&v.table, DialectScope::One(EngineKind::Postgres), lc);
+    let v_column = ident(&v.version_column, DialectScope::One(EngineKind::Postgres), lc);
 
     let mut out = String::from("DO $$\n");
     if g.version.is_some() || g.skip_if_present {
@@ -163,7 +173,7 @@ fn postgres_block(model: &DmlModel, target: &Target) -> String {
 
     let last = model.rows.len().saturating_sub(1);
     for (i, row) in model.rows.iter().enumerate() {
-        let body = indent(&plain_statement(model, row, EngineKind::Postgres));
+        let body = indent(&plain_statement(model, row, DialectScope::One(EngineKind::Postgres))?);
         if g.skip_if_present && model.operation != DmlOperation::Delete {
             let predicate = model
                 .key_columns
@@ -171,8 +181,8 @@ fn postgres_block(model: &DmlModel, target: &Target) -> String {
                 .map(|c| {
                     format!(
                         "{} = {}",
-                        ident(&c.name, EngineKind::Postgres, lc),
-                        literal(row.get(&c.name).map(String::as_str), c, EngineKind::Postgres)
+                        ident(&c.name, DialectScope::One(EngineKind::Postgres), lc),
+                        literal(row.get(&c.name).map(String::as_str), c, DialectScope::One(EngineKind::Postgres))
                     )
                 })
                 .collect::<Vec<_>>()
@@ -191,7 +201,7 @@ fn postgres_block(model: &DmlModel, target: &Target) -> String {
     if let Some(guard) = &g.version {
         let mut sets = vec![format!("{v_column} = '{}'", guard.to)];
         if let Some(date) = &v.date_column {
-            sets.push(format!("{} = CURRENT_TIMESTAMP", ident(date, EngineKind::Postgres, lc)));
+            sets.push(format!("{} = CURRENT_TIMESTAMP", ident(date, DialectScope::One(EngineKind::Postgres), lc)));
         }
         out.push_str(&format!(
             "\n  -- carry the database to {}\n  UPDATE {v_table} SET {}{};\n",
@@ -205,5 +215,5 @@ fn postgres_block(model: &DmlModel, target: &Target) -> String {
     // refuses a COMMIT there. The Oracle side commits because its block is the
     // transaction. Same rule, two correct spellings — which is the product.
     out.push_str("END $$;");
-    out
+    Ok(out)
 }

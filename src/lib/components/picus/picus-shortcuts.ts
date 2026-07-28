@@ -45,7 +45,7 @@ export const PICUS_SHORTCUTS: PicusShortcutGroup[] = [
     shortcuts: [
       { keys: ['Ctrl', 'Enter'], description: 'Run the statement under the cursor (or the selection)' },
       { keys: ['Ctrl', 'Shift', 'Enter'], description: 'Run the whole script' },
-      { keys: ['Ctrl', 'Shift', 'C'], description: 'Cancel the running query' },
+      { keys: ['Ctrl', 'Shift', 'C'], description: 'Cancel the running query, or the exact row count running behind it' },
       { keys: ['Ctrl', 'T'], description: 'New query tab on the active connection' },
       { keys: ['Ctrl', 'Shift', 'D'], description: 'Cycle the active connection' },
       { keys: ['Ctrl', 'Shift', 'N'], description: 'New connection' },
@@ -77,6 +77,11 @@ export const PICUS_SHORTCUTS: PicusShortcutGroup[] = [
       // (Ctrl+Shift+E is the global File Explorer, Ctrl+Shift+R is Tyto's global
       // record) — a window-local binding underneath either would never fire.
       { keys: ['F5'], description: 'Re-read the script repository from disk' },
+      // Ctrl+Shift+F rather than an Alt+Shift chord (Windows steals those to switch
+      // keyboard layout) — F for folder, and nothing in Picus searches across files
+      // for it to collide with.
+      { keys: ['Ctrl', 'Shift', 'F'], description: 'Classify a folder — say which engine and which role it has' },
+      { keys: ['Shift', 'F10'], description: 'Open the menu of the focused row in the tree' },
     ],
   },
   {

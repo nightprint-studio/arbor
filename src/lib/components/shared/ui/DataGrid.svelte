@@ -17,6 +17,47 @@
   export type DataGridValue = string | number | boolean | null | undefined;
 
   export type SortDirection = 'asc' | 'desc';
+
+  /**
+   * A result larger than what is in memory — a window onto something of known
+   * length, rather than the whole of something short.
+   *
+   * The grid drives it: it scales the scrollbar to `total`, draws placeholders for
+   * the rows it does not have, and calls `request` before the viewport reaches a
+   * gap. What a range costs, how a late reply is matched to its request and when a
+   * far-away range is forgotten are the source's business, not the grid's.
+   *
+   * Deliberately free of any transport: `request` is a plain callback, so this
+   * stays a `shared/ui` shape a non-Arbor consumer could satisfy from a fetch, a
+   * worker or an array.
+   */
+  export interface DataGridWindowSource {
+    /** Rows the result is believed to have — what the scrollbar is scaled to. */
+    total: number;
+    /**
+     * `total` is an estimate rather than a count. The grid never prints the total
+     * itself, but it does refuse to claim completeness on an approximate length —
+     * consumers showing the number must mark it (`~`).
+     */
+    approximate?: boolean;
+    /**
+     * Every row is loaded AND `total` is exact. Sorting and filtering are
+     * meaningful again at that point, and the grid re-enables them.
+     */
+    complete?: boolean;
+    /** The row at an absolute index; `undefined` while it has not arrived. */
+    rowAt: (index: number) => DataGridValue[] | undefined;
+    /**
+     * Ask for `[start, start + count)`. Called whenever the band around the
+     * viewport contains a row that is missing, so it WILL be called repeatedly for
+     * a range still in flight — the source is responsible for ignoring a repeat.
+     */
+    request: (start: number, count: number) => void;
+    /** Rows asked for in one go. */
+    chunk?: number;
+    /** How far beyond the viewport to look for a gap before asking. */
+    margin?: number;
+  }
 </script>
 
 <script lang="ts">
@@ -34,18 +75,39 @@
    *  • **Numbers line up.** Numeric columns are right-aligned with tabular
    *    figures, so magnitudes are comparable by eye down the column.
    *
+   * ## Two ways to feed it
+   *
+   *  • **`rows`** — the whole thing, in memory. Everything sorts and filters.
+   *  • **`source`** — a {@link DataGridWindowSource}: a total, the rows loaded so
+   *    far, and a callback asking for a range. The scrollbar is scaled to the
+   *    total from the start, rows not yet loaded draw as placeholders instead of
+   *    collapsing it, and the next range is asked for before the viewport reaches
+   *    the edge of what is loaded.
+   *
+   * The two are exclusive and `source` wins. Sorting and filtering over a window
+   * would order and hide a fraction of the result while looking like they had
+   * ordered and hidden all of it, so while a source is incomplete both controls
+   * stay visible and disabled, carrying the reason. The moment the source reports
+   * `complete` they come back and behave exactly as in the array case.
+   *
    * Keyboard: ↑/↓ move the selected row, PageUp/PageDown jump a viewport,
    * Home/End go to the ends, Enter fires `onActivate`. Column headers are
    * buttons — sorting never needs the mouse. Per-column filters live in an
-   * optional second header row enabled with `filterable`.
+   * optional second header row enabled with `filterable`. End on a windowed
+   * source jumps to the last row of the RESULT and pulls the tail in, so reaching
+   * the far end never needs the scrollbar.
    *
    * NOTE (shared/ui contract): no Arbor concepts, no IPC/stores, no imports from
    * shared/internal — generic props + snippets only.
    */
+  import { untrack } from 'svelte';
+
   interface Props {
     columns: DataGridColumn[];
-    /** Row-major values, aligned with `columns`. */
-    rows: DataGridValue[][];
+    /** Row-major values, aligned with `columns`. Ignored when `source` is given. */
+    rows?: DataGridValue[][];
+    /** Drive the grid from a window onto a larger result instead of an array. */
+    source?: DataGridWindowSource;
     rowHeight?: number;
     overscan?: number;
     /** Leading gutter with the 1-based row ordinal. */
@@ -56,7 +118,11 @@
     filterable?: boolean;
     /** Drag handles between headers. */
     resizable?: boolean;
-    /** Index of the selected row (bindable, indexes `rows` not the view). */
+    /**
+     * Index of the selected row (bindable). Indexes `rows` in the array case and
+     * the RESULT in the windowed one — in both, the thing the data is addressed
+     * by, never the on-screen position.
+     */
     selectedRow?: number | null;
     /** Enter / double-click on a row. */
     onActivate?: (rowIndex: number) => void;
@@ -64,6 +130,8 @@
     onEditCell?: (rowIndex: number, columnIndex: number) => void;
     editable?: boolean;
     emptyMessage?: string;
+    /** Why sorting and filtering are inert while a window is still filling. */
+    partialNotice?: string;
     ariaLabel?: string;
     class?: string;
     /** Override a cell's rendering (the default handles null/empty/number). */
@@ -74,7 +142,8 @@
 
   let {
     columns,
-    rows,
+    rows = [],
+    source,
     rowHeight = 24,
     overscan = 12,
     showRowNumbers = true,
@@ -86,11 +155,19 @@
     onEditCell,
     editable = false,
     emptyMessage = 'No rows.',
+    partialNotice = 'Only part of this result is loaded — sorting and filtering come back once all of it is.',
     ariaLabel = 'Data grid',
     class: klass = '',
     cell,
     empty,
   }: Props = $props();
+
+  /**
+   * A source that has everything folds back into the array path: once every row
+   * is in memory and the length is exact, "windowed" is a fact about how the rows
+   * arrived, not about what can be done with them.
+   */
+  const windowed = $derived(!!source && !source.complete);
 
   // ── Sorting ───────────────────────────────────────────────────────────────
   let sortColumn = $state<string | null>(null);
@@ -131,9 +208,22 @@
     dragging = null;
   }
 
-  // ── Derived view ──────────────────────────────────────────────────────────
+  // ── Derived view (array path) ─────────────────────────────────────────────
+  /**
+   * The rows the array pipeline works on. A complete source is materialised once
+   * here rather than duplicated down the file — sorting, filtering, selection and
+   * keyboard movement then have exactly one implementation to be correct in.
+   */
+  const baseRows = $derived.by<DataGridValue[][]>(() => {
+    if (!source) return rows;
+    if (!source.complete) return [];
+    const out: DataGridValue[][] = [];
+    for (let i = 0; i < source.total; i += 1) out.push(source.rowAt(i) ?? []);
+    return out;
+  });
+
   /** Rows carry their original index so selection survives sorting/filtering. */
-  const indexed = $derived(rows.map((r, i) => ({ row: r, index: i })));
+  const indexed = $derived(baseRows.map((r, i) => ({ row: r, index: i })));
 
   const filtered = $derived.by(() => {
     const active = Object.entries(filters).filter(([, v]) => v.trim() !== '');
@@ -169,14 +259,71 @@
   let scrollTop = $state(0);
   let viewH = $state(0);
 
-  const totalH = $derived(view.length * rowHeight);
+  /** Rows the scrollbar spans: the result's length, not what is in memory. */
+  const viewLength = $derived(windowed ? (source?.total ?? 0) : view.length);
+
+  const totalH = $derived(viewLength * rowHeight);
   const start = $derived(Math.max(0, Math.floor(scrollTop / rowHeight) - overscan));
-  const end = $derived(Math.min(view.length, Math.ceil((scrollTop + viewH) / rowHeight) + overscan));
-  const slice = $derived(view.slice(start, end));
+  const end = $derived(Math.min(viewLength, Math.ceil((scrollTop + viewH) / rowHeight) + overscan));
+
+  /** What is drawn. `row: undefined` is a row that has not arrived yet. */
+  const slice = $derived.by<{ row: DataGridValue[] | undefined; index: number }[]>(() => {
+    if (!windowed) return view.slice(start, end);
+    const src = source;
+    if (!src) return [];
+    const out: { row: DataGridValue[] | undefined; index: number }[] = [];
+    for (let i = start; i < end; i += 1) out.push({ row: src.rowAt(i), index: i });
+    return out;
+  });
+
   const offsetY = $derived(start * rowHeight);
 
   function onScroll(e: Event) {
     scrollTop = (e.currentTarget as HTMLElement).scrollTop;
+  }
+
+  /**
+   * Ask for the next range before the viewport needs it.
+   *
+   * The band scanned is the visible slice widened by `margin` on both sides, and
+   * the FIRST missing row in it is what gets asked for. Deriving the ask from the
+   * gap rather than from the scroll position is what makes the repeat harmless:
+   * while a range is in flight its rows are still missing, so this recomputes the
+   * same `(start, count)` pair every time it re-runs, and the source recognises it.
+   *
+   * Reads only positions and `rowAt`, so it re-runs when the viewport moves and
+   * when a range lands (closing a gap, or revealing the next one).
+   */
+  $effect(() => {
+    const src = source;
+    if (!src || src.complete || !src.total) return;
+    const chunk = Math.max(1, src.chunk ?? 200);
+    const margin = Math.max(0, src.margin ?? Math.floor(chunk / 5));
+    const from = Math.max(0, start - margin);
+    const to = Math.min(src.total, end + margin);
+    let missing = -1;
+    for (let i = from; i < to; i += 1) {
+      if (src.rowAt(i) === undefined) { missing = i; break; }
+    }
+    if (missing < 0) return;
+    // The call mutates the source; untracked so its own reads never become deps
+    // of this effect (which would re-enter it on every arrival).
+    untrack(() => src.request(missing, chunk));
+  });
+
+  // ── Selection & keyboard ──────────────────────────────────────────────────
+  //
+  // Display position and row index are the same number in the windowed case and
+  // differ in the sorted/filtered one; these two are the only place that knows.
+  function displayOf(rowIndex: number | null): number {
+    if (rowIndex === null) return -1;
+    if (windowed) return rowIndex < viewLength ? rowIndex : -1;
+    return view.findIndex((r) => r.index === rowIndex);
+  }
+
+  function indexAt(display: number): number | null {
+    if (windowed) return display >= 0 && display < viewLength ? display : null;
+    return view[display]?.index ?? null;
   }
 
   /** Keep the selected row inside the viewport after a keyboard move. */
@@ -190,12 +337,16 @@
     }
   }
 
+  function selectDisplay(display: number) {
+    const clamped = Math.max(0, Math.min(viewLength - 1, display));
+    selectedRow = indexAt(clamped);
+    revealRow(clamped);
+  }
+
   function moveSelection(delta: number) {
-    if (!view.length) return;
-    const current = view.findIndex((r) => r.index === selectedRow);
-    const next = Math.max(0, Math.min(view.length - 1, (current < 0 ? -1 : current) + delta));
-    selectedRow = view[next].index;
-    revealRow(next);
+    if (!viewLength) return;
+    const current = displayOf(selectedRow);
+    selectDisplay((current < 0 ? -1 : current) + delta);
   }
 
   function onKeyDown(e: KeyboardEvent) {
@@ -205,8 +356,8 @@
       case 'ArrowUp':   moveSelection(-1); break;
       case 'PageDown':  moveSelection(page); break;
       case 'PageUp':    moveSelection(-page); break;
-      case 'Home':      if (view.length) { selectedRow = view[0].index; revealRow(0); } break;
-      case 'End':       if (view.length) { selectedRow = view[view.length - 1].index; revealRow(view.length - 1); } break;
+      case 'Home':      if (viewLength) selectDisplay(0); break;
+      case 'End':       if (viewLength) selectDisplay(viewLength - 1); break;
       case 'Enter':     if (selectedRow !== null) onActivate?.(selectedRow); break;
       default: return;
     }
@@ -219,7 +370,10 @@
 </script>
 
 <div class="dg {klass}">
-  <!-- Header: sticky, one button per column, optional filter row underneath. -->
+  <!-- Header: sticky, one button per column, optional filter row underneath.
+       While a window is filling, the sort buttons stay in place and go inert:
+       removing them would read as "this grid does not sort", which is a different
+       and untrue statement. -->
   <div class="dg-head" style:grid-template-columns={gridTemplate}>
     {#if showRowNumbers}
       <div class="dg-th dg-gutter-th" aria-hidden="true"></div>
@@ -227,9 +381,16 @@
     {#each columns as col (col.id)}
       <div class="dg-th" class:dg-num={col.type === 'number'}>
         {#if sortable}
-          <button type="button" class="dg-sort" onclick={() => cycleSort(col.id)} aria-label={`Sort by ${col.label}`}>
+          <button
+            type="button"
+            class="dg-sort"
+            disabled={windowed}
+            title={windowed ? partialNotice : undefined}
+            onclick={() => cycleSort(col.id)}
+            aria-label={`Sort by ${col.label}`}
+          >
             <span class="dg-th-label">{col.label}</span>
-            {#if sortColumn === col.id}
+            {#if sortColumn === col.id && !windowed}
               <span class="dg-sort-mark" aria-hidden="true">{sortDir === 'asc' ? '▲' : '▼'}</span>
             {/if}
           </button>
@@ -260,8 +421,10 @@
           <input
             class="dg-filter"
             type="text"
-            placeholder="filter"
+            placeholder={windowed ? 'partial' : 'filter'}
             aria-label={`Filter ${col.label}`}
+            disabled={windowed}
+            title={windowed ? partialNotice : undefined}
             value={filters[col.id] ?? ''}
             oninput={(e) => (filters = { ...filters, [col.id]: e.currentTarget.value })}
           />
@@ -278,10 +441,10 @@
     onkeydown={onKeyDown}
     role="grid"
     aria-label={ariaLabel}
-    aria-rowcount={view.length}
+    aria-rowcount={viewLength}
     tabindex="0"
   >
-    {#if !view.length}
+    {#if !viewLength}
       <div class="dg-empty">
         {#if empty}{@render empty()}{:else}<span>{emptyMessage}</span>{/if}
       </div>
@@ -292,36 +455,48 @@
             <div
               class="dg-row"
               class:dg-selected={selectedRow === entry.index}
+              class:dg-row-pending={entry.row === undefined}
               style:grid-template-columns={gridTemplate}
               style:height={`${rowHeight}px`}
               role="row"
               aria-rowindex={start + i + 1}
               aria-selected={selectedRow === entry.index}
+              aria-busy={entry.row === undefined}
               tabindex="-1"
               onclick={() => (selectedRow = entry.index)}
               ondblclick={() => onActivate?.(entry.index)}
             >
               {#if showRowNumbers}
+                <!-- The ordinal is known before the row is: that is the point of
+                     scaling the scrollbar to the total. -->
                 <span class="dg-cell dg-gutter" role="gridcell">{entry.index + 1}</span>
               {/if}
               {#each columns as col, ci (col.id)}
-                {@const value = entry.row[ci]}
-                <span
-                  class="dg-cell"
-                  class:dg-num={col.type === 'number'}
-                  role="gridcell"
-                  ondblclick={editable ? () => onEditCell?.(entry.index, ci) : undefined}
-                >
-                  {#if cell}
-                    {@render cell({ value, column: col, rowIndex: entry.index, columnIndex: ci })}
-                  {:else if value === null || value === undefined}
-                    <span class="dg-null">NULL</span>
-                  {:else if value === ''}
-                    <span class="dg-blank" title="empty string"></span>
-                  {:else}
-                    {value}
-                  {/if}
-                </span>
+                {#if entry.row === undefined}
+                  <!-- A row on its way. A quiet bar, never `NULL`: a value that is
+                       absent and a value that has not arrived are different facts. -->
+                  <span class="dg-cell" class:dg-num={col.type === 'number'} role="gridcell">
+                    <span class="dg-loading"></span>
+                  </span>
+                {:else}
+                  {@const value = entry.row[ci]}
+                  <span
+                    class="dg-cell"
+                    class:dg-num={col.type === 'number'}
+                    role="gridcell"
+                    ondblclick={editable ? () => onEditCell?.(entry.index, ci) : undefined}
+                  >
+                    {#if cell}
+                      {@render cell({ value, column: col, rowIndex: entry.index, columnIndex: ci })}
+                    {:else if value === null || value === undefined}
+                      <span class="dg-null">NULL</span>
+                    {:else if value === ''}
+                      <span class="dg-blank" title="empty string"></span>
+                    {:else}
+                      {value}
+                    {/if}
+                  </span>
+                {/if}
               {/each}
             </div>
           {/each}
@@ -395,7 +570,10 @@
     text-transform: inherit;
     cursor: pointer;
   }
-  .dg-sort:hover { color: var(--text-primary); }
+  .dg-sort:hover:not(:disabled) { color: var(--text-primary); }
+  /* Inert while the window fills — present, visibly unavailable, and it says why
+     on hover and on focus. */
+  .dg-sort:disabled { cursor: default; color: var(--text-disabled); }
   .dg-th-label { overflow: hidden; text-overflow: ellipsis; }
   .dg-sort-mark { font-size: 8px; color: var(--accent); }
   .dg-th-hint {
@@ -450,6 +628,7 @@
   }
   .dg-filter:focus { border-color: var(--border-focus); }
   .dg-filter::placeholder { color: var(--text-disabled); font-style: italic; }
+  .dg-filter:disabled { opacity: 0.5; cursor: default; }
 
   /* ── Body ───────────────────────────────────────────────────────────────── */
   .dg-body {
@@ -467,6 +646,9 @@
   .dg-row { cursor: default; }
   .dg-row:hover { background: var(--bg-hover); }
   .dg-row.dg-selected { background: var(--bg-selected); }
+  /* No hover affordance on a row there is nothing to interact with yet. */
+  .dg-row-pending { cursor: progress; }
+  .dg-row-pending:hover { background: none; }
 
   .dg-cell {
     display: flex;
@@ -505,6 +687,17 @@
     border: 1px dashed var(--border);
     border-radius: 2px;
     opacity: 0.7;
+  }
+
+  /* A row still in flight. Static rather than animated: a screenful of pulsing
+     bars scrolling under the cursor is noise, and on WebView2 a permanently
+     animating layer keeps the compositor busy for nothing. */
+  .dg-loading {
+    width: 62%;
+    max-width: 90px;
+    height: 7px;
+    border-radius: 3px;
+    background: var(--bg-hover);
   }
 
   .dg-empty {

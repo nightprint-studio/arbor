@@ -37,6 +37,7 @@ import {
   saveConnection,
   storeSecret,
 } from '$lib/ipc/picus/db';
+import { picusResultsStore } from './result.svelte';
 import { picusSettingsStore } from './settings.svelte';
 
 /** Resolve a connection's palette slot to the CSS variable holding its colour. */
@@ -200,7 +201,16 @@ function createConnectionsStore() {
       }
     },
 
+    /**
+     * Close the session — and, first, the cursors held on it.
+     *
+     * A held result is a resource on the server, and the tabs showing one stay
+     * open across a disconnect. Releasing them here rather than leaving them to
+     * fail on the next window is what keeps "disconnect" an orderly end instead
+     * of an abandonment.
+     */
     async disconnect(id: string) {
+      picusResultsStore.releaseConnection(id);
       await rpcDisconnect(id);
       const row = rows.find((r) => r.id === id);
       if (row) {
@@ -225,6 +235,7 @@ function createConnectionsStore() {
     },
 
     async remove(id: string) {
+      picusResultsStore.releaseConnection(id);
       await deleteConnection(id);
       rows = rows.filter((c) => c.id !== id);
       if (activeId === id) activeId = rows[0]?.id ?? '';

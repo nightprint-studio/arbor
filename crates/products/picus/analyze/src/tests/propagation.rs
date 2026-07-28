@@ -1,4 +1,4 @@
-//! CONS002 / CONS003 — one branch's initialisation against its own updates.
+//! CONS002 / CONS003 — one dialect's initialisation against its own updates.
 //!
 //! Most of these assert that nothing is produced. The install half is
 //! cumulative and the update half is a chain of deltas, so a naive reading of
@@ -60,7 +60,7 @@ fn a_table_the_updates_never_load_is_not_compared_at_all() {
 }
 
 #[test]
-fn a_branch_with_no_update_folder_has_nothing_to_compare() {
+fn a_dialect_with_no_update_folder_has_nothing_to_compare() {
     let repo = Fixture::build(&[(
         "ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql",
         "INSERT INTO PARAMETRI (COD, VALORE) VALUES ('SOGLIA_SCONTO', 15);",
@@ -144,7 +144,7 @@ fn a_reference_data_folder_counts_as_part_of_the_initialisation() {
 #[test]
 fn a_computed_value_stands_the_table_down_rather_than_reporting_a_difference() {
     // Two rows stamped with SYSDATE are never the same value and never known to
-    // be different either. The same abstention the cross-branch comparison makes.
+    // be different either. The same abstention the cross-dialect comparison makes.
     let computed = maintained(
         "INSERT INTO PARAMETRI (COD, DATA_AGG) VALUES ('SOGLIA_SCONTO', SYSDATE);\n\
          INSERT INTO PARAMETRI (COD, DATA_AGG) VALUES ('MAX_RIGHE', SYSDATE);",
@@ -193,7 +193,7 @@ fn an_extra_column_on_one_side_is_not_a_missing_row() {
 }
 
 #[test]
-fn the_two_halves_are_never_read_across_branches() {
+fn the_two_halves_are_never_read_across_dialects() {
     // The Oracle initialisation is not the PostgreSQL updates' initialisation.
     // Reading them as one story would make a repository with a one-sided folder
     // layout report every row it has.

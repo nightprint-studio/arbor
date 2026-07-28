@@ -4,7 +4,7 @@
 //! statement that either fails on a customer's database or, worse, succeeds and
 //! writes the wrong thing.
 
-use picus_types::prelude::{Column, EngineKind};
+use picus_types::prelude::{Column, DialectScope, EngineKind};
 
 /// Column types whose values are emitted bare rather than quoted.
 pub fn is_numeric_type(data_type: &str) -> bool {
@@ -27,11 +27,21 @@ pub fn looks_like_expression(value: &str) -> bool {
     EXPRESSIONS.contains(&v.as_str())
 }
 
-/// The engine's "now".
-pub fn now_function(dialect: EngineKind) -> &'static str {
-    match dialect {
-        EngineKind::Oracle => "SYSDATE",
-        EngineKind::Postgres => "CURRENT_TIMESTAMP",
+/// The scope's "now".
+///
+/// `SYSDATE` is Oracle's and `now()` is PostgreSQL's, but **`CURRENT_TIMESTAMP`
+/// is standard and both engines accept it** — so the portable answer is a real
+/// value rather than a refusal. That is not a lucky accident, it is the shape of
+/// the whole feature: the intersection of two dialects is usually smaller than
+/// either, not empty, and the point of a portable folder is to live in it.
+///
+/// It self-checks, too: `DIA001` over a portable folder flags `SYSDATE` and
+/// `now()` and says nothing about `CURRENT_TIMESTAMP`, so what this emits is
+/// exactly what the analyser will accept back.
+pub fn now_function(scope: DialectScope) -> &'static str {
+    match scope.dialect() {
+        Some(EngineKind::Oracle) => "SYSDATE",
+        Some(EngineKind::Postgres) | None => "CURRENT_TIMESTAMP",
     }
 }
 
@@ -40,10 +50,12 @@ pub fn now_function(dialect: EngineKind) -> &'static str {
 /// `lowercase` is a per-project convention and applies to PostgreSQL only —
 /// unquoted identifiers fold to lower case there and to upper case on Oracle, so
 /// applying it to both would produce Oracle scripts that no longer match the
-/// surrounding code.
-pub fn ident(name: &str, dialect: EngineKind, lowercase: bool) -> String {
-    match dialect {
-        EngineKind::Postgres if lowercase => name.to_lowercase(),
+/// surrounding code. A **portable** script is in exactly that position twice
+/// over: it is read by both engines, which fold in opposite directions, so it
+/// leaves the identifier as written and lets each engine do what it does.
+pub fn ident(name: &str, scope: DialectScope, lowercase: bool) -> String {
+    match scope.dialect() {
+        Some(EngineKind::Postgres) if lowercase => name.to_lowercase(),
         _ => name.to_string(),
     }
 }
@@ -53,7 +65,7 @@ pub fn ident(name: &str, dialect: EngineKind, lowercase: bool) -> String {
 /// Empty → `NULL`; a recognised expression passes through, translated for the
 /// dialect; a number stays bare when the column is numeric; everything else
 /// becomes a quoted literal with its quotes doubled.
-pub fn literal(value: Option<&str>, column: &Column, dialect: EngineKind) -> String {
+pub fn literal(value: Option<&str>, column: &Column, scope: DialectScope) -> String {
     let raw = value.unwrap_or("").trim();
     if raw.is_empty() {
         return "NULL".to_string();
@@ -62,7 +74,7 @@ pub fn literal(value: Option<&str>, column: &Column, dialect: EngineKind) -> Str
         let upper = raw.to_ascii_uppercase();
         return match upper.as_str() {
             "NULL" => "NULL".to_string(),
-            "SYSDATE" | "NOW()" | "CURRENT_TIMESTAMP" => now_function(dialect).to_string(),
+            "SYSDATE" | "NOW()" | "CURRENT_TIMESTAMP" => now_function(scope).to_string(),
             other => other.to_string(),
         };
     }
@@ -151,10 +163,10 @@ mod tests {
     #[test]
     fn a_quote_in_a_value_cannot_end_the_literal() {
         let c = col("NOTE", "varchar(50)");
-        assert_eq!(literal(Some("d'Annunzio"), &c, EngineKind::Oracle), "'d''Annunzio'");
+        assert_eq!(literal(Some("d'Annunzio"), &c, DialectScope::One(EngineKind::Oracle)), "'d''Annunzio'");
         // The hostile shape: it must stay one literal.
         assert_eq!(
-            literal(Some("x'; DROP TABLE T; --"), &c, EngineKind::Oracle),
+            literal(Some("x'; DROP TABLE T; --"), &c, DialectScope::One(EngineKind::Oracle)),
             "'x''; DROP TABLE T; --'"
         );
     }
@@ -162,27 +174,47 @@ mod tests {
     #[test]
     fn empty_becomes_null_and_null_stays_null() {
         let c = col("NOTE", "varchar(50)");
-        assert_eq!(literal(Some(""), &c, EngineKind::Oracle), "NULL");
-        assert_eq!(literal(None, &c, EngineKind::Oracle), "NULL");
-        assert_eq!(literal(Some("null"), &c, EngineKind::Oracle), "NULL");
+        assert_eq!(literal(Some(""), &c, DialectScope::One(EngineKind::Oracle)), "NULL");
+        assert_eq!(literal(None, &c, DialectScope::One(EngineKind::Oracle)), "NULL");
+        assert_eq!(literal(Some("null"), &c, DialectScope::One(EngineKind::Oracle)), "NULL");
     }
 
     #[test]
     fn now_is_translated_per_dialect() {
         let c = col("D", "date");
-        assert_eq!(literal(Some("SYSDATE"), &c, EngineKind::Oracle), "SYSDATE");
-        assert_eq!(literal(Some("SYSDATE"), &c, EngineKind::Postgres), "CURRENT_TIMESTAMP");
-        assert_eq!(literal(Some("now()"), &c, EngineKind::Oracle), "SYSDATE");
+        assert_eq!(literal(Some("SYSDATE"), &c, DialectScope::One(EngineKind::Oracle)), "SYSDATE");
+        assert_eq!(literal(Some("SYSDATE"), &c, DialectScope::One(EngineKind::Postgres)), "CURRENT_TIMESTAMP");
+        assert_eq!(literal(Some("now()"), &c, DialectScope::One(EngineKind::Oracle)), "SYSDATE");
+    }
+
+    #[test]
+    fn a_portable_script_gets_the_now_both_engines_accept() {
+        // Neither `SYSDATE` nor `now()` — the standard spelling, which is the
+        // intersection and is what `DIA001` will accept back from the file.
+        let c = col("D", "date");
+        for written in ["SYSDATE", "now()", "CURRENT_TIMESTAMP"] {
+            assert_eq!(literal(Some(written), &c, DialectScope::Portable), "CURRENT_TIMESTAMP");
+        }
+        assert_eq!(now_function(DialectScope::Portable), "CURRENT_TIMESTAMP");
+    }
+
+    #[test]
+    fn a_portable_script_never_folds_an_identifier() {
+        // The two engines fold unquoted identifiers in opposite directions, so
+        // one file cannot be pre-folded for both: it is left as written and each
+        // engine does what it does.
+        assert_eq!(ident("PARAMETRI", DialectScope::Portable, true), "PARAMETRI");
+        assert_eq!(ident("PARAMETRI", DialectScope::Portable, false), "PARAMETRI");
     }
 
     #[test]
     fn numbers_stay_bare_only_in_numeric_columns() {
         let n = col("V", "numeric(5,2)");
         let t = col("CODE", "varchar(10)");
-        assert_eq!(literal(Some("15"), &n, EngineKind::Oracle), "15");
-        assert_eq!(literal(Some("-1.5"), &n, EngineKind::Oracle), "-1.5");
+        assert_eq!(literal(Some("15"), &n, DialectScope::One(EngineKind::Oracle)), "15");
+        assert_eq!(literal(Some("-1.5"), &n, DialectScope::One(EngineKind::Oracle)), "-1.5");
         // The one that matters: an account code must keep its leading zeros.
-        assert_eq!(literal(Some("007"), &t, EngineKind::Oracle), "'007'");
+        assert_eq!(literal(Some("007"), &t, DialectScope::One(EngineKind::Oracle)), "'007'");
     }
 
     #[test]
@@ -190,7 +222,7 @@ mod tests {
         let n = col("V", "numeric");
         for odd in ["1e5", "1.2.3", "1 2", "+3", "0x1F", ".5", "5."] {
             assert!(
-                literal(Some(odd), &n, EngineKind::Oracle).starts_with('\''),
+                literal(Some(odd), &n, DialectScope::One(EngineKind::Oracle)).starts_with('\''),
                 "{odd} must be quoted rather than emitted bare"
             );
         }
@@ -198,9 +230,9 @@ mod tests {
 
     #[test]
     fn identifier_casing_never_touches_oracle() {
-        assert_eq!(ident("PARAMETRI", EngineKind::Postgres, true), "parametri");
-        assert_eq!(ident("PARAMETRI", EngineKind::Postgres, false), "PARAMETRI");
-        assert_eq!(ident("PARAMETRI", EngineKind::Oracle, true), "PARAMETRI");
+        assert_eq!(ident("PARAMETRI", DialectScope::One(EngineKind::Postgres), true), "parametri");
+        assert_eq!(ident("PARAMETRI", DialectScope::One(EngineKind::Postgres), false), "PARAMETRI");
+        assert_eq!(ident("PARAMETRI", DialectScope::One(EngineKind::Oracle), true), "PARAMETRI");
     }
 
     #[test]

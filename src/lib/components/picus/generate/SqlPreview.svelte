@@ -25,7 +25,7 @@
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import { sqlLanguage } from '../picus-sql-language';
-  import { DIALECTS, FOLDER_ROLE_SHORT } from '$lib/types/picus';
+  import { FOLDER_ROLE_SHORT, engineLabel, isDialect } from '$lib/types/picus';
 
   const targets = $derived(dmlStore.enabledTargets);
 
@@ -37,13 +37,15 @@
   const items = $derived<TabItem[]>(
     targets.map((t) => ({
       id: t.id,
-      label: `${DIALECTS[t.dialect].short} · ${FOLDER_ROLE_SHORT[t.role]}`,
+      label: `${engineLabel(t.dialect)} · ${FOLDER_ROLE_SHORT[t.role]}`,
       title: t.file,
     })),
   );
 
   const sql = $derived(target ? dmlStore.sqlFor(target) : '');
-  const language = $derived(sqlLanguage(target?.dialect));
+  // A portable destination has no single dialect to highlight as; the grammar is
+  // one permissive superset either way, so the fallback costs nothing visible.
+  const language = $derived(sqlLanguage(isDialect(target?.dialect) ? target.dialect : null));
   /** This destination's own rules contradict each other — stated, not swallowed. */
   const conflict = $derived(target ? dmlStore.ruleConflictFor(target.id) : null);
 

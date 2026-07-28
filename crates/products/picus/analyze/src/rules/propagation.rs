@@ -1,7 +1,7 @@
-//! `CONS002` / `CONS003` — a datum that lives in one half of a branch's install
+//! `CONS002` / `CONS003` — a datum that lives in one half of a dialect's install
 //! story and not in the other.
 //!
-//! These two compare **roles inside one branch**, never one branch against
+//! These two compare **roles inside one dialect**, never one dialect against
 //! another. A repository has two ways to arrive at a running database and they
 //! must arrive at the same one:
 //!
@@ -42,7 +42,7 @@
 //!    once in each direction — would be two findings for one row that is
 //!    perfectly fine.
 //! 3. **An unreadable statement stands the table down**, exactly as it does
-//!    across branches: a computed cell (`SYSDATE`, `now()`, a sequence), an
+//!    across dialects: a computed cell (`SYSDATE`, `now()`, a sequence), an
 //!    `INSERT … SELECT`, or a row with no column list. A difference nobody can
 //!    close is worse than a difference nobody was told about.
 //!
@@ -52,12 +52,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use picus_parse::prelude::{line_col, DmlOperation};
-use picus_project::prelude::{Branch, ScriptFolder};
+use picus_parse::prelude::{line_col, DmlOperation, EngineKind};
+use picus_project::prelude::FolderNode;
 use picus_types::prelude::FolderRole;
 
 use crate::compare::{self, RowFingerprint};
-use crate::context::{branch_label, Context};
+use crate::context::{engine_label, Context};
 use crate::finding::{Anchor, Finding};
 use crate::report::Output;
 use crate::rule::RuleId;
@@ -87,7 +87,7 @@ fn half_of(role: FolderRole) -> Option<Half> {
     }
 }
 
-/// Everything one half of one branch inserts into one table.
+/// Everything one half of one dialect inserts into one table.
 #[derive(Debug)]
 struct Side<'a> {
     /// Every row, with the first place it is written. Not yet reduced to the
@@ -100,7 +100,7 @@ struct Side<'a> {
     /// decode.
     readable: bool,
     /// A folder of this half, for the jump to where the datum is not.
-    folder: Option<&'a ScriptFolder>,
+    folder: Option<&'a FolderNode>,
 }
 
 impl Side<'_> {
@@ -109,18 +109,18 @@ impl Side<'_> {
     }
 }
 
-/// One table, seen from both halves of one branch.
+/// One table, seen from both halves of one dialect.
 #[derive(Debug)]
 struct Pair<'a> {
-    branch: &'a Branch,
+    dialect: EngineKind,
     table: String,
     install: Side<'a>,
     upgrade: Side<'a>,
 }
 
 impl<'a> Pair<'a> {
-    fn new(branch: &'a Branch, table: String) -> Self {
-        Pair { branch, table, install: Side::new(), upgrade: Side::new() }
+    fn new(dialect: EngineKind, table: String) -> Self {
+        Pair { dialect, table, install: Side::new(), upgrade: Side::new() }
     }
 
     fn side_mut(&mut self, half: Half) -> &mut Side<'a> {
@@ -131,38 +131,49 @@ impl<'a> Pair<'a> {
     }
 }
 
-/// Every `(branch, table)` either half of the repository inserts into.
-fn collect<'a>(context: &Context<'a>) -> BTreeMap<(String, String), Pair<'a>> {
-    let mut tables: BTreeMap<(String, String), Pair<'a>> = BTreeMap::new();
+/// Every `(dialect, table)` either half of the repository inserts into.
+///
+/// A folder no ancestor declares a dialect for takes part in nothing: it has no
+/// install story of its own to be inconsistent with.
+///
+/// A **portable** folder takes part in *every* dialect's story, which is why this
+/// iterates `placement.dialects()` rather than reading one. A repository whose
+/// initialisation is portable and whose updates are per-dialect still has an
+/// Oracle install-versus-upgrade comparison and a PostgreSQL one, and skipping
+/// the portable half would leave both with nothing to compare against — a rule
+/// that quietly stops running is worse than one that reports.
+fn collect<'a>(context: &Context<'a>) -> BTreeMap<(EngineKind, String), Pair<'a>> {
+    let mut tables: BTreeMap<(EngineKind, String), Pair<'a>> = BTreeMap::new();
     for (script, placement) in context.project.placed() {
-        let Some(half) = half_of(placement.folder.role) else { continue };
+        let Some(half) = half_of(placement.effective_role()) else { continue };
         for statement in &script.parsed.statements {
             for shape in statement.dml.iter().filter(|d| d.operation == DmlOperation::Insert) {
                 let table = shape.table.folded_name();
-                let key = (placement.branch.id.clone(), table.clone());
-                let pair = tables
-                    .entry(key)
-                    .or_insert_with(|| Pair::new(placement.branch, table));
-                let side = pair.side_mut(half);
-                side.folder.get_or_insert(placement.folder);
-                side.columns.extend(compare::written_columns(shape));
-                // A row with no column list cannot be reduced to shared columns
-                // at all: lining it up against a named row would be a guess about
-                // the table's physical column order, which is exactly what
-                // `DML002` exists to say nobody should make.
-                if !shape.has_column_list {
-                    side.readable = false;
-                    continue;
-                }
-                match compare::comparable_rows(shape) {
-                    Some(rows) => {
-                        for (row, fingerprint) in shape.rows.iter().zip(rows) {
-                            let line = line_col(script.source, row.range.start).0;
-                            let anchor = Anchor::at(script.path, &placement.branch.id, line);
-                            side.rows.push((fingerprint, anchor));
-                        }
+                for dialect in placement.dialects().iter().copied() {
+                    let key = (dialect, table.clone());
+                    let pair =
+                        tables.entry(key).or_insert_with(|| Pair::new(dialect, table.clone()));
+                    let side = pair.side_mut(half);
+                    side.folder.get_or_insert(placement.folder);
+                    side.columns.extend(compare::written_columns(shape));
+                    // A row with no column list cannot be reduced to shared
+                    // columns at all: lining it up against a named row would be a
+                    // guess about the table's physical column order, which is
+                    // exactly what `DML002` exists to say nobody should make.
+                    if !shape.has_column_list {
+                        side.readable = false;
+                        continue;
                     }
-                    None => side.readable = false,
+                    match compare::comparable_rows(shape) {
+                        Some(rows) => {
+                            for (row, fingerprint) in shape.rows.iter().zip(rows) {
+                                let line = line_col(script.source, row.range.start).0;
+                                let anchor = Anchor::at(script.path, line);
+                                side.rows.push((fingerprint, anchor));
+                            }
+                        }
+                        None => side.readable = false,
+                    }
                 }
             }
         }
@@ -199,18 +210,18 @@ fn compare_halves(pair: &Pair<'_>, output: &mut Output) {
     let installed = reduce(&pair.install.rows, &shared);
     let upgraded = reduce(&pair.upgrade.rows, &shared);
 
-    let label = branch_label(pair.branch);
+    let label = engine_label(pair.dialect);
     for (datum, anchor) in &installed {
         if upgraded.contains_key(datum) {
             continue;
         }
-        output.findings.push(never_propagated(pair, &label, datum, anchor, upgrade_folder));
+        output.findings.push(never_propagated(pair, label, datum, anchor, upgrade_folder));
     }
     for (datum, anchor) in &upgraded {
         if installed.contains_key(datum) {
             continue;
         }
-        output.findings.push(never_seeded(pair, &label, datum, anchor, install_folder));
+        output.findings.push(never_seeded(pair, label, datum, anchor, install_folder));
     }
 }
 
@@ -245,7 +256,7 @@ fn never_propagated(
     label: &str,
     datum: &RowFingerprint,
     anchor: &Anchor,
-    upgrade_folder: &ScriptFolder,
+    upgrade_folder: &FolderNode,
 ) -> Finding {
     let row = compare::render(datum);
     Finding::new(
@@ -257,7 +268,7 @@ fn never_propagated(
              gets here through `{upgrade}`, where nothing inserts it, so it never arrives — and the \
              same query answers differently depending on how old the installation is. A row that \
              predates the update folder is fine: declare it with `-- picus: ignore CONS002 — why`.",
-            upgrade = upgrade_folder.label
+            upgrade = upgrade_folder.path
         ),
     )
     .also_at(upgrade_folder.path.clone())
@@ -271,7 +282,7 @@ fn never_seeded(
     label: &str,
     datum: &RowFingerprint,
     anchor: &Anchor,
-    install_folder: &ScriptFolder,
+    install_folder: &FolderNode,
 ) -> Finding {
     let row = compare::render(datum);
     Finding::new(
@@ -283,7 +294,7 @@ fn never_seeded(
              installed from scratch runs `{install}`, which never inserts it, and never runs this \
              update either — so the newest installation is the one missing a row every older one \
              has, and it stays missing until somebody notices.",
-            install = install_folder.label
+            install = install_folder.path
         ),
     )
     .also_at(install_folder.path.clone())

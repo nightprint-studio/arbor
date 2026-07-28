@@ -10,9 +10,9 @@
 //! Each domain's handler functions live in their own module here, auto-advertised
 //! via `Hello` and auto-routed by the shell's broker. Served today: the typed
 //! product config, the per-engine descriptors, and the whole database half —
-//! connections, schema, paged rows, statement execution and cancellation, against
-//! PostgreSQL. The script half (parse / inventory / analyse / emit / rewrite) lands
-//! in the following waves against the same `PicusState`.
+//! connections, schema, scrolling results, statement execution and cancellation,
+//! against PostgreSQL. The script half (parse / inventory / analyse / emit /
+//! rewrite) lands in the following waves against the same `PicusState`.
 //!
 //! Two rules this binary must keep as it grows (see `docs/picus-design.md`):
 //!
@@ -42,9 +42,11 @@ mod config_cmds;
 // Connection lifecycle: the configured list (persisted, never with a password) plus
 // open / close / test against a live server.
 mod connections;
-// Schema reads: the browser tree, one relation in full, one page of rows.
+// Schema reads: the browser tree and one relation in full. Its *rows* are a read
+// like any other and live in `query`.
 mod schema;
-// Statement execution + server-side cancellation.
+// Statement execution, the held results a read leaves behind (windows, exact count,
+// close) and server-side cancellation.
 mod query;
 // The per-engine descriptors the UI renders from — including engines with no
 // driver, which is how Oracle stays a first-class script engine.

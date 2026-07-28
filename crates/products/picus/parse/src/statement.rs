@@ -104,9 +104,13 @@ impl Segment<'_> {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParsedFile {
-    /// The dialect the file was parsed *as*. Always supplied by the caller —
-    /// there is no ambient dialect anywhere in Picus (`docs/picus-design.md` §1).
-    pub engine: picus_types::prelude::EngineKind,
+    /// What the file was parsed **as** — one dialect, or portable. Always
+    /// supplied by the caller; there is no ambient dialect anywhere in Picus
+    /// (`docs/picus-design.md` §1).
+    ///
+    /// Under `Portable` the `foreign` list inverts: a construct belonging to
+    /// *either* dialect is recorded, because the file promised to run on both.
+    pub scope: picus_types::prelude::DialectScope,
     /// Length in bytes of the source this file maps. Kept so the segment walk
     /// and the round-trip check work without the source.
     pub source_len: usize,

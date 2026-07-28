@@ -5,7 +5,7 @@
  *  • a **database client** (multiple simultaneous Oracle / PostgreSQL sessions,
  *    schema browsing, query editor, data grid), and
  *  • a **maintainer of SQL scripts on disk**, where the same logical change has
- *    to be written into an Oracle branch AND a PostgreSQL branch, in different
+ *    to be written into an Oracle folder AND a PostgreSQL folder, in different
  *    syntactic forms.
  *
  * The single structural invariant of the whole product: **the dialect is a
@@ -47,6 +47,128 @@ export const DIALECTS: Record<Dialect, DialectInfo> = {
     colorVar: '--ws-color-0',
   },
 };
+
+/**
+ * An engine Picus **recognises and does not support**.
+ *
+ * The third state, and it is not the same as "no engine". A repository whose
+ * `MSQ` folders are SQL Server was previously stuck being asked, forever, a
+ * question with no available answer — and a tool that keeps asking something you
+ * have already answered is one people stop reading.
+ *
+ * A folder in this state is named on screen, left out of every lane, comparison
+ * and coverage column, and — the part that matters most — **never parsed**: a
+ * permissive Oracle/PostgreSQL grammar does not fail on T-SQL, it produces
+ * plausible-looking nonsense.
+ */
+export type ForeignEngine = 'sqlserver' | 'db2' | 'mysql' | 'mariadb' | 'sqlite';
+
+/** How each unsupported engine is spelled, matching `picus-types`' `label()`. */
+export const FOREIGN_ENGINES: Record<ForeignEngine, string> = {
+  sqlserver: 'SQL Server',
+  db2: 'DB2',
+  mysql: 'MySQL',
+  mariadb: 'MariaDB',
+  sqlite: 'SQLite',
+};
+
+/** Every unsupported engine, in the order the pickers list them. */
+export const FOREIGN_ENGINE_CHOICES: ForeignEngine[] = [
+  'sqlserver', 'db2', 'mysql', 'mariadb', 'sqlite',
+];
+
+/**
+ * **Portable SQL**: valid on every dialect Picus supports.
+ *
+ * The folders of plain `INSERT` / `UPDATE` / `DELETE` that are meant to run on
+ * Oracle *and* on PostgreSQL. Before this existed they had to be declared as one
+ * or the other, which was a lie either way — and the lie had consequences: the
+ * dialect they were not got reported as missing everything they contained.
+ *
+ * It is **never inferred**. No folder name produces it. A promise that these
+ * scripts run on both engines is something a person makes, not something a name
+ * implies, so it only ever arrives because somebody declared it.
+ */
+export const GENERIC_ENGINE = 'generic';
+
+/**
+ * What a folder can be declared as — all four answers in one value, because a
+ * folder has one engine.
+ *
+ * It crosses the wire as a single string in a single key, which is why
+ * `dialect = "oracle"`, `"generic"` and `"sqlserver"` are the same field in the
+ * project file.
+ */
+export type FolderEngine = Dialect | typeof GENERIC_ENGINE | ForeignEngine;
+
+/**
+ * What a generation may be emitted as: one dialect, or portable.
+ *
+ * Deliberately narrower than `FolderEngine` — there is no member for an engine
+ * Picus does not support, so a destination in such a folder is unrepresentable.
+ * The same distinction the backend's `DialectScope` makes, for the same reason.
+ */
+export type TargetScope = Dialect | typeof GENERIC_ENGINE;
+
+/** Is this engine one Picus reads and generates as a single dialect? */
+export function isDialect(engine: FolderEngine | null | undefined): engine is Dialect {
+  return engine === 'oracle' || engine === 'postgres';
+}
+
+/** Portable SQL — valid on both dialects, and emitted as their intersection. */
+export function isGenericEngine(engine: FolderEngine | null | undefined): boolean {
+  return engine === GENERIC_ENGINE;
+}
+
+/** An engine Picus recognises and does not read. */
+export function isForeignEngine(
+  engine: FolderEngine | null | undefined,
+): engine is ForeignEngine {
+  return !!engine && engine in FOREIGN_ENGINES;
+}
+
+/** How to spell any engine — dialect, portable, or unsupported. */
+export function engineLabel(engine: FolderEngine): string {
+  if (isDialect(engine)) return DIALECTS[engine].short;
+  if (isGenericEngine(engine)) return 'Portable SQL';
+  return FOREIGN_ENGINES[engine as ForeignEngine];
+}
+
+/**
+ * Every dialect a folder with this engine answers for.
+ *
+ * Two for portable, one for a dialect, none for an unsupported engine — the
+ * question every lane, coverage column and cross-dialect comparison asks, and the
+ * reason a portable folder is the first thing in the model to be in two lanes.
+ */
+export function enginesCovered(engine: FolderEngine | null | undefined): Dialect[] {
+  if (isDialect(engine)) return [engine];
+  if (isGenericEngine(engine)) return ['oracle', 'postgres'];
+  return [];
+}
+
+/**
+ * A folder **name** that means something in this repository.
+ *
+ * The built-in vocabulary is a global heuristic and can only hold names that mean
+ * one thing everywhere — `ORA` is Oracle in every repository, `POS` is not
+ * PostgreSQL in every repository. An alias is the local fact its owner knows,
+ * and it answers for *every* folder of that name, including the ones the next
+ * release will add. That is what a per-path declaration can never do.
+ *
+ * `engine` and `role` are wire strings rather than the unions, deliberately: the
+ * backend keeps them as strings so a hand-edited typo degrades to "this alias
+ * does nothing" and is reported, instead of failing the whole file's parse. The
+ * interface renders whatever it is given.
+ */
+export interface FolderAlias {
+  /** The name as the repository spells it. Matched whole-word, case-insensitively. */
+  name: string;
+  /** `oracle` · `postgres` · an unsupported engine · absent. */
+  engine?: string | null;
+  /** A `FolderRole` wire word, or absent. */
+  role?: string | null;
+}
 
 // ── Connections ──────────────────────────────────────────────────────────────
 
@@ -223,21 +345,107 @@ export interface ScriptFile {
   status?: 'modified' | 'new' | 'error';
 }
 
-export interface ScriptFolder {
-  id: string;
-  label: string;
-  role: FolderRole;
-  /** Path relative to the project root. */
+/**
+ * One directory of the repository, as it actually is on disk.
+ *
+ * There is no "branch" level and no invented grouping: the tree Picus shows is
+ * the tree the user has. A repository whose layout is
+ * `AGGIORNAMENTO/<version>/ORA` puts the dialect five levels down and the role
+ * at the top; another puts them the other way round. Both are described by the
+ * same rule — **any directory may declare a dialect and/or a role, and every
+ * directory below it inherits that declaration until one overrides it**.
+ *
+ * Hence the two pairs of fields, which are NOT redundant:
+ *  • `engine` / `role` are what this folder **declares** — `null` means "says
+ *    nothing, ask my ancestors". They are what a correction writes.
+ *  • `effectiveEngine` / `effectiveRole` are the answer **after inheritance** —
+ *    what the folder actually is. `effectiveEngine: null` is a real answer
+ *    (nobody up the chain said), and `effectiveRole` falls back to `ignored`.
+ *
+ * Showing only the effective pair would leave the user with no way to tell where
+ * to go to change it; showing only the declared pair would leave most rows blank.
+ *
+ * ## One engine field, four answers
+ *
+ * A folder has one engine, so it has one field, and it is one of four things: a
+ * dialect Picus reads; **portable** SQL valid on both; an engine it only
+ * recognises; or nothing yet. Read it through the helpers below rather than the
+ * field, because the useful questions are not "which engine" but "what do I
+ * generate" ({@link dialectOf}, `null` for portable) and "does this count for
+ * that engine" ({@link folderCovers}, true of **both** for portable).
+ */
+export interface FolderNode {
+  /** Project-relative path, POSIX separators. **The identity** of the folder. */
   path: string;
+  /** Last path segment — what the row shows. */
+  name: string;
+  /** Engine DECLARED on this folder; `null` means inherit from an ancestor. */
+  engine: FolderEngine | null;
+  /** Role DECLARED on this folder; `null` means inherited from an ancestor. */
+  role: FolderRole | null;
+  /**
+   * Engine after inheritance. `null` is a real answer and means exactly one
+   * thing: **nobody has said**. It is not what a portable folder gets and not
+   * what an unsupported one gets — both of those are answers.
+   */
+  effectiveEngine: FolderEngine | null;
+  /** Role after inheritance. `ignored` when nobody said. */
+  effectiveRole: FolderRole;
+  children: FolderNode[];
   files: ScriptFile[];
 }
 
-/** A per-dialect branch of the script repository. */
-export interface Branch {
-  id: string;
-  label: string;
-  dialect: Dialect;
-  folders: ScriptFolder[];
+/** What this folder **declares**; `null` = it says nothing and inherits. */
+export function declaredEngine(node: FolderNode): FolderEngine | null {
+  return node.engine;
+}
+
+/** What applies here after inheritance. */
+export function folderEngine(node: FolderNode): FolderEngine | null {
+  return node.effectiveEngine;
+}
+
+/**
+ * The **single** dialect this folder's scripts are generated as, if it has one.
+ *
+ * `null` for a portable folder as well as for an unclassified one, which is
+ * correct in both cases: a portable folder has no single dialect, it has two.
+ * Callers that meant "which side of the comparison is this" want
+ * {@link folderCovers}.
+ */
+export function dialectOf(node: FolderNode): Dialect | null {
+  const engine = node.effectiveEngine;
+  return isDialect(engine) ? engine : null;
+}
+
+/** Does content in this folder count as present for `dialect`? */
+export function folderCovers(node: FolderNode, dialect: Dialect): boolean {
+  return enginesCovered(node.effectiveEngine).includes(dialect);
+}
+
+/** Portable SQL: written to run on every dialect Picus supports. */
+export function isGeneric(node: FolderNode): boolean {
+  return isGenericEngine(node.effectiveEngine);
+}
+
+/** An engine Picus recognises and does not read — an answer, never a question. */
+export function engineIsUnsupported(node: FolderNode): boolean {
+  return isForeignEngine(node.effectiveEngine);
+}
+
+/**
+ * Nobody knows what engine this folder is — the state that is **asked about**.
+ *
+ * Explicitly not true of a portable or an unsupported engine: those are answers,
+ * and asking again would be asking a question the user has already answered.
+ */
+export function engineIsUnknown(node: FolderNode): boolean {
+  return node.effectiveEngine === null;
+}
+
+/** Can a generation be written into this folder? */
+export function folderAcceptsGeneration(node: FolderNode): boolean {
+  return isDialect(node.effectiveEngine) || isGeneric(node);
 }
 
 /**
@@ -276,7 +484,8 @@ export const DEFAULT_VERSION_TABLE: VersionTableConfig = {
 export interface Project {
   name: string;
   root: string;
-  branches: Branch[];
+  /** The repository's real directory hierarchy, from the root's own children. */
+  tree: FolderNode[];
 }
 
 // ── Inventory ────────────────────────────────────────────────────────────────
@@ -285,10 +494,18 @@ export type ObjectKind =
   | 'table' | 'view' | 'sequence' | 'package' | 'procedure' | 'function' | 'trigger';
 
 /**
- * One indexed database object and how each branch/folder covers it. `coverage`
- * is keyed by `"<branchId>/<folderId>"` and holds the number of statements that
- * touch the object there — `0` is the interesting value (a gap between
- * branches), which is what `CONS001` reports.
+ * One indexed database object and how the repository covers it.
+ *
+ * `coverage` is keyed by **folder path** — the same identity `FolderNode.path`
+ * carries — and holds the number of statements in that folder which touch the
+ * object. `0` (or an absent key) is the interesting value: a place that stays
+ * silent about something another place says, which is what the `CONS001` family
+ * reports.
+ *
+ * A real repository has hundreds of folders, so nothing renders this map
+ * folder-by-folder. `utils/picus/coverage.ts` folds it into the axes the rules
+ * actually compare — engine × role — and keeps the per-folder detail for the
+ * one object being looked at.
  */
 export interface InventoryObject {
   name: string;
@@ -322,7 +539,6 @@ export interface Finding {
   line?: number;
   /** Extra locations for rules that pair two places (e.g. a duplicate). */
   alsoAt?: string;
-  branchId: string;
   /** Label of the corrective action, when the rule can propose a patch. */
   fixLabel?: string;
   /**
@@ -370,14 +586,27 @@ export interface TargetGuards {
  * One file the generation is written into. Every target carries its own dialect
  * and its own rules: the same logical change becomes a bare INSERT in the Oracle
  * init script and a guarded PL/SQL block in the Oracle update script.
+ *
+ * A target names **a file and a dialect** — nothing above it. The dialect and the
+ * role are copied from the destination folder's *effective* values at the moment
+ * the destination is added, and stay editable afterwards; a folder with no engine
+ * cannot become a destination at all, because there is no form to write in.
  */
 export interface Target {
   id: string;
   /** Project-relative path of the destination file. */
   file: string;
-  dialect: Dialect;
+  /**
+   * One dialect, or `generic` for a portable destination.
+   *
+   * A portable target accepts only what **both** engines accept: plain
+   * statements, no procedural block, no upsert, and therefore no version guard.
+   * The backend refuses the rest with the reason rather than emitting something
+   * that runs on one engine — the payoff being that a portable destination writes
+   * one file where two used to be needed.
+   */
+  dialect: TargetScope;
   role: FolderRole;
-  branchId: string;
   enabled: boolean;
   wrap: TargetWrap;
   guards: TargetGuards;
@@ -388,17 +617,15 @@ export interface Target {
 /** A cell value. `null` is a real SQL NULL and renders differently from ''. */
 export type CellValue = string | number | null;
 
-export interface QueryResult {
-  columns: Column[];
-  rows: CellValue[][];
-  /** Server-side elapsed time in ms. */
-  elapsedMs: number;
-  /** Rows actually fetched (may be capped by the row limit). */
-  rowCount: number;
-  /** True when the row limit truncated the result. */
-  truncated: boolean;
-}
-
+/**
+ * A result set is NOT a value here.
+ *
+ * A read opens a held cursor on the server and the UI holds a window onto it, so
+ * "the rows" is a live handle with a length, a loaded extent and a lifetime —
+ * `stores/picus/result` owns that shape, and the wire types for its calls live in
+ * `ipc/picus/db`. A plain rows-and-count record used to stand here, and it could
+ * only ever describe a result small enough to have been fetched whole.
+ */
 export interface QueryLogEntry {
   time: string;
   text: string;
@@ -425,8 +652,13 @@ export interface PicusTab {
   objectKind?: Extract<ObjectKind, 'table' | 'view' | 'sequence' | 'trigger'>;
   /** Project-relative path, for `file` tabs. */
   file?: string;
-  /** Dialect of the file/connection, shown as a chip on the tab. */
-  dialect?: Dialect;
+  /**
+   * Engine of the file or connection, shown as a chip on the tab.
+   *
+   * A `FolderEngine` and not a `Dialect`, because a file in a portable folder has
+   * no single dialect — it has two — and the chip says so rather than picking one.
+   */
+  dialect?: FolderEngine;
   /** Unsaved changes marker. */
   dirty?: boolean;
   /**

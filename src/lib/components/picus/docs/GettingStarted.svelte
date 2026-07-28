@@ -11,9 +11,9 @@
 
 <h2>The problem it exists for</h2>
 <p>
-  A script repository usually holds the same logical change twice: once in the Oracle
-  branch, once in the PostgreSQL one, written in two different syntaxes. Keeping those
-  in step by hand produces the same failures over and over — a row added to the
+  A script repository usually holds the same logical change twice: once for Oracle, once
+  for PostgreSQL, written in two different syntaxes and often in two folders that look
+  nothing alike. Keeping those in step by hand produces the same failures over and over — a row added to the
   initialisation and forgotten in the updates, an update block with no starting-version
   guard that re-applies itself, a file saved by another editor that quietly turns
   windows-1252 into UTF-8 and mangles every accented description.
@@ -53,8 +53,9 @@
 <h2>The rule everything else follows</h2>
 <p>
   <b>The dialect belongs to the folder, not to the project.</b> There is no "current
-  dialect" anywhere in Picus. Every branch declares its own, and every operation that
-  reads, analyses or writes SQL is told which one it is working in. That is why the same
-  generation produces four different files, and why each of them is correct on its own
-  terms.
+  dialect" anywhere in Picus. A folder declares which engine its scripts are written for,
+  everything beneath it inherits that until another folder says otherwise, and every
+  operation that reads, analyses or writes SQL is told which engine it is working in. That
+  is why the same generation produces four different files, and why each of them is
+  correct on its own terms.
 </p>

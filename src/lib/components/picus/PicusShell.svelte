@@ -50,11 +50,14 @@
   import PicusConnectionDetailsModal from './PicusConnectionDetailsModal.svelte';
   import PicusDocsPanel from './PicusDocsPanel.svelte';
   import AddDestinationModal from './generate/AddDestinationModal.svelte';
+  import ClassifyFolderModal from './ClassifyFolderModal.svelte';
+  import { aliasOfferDetail } from './folder-classify';
   import {
     PICUS_SECTIONS,
     buildPicusPalette,
     picusPaletteIcon,
   } from './picus-palette';
+  import { FOLDER_ROLE_LABELS, engineLabel } from '$lib/types/picus';
 
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { picusUiStore, type SidebarSection } from '$lib/stores/picus/ui.svelte';
@@ -234,6 +237,52 @@
     dmlStore.markGenerated();
   }
 
+  // ── "…and every folder named POS" ───────────────────────────────────────────
+  //
+  // Raised by `folder-classify.ts` right after a folder is classified, and owned
+  // here for the same reason the delete confirmation is: classifying is reachable
+  // from the tree row, the dialog and the palette, and the follow-up question must
+  // not depend on which of the three is on screen.
+  //
+  // It is deliberately a **second** dialog rather than a checkbox on the first.
+  // Declaring what one folder is and declaring what a name means across the whole
+  // repository are different decisions with different blast radii — one folder
+  // versus eleven and counting — and a user who reached the second by pressing a
+  // button that named the first would be right to feel misled.
+  const aliasOffer = $derived(picusUiStore.aliasOffer);
+
+  const aliasOfferMessage = $derived.by(() => {
+    const offer = aliasOffer;
+    if (!offer) return '';
+    const said = [
+      offer.engine ? engineLabel(offer.engine) : null,
+      offer.role ? FOLDER_ROLE_LABELS[offer.role] : null,
+    ].filter(Boolean).join(' · ');
+    const others = offer.paths.length - 1;
+    return (
+      `${offer.origin} is ${said}. ` +
+      (others === 1
+        ? `One other folder is called ${offer.name} — should it mean the same thing?`
+        : `${others} other folders are called ${offer.name} — should they all mean the same thing?`)
+    );
+  });
+
+  async function acceptAliasOffer() {
+    const offer = aliasOffer;
+    if (!offer) return;
+    const message = await picusProjectStore.setAlias(offer.name, offer.engine, offer.role);
+    picusUiStore.closeFolderAlias();
+    if (message) {
+      toastStore.show(`${offer.name} could not be declared — ${message}`, 'error');
+      return;
+    }
+    toastStore.show(
+      `Every folder named ${offer.name} is now classified — ${offer.paths.length} of them, ` +
+        'and any added later.',
+      'success',
+    );
+  }
+
   // ── Deleting a connection ───────────────────────────────────────────────────
   //
   // Owned by the shell rather than by the connections panel: deleting is offered
@@ -383,6 +432,14 @@
       e.preventDefault();
       return;
     }
+    // Saying what a folder is — the step that makes a repository work at all when
+    // its engine sits several levels down and nothing in the name gives it away.
+    if (mod && e.shiftKey && key === 'f') {
+      if (picusProjectStore.folderCount) picusUiStore.openFolderClassify();
+      else toastStore.show('No repository is attached — there is no folder to classify.', 'warning');
+      e.preventDefault();
+      return;
+    }
 
     // Generation.
     if (mod && !e.shiftKey && key === 'g') { generate(); e.preventDefault(); return; }
@@ -513,7 +570,28 @@
 {/if}
 
 {#if picusUiStore.settingsOpen}
-  <PicusSettingsModal onClose={() => picusUiStore.closeSettings()} />
+  <PicusSettingsModal
+    initialSection={picusUiStore.settingsSection}
+    onClose={() => picusUiStore.closeSettings()}
+  />
+{/if}
+
+{#if aliasOffer}
+  <!-- The second decision, and visibly a second one: the folder the user
+       classified is already saved, and this asks whether the same answer should
+       hold for every folder of that name. Cancelling costs them nothing they
+       just did — which is the property that makes it safe to offer at all. -->
+  <ConfirmModal
+    title={`Every folder named ${aliasOffer.name}`}
+    message={aliasOfferMessage}
+    detail={aliasOfferDetail(aliasOffer.paths, aliasOffer.origin, picusProjectStore.configPath)}
+    variant="info"
+    confirmLabel={`Apply to all ${aliasOffer.paths.length}`}
+    cancelLabel="Just this folder"
+    busy={picusProjectStore.classifying}
+    onConfirm={() => void acceptAliasOffer()}
+    onCancel={() => picusUiStore.declineFolderAlias()}
+  />
 {/if}
 
 {#if picusUiStore.shortcutsOpen}
@@ -528,6 +606,15 @@
   <!-- Mounted on the shell, not on the generator view: the sidebar can open it
        while another tab is on screen. -->
   <AddDestinationModal onClose={() => picusUiStore.closeAddDestination()} />
+{/if}
+
+{#if picusUiStore.folderClassifyPath !== null}
+  <!-- Saying what a folder is. Mounted on the shell because it is opened from the
+       tree row, from the palette and from the destination picker alike. -->
+  <ClassifyFolderModal
+    path={picusUiStore.folderClassifyPath}
+    onClose={() => picusUiStore.closeFolderClassify()}
+  />
 {/if}
 
 {#if picusUiStore.scriptRootPickerId}

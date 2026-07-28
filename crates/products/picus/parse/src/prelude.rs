@@ -12,7 +12,8 @@ pub use crate::parser::{language, parse, SqlParser};
 pub use crate::range::{line_col, ByteRange};
 pub use crate::statement::{ParsedFile, Segment, Statement, StatementKind};
 
-// `EngineKind` is re-exported because every entry point takes one, and making a
+// `EngineKind` and `DialectScope` are re-exported because every entry point takes
+// the latter and every construct is classified with the former; making a
 // caller name a third crate just to say which dialect a file is would be a poor
 // trade for purity.
-pub use picus_types::prelude::EngineKind;
+pub use picus_types::prelude::{DialectScope, EngineKind};

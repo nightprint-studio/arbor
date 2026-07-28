@@ -19,6 +19,7 @@
   import { schemaStore } from '$lib/stores/picus/schema.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
+  import { picusResultsStore } from '$lib/stores/picus/result.svelte';
   import PicusShell from './PicusShell.svelte';
 
   onMount(() => {
@@ -37,7 +38,18 @@
       void picusSettingsStore.loadConfig();
       void connectionsStore.load();
     });
-    return () => { void unlisten.then((off) => off()); };
+
+    // The last path a cursor can escape through. Every tab open at this moment is
+    // holding one, and closing the window closes none of them by itself — the
+    // sessions outlive the webview.
+    const release = () => picusResultsStore.releaseAll();
+    globalThis.addEventListener('beforeunload', release);
+
+    return () => {
+      globalThis.removeEventListener('beforeunload', release);
+      release();
+      void unlisten.then((off) => off());
+    };
   });
 
   /**

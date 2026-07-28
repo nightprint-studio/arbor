@@ -130,7 +130,7 @@
     {/if}
     <span class="ptab-label">{item.label}</span>
     {#if tab.dialect}
-      <PicusDialectChip dialect={tab.dialect} terse />
+      <PicusDialectChip engine={tab.dialect} terse />
     {/if}
     {#if tab.dirty}
       <span class="ptab-dirty" title="Unsaved changes" aria-label="Unsaved changes"></span>

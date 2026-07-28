@@ -12,26 +12,33 @@
    *  • **Sequence / trigger** — properties, because there is nothing else true
    *    about them.
    *
-   * Data is **paged**, not endlessly scrolled: a table with four million rows
-   * has to be approachable, and "1–100 of 4,210" is an answer where an infinite
-   * scrollbar is not. Editing a cell is never a silent UPDATE — the statement is
-   * shown before it runs, and never at all on a read-only connection.
+   * Data is one **continuous scroll** over a held cursor — the same behaviour a
+   * query result has, because a table's rows and a statement's rows are the same
+   * thing to the person reading them. The scrollbar is scaled to the row count
+   * immediately (the server's estimate, marked `~`, replaced by the exact number
+   * when the background count lands) and windows arrive before the viewport
+   * reaches them. There is no page selector: two ways of moving through rows in
+   * one product is one too many, and the total now lives in the status bar.
+   *
+   * Editing a cell is never a silent UPDATE — the statement is shown before it
+   * runs, and never at all on a read-only connection.
    */
   import { Table2, Eye, ListOrdered, Zap, KeyRound, Link2, ArrowLeftRight } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import DataGrid, { type DataGridColumn } from '$lib/components/shared/ui/DataGrid.svelte';
-  import Pagination from '$lib/components/shared/ui/Pagination.svelte';
   import CodeEditor from '$lib/components/shared/ui/code-editor/CodeEditor.svelte';
   import { sqlLanguage } from '../picus-sql-language';
   import { tooltip } from '$lib/actions/tooltip';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { schemaStore } from '$lib/stores/picus/schema.svelte';
+  import { picusSettingsStore } from '$lib/stores/picus/settings.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
-  import { fetchPage } from '$lib/ipc/picus/db';
-  import type { CellValue, PicusTab } from '$lib/types/picus';
+  import { createResult, formatRowTotal, picusResultsStore } from '$lib/stores/picus/result.svelte';
+  import { openRelation } from '$lib/ipc/picus/db';
+  import type { PicusTab } from '$lib/types/picus';
 
   interface Props {
     tab: PicusTab;
@@ -69,65 +76,58 @@
     if (name && (objectKind === 'table' || objectKind === 'view')) void schemaStore.detail(name);
   });
 
-  // ── Data (paged) ────────────────────────────────────────────────────────────
+  // ── Data (one held cursor, scrolled) ────────────────────────────────────────
   //
-  // Paging and virtualisation answer two different problems and are both needed:
-  // paging bounds what is FETCHED (a four-million-row table must not become a
-  // four-million-row round trip), virtualisation bounds what is RENDERED (only
-  // the visible slice of the current page is ever in the DOM). Because the grid
-  // virtualises, a large page costs no more to display than a small one — hence
-  // the generous page sizes below.
-  let page = $state(1);
-  let pageSize = $state(500);
-  const PAGE_SIZES = [100, 500, 1000, 5000, 10_000];
-  // A different object means a different result set — never keep the old page.
-  $effect(() => { void tab.id; page = 1; });
+  // The cursor is opened as the tab opens, so switching to Data is instant, and
+  // it is registered against the TAB — the results registry then closes it when
+  // the tab closes, when the connection drops, or when this effect replaces it
+  // with another. Nothing in this component has to remember to release it.
+  const result = $derived(picusResultsStore.forOwner(tab.id));
 
-  let pageRows = $state<CellValue[][]>([]);
-  let totalRows = $state<number | null>(null);
-  let rowsLoading = $state(false);
   let rowsError = $state('');
-
-  // A page is a server-side OFFSET, and PostgreSQL reaches offset N by walking N
-  // rows: page 5 000 of 500 is a 2.5-million-row walk for every turn. That is a
-  // property of the mechanism, not a bug, but it is invisible — so it is said out
-  // loud once the walk gets long enough to feel.
-  const DEEP_OFFSET = 100_000;
-  const deepOffset = $derived((page - 1) * pageSize >= DEEP_OFFSET);
+  let opening = $state(false);
 
   /**
-   * Fetch the current page.
+   * Which relation the cursor currently open here is on.
    *
-   * `total` is the server's row ESTIMATE, not a `count(*)`: drawing a page number
-   * is not worth scanning a hundred-million-row table. It can therefore be a little
-   * wrong, which is why the last page is discovered by getting fewer rows back
-   * rather than by trusting the arithmetic.
+   * A plain `let`, deliberately not `$state`: it exists to stop the effect below
+   * from re-opening the same relation on every unrelated re-run, and making it
+   * reactive would make writing it re-enter the effect that wrote it.
    */
+  let openedKey = '';
+
   $effect(() => {
     const id = conn?.id;
     const name = tab.table;
-    const offset = (page - 1) * pageSize;
-    const limit = pageSize;
-    if (!id || !name || objectKind === 'sequence' || objectKind === 'trigger') {
-      pageRows = [];
-      totalRows = null;
-      return;
-    }
+    const kind = objectKind;
+    if (!id || !name || kind === 'sequence' || kind === 'trigger') return;
+
+    const key = `${id}::${name}`;
+    if (key === openedKey) return;
+    openedKey = key;
+
     let cancelled = false;
-    rowsLoading = true;
-    fetchPage(id, name, offset, limit)
+    opening = true;
+    rowsError = '';
+    // Same window size as a typed query — one setting, one behaviour.
+    openRelation(id, name, picusSettingsStore.rowLimit)
       .then((res) => {
-        if (cancelled) return;
-        pageRows = res.rows;
-        totalRows = res.total ?? null;
-        rowsError = '';
+        const opened = createResult(id, res);
+        // Rebinding the tab (or closing it) while this was in flight does NOT make
+        // the cursor the server just opened go away — it has to be closed rather
+        // than dropped, or it outlives everything that could have released it.
+        if (cancelled) { void opened?.close(); return; }
+        picusResultsStore.adopt(tab.id, opened);
       })
       .catch((e) => {
         if (cancelled) return;
-        pageRows = [];
         rowsError = String(e);
+        // Let a retry happen: the tab is still open on a relation nothing is held
+        // for, and a key left set would make every later attempt a no-op.
+        openedKey = '';
       })
-      .finally(() => { if (!cancelled) rowsLoading = false; });
+      .finally(() => { if (!cancelled) opening = false; });
+
     return () => { cancelled = true; };
   });
 
@@ -224,7 +224,7 @@
         <div><dt>Cycles</dt><dd>{sequence.cycle ? 'yes' : 'no'}</dd></div>
       </dl>
       <p class="ov-note">
-        A sequence missing from one branch is the kind of gap that only shows up when an
+        A sequence missing from one engine's scripts is the kind of gap that only shows up when an
         insert runs — the inventory tracks it like any other object.
       </p>
     </div>
@@ -279,43 +279,30 @@
         <Badge variant="tone" tone="error" size="sm" label="error" />
         <span>{rowsError}</span>
       </div>
-    {/if}
-    {#if deepOffset}
-      <div class="tv-note">
-        <Badge variant="tone" tone="warning" size="sm" label="deep page" />
+    {:else if result && !result.complete}
+      <!-- Said once, above the rows: the grid below shows the whole length but
+           holds part of it, and its sorting and filters are inert until it holds
+           all of it. The counter climbs on its own and the note leaves when there
+           is nothing left to qualify. -->
+      <div class="tv-note tv-note-info">
+        <Badge variant="tone" tone="neutral" size="sm" label="loading" />
         <span>
-          Reaching row {((page - 1) * pageSize).toLocaleString()} means the server walks every
-          row before it, so pages this far in keep getting slower. A query with its own
-          <code>WHERE</code> on an indexed column gets there in one step.
+          {result.loaded.toLocaleString()} of {formatRowTotal(result)} rows loaded — the rest
+          arrives as you scroll. Sorting and the per-column filters come back once the whole
+          relation is here; to reach a specific distant row, query it with a
+          <code>WHERE</code> on an indexed column instead of scrolling to it.
         </span>
       </div>
     {/if}
     <DataGrid
       columns={dataColumns}
-      rows={pageRows}
+      source={result ?? undefined}
       filterable
       editable={!conn?.readOnly && relation.kind === 'table'}
       ariaLabel={`Rows of ${relation.name}`}
       onEditCell={() => toastStore.show('Inline editing shows its UPDATE before running it — arriving with the driver.', 'info')}
-      emptyMessage={rowsLoading ? 'Loading…' : 'No row on this page.'}
+      emptyMessage={opening ? 'Opening…' : `This ${relation.kind} has no rows.`}
     />
-    <Pagination
-      {page}
-      {pageSize}
-      total={totalRows ?? (page - 1) * pageSize + pageRows.length}
-      pageSizes={PAGE_SIZES}
-      onPage={(p) => (page = p)}
-      onPageSize={(n) => { pageSize = n; page = 1; }}
-    >
-      {#snippet trailing()}
-        <span class="tv-trailing">
-          {#if relation.kind === 'view'}view{:else}table{/if}
-          {#if totalRows != null}
-            · ~{totalRows.toLocaleString()} rows on the server
-          {/if}
-        </span>
-      {/snippet}
-    </Pagination>
   </div>
 
 {:else if picusUiStore.tableSubview === 'structure'}
@@ -476,7 +463,12 @@
     font-size: 10.5px;
     color: var(--text-primary);
   }
-  .tv-trailing { color: var(--text-disabled); }
+  /* "Still filling" is a state, not a problem — it must not wear the warning
+     colour the read-only and error notes above it use. */
+  .tv-note-info {
+    background: var(--bg-elevated);
+    border-bottom-color: var(--border-subtle);
+  }
 
   .tv-ddl { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
   .tv-ddl-bar {

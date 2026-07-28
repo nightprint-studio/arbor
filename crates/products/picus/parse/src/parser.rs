@@ -1,6 +1,6 @@
 //! The entry point: source text + an explicit dialect → [`ParsedFile`].
 
-use picus_types::prelude::EngineKind;
+use picus_types::prelude::DialectScope;
 use tree_sitter::{Language, Parser};
 
 use crate::error::{ParseError, ParseErrorKind};
@@ -55,33 +55,37 @@ impl SqlParser {
 
     /// Parse `source` as `engine`.
     ///
-    /// The dialect is a parameter and never a field on the parser: the same
-    /// `SqlParser` parses an Oracle file and then a PostgreSQL one, and mixing
-    /// them up is impossible because there is nowhere to store the confusion
-    /// (`docs/picus-design.md` §1).
+    /// The scope is a parameter and never a field on the parser: the same
+    /// `SqlParser` parses an Oracle file, then a PostgreSQL one, then a portable
+    /// one, and mixing them up is impossible because there is nowhere to store
+    /// the confusion (`docs/picus-design.md` §1).
+    ///
+    /// `DialectScope::Portable` is not a third grammar — it is the same permissive
+    /// superset with the *acceptance* rule inverted: nothing dialect-specific is
+    /// allowed, so both engines' constructs come back in `foreign`.
     ///
     /// Never returns `Err` and never panics. Syntax problems come back inside
     /// [`ParsedFile::errors`].
-    pub fn parse(&mut self, source: &str, engine: EngineKind) -> ParsedFile {
+    pub fn parse(&mut self, source: &str, scope: DialectScope) -> ParsedFile {
         let Some(parser) = self.inner.as_mut() else {
-            return failed(source, engine, "the SQL grammar could not be loaded");
+            return failed(source, scope, "the SQL grammar could not be loaded");
         };
         let Some(tree) = parser.parse(source.as_bytes(), None) else {
-            return failed(source, engine, "the parser produced no tree");
+            return failed(source, scope, "the parser produced no tree");
         };
-        walk::walk_file(tree.root_node(), source, engine)
+        walk::walk_file(tree.root_node(), source, scope)
     }
 }
 
 /// Parse once. Convenience for a caller with a single file; prefer
 /// [`SqlParser`] in a loop.
-pub fn parse(source: &str, engine: EngineKind) -> ParsedFile {
-    SqlParser::new().parse(source, engine)
+pub fn parse(source: &str, scope: DialectScope) -> ParsedFile {
+    SqlParser::new().parse(source, scope)
 }
 
-fn failed(source: &str, engine: EngineKind, reason: &str) -> ParsedFile {
+fn failed(source: &str, scope: DialectScope, reason: &str) -> ParsedFile {
     ParsedFile {
-        engine,
+        scope,
         source_len: source.len(),
         statements: Vec::new(),
         errors: vec![ParseError {

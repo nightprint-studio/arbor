@@ -7,6 +7,8 @@
  * active rail icon collapses the sidebar, clicking another switches to it.
  */
 
+import type { FolderEngine, FolderRole } from '$lib/types/picus';
+
 /** The four left-rail sections. */
 export type SidebarSection = 'connections' | 'scripts' | 'generate' | 'inventory';
 
@@ -16,6 +18,27 @@ export type BottomTab = 'consistency' | 'output' | 'changes';
 
 /** Sub-view of a table tab: its rows, its columns, or its DDL. */
 export type TableSubview = 'data' | 'structure' | 'ddl';
+
+/**
+ * An offer to turn one folder's classification into a project-wide rule.
+ *
+ * Raised the moment the user classifies a folder whose name repeats, because
+ * that is the moment they have the knowledge: they just said what `POS` is, and
+ * there are ten more folders called `POS`. It carries the paths rather than only
+ * a count so the confirmation can name what it would touch.
+ */
+export interface AliasOffer {
+  /** The folder name the rule would be about. */
+  name: string;
+  /** The engine the user just declared, when that is what they declared. */
+  engine: FolderEngine | null;
+  /** The role they just declared, when that is what they declared. */
+  role: FolderRole | null;
+  /** Every folder the rule would reach, in tree order — including the first. */
+  paths: string[];
+  /** The one they classified, so the offer can talk about "the other ten". */
+  origin: string;
+}
 
 function createPicusUiStore() {
   let sidebarSection = $state<SidebarSection>('connections');
@@ -53,6 +76,35 @@ function createPicusUiStore() {
    * picker must not depend on which of the three is on screen.
    */
   let scriptRootPickerId = $state<string | null>(null);
+  /**
+   * Folder whose engine and role are being set; `null` means closed, `''` means
+   * "open, nothing picked yet".
+   *
+   * Owned here rather than by the scripts tree because classifying is reachable
+   * from the tree row, from the command palette and from the destination picker
+   * — and the dialog must not depend on which of the three is on screen. This is
+   * the same reasoning as the connection editor above it.
+   */
+  let folderClassifyPath = $state<string | null>(null);
+  /**
+   * The "…and every folder named POS" offer, waiting on an answer.
+   *
+   * A **second, distinct** action rather than a side effect of the classification
+   * that preceded it: declaring what one folder is and declaring what a name
+   * means project-wide are different decisions with different blast radii, and
+   * folding the second into the first would mean the user reaches eleven folders
+   * by pressing a button that named one.
+   */
+  let aliasOffer = $state<AliasOffer | null>(null);
+  /**
+   * Names the user has already declined this session.
+   *
+   * Without this, saying "no" to the offer on the first `POS` folder means being
+   * asked again on the second, and the tenth. One refusal is an answer.
+   */
+  let declinedAliases = $state<string[]>([]);
+  /** Settings page to open on; `''` means "wherever it was". */
+  let settingsSection = $state('');
 
   return {
     get sidebarSection() { return sidebarSection; },
@@ -71,12 +123,16 @@ function createPicusUiStore() {
     get connectionDeleteId() { return connectionDeleteId; },
     get addDestinationOpen() { return addDestinationOpen; },
     get scriptRootPickerId() { return scriptRootPickerId; },
+    get folderClassifyPath() { return folderClassifyPath; },
+    get aliasOffer() { return aliasOffer; },
+    get settingsSection() { return settingsSection; },
 
     /** True while any dialog owns the keyboard — the shell's shortcuts stand down. */
     get anyModalOpen() {
       return settingsOpen || shortcutsOpen || aboutOpen || connectionEditorOpen
         || connectionDetailsId !== null || connectionDeleteId !== null
-        || addDestinationOpen || paletteOpen || scriptRootPickerId !== null;
+        || addDestinationOpen || paletteOpen || scriptRootPickerId !== null
+        || folderClassifyPath !== null || aliasOffer !== null;
     },
 
     /** Rail click: same section → collapse; different section → switch + open. */
@@ -105,8 +161,15 @@ function createPicusUiStore() {
 
     togglePalette() { paletteOpen = !paletteOpen; },
     closePalette() { paletteOpen = false; },
-    openSettings() { settingsOpen = true; },
-    closeSettings() { settingsOpen = false; },
+    /** `section` lands the dialog on one page — the palette addresses them by name. */
+    openSettings(section = '') {
+      settingsSection = section;
+      settingsOpen = true;
+    },
+    closeSettings() {
+      settingsOpen = false;
+      settingsSection = '';
+    },
     openShortcuts() { shortcutsOpen = true; },
     closeShortcuts() { shortcutsOpen = false; },
     openAbout() { aboutOpen = true; },
@@ -142,6 +205,26 @@ function createPicusUiStore() {
     /** Attach (or re-point) the script repository of one connection. */
     openScriptRootPicker(connectionId: string) { scriptRootPickerId = connectionId; },
     closeScriptRootPicker() { scriptRootPickerId = null; },
+
+    /** Say what a folder is. `''` opens the dialog on its own folder picker. */
+    openFolderClassify(path = '') { folderClassifyPath = path; },
+    closeFolderClassify() { folderClassifyPath = null; },
+
+    /**
+     * Offer to turn what was just decided about one folder into a rule about its
+     * name. Ignored when the user already declined that name this session.
+     */
+    offerFolderAlias(offer: AliasOffer) {
+      if (declinedAliases.includes(offer.name.toLowerCase())) return;
+      aliasOffer = offer;
+    },
+    /** They said no. Do not ask about this name again while the window is open. */
+    declineFolderAlias() {
+      if (aliasOffer) declinedAliases = [...declinedAliases, aliasOffer.name.toLowerCase()];
+      aliasOffer = null;
+    },
+    /** They said yes, or the offer is otherwise finished with. */
+    closeFolderAlias() { aliasOffer = null; },
   };
 }
 

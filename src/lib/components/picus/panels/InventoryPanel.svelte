@@ -1,12 +1,15 @@
 <script lang="ts">
   /**
-   * Inventory panel — every object the scripts define or touch, and whether both
-   * branches tell the same story about it.
+   * Inventory panel — every object the scripts define or touch, and whether the
+   * repository tells the same story about it everywhere.
    *
-   * An object with a zero in any branch's column is a gap: something exists in
-   * Oracle and not in PostgreSQL (or in initialisation and not in updates). That
-   * is the `CONS001`/`CONS002` family, surfaced here as a marker before the
-   * analysis has even been asked for.
+   * "Everywhere" is not "in every folder": coverage arrives keyed by folder path
+   * and a repository has hundreds of those, most of them one delivered version
+   * of the same thing. It is folded onto the axes the rules actually compare —
+   * **engine × role** — by `utils/picus/coverage.ts`. A zero in any of those
+   * columns is a gap: something exists in Oracle and not in PostgreSQL, or in
+   * initialisation and not in updates. That is the `CONS001`/`CONS002` family,
+   * surfaced here as a marker before the analysis has even been asked for.
    */
   import { Layers, Table2, Package, RefreshCw, TriangleAlert } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
@@ -20,7 +23,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
-  import type { InventoryObject } from '$lib/types/picus';
+  import { coverageBuckets, coverageGaps } from '$lib/utils/picus/coverage';
 
   let query = $state('');
   const needle = $derived(query.trim().toLowerCase());
@@ -29,16 +32,8 @@
     picusProjectStore.inventory.filter((o) => !needle || o.name.toLowerCase().includes(needle)),
   );
 
-  /** Which branch/folder slots exist, in tree order — the coverage columns. */
-  const slots = $derived(
-    picusProjectStore.branches.flatMap((b) =>
-      b.folders.map((f) => ({ key: `${b.id}/${f.id}`, label: `${b.label} / ${f.label}` })),
-    ),
-  );
-
-  function gaps(obj: InventoryObject): string[] {
-    return slots.filter((s) => (obj.coverage[s.key] ?? 0) === 0).map((s) => s.label);
-  }
+  /** The comparison axes this repository has — engine × role, never per folder. */
+  const buckets = $derived(coverageBuckets(picusProjectStore.tree));
 </script>
 
 <PanelShell title="Inventory" count={picusProjectStore.inventory.length}>
@@ -83,8 +78,13 @@
       label={picusProjectStore.inventory.length ? `Nothing matches “${query}”.` : 'Nothing indexed yet.'}
     />
   {:else}
-    {#each visible as obj (obj.name)}
-      {@const missing = gaps(obj)}
+    <!-- Keyed by kind AND name: a name alone is not unique. The same identifier
+         can be indexed under two kinds — a view for one engine that another writes
+         into as a table, a package spec beside something of its own name — and a
+         duplicate key is a hard Svelte error that takes the whole panel down
+         rather than merely drawing one row twice. -->
+    {#each visible as obj (`${obj.kind}/${obj.name}`)}
+      {@const missing = coverageGaps(obj, buckets)}
       <SidebarItem onclick={() => picusTabsStore.openInventory()}>
         {#snippet icon()}
           {#if obj.kind === 'table'}<Table2 size={13} />{:else}<Package size={13} />{/if}
@@ -106,13 +106,14 @@
       </SidebarItem>
     {/each}
 
-    <!-- Something the index found but no branch claims. Not a gap between the two
-         branches — a place outside the model altogether, which is worth naming. -->
-    <NoticeList notes={picusProjectStore.orphans} label="Outside every branch" />
+    <!-- Something the index found that no classified folder claims. Not a gap
+         between two engines — a place outside the model altogether, worth naming. -->
+    <NoticeList notes={picusProjectStore.orphans} label="Outside every classified folder" />
 
     <p class="ip-hint">
-      Coverage is compared across branches: Oracle and PostgreSQL have to tell the same
-      story. Open the Inventory tab for the full matrix.
+      Coverage is compared by engine and by role: Oracle and PostgreSQL have to tell the
+      same story, and so do the updates and the initialisation. Open the Inventory tab for
+      the matrix and the folder-by-folder detail.
     </p>
   {/if}
 </PanelShell>

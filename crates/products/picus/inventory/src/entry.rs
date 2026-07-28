@@ -3,17 +3,17 @@
 //!
 //! The row carries two different things and they answer different questions:
 //!
-//! * **coverage** — a count per `"<branchId>/<folderId>"`, which is what the
-//!   inventory view renders and what `CONS001` reads. It is deliberately a count
-//!   of *statements*, not of occurrences: a statement that names `PARAMETRI` four
-//!   times has done one thing to it.
+//! * **coverage** — a count per **folder path**, which is what the inventory view
+//!   renders and what `CONS001` reads. It is deliberately a count of *statements*,
+//!   not of occurrences: a statement that names `PARAMETRI` four times has done
+//!   one thing to it.
 //! * **sites** — where each of those statements is, which is what a rule needs
 //!   when it has to point at a line and what "go to definition" follows.
 
 use std::collections::BTreeMap;
 
 use picus_parse::prelude::{ByteRange, ObjectKind};
-use picus_types::prelude::FolderRole;
+use picus_types::prelude::{DialectScope, EngineKind, FolderRole};
 
 use crate::kind::InventoryKind;
 
@@ -22,8 +22,13 @@ use crate::kind::InventoryKind;
 pub struct ObjectSite {
     /// Project-relative path, POSIX separators.
     pub path: String,
-    pub branch_id: String,
-    pub folder_id: String,
+    /// The folder holding the file — the coverage column this site counts under.
+    pub folder_path: String,
+    /// What that folder's SQL has to be valid in. `None` when no folder above it
+    /// declares an engine, and rules that compare dialects leave those sites
+    /// alone. `Portable` for a folder written for **both**, which is why lookups
+    /// go through `covers` rather than an equality test.
+    pub scope: Option<DialectScope>,
     pub role: FolderRole,
     /// Index into the file's `statements`, so a caller can get back to the whole
     /// statement without searching by range.
@@ -61,22 +66,16 @@ pub struct ObjectEntry {
     /// rule. Unqualified: the schema an object was written under is dropped.
     pub name: String,
     pub kind: InventoryKind,
-    /// Statements touching this object, per `"<branchId>/<folderId>"`. Every
-    /// column the project has is present, including the zeroes.
+    /// Statements touching this object, per **folder path**. Every column the
+    /// project has is present, including the zeroes.
     pub coverage: BTreeMap<String, usize>,
     /// Every place the object was named, in file then source order.
     pub sites: Vec<ObjectSite>,
 }
 
 impl ObjectEntry {
-    pub fn coverage_in(&self, key: &str) -> usize {
-        self.coverage.get(key).copied().unwrap_or(0)
-    }
-
-    /// How many statements in one branch touch this object, across every folder.
-    pub fn coverage_in_branch(&self, branch_id: &str) -> usize {
-        let prefix = format!("{branch_id}/");
-        self.coverage.iter().filter(|(k, _)| k.starts_with(&prefix)).map(|(_, v)| *v).sum()
+    pub fn coverage_in(&self, folder_path: &str) -> usize {
+        self.coverage.get(folder_path).copied().unwrap_or(0)
     }
 
     /// Sites where the object is created — never where it is altered.
@@ -84,9 +83,15 @@ impl ObjectEntry {
         self.sites.iter().filter(|s| s.creating)
     }
 
-    /// Sites in one folder role, in one branch.
-    pub fn sites_in(&self, branch_id: &str, role: FolderRole) -> impl Iterator<Item = &ObjectSite> {
-        let branch = branch_id.to_string();
-        self.sites.iter().filter(move |s| s.branch_id == branch && s.role == role)
+    /// Sites in one `(dialect, role)` lane — the unit every cross-dialect rule
+    /// compares.
+    pub fn sites_in(
+        &self,
+        dialect: EngineKind,
+        role: FolderRole,
+    ) -> impl Iterator<Item = &ObjectSite> {
+        self.sites
+            .iter()
+            .filter(move |s| s.scope.map(|x| x.covers(dialect)).unwrap_or(false) && s.role == role)
     }
 }

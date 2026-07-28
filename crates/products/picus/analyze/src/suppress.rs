@@ -265,10 +265,10 @@ fn strip_prefix_ignore_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use picus_parse::prelude::{EngineKind, SqlParser};
+    use picus_parse::prelude::{DialectScope, EngineKind, SqlParser};
 
     fn scan_oracle(source: &str) -> (Vec<Suppression>, Vec<RejectedSuppression>) {
-        let parsed = SqlParser::new().parse(source, EngineKind::Oracle);
+        let parsed = SqlParser::new().parse(source, DialectScope::One(EngineKind::Oracle));
         scan("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", source, &parsed)
     }
 
@@ -388,7 +388,7 @@ mod tests {
         use crate::finding::{Anchor, Finding};
         let mut findings = vec![Finding::new(
             RuleId::Dml001,
-            Anchor::at("a.sql", "ora", 3),
+            Anchor::at("a.sql", 3),
             "DELETE without a WHERE clause",
             "…",
         )

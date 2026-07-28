@@ -24,7 +24,6 @@ use crate::rule::RuleId;
 pub(crate) fn run(context: &Context<'_>, output: &mut Output) {
     for (script, placement) in context.project.placed() {
         let file = placement.file;
-        let branch_id = placement.branch.id.as_str();
 
         // A pinned encoding is a decision, not a drift. The user (or the project
         // file) said what this is; reporting it back at them every run is how a
@@ -33,13 +32,13 @@ pub(crate) fn run(context: &Context<'_>, output: &mut Output) {
             output.findings.push(
                 Finding::new(
                     RuleId::Enc001,
-                    Anchor::file(script.path, branch_id),
+                    Anchor::file(script.path),
                     format!("This file is {} where the folder is {}", file.encoding, file.expected_encoding),
                     format!(
                         "It was saved by an editor that did not know, so every accented character \
                          in it is now a different byte sequence from the one the rest of `{}` uses. \
                          The descriptions those characters are in install wrong.",
-                        placement.folder.label
+                        placement.folder.name
                     ),
                 )
                 .fix(format!("Convert back to {}", file.expected_encoding))
@@ -53,7 +52,7 @@ pub(crate) fn run(context: &Context<'_>, output: &mut Output) {
             output.findings.push(
                 Finding::new(
                     RuleId::Enc002,
-                    Anchor::at(script.path, branch_id, offender.line),
+                    Anchor::at(script.path, offender.line),
                     format!(
                         "'{}' cannot be written in {}",
                         offender.ch, file.expected_encoding

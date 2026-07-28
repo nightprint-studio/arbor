@@ -1,17 +1,18 @@
 //! Fixtures shared by the crate's unit tests.
 //!
-//! A two-branch repository shaped like the ones Picus was built for: an Oracle
-//! branch and a PostgreSQL one, each with an initialisation folder and an update
-//! folder. Everything the tests assert is about *that* shape, because a rule that
-//! only works on a one-branch repository is a rule that does not work.
+//! A two-dialect repository shaped like the ones Picus was built for: an Oracle
+//! folder and a PostgreSQL one, each with an initialisation folder and an update
+//! folder, and the dialect declared once at the top so the folders under it
+//! inherit it. Everything the tests assert is about *that* shape, because a rule
+//! that only works on a one-dialect repository is a rule that does not work.
 
 use arbor_fs::prelude::encoding::EncodingSource;
-use picus_parse::prelude::{EngineKind, ParsedFile, SqlParser};
-use picus_project::prelude::{Branch, LineEnding, Project, ScriptFile, ScriptFolder};
-use picus_types::prelude::FolderRole;
+use picus_parse::prelude::{DialectScope, EngineKind, ParsedFile, SqlParser};
+use picus_project::prelude::{resolve, FolderNode, LineEnding, Project, ScriptFile};
+use picus_types::prelude::{FolderEngine, FolderRole};
 
 pub(crate) fn parsed(source: &str, engine: EngineKind) -> ParsedFile {
-    SqlParser::new().parse(source, engine)
+    SqlParser::new().parse(source, DialectScope::One(engine))
 }
 
 pub(crate) fn file(path: &str) -> ScriptFile {
@@ -26,66 +27,65 @@ pub(crate) fn file(path: &str) -> ScriptFile {
     }
 }
 
-fn folder(id: &str, label: &str, role: FolderRole, path: &str, files: Vec<ScriptFile>) -> ScriptFolder {
-    ScriptFolder { id: id.to_string(), label: label.to_string(), role, path: path.to_string(), files }
+fn folder(path: &str, role: FolderRole, files: Vec<ScriptFile>) -> FolderNode {
+    let name = path.rsplit('/').next().unwrap_or(path).to_string();
+    FolderNode { role: Some(role), files, ..FolderNode::new(path, name) }
 }
 
-/// The canonical two-branch repository.
+fn top(path: &str, dialect: EngineKind, children: Vec<FolderNode>) -> FolderNode {
+    FolderNode {
+        engine: Some(FolderEngine::Supported(dialect)),
+        children,
+        ..FolderNode::new(path, path)
+    }
+}
+
+/// The canonical two-dialect repository.
 pub(crate) fn project() -> Project {
-    Project {
+    let mut project = Project {
         name: "PROD_CORE".to_string(),
         root: "/repo/prod-core".to_string(),
-        branches: vec![
-            Branch {
-                id: "ora".to_string(),
-                label: "ORACLE".to_string(),
-                dialect: Some(EngineKind::Oracle),
-                path: "ORACLE".to_string(),
-                folders: vec![
+        tree: vec![
+            top(
+                "ORACLE",
+                EngineKind::Oracle,
+                vec![
                     folder(
-                        "ora-init",
-                        "INIZIALIZZAZIONE",
-                        FolderRole::Init,
+                        "ORACLE/AGGIORNAMENTO",
+                        FolderRole::Update,
+                        vec![file("ORACLE/AGGIORNAMENTO/4_12__4_13.sql")],
+                    ),
+                    folder(
                         "ORACLE/INIZIALIZZAZIONE",
+                        FolderRole::Init,
                         vec![
                             file("ORACLE/INIZIALIZZAZIONE/01_TABELLE.sql"),
                             file("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql"),
                         ],
                     ),
-                    folder(
-                        "ora-upd",
-                        "AGGIORNAMENTO",
-                        FolderRole::Update,
-                        "ORACLE/AGGIORNAMENTO",
-                        vec![file("ORACLE/AGGIORNAMENTO/4_12__4_13.sql")],
-                    ),
                 ],
-            },
-            Branch {
-                id: "pg".to_string(),
-                label: "POSTGRES".to_string(),
-                dialect: Some(EngineKind::Postgres),
-                path: "POSTGRES".to_string(),
-                folders: vec![
+            ),
+            top(
+                "POSTGRES",
+                EngineKind::Postgres,
+                vec![
                     folder(
-                        "pg-init",
-                        "INIZIALIZZAZIONE",
-                        FolderRole::Init,
+                        "POSTGRES/AGGIORNAMENTO",
+                        FolderRole::Update,
+                        vec![file("POSTGRES/AGGIORNAMENTO/4_12__4_13.sql")],
+                    ),
+                    folder(
                         "POSTGRES/INIZIALIZZAZIONE",
+                        FolderRole::Init,
                         vec![
                             file("POSTGRES/INIZIALIZZAZIONE/01_tabelle.sql"),
                             file("POSTGRES/INIZIALIZZAZIONE/02_parametri.sql"),
                         ],
                     ),
-                    folder(
-                        "pg-upd",
-                        "AGGIORNAMENTO",
-                        FolderRole::Update,
-                        "POSTGRES/AGGIORNAMENTO",
-                        vec![file("POSTGRES/AGGIORNAMENTO/4_12__4_13.sql")],
-                    ),
                 ],
-            },
+            ),
         ],
-    }
+    };
+    resolve(&mut project.tree, None, None);
+    project
 }

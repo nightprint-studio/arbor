@@ -1,33 +1,55 @@
-//! `CONS001` / `CONS004` — the two ways two branches drift apart.
+//! `CONS001` / `CONS004` — the two ways two dialects drift apart.
 //!
-//! Everything here compares **folders of the same role**, never folders of the
-//! same name and never a whole branch against a whole branch. `ORACLE/
-//! INIZIALIZZAZIONE` and `POSTGRES/INIZIALIZZAZIONE` are counterparts because
-//! they are both `init`, not because somebody spelled them the same way; a
-//! project whose PostgreSQL branch calls it `SETUP` compares just as well.
+//! Everything here compares **lanes**: the folders that play one role for one
+//! dialect, against the folders that play the same role for another. The folders
+//! that initialise Oracle and the folders that initialise PostgreSQL are
+//! counterparts because they are both `init`, not because somebody spelled them
+//! the same way; a repository that calls one of them `SETUP`, or splits it across
+//! `INIZIALIZZAZIONE/2024/ORA` and `INIZIALIZZAZIONE/2025/ORA`, compares just as
+//! well.
 //!
-//! And nothing here talks about a branch whose dialect is unknown. `picus-project`
-//! refuses to guess an engine, and a rule that compared a `COMMON/` folder with
-//! the Oracle branch would report every object in the repository as missing from
-//! it — a first run that produces nothing but noise is a tool nobody opens twice.
+//! And nothing here talks about a folder no ancestor declares a dialect for.
+//! `picus-project` refuses to guess an engine, and a rule that compared an
+//! unclassified folder with the Oracle ones would report every object in the
+//! repository as missing from it — a first run that produces nothing but noise is
+//! a tool nobody opens twice.
 //!
-//! The other axis — one branch's initialisation against its own updates — is
+//! ## Portable folders are in **every** lane
+//!
+//! A folder declared portable holds SQL that runs on both engines, so what it
+//! writes is present on both. `FolderNode::is_in_lane` therefore puts it in the
+//! Oracle lane and the PostgreSQL lane at once — the first thing in the model to
+//! belong to more than one — and two consequences follow that are worth stating
+//! rather than discovering:
+//!
+//! * **`CONS001` cannot report it as a gap.** `coverage_of` sums a lane's
+//!   folders, so a portable folder's statements are added to *both* dialects'
+//!   totals and neither reads zero. That is the intended answer, not
+//!   double-counting: the sums are per dialect and never added together, and a
+//!   row that really is installed on both engines really does cover both.
+//! * **The one-finding-per-object-per-dialect dedup is untouched.** It is keyed
+//!   on the dialect that is *missing* something, and a portable folder only ever
+//!   removes gaps. It cannot produce a second finding, only prevent a first.
+//!
+//! `CONS004` deliberately leaves portable folders out — see the note there.
+//!
+//! The other axis — one dialect's initialisation against its own updates — is
 //! `CONS002`/`CONS003`, in [`crate::rules::propagation`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use picus_inventory::prelude::{ObjectEntry, Placement};
+use picus_inventory::prelude::ObjectEntry;
 use picus_parse::prelude::{line_col, DmlOperation, EngineKind};
-use picus_project::prelude::Branch;
+use picus_project::prelude::FolderNode;
 use picus_types::prelude::FolderRole;
 
 use crate::compare::{self, RowFingerprint};
-use crate::context::{branch_label, folders_with_role, Context};
+use crate::context::{engine_label, Context};
 use crate::finding::{Anchor, Finding};
 use crate::report::Output;
 use crate::rule::RuleId;
 
-/// The roles a cross-branch comparison is meaningful for, most significant
+/// The roles a cross-dialect comparison is meaningful for, most significant
 /// first. `Ignored` is absent by construction: it is what a folder gets when
 /// nobody could tell what it was for, and comparing two of those says nothing.
 const COMPARED_ROLES: [FolderRole; 4] =
@@ -41,7 +63,7 @@ pub(crate) fn run(context: &Context<'_>, output: &mut Output) {
 // ── CONS001 — covered here, not covered there ────────────────────────────────
 
 fn coverage_gaps(context: &Context<'_>, output: &mut Output) {
-    let branches = context.dialect_branches();
+    let dialects = context.dialects();
     for entry in &context.inventory.objects {
         // A package has no PostgreSQL counterpart to be missing from. Reporting
         // one would put a permanent, unfixable finding at the top of every
@@ -49,70 +71,67 @@ fn coverage_gaps(context: &Context<'_>, output: &mut Output) {
         if !entry.kind.exists_in_both_engines() {
             continue;
         }
-        // One finding per object per branch, at the most significant role where
-        // the gap shows. A table absent from a whole branch would otherwise be
+        // One finding per object per dialect, at the most significant role where
+        // the gap shows. A table absent from a whole dialect would otherwise be
         // reported once for init, once for data and once for update — three rows
         // for one problem and one fix.
-        let mut already: BTreeSet<&str> = BTreeSet::new();
+        let mut already: BTreeSet<EngineKind> = BTreeSet::new();
         for role in COMPARED_ROLES {
-            for (branch, covering) in gaps_at(entry, &branches, role) {
-                if already.insert(branch.id.as_str()) {
-                    output.findings.push(missing_finding(entry, branch, covering, role));
+            for (missing, covering) in gaps_at(entry, context, &dialects, role) {
+                if already.insert(missing) {
+                    output.findings.push(missing_finding(entry, context, missing, covering, role));
                 }
             }
         }
     }
 }
 
-/// Branches that do nothing with `entry` at `role` while another dialect's
-/// branch does, paired with the branch that does.
-fn gaps_at<'a>(
+/// Dialects that do nothing with `entry` at `role` while another dialect does,
+/// paired with the dialect that does.
+fn gaps_at(
     entry: &ObjectEntry,
-    branches: &[&'a Branch],
+    context: &Context<'_>,
+    dialects: &[EngineKind],
     role: FolderRole,
-) -> Vec<(&'a Branch, &'a Branch)> {
-    let participating: Vec<&'a Branch> =
-        branches.iter().copied().filter(|b| has_role(b, role)).collect();
-    let dialects: BTreeSet<EngineKind> = participating.iter().filter_map(|b| b.dialect).collect();
-    // Nothing to compare against: one branch, or several branches that are all
-    // the same engine.
-    if participating.len() < 2 || dialects.len() < 2 {
+) -> Vec<(EngineKind, EngineKind)> {
+    let participating: Vec<EngineKind> =
+        dialects.iter().copied().filter(|d| !context.lane(*d, role).is_empty()).collect();
+    // Nothing to compare against: only one dialect has a folder for this role.
+    if participating.len() < 2 {
         return Vec::new();
     }
-    let covered: Vec<&'a Branch> =
-        participating.iter().copied().filter(|b| coverage_of(entry, b, role) > 0).collect();
+    let covered: Vec<EngineKind> =
+        participating.iter().copied().filter(|d| coverage_of(entry, context, *d, role) > 0).collect();
     let Some(reference) = covered.first().copied() else { return Vec::new() };
     participating
         .into_iter()
-        .filter(|b| coverage_of(entry, b, role) == 0)
-        // Only against a branch of a *different* engine: two Oracle branches
-        // disagreeing is a different question from a dialect gap.
-        .filter(|b| b.dialect != reference.dialect)
-        .map(|b| (b, reference))
+        .filter(|d| coverage_of(entry, context, *d, role) == 0)
+        .map(|d| (d, reference))
         .collect()
 }
 
 fn missing_finding(
     entry: &ObjectEntry,
-    missing: &Branch,
-    covering: &Branch,
+    context: &Context<'_>,
+    missing: EngineKind,
+    covering: EngineKind,
     role: FolderRole,
 ) -> Finding {
-    let folder = folders_with_role(missing, role).next();
+    let lane = context.lane(missing, role);
     // The anchor is the folder, not a file inside it: no file in it is the one
     // that should have had the statement, and naming one would be a guess
     // dressed up as advice. The jump the user wants is `alsoAt`, which points at
-    // the branch that does do it.
-    let path = folder.map(|f| f.path.as_str()).unwrap_or(missing.path.as_str());
-    let elsewhere = entry.sites_in(&covering.id, role).next().map(|s| s.location());
+    // the dialect that does do it.
+    let path = lane.first().map(|f| f.path.as_str()).unwrap_or("");
+    let elsewhere = entry.sites_in(covering, role).next().map(|s| s.location());
 
     let mut draft = Finding::new(
         RuleId::Cons001,
-        Anchor::file(path, &missing.id),
-        format!("{} is not touched by the {} branch", entry.name, branch_label(missing)),
-        gap_consequence(entry, missing, covering, role),
+        Anchor::file(path),
+        format!("{} is not touched by the {} scripts", entry.name, engine_label(missing)),
+        gap_consequence(entry, context, missing, covering, role),
     )
-    .fix(format!("Generate for {} too", branch_label(missing)));
+    .fix(format!("Generate for {} too", engine_label(missing)));
     if let Some(location) = elsewhere {
         draft = draft.also_at(location);
     }
@@ -122,14 +141,15 @@ fn missing_finding(
 /// What actually goes wrong, which depends entirely on what the folder is for.
 fn gap_consequence(
     entry: &ObjectEntry,
-    missing: &Branch,
-    covering: &Branch,
+    context: &Context<'_>,
+    missing: EngineKind,
+    covering: EngineKind,
     role: FolderRole,
 ) -> String {
-    let count = coverage_of(entry, covering, role);
+    let count = coverage_of(entry, context, covering, role);
     let statements =
         if count == 1 { "1 statement".to_string() } else { format!("{count} statements") };
-    let (there, here) = (branch_label(covering), branch_label(missing));
+    let (there, here) = (engine_label(covering), engine_label(missing));
     match role {
         FolderRole::Init => format!(
             "The {there} initialisation runs {statements} against {name}; the {here} one runs none, \
@@ -143,7 +163,7 @@ fn gap_consequence(
             name = entry.name
         ),
         FolderRole::Data => format!(
-            "The {there} branch loads {name} with {statements} of reference data that {here} never \
+            "The {there} scripts load {name} with {statements} of reference data that {here} never \
              loads: the two installations answer the same query differently.",
             name = entry.name
         ),
@@ -152,17 +172,15 @@ fn gap_consequence(
              report, another procedure — fails at runtime on {here}.",
             name = entry.name
         ),
-        FolderRole::Ignored => format!("{} is absent from the {here} branch.", entry.name),
+        FolderRole::Ignored => format!("{} is absent from the {here} scripts.", entry.name),
     }
 }
 
-// ── CONS004 — both branches do it, differently ───────────────────────────────
+// ── CONS004 — both dialects do it, differently ───────────────────────────────
 
-/// What one branch writes into one object at one role.
+/// What one dialect writes into one object at one role.
 #[derive(Debug)]
 struct Written {
-    dialect: EngineKind,
-    label: String,
     columns: BTreeSet<String>,
     /// `None` once any statement turned out to be incomparable — a computed
     /// value, or an `INSERT … SELECT`. The columns survive that; the rows do not.
@@ -171,27 +189,33 @@ struct Written {
 }
 
 fn divergent_content(context: &Context<'_>, output: &mut Output) {
-    // Keyed by the role's wire word rather than by `FolderRole`, which is not
-    // `Ord` — unlike `EngineKind` and `ObjectKind`, its two neighbours in the
-    // same vocabulary.
-    let mut written: BTreeMap<(String, &'static str), BTreeMap<String, Written>> = BTreeMap::new();
+    // Keyed by the role's wire word so the map key stays a plain pair of things
+    // that print, which is what the message below needs anyway.
+    let mut written: BTreeMap<(String, &'static str), BTreeMap<EngineKind, Written>> =
+        BTreeMap::new();
     for (script, placement) in context.project.placed() {
-        let Some(dialect) = placement.branch.dialect else { continue };
-        if !COMPARED_ROLES.contains(&placement.folder.role) {
+        // A portable folder is deliberately not a side of this comparison. It
+        // writes the same rows to both engines by construction, so it can never
+        // be the *source* of a divergence between them — and putting it on both
+        // sides would compare it against itself and report nothing while hiding
+        // the real difference. A genuine gap is still caught: whatever a dialect
+        // folder writes that its counterpart does not is reported exactly as
+        // before, because the portable rows are absent from both sides equally.
+        let Some(dialect) = placement.effective_dialect() else { continue };
+        if !COMPARED_ROLES.contains(&placement.effective_role()) {
             continue;
         }
         for statement in &script.parsed.statements {
             for shape in statement.dml.iter().filter(|d| d.operation == DmlOperation::Insert) {
-                let key = (shape.table.folded_name(), placement.folder.role.as_str());
-                let per_branch = written.entry(key).or_default();
-                let slot = per_branch.entry(placement.branch.id.clone()).or_insert_with(|| {
-                    Written {
-                        dialect,
-                        label: branch_label(placement.branch),
-                        columns: BTreeSet::new(),
-                        rows: Some(BTreeSet::new()),
-                        anchor: anchor_of(script.source, script.path, placement, shape.table.range.start),
-                    }
+                let key = (shape.table.folded_name(), placement.effective_role().as_str());
+                let per_dialect = written.entry(key).or_default();
+                let slot = per_dialect.entry(dialect).or_insert_with(|| Written {
+                    columns: BTreeSet::new(),
+                    rows: Some(BTreeSet::new()),
+                    anchor: Anchor::at(
+                        script.path,
+                        line_col(script.source, shape.table.range.start).0,
+                    ),
                 });
                 slot.columns.extend(compare::written_columns(shape));
                 match (slot.rows.as_mut(), compare::comparable_rows(shape)) {
@@ -207,8 +231,8 @@ fn divergent_content(context: &Context<'_>, output: &mut Output) {
         }
     }
 
-    for ((table, role), per_branch) in written {
-        if let Some(finding) = divergence(&table, role, &per_branch) {
+    for ((table, role), per_dialect) in written {
+        if let Some(finding) = divergence(&table, role, &per_dialect) {
             output.findings.push(finding);
         }
     }
@@ -217,19 +241,21 @@ fn divergent_content(context: &Context<'_>, output: &mut Output) {
 fn divergence(
     table: &str,
     role: &str,
-    per_branch: &BTreeMap<String, Written>,
+    per_dialect: &BTreeMap<EngineKind, Written>,
 ) -> Option<Finding> {
-    let mut sides = per_branch.values();
-    let reference = sides.next()?;
-    let other = sides.find(|w| w.dialect != reference.dialect)?;
+    let mut sides = per_dialect.iter();
+    let (reference_dialect, reference) = sides.next()?;
+    let (other_dialect, other) = sides.next()?;
 
     // Report on the side that ends up with less: that is the installation which
     // will be missing something, and it is where the fix goes.
-    let (short, long) = if other.columns.len() < reference.columns.len() {
-        (other, reference)
-    } else {
-        (reference, other)
-    };
+    let ((short_dialect, short), (long_dialect, long)) =
+        if other.columns.len() < reference.columns.len() {
+            ((other_dialect, other), (reference_dialect, reference))
+        } else {
+            ((reference_dialect, reference), (other_dialect, other))
+        };
+    let (short_label, long_label) = (engine_label(*short_dialect), engine_label(*long_dialect));
 
     if short.columns != long.columns {
         let missing: Vec<&str> =
@@ -239,13 +265,11 @@ fn divergence(
                 Finding::new(
                     RuleId::Cons004,
                     short.anchor.clone(),
-                    format!("{table} is filled in differently in the two branches"),
+                    format!("{table} is filled in differently in the two dialects"),
                     format!(
-                        "The {long_label} branch writes {columns} into {table} and the {short_label} \
-                         branch never does, so the same row exists on both engines with those \
-                         columns left at their default on {short_label}.",
-                        long_label = long.label,
-                        short_label = short.label,
+                        "The {long_label} scripts write {columns} into {table} and the {short_label} \
+                         ones never do, so the same row exists on both engines with those columns \
+                         left at their default on {short_label}.",
                         columns = missing.join(", ")
                     ),
                 )
@@ -265,16 +289,12 @@ fn divergence(
     let only_here: Vec<&RowFingerprint> = short_rows.difference(long_rows).collect();
     let detail = match (only_there.first(), only_here.first()) {
         (Some(there), _) => format!(
-            "the {} branch inserts {} and the {} branch does not",
-            long.label,
-            compare::render(there),
-            short.label
+            "the {long_label} scripts insert {} and the {short_label} ones do not",
+            compare::render(there)
         ),
         (None, Some(here)) => format!(
-            "the {} branch inserts {}, which the {} branch does not",
-            short.label,
-            compare::render(here),
-            long.label
+            "the {short_label} scripts insert {}, which the {long_label} ones do not",
+            compare::render(here)
         ),
         (None, None) => return None,
     };
@@ -282,9 +302,9 @@ fn divergence(
         Finding::new(
             RuleId::Cons004,
             short.anchor.clone(),
-            format!("{table} is populated differently in the two branches"),
+            format!("{table} is populated differently in the two dialects"),
             format!(
-                "Both branches load {table} in their {role} scripts, but not with the same rows: \
+                "Both dialects load {table} in their {role} scripts, but not with the same rows: \
                  {detail}. The two installations disagree about data the application reads as fact.",
             ),
         )
@@ -295,16 +315,21 @@ fn divergence(
 
 // ── shared ───────────────────────────────────────────────────────────────────
 
-fn has_role(branch: &Branch, role: FolderRole) -> bool {
-    branch.folders.iter().any(|f| f.role == role)
-}
-
-fn coverage_of(entry: &ObjectEntry, branch: &Branch, role: FolderRole) -> usize {
-    folders_with_role(branch, role)
-        .map(|f| entry.coverage_in(&picus_inventory::prelude::coverage_key(&branch.id, &f.id)))
-        .sum()
-}
-
-fn anchor_of(source: &str, path: &str, placement: Placement<'_>, offset: usize) -> Anchor {
-    Anchor::at(path, &placement.branch.id, line_col(source, offset).0)
+/// How many statements the whole lane runs against this object.
+///
+/// Summed across the lane's folders rather than read from one of them: a
+/// repository that splits its updates over `2024/ORA` and `2025/ORA` has one
+/// update story, and counting either half alone would report the other as a gap.
+///
+/// A portable folder is in every lane, so its statements are counted once for
+/// Oracle and once for PostgreSQL. Not double-counting: these sums are per
+/// dialect and are never added to each other, and one portable `INSERT` genuinely
+/// does put the row in both installations.
+fn coverage_of(
+    entry: &ObjectEntry,
+    context: &Context<'_>,
+    dialect: EngineKind,
+    role: FolderRole,
+) -> usize {
+    context.lane(dialect, role).iter().map(|f: &&FolderNode| entry.coverage_in(&f.path)).sum()
 }

@@ -14,6 +14,7 @@ mod encoding;
 mod propagation;
 mod report;
 mod suppression;
+mod tree;
 mod version;
 
 use crate::report::Report;

@@ -70,7 +70,7 @@ fn every_corpus_input_round_trips_byte_for_byte() {
     let mut parser = SqlParser::new();
     for (file, name, input) in corpus_cases() {
         for engine in [EngineKind::Oracle, EngineKind::Postgres] {
-            let parsed = parser.parse(&input, engine);
+            let parsed = parser.parse(&input, DialectScope::One(engine));
             assert_eq!(
                 parsed.reassemble(&input),
                 input,
@@ -84,7 +84,7 @@ fn every_corpus_input_round_trips_byte_for_byte() {
 fn segments_tile_the_source_exactly_once() {
     let mut parser = SqlParser::new();
     for (file, name, input) in corpus_cases() {
-        let parsed = parser.parse(&input, EngineKind::Oracle);
+        let parsed = parser.parse(&input, DialectScope::One(EngineKind::Oracle));
         let mut cursor = 0usize;
         for segment in parsed.segments() {
             let range = segment.range();
@@ -100,7 +100,7 @@ fn segments_tile_the_source_exactly_once() {
 fn statement_ranges_are_ordered_disjoint_and_in_bounds() {
     let mut parser = SqlParser::new();
     for (file, name, input) in corpus_cases() {
-        let parsed = parser.parse(&input, EngineKind::Postgres);
+        let parsed = parser.parse(&input, DialectScope::One(EngineKind::Postgres));
         let mut previous_end = 0usize;
         for statement in &parsed.statements {
             assert!(
@@ -120,7 +120,7 @@ fn statement_ranges_are_ordered_disjoint_and_in_bounds() {
 fn the_whole_corpus_parses_without_hard_errors() {
     let mut parser = SqlParser::new();
     for (file, name, input) in corpus_cases() {
-        let parsed = parser.parse(&input, EngineKind::Oracle);
+        let parsed = parser.parse(&input, DialectScope::One(EngineKind::Oracle));
         let errors: Vec<String> = parsed
             .errors.iter()
             .map(|e| format!("{:?} at {:?} in {}: {}", e.kind, e.range, e.parent, e.text))
@@ -133,7 +133,7 @@ fn the_whole_corpus_parses_without_hard_errors() {
 fn every_corpus_input_yields_at_least_one_statement() {
     let mut parser = SqlParser::new();
     for (file, name, input) in corpus_cases() {
-        let parsed = parser.parse(&input, EngineKind::Oracle);
+        let parsed = parser.parse(&input, DialectScope::One(EngineKind::Oracle));
         assert!(
             !parsed.statements.is_empty(),
             "{file} / {name}: nothing was recognised as a statement"
@@ -149,8 +149,8 @@ fn parsing_is_independent_of_the_declared_dialect_except_for_findings() {
     // broken.
     let mut parser = SqlParser::new();
     for (file, name, input) in corpus_cases() {
-        let oracle = parser.parse(&input, EngineKind::Oracle);
-        let postgres = parser.parse(&input, EngineKind::Postgres);
+        let oracle = parser.parse(&input, DialectScope::One(EngineKind::Oracle));
+        let postgres = parser.parse(&input, DialectScope::One(EngineKind::Postgres));
         let oracle_ranges: Vec<_> = oracle.statements.iter().map(|s| s.range).collect();
         let postgres_ranges: Vec<_> = postgres.statements.iter().map(|s| s.range).collect();
         assert_eq!(oracle_ranges, postgres_ranges, "{file} / {name}");

@@ -210,36 +210,102 @@ export function tableDetail(id: string, name: string): Promise<TableInfo> {
   return picus('picus_table_detail', { id, name });
 }
 
-export interface RowPage {
+// ── Statements and held results ──────────────────────────────────────────────
+//
+// A read does not return "the rows": it returns a HELD CURSOR plus the first
+// window onto it. Everything after that is `picus_result_window` against the same
+// `resultId`, which is what makes scrolling a four-million-row table neither
+// repeat a row nor skip one — an `OFFSET`/`LIMIT` pair over a table being written
+// to does both.
+//
+// A cursor is a resource on someone's database. Every path that ends a result —
+// a tab closing, a new statement replacing it, a connection going down — has to
+// reach `picus_close_result`; the lifetime is owned by `stores/picus/result`.
+
+/** The answer to any statement: a read opens a result, a write reports its count. */
+export interface ExecuteResult {
+  /** Handle of the held cursor. `null` for a statement that returns no rows. */
+  resultId: string | null;
   columns: Column[];
+  /** The first window — rows `[0, rowCount)` of the result. */
   rows: CellValue[][];
-  offset: number;
-  /** Row estimate when cheaply available — never a `count(*)` over a huge table. */
-  total?: number;
+  /**
+   * The planner's row estimate. It arrives with the first window, costs nothing,
+   * and is wrong — anything displaying it must mark it approximate.
+   */
+  estimatedRows: number | null;
+  /** The exact length, when the backend already had it without counting. */
+  totalRows: number | null;
+  /** Server-side elapsed time in ms. */
+  elapsedMs: number;
+  /** Rows in this first window. */
+  rowCount: number;
+  /** True when this window already reached the end — the length is then exact. */
+  endOfResult: boolean;
+  /** Rows a write touched. `null` for a read. */
+  affected: number | null;
 }
 
-export function fetchPage(
-  id: string,
-  name: string,
+/**
+ * Run one statement. One door for every statement, read or write.
+ *
+ * `window` sizes the **first** window. Send the user's own "rows per window"
+ * setting: every later window uses it, and a first window of a different size than
+ * all the others is the kind of inconsistency nobody reports and everybody notices.
+ * Omitted, the backend picks its default.
+ */
+export function execute(
+  connectionId: string,
+  sql: string,
+  window?: number,
+): Promise<ExecuteResult> {
+  return picus('picus_execute', { connectionId, sql, window });
+}
+
+/** Open a relation's rows as a held result — the table tab's Data view. */
+export function openRelation(
+  connectionId: string,
+  relation: string,
+  window?: number,
+): Promise<ExecuteResult> {
+  return picus('picus_open_relation', { connectionId, relation, window });
+}
+
+export interface ResultWindow {
+  /**
+   * Echoes the requested offset. Load-bearing: a window that arrives after the
+   * user has scrolled elsewhere is matched to its request by this, and dropped
+   * when it belongs to a result that is no longer the one on screen.
+   */
+  offset: number;
+  rows: CellValue[][];
+  /** True when this window ran out — the result's length is then known exactly. */
+  endOfResult: boolean;
+}
+
+export function resultWindow(
+  connectionId: string,
+  resultId: string,
   offset: number,
   limit: number,
-): Promise<RowPage> {
-  return picus('picus_fetch_page', { id, name, offset, limit });
+): Promise<ResultWindow> {
+  return picus('picus_result_window', { connectionId, resultId, offset, limit });
 }
 
-// ── Statements ───────────────────────────────────────────────────────────────
-
-export interface ExecuteResult {
-  columns: Column[];
-  rows: CellValue[][];
-  elapsedMs: number;
-  rowCount: number;
-  truncated: boolean;
-  commandTag: string;
+/**
+ * The exact length of a held result.
+ *
+ * Slow by nature — it is the scan the estimate exists to avoid — so it is asked
+ * for in the background and abortable through {@link cancel} like any other
+ * statement on that connection.
+ */
+export function countResult(connectionId: string, resultId: string): Promise<{ total: number }> {
+  return picus('picus_count_result', { connectionId, resultId });
 }
 
-export function execute(id: string, sql: string, limit: number): Promise<ExecuteResult> {
-  return picus('picus_execute', { id, sql, limit });
+/** Release the cursor. Idempotent: closing an already-closed result is not an error. */
+export function closeResult(connectionId: string, resultId: string): Promise<void> {
+  return picus('picus_close_result', { connectionId, resultId });
 }
 
 /** Ask the server to cancel. A no-op when nothing is running — never an error. */

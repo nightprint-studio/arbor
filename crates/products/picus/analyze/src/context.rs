@@ -1,15 +1,28 @@
 //! [`Context`] — the lookups every rule needs, resolved once.
 //!
 //! Nothing here is a rule. It is the answers to the questions a rule keeps
-//! asking: which branches have a dialect at all, what this folder's naming scheme
-//! is, what the version table is called in comparison form. Resolving them in one
-//! place is not tidiness — it is the difference between one rule reading the
-//! configuration slightly differently from its neighbour and every rule agreeing.
+//! asking: which dialects the repository actually has, which folders play a role
+//! for one of them, what this folder's naming scheme is, what the version table
+//! is called in comparison form. Resolving them in one place is not tidiness — it
+//! is the difference between one rule reading the configuration slightly
+//! differently from its neighbour and every rule agreeing.
+//!
+//! ## The unit of comparison is a **lane**, not a branch
+//!
+//! `(dialect, role)`. The folders that initialise Oracle are one lane, the
+//! folders that initialise PostgreSQL are another, and the cross-dialect rules
+//! compare the two. A lane is plural on purpose: a repository that keeps its
+//! updates in `AGGIORNAMENTO/2024/ORA` and `AGGIORNAMENTO/2025/ORA` still has one
+//! update story, and a rule that took the first folder would compare half of it.
+//!
+//! Folders no ancestor declares a dialect for are in **no** lane, so they take
+//! part in nothing cross-dialect. `picus-project` refuses to guess an engine, and
+//! a rule that compared an unclassified folder with the Oracle ones would report
+//! every object in the repository as missing from it — a first run that produces
+//! nothing but noise is a tool nobody opens twice.
 
 use picus_inventory::prelude::{Inventory, ParsedProject};
-use picus_project::prelude::{
-    Branch, EngineKind, FolderConfig, NamingScheme, ProjectConfig, ScriptFolder,
-};
+use picus_project::prelude::{EngineKind, FolderDeclaration, FolderNode, NamingScheme, ProjectConfig};
 use picus_types::prelude::FolderRole;
 
 /// What the whole analysis works against.
@@ -35,60 +48,43 @@ impl<'a> Context<'a> {
         Context { project, config, inventory, version_table }
     }
 
-    /// Branches whose engine is known.
-    ///
-    /// A branch with no dialect is not half a branch, it is a folder nobody could
-    /// identify — `picus-project` refuses to guess because a wrong guess writes
-    /// Oracle syntax into a PostgreSQL file. The cross-branch rules honour the
-    /// same refusal: comparing a `COMMON/` folder against the Oracle branch would
-    /// report every object in the repository as missing from it.
-    pub fn dialect_branches(&self) -> Vec<&'a Branch> {
-        self.project.project().branches.iter().filter(|b| b.dialect.is_some()).collect()
+    /// Every dialect the repository declares somewhere, in a stable order.
+    pub fn dialects(&self) -> Vec<EngineKind> {
+        self.project.project().dialects()
     }
 
-    /// The configured settings for a folder, matched on its path.
-    pub fn folder_config(&self, folder: &ScriptFolder) -> Option<&'a FolderConfig> {
-        self.config
-            .branches
-            .iter()
-            .flat_map(|b| b.folders.iter())
-            .find(|f| f.path == folder.path)
+    /// The folders that play `role` for `dialect`.
+    pub fn lane(&self, dialect: EngineKind, role: FolderRole) -> Vec<&'a FolderNode> {
+        self.project.project().lane(dialect, role).collect()
     }
 
-    /// The naming scheme in force for a folder — its own, or the project's.
-    pub fn naming_for(&self, folder: &ScriptFolder) -> &'a NamingScheme {
-        match self.folder_config(folder) {
-            Some(configured) => self.config.naming_for(configured),
-            None => &self.config.naming,
-        }
+    /// Every folder of the repository, whatever it resolved to.
+    pub fn folders(&self) -> impl Iterator<Item = &'a FolderNode> {
+        self.project.project().walk()
+    }
+
+    /// What a folder or one of its ancestors declares, if anything.
+    pub fn declaration(&self, folder: &FolderNode) -> Option<&'a FolderDeclaration> {
+        self.config.declaration(&folder.path)
+    }
+
+    /// The naming scheme in force for a folder — the nearest declared one, or the
+    /// project's.
+    pub fn naming_for(&self, folder: &FolderNode) -> &'a NamingScheme {
+        self.config.naming_for(&folder.path)
     }
 }
 
 /// The display name of an engine, as the interface writes it.
+///
+/// Lives here rather than in one rule because five of them write it into a
+/// message, and a dialect that was "PostgreSQL" in one finding and "postgres" in
+/// the next would read as two different things.
 pub fn engine_label(engine: EngineKind) -> &'static str {
     match engine {
         EngineKind::Oracle => "Oracle",
         EngineKind::Postgres => "PostgreSQL",
     }
-}
-
-/// A branch as a person names it: the engine when it has one, the folder label
-/// otherwise.
-///
-/// Lives here rather than in one rule because three of them write it into a
-/// message, and a branch that was "PostgreSQL" in one finding and "POSTGRES" in
-/// the next would read as two different things.
-pub fn branch_label(branch: &Branch) -> String {
-    branch.dialect.map(engine_label).map(str::to_string).unwrap_or_else(|| branch.label.clone())
-}
-
-/// The folders of one role in a branch.
-///
-/// Plural on purpose: a project that keeps its updates in two folders still has
-/// one update story, and a rule that took the first folder would compare half of
-/// it.
-pub fn folders_with_role(branch: &Branch, role: FolderRole) -> impl Iterator<Item = &ScriptFolder> {
-    branch.folders.iter().filter(move |f| f.role == role)
 }
 
 /// An identifier in comparison form: unquoted folds to upper case, quoted keeps

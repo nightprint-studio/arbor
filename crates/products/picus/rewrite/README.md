@@ -43,7 +43,7 @@ every fallible decision is made before the first write, the only failures `commi
 I/O ones; when one does, every file already written is put back.
 
 "All or nothing" matters more here than usual: half a change applied across a two-dialect
-repository is worse than none of it, because the branches now disagree and the tool meant to
+repository is worse than none of it, because the two dialects now disagree and the tool meant to
 detect that is the one that caused it.
 
 ## Tests

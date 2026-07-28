@@ -1,15 +1,28 @@
 <script lang="ts">
   /**
-   * Inventory — the coverage matrix: every indexed object against every
-   * branch/folder that could define or touch it.
+   * Inventory — the coverage matrix: every indexed object against every place
+   * that could define or touch it.
    *
-   * Reading it is the point. A row of ones means the two branches agree. A zero
-   * is a hole: something exists in Oracle and not in PostgreSQL, or in the
-   * initialisation and not in the updates. Those holes are the `CONS001` /
-   * `CONS002` / `CONS003` family, and this table is where you see them before
-   * an installation does.
+   * ## Why the columns are not folders
+   *
+   * Coverage arrives keyed by folder path, and a real repository has hundreds of
+   * folders — one per delivered version, eleven of them called `ORA`. A column
+   * each is not a matrix, it is a horizontal scroll, and it answers a question
+   * nobody asks: "how many statements are in this exact directory".
+   *
+   * The question the rules ask, and the one a person asks, is **"does the Oracle
+   * side say what the PostgreSQL side says, and do the updates say what the
+   * initialisation says"**. Both are properties of the effective engine and the
+   * effective role. So those are the columns: six or eight, stable however many
+   * versions accumulate.
+   *
+   * Nothing is folded away for good. Expanding a row gives the per-folder numbers
+   * behind every column for that one object — which is where "*which* of the
+   * eleven version folders is missing it" is actually asked — and anything that
+   * landed outside the columns entirely is counted rather than rounded off, so a
+   * folded matrix can never look complete when it is not.
    */
-  import { Table2, Package, TriangleAlert, CheckCircle2 } from 'lucide-svelte';
+  import { Table2, Package, TriangleAlert, CheckCircle2, ChevronRight } from 'lucide-svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
@@ -21,30 +34,33 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
+  import {
+    bucketCoverage,
+    coverageBuckets,
+    elsewhereCount,
+    folderBreakdown,
+    ignoredFileCount,
+  } from '$lib/utils/picus/coverage';
+  import type { InventoryObject } from '$lib/types/picus';
 
   let query = $state('');
   const needle = $derived(query.trim().toLowerCase());
 
-  /** Matrix columns: one per branch/folder, carrying its dialect and role. */
-  const slots = $derived(
-    picusProjectStore.branches.flatMap((b) =>
-      b.folders.map((f) => ({
-        key: `${b.id}/${f.id}`,
-        branch: b.label,
-        folder: f.label,
-        dialect: b.dialect,
-        role: f.role,
-      })),
-    ),
-  );
+  /** Matrix columns: one per engine × role that this repository actually has. */
+  const buckets = $derived(coverageBuckets(picusProjectStore.tree));
+  const hidden = $derived(ignoredFileCount(picusProjectStore.tree));
 
   const rows = $derived(
     picusProjectStore.inventory.filter((o) => !needle || o.name.toLowerCase().includes(needle)),
   );
 
   const gapCount = $derived(
-    picusProjectStore.inventory.filter((o) => slots.some((s) => (o.coverage[s.key] ?? 0) === 0)).length,
+    picusProjectStore.inventory.filter((o) => buckets.some((b) => bucketCoverage(o, b) === 0)).length,
   );
+
+  /** Which object's folder-by-folder detail is open. One at a time — it is deep. */
+  let openObject = $state<string | null>(null);
+  function objectKey(obj: InventoryObject) { return `${obj.kind}/${obj.name}`; }
 </script>
 
 <div class="iv">
@@ -52,8 +68,9 @@
     <div>
       <h1>Inventory</h1>
       <p>
-        Every object the scripts define or touch, against every place that could define it.
-        A zero is a branch that stays silent about something the other one says.
+        Every object the scripts define or touch, against every engine and role that could
+        define it. A zero is one side staying silent about something another side says.
+        Open a row for the folder-by-folder detail behind its columns.
       </p>
     </div>
     <div class="iv-summary">
@@ -62,7 +79,7 @@
       {:else if gapCount}
         <span class="iv-gaps"><TriangleAlert size={13} /> {gapCount} object{gapCount === 1 ? '' : 's'} with gaps</span>
       {:else}
-        <span class="iv-ok"><CheckCircle2 size={13} /> Branches agree</span>
+        <span class="iv-ok"><CheckCircle2 size={13} /> Nothing missing</span>
       {/if}
       <button class="iv-link" onclick={() => picusUiStore.showBottom('consistency')}>
         Open the consistency report
@@ -73,6 +90,18 @@
   <div class="iv-search">
     <SearchBar bind:query showRegex={false} placeholder="Filter objects" ariaLabel="Filter objects" />
   </div>
+
+  {#if picusProjectStore.unclassifiedFolders.length}
+    <!-- Scripts under a folder no engine covers are indexed into no column at all.
+         Saying so is the difference between a matrix that is complete and one that
+         only looks it. -->
+    <Alert
+      variant="warning"
+      compact
+      title={`${picusProjectStore.unclassifiedFolders.length} folder(s) of scripts have no engine`}
+      text="Their statements belong to no column below. Classify them — Ctrl+Shift+F — and the matrix accounts for them."
+    />
+  {/if}
 
   {#if picusProjectStore.analysisError}
     <Alert
@@ -98,47 +127,108 @@
         <thead>
           <tr>
             <th class="iv-obj-th" scope="col">Object</th>
-            {#each slots as slot (slot.key)}
+            {#each buckets as bucket (bucket.key)}
               <th scope="col" class="iv-slot-th">
                 <span class="iv-slot">
-                  <PicusDialectChip dialect={slot.dialect} terse />
-                  <PicusRoleChip role={slot.role} terse />
+                  <PicusDialectChip dialect={bucket.dialect} terse />
+                  <PicusRoleChip role={bucket.role} terse />
                 </span>
-                <span class="iv-slot-name" title={`${slot.branch} / ${slot.folder}`}>{slot.folder}</span>
+                <span
+                  class="iv-slot-name"
+                  use:tooltip={{
+                    content: `${bucket.folders.length} folder(s), ${bucket.fileCount} file(s)`,
+                    description: bucket.folders.slice(0, 12).join('\n')
+                      + (bucket.folders.length > 12 ? `\n… and ${bucket.folders.length - 12} more` : ''),
+                  }}
+                >
+                  {bucket.folders.length} folder{bucket.folders.length === 1 ? '' : 's'}
+                </span>
               </th>
             {/each}
           </tr>
         </thead>
         <tbody>
-          {#each rows as obj (obj.name)}
+          <!-- Kind AND name — see the note in `InventoryPanel`: a name alone is
+               not unique, and a duplicate key is a hard error, not a glitch. -->
+          {#each rows as obj (objectKey(obj))}
+            {@const key = objectKey(obj)}
+            {@const expanded = openObject === key}
+            {@const stray = elsewhereCount(obj, buckets)}
             <tr>
               <th scope="row" class="iv-obj">
+                <button
+                  class="iv-twist"
+                  class:iv-open={expanded}
+                  aria-expanded={expanded}
+                  aria-label={`Folder detail for ${obj.name}`}
+                  onclick={() => (openObject = expanded ? null : key)}
+                >
+                  <ChevronRight size={12} />
+                </button>
                 {#if obj.kind === 'table'}<Table2 size={13} />{:else}<Package size={13} />{/if}
                 <span class="iv-obj-name">{obj.name}</span>
                 <Badge variant="tone" tone="neutral" size="sm" label={obj.kind} />
+                {#if stray}
+                  <span
+                    class="iv-stray"
+                    use:tooltip={'Statements in folders no column covers — an ignored folder, or one with no engine'}
+                  >
+                    +{stray} elsewhere
+                  </span>
+                {/if}
               </th>
-              {#each slots as slot (slot.key)}
-                {@const n = obj.coverage[slot.key] ?? 0}
+              {#each buckets as bucket (bucket.key)}
+                {@const n = bucketCoverage(obj, bucket)}
                 <td class="iv-cell" class:iv-zero={n === 0} class:iv-many={n > 1}>
                   <span
                     use:tooltip={n === 0
-                      ? `${obj.name} is never touched in ${slot.branch} / ${slot.folder}`
-                      : `${n} statement${n === 1 ? '' : 's'} in ${slot.branch} / ${slot.folder}`}
+                      ? `${obj.name} is never touched under ${bucket.label}`
+                      : `${n} statement${n === 1 ? '' : 's'} under ${bucket.label}`}
                   >
                     {n === 0 ? '—' : n}
                   </span>
                 </td>
               {/each}
             </tr>
+
+            {#if expanded}
+              <tr class="iv-detail-row">
+                <td class="iv-detail" colspan={buckets.length + 1}>
+                  <!-- The folded detail, for this object only: which folder in each
+                       column says something, and which stays quiet. -->
+                  <div class="iv-detail-grid">
+                    {#each buckets as bucket (bucket.key)}
+                      <div class="iv-detail-col">
+                        <span class="iv-detail-head">{bucket.label}</span>
+                        {#each folderBreakdown(obj, bucket) as line (line.path)}
+                          <span class="iv-detail-line" class:iv-detail-zero={line.count === 0}>
+                            <span class="iv-detail-path">{line.path}</span>
+                            <span class="iv-detail-n">{line.count === 0 ? '—' : line.count}</span>
+                          </span>
+                        {/each}
+                      </div>
+                    {/each}
+                  </div>
+                </td>
+              </tr>
+            {/if}
           {/each}
         </tbody>
       </table>
     </div>
+
+    {#if hidden}
+      <p class="iv-note">
+        {hidden} file{hidden === 1 ? '' : 's'} sit under folders whose role is <b>ignored</b>.
+        They are not indexed, so they are not a column here — a column of zeroes for them
+        would read as a gap instead of as a choice.
+      </p>
+    {/if}
   {/if}
 
-  <!-- Indexed, but claimed by no branch: not a gap between the two, a place
-       outside the model. Hiding it would make the matrix above look complete. -->
-  <NoticeList notes={picusProjectStore.orphans} label="Outside every branch" />
+  <!-- Indexed, but claimed by no classified folder: not a gap between engines, a
+       place outside the model. Hiding it would make the matrix look complete. -->
+  <NoticeList notes={picusProjectStore.orphans} label="Outside every classified folder" />
 </div>
 
 <style>
@@ -194,7 +284,7 @@
     white-space: nowrap;
   }
   .iv-slot { display: flex; align-items: center; gap: 4px; margin-bottom: 3px; }
-  .iv-slot-name { font-size: 10px; color: var(--text-disabled); }
+  .iv-slot-name { font-size: 10px; color: var(--text-disabled); text-transform: none; letter-spacing: 0; }
 
   .iv-obj {
     display: flex;
@@ -208,17 +298,68 @@
   .iv-obj :global(svg) { color: var(--text-muted); }
   .iv-obj-name { font-family: var(--font-code); font-size: 11.5px; }
 
+  /* Disclosure for the per-folder detail of one object. */
+  .iv-twist {
+    display: inline-flex;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--text-disabled);
+    cursor: pointer;
+    transition: transform var(--transition-fast);
+  }
+  .iv-twist.iv-open { transform: rotate(90deg); }
+  .iv-twist:hover { color: var(--text-primary); }
+
+  /* Statements the columns do not account for — never rounded away. */
+  .iv-stray {
+    font-size: 10px;
+    color: var(--warning);
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
   .iv-cell {
     padding: 6px 10px;
     text-align: center;
     font-variant-numeric: tabular-nums;
     color: var(--text-secondary);
   }
-  /* A gap is the thing worth seeing: an object one branch never mentions. */
+  /* A gap is the thing worth seeing: something one side never mentions. */
   .iv-zero { color: var(--error); font-weight: 700; background: var(--error-subtle); }
   /* More than one statement is not wrong, but it is worth a glance (DUP002). */
   .iv-many { color: var(--warning); font-weight: 600; }
 
   .iv-table tbody tr:hover td,
   .iv-table tbody tr:hover th { background: var(--bg-hover); }
+
+  .iv-detail-row:hover td { background: var(--bg-elevated); }
+  .iv-detail { padding: 8px 10px 10px 28px; background: var(--bg-elevated); }
+  .iv-detail-grid {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+  }
+  .iv-detail-col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .iv-detail-head {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+  }
+  .iv-detail-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-family: var(--font-code);
+    font-size: 10.5px;
+    color: var(--text-secondary);
+  }
+  .iv-detail-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
+  .iv-detail-n { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .iv-detail-zero { color: var(--error); }
+
+  .iv-note { font-size: 11.5px; line-height: 1.55; color: var(--text-muted); max-width: 90ch; }
 </style>

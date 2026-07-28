@@ -2,9 +2,13 @@
 //!
 //! A parsed file on its own says nothing useful about consistency: the same
 //! INSERT means one thing in an initialisation folder and another in an update
-//! folder, and *which branch it is in* is the whole point. So the input to both
-//! this crate and `picus-analyze` is the parse **joined to the project tree**,
-//! and the join is done once, here, rather than re-derived by every rule.
+//! folder, and *which dialect it is written in* is the whole point. So the input
+//! to both this crate and `picus-analyze` is the parse **joined to the project
+//! tree**, and the join is done once, here, rather than re-derived by every rule.
+//!
+//! The join is to a folder, and the folder already knows everything a rule asks:
+//! its dialect and its role are the resolved ones, inherited from wherever in the
+//! tree they were declared.
 //!
 //! Deliberately borrowed throughout. A `ParsedFile` is a map of a string the
 //! caller still owns (`picus-parse`'s invariant); copying either into this crate
@@ -14,7 +18,8 @@
 use std::collections::HashMap;
 
 use picus_parse::prelude::ParsedFile;
-use picus_project::prelude::{Branch, Project, ScriptFile, ScriptFolder};
+use picus_project::prelude::{FolderNode, Project, ScriptFile};
+use picus_types::prelude::{DialectScope, EngineKind, FolderRole};
 
 /// One parsed script, keyed by the path that joins it to the project tree.
 #[derive(Debug, Clone, Copy)]
@@ -34,22 +39,59 @@ pub struct ParsedScript<'a> {
 /// Where a file sits in the repository, and therefore what is expected of it.
 #[derive(Debug, Clone, Copy)]
 pub struct Placement<'a> {
-    pub branch: &'a Branch,
-    pub folder: &'a ScriptFolder,
+    pub folder: &'a FolderNode,
     pub file: &'a ScriptFile,
 }
 
-impl Placement<'_> {
-    /// The `"<branchId>/<folderId>"` column this file's statements count towards.
-    pub fn coverage_key(&self) -> String {
-        coverage_key(&self.branch.id, &self.folder.id)
+impl<'a> Placement<'a> {
+    /// The column this file's statements count towards: **the folder's path**,
+    /// which is its identity everywhere else too.
+    pub fn coverage_key(&self) -> &'a str {
+        &self.folder.path
     }
-}
 
-/// The key one coverage cell is stored under. Fixed here so the backend and the
-/// interface cannot spell it differently.
-pub fn coverage_key(branch_id: &str, folder_id: &str) -> String {
-    format!("{branch_id}/{folder_id}")
+    /// The **single** dialect these scripts are written in, or `None` when there
+    /// is not exactly one — nobody declared an engine, the engine is one Picus
+    /// does not read, or the folder is **portable** and answers for both.
+    ///
+    /// A rule asking "which side of the comparison is this" wants
+    /// [`covers`](Self::covers); this one is for the rules that need one dialect
+    /// and genuinely have nothing to say without it.
+    pub fn effective_dialect(&self) -> Option<EngineKind> {
+        self.folder.effective_dialect()
+    }
+
+    /// What these scripts have to be valid in — the parse and emit target.
+    ///
+    /// `None` only for an engine Picus does not read and for one nobody declared.
+    pub fn scope(&self) -> Option<DialectScope> {
+        self.folder.scope()
+    }
+
+    /// Does what is written here count as present for `dialect`?
+    ///
+    /// True of **both** for a portable folder. Every cross-dialect rule asks this
+    /// rather than comparing `effective_dialect`, because a row inserted by a
+    /// portable script really is present on both engines and reporting it as
+    /// missing from either would be reporting the opposite of the truth.
+    pub fn covers(&self, dialect: EngineKind) -> bool {
+        self.folder.covers(dialect)
+    }
+
+    /// Every dialect this placement answers for — two for a portable folder.
+    pub fn dialects(&self) -> &'static [EngineKind] {
+        self.folder.effective_engine.map(|e| e.dialects()).unwrap_or(&[])
+    }
+
+    /// Portable SQL: written to run on every dialect Picus supports.
+    pub fn is_generic(&self) -> bool {
+        self.folder.is_generic()
+    }
+
+    /// What the folder is for, after inheritance.
+    pub fn effective_role(&self) -> FolderRole {
+        self.folder.effective_role
+    }
 }
 
 /// A repository's tree with its files parsed.
@@ -71,11 +113,9 @@ impl<'a> ParsedProject<'a> {
     /// repository it never read.
     pub fn new(project: &'a Project, scripts: Vec<ParsedScript<'a>>) -> Self {
         let mut placement: HashMap<&'a str, Placement<'a>> = HashMap::new();
-        for branch in &project.branches {
-            for folder in &branch.folders {
-                for file in &folder.files {
-                    placement.insert(file.path.as_str(), Placement { branch, folder, file });
-                }
+        for folder in project.walk() {
+            for file in &folder.files {
+                placement.insert(file.path.as_str(), Placement { folder, file });
             }
         }
         let orphans = scripts
@@ -114,11 +154,23 @@ impl<'a> ParsedProject<'a> {
     /// bearing part: a folder whose files were all skipped still gets a column,
     /// so its zeroes are visible. A column that only appeared when something was
     /// found would make "nothing here" indistinguishable from "nothing looked".
+    ///
+    /// Folders that hold no scripts of their own are left out: a directory that
+    /// exists only to contain other directories has no statements to count, and a
+    /// column that can never be anything but zero is noise in a table whose whole
+    /// point is that a zero means something.
+    ///
+    /// So are folders written in an engine Picus does not support. The paragraph
+    /// above is exactly why: their files are deliberately never parsed, so their
+    /// column can only ever read zero — and a permanent row of zeroes for the SQL
+    /// Server folders would read as "these are missing everything" when the truth
+    /// is "these are none of Picus's business". An unclassified folder is a
+    /// different case and keeps its column: there, the zeroes are the question.
     pub fn coverage_keys(&self) -> Vec<String> {
         self.project
-            .branches
-            .iter()
-            .flat_map(|b| b.folders.iter().map(move |f| coverage_key(&b.id, &f.id)))
+            .walk()
+            .filter(|folder| !folder.files.is_empty() && !folder.engine_is_unsupported())
+            .map(|folder| folder.path.clone())
             .collect()
     }
 }
@@ -129,7 +181,7 @@ mod tests {
     use crate::testing::{parsed, project};
 
     #[test]
-    fn a_script_finds_its_branch_folder_and_role() {
+    fn a_script_finds_its_folder_its_dialect_and_its_role() {
         let project = project();
         let parse = parsed("SELECT 1;", picus_parse::prelude::EngineKind::Oracle);
         let scripts = vec![ParsedScript {
@@ -139,9 +191,10 @@ mod tests {
         }];
         let joined = ParsedProject::new(&project, scripts);
         let place = joined.placement_of("ORACLE/INIZIALIZZAZIONE/01_TABELLE.sql").expect("placed");
-        assert_eq!(place.branch.id, "ora");
-        assert_eq!(place.folder.id, "ora-init");
-        assert_eq!(place.coverage_key(), "ora/ora-init");
+        assert_eq!(place.folder.path, "ORACLE/INIZIALIZZAZIONE");
+        assert_eq!(place.coverage_key(), "ORACLE/INIZIALIZZAZIONE");
+        assert_eq!(place.effective_dialect(), Some(EngineKind::Oracle));
+        assert_eq!(place.effective_role(), FolderRole::Init);
         assert!(joined.orphans().is_empty());
     }
 
@@ -157,14 +210,19 @@ mod tests {
     }
 
     #[test]
-    fn every_folder_gets_a_column_even_with_nothing_parsed() {
+    fn every_folder_that_holds_scripts_gets_a_column_even_with_nothing_parsed() {
         // Otherwise a folder nobody read looks exactly like a folder with no
         // findings, which is the failure this tool must never have.
         let project = project();
         let joined = ParsedProject::new(&project, Vec::new());
         assert_eq!(
             joined.coverage_keys(),
-            ["ora/ora-init", "ora/ora-upd", "pg/pg-init", "pg/pg-upd"]
+            [
+                "ORACLE/AGGIORNAMENTO",
+                "ORACLE/INIZIALIZZAZIONE",
+                "POSTGRES/AGGIORNAMENTO",
+                "POSTGRES/INIZIALIZZAZIONE",
+            ]
         );
     }
 }

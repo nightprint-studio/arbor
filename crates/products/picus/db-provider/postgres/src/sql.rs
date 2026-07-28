@@ -92,7 +92,7 @@ pub fn statement_kind(sql: &str) -> StatementKind {
 }
 
 /// The first real keyword of a statement, upper-cased. `""` when there is none.
-fn leading_keyword(s: &str) -> String {
+pub(crate) fn leading_keyword(s: &str) -> String {
     s.split(|c: char| c.is_whitespace() || c == '(' || c == ';')
         .find(|w| !w.is_empty())
         .unwrap_or("")
@@ -102,7 +102,7 @@ fn leading_keyword(s: &str) -> String {
 /// Drop leading whitespace and comments so the first real keyword is reachable.
 /// Handles `--` line comments and `/* */` blocks (including nested ones, which
 /// PostgreSQL allows).
-fn strip_leading_noise(sql: &str) -> &str {
+pub(crate) fn strip_leading_noise(sql: &str) -> &str {
     let mut s = sql.trim_start();
     loop {
         if let Some(rest) = s.strip_prefix("--") {
@@ -169,7 +169,7 @@ pub fn guard_read_only(sql: &str, read_only: bool) -> Result<(), DbError> {
     }
 }
 
-// ── Bounding a result set at the server ────────────────────────────────────────
+// ── Statement scanning ─────────────────────────────────────────────────────────
 
 /// The single statement `sql` contains, trimmed and without its terminating `;` —
 /// or `None` when it holds none, or more than one.
@@ -287,32 +287,6 @@ fn dollar_tag_end(sql: &str, at: usize) -> Option<usize> {
         j += 1;
     }
     None
-}
-
-/// Wrap a statement so the **server** stops at `limit` rows, or `None` when it
-/// cannot safely be wrapped.
-///
-/// This is the difference between reading a page of a table and reading the table.
-/// Without it a `SELECT * FROM orders` on a few million rows crosses the wire in
-/// full and is only then cut down to the display cap — the user waits for, and this
-/// process holds, every row they will never see.
-///
-/// Wrapping rather than appending `LIMIT` is what makes it correct in the presence
-/// of the user's own `LIMIT`, `ORDER BY` or `UNION`: the inner statement keeps its
-/// own meaning and the cap applies to whatever it produced. Only a single read
-/// beginning `SELECT` or `WITH` qualifies — `SHOW`, `EXPLAIN` and `TABLE t` are not
-/// valid in a `FROM`, and a write must never be silently reshaped.
-pub fn capped_statement(sql: &str, limit: u32) -> Option<String> {
-    let body = single_statement(sql)?;
-    if statement_kind(body) != StatementKind::Read {
-        return None;
-    }
-    if !matches!(leading_keyword(strip_leading_noise(body)).as_str(), "SELECT" | "WITH") {
-        return None;
-    }
-    // The trailing newline matters: a statement ending in a `--` comment would
-    // otherwise swallow the closing parenthesis.
-    Some(format!("SELECT * FROM (\n{body}\n) AS \"picus_capped\"\nLIMIT {limit}"))
 }
 
 // ── pg_trigger.tgtype bit decoding ─────────────────────────────────────────────
@@ -483,46 +457,6 @@ mod tests {
     fn an_unterminated_literal_is_left_alone() {
         assert_eq!(single_statement("SELECT 'oops"), None);
         assert_eq!(single_statement("SELECT /* oops"), None);
-    }
-
-    #[test]
-    fn a_read_is_capped_at_the_server() {
-        let out = capped_statement("SELECT * FROM orders", 501).expect("wrappable");
-        assert!(out.starts_with("SELECT * FROM ("), "{out}");
-        assert!(out.ends_with("LIMIT 501"), "{out}");
-        assert!(out.contains("SELECT * FROM orders"));
-    }
-
-    #[test]
-    fn the_users_own_limit_survives_being_capped() {
-        // Wrapping (rather than appending) is what makes this correct: the inner
-        // LIMIT still means what it said.
-        let out = capped_statement("SELECT a FROM t ORDER BY a LIMIT 10", 501).expect("wrappable");
-        assert!(out.contains("ORDER BY a LIMIT 10"));
-        assert!(out.ends_with("LIMIT 501"));
-    }
-
-    #[test]
-    fn a_cte_is_wrappable_and_a_write_is_never_reshaped() {
-        assert!(capped_statement("WITH x AS (SELECT 1) SELECT * FROM x", 10).is_some());
-        assert_eq!(capped_statement("UPDATE t SET a = 1", 10), None);
-        assert_eq!(capped_statement("WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d", 10), None);
-    }
-
-    #[test]
-    fn statements_that_cannot_sit_in_a_from_are_left_alone() {
-        assert_eq!(capped_statement("SHOW search_path", 10), None);
-        assert_eq!(capped_statement("EXPLAIN SELECT 1", 10), None);
-        assert_eq!(capped_statement("TABLE orders", 10), None);
-        assert_eq!(capped_statement("SET search_path TO x", 10), None);
-        assert_eq!(capped_statement("SELECT 1; SELECT 2", 10), None, "multi-statement");
-    }
-
-    #[test]
-    fn a_trailing_comment_cannot_swallow_the_closing_parenthesis() {
-        let out = capped_statement("SELECT 1 -- trailing", 5).expect("wrappable");
-        // The newline before `)` is the whole point.
-        assert!(out.contains("-- trailing\n)"), "{out}");
     }
 
     #[test]

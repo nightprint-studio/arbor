@@ -84,7 +84,7 @@
           </button>
         {/snippet}
         <span class="gp-chips">
-          <PicusDialectChip dialect={target.dialect} terse />
+          <PicusDialectChip engine={target.dialect} terse />
           <PicusRoleChip role={target.role} terse />
           {#if target.wrap === 'block'}
             <Badge variant="tone" tone="accent" size="sm" label="block" />

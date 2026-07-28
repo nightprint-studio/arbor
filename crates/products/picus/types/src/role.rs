@@ -10,7 +10,12 @@
 use serde::{Deserialize, Serialize};
 
 /// What a folder of scripts is FOR. Drives which rules a target defaults to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// Ordered, in the order declared below — which is [`FolderRole::ALL`], the order
+/// the interface lists them in. The ordering earns its keep as a map key: the
+/// rules group folders by `(dialect, role)`, and a lane that sorted differently
+/// from run to run would reorder the report for no reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FolderRole {
     /// Runs on a fresh install. Bare statements, no guards.
@@ -49,6 +54,16 @@ impl FolderRole {
         }
     }
 
+    /// Parse a wire word; `None` for anything unrecognised.
+    ///
+    /// The counterpart of [`EngineKind::from_wire`](crate::kind::EngineKind::from_wire),
+    /// and it exists for the same reason: settings that a human types into a TOML
+    /// file are stored as plain strings so a typo degrades to the default and is
+    /// reported, rather than failing the parse and resetting the rest of the file.
+    pub fn from_wire(s: &str) -> Option<Self> {
+        FolderRole::ALL.iter().copied().find(|r| r.as_str() == s)
+    }
+
     /// Can a generation be written into a folder with this role?
     ///
     /// `Ignored` is the only no, and it is a hard no rather than a UI hint: it is
@@ -76,6 +91,15 @@ mod tests {
             let json = serde_json::to_string(&role).unwrap();
             assert_eq!(json, format!("\"{}\"", role.as_str()));
         }
+    }
+
+    #[test]
+    fn wire_words_round_trip() {
+        for role in FolderRole::ALL {
+            assert_eq!(FolderRole::from_wire(role.as_str()), Some(role));
+        }
+        assert_eq!(FolderRole::from_wire("initialisation"), None);
+        assert_eq!(FolderRole::from_wire(""), None);
     }
 
     #[test]

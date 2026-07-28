@@ -5,7 +5,7 @@
 //! vocabulary from `picus-types` is re-exported here so a script-side call site
 //! imports one prelude rather than two.
 
-pub use picus_types::prelude::{Column, EngineKind};
+pub use picus_types::prelude::{Column, DialectScope, EngineKind};
 
 pub use crate::dml::{DmlModel, DmlOperation, DmlRow, VersionTableConfig};
 pub use crate::target::{FolderRole, Target, TargetGuards, TargetWrap, VersionGuard};

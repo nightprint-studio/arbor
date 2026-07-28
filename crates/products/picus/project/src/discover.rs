@@ -12,24 +12,36 @@
 //! and only then is [`crate::config::ProjectConfig::save`] called. A tool that
 //! guessed and wrote would be a tool nobody could trust with a repository.
 //!
-//! When a project file already exists it **wins** over every inference: roles,
-//! labels and dialects come from the file, and discovery only fills in what the
-//! file cannot know — which files exist and what encoding they turned out to be.
+//! ## The tree is the repository's own
+//!
+//! Every directory holding scripts becomes a [`FolderNode`] where it actually
+//! sits — no branches, no flattening, no two-level assumption. Directories in
+//! between are kept even when they hold no scripts themselves, because they are
+//! what a declaration inherits *through*.
+//!
+//! What each folder declares comes from the project file if it says anything
+//! about that path, and from [`crate::infer`] otherwise; what *applies* to it is
+//! then [`crate::resolve`]'s answer. When a project file already exists it
+//! **wins** over every inference, and discovery only fills in what the file cannot
+//! know — which files exist and what encoding they turned out to be.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use arbor_fs::prelude::encoding::{detect_in_context, EncodingContext};
-use picus_types::prelude::FolderRole;
+use picus_types::prelude::{FolderEngine, FolderRole};
 
+use crate::alias::AliasVocabulary;
 use crate::config::{
-    BranchConfig, EncodingSettings, FolderConfig, GenerationSettings, ProjectConfig,
-    VersionTableSettings, CURRENT_VERSION, DEFAULT_ENCODING,
+    EncodingSettings, FolderDeclaration, GenerationSettings, ProjectConfig, VersionTableSettings,
+    CURRENT_VERSION, DEFAULT_ENCODING,
 };
 use crate::error::ProjectError;
-use crate::infer::{infer_dialect, infer_role};
+use crate::infer::{infer_engine_in, infer_role_in};
 use crate::naming::NamingScheme;
-use crate::tree::{Branch, LineEnding, Project, ScriptFile, ScriptFolder};
+use crate::path::{last_segment, parent_of};
+use crate::resolve::resolve;
+use crate::tree::{FolderNode, LineEnding, Project, ScriptFile};
 
 /// Extensions that count as script files. Anything else is not part of the
 /// installation and is not shown — a repository full of `.docx` and `.zip` should
@@ -84,6 +96,9 @@ pub struct Proposal {
     pub is_new: bool,
 }
 
+/// Files of one directory, keyed by the directory's project-relative path.
+type FilesByDir<'a> = BTreeMap<&'a str, Vec<&'a SourceFile>>;
+
 /// Work out what a repository is, from its files. Pure.
 pub fn plan(root: &Path, files: &[SourceFile], existing: Option<&ProjectConfig>) -> Proposal {
     let name = existing
@@ -91,157 +106,45 @@ pub fn plan(root: &Path, files: &[SourceFile], existing: Option<&ProjectConfig>)
         .or_else(|| root.file_name().map(|n| n.to_string_lossy().to_string()))
         .unwrap_or_else(|| "project".to_string());
 
-    let default_encoding =
-        existing.map(|c| c.encoding.default.clone()).unwrap_or_else(|| DEFAULT_ENCODING.to_string());
-
-    // Group by directory, then by branch. `BTreeMap` rather than a hash map
-    // throughout: the order of branches and folders is user-visible, and it must
-    // not depend on how the filesystem happened to enumerate them.
-    let mut by_dir: BTreeMap<&str, Vec<&SourceFile>> = BTreeMap::new();
+    // `BTreeMap`/`BTreeSet` throughout: the order of folders and files is
+    // user-visible, and it must not depend on how the filesystem happened to
+    // enumerate them.
+    let mut by_dir: FilesByDir = BTreeMap::new();
     for file in files.iter().filter(|f| is_script(&f.path)) {
         by_dir.entry(parent_of(&file.path)).or_default().push(file);
     }
-    let mut by_branch: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for dir in by_dir.keys() {
-        by_branch.entry(branch_segment(dir)).or_default().push(dir);
+    let dirs = directories(&by_dir);
+
+    let builder = Builder {
+        existing,
+        // Compiled once per scan and consulted for every folder. A repository
+        // that declares nothing gets `EMPTY`, so there is one code path rather
+        // than a "with vocabulary" and a "without" one.
+        aliases: existing.map(ProjectConfig::vocabulary).unwrap_or(AliasVocabulary::EMPTY),
+        default_encoding: existing
+            .map(|c| c.encoding.default.clone())
+            .unwrap_or_else(|| DEFAULT_ENCODING.to_string()),
+    };
+
+    let mut tree = builder.children_of("", &dirs, &by_dir);
+    // Scripts sitting in the repository root itself: a node of their own, so they
+    // are visible and classifiable like everything else. Its path is `""`, and it
+    // declares nothing — a declaration on `""` is the *repository's*, which every
+    // top-level folder inherits from, so it is passed to the resolver instead.
+    if let Some(root_files) = by_dir.get("") {
+        let node = FolderNode {
+            files: builder.script_files("", root_files),
+            ..FolderNode::new("", name.clone())
+        };
+        tree.insert(0, node);
     }
 
-    let mut notes = Vec::new();
-    let mut branches = Vec::new();
-    let mut branch_configs = Vec::new();
-
-    for (branch_path, dirs) in &by_branch {
-        let branch_id = slug(if branch_path.is_empty() { "root" } else { branch_path });
-        let configured_branch =
-            existing.and_then(|c| c.branches.iter().find(|b| b.path == *branch_path));
-        // A label the user rewrote is a decision, exactly like a role they
-        // corrected, and a rescan must not quietly restore the folder's own name.
-        let branch_label = match configured_branch {
-            Some(b) => b.label.clone(),
-            None => last_segment(branch_path).unwrap_or(&name).to_string(),
-        };
-        let dialect = match configured_branch {
-            Some(b) => b.dialect,
-            None => {
-                let guess = infer_dialect(&branch_label);
-                if guess.is_none() {
-                    notes.push(ProposalNote {
-                        path: branch_path.to_string(),
-                        message: format!(
-                            "nothing in the name `{branch_label}` says which engine this branch is written in — \
-                             pick one, or leave it unset and nothing will be generated into it"
-                        ),
-                        needs_attention: true,
-                    });
-                }
-                guess.map(|g| g.value)
-            }
-        };
-
-        let mut folders = Vec::new();
-        let mut folder_configs = Vec::new();
-
-        for dir in dirs {
-            let files_here = &by_dir[*dir];
-            let configured_folder =
-                configured_branch.and_then(|b| b.folders.iter().find(|f| f.path == **dir));
-
-            let label = match configured_folder {
-                Some(f) => f.label.clone(),
-                None => last_segment(dir).unwrap_or(&name).to_string(),
-            };
-            let role = match configured_folder {
-                Some(f) => f.role,
-                None => {
-                    let guess = infer_role_for(dir, branch_path);
-                    if !guess.is_confident() {
-                        notes.push(ProposalNote {
-                            path: dir.to_string(),
-                            message: format!(
-                                "`{label}` does not look like any folder Picus recognises, so it is marked \
-                                 as ignored — nothing will be generated into it until you say what it is"
-                            ),
-                            needs_attention: true,
-                        });
-                    }
-                    guess.value
-                }
-            };
-
-            // The folder's own encoding vote. Files that are pure ASCII abstain,
-            // which is exactly right: they are the ones being decided.
-            let mut context = EncodingContext::new()
-                .with_legacy(label_to_encoding(&default_encoding));
-            if let Some(pinned) = configured_folder.and_then(|f| f.encoding.as_deref()) {
-                context = context.with_dominant(label_to_encoding(pinned));
-            }
-            for file in files_here {
-                context.observe(&file.sample);
-            }
-            let expected = context
-                .dominant()
-                .map(|e| e.name().to_string())
-                .unwrap_or_else(|| default_encoding.clone());
-
-            let mut script_files = Vec::new();
-            for file in files_here {
-                let detection = detect_in_context(&file.sample, &context);
-                let script = ScriptFile {
-                    path: file.path.clone(),
-                    name: last_segment(&file.path).unwrap_or(&file.path).to_string(),
-                    size: file.size,
-                    encoding: detection.encoding.name().to_string(),
-                    encoding_source: detection.source,
-                    eol: LineEnding::detect(&file.sample),
-                    expected_encoding: expected.clone(),
-                };
-                if script.encoding_drifted() {
-                    notes.push(ProposalNote {
-                        path: script.path.clone(),
-                        message: format!(
-                            "this file is {} while the rest of `{label}` is {expected} — \
-                             it was probably rewritten by an editor that did not know",
-                            script.encoding
-                        ),
-                        needs_attention: false,
-                    });
-                }
-                script_files.push(script);
-            }
-            script_files.sort_by(|a, b| a.path.cmp(&b.path));
-
-            folder_configs.push(FolderConfig {
-                id: slug(dir),
-                label: label.clone(),
-                path: dir.to_string(),
-                role,
-                encoding: configured_folder.and_then(|f| f.encoding.clone()),
-                naming: configured_folder.and_then(|f| f.naming.clone()),
-            });
-            folders.push(ScriptFolder {
-                id: slug(dir),
-                label,
-                role,
-                path: dir.to_string(),
-                files: script_files,
-            });
-        }
-
-        branch_configs.push(BranchConfig {
-            id: branch_id.clone(),
-            label: branch_label.clone(),
-            path: branch_path.to_string(),
-            dialect,
-            folders: folder_configs,
-        });
-        branches.push(Branch {
-            id: branch_id,
-            label: branch_label,
-            dialect,
-            path: branch_path.to_string(),
-            folders,
-        });
-    }
+    let root_declaration = existing.and_then(|c| c.declaration(""));
+    resolve(
+        &mut tree,
+        root_declaration.and_then(|d| d.dialect),
+        root_declaration.and_then(|d| d.role),
+    );
 
     let config = match existing {
         // An existing file is authoritative and is never rewritten by a scan: a
@@ -249,29 +152,261 @@ pub fn plan(root: &Path, files: &[SourceFile], existing: Option<&ProjectConfig>)
         // otherwise, because deleting their configuration behind their back is
         // exactly the behaviour this design refuses.
         Some(existing) => existing.clone(),
-        None => ProjectConfig {
-            version: CURRENT_VERSION,
-            name: name.clone(),
-            encoding: EncodingSettings {
-                default: default_encoding,
-                eol: dominant_eol(&branches),
-            },
-            version_table: VersionTableSettings::default(),
-            generation: GenerationSettings::default(),
-            naming: NamingScheme::default(),
-            branches: branch_configs,
-        },
+        None => proposed_config(&name, &tree, &builder.default_encoding),
     };
 
     Proposal {
+        notes: notes(&tree),
+        project: Project { name, root: root.display().to_string(), tree },
         config,
-        project: Project {
-            name,
-            root: root.display().to_string(),
-            branches,
-        },
-        notes,
         is_new: existing.is_none(),
+    }
+}
+
+/// Every directory the tree needs: the ones holding scripts, plus every
+/// directory above them, which is what a declaration inherits through.
+fn directories<'a>(by_dir: &FilesByDir<'a>) -> BTreeSet<&'a str> {
+    let mut out = BTreeSet::new();
+    for dir in by_dir.keys().filter(|d| !d.is_empty()) {
+        let mut current: &str = dir;
+        while !current.is_empty() && out.insert(current) {
+            current = parent_of(current);
+        }
+    }
+    out
+}
+
+/// Turns directories into folders. Holds the two things every node needs and
+/// nothing else.
+struct Builder<'a> {
+    existing: Option<&'a ProjectConfig>,
+    /// The project's own folder-name vocabulary, compiled once for the scan.
+    aliases: AliasVocabulary,
+    default_encoding: String,
+}
+
+impl Builder<'_> {
+    /// The folders directly inside `parent`, each with its own subtree.
+    fn children_of(
+        &self,
+        parent: &str,
+        dirs: &BTreeSet<&str>,
+        by_dir: &FilesByDir<'_>,
+    ) -> Vec<FolderNode> {
+        dirs.iter()
+            .filter(|dir| parent_of(dir) == parent)
+            .map(|dir| self.node(dir, dirs, by_dir))
+            .collect()
+    }
+
+    fn node(&self, path: &str, dirs: &BTreeSet<&str>, by_dir: &FilesByDir<'_>) -> FolderNode {
+        let name = last_segment(path);
+        let (engine, role) = self.declared(path, name);
+        let files = by_dir.get(path).map(|files| self.script_files(path, files)).unwrap_or_default();
+
+        FolderNode {
+            engine,
+            role,
+            files,
+            children: self.children_of(path, dirs, by_dir),
+            ..FolderNode::new(path, name)
+        }
+    }
+
+    /// What this folder declares: the project file's word if it has one about
+    /// this path, then the project's own vocabulary, then the built-in one.
+    ///
+    /// That order is the whole precedence rule, and each step earns its place. A
+    /// **per-path declaration** is a specific answer about this folder and beats
+    /// everything. An **alias** is a fact its owner knows about this repository —
+    /// `POS` is PostgreSQL here — and beats a global heuristic that cannot know
+    /// it. The **built-in vocabulary** is that heuristic, and it is last.
+    ///
+    /// A declaration is authoritative for **both** fields, including for the one
+    /// it leaves absent — that absence is the user saying "inherit", and
+    /// re-inferring over it would undo a correction on every rescan. Note that an
+    /// alias does *not* get that treatment: it is inference, so a folder the
+    /// project file mentions at all ignores it entirely.
+    fn declared(&self, path: &str, name: &str) -> (Option<FolderEngine>, Option<FolderRole>) {
+        if let Some(declared) = self.existing.and_then(|c| c.declaration(path)) {
+            return (declared.dialect, declared.role);
+        }
+        let role = infer_role_in(name, &self.aliases);
+        (
+            infer_engine_in(name, &self.aliases).map(|guess| guess.value),
+            // Only a confident guess declares anything. The fallback is `Ignored`,
+            // and declaring that here would stop a role inherited from above ever
+            // reaching a folder called `2024`.
+            role.is_confident().then_some(role.value),
+        )
+    }
+
+    /// The folder's files, with the encoding each turned out to be.
+    fn script_files(&self, path: &str, files: &[&SourceFile]) -> Vec<ScriptFile> {
+        // The folder's own encoding vote. Files that are pure ASCII abstain,
+        // which is exactly right: they are the ones being decided.
+        let mut context =
+            EncodingContext::new().with_legacy(label_to_encoding(&self.default_encoding));
+        if let Some(pinned) = self.existing.and_then(|c| c.declared_encoding(path)) {
+            context = context.with_dominant(label_to_encoding(pinned));
+        }
+        for file in files {
+            context.observe(&file.sample);
+        }
+        let expected = context
+            .dominant()
+            .map(|e| e.name().to_string())
+            .unwrap_or_else(|| self.default_encoding.clone());
+
+        let mut out: Vec<ScriptFile> = files
+            .iter()
+            .map(|file| {
+                let detection = detect_in_context(&file.sample, &context);
+                ScriptFile {
+                    path: file.path.clone(),
+                    name: last_segment(&file.path).to_string(),
+                    size: file.size,
+                    encoding: detection.encoding.name().to_string(),
+                    encoding_source: detection.source,
+                    eol: LineEnding::detect(&file.sample),
+                    expected_encoding: expected.clone(),
+                }
+            })
+            .collect();
+        out.sort_by(|a, b| a.path.cmp(&b.path));
+        out
+    }
+}
+
+/// The configuration a brand-new project is proposed with.
+fn proposed_config(name: &str, tree: &[FolderNode], default_encoding: &str) -> ProjectConfig {
+    let mut folders = Vec::new();
+    declarations(tree, (None, None), &mut folders);
+    ProjectConfig {
+        version: CURRENT_VERSION,
+        name: name.to_string(),
+        encoding: EncodingSettings {
+            default: default_encoding.to_string(),
+            eol: dominant_eol(tree),
+        },
+        version_table: VersionTableSettings::default(),
+        generation: GenerationSettings::default(),
+        naming: NamingScheme::default(),
+        folders,
+        // A repository being read for the first time has no vocabulary: an alias
+        // is something its owner tells Picus, never something Picus invents. The
+        // interface offers to add one at the moment a folder is classified, which
+        // is where the knowledge actually is.
+        aliases: Vec::new(),
+    }
+}
+
+/// One declaration per folder that says something its ancestors did not.
+///
+/// A folder whose inferred dialect is the one it would have inherited anyway
+/// writes nothing: the file then reads as the handful of decisions the repository
+/// actually embodies, rather than as a line per directory.
+fn declarations(
+    nodes: &[FolderNode],
+    inherited: (Option<FolderEngine>, Option<FolderRole>),
+    out: &mut Vec<FolderDeclaration>,
+) {
+    for node in nodes {
+        let engine = node.engine;
+        let mut declaration = FolderDeclaration::new(&node.path);
+        if engine.is_some() && engine != inherited.0 {
+            declaration.dialect = engine;
+        }
+        if node.role.is_some() && node.role != inherited.1 {
+            declaration.role = node.role;
+        }
+        if !declaration.is_empty() {
+            out.push(declaration);
+        }
+        let below = (engine.or(inherited.0), node.role.or(inherited.1));
+        declarations(&node.children, below, out);
+    }
+}
+
+/// What the user should look at before confirming.
+///
+/// Only folders that actually hold scripts produce a question: a directory that
+/// exists solely because something below it holds files is not a decision anybody
+/// has to make.
+///
+/// Neither is a folder written in an engine Picus does not support. That is an
+/// **answer** — "these are SQL Server scripts" — and there is nothing the user
+/// could do with the question. A tool that keeps asking something you have
+/// already answered is one people stop reading, and this report is the one part
+/// of Picus that must keep being read.
+fn notes(tree: &[FolderNode]) -> Vec<ProposalNote> {
+    let mut out = Vec::new();
+    for node in tree.iter().flat_map(FolderNode::walk) {
+        if node.files.is_empty() {
+            continue;
+        }
+        if node.engine_is_unsupported() {
+            // Not silent about the file-level facts below, though: an encoding
+            // that drifted is still worth saying, whoever owns the scripts.
+            out.extend(node.files.iter().filter(|f| f.encoding_drifted()).map(|f| drifted(node, f)));
+            continue;
+        }
+        if node.effective_role == FolderRole::Ignored {
+            // A folder somebody (or a keyword) called `ignored` is a decision.
+            // One that merely fell through to it is the question.
+            if node.role != Some(FolderRole::Ignored) {
+                out.push(unknown_role(node));
+            }
+        } else if node.engine_is_unknown() {
+            // Asked only where it matters: an ignored folder receives nothing
+            // whatever its dialect, so pairing the two questions would double the
+            // list for no extra decision.
+            out.push(unknown_dialect(node));
+        }
+        for file in &node.files {
+            if file.encoding_drifted() {
+                out.push(drifted(node, file));
+            }
+        }
+    }
+    out
+}
+
+fn unknown_role(node: &FolderNode) -> ProposalNote {
+    ProposalNote {
+        path: node.path.clone(),
+        message: format!(
+            "nothing above `{}` says what these scripts are for, so it is marked as ignored — \
+             nothing will be generated into it until you say what it is",
+            node.name
+        ),
+        needs_attention: true,
+    }
+}
+
+fn unknown_dialect(node: &FolderNode) -> ProposalNote {
+    ProposalNote {
+        path: node.path.clone(),
+        message: format!(
+            "nothing in the name `{}`, or above it, says which engine these scripts are written \
+             in — pick one, or leave it unset and nothing will be generated into it. If every \
+             folder called `{}` means the same engine, say so once for the whole project rather \
+             than folder by folder",
+            node.name, node.name
+        ),
+        needs_attention: true,
+    }
+}
+
+fn drifted(node: &FolderNode, file: &ScriptFile) -> ProposalNote {
+    ProposalNote {
+        path: file.path.clone(),
+        message: format!(
+            "this file is {} while the rest of `{}` is {} — it was probably rewritten by an \
+             editor that did not know",
+            file.encoding, node.name, file.expected_encoding
+        ),
+        needs_attention: false,
     }
 }
 
@@ -332,31 +467,11 @@ fn read_sample(path: &Path) -> Result<Vec<u8>, ProjectError> {
     Ok(sample)
 }
 
-/// A folder's role, falling back to its ancestors' names before giving up.
-///
-/// `ORACLE/AGGIORNAMENTO/2026` is an update folder even though `2026` says
-/// nothing: the role of a subfolder is the role of the thing it is inside.
-fn infer_role_for(dir: &str, branch: &str) -> crate::infer::Guess<FolderRole> {
-    let mut current = dir;
-    loop {
-        let guess = infer_role(last_segment(current).unwrap_or(current));
-        if guess.is_confident() {
-            return guess;
-        }
-        match parent_of(current) {
-            parent if parent.is_empty() || parent == branch || parent == current => {
-                return crate::infer::Guess { value: FolderRole::Ignored, matched: None }
-            }
-            parent => current = parent,
-        }
-    }
-}
-
 /// The line ending most of the project uses, for generated content to match.
-fn dominant_eol(branches: &[Branch]) -> LineEnding {
+fn dominant_eol(tree: &[FolderNode]) -> LineEnding {
     let mut lf = 0usize;
     let mut crlf = 0usize;
-    for file in branches.iter().flat_map(|b| b.folders.iter().flat_map(|f| f.files.iter())) {
+    for file in tree.iter().flat_map(FolderNode::all_files) {
         match file.eol {
             LineEnding::Lf => lf += 1,
             LineEnding::Crlf => crlf += 1,
@@ -391,53 +506,14 @@ fn is_script(path: &str) -> bool {
     }
 }
 
-fn parent_of(path: &str) -> &str {
-    match path.rfind('/') {
-        Some(i) => &path[..i],
-        None => "",
-    }
-}
-
-fn last_segment(path: &str) -> Option<&str> {
-    if path.is_empty() {
-        return None;
-    }
-    Some(path.rsplit('/').next().unwrap_or(path))
-}
-
-fn branch_segment(dir: &str) -> &str {
-    match dir.find('/') {
-        Some(i) => &dir[..i],
-        None => dir,
-    }
-}
-
-/// A stable id from a path: lowercase, one dash per run of anything else.
-fn slug(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut pending_dash = false;
-    for c in text.chars() {
-        if c.is_ascii_alphanumeric() {
-            if pending_dash && !out.is_empty() {
-                out.push('-');
-            }
-            pending_dash = false;
-            out.extend(c.to_lowercase());
-        } else {
-            pending_dash = true;
-        }
-    }
-    if out.is_empty() {
-        "root".to_string()
-    } else {
-        out
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use picus_types::prelude::EngineKind;
+    use picus_types::prelude::{EngineKind, ForeignEngine};
+
+    fn supported(kind: EngineKind) -> Option<FolderEngine> {
+        Some(FolderEngine::Supported(kind))
+    }
 
     fn cp1252(text: &str) -> Vec<u8> {
         encoding_rs::WINDOWS_1252.encode(text).0.into_owned()
@@ -447,7 +523,7 @@ mod tests {
         SourceFile { path: path.to_string(), size: bytes.len() as u64, sample: bytes }
     }
 
-    /// A two-branch repository shaped like the ones this product was built for.
+    /// A two-dialect repository shaped like the ones this product was built for.
     fn repository() -> Vec<SourceFile> {
         vec![
             file("ORACLE/INIZIALIZZAZIONE/01_TABELLE.sql", cp1252("-- tabelle\r\nCREATE TABLE X;\r\n")),
@@ -466,30 +542,97 @@ mod tests {
         plan(Path::new("/repo/prod-core"), &repository(), None)
     }
 
+    fn at<'a>(proposal: &'a Proposal, path: &str) -> &'a FolderNode {
+        proposal.project.folder_at(path).unwrap_or_else(|| panic!("no folder at {path}"))
+    }
+
     #[test]
-    fn branches_are_the_top_level_folders_and_carry_the_dialect() {
+    fn the_tree_is_the_directory_hierarchy_and_nothing_else() {
         let p = planned();
-        let ids: Vec<&str> = p.project.branches.iter().map(|b| b.id.as_str()).collect();
-        assert_eq!(ids, ["oracle", "postgres"]);
-        assert_eq!(p.project.branches[0].dialect, Some(EngineKind::Oracle));
-        assert_eq!(p.project.branches[1].dialect, Some(EngineKind::Postgres));
+        let paths: Vec<&str> = p.project.walk().map(|n| n.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "ORACLE",
+                "ORACLE/AGGIORNAMENTO",
+                "ORACLE/INIZIALIZZAZIONE",
+                "POSTGRES",
+                "POSTGRES/AGGIORNAMENTO",
+                "POSTGRES/INIZIALIZZAZIONE",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_dialect_is_declared_where_the_name_says_it_and_inherited_below() {
+        let p = planned();
+        assert_eq!(at(&p, "ORACLE").engine, supported(EngineKind::Oracle));
+        // Declared once, at the top; the folders under it say nothing and mean it.
+        assert_eq!(at(&p, "ORACLE/AGGIORNAMENTO").engine, None);
+        assert_eq!(at(&p, "ORACLE/AGGIORNAMENTO").effective_dialect(), Some(EngineKind::Oracle));
+        assert_eq!(at(&p, "POSTGRES/INIZIALIZZAZIONE").effective_dialect(), Some(EngineKind::Postgres));
+    }
+
+    #[test]
+    fn the_dialect_can_sit_at_the_bottom_of_the_tree_and_the_role_at_the_top() {
+        // The repository this whole shape exists for. Nothing here is a branch:
+        // `AGGIORNAMENTO` is three levels above the folder that says `ORA`.
+        let files = vec![
+            file("AGGIORNAMENTO/2024/ORA/4_12.sql", cp1252("-- x\r\n")),
+            file("AGGIORNAMENTO/2024/POS/4_12.sql", cp1252("-- x\r\n")),
+            file("INIZIALIZZAZIONE/2024/ORA/01.sql", cp1252("-- x\r\n")),
+        ];
+        let p = plan(Path::new("/repo/prod-core"), &files, None);
+
+        let ora = at(&p, "AGGIORNAMENTO/2024/ORA");
+        assert_eq!(ora.effective_dialect(), Some(EngineKind::Oracle));
+        assert_eq!(ora.effective_role, FolderRole::Update);
+        // `POS` matches nothing Picus knows, and inventing a dialect for it is the
+        // failure this product exists to catch. The user is asked instead.
+        let pos = at(&p, "AGGIORNAMENTO/2024/POS");
+        assert_eq!(pos.effective_dialect(), None);
+        assert_eq!(pos.effective_role, FolderRole::Update);
+        let note = p.notes.iter().find(|n| n.path == "AGGIORNAMENTO/2024/POS").expect("a note");
+        assert!(note.needs_attention);
+        assert!(note.message.contains("engine"), "{}", note.message);
+        // …and the same leaf name under another role keeps that other role.
+        assert_eq!(at(&p, "INIZIALIZZAZIONE/2024/ORA").effective_role, FolderRole::Init);
+    }
+
+    #[test]
+    fn the_proposed_file_declares_only_what_is_not_inherited() {
+        let files = vec![
+            file("AGGIORNAMENTO/2024/ORA/4_12.sql", cp1252("-- x\r\n")),
+            file("AGGIORNAMENTO/2025/ORA/4_13.sql", cp1252("-- x\r\n")),
+        ];
+        let p = plan(Path::new("/repo/prod-core"), &files, None);
+        let declared: Vec<(&str, Option<FolderEngine>, Option<FolderRole>)> =
+            p.config.folders.iter().map(|f| (f.path.as_str(), f.dialect, f.role)).collect();
+        assert_eq!(
+            declared,
+            [
+                ("AGGIORNAMENTO", None, Some(FolderRole::Update)),
+                ("AGGIORNAMENTO/2024/ORA", supported(EngineKind::Oracle), None),
+                ("AGGIORNAMENTO/2025/ORA", supported(EngineKind::Oracle), None),
+            ]
+        );
     }
 
     #[test]
     fn a_folder_with_no_script_files_does_not_become_a_folder() {
         // DOCUMENTAZIONE holds one .txt, so it is not part of the project at all.
         let p = planned();
-        assert!(p.project.branches.iter().all(|b| b.id != "documentazione"));
+        assert!(p.project.folder_at("DOCUMENTAZIONE").is_none());
         assert_eq!(p.project.all_files().count(), 5);
     }
 
     #[test]
     fn roles_come_from_the_folder_names() {
         let p = planned();
-        let oracle = &p.project.branches[0];
-        let roles: Vec<FolderRole> = oracle.folders.iter().map(|f| f.role).collect();
-        // BTreeMap order: AGGIORNAMENTO before INIZIALIZZAZIONE.
-        assert_eq!(roles, [FolderRole::Update, FolderRole::Init]);
+        assert_eq!(at(&p, "ORACLE/AGGIORNAMENTO").effective_role, FolderRole::Update);
+        assert_eq!(at(&p, "ORACLE/INIZIALIZZAZIONE").effective_role, FolderRole::Init);
+        // The folder that only holds other folders declares nothing.
+        assert_eq!(at(&p, "ORACLE").role, None);
     }
 
     #[test]
@@ -497,12 +640,10 @@ mod tests {
         let mut files = repository();
         files.push(file("ORACLE/AGGIORNAMENTO/2026/4_12__4_13.sql", cp1252("-- x\r\n")));
         let p = plan(Path::new("/repo/prod-core"), &files, None);
-        let nested = p.project.branches[0]
-            .folders
-            .iter()
-            .find(|f| f.path == "ORACLE/AGGIORNAMENTO/2026")
-            .expect("the nested folder");
-        assert_eq!(nested.role, FolderRole::Update);
+        let nested = at(&p, "ORACLE/AGGIORNAMENTO/2026");
+        assert_eq!(nested.role, None, "`2026` says nothing about itself");
+        assert_eq!(nested.effective_role, FolderRole::Update);
+        assert_eq!(nested.effective_dialect(), Some(EngineKind::Oracle));
     }
 
     #[test]
@@ -514,14 +655,15 @@ mod tests {
         let b = plan(Path::new("/repo/prod-core"), &reversed, None);
         assert_eq!(a.project, b.project);
         assert_eq!(a.config, b.config);
+        assert_eq!(a.notes, b.notes);
     }
 
     #[test]
-    fn an_unrecognised_branch_gets_no_dialect_and_says_so() {
-        let files = vec![file("COMMON/x.sql", cp1252("select 1;\r\n"))];
+    fn an_unrecognised_folder_gets_no_dialect_and_says_so() {
+        let files = vec![file("COMMON/AGGIORNAMENTO/x.sql", cp1252("select 1;\r\n"))];
         let p = plan(Path::new("/repo/prod-core"), &files, None);
-        assert_eq!(p.project.branches[0].dialect, None);
-        let note = p.notes.iter().find(|n| n.path == "COMMON").expect("a note about it");
+        assert_eq!(at(&p, "COMMON/AGGIORNAMENTO").effective_dialect(), None);
+        let note = p.notes.iter().find(|n| n.path == "COMMON/AGGIORNAMENTO").expect("a note");
         assert!(note.needs_attention);
         assert!(note.message.contains("engine"));
     }
@@ -530,23 +672,25 @@ mod tests {
     fn an_unrecognised_folder_is_ignored_and_flagged() {
         let files = vec![file("ORACLE/MISCELLANEA/x.sql", cp1252("select 1;\r\n"))];
         let p = plan(Path::new("/repo/prod-core"), &files, None);
-        assert_eq!(p.project.branches[0].folders[0].role, FolderRole::Ignored);
-        let note = p
-            .notes
-            .iter()
-            .find(|n| n.path == "ORACLE/MISCELLANEA")
-            .expect("a note about it");
+        assert_eq!(at(&p, "ORACLE/MISCELLANEA").effective_role, FolderRole::Ignored);
+        let note = p.notes.iter().find(|n| n.path == "ORACLE/MISCELLANEA").expect("a note");
         assert!(note.needs_attention);
+        // One question, not two: an ignored folder receives nothing whatever its
+        // dialect, so it is not also asked about that.
+        assert_eq!(p.notes.iter().filter(|n| n.path == "ORACLE/MISCELLANEA").count(), 1);
+    }
+
+    #[test]
+    fn a_folder_that_only_holds_other_folders_is_never_a_question() {
+        let files = vec![file("ORACLE/AGGIORNAMENTO/x.sql", cp1252("select 1;\r\n"))];
+        let p = plan(Path::new("/repo/prod-core"), &files, None);
+        assert!(p.notes.is_empty(), "{:?}", p.notes);
     }
 
     #[test]
     fn encoding_is_detected_and_ascii_files_inherit_the_folders() {
         let p = planned();
-        let init = p.project.branches[0]
-            .folders
-            .iter()
-            .find(|f| f.path == "ORACLE/INIZIALIZZAZIONE")
-            .expect("the init folder");
+        let init = at(&p, "ORACLE/INIZIALIZZAZIONE");
 
         // 02_PARAMETRI has an accented character, so it decides the folder…
         let parametri = init.files.iter().find(|f| f.name == "02_PARAMETRI.sql").unwrap();
@@ -597,64 +741,307 @@ mod tests {
         let first = planned();
         let mut config = first.config.clone();
         // The user disagreed: this is a data folder, not an initialisation one.
-        let folder = config.branches[0]
-            .folders
-            .iter_mut()
-            .find(|f| f.path == "ORACLE/INIZIALIZZAZIONE")
-            .unwrap();
-        folder.role = FolderRole::Data;
-        folder.label = "Reference data".to_string();
+        config.declaration_mut("ORACLE/INIZIALIZZAZIONE").role = Some(FolderRole::Data);
 
         let second = plan(Path::new("/repo/prod-core"), &repository(), Some(&config));
-        let init = second.project.branches[0]
-            .folders
-            .iter()
-            .find(|f| f.path == "ORACLE/INIZIALIZZAZIONE")
-            .unwrap();
-        assert_eq!(init.role, FolderRole::Data);
-        assert_eq!(init.label, "Reference data");
+        assert_eq!(at(&second, "ORACLE/INIZIALIZZAZIONE").effective_role, FolderRole::Data);
         // …and nothing is proposed, because there is nothing to confirm.
         assert!(!second.is_new);
         assert_eq!(second.config, config);
     }
 
     #[test]
-    fn a_configured_folder_encoding_outranks_the_vote() {
+    fn a_declaration_that_clears_a_dialect_is_not_re_inferred() {
+        // The user looked at `ORACLE`, said "actually nobody knows", and a rescan
+        // must not overrule them by reading the folder's name again.
         let mut config = planned().config;
-        config.branches[0]
-            .folders
-            .iter_mut()
-            .find(|f| f.path == "ORACLE/INIZIALIZZAZIONE")
-            .unwrap()
-            .encoding = Some("UTF-8".to_string());
+        config.declaration_mut("ORACLE").dialect = None;
+        config.declaration_mut("ORACLE").role = Some(FolderRole::Ignored);
 
         let p = plan(Path::new("/repo/prod-core"), &repository(), Some(&config));
-        let init = p.project.branches[0]
-            .folders
-            .iter()
-            .find(|f| f.path == "ORACLE/INIZIALIZZAZIONE")
-            .unwrap();
+        assert_eq!(at(&p, "ORACLE").effective_dialect(), None);
+        assert_eq!(at(&p, "ORACLE/AGGIORNAMENTO").effective_dialect(), None);
+    }
+
+    #[test]
+    fn a_configured_folder_encoding_outranks_the_vote_and_reaches_the_folders_below() {
+        let mut config = planned().config;
+        config.declaration_mut("ORACLE").encoding = Some("UTF-8".to_string());
+
+        let p = plan(Path::new("/repo/prod-core"), &repository(), Some(&config));
+        let init = at(&p, "ORACLE/INIZIALIZZAZIONE");
         // Every file in the folder is now measured against UTF-8, so the
         // windows-1252 one reads as drift — which is the point of pinning it.
         assert!(init.files.iter().all(|f| f.expected_encoding == "UTF-8"));
         assert!(init.files.iter().any(|f| f.encoding_drifted()));
+        // …and a folder in another part of the tree is untouched.
+        assert!(at(&p, "POSTGRES/INIZIALIZZAZIONE")
+            .files
+            .iter()
+            .all(|f| f.expected_encoding == "windows-1252"));
     }
 
     #[test]
     fn files_at_the_root_still_belong_somewhere() {
-        let files = vec![file("install.sql", cp1252("select 1;\r\n"))];
+        let files = vec![
+            file("install.sql", cp1252("select 1;\r\n")),
+            file("ORACLE/AGGIORNAMENTO/x.sql", cp1252("select 1;\r\n")),
+        ];
         let p = plan(Path::new("/repo/prod-core"), &files, None);
-        assert_eq!(p.project.branches.len(), 1);
-        assert_eq!(p.project.branches[0].id, "root");
-        assert_eq!(p.project.branches[0].dialect, None);
-        assert_eq!(p.project.all_files().count(), 1);
+        // The root is a folder of its own, first, named after the repository.
+        assert_eq!(p.project.tree[0].path, "");
+        assert_eq!(p.project.tree[0].name, "prod-core");
+        assert_eq!(p.project.tree[0].files.len(), 1);
+        assert_eq!(p.project.tree[0].effective_dialect(), None);
+        assert_eq!(p.project.all_files().count(), 2);
+    }
+
+    // ── The project's own vocabulary, end to end ──────────────────────────────
+
+    /// The repository this feature exists for: one folder set per delivered
+    /// version, four engines, eleven of each.
+    fn versioned_repository() -> Vec<SourceFile> {
+        let mut files = Vec::new();
+        for version in ["4_11", "4_12", "4_13"] {
+            for engine in ["ORA", "POS", "MSQ", "DB"] {
+                files.push(file(
+                    &format!("AGGIORNAMENTO/{version}/{engine}/{version}.sql"),
+                    cp1252("-- x\r\n"),
+                ));
+            }
+        }
+        files
+    }
+
+    /// A configuration that declares nothing but the vocabulary under test.
+    fn with_aliases(entries: &[(&str, Option<&str>, Option<&str>)]) -> ProjectConfig {
+        let mut config = ProjectConfig {
+            version: CURRENT_VERSION,
+            name: "PROD_CORE".to_string(),
+            encoding: EncodingSettings::default(),
+            version_table: VersionTableSettings::default(),
+            generation: GenerationSettings::default(),
+            naming: NamingScheme::default(),
+            folders: Vec::new(),
+            aliases: Vec::new(),
+        };
+        for (name, engine, role) in entries {
+            let alias = config.alias_mut(name);
+            alias.engine = engine.map(str::to_string);
+            alias.role = role.map(str::to_string);
+        }
+        config
     }
 
     #[test]
-    fn slugs_are_stable_and_never_empty() {
-        assert_eq!(slug("ORACLE/AGGIORNAMENTO"), "oracle-aggiornamento");
-        assert_eq!(slug("01_INIZIALIZZAZIONE"), "01-inizializzazione");
-        assert_eq!(slug("///"), "root");
-        assert_eq!(slug(""), "root");
+    fn one_alias_classifies_every_folder_of_that_name_at_once() {
+        // Eleven folders in the real repository, three here. Declaring `POS` once
+        // is the difference between one decision and one per delivered version —
+        // and the reason this is a name and not a path.
+        let config = with_aliases(&[("POS", Some("postgres"), None)]);
+        let p = plan(Path::new("/repo/prod-core"), &versioned_repository(), Some(&config));
+
+        for version in ["4_11", "4_12", "4_13"] {
+            let folder = at(&p, &format!("AGGIORNAMENTO/{version}/POS"));
+            assert_eq!(folder.effective_dialect(), Some(EngineKind::Postgres), "{version}");
+            // …and the role still comes from the top of the tree, untouched.
+            assert_eq!(folder.effective_role, FolderRole::Update, "{version}");
+        }
+        // Nothing was written into the file to achieve it: the alias is the whole
+        // declaration, and a `POS` folder added next month needs no further edit.
+        assert!(p.config.folders.is_empty());
+    }
+
+    #[test]
+    fn an_alias_naming_an_unsupported_engine_makes_the_folder_go_quiet() {
+        // MSQ is SQL Server and DB is DB2. Neither is a question, so neither
+        // produces a note — and neither is ever parsed.
+        let config = with_aliases(&[
+            ("POS", Some("postgres"), None),
+            ("MSQ", Some("sqlserver"), None),
+            ("DB", Some("db2"), None),
+        ]);
+        let p = plan(Path::new("/repo/prod-core"), &versioned_repository(), Some(&config));
+
+        let msq = at(&p, "AGGIORNAMENTO/4_12/MSQ");
+        assert_eq!(msq.effective_engine.and_then(FolderEngine::foreign), Some(ForeignEngine::SqlServer));
+        assert_eq!(msq.effective_dialect(), None, "nothing is parsed with it");
+        assert!(msq.engine_is_unsupported() && !msq.engine_is_unknown());
+        assert_eq!(at(&p, "AGGIORNAMENTO/4_11/DB").effective_engine.and_then(FolderEngine::foreign), Some(ForeignEngine::Db2));
+
+        // The whole point: the repository is fully described, so there is nothing
+        // left to ask about.
+        assert!(p.notes.is_empty(), "{:?}", p.notes);
+    }
+
+    #[test]
+    fn without_the_vocabulary_the_same_repository_asks_nine_times() {
+        // The state this feature replaces, asserted so the improvement is not a
+        // claim: POS, MSQ and DB in each of the three versions.
+        let p = plan(Path::new("/repo/prod-core"), &versioned_repository(), None);
+        let asked: Vec<&str> =
+            p.notes.iter().filter(|n| n.needs_attention).map(|n| n.path.as_str()).collect();
+        assert_eq!(asked.len(), 9, "{asked:?}");
+        assert!(asked.iter().all(|path| path.ends_with("POS")
+            || path.ends_with("MSQ")
+            || path.ends_with("DB")));
+    }
+
+    #[test]
+    fn a_per_path_declaration_beats_an_alias() {
+        // A specific answer beats a general rule. The user looked at one `POS`
+        // folder, said it is actually Oracle, and a rescan must not overrule them
+        // with the project-wide vocabulary.
+        let mut config = with_aliases(&[("POS", Some("postgres"), None)]);
+        config.declaration_mut("AGGIORNAMENTO/4_12/POS").dialect = supported(EngineKind::Oracle);
+
+        let p = plan(Path::new("/repo/prod-core"), &versioned_repository(), Some(&config));
+        assert_eq!(
+            at(&p, "AGGIORNAMENTO/4_12/POS").effective_dialect(),
+            Some(EngineKind::Oracle)
+        );
+        // …and the alias still answers for every folder nobody singled out.
+        assert_eq!(
+            at(&p, "AGGIORNAMENTO/4_13/POS").effective_dialect(),
+            Some(EngineKind::Postgres)
+        );
+    }
+
+    #[test]
+    fn a_per_path_declaration_that_clears_the_engine_also_beats_an_alias() {
+        // The harder half of the same rule: an absent field in a declaration is
+        // the user saying "inherit", and re-inferring — from the alias this time —
+        // would undo that correction on every rescan.
+        let mut config = with_aliases(&[("POS", Some("postgres"), None)]);
+        config.declaration_mut("AGGIORNAMENTO/4_12/POS").role = Some(FolderRole::Data);
+
+        let p = plan(Path::new("/repo/prod-core"), &versioned_repository(), Some(&config));
+        let pinned = at(&p, "AGGIORNAMENTO/4_12/POS");
+        assert_eq!(pinned.effective_dialect(), None, "the declaration is authoritative");
+        assert_eq!(pinned.effective_role, FolderRole::Data);
+    }
+
+    #[test]
+    fn an_alias_beats_the_built_in_vocabulary_during_discovery() {
+        let config = with_aliases(&[("ORA", Some("postgres"), None)]);
+        let p = plan(Path::new("/repo/prod-core"), &versioned_repository(), Some(&config));
+        assert_eq!(
+            at(&p, "AGGIORNAMENTO/4_12/ORA").effective_dialect(),
+            Some(EngineKind::Postgres)
+        );
+    }
+
+    #[test]
+    fn an_alias_can_name_a_role_as_well_as_an_engine() {
+        // A repository whose update folder is called CONSEGNE has exactly the
+        // problem the engine alias solves, one axis over.
+        let files = vec![file("CONSEGNE/2024/ORA/4_12.sql", cp1252("-- x\r\n"))];
+        let bare = plan(Path::new("/repo/prod-core"), &files, None);
+        assert_eq!(at(&bare, "CONSEGNE/2024/ORA").effective_role, FolderRole::Ignored);
+
+        let config = with_aliases(&[("CONSEGNE", None, Some("update"))]);
+        let p = plan(Path::new("/repo/prod-core"), &files, Some(&config));
+        assert_eq!(at(&p, "CONSEGNE/2024/ORA").effective_role, FolderRole::Update);
+        assert!(p.notes.is_empty(), "{:?}", p.notes);
+    }
+
+    #[test]
+    fn a_bad_alias_degrades_to_the_repository_that_has_none() {
+        let config = with_aliases(&[("POS", Some("postgres"), None), ("MSQ", Some("t-sql"), None)]);
+        let p = plan(Path::new("/repo/prod-core"), &versioned_repository(), Some(&config));
+
+        assert_eq!(
+            at(&p, "AGGIORNAMENTO/4_12/POS").effective_dialect(),
+            Some(EngineKind::Postgres)
+        );
+        // The bad one classifies nothing, so those folders are asked about again —
+        // which is the correct degradation, not a silent wrong answer.
+        assert!(at(&p, "AGGIORNAMENTO/4_12/MSQ").engine_is_unknown());
+        assert!(p.notes.iter().any(|n| n.path == "AGGIORNAMENTO/4_12/MSQ"));
+        // …and the user is told why, once, by the configuration itself.
+        let problems = p.config.problems();
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("t-sql"), "{problems:?}");
+    }
+
+    #[test]
+    fn an_unsupported_folder_still_reports_an_encoding_that_drifted() {
+        // Going quiet about the engine is not going quiet about everything: a
+        // file that changed encoding is a fact about the bytes, and true whoever
+        // owns the scripts.
+        let config = with_aliases(&[("MSQ", Some("sqlserver"), None)]);
+        let files = vec![
+            file("AGGIORNAMENTO/MSQ/a.sql", cp1252("-- perché\r\n")),
+            file("AGGIORNAMENTO/MSQ/b.sql", "-- perché\r\n".as_bytes().to_vec()),
+        ];
+        let p = plan(Path::new("/repo/prod-core"), &files, Some(&config));
+
+        assert!(p.notes.iter().all(|n| !n.needs_attention), "{:?}", p.notes);
+        assert!(p.notes.iter().any(|n| n.path.ends_with("b.sql")), "{:?}", p.notes);
+    }
+
+    #[test]
+    fn a_portable_folder_is_classified_and_never_asked_about() {
+        // The folder of plain inserts meant to run on both engines. Declared, not
+        // guessed — and once declared it is as settled as `ORA` is.
+        let files = vec![
+            file("AGGIORNAMENTO/COMUNE/4_12.sql", cp1252("UPDATE PARAMETRI SET V = 1;\r\n")),
+            file("AGGIORNAMENTO/2024/ORA/4_12.sql", cp1252("-- x\r\n")),
+        ];
+        let bare = plan(Path::new("/repo/prod-core"), &files, None);
+        // Nothing infers it: without a declaration, `COMUNE` is a question.
+        assert!(at(&bare, "AGGIORNAMENTO/COMUNE").engine_is_unknown());
+
+        let config = with_aliases(&[("COMUNE", Some("generic"), None)]);
+        let p = plan(Path::new("/repo/prod-core"), &files, Some(&config));
+        let comune = at(&p, "AGGIORNAMENTO/COMUNE");
+        assert!(comune.is_generic());
+        assert!(!comune.engine_is_unknown(), "portable is an answer");
+        assert_eq!(comune.effective_dialect(), None, "no single dialect to emit as");
+        assert!(EngineKind::ALL.iter().all(|d| comune.covers(*d)));
+        assert!(p.notes.is_empty(), "{:?}", p.notes);
+    }
+
+    #[test]
+    fn a_portable_declaration_can_also_be_made_on_one_path() {
+        // The alias is for names that repeat; a single portable folder is an
+        // ordinary declaration in the same `dialect` key as every other engine.
+        let files = vec![file("COMUNE/parametri.sql", cp1252("INSERT INTO P VALUES (1);\r\n"))];
+        let mut config = with_aliases(&[]);
+        config.declaration_mut("COMUNE").dialect = Some(FolderEngine::Generic);
+        config.declaration_mut("COMUNE").role = Some(FolderRole::Data);
+
+        let p = plan(Path::new("/repo/prod-core"), &files, Some(&config));
+        assert!(at(&p, "COMUNE").is_generic());
+        // …and it survives a round trip through the file it came from.
+        let text = toml::to_string_pretty(&config).expect("serialises");
+        assert!(text.contains(r#"dialect = "generic""#), "{text}");
+        assert_eq!(ProjectConfig::parse(&text).unwrap(), config);
+    }
+
+    #[test]
+    fn the_built_in_vocabulary_recognises_an_unsupported_engine_by_its_real_name() {
+        // No alias at all: a folder that spells the product out is recognised
+        // everywhere, which is what keeps the global list honest and short.
+        let files = vec![file("AGGIORNAMENTO/MSSQL/4_12.sql", cp1252("-- x\r\n"))];
+        let p = plan(Path::new("/repo/prod-core"), &files, None);
+        assert_eq!(
+            at(&p, "AGGIORNAMENTO/MSSQL").effective_engine.and_then(FolderEngine::foreign),
+            Some(ForeignEngine::SqlServer)
+        );
+        assert!(p.notes.is_empty(), "{:?}", p.notes);
+    }
+
+    #[test]
+    fn a_declaration_on_the_root_reaches_every_folder() {
+        let mut config = planned().config;
+        config.declaration_mut("").dialect = supported(EngineKind::Postgres);
+        let p = plan(Path::new("/repo/prod-core"), &repository(), Some(&config));
+        // `ORACLE` still declares its own, and everything that declares nothing
+        // takes the root's.
+        assert_eq!(at(&p, "ORACLE").effective_dialect(), Some(EngineKind::Oracle));
+        let files = vec![file("MISC/AGGIORNAMENTO/x.sql", cp1252("select 1;\r\n"))];
+        let p = plan(Path::new("/repo/prod-core"), &files, Some(&config));
+        assert_eq!(at(&p, "MISC/AGGIORNAMENTO").effective_dialect(), Some(EngineKind::Postgres));
     }
 }

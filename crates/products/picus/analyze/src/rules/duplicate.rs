@@ -3,9 +3,10 @@
 //! Both rules spend most of their code on **not** firing, because "twice" is
 //! ambiguous in a repository that deliberately says everything twice:
 //!
-//! * `PARAMETRI` created in the Oracle branch and again in the PostgreSQL branch
+//! * `PARAMETRI` created by the Oracle scripts and again by the PostgreSQL ones
 //!   is the product's entire premise, not a duplicate. `DUP002` therefore compares
-//!   **within one branch**;
+//!   **within one dialect** — and folders no ancestor declares a dialect for form
+//!   a group of their own rather than being lumped in with somebody's;
 //! * a table created in the initialisation folder and altered by four update
 //!   scripts is an ordinary, healthy repository. `DUP002` counts **creations**,
 //!   never definitions;
@@ -15,7 +16,7 @@
 use std::collections::BTreeMap;
 
 use picus_inventory::prelude::ObjectSite;
-use picus_parse::prelude::{line_col, DmlOperation, DmlShape};
+use picus_parse::prelude::{line_col, DialectScope, DmlOperation, DmlShape};
 
 use crate::compare::{self, RowFingerprint};
 use crate::context::Context;
@@ -44,7 +45,7 @@ pub(crate) fn run(context: &Context<'_>, output: &mut Output) {
 type Signature = (String, bool);
 
 fn duplicate_rows(context: &Context<'_>, output: &mut Output) {
-    for (script, placement) in context.project.placed() {
+    for (script, _) in context.project.placed() {
         // First occurrence of each row, per signature, in source order.
         let mut seen: BTreeMap<(Signature, RowFingerprint), usize> = BTreeMap::new();
         for statement in &script.parsed.statements {
@@ -60,7 +61,6 @@ fn duplicate_rows(context: &Context<'_>, output: &mut Output) {
                         Some(first) => output.findings.push(duplicate_row_finding(
                             script.source,
                             script.path,
-                            &placement.branch.id,
                             &shape.table.folded_name(),
                             &fingerprint,
                             *first,
@@ -77,11 +77,9 @@ fn signature_of(shape: &DmlShape) -> Signature {
     (shape.table.folded_name(), shape.has_column_list)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn duplicate_row_finding(
     source: &str,
     path: &str,
-    branch_id: &str,
     table: &str,
     fingerprint: &RowFingerprint,
     first: usize,
@@ -91,7 +89,7 @@ fn duplicate_row_finding(
     let line = line_col(source, second).0;
     Finding::new(
         RuleId::Dup001,
-        Anchor::at(path, branch_id, line),
+        Anchor::at(path, line),
         format!("The same row is inserted into {table} twice"),
         format!(
             "Line {first_line} already inserts {row}. On a table with a key over those columns the \
@@ -109,21 +107,28 @@ fn duplicate_row_finding(
 
 fn duplicate_definitions(context: &Context<'_>, output: &mut Output) {
     for entry in &context.inventory.objects {
-        // Keyed by branch **and** by the exact kind the source declared: two
-        // branches creating the same table is the point of the repository, and a
+        // Keyed by scope **and** by the exact kind the source declared: two
+        // dialects creating the same table is the point of the repository, and a
         // package spec is not its body.
-        let mut by_origin: BTreeMap<(&str, picus_parse::prelude::ObjectKind), Vec<&ObjectSite>> =
-            BTreeMap::new();
+        //
+        // A portable folder is its own key rather than being folded into either
+        // dialect. Creating a table portably *and* creating it in the Oracle
+        // folder is a genuine duplicate — which is what `DUP001` reports across
+        // scopes; here the question is only "twice within the same origin".
+        let mut by_origin: BTreeMap<
+            (Option<DialectScope>, picus_parse::prelude::ObjectKind),
+            Vec<&ObjectSite>,
+        > = BTreeMap::new();
         for site in entry.creations() {
-            by_origin.entry((site.branch_id.as_str(), site.declared_kind)).or_default().push(site);
+            by_origin.entry((site.scope, site.declared_kind)).or_default().push(site);
         }
-        for ((branch_id, _), sites) in by_origin {
+        for (_, sites) in by_origin {
             let Some((first, rest)) = sites.split_first() else { continue };
             for site in rest {
                 output.findings.push(
                     Finding::new(
                         RuleId::Dup002,
-                        Anchor::at(&site.path, branch_id, site.line),
+                        Anchor::at(&site.path, site.line),
                         format!("{} is created in two places", entry.name),
                         format!(
                             "`{}` also creates it. Whichever file the installer runs last decides \

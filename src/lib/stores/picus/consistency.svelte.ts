@@ -29,7 +29,19 @@ import type { AnalyzeScriptsResult, ProjectNote, SkippedRule } from '$lib/ipc/pi
 import { suppressionNote } from '$lib/ipc/picus/scripts';
 import type { Finding, Severity } from '$lib/types/picus';
 
-export type FindingGrouping = 'severity' | 'branch' | 'file';
+export type FindingGrouping = 'severity' | 'folder' | 'file';
+
+/**
+ * The folder a finding sits in, taken from its own path.
+ *
+ * Derived rather than carried as a field: the folder of `X/Y/z.sql` is `X/Y`
+ * whatever the backend chooses to say about it, and asking the project store
+ * instead would turn the import line (project → consistency) into a cycle.
+ */
+function folderOf(file: string): string {
+  const cut = file.lastIndexOf('/');
+  return cut > 0 ? file.slice(0, cut) : '(repository root)';
+}
 
 function createConsistencyStore() {
   let findings = $state<Finding[]>([]);
@@ -86,10 +98,9 @@ function createConsistencyStore() {
         }))
         .filter((g) => g.items.length > 0);
     }
-    const key = grouping === 'branch' ? 'branchId' : 'file';
     const buckets = new Map<string, Finding[]>();
     for (const f of visible) {
-      const k = String(f[key as keyof Finding] ?? '—');
+      const k = grouping === 'folder' ? folderOf(f.file) : f.file;
       const list = buckets.get(k);
       if (list) list.push(f);
       else buckets.set(k, [f]);

@@ -5,10 +5,18 @@
  * re-runs against the new database rather than silently keeping the old result.
  * The connection's colour paints the tab's top accent, so two tabs on two
  * databases are never confused at a glance.
+ *
+ * ## Closing a tab closes a cursor
+ *
+ * A query or table tab holds a **result** — a cursor the server is keeping open
+ * on its behalf. Every path that removes a tab from this list therefore runs
+ * through {@link forget}, including the bulk ones: "close all" abandoning four
+ * cursors is the same leak as "close" abandoning one, and is easier to miss.
  */
 
-import type { Dialect, PicusTab, TabKind } from '$lib/types/picus';
+import type { FolderEngine, PicusTab, TabKind } from '$lib/types/picus';
 import { connectionsStore } from './connections.svelte';
+import { queryStore } from './query.svelte';
 
 /** The generator is a singleton tab: there is one generation in flight. */
 const GENERATE_TAB_ID = 'generate';
@@ -37,6 +45,18 @@ function createTabsStore() {
     activeId = tab.id;
   }
 
+  /**
+   * Replace the list, releasing whatever fell out of it.
+   *
+   * Every removal goes through here so a cursor cannot survive its tab — the
+   * single-tab close and the three bulk gestures share one line of cleanup
+   * instead of four copies, one of which would eventually not be updated.
+   */
+  function keep(predicate: (tab: PicusTab, index: number) => boolean) {
+    for (const [i, t] of tabs.entries()) if (!predicate(t, i)) queryStore.forget(t.id);
+    tabs = tabs.filter(predicate);
+  }
+
   return {
     get tabs() { return tabs; },
     get activeId() { return activeId; },
@@ -53,13 +73,13 @@ function createTabsStore() {
     close(id: string) {
       const i = tabs.findIndex((t) => t.id === id);
       if (i < 0) return;
-      tabs = tabs.filter((t) => t.id !== id);
+      keep((t) => t.id !== id);
       if (activeId !== id) return;
       activeId = tabs[Math.min(i, tabs.length - 1)]?.id ?? '';
     },
 
     closeOthers(id: string) {
-      tabs = tabs.filter((t) => t.id === id || !isClosable(t));
+      keep((t) => t.id === id || !isClosable(t));
       activeId = id;
     },
 
@@ -67,13 +87,13 @@ function createTabsStore() {
     closeToRight(id: string) {
       const i = tabs.findIndex((t) => t.id === id);
       if (i < 0) return;
-      tabs = tabs.filter((t, idx) => idx <= i || !isClosable(t));
+      keep((t, idx) => idx <= i || !isClosable(t));
       if (!tabs.some((t) => t.id === activeId)) activeId = id;
     },
 
     /** Close every closable tab. The generator is pinned and survives. */
     closeAll() {
-      tabs = tabs.filter((t) => !isClosable(t));
+      keep((t) => !isClosable(t));
       activeId = tabs[0]?.id ?? '';
     },
 
@@ -158,7 +178,7 @@ function createTabsStore() {
      * bumped every time so stepping twice onto the same line moves the caret both
      * times instead of looking ignored.
      */
-    openFile(path: string, name: string, dialect: Dialect | null, line?: number) {
+    openFile(path: string, name: string, dialect: FolderEngine | null, line?: number) {
       const id = `file:${path}`;
       open({
         id,

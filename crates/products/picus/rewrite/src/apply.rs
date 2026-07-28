@@ -11,7 +11,7 @@
 //!
 //! "All or nothing" matters more here than in most places: half of a change
 //! applied across a two-dialect repository is worse than none of it, because the
-//! branches now disagree and the tool that is supposed to detect that is the one
+//! dialects now disagree and the tool that is supposed to detect that is the one
 //! that caused it.
 
 use std::path::PathBuf;

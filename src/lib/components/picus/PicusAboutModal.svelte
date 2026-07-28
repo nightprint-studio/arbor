@@ -50,8 +50,9 @@
         <p class="ab-tagline">SQL studio — databases and the scripts that build them</p>
         <p class="ab-blurb">
           A client for Oracle and PostgreSQL, and a maintainer for the script repository
-          they are installed from: it reads both dialect branches, checks that they stay in
-          step, and generates the changes that keep them there.
+          they are installed from: it reads the folder tree as it is, works out which
+          engine each part is written for, checks that they stay in step, and generates the
+          changes that keep them there.
         </p>
       </div>
     </section>

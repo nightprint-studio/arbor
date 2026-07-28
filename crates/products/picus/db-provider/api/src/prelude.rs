@@ -18,6 +18,8 @@ pub use crate::descriptor::{
 };
 pub use crate::error::{DbError, DbResult};
 pub use crate::provider::{DbProvider, DbSession};
-pub use crate::query::{CellValue, QueryResult, RowPage};
+pub use crate::query::{
+    CellValue, ExecuteResult, ResultCount, ResultWindow, DEFAULT_WINDOW_ROWS,
+};
 pub use crate::registry::DbProviderRegistry;
 pub use crate::secret::{NoSecrets, Secret, SecretResolver};

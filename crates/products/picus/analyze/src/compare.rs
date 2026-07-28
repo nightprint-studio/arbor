@@ -18,7 +18,7 @@ use picus_parse::prelude::{ColumnRef, DmlShape, LiteralValue, ValueRow};
 
 /// A row reduced to `(column, value)` pairs in a canonical order.
 ///
-/// Sorted by column name when the statement has a column list, so two branches
+/// Sorted by column name when the statement has a column list, so two dialects
 /// that write the same columns in a different order still compare equal — which
 /// they should, since the database does not care either.
 pub type RowFingerprint = Vec<(String, String)>;
@@ -63,7 +63,7 @@ pub fn comparable_rows(shape: &DmlShape) -> Option<Vec<RowFingerprint>> {
 /// not.
 ///
 /// This is the part of a cross-dialect comparison that survives `SYSDATE`: two
-/// branches inserting into different column sets have diverged whatever the
+/// dialects inserting into different column sets have diverged whatever the
 /// values are, and noticing that costs nothing.
 pub fn written_columns(shape: &DmlShape) -> Vec<String> {
     let mut out: Vec<String> = shape
@@ -103,11 +103,11 @@ fn normalise(value: &LiteralValue) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use picus_parse::prelude::{EngineKind, SqlParser};
+    use picus_parse::prelude::{DialectScope, EngineKind, SqlParser};
 
     fn shapes(source: &str, engine: EngineKind) -> Vec<DmlShape> {
         SqlParser::new()
-            .parse(source, engine)
+            .parse(source, DialectScope::One(engine))
             .statements
             .iter()
             .flat_map(|s| s.dml.iter().cloned())

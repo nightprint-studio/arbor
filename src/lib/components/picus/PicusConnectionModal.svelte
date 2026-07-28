@@ -286,7 +286,7 @@
     <ModalHeader {onClose}>
       <Database size={14} />
       <span class="modal-title">{existing ? `Edit ${existing.name}` : 'New connection'}</span>
-      <PicusDialectChip {dialect} />
+      <PicusDialectChip engine={dialect} />
     </ModalHeader>
   {/snippet}
 
@@ -360,7 +360,7 @@
             <span>
               Picus has no driver for {descriptor?.label ?? 'this engine'} yet, so it cannot open a
               session to one. Its <b>scripts</b> are fully supported — read, analysed, generated
-              into and rewritten — which is what a branch of that dialect actually needs.
+              into and rewritten — which is what a folder written for that engine actually needs.
             </span>
           </span>
         </Alert>
@@ -371,7 +371,7 @@
       <h2>Scripts</h2>
       <FormField
         label="Script repository"
-        hint="The folder this database is installed from — one branch per dialect. Opening this connection brings its scripts, its inventory and its consistency report into the window. Optional: a connection used only for queries needs none."
+        hint="The folder this database is installed from. Picus reads its directory tree as it is and works out which parts are written for which engine. Opening this connection brings its scripts, its inventory and its consistency report into the window. Optional: a connection used only for queries needs none."
       >
         <div class="cm-root">
           <Input

@@ -6,12 +6,16 @@
 //! server-side cancellation key — which is what makes the query editor's Cancel
 //! actually stop a running statement instead of abandoning it.
 //!
-//! ## The three decisions worth knowing before reading the code
+//! ## The four decisions worth knowing before reading the code
 //!
 //! * **Values come back as the server's own text** (the simple query protocol), and
 //!   only numeric columns are turned into numbers. A maintenance tool must show a
 //!   `timestamptz` and a wide `numeric` the way the server prints them, and must
-//!   never turn the string `007` into `7`. See [`session`].
+//!   never turn the string `007` into `7`. See [`rows`].
+//! * **A read is a held cursor, not a page of `OFFSET`.** Scrolling asks a
+//!   `SCROLL CURSOR WITH HOLD` for a window over one fixed snapshot, so no row is
+//!   ever shown twice or skipped. [`cursor`] documents what `WITH HOLD` costs, why
+//!   the alternative is unavailable here, and what closes a cursor.
 //! * **Read-only is enforced by the server.** A read-only session is opened with
 //!   `SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`; the lexical check in
 //!   [`sql::guard_read_only`] exists only to give a better message sooner.
@@ -22,10 +26,12 @@
 //! ## Public API: use the [`prelude`]
 
 pub mod catalog;
+pub mod cursor;
 pub mod descriptor;
 pub mod error;
 pub mod prelude;
 pub mod provider;
+pub mod rows;
 pub mod session;
 pub mod sql;
 pub mod tls;

@@ -26,6 +26,7 @@
 
 import type {
   Finding,
+  FolderAlias,
   InventoryObject,
   LineEnding,
   Project,
@@ -41,7 +42,7 @@ import { picus } from '../rpc';
  * One thing the reader wants to tell the user about a file or a folder.
  *
  * `needsAttention` is the difference between "worth knowing" (this folder was
- * classified as data because of its name) and "answer me" (this branch's engine
+ * classified as data because of its name) and "answer me" (this folder's engine
  * could not be decided). The second kind is a question, and the panel treats it
  * as one.
  */
@@ -101,6 +102,14 @@ export interface OpenScriptsResult {
   isNew: boolean;
   /** What the reader could not settle. A question to the user, never a footnote. */
   problems: RawNotice[];
+  /**
+   * The folder names this repository has declared a meaning for.
+   *
+   * Sent with the tree because it *explains* the tree: a `POS` folder reading as
+   * PostgreSQL when nothing about `POS` says PostgreSQL is a mystery until the
+   * vocabulary is on screen next to it.
+   */
+  aliases: FolderAlias[];
 }
 
 /** Read a script repository. Cheap enough to await before drawing the tree. */
@@ -125,7 +134,7 @@ export function refreshScripts(root: string): Promise<OpenScriptsResult> {
  */
 export interface SkippedRule {
   rule: RuleId;
-  /** Where the rule stood down — a branch, a folder, a file, or the project. */
+  /** Where the rule stood down — a folder, a file, or the project. */
   scope: string;
   reason: string;
 }
@@ -155,7 +164,7 @@ export interface AnalyzeScriptsResult {
   skipped: SkippedRule[];
   /** Suppression comments that named nothing, or named a rule that never fired. */
   rejectedSuppressions: RejectedSuppression[];
-  /** Objects and files that belong to no branch — indexed, but outside the model. */
+  /** Objects and files no classified folder claims — indexed, outside the model. */
   orphans: RawNotice[];
 }
 

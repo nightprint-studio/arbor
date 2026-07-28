@@ -20,8 +20,8 @@ use crate::kind::InventoryKind;
 pub struct InventoryObject {
     pub name: String,
     pub kind: InventoryKind,
-    /// Keyed `"<branchId>/<folderId>"`. `0` means the folder exists and does
-    /// nothing with this object, which is the value the interface highlights.
+    /// Keyed by the folder's project-relative path. `0` means the folder exists
+    /// and does nothing with this object, which is the value the interface highlights.
     pub coverage: BTreeMap<String, usize>,
 }
 
@@ -44,14 +44,17 @@ mod tests {
         let object = InventoryObject {
             name: "PARAMETRI".to_string(),
             kind: InventoryKind::Table,
-            coverage: [("ora/ora-init".to_string(), 1usize), ("pg/pg-upd".to_string(), 0)]
-                .into_iter()
-                .collect(),
+            coverage: [
+                ("AGGIORNAMENTO/2024/ORA".to_string(), 1usize),
+                ("AGGIORNAMENTO/2024/POS".to_string(), 0),
+            ]
+            .into_iter()
+            .collect(),
         };
         let json = serde_json::to_string(&object).unwrap();
         assert_eq!(
             json,
-            r#"{"name":"PARAMETRI","kind":"table","coverage":{"ora/ora-init":1,"pg/pg-upd":0}}"#
+            r#"{"name":"PARAMETRI","kind":"table","coverage":{"AGGIORNAMENTO/2024/ORA":1,"AGGIORNAMENTO/2024/POS":0}}"#
         );
     }
 }

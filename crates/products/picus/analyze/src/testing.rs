@@ -1,47 +1,73 @@
 //! A repository fixture, so the tests can be about rules instead of scaffolding.
 //!
-//! Files are declared by path and the layout does the rest: `ORACLE/…` is the
-//! Oracle branch, `POSTGRES/…` the PostgreSQL one, the folder name gives the
-//! role, and `COMMON/…` is the branch nobody could identify — which is a case the
-//! cross-branch rules have to stay quiet about, so it has to be easy to build.
+//! Files are declared by path and the layout does the rest: the tree is the real
+//! one, `ORACLE/…` declares Oracle at the top and `POSTGRES/…` PostgreSQL, the
+//! folder name gives the role, and `COMMON/…` is the folder nobody could
+//! identify — which is a case the cross-dialect rules have to stay quiet about,
+//! so it has to be easy to build.
+//!
+//! Nothing here hand-writes what a folder resolves to: the declarations go on the
+//! nodes and `picus_project::resolve` works out the rest, exactly as discovery
+//! does. A fixture that resolved its own tree would be able to describe a
+//! repository the product cannot produce.
+
+use std::collections::BTreeMap;
 
 use arbor_fs::prelude::encoding::EncodingSource;
 use picus_inventory::prelude::{Inventory, ParsedProject, ParsedScript};
-use picus_parse::prelude::{EngineKind, ParsedFile, SqlParser};
+use picus_parse::prelude::{DialectScope, EngineKind, ParsedFile, SqlParser};
 use picus_project::prelude::{
-    Branch, BranchConfig, EncodingSettings, FolderConfig, GenerationSettings, LineEnding,
-    NamingScheme, Project, ProjectConfig, ScriptFile, ScriptFolder, VersionTableSettings,
-    CURRENT_VERSION,
+    resolve, EncodingSettings, FolderDeclaration, FolderNode, GenerationSettings, LineEnding,
+    NamingScheme, Project, ProjectConfig, ScriptFile, VersionTableSettings, CURRENT_VERSION,
 };
-use picus_types::prelude::FolderRole;
+use picus_types::prelude::{FolderEngine, FolderRole};
 
 use crate::report::{analyze, Report};
 
-/// `(branch id, branch label, dialect)` for a top-level folder.
-fn branch_of(path: &str) -> (&'static str, &'static str, Option<EngineKind>) {
-    match path.split('/').next().unwrap_or("") {
-        "ORACLE" => ("ora", "ORACLE", Some(EngineKind::Oracle)),
-        "POSTGRES" => ("pg", "POSTGRES", Some(EngineKind::Postgres)),
-        _ => ("common", "COMMON", None),
+/// What a folder's own name declares about its dialect — at **any** depth, which
+/// is what lets a test write either `ORACLE/AGGIORNAMENTO/…` or the shape real
+/// repositories have, `AGGIORNAMENTO/2024/ORA/…`.
+fn engine_of(name: &str) -> Option<FolderEngine> {
+    match name {
+        "ORACLE" | "ORA" => Some(FolderEngine::Supported(EngineKind::Oracle)),
+        "POSTGRES" | "POS" => Some(FolderEngine::Supported(EngineKind::Postgres)),
+        // Never inferred in the product — declared. The fixture spells the
+        // declaration as a folder name so a test can say "portable" in a path.
+        "COMUNE" | "GENERIC" => Some(FolderEngine::Generic),
+        _ => None,
     }
 }
 
-fn role_of(folder: &str) -> FolderRole {
+/// The engine a file is parsed as: its nearest folder that declares one, exactly
+/// as `picus-be` resolves it.
+fn engine_for(path: &str) -> DialectScope {
+    let mut folder = folder_path(path);
+    loop {
+        if let Some(engine) = engine_of(picus_project::prelude::last_segment(&folder)) {
+            return engine.scope().expect("the fixture declares no unsupported engines");
+        }
+        if folder.is_empty() {
+            // The grammar is one permissive superset of both dialects, so the
+            // fallback changes nothing but which constructs count as foreign —
+            // and `DIA001` refuses to report those without a dialect anyway.
+            return DialectScope::One(EngineKind::Oracle);
+        }
+        folder = picus_project::prelude::parent_of(&folder).to_string();
+    }
+}
+
+fn role_of(folder: &str) -> Option<FolderRole> {
     match folder {
-        "INIZIALIZZAZIONE" => FolderRole::Init,
-        "AGGIORNAMENTO" => FolderRole::Update,
-        "PROCEDURE" => FolderRole::Routines,
-        "DATI" => FolderRole::Data,
-        _ => FolderRole::Ignored,
+        "INIZIALIZZAZIONE" => Some(FolderRole::Init),
+        "AGGIORNAMENTO" => Some(FolderRole::Update),
+        "PROCEDURE" => Some(FolderRole::Routines),
+        "DATI" => Some(FolderRole::Data),
+        _ => None,
     }
 }
 
 fn folder_path(path: &str) -> String {
     path.rsplit_once('/').map(|(dir, _)| dir.to_string()).unwrap_or_default()
-}
-
-fn folder_id(path: &str) -> String {
-    folder_path(path).to_lowercase().replace('/', "-")
 }
 
 pub(crate) struct Fixture {
@@ -61,64 +87,31 @@ impl std::fmt::Debug for Fixture {
 impl Fixture {
     pub fn build(files: &[(&str, &str)]) -> Fixture {
         let mut parser = SqlParser::new();
-        let mut branches: Vec<Branch> = Vec::new();
         let mut parses = Vec::new();
+        // Path → files, so the tree can be assembled once from the paths alone.
+        let mut by_folder: BTreeMap<String, Vec<ScriptFile>> = BTreeMap::new();
 
         for (path, source) in files {
-            let (branch_id, branch_label, dialect) = branch_of(path);
-            let engine = dialect.unwrap_or(EngineKind::Oracle);
+            let engine = engine_for(path);
             parses.push((path.to_string(), source.to_string(), parser.parse(source, engine)));
-
-            let branch_index = match branches.iter().position(|b| b.id == branch_id) {
-                Some(i) => i,
-                None => {
-                    branches.push(Branch {
-                        id: branch_id.to_string(),
-                        label: branch_label.to_string(),
-                        dialect,
-                        path: branch_label.to_string(),
-                        folders: Vec::new(),
-                    });
-                    branches.len() - 1
-                }
-            };
-            let folders = &mut branches[branch_index].folders;
-            let id = folder_id(path);
-            let folder_index = match folders.iter().position(|f| f.id == id) {
-                Some(i) => i,
-                None => {
-                    let dir = folder_path(path);
-                    folders.push(ScriptFolder {
-                        id: id.clone(),
-                        label: dir.rsplit('/').next().unwrap_or(&dir).to_string(),
-                        role: role_of(dir.rsplit('/').next().unwrap_or(&dir)),
-                        path: dir,
-                        files: Vec::new(),
-                    });
-                    folders.len() - 1
-                }
-            };
-            folders[folder_index].files.push(script_file(path, source));
+            by_folder.entry(folder_path(path)).or_default().push(script_file(path, source));
         }
 
-        let config = config_for(&branches);
-        Fixture {
-            project: Project {
-                name: "PROD_CORE".to_string(),
-                root: "/repo/prod-core".to_string(),
-                branches,
-            },
-            config,
-            parses,
-        }
+        let mut project = Project {
+            name: "PROD_CORE".to_string(),
+            root: "/repo/prod-core".to_string(),
+            tree: tree(&by_folder),
+        };
+        resolve(&mut project.tree, None, None);
+
+        let config = config_for(&project);
+        Fixture { project, config, parses }
     }
 
     /// Pin one file's detected and expected encodings — the two inputs the
     /// encoding rules read.
     pub fn encoded(mut self, path: &str, detected: &str, expected: &str) -> Fixture {
-        for file in self.project.branches.iter_mut().flat_map(|b| {
-            b.folders.iter_mut().flat_map(|f| f.files.iter_mut())
-        }) {
+        for file in files_mut(&mut self.project) {
             if file.path == path {
                 file.encoding = detected.to_string();
                 file.expected_encoding = expected.to_string();
@@ -128,9 +121,7 @@ impl Fixture {
     }
 
     pub fn encoding_source(mut self, path: &str, source: EncodingSource) -> Fixture {
-        for file in self.project.branches.iter_mut().flat_map(|b| {
-            b.folders.iter_mut().flat_map(|f| f.files.iter_mut())
-        }) {
+        for file in files_mut(&mut self.project) {
             if file.path == path {
                 file.encoding_source = source;
             }
@@ -161,6 +152,59 @@ impl Fixture {
     }
 }
 
+/// Build the real hierarchy from the folder paths, declaring what each level's
+/// name says about it.
+fn tree(by_folder: &BTreeMap<String, Vec<ScriptFile>>) -> Vec<FolderNode> {
+    let mut paths: Vec<String> = Vec::new();
+    for folder in by_folder.keys() {
+        let mut current = folder.as_str();
+        while !current.is_empty() {
+            if !paths.iter().any(|p| p == current) {
+                paths.push(current.to_string());
+            }
+            current = picus_project::prelude::parent_of(current);
+        }
+    }
+    paths.sort();
+    nodes_under("", &paths, by_folder)
+}
+
+fn nodes_under(
+    parent: &str,
+    paths: &[String],
+    by_folder: &BTreeMap<String, Vec<ScriptFile>>,
+) -> Vec<FolderNode> {
+    paths
+        .iter()
+        .filter(|path| picus_project::prelude::parent_of(path) == parent)
+        .map(|path| {
+            let name = picus_project::prelude::last_segment(path);
+            FolderNode {
+                // Each level declares what its own name says, and nothing else —
+                // the dialect and the role are independent and may sit at
+                // opposite ends of the tree, which is the point.
+                engine: engine_of(name),
+                role: role_of(name),
+                files: by_folder.get(path).cloned().unwrap_or_default(),
+                children: nodes_under(path, paths, by_folder),
+                ..FolderNode::new(path.clone(), name)
+            }
+        })
+        .collect()
+}
+
+fn files_mut(project: &mut Project) -> impl Iterator<Item = &mut ScriptFile> {
+    fn walk<'a>(nodes: &'a mut [FolderNode], out: &mut Vec<&'a mut ScriptFile>) {
+        for node in nodes {
+            out.extend(node.files.iter_mut());
+            walk(&mut node.children, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(&mut project.tree, &mut out);
+    out.into_iter()
+}
+
 fn script_file(path: &str, source: &str) -> ScriptFile {
     ScriptFile {
         path: path.to_string(),
@@ -173,7 +217,9 @@ fn script_file(path: &str, source: &str) -> ScriptFile {
     }
 }
 
-fn config_for(branches: &[Branch]) -> ProjectConfig {
+/// The project file the tree implies: one declaration per folder that declares
+/// something, exactly as discovery would propose.
+fn config_for(project: &Project) -> ProjectConfig {
     ProjectConfig {
         version: CURRENT_VERSION,
         name: "PROD_CORE".to_string(),
@@ -181,26 +227,16 @@ fn config_for(branches: &[Branch]) -> ProjectConfig {
         version_table: VersionTableSettings::default(),
         generation: GenerationSettings::default(),
         naming: NamingScheme::default(),
-        branches: branches
-            .iter()
-            .map(|branch| BranchConfig {
-                id: branch.id.clone(),
-                label: branch.label.clone(),
-                path: branch.path.clone(),
-                dialect: branch.dialect,
-                folders: branch
-                    .folders
-                    .iter()
-                    .map(|folder| FolderConfig {
-                        id: folder.id.clone(),
-                        label: folder.label.clone(),
-                        path: folder.path.clone(),
-                        role: folder.role,
-                        encoding: None,
-                        naming: None,
-                    })
-                    .collect(),
+        folders: project
+            .walk()
+            .filter(|node| node.engine.is_some() || node.role.is_some())
+            .map(|node| FolderDeclaration {
+                path: node.path.clone(),
+                dialect: node.engine,
+                role: node.role,
+                ..FolderDeclaration::default()
             })
             .collect(),
+        aliases: Vec::new(),
     }
 }

@@ -1,11 +1,11 @@
 # picus-inventory
 
 An index of every database object a script repository names: **where it is defined, where it is
-referenced, and how many statements touch it in each branch and folder**.
+referenced, and how many statements touch it in each folder**.
 
 It is what the inventory view renders, and it is where the first consistency rule comes from.
 The cell that matters is the **zero**: `PARAMETRI` covered once in `ORACLE/AGGIORNAMENTO` and
-zero times in `POSTGRES/AGGIORNAMENTO` means one branch does something the other does not, and
+zero times in `POSTGRES/AGGIORNAMENTO` means one dialect does something the other does not, and
 that is the entire reason Picus exists.
 
 ## Pure by construction
@@ -33,7 +33,8 @@ joined.orphans();        // parses whose path is not in the tree: a caller bug, 
 ```
 
 `ParsedProject` is the join of "what was parsed" to "where it sits", and it is deliberately the
-input type of `picus-analyze` too. A rule that had to re-derive a file's branch would be a rule
+input type of `picus-analyze` too. A rule that had to re-derive a file's folder — and so its
+dialect and its role — would be a rule
 that could derive it differently.
 
 ## The identifier-case rule
@@ -44,19 +45,19 @@ qualifier is dropped.**
 This is the one decision the whole crate rests on, so it is worth the paragraph.
 
 Oracle folds an unquoted identifier to upper case and PostgreSQL folds it to lower case, which
-means the *same* table is written `PARAMETRI` in one branch and `parametri` in the other and is
+means the *same* table is written `PARAMETRI` in one dialect and `parametri` in the other and is
 one object all the same. Comparing the written form would report every object in the repository
 as missing from one side — the tool would produce nothing but noise on its first run. So both
 fold to a single case, and **upper** is the one, because that is what Oracle's own data
-dictionary stores and Oracle is the branch whose names are written by hand.
+dictionary stores and Oracle is the side whose names are written by hand.
 
 A **quoted** name is not folded, in either direction. `"parametri"` and `parametri` are
 genuinely different objects to both engines, and collapsing them would hide a real bug rather
 than reveal one. (The fold itself lives in `picus-parse`'s `ObjectRef::folded_name`, so the
 parser, the inventory and the rules cannot disagree about it.)
 
-The **schema qualifier is dropped** for the same reason the case is folded: the Oracle branch
-qualifies with the owning user, the PostgreSQL one with `public`, both inconsistently and
+The **schema qualifier is dropped** for the same reason the case is folded: the Oracle scripts
+qualify with the owning user, the PostgreSQL ones with `public`, both inconsistently and
 usually not at all. Keying on `APP.PARAMETRI` versus `public.parametri` would make one object
 into two and every row would look half-missing.
 
@@ -71,7 +72,7 @@ Two foldings, and one refusal to fold:
 
 | Written | Row | Why |
 |---|---|---|
-| `MATERIALIZED VIEW` | `view` | The two branches spell the same object differently; a maintainer wants one row |
+| `MATERIALIZED VIEW` | `view` | The two dialects spell the same object differently; a maintainer wants one row |
 | `PACKAGE BODY` | `package` | A spec and a body of the same name are one object to a human |
 | `PACKAGE` spec vs body | **distinct** on the site | `ObjectSite::declared_kind` keeps the exact kind, so "spec here, body there" is not read as one object defined twice |
 
@@ -79,15 +80,18 @@ Two foldings, and one refusal to fold:
 
 A coverage cell is **the number of statements** that touch the object in that folder, not the
 number of times it is mentioned. A statement naming `PARAMETRI` four times has done one thing to
-it, and counting mentions would make a verbose branch look better covered than a terse one.
+it, and counting mentions would make a verbose folder look better covered than a terse one.
 
 Both definitions and references count as touching: an `INSERT INTO PARAMETRI` in an update
 folder is exactly the coverage `CONS001` is looking for.
 
-Every column the project has is seeded to zero before anything is counted, including folders
-whose files were never parsed. A column that only appeared once something was found would make
-*"this folder has none"* indistinguishable from *"nothing looked here"* — which is the one
-failure a consistency tool must not have.
+A column is keyed by the folder's **project-relative path** (`AGGIORNAMENTO/2024/ORA`), which is
+a folder's identity everywhere else in Picus too. Every folder that holds scripts gets one and
+every one of them is seeded to zero before anything is counted, including folders whose files
+were never parsed — a column that only appeared once something was found would make *"this
+folder has none"* indistinguishable from *"nothing looked here"*, which is the one failure a
+consistency tool must not have. Folders that hold only other folders get no column: a cell that
+can never be anything but zero is noise in a table whose point is that a zero means something.
 
 `ALTER` defines an object but does not **create** it (`ObjectSite::creating`). A table created
 in the initialisation folder and altered by three update scripts is an ordinary repository, not

@@ -137,6 +137,14 @@
     onSelect?:      (node: T, e: MouseEvent | KeyboardEvent) => void;
     onActivate?:    (node: T) => void;
     onContextMenu?: (node: T, e: MouseEvent) => void;
+    /** Row-level key handler, called **before** the widget's own Enter / Space /
+     *  Arrow handling. Calling `preventDefault()` on the event stands the built-in
+     *  behaviour down, which is how a consumer binds keys the tree doesn't own —
+     *  the keyboard route to a row's context menu (Shift+F10, the Menu key), a
+     *  Delete, a rename. The event target is the row, so
+     *  `(e.currentTarget as HTMLElement).getBoundingClientRect()` gives the
+     *  coordinates a menu needs to open at. */
+    onRowKeydown?:  (node: T, e: KeyboardEvent) => void;
 
     // ── Per-row hooks ──────────────────────────────────────────────────
     /** Extra class on the row wrapper, computed per node. */
@@ -187,6 +195,7 @@
     onSelect,
     onActivate,
     onContextMenu,
+    onRowKeydown,
     rowClass,
     rowTitle,
     draggable,
@@ -492,6 +501,10 @@
   }
 
   function handleKeydown(node: T, hasKids: boolean, e: KeyboardEvent) {
+    // Consumer first: it may bind keys the tree has no opinion about, and
+    // `preventDefault()` is how it says "I handled this one".
+    onRowKeydown?.(node, e);
+    if (e.defaultPrevented) return;
     // Minimal keyboard model — Enter / Space activate, Right opens,
     // Left closes. Up/Down list-nav is left to the browser's default
     // tab order so we don't fight focus traps in modal hosts.

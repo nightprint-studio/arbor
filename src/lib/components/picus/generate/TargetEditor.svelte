@@ -35,20 +35,37 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
-  import type { Target } from '$lib/types/picus';
+  import { GENERIC_ENGINE, type Target } from '$lib/types/picus';
 
-  /** What each rule turns into, per dialect — shown inline, never hidden. */
+  /**
+   * What each rule turns into, per dialect — shown inline, never hidden.
+   *
+   * A **portable** destination has no dialect-specific spelling for any of these,
+   * which is precisely why it accepts none of them: the two engines write a
+   * procedural block, an existence check and a savepoint in ways the other cannot
+   * parse. The hints say that rather than picking one engine's answer, and the
+   * controls below are disabled to match — the backend refuses them anyway, and a
+   * control that can only produce a refusal should not be operable.
+   */
+  const PORTABLE_BLOCK_HINT = 'no form runs on both engines';
+
   function wrapHint(t: Target): string {
+    if (t.dialect === GENERIC_ENGINE) return PORTABLE_BLOCK_HINT;
     return t.dialect === 'oracle' ? 'DECLARE … BEGIN … END; /' : 'DO $$ … END $$;';
   }
   function objectHint(t: Target): string {
+    if (t.dialect === GENERIC_ENGINE) return 'needs a block, which a portable script cannot have';
     return t.dialect === 'oracle' ? 'checked against USER_TABLES' : 'checked with to_regclass';
   }
   function txHint(t: Target): string {
+    if (t.dialect === GENERIC_ENGINE) return 'needs a block, which a portable script cannot have';
     return t.dialect === 'oracle'
       ? 'SAVEPOINT + ROLLBACK TO on error'
       : 'the DO block is already one transaction';
   }
+
+  /** Portable destinations take plain statements and nothing that needs a block. */
+  const portable = (t: Target) => t.dialect === GENERIC_ENGINE;
 </script>
 
 {#each dmlStore.targets as target (target.id)}
@@ -74,7 +91,7 @@
         aria-expanded={expanded}
         onclick={() => dmlStore.expandTarget(target.id)}
       >
-        <PicusDialectChip dialect={target.dialect} />
+        <PicusDialectChip engine={target.dialect} />
         <PicusRoleChip role={target.role} />
         <span class="te-path">{target.file}</span>
         <span class="te-summary">
@@ -117,6 +134,7 @@
           <Toggle
             checked={target.wrap === 'block'}
             size="sm"
+            disabled={portable(target)}
             label="Wrap in a procedural block"
             ariaLabel="Wrap in a procedural block"
             onchange={(on) => dmlStore.setWrap(target.id, on ? 'block' : 'plain')}
@@ -128,6 +146,7 @@
           <Toggle
             checked={!!target.guards.version}
             size="sm"
+            disabled={portable(target)}
             label="Run only when the database is at version"
             ariaLabel="Version guard"
             onchange={(on) => dmlStore.setVersionGuard(target.id, on)}
@@ -181,6 +200,7 @@
           <Toggle
             checked={target.guards.requireObject}
             size="sm"
+            disabled={portable(target)}
             label="Stop if the table doesn't exist"
             ariaLabel="Require the table to exist"
             onchange={(on) => dmlStore.setGuard(target.id, 'requireObject', on)}
@@ -192,7 +212,7 @@
           <Toggle
             checked={target.guards.transactional}
             size="sm"
-            disabled={target.dialect === 'postgres'}
+            disabled={target.dialect === 'postgres' || portable(target)}
             label="Savepoint and roll back on error"
             ariaLabel="Transactional"
             onchange={(on) => dmlStore.setGuard(target.id, 'transactional', on)}

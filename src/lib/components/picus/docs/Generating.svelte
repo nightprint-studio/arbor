@@ -4,9 +4,9 @@
 
 <h1>Generating DML</h1>
 <p class="doc-lead">
-  Describe a datum once; Picus writes it into every branch that expects it, in the form
-  each of them requires. Generation is deterministic — structured input becomes a model,
-  the model is emitted per dialect. No language model is involved at any point.
+  Describe a datum once; Picus writes it into every folder that expects it, in the form
+  that folder's engine requires. Generation is deterministic — structured input becomes a
+  model, the model is emitted per dialect. No language model is involved at any point.
 </p>
 
 <h2>Three sources, one model</h2>
@@ -15,7 +15,7 @@
     Values are validated as you type, not when you save.</li>
   <li><b>Paste SQL</b> — paste statements you already have; they are re-read (parsed, not
     string-substituted) and become the same model. This is the "I have the INSERT, write
-    me the other branch's version" case.</li>
+    me the other engine's version" case.</li>
   <li><b>CSV</b> — delimiter sniffed, first row as header, and an explicit header →
     column mapping with a same-name proposal. Rows that fail their column types are shown
     as rejected rather than silently dropped.</li>
@@ -34,12 +34,17 @@
 
 <h2>Destinations and their rules</h2>
 <p>
-  Each destination is one file, in one branch, with its own dialect and its own rules.
-  <b>Add</b> — on the Destinations card or in the sidebar — lists the project's folders and
-  files, so a destination arrives with its branch's dialect and its role's preset already
-  applied; it can also create a file that does not exist yet, which is what a new update
-  script always is. Expanding a destination shows every rule with, beside it, what it
-  becomes in the emitted SQL.
+  Each destination is one file, with its own dialect and its own rules. <b>Add</b> — on the
+  Destinations card or in the sidebar — lists every folder that holds scripts, so a
+  destination arrives with that folder's engine and its role's preset already applied,
+  inherited or declared alike; it can also create a file that does not exist yet, which is
+  what a new update script always is. Expanding a destination shows every rule with,
+  beside it, what it becomes in the emitted SQL.
+</p>
+<p>
+  A folder <b>with no engine cannot be a destination</b>: there is no form to write the
+  statements in. Such a folder is still listed, saying so, with the one action that fixes
+  it — see <i>Scripts on disk</i> for how a folder is classified.
 </p>
 <ul>
   <li><b>Procedural block</b> — <code>DECLARE … BEGIN … END; /</code> on Oracle,

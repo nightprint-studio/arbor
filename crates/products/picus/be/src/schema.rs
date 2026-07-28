@@ -4,9 +4,13 @@
 //! with its columns, cheap enough for a schema with hundreds of tables.
 //! [`picus_table_detail`] adds the constraints and indexes, and is only paid for
 //! when a tab actually opens.
+//!
+//! A relation's *rows* are not here — they are a read like any other, and live with
+//! the rest of the reads in [`crate::query`] (`picus_open_relation`). Structure and
+//! data are different questions about the same object, and only one of them scrolls.
 
 use picus_core::prelude::PicusState;
-use picus_db_api::prelude::{RowPage, SchemaSnapshot, TableInfo};
+use picus_db_api::prelude::{SchemaSnapshot, TableInfo};
 
 use crate::connections::require_session;
 
@@ -25,22 +29,4 @@ async fn picus_table_detail(
     name: String,
 ) -> Result<TableInfo, String> {
     require_session(state, &id)?.table_detail(&name).await.map_err(|e| e.to_string())
-}
-
-/// One page of a relation's rows.
-///
-/// Paging bounds what crosses the wire; the grid's virtualisation bounds what is
-/// drawn. Both are needed, which is why the page size goes as high as it does.
-#[arbor_rpc::handler]
-async fn picus_fetch_page(
-    state: &PicusState,
-    id: String,
-    name: String,
-    offset: u64,
-    limit: u32,
-) -> Result<RowPage, String> {
-    require_session(state, &id)?
-        .fetch_page(&name, offset, limit)
-        .await
-        .map_err(|e| e.to_string())
 }

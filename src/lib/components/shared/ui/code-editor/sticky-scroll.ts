@@ -60,6 +60,7 @@ export function stickyScroll(): Extension {
       lastKey = '';
 
       readonly onScroll: () => void;
+      raf = 0;
 
       constructor(readonly view: EditorView) {
         this.el = document.createElement('div');
@@ -67,19 +68,38 @@ export function stickyScroll(): Extension {
         view.dom.appendChild(this.el);
         // Small scrolls within CodeMirror's rendered margin don't fire a `ViewUpdate`, so the pinned
         // set is refreshed straight off the scroll event (rAF-coalesced) for a smooth follow.
-        let raf = 0;
-        this.onScroll = () => {
-          if (raf) return;
-          raf = requestAnimationFrame(() => { raf = 0; this.render(); });
-        };
+        this.onScroll = () => this.schedule();
         view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
-        this.render();
+        this.schedule();
+      }
+
+      /**
+       * Render on the next frame, never inline.
+       *
+       * `render()` reads the layout (`lineBlockAtHeight` → `readMeasured`), and CodeMirror
+       * **forbids that while an update is in flight** — it throws
+       * `Reading the editor layout isn't allowed during an update`. Both of this plugin's
+       * entry points are inside that window: a `ViewPlugin` is constructed during the view's
+       * first update, and `update()` runs during every one after it. The exception is caught
+       * per-plugin and logged as "CodeMirror plugin crashed", so this failed quietly rather
+       * than visibly — the sticky header simply stopped appearing.
+       *
+       * Deferring to `requestAnimationFrame` puts every read after the update has settled,
+       * which is also where the scroll path already ran. One path, one guarantee.
+       */
+      schedule() {
+        if (this.raf) return;
+        this.raf = requestAnimationFrame(() => {
+          this.raf = 0;
+          // The view can be torn down between the request and the frame.
+          if (this.el.isConnected) this.render();
+        });
       }
 
       update(u: ViewUpdate) {
         // Scroll is driven by the (rAF-coalesced) scroll listener; here we only react to edits and
         // layout changes, so a scroll doesn't render twice per frame (a source of the flicker).
-        if (u.docChanged || u.geometryChanged) this.render();
+        if (u.docChanged || u.geometryChanged) this.schedule();
       }
 
       render() {
@@ -123,6 +143,9 @@ export function stickyScroll(): Extension {
       }
 
       destroy() {
+        // Cancel a pending frame: without this it fires against a torn-down view, which is
+        // the other half of the same class of bug.
+        if (this.raf) cancelAnimationFrame(this.raf);
         this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
         this.el.remove();
       }

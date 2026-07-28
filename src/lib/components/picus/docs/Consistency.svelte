@@ -30,10 +30,10 @@
     <tr><th>Id</th><th>Rule</th><th>Severity</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>CONS001</code></td><td>Statement present in one branch and absent from the other dialect's equivalent</td><td>blocking</td></tr>
+    <tr><td><code>CONS001</code></td><td>Statement present for one engine and absent from the other engine's equivalent folder</td><td>blocking</td></tr>
     <tr><td><code>CONS002</code></td><td>Datum in the initialisation, never propagated to the updates</td><td>blocking</td></tr>
     <tr><td><code>CONS003</code></td><td>Datum in an update, missing from the initialisation — a fresh install ends up incomplete</td><td>blocking</td></tr>
-    <tr><td><code>CONS004</code></td><td>Object filled in differently by the two branches — same row, different columns or different values</td><td>blocking</td></tr>
+    <tr><td><code>CONS004</code></td><td>Object filled in differently for the two engines — same row, different columns or different values</td><td>blocking</td></tr>
     <tr><td><code>DIA001</code></td><td>Statement written in the other dialect's syntax, in a folder that will run against this one</td><td>blocking</td></tr>
     <tr><td><code>VER001</code></td><td>Update block with no starting-version guard</td><td>blocking</td></tr>
     <tr><td><code>VER002</code></td><td>Block that changes data without carrying the version forward</td><td>blocking</td></tr>
@@ -90,5 +90,5 @@
   <li>The counter in the status bar opens the report; a finding's location opens the file
     at the right place, and for rules that pair two places — a duplicate, an object defined
     twice — the second location is a link of its own.</li>
-  <li>Findings group by severity, by branch or by file.</li>
+  <li>Findings group by severity, by folder or by file.</li>
 </ul>

@@ -36,17 +36,17 @@ impl Severity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum RuleId {
-    /// An object one branch touches and the other does not.
+    /// An object one dialect touches and the other does not.
     Cons001,
     /// A datum the initialisation writes and no update script ever writes.
     Cons002,
     /// A datum an update script writes and the initialisation never writes.
     Cons003,
-    /// The same object filled in differently in the two branches.
+    /// The same object filled in differently in the two dialects.
     Cons004,
     /// A statement written in the dialect the folder is not.
     ///
-    /// Its own prefix on purpose: it is not a disagreement between two branches,
+    /// Its own prefix on purpose: it is not a disagreement between two dialects,
     /// it is one script that will not run.
     Dia001,
     /// An update script that writes without checking where it started from.
@@ -57,7 +57,7 @@ pub enum RuleId {
     Ver003,
     /// The same row inserted twice in one script.
     Dup001,
-    /// The same object created in two places in one branch.
+    /// The same object created in two places for one dialect.
     Dup002,
     /// A file whose encoding drifted from what its folder expects.
     Enc001,
@@ -156,7 +156,7 @@ impl RuleId {
     /// that varied with circumstance would be a severity nobody could filter on.
     pub fn severity(self) -> Severity {
         match self {
-            // The installation ends up wrong: a branch missing a change, a
+            // The installation ends up wrong: a dialect missing a change, a
             // script that cannot run, a guard that is not there, a key that
             // collides, a character that cannot be written.
             RuleId::Cons001

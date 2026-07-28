@@ -166,7 +166,7 @@ mod tests {
     fn snapshot(root: &str) -> Arc<ScriptSnapshot> {
         Arc::new(ScriptSnapshot {
             root: PathBuf::from(root),
-            project: Project { name: "PROD".into(), root: root.into(), branches: Vec::new() },
+            project: Project { name: "PROD".into(), root: root.into(), tree: Vec::new() },
             config: ProjectConfig {
                 version: CURRENT_VERSION,
                 name: "PROD".into(),
@@ -174,7 +174,8 @@ mod tests {
                 version_table: Default::default(),
                 generation: Default::default(),
                 naming: NamingScheme::default(),
-                branches: Vec::new(),
+                folders: Vec::new(),
+                aliases: Vec::new(),
             },
             notes: Vec::new(),
             is_new: false,

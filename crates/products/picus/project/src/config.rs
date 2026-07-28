@@ -12,6 +12,46 @@
 //! repository, and namespacing per product inside it leaves room for the other
 //! products to move in without a second dotfile each.
 //!
+//! ## The shape: a flat list of declarations keyed by path
+//!
+//! ```toml
+//! [[folder]]
+//! path = "AGGIORNAMENTO"
+//! role = "update"
+//!
+//! [[folder]]
+//! path = "AGGIORNAMENTO/2024/ORA"
+//! dialect = "oracle"
+//! ```
+//!
+//! A declaration says what is true **of that folder**; everything below it
+//! inherits until another declaration overrides it ([`crate::resolve`]). Flat and
+//! keyed by path rather than nested, for one concrete reason: a subdirectory
+//! appearing on disk must not need the file to be restructured. The previous
+//! shape — an array of branches each holding an array of folders — could only
+//! describe two fixed levels, and a repository whose dialect sits three levels
+//! down had nowhere to say so.
+//!
+//! ## And a vocabulary, for the names that repeat
+//!
+//! A declaration answers for one path. A repository with a folder per delivered
+//! version has eleven folders called `POS` and will have a twelfth next month, so
+//! it also gets to say what a **name** means:
+//!
+//! ```toml
+//! [[alias]]
+//! name = "POS"
+//! engine = "postgres"
+//! ```
+//!
+//! That is [`crate::alias`], and it applies at discovery — so a `POS` folder
+//! added later is classified without anyone touching this file again. A per-path
+//! `[[folder]]` declaration still wins over it: a specific answer beats a general
+//! rule.
+//!
+//! A `version = 1` file still loads: [`crate::legacy`] folds its branches and
+//! folders into declarations, and nothing is lost.
+//!
 //! **This file is never written without the user's explicit confirmation.** The
 //! functions here are plain I/O; the confirmation belongs to the caller, and the
 //! proposal flow in [`crate::discover`] exists precisely so there is something to
@@ -20,20 +60,25 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use picus_types::prelude::{EngineKind, FolderRole};
+use picus_types::prelude::{FolderEngine, FolderRole};
 use serde::{Deserialize, Serialize};
 
+use crate::alias::{alias_key, AliasVocabulary, InferenceAlias};
 use crate::error::ProjectError;
 use crate::insertion::InsertionRule;
 use crate::marker::MarkerTemplate;
 use crate::naming::NamingScheme;
+use crate::path::self_and_ancestors;
 use crate::tree::LineEnding;
 
 /// Where the file sits, relative to the project root.
 pub const PROJECT_CONFIG_RELATIVE_PATH: &str = ".arbor/picus/project.toml";
 
 /// The schema version this build writes and understands.
-pub const CURRENT_VERSION: u32 = 1;
+///
+/// `2` is the flat `[[folder]]` shape. `1` — branches holding folders — is still
+/// read, and migrated on the way in.
+pub const CURRENT_VERSION: u32 = 2;
 
 /// The default single-byte encoding for these repositories. Not a guess about
 /// text in general — a fact about the corpus Picus was built for.
@@ -55,10 +100,23 @@ pub struct ProjectConfig {
     pub generation: GenerationSettings,
     #[serde(default)]
     pub naming: NamingScheme,
-    /// One per per-dialect branch. `branch` singular in the file because TOML
-    /// spells an array of tables `[[branch]]`, which reads better than `[[branches]]`.
-    #[serde(default, rename = "branch")]
-    pub branches: Vec<BranchConfig>,
+    /// What each folder declares, keyed by its project-relative path. `folder`
+    /// singular in the file because TOML spells an array of tables `[[folder]]`.
+    ///
+    /// Only folders that declare *something* appear: a folder that simply
+    /// inherits is absent, and a repository that agrees with what Picus inferred
+    /// writes a short file.
+    #[serde(default, rename = "folder")]
+    pub folders: Vec<FolderDeclaration>,
+    /// Folder **names** that mean something in this repository — the vocabulary
+    /// that answers for every folder called `POS`, including the ones not yet
+    /// created. `alias` singular for the same TOML reason as `folder`.
+    ///
+    /// Ordered after `folders` in this struct because `toml` refuses to emit a
+    /// value after a table, and both of these are arrays of tables: the plain
+    /// values have to come first, and between two arrays the order is free.
+    #[serde(default, rename = "alias")]
+    pub aliases: Vec<InferenceAlias>,
 }
 
 fn default_version() -> u32 {
@@ -154,42 +212,68 @@ impl GenerationSettings {
     }
 }
 
-/// One per-dialect branch.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// What one folder declares about itself.
+///
+/// Every field except the path is optional and every one of them **inherits**:
+/// a folder that declares nothing about its encoding is in its nearest
+/// ancestor's, exactly as it is in its nearest ancestor's dialect.
+///
+/// Field order is load-bearing for TOML: the values first, the `naming` table
+/// last, because `toml` refuses to emit a value after a table.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub struct BranchConfig {
-    pub id: String,
-    pub label: String,
-    /// Path relative to the project root, POSIX separators.
+pub struct FolderDeclaration {
+    /// Project-relative path, POSIX separators. `""` is the repository root, and
+    /// a declaration there applies to everything.
     pub path: String,
-    /// Absent when the engine is unknown. Nothing is generated into such a branch.
+    /// The engine every script under here is written in, unless something below
+    /// says otherwise. Absent means "inherit"; nothing is generated into a folder
+    /// no ancestor declares one for.
+    ///
+    /// The value may name an engine Picus does **not** read — `dialect =
+    /// "sqlserver"` — which is how one folder is pinned as somebody else's
+    /// territory without inventing a second key for it. A folder has one engine,
+    /// so it has one key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dialect: Option<EngineKind>,
-    #[serde(default, rename = "folder")]
-    pub folders: Vec<FolderConfig>,
-}
-
-/// One folder inside a branch.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct FolderConfig {
-    pub id: String,
-    pub label: String,
-    pub path: String,
-    pub role: FolderRole,
-    /// Overrides the project's default encoding for this folder only.
+    pub dialect: Option<FolderEngine>,
+    /// What the folder is for. Absent means "inherit", falling back to
+    /// [`FolderRole::Ignored`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<FolderRole>,
+    /// Overrides the project's default encoding from here down.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encoding: Option<String>,
-    /// Overrides the update-file naming for this folder only — a branch whose
-    /// update files are named differently from its sibling's.
+    /// Overrides the update-file naming from here down — a folder whose update
+    /// files are named differently from its sibling's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub naming: Option<NamingScheme>,
+}
+
+impl FolderDeclaration {
+    /// A declaration for a path that says nothing yet.
+    pub fn new(path: impl Into<String>) -> FolderDeclaration {
+        FolderDeclaration { path: path.into(), ..FolderDeclaration::default() }
+    }
+
+    /// Does this declaration say anything at all? One that does not is noise in
+    /// the file and is dropped rather than written.
+    pub fn is_empty(&self) -> bool {
+        self.dialect.is_none()
+            && self.role.is_none()
+            && self.encoding.is_none()
+            && self.naming.is_none()
+    }
 }
 
 impl ProjectConfig {
     /// The absolute path of the project file for a root.
     pub fn path_in(root: &Path) -> PathBuf {
         root.join(".arbor").join("picus").join("project.toml")
+    }
+
+    /// Parse a project file, migrating a `version = 1` one on the way in.
+    pub fn parse(text: &str) -> Result<ProjectConfig, toml::de::Error> {
+        crate::legacy::parse(text)
     }
 
     /// Read the project file. `Ok(None)` means "this repository has not been set
@@ -202,7 +286,7 @@ impl ProjectConfig {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(ProjectError::Io { path, reason: e.to_string() }),
         };
-        let config: ProjectConfig = toml::from_str(&text)
+        let config = ProjectConfig::parse(&text)
             .map_err(|e| ProjectError::Malformed { path: path.clone(), reason: e.to_string() })?;
         if config.version > CURRENT_VERSION {
             return Err(ProjectError::Malformed {
@@ -237,14 +321,112 @@ impl ProjectConfig {
         Ok(path)
     }
 
-    /// The naming scheme in force for one folder — its own, or the project's.
-    pub fn naming_for<'a>(&'a self, folder: &'a FolderConfig) -> &'a NamingScheme {
-        folder.naming.as_ref().unwrap_or(&self.naming)
+    /// What this exact folder declares, if anything.
+    pub fn declaration(&self, path: &str) -> Option<&FolderDeclaration> {
+        self.folders.iter().find(|f| f.path == path)
     }
 
-    /// The encoding one folder is expected to be in.
-    pub fn encoding_for<'a>(&'a self, folder: &'a FolderConfig) -> &'a str {
-        folder.encoding.as_deref().unwrap_or(&self.encoding.default)
+    /// The declaration for a folder, created empty if there is none.
+    ///
+    /// The tree has folders the file has never mentioned — that is the normal
+    /// state, since only folders that declare something are written — so an edit
+    /// has to be able to start one.
+    pub fn declaration_mut(&mut self, path: &str) -> &mut FolderDeclaration {
+        if let Some(index) = self.folders.iter().position(|f| f.path == path) {
+            return &mut self.folders[index];
+        }
+        self.folders.push(FolderDeclaration::new(path));
+        self.folders.last_mut().expect("just pushed")
+    }
+
+    /// Drop declarations that no longer say anything, and keep the file ordered
+    /// by path so a diff of it reads like the tree. The vocabulary is tidied the
+    /// same way, by name.
+    pub fn tidy(&mut self) {
+        self.folders.retain(|f| !f.is_empty());
+        self.folders.sort_by(|a, b| a.path.cmp(&b.path));
+        self.aliases.retain(|a| !a.is_empty() && !a.key().is_empty());
+        self.aliases.sort_by(|a, b| a.key().cmp(&b.key()));
+    }
+
+    // ── The project's own vocabulary ──────────────────────────────────────────
+
+    /// The vocabulary, compiled and ready to answer questions about a folder.
+    ///
+    /// Built per call rather than cached: a `ProjectConfig` is a plain value that
+    /// callers clone and edit, and a cache on it would be one more thing that can
+    /// disagree with the field beside it. Discovery compiles it once per scan,
+    /// which is the only hot path.
+    pub fn vocabulary(&self) -> AliasVocabulary {
+        AliasVocabulary::compile(&self.aliases)
+    }
+
+    /// What this project declares about a folder name, if anything.
+    ///
+    /// Looked up by [`alias_key`], not by the literal string: `POS` and `pos`
+    /// are the same alias because they match the same folders, and an editor
+    /// that thought otherwise would let the file grow two entries fighting over
+    /// the same rows.
+    pub fn alias(&self, name: &str) -> Option<&InferenceAlias> {
+        let key = alias_key(name);
+        self.aliases.iter().find(|a| a.key() == key)
+    }
+
+    /// The alias for a name, created empty if there is none.
+    pub fn alias_mut(&mut self, name: &str) -> &mut InferenceAlias {
+        let key = alias_key(name);
+        if let Some(index) = self.aliases.iter().position(|a| a.key() == key) {
+            return &mut self.aliases[index];
+        }
+        self.aliases.push(InferenceAlias::new(name));
+        self.aliases.last_mut().expect("just pushed")
+    }
+
+    /// Forget a name. `true` when there was one to forget.
+    pub fn remove_alias(&mut self, name: &str) -> bool {
+        let key = alias_key(name);
+        let before = self.aliases.len();
+        self.aliases.retain(|a| a.key() != key);
+        self.aliases.len() != before
+    }
+
+    /// The first thing a folder or one of its ancestors declares.
+    ///
+    /// The shared half of every inherited setting: the nearest declaration wins,
+    /// and the repository root (`""`) is the last one tried.
+    fn inherited<'a, T>(
+        &'a self,
+        folder_path: &str,
+        pick: impl Fn(&'a FolderDeclaration) -> Option<T>,
+    ) -> Option<T> {
+        self_and_ancestors(folder_path)
+            .into_iter()
+            .find_map(|ancestor| self.declaration(ancestor).and_then(&pick))
+    }
+
+    /// The naming scheme a folder or one of its ancestors declares, if any.
+    pub fn declared_naming(&self, folder_path: &str) -> Option<&NamingScheme> {
+        self.inherited(folder_path, |d| d.naming.as_ref())
+    }
+
+    /// The encoding a folder or one of its ancestors declares, if any.
+    ///
+    /// Distinct from [`encoding_for`](Self::encoding_for) because "the project's
+    /// default" and "somebody pinned this folder" are different facts: discovery
+    /// lets the files vote in the first case and refuses to in the second.
+    pub fn declared_encoding(&self, folder_path: &str) -> Option<&str> {
+        self.inherited(folder_path, |d| d.encoding.as_deref())
+    }
+
+    /// The naming scheme in force for a folder — the nearest declared one, or the
+    /// project's.
+    pub fn naming_for(&self, folder_path: &str) -> &NamingScheme {
+        self.declared_naming(folder_path).unwrap_or(&self.naming)
+    }
+
+    /// The encoding a folder's files are expected to be in.
+    pub fn encoding_for(&self, folder_path: &str) -> &str {
+        self.declared_encoding(folder_path).unwrap_or(&self.encoding.default)
     }
 
     /// Validate what can only be checked once, at load: the patterns compile and
@@ -259,12 +441,10 @@ impl ProjectConfig {
         if let Err(e) = self.naming.compile() {
             out.push(e.to_string());
         }
-        for branch in &self.branches {
-            for folder in &branch.folders {
-                if let Some(naming) = &folder.naming {
-                    if let Err(e) = naming.compile() {
-                        out.push(format!("{}: {e}", folder.path));
-                    }
+        for folder in &self.folders {
+            if let Some(naming) = &folder.naming {
+                if let Err(e) = naming.compile() {
+                    out.push(format!("{}: {e}", folder.path));
                 }
             }
         }
@@ -274,26 +454,20 @@ impl ProjectConfig {
             ));
         }
         for (role, rule) in &self.generation.insertion {
-            if !FolderRole::ALL.iter().any(|r| r.as_str() == role) {
-                out.push(format!(
+            match FolderRole::from_wire(role) {
+                None => out.push(format!(
                     "`[generation.insertion]` declares `{role}`, which is not a folder role — \
                      no folder will ever use it"
-                ));
-            } else if InsertionRule::from_wire(rule).is_none() {
-                out.push(format!(
+                )),
+                Some(known) if InsertionRule::from_wire(rule).is_none() => out.push(format!(
                     "`{rule}` is not an insertion rule Picus knows, so `{role}` folders keep the \
                      default ({})",
-                    InsertionRule::default_for(
-                        FolderRole::ALL
-                            .iter()
-                            .copied()
-                            .find(|r| r.as_str() == role)
-                            .unwrap_or(FolderRole::Ignored)
-                    )
-                    .describe()
-                ));
+                    InsertionRule::default_for(known).describe()
+                )),
+                Some(_) => {}
             }
         }
+        out.extend(crate::alias::problems(&self.aliases));
         out
     }
 }
@@ -301,6 +475,11 @@ impl ProjectConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use picus_types::prelude::{EngineKind, ForeignEngine};
+
+    fn oracle() -> Option<FolderEngine> {
+        Some(FolderEngine::Supported(EngineKind::Oracle))
+    }
 
     fn sample() -> ProjectConfig {
         ProjectConfig {
@@ -310,28 +489,37 @@ mod tests {
             version_table: VersionTableSettings::default(),
             generation: GenerationSettings::default(),
             naming: NamingScheme::default(),
-            branches: vec![BranchConfig {
-                id: "ora".to_string(),
-                label: "ORACLE".to_string(),
-                path: "ORACLE".to_string(),
-                dialect: Some(EngineKind::Oracle),
-                folders: vec![FolderConfig {
-                    id: "ora-upd".to_string(),
-                    label: "AGGIORNAMENTO".to_string(),
-                    path: "ORACLE/AGGIORNAMENTO".to_string(),
-                    role: FolderRole::Update,
-                    encoding: None,
-                    naming: None,
-                }],
-            }],
+            folders: vec![
+                FolderDeclaration {
+                    path: "AGGIORNAMENTO".to_string(),
+                    role: Some(FolderRole::Update),
+                    ..FolderDeclaration::default()
+                },
+                FolderDeclaration {
+                    path: "AGGIORNAMENTO/2024/ORA".to_string(),
+                    dialect: oracle(),
+                    ..FolderDeclaration::default()
+                },
+            ],
+            aliases: Vec::new(),
         }
     }
 
     #[test]
     fn it_round_trips_through_toml() {
         let text = toml::to_string_pretty(&sample()).expect("serialises");
-        let back: ProjectConfig = toml::from_str(&text).expect("parses");
+        let back = ProjectConfig::parse(&text).expect("parses");
         assert_eq!(back, sample());
+    }
+
+    #[test]
+    fn the_declarations_are_a_flat_list_keyed_by_path() {
+        // The shape the whole model rests on: the role is declared at the top of
+        // the tree and the dialect three levels down, in the same list.
+        let text = toml::to_string_pretty(&sample()).expect("serialises");
+        assert!(text.contains("[[folder]]"), "{text}");
+        assert!(text.contains(r#"path = "AGGIORNAMENTO/2024/ORA""#), "{text}");
+        assert!(!text.contains("[[branch]]"), "{text}");
     }
 
     #[test]
@@ -343,7 +531,7 @@ mod tests {
         config.version_table.date_column = None;
         let text = toml::to_string_pretty(&config).expect("serialises");
         assert!(!text.contains("date_column"));
-        let back: ProjectConfig = toml::from_str(&text).expect("parses");
+        let back = ProjectConfig::parse(&text).expect("parses");
         assert_eq!(back.version_table.date_column, None);
     }
 
@@ -353,40 +541,93 @@ mod tests {
         // than the parse failing and taking the whole project with it.
         let text = r#"
             name = "MINIMAL"
-            [[branch]]
-            id = "pg"
-            label = "POSTGRES"
+            [[folder]]
             path = "POSTGRES"
             dialect = "postgres"
         "#;
-        let config: ProjectConfig = toml::from_str(text).expect("parses");
+        let config = ProjectConfig::parse(text).expect("parses");
         assert_eq!(config.version, CURRENT_VERSION);
         assert_eq!(config.encoding.default, DEFAULT_ENCODING);
         assert_eq!(config.encoding.eol, LineEnding::Crlf);
         assert_eq!(config.version_table.table, "VERSIONE_DB");
         assert_eq!(config.naming, NamingScheme::default());
-        assert_eq!(config.branches[0].dialect, Some(EngineKind::Postgres));
-        assert!(config.branches[0].folders.is_empty());
+        assert_eq!(config.folders[0].dialect, Some(FolderEngine::Supported(EngineKind::Postgres)));
+        // A declaration that says nothing about a role means "inherit", not
+        // "ignored" — the resolver decides that, not the parse.
+        assert_eq!(config.folders[0].role, None);
     }
 
     #[test]
-    fn a_folder_can_override_the_project_wide_settings() {
+    fn an_overridden_setting_reaches_every_folder_below_it() {
         let mut config = sample();
-        let folder = &mut config.branches[0].folders[0];
-        folder.encoding = Some("UTF-8".to_string());
-        folder.naming = Some(NamingScheme {
+        config.declaration_mut("AGGIORNAMENTO").encoding = Some("UTF-8".to_string());
+        config.declaration_mut("AGGIORNAMENTO").naming = Some(NamingScheme {
             pattern: r"^(?P<to>\d+)\.sql$".to_string(),
             template: "{to}.sql".to_string(),
             separator: '_',
         });
-        let folder = config.branches[0].folders[0].clone();
-        assert_eq!(config.encoding_for(&folder), "UTF-8");
-        assert_ne!(config.naming_for(&folder), &NamingScheme::default());
 
-        // …and a folder that overrides nothing inherits both.
-        let plain = FolderConfig { encoding: None, naming: None, ..folder };
-        assert_eq!(config.encoding_for(&plain), DEFAULT_ENCODING);
-        assert_eq!(config.naming_for(&plain), &NamingScheme::default());
+        // The folder itself, and a folder three levels under it.
+        for path in ["AGGIORNAMENTO", "AGGIORNAMENTO/2024/ORA"] {
+            assert_eq!(config.encoding_for(path), "UTF-8", "{path}");
+            assert_ne!(config.naming_for(path), &NamingScheme::default(), "{path}");
+        }
+        // …and a folder somewhere else inherits neither.
+        assert_eq!(config.encoding_for("INIZIALIZZAZIONE"), DEFAULT_ENCODING);
+        assert_eq!(config.naming_for("INIZIALIZZAZIONE"), &NamingScheme::default());
+    }
+
+    #[test]
+    fn a_declaration_on_the_root_is_the_projects_own_setting() {
+        let mut config = sample();
+        config.declaration_mut("").encoding = Some("UTF-8".to_string());
+        assert_eq!(config.encoding_for("AGGIORNAMENTO/2024/ORA"), "UTF-8");
+        // The nearest declaration still wins over the root's.
+        config.declaration_mut("AGGIORNAMENTO").encoding = Some("windows-1252".to_string());
+        assert_eq!(config.encoding_for("AGGIORNAMENTO/2024/ORA"), "windows-1252");
+    }
+
+    #[test]
+    fn an_edit_starts_a_declaration_for_a_folder_the_file_never_mentioned() {
+        let mut config = sample();
+        config.declaration_mut("AGGIORNAMENTO/2024/POS").dialect =
+            Some(FolderEngine::Supported(EngineKind::Postgres));
+        assert_eq!(config.folders.len(), 3);
+        assert_eq!(
+            config.declaration("AGGIORNAMENTO/2024/POS").unwrap().dialect,
+            Some(FolderEngine::Supported(EngineKind::Postgres))
+        );
+    }
+
+    #[test]
+    fn a_folder_can_be_pinned_to_an_engine_picus_does_not_read() {
+        // One key for one slot: the same `dialect` that says `oracle` says
+        // `sqlserver`, and it survives the round trip as that.
+        let text = r#"
+            name = "MINIMAL"
+            [[folder]]
+            path = "AGGIORNAMENTO/2024/MSQ"
+            dialect = "sqlserver"
+        "#;
+        let config = ProjectConfig::parse(text).expect("parses");
+        assert_eq!(
+            config.folders[0].dialect,
+            Some(FolderEngine::Unsupported(ForeignEngine::SqlServer))
+        );
+        let back = ProjectConfig::parse(&toml::to_string_pretty(&config).unwrap()).unwrap();
+        assert_eq!(back, config);
+    }
+
+    #[test]
+    fn tidying_drops_a_declaration_that_says_nothing() {
+        let mut config = sample();
+        config.declaration_mut("AGGIORNAMENTO/2024/POS");
+        assert_eq!(config.folders.len(), 3);
+        config.tidy();
+        assert_eq!(config.folders.len(), 2);
+        // …and orders what is left by path.
+        let paths: Vec<&str> = config.folders.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["AGGIORNAMENTO", "AGGIORNAMENTO/2024/ORA"]);
     }
 
     #[test]
@@ -397,7 +638,8 @@ mod tests {
             update = "before-final-commit"
             init = "nonsense"
         "#;
-        let config: ProjectConfig = toml::from_str(text).expect("an unknown rule must not fail the parse");
+        let config =
+            ProjectConfig::parse(text).expect("an unknown rule must not fail the parse");
 
         assert_eq!(
             config.generation.insertion_for(FolderRole::Update),
@@ -424,7 +666,7 @@ mod tests {
             .insertion
             .insert(FolderRole::Init.as_str().to_string(), InsertionRule::EndOfFile.as_wire().to_string());
         let text = toml::to_string_pretty(&config).expect("serialises");
-        let back: ProjectConfig = toml::from_str(&text).expect("parses");
+        let back = ProjectConfig::parse(&text).expect("parses");
         assert_eq!(back, config);
     }
 
@@ -442,11 +684,106 @@ mod tests {
     }
 
     #[test]
+    fn a_bad_pattern_on_one_folder_is_reported_against_that_folder() {
+        let mut config = sample();
+        config.declaration_mut("AGGIORNAMENTO/2024/ORA").naming = Some(NamingScheme {
+            pattern: "^(?P<to>[unclosed".to_string(),
+            template: "{to}.sql".to_string(),
+            separator: '_',
+        });
+        let problems = config.problems();
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].starts_with("AGGIORNAMENTO/2024/ORA:"), "{problems:?}");
+    }
+
+    // ── The project's own vocabulary ──────────────────────────────────────────
+
+    #[test]
+    fn the_vocabulary_round_trips_as_an_array_of_tables() {
+        let mut config = sample();
+        config.alias_mut("POS").engine = Some("postgres".to_string());
+        config.alias_mut("MSQ").engine = Some("sqlserver".to_string());
+        config.alias_mut("CONSEGNE").role = Some("update".to_string());
+
+        let text = toml::to_string_pretty(&config).expect("serialises");
+        assert!(text.contains("[[alias]]"), "{text}");
+        assert!(text.contains(r#"name = "POS""#), "{text}");
+        assert_eq!(ProjectConfig::parse(&text).expect("parses"), config);
+    }
+
+    #[test]
+    fn a_repository_that_declares_no_vocabulary_writes_none() {
+        // The file has to stay readable as "the handful of decisions this
+        // repository embodies"; an empty table for a feature nobody used is noise.
+        let text = toml::to_string_pretty(&sample()).expect("serialises");
+        assert!(!text.contains("[[alias]]"), "{text}");
+        assert!(ProjectConfig::parse(&text).unwrap().aliases.is_empty());
+    }
+
+    #[test]
+    fn an_alias_is_the_same_alias_however_it_is_spelled() {
+        let mut config = sample();
+        config.alias_mut("POS").engine = Some("postgres".to_string());
+        // Editing it by another spelling reaches the same entry rather than
+        // adding a second one that fights over the same folders.
+        config.alias_mut("pos").engine = Some("oracle".to_string());
+        assert_eq!(config.aliases.len(), 1);
+        assert_eq!(config.alias("POS").unwrap().engine.as_deref(), Some("oracle"));
+
+        assert!(config.remove_alias("Pos"));
+        assert!(config.alias("POS").is_none());
+        assert!(!config.remove_alias("POS"), "there is nothing left to remove");
+    }
+
+    #[test]
+    fn tidying_drops_an_alias_that_says_nothing_and_orders_the_rest() {
+        let mut config = sample();
+        config.alias_mut("POS").engine = Some("postgres".to_string());
+        config.alias_mut("MSQ");
+        config.alias_mut("CONSEGNE").role = Some("update".to_string());
+        assert_eq!(config.aliases.len(), 3);
+
+        config.tidy();
+        let names: Vec<&str> = config.aliases.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["CONSEGNE", "POS"]);
+    }
+
+    #[test]
+    fn a_bad_alias_is_reported_and_the_file_still_opens() {
+        // Same contract as `[generation.insertion]`: degrade, report, never fail
+        // the parse and reset every other setting in the file.
+        let text = r#"
+            name = "MINIMAL"
+            [[folder]]
+            path = "AGGIORNAMENTO"
+            role = "update"
+            [[alias]]
+            name = "MSQ"
+            engine = "sqlserver2019"
+            [[alias]]
+            name = "POS"
+            engine = "postgres"
+        "#;
+        let config = ProjectConfig::parse(text).expect("an unknown engine must not fail the parse");
+        // Everything else in the file survived.
+        assert_eq!(config.declaration("AGGIORNAMENTO").unwrap().role, Some(FolderRole::Update));
+
+        let problems = config.problems();
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("sqlserver2019"), "{problems:?}");
+
+        // The good alias still works; the bad one claims nothing.
+        let vocabulary = config.vocabulary();
+        assert!(vocabulary.engine("POS").is_some());
+        assert!(vocabulary.engine("MSQ").is_none());
+    }
+
+    #[test]
     fn a_file_from_a_newer_picus_is_refused_by_name() {
         let mut config = sample();
         config.version = CURRENT_VERSION + 1;
         let text = toml::to_string_pretty(&config).unwrap();
-        let parsed: ProjectConfig = toml::from_str(&text).unwrap();
+        let parsed = ProjectConfig::parse(&text).unwrap();
         // `load` is what enforces it; assert the condition it checks.
         assert!(parsed.version > CURRENT_VERSION);
     }

@@ -33,9 +33,8 @@ impl Inventory {
         let mut rows: BTreeMap<(InventoryKind, String), ObjectEntry> = BTreeMap::new();
 
         for (script, placement) in project.placed() {
-            let key = placement.coverage_key();
             for (index, statement) in script.parsed.statements.iter().enumerate() {
-                index_statement(&mut rows, &keys, script, placement, &key, index, statement);
+                index_statement(&mut rows, &keys, script, placement, index, statement);
             }
         }
 
@@ -59,10 +58,10 @@ fn index_statement(
     keys: &[String],
     script: &ParsedScript<'_>,
     placement: Placement<'_>,
-    coverage_key: &str,
     index: usize,
     statement: &Statement,
 ) {
+    let coverage_key = placement.coverage_key();
     // A statement counts once per object however many times it names it, so the
     // coverage cell is a count of statements and stays comparable between a
     // terse Oracle script and a chatty PostgreSQL one.
@@ -92,9 +91,9 @@ fn index_statement(
         if sited.insert((kind, name.clone(), defining)) {
             row.sites.push(ObjectSite {
                 path: script.path.to_string(),
-                branch_id: placement.branch.id.clone(),
-                folder_id: placement.folder.id.clone(),
-                role: placement.folder.role,
+                folder_path: placement.folder.path.clone(),
+                scope: placement.scope(),
+                role: placement.effective_role(),
                 statement_index: index,
                 range: object.range,
                 line: line_col(script.source, object.range.start).0,
@@ -122,7 +121,7 @@ fn new_entry(kind: InventoryKind, name: &str, keys: &[String]) -> ObjectEntry {
 /// The comparison form of an object's name.
 ///
 /// **Unqualified on purpose.** `picus-parse` can give `APP.PARAMETRI`, but the
-/// Oracle branch qualifies with the owning user and the PostgreSQL one with
+/// Oracle scripts qualify with the owning user and the PostgreSQL ones with
 /// `public`, inconsistently and usually not at all. Keying on the qualified name
 /// would make `PARAMETRI` and `public.parametri` two objects and every row in the
 /// repository would look half-missing.
@@ -189,8 +188,8 @@ mod tests {
         let row = &inventory.objects[0];
         assert_eq!(row.name, "PARAMETRI");
         assert_eq!(row.kind, InventoryKind::Table);
-        assert_eq!(row.coverage_in("ora/ora-init"), 1);
-        assert_eq!(row.coverage_in("pg/pg-init"), 1);
+        assert_eq!(row.coverage_in("ORACLE/INIZIALIZZAZIONE"), 1);
+        assert_eq!(row.coverage_in("POSTGRES/INIZIALIZZAZIONE"), 1);
     }
 
     #[test]
@@ -237,7 +236,7 @@ mod tests {
     #[test]
     fn a_statement_naming_a_table_four_times_counts_once() {
         // Coverage is "how many statements touch this", not "how often is it
-        // mentioned" — otherwise a verbose branch always looks better covered.
+        // mentioned" — otherwise a verbose folder always looks better covered.
         let f = Fixture::new(&[(
             "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
             "UPDATE PARAMETRI SET VALORE = (SELECT MAX(VALORE) FROM PARAMETRI) \
@@ -247,11 +246,11 @@ mod tests {
         let project = project();
         let joined = ParsedProject::new(&project, f.scripts());
         let inventory = Inventory::build(&joined);
-        assert_eq!(inventory.objects[0].coverage_in("ora/ora-upd"), 1);
+        assert_eq!(inventory.objects[0].coverage_in("ORACLE/AGGIORNAMENTO"), 1);
     }
 
     #[test]
-    fn a_gap_between_branches_is_a_zero_that_is_actually_there() {
+    fn a_gap_between_dialects_is_a_zero_that_is_actually_there() {
         let f = Fixture::new(&[(
             "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
             "INSERT INTO PARAMETRI (COD) VALUES ('SOGLIA_SCONTO');",
@@ -264,9 +263,9 @@ mod tests {
         // Every column of the project is present, so the interesting `0` is a
         // value and not an absence.
         assert_eq!(row.coverage.len(), 4);
-        assert_eq!(row.coverage_in("ora/ora-upd"), 1);
-        assert_eq!(row.coverage_in("pg/pg-upd"), 0);
-        assert!(row.coverage.contains_key("pg/pg-init"));
+        assert_eq!(row.coverage_in("ORACLE/AGGIORNAMENTO"), 1);
+        assert_eq!(row.coverage_in("POSTGRES/AGGIORNAMENTO"), 0);
+        assert!(row.coverage.contains_key("POSTGRES/INIZIALIZZAZIONE"));
     }
 
     #[test]
@@ -367,6 +366,6 @@ mod tests {
         let joined = ParsedProject::new(&project, f.scripts());
         let inventory = Inventory::build(&joined);
         let row = inventory.find(InventoryKind::Table, "PARAMETRI").expect("indexed");
-        assert_eq!(row.coverage_in("ora/ora-upd"), 1);
+        assert_eq!(row.coverage_in("ORACLE/AGGIORNAMENTO"), 1);
     }
 }

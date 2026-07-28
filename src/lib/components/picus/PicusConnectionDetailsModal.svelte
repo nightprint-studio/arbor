@@ -62,7 +62,7 @@
     <ModalHeader {onClose}>
       <Database size={14} />
       <span class="cd-title">{row?.name ?? 'Connection'}</span>
-      {#if row}<PicusDialectChip dialect={row.engine} />{/if}
+      {#if row}<PicusDialectChip engine={row.engine} />{/if}
     </ModalHeader>
   {/snippet}
 

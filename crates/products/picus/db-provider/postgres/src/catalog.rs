@@ -43,28 +43,6 @@ pub async fn read_relation(
     Ok(tables.into_iter().chain(views).next())
 }
 
-/// The planner's row estimate for one relation, when it has one.
-///
-/// `reltuples` is a single catalogue lookup and is what makes a page number cheap:
-/// a `count(*)` would scan the table, and on the tables Picus is pointed at that is
-/// the difference between a page turn and a coffee break. `None` covers both "never
-/// analysed" (`-1`) and "no such relation", which are the same thing to the caller:
-/// no number worth showing.
-pub async fn read_estimated_rows(
-    client: &Client,
-    schema: &str,
-    name: &str,
-) -> DbResult<Option<i64>> {
-    const SQL: &str = "
-        SELECT c.reltuples::bigint
-          FROM pg_class c
-          JOIN pg_namespace n ON n.oid = c.relnamespace
-         WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('r', 'p', 'v', 'm')";
-
-    let rows = client.query(SQL, &[&schema, &name]).await.map_err(map_pg)?;
-    Ok(rows.first().map(|r| r.get::<_, i64>(0)).filter(|n| *n >= 0))
-}
-
 /// The shared body: every relation in `schema`, or just the one named.
 async fn read_relations_where(
     client: &Client,

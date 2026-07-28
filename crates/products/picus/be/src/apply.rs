@@ -34,7 +34,7 @@ use picus_core::prelude::{digest, InsertionRule, PicusConfig, PicusState, Script
 use picus_emit::prelude::emit_for_target;
 use picus_parse::prelude::SqlParser;
 use picus_project::prelude::{
-    label_to_encoding, LineEnding, MarkerFields, MarkerTemplate, ProjectConfig,
+    label_to_encoding, parent_of, LineEnding, MarkerFields, MarkerTemplate, ProjectConfig,
 };
 use picus_rewrite::prelude::{commit, prepare_one, Eol, PreparedFile, SourceText, Splice};
 use serde::{Deserialize, Serialize};
@@ -239,7 +239,7 @@ pub(crate) fn plan(
 
         let splice = Splice {
             range: placement.range,
-            replacement: block_text(model, target, &snapshot.config.generation.marker),
+            replacement: block_text(model, target, &snapshot.config.generation.marker)?,
             reason: placement.reason,
         };
         let prepared = prepare_one(&source, &[splice]).map_err(|e| e.to_string())?;
@@ -258,8 +258,17 @@ pub(crate) fn plan(
 /// The trailing newline is not cosmetic: [`crate::placement`] gives back a range
 /// that includes the line break it consumed, so a block that ends without one
 /// would join itself to whatever follows the second time it is generated.
-fn block_text(model: &DmlModel, target: &Target, marker: &MarkerTemplate) -> String {
-    let mut sql = emit_for_target(model, target);
+/// Refuses rather than writing when the destination cannot take this model — a
+/// portable folder asked for an upsert, or wrapped in a block. The refusal comes
+/// from the emitter itself, so no caller can reach the wrong bytes by forgetting
+/// to check first.
+fn block_text(
+    model: &DmlModel,
+    target: &Target,
+    marker: &MarkerTemplate,
+) -> Result<String, String> {
+    let mut sql = emit_for_target(model, target)
+        .map_err(|refusal| format!("{}: {refusal}", target.file))?;
     if !sql.ends_with('\n') {
         sql.push('\n');
     }
@@ -276,12 +285,12 @@ fn block_text(model: &DmlModel, target: &Target, marker: &MarkerTemplate) -> Str
         hash: Some(&hash),
     };
 
-    match marker.render(&fields) {
+    Ok(match marker.render(&fields) {
         Some(line) => format!("{line}\n{sql}"),
         // Marking switched off: the block is the SQL, and nothing will be able to
         // find it again — which is exactly what emptying the template buys.
         None => sql,
-    }
+    })
 }
 
 fn operation_word(operation: DmlOperation) -> &'static str {
@@ -375,24 +384,15 @@ fn destination(root: &Path, relative: &str) -> Result<PathBuf, String> {
 
 /// The encoding label and line ending a destination is written in: its own where
 /// the file exists, its folder's where it is about to be created.
+///
+/// The folder's answer is the nearest declaration at or above it, so a file about
+/// to be created three levels down takes the encoding somebody pinned at the top
+/// rather than the project-wide default.
 fn conventions(snapshot: &ScriptSnapshot, relative: &str) -> (String, Eol) {
     if let Some(source) = snapshot.source(relative) {
         return (source.encoding.clone(), eol_of(source.eol));
     }
-    let folder = snapshot
-        .config
-        .branches
-        .iter()
-        .flat_map(|b| b.folders.iter())
-        .filter(|f| relative.starts_with(&format!("{}/", f.path)))
-        // The longest matching folder path, so a nested folder's own encoding
-        // wins over its parent's.
-        .max_by_key(|f| f.path.len());
-
-    let label = match folder {
-        Some(folder) => snapshot.config.encoding_for(folder),
-        None => snapshot.config.encoding.default.as_str(),
-    };
+    let label = snapshot.config.encoding_for(parent_of(relative));
     (label.to_string(), eol_of(snapshot.config.encoding.eol))
 }
 
@@ -421,7 +421,7 @@ fn relative_to(root: &Path, path: &Path) -> String {
 mod tests {
     use super::*;
     use picus_project::prelude::{
-        BranchConfig, EncodingSettings, FolderConfig, NamingScheme, CURRENT_VERSION,
+        EncodingSettings, FolderDeclaration, NamingScheme, CURRENT_VERSION,
     };
 
     fn approved(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
@@ -514,7 +514,8 @@ mod tests {
             version_table: Default::default(),
             generation: Default::default(),
             naming: NamingScheme::default(),
-            branches: Vec::new(),
+            folders: Vec::new(),
+            aliases: Vec::new(),
         };
         for (role, rule) in declared {
             config
@@ -574,22 +575,14 @@ mod tests {
 
     #[test]
     fn a_new_file_is_created_with_its_folders_conventions() {
-        // The folder's declared encoding decides, and the deepest folder wins.
+        // A declared encoding reaches every folder below it, and the nearest
+        // declaration wins.
         let mut config = project_config(&[]);
         config.encoding.default = "UTF-8".to_string();
-        config.branches.push(BranchConfig {
-            id: "ora".to_string(),
-            label: "ORACLE".to_string(),
+        config.folders.push(FolderDeclaration {
             path: "ORACLE".to_string(),
-            dialect: None,
-            folders: vec![FolderConfig {
-                id: "ora-upd".to_string(),
-                label: "AGGIORNAMENTO".to_string(),
-                path: "ORACLE/AGGIORNAMENTO".to_string(),
-                role: FolderRole::Update,
-                encoding: Some("windows-1252".to_string()),
-                naming: None,
-            }],
+            encoding: Some("windows-1252".to_string()),
+            ..FolderDeclaration::default()
         });
 
         let snapshot = ScriptSnapshot {
@@ -597,7 +590,7 @@ mod tests {
             project: picus_project::prelude::Project {
                 name: "PROD_CORE".to_string(),
                 root: "/repo".to_string(),
-                branches: Vec::new(),
+                tree: Vec::new(),
             },
             config,
             notes: Vec::new(),
@@ -606,11 +599,12 @@ mod tests {
             sources: BTreeMap::new(),
         };
 
-        let (label, eol) = conventions(&snapshot, "ORACLE/AGGIORNAMENTO/4_13__4_14.sql");
+        // Three levels under the folder that declared it.
+        let (label, eol) = conventions(&snapshot, "ORACLE/AGGIORNAMENTO/2026/4_13__4_14.sql");
         assert_eq!(label, "windows-1252");
         assert_eq!(eol, Eol::Crlf);
 
-        // A file in no configured folder takes the project's own default.
+        // A file no declaration covers takes the project's own default.
         let (label, _) = conventions(&snapshot, "loose.sql");
         assert_eq!(label, "UTF-8");
     }

@@ -60,7 +60,7 @@
     {#if conn.readOnly}
       <span class="cr-ro" use:tooltip={'Read-only: the backend refuses write statements'}><Lock size={11} /></span>
     {/if}
-    <PicusDialectChip dialect={conn.dialect} terse />
+    <PicusDialectChip engine={conn.dialect} terse />
   {/snippet}
   {#snippet actions()}
     <!-- Connect / disconnect. A connection can be configured, listed and edited

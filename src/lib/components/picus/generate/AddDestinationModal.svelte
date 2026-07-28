@@ -2,15 +2,21 @@
   /**
    * Add a destination — pick the file this generation should also be written to.
    *
-   * The list is the project itself, grouped by branch and folder, so the choice
-   * carries its dialect and its role with it: picking a file inside
-   * `ORACLE/AGGIORNAMENTO` gives you an Oracle update destination with the
-   * update preset already applied, and nothing has to be re-stated.
+   * The list is the repository itself, one group per folder that holds scripts,
+   * so the choice carries its engine and its role with it: picking a file inside
+   * `AGGIORNAMENTO/4.13.2/ORA` gives you an Oracle update destination with the
+   * update preset already applied, and nothing has to be re-stated. The engine
+   * and the role are the folder's **effective** ones — inherited from wherever
+   * they were declared, which is the whole point of the inheritance rule.
+   *
+   * A folder with no engine cannot become a destination: there is no form to
+   * write the statements in. Rather than hide it, the group says so and offers
+   * the one action that fixes it.
    *
    * Files already among the destinations are shown as such rather than hidden —
    * "why is it not in the list" is a worse question than "it is already there".
    */
-  import { FilePlus2, FileCode2, Check, Search } from 'lucide-svelte';
+  import { FilePlus2, FileCode2, Check, FolderCog, Search } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
@@ -22,18 +28,30 @@
   import PicusRoleChip from '../PicusRoleChip.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { dmlStore, presetForRole } from '$lib/stores/picus/dml.svelte';
-  import { picusProjectStore } from '$lib/stores/picus/project.svelte';
-  import type { Branch, FolderRole, ScriptFolder } from '$lib/types/picus';
+  import { picusProjectStore, type FolderEntry } from '$lib/stores/picus/project.svelte';
+  import { picusUiStore } from '$lib/stores/picus/ui.svelte';
+  import {
+    declaredEngine,
+    engineIsUnsupported,
+    folderAcceptsGeneration,
+    folderEngine,
+    isDialect,
+    isGenericEngine,
+    type FolderRole,
+  } from '$lib/types/picus';
 
   let { onClose }: { onClose: () => void } = $props();
 
   let query = $state('');
   /** Name for a file that does not exist yet, inside the selected folder. */
   let newFileName = $state('');
-  let newFileFolder = $state<{ branch: Branch; folder: ScriptFolder } | null>(null);
+  let newFileFolder = $state<FolderEntry | null>(null);
 
   const needle = $derived(query.trim().toLowerCase());
   const existingFiles = $derived(new Set(dmlStore.targets.map((t) => t.file)));
+
+  /** Only folders that hold scripts can be written into — the rest are structure. */
+  const groups = $derived(picusProjectStore.entries.filter((e) => e.node.files.length > 0));
 
   function matches(path: string, name: string) {
     return !needle || path.toLowerCase().includes(needle) || name.toLowerCase().includes(needle);
@@ -49,17 +67,26 @@
     return bits.join(' · ');
   }
 
-  function add(branch: Branch, folder: ScriptFolder, file: string) {
-    dmlStore.addTarget({ file, dialect: branch.dialect, role: folder.role, branchId: branch.id });
+  function add(entry: FolderEntry, file: string) {
+    const engine = folderEngine(entry.node);
+    // A portable folder is a destination like any other; the backend restricts
+    // what may be written into it to the intersection of the two dialects, which
+    // is the whole payoff — one file instead of two for a plain INSERT.
+    if (!isDialect(engine) && !isGenericEngine(engine)) {
+      // Should be unreachable — the rows are disabled — but a destination with no
+      // engine would silently emit nothing, so it is refused rather than trusted.
+      toastStore.show(`${entry.node.path} has no engine. Say which database it is for first.`, 'warning');
+      return;
+    }
+    dmlStore.addTarget({ file, dialect: engine, role: entry.node.effectiveRole });
     toastStore.show(`${file} added as a destination.`, 'success');
     onClose();
   }
 
   function addNew() {
     if (!newFileFolder || !newFileName.trim()) return;
-    const { branch, folder } = newFileFolder;
     const name = newFileName.trim().endsWith('.sql') ? newFileName.trim() : `${newFileName.trim()}.sql`;
-    add(branch, folder, `${folder.path}/${name}`);
+    add(newFileFolder, `${newFileFolder.node.path}/${name}`);
   }
 </script>
 
@@ -77,70 +104,98 @@
     </div>
 
     <div class="ad-list">
-      {#if !picusProjectStore.branches.length}
-        <StateBlock tone="info" fill={false} label="No project open — there is nowhere to write." />
+      {#if !groups.length}
+        <StateBlock tone="info" fill={false} label="No repository open — there is nowhere to write." />
       {/if}
 
-      {#each picusProjectStore.branches as branch (branch.id)}
-        {#each branch.folders as folder (folder.id)}
-          {@const files = folder.files.filter((f) => matches(f.path, f.name))}
-          {#if files.length || !needle}
-            <div class="ad-group">
-              <span class="ad-group-name">{branch.label} / {folder.label}</span>
-              <PicusDialectChip dialect={branch.dialect} terse />
-              <PicusRoleChip role={folder.role} terse />
-              <span class="ad-spacer"></span>
-              <span class="ad-preset">{presetSummary(folder.role)}</span>
-            </div>
-
-            {#each files as file (file.path)}
-              {@const already = existingFiles.has(file.path)}
-              <button
-                class="ad-row"
-                class:ad-already={already}
-                disabled={already}
-                onclick={() => add(branch, folder, file.path)}
+      {#each groups as entry (entry.node.path)}
+        {@const folder = entry.node}
+        {@const files = folder.files.filter((f) => matches(f.path, f.name))}
+        {@const writable = folderAcceptsGeneration(folder)}
+        {#if files.length || !needle}
+          <div class="ad-group">
+            <span class="ad-group-name" title={folder.path}>{folder.path}</span>
+            <PicusDialectChip
+              engine={folderEngine(folder)}
+              terse
+              inherited={declaredEngine(folder) === null}
+              from={entry.dialectFrom ?? ''}
+            />
+            <PicusRoleChip
+              role={folder.effectiveRole}
+              terse
+              inherited={folder.role === null}
+              from={entry.roleFrom ?? ''}
+            />
+            <span class="ad-spacer"></span>
+            {#if writable}
+              <span class="ad-preset">{presetSummary(folder.effectiveRole)}</span>
+            {:else if engineIsUnsupported(folder)}
+              <!-- An engine Picus does not read is not an unanswered question, so
+                   it gets a statement rather than a call to action: there is
+                   nothing here for the user to fix. -->
+              <span class="ad-preset">Picus does not generate this engine</span>
+            {:else}
+              <!-- Not a disabled group with no explanation: the reason, and the
+                   one action that removes it. -->
+              <Button
+                variant="ghost"
+                size="xs"
+                onclick={() => picusUiStore.openFolderClassify(folder.path)}
               >
-                <FileCode2 size={13} />
-                <span class="ad-name">{file.name}</span>
-                <span class="ad-path">{file.path}</span>
-                <span class="ad-spacer"></span>
-                {#if already}
-                  <Badge variant="tone" tone="neutral" size="sm" label="already a destination" />
-                {:else}
-                  <Check size={13} class="ad-tick" />
-                {/if}
-              </button>
-            {/each}
-
-            {#if !needle}
-              <!-- A new file inside this folder: generation often introduces the
-                   next update script rather than appending to an existing one. -->
-              <div class="ad-new" class:ad-new-open={newFileFolder?.folder.id === folder.id}>
-                {#if newFileFolder?.folder.id === folder.id}
-                  <Input
-                    value={newFileName}
-                    size="sm"
-                    placeholder="4_13__4_14.sql"
-                    ariaLabel="New file name"
-                    oninput={(v) => (newFileName = v)}
-                  />
-                  <Button variant="primary" size="xs" disabled={!newFileName.trim()} onclick={addNew}>Create</Button>
-                  <Button variant="ghost" size="xs" onclick={() => (newFileFolder = null)}>Cancel</Button>
-                {:else}
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    onclick={() => { newFileFolder = { branch, folder }; newFileName = ''; }}
-                  >
-                    {#snippet iconStart()}<FilePlus2 size={12} />{/snippet}
-                    New file in this folder…
-                  </Button>
-                {/if}
-              </div>
+                {#snippet iconStart()}<FolderCog size={12} />{/snippet}
+                No engine — say which…
+              </Button>
             {/if}
+          </div>
+
+          {#each files as file (file.path)}
+            {@const already = existingFiles.has(file.path)}
+            <button
+              class="ad-row"
+              class:ad-already={already || !writable}
+              disabled={already || !writable}
+              onclick={() => add(entry, file.path)}
+            >
+              <FileCode2 size={13} />
+              <span class="ad-name">{file.name}</span>
+              <span class="ad-path">{file.path}</span>
+              <span class="ad-spacer"></span>
+              {#if already}
+                <Badge variant="tone" tone="neutral" size="sm" label="already a destination" />
+              {:else if writable}
+                <Check size={13} class="ad-tick" />
+              {/if}
+            </button>
+          {/each}
+
+          {#if !needle && writable}
+            <!-- A new file inside this folder: generation often introduces the
+                 next update script rather than appending to an existing one. -->
+            <div class="ad-new" class:ad-new-open={newFileFolder?.node.path === folder.path}>
+              {#if newFileFolder?.node.path === folder.path}
+                <Input
+                  value={newFileName}
+                  size="sm"
+                  placeholder="4_13__4_14.sql"
+                  ariaLabel="New file name"
+                  oninput={(v) => (newFileName = v)}
+                />
+                <Button variant="primary" size="xs" disabled={!newFileName.trim()} onclick={addNew}>Create</Button>
+                <Button variant="ghost" size="xs" onclick={() => (newFileFolder = null)}>Cancel</Button>
+              {:else}
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onclick={() => { newFileFolder = entry; newFileName = ''; }}
+                >
+                  {#snippet iconStart()}<FilePlus2 size={12} />{/snippet}
+                  New file in this folder…
+                </Button>
+              {/if}
+            </div>
           {/if}
-        {/each}
+        {/if}
       {/each}
 
       {#if needle && !picusProjectStore.allFiles.some((f) => matches(f.path, f.name))}
@@ -154,8 +209,9 @@
 
   {#snippet footer()}
     <span class="ad-foot">
-      A destination inherits the dialect of its branch and the preset of its folder's role;
-      both stay editable afterwards.
+      A destination takes the engine and the role its folder effectively has — inherited or
+      declared, it makes no difference here — and the preset that role implies. All of it
+      stays editable afterwards.
     </span>
     <Button variant="ghost" size="sm" onclick={onClose}>Close</Button>
   {/snippet}
@@ -179,7 +235,20 @@
     text-transform: uppercase;
     color: var(--text-muted);
   }
-  .ad-group-name { white-space: nowrap; }
+  /* The group IS a path, so it reads as one: code font, real case, ellipsised
+     from the left of the row rather than wrapping the header onto two lines. */
+  .ad-group-name {
+    font-family: var(--font-code);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 60%;
+  }
   .ad-preset {
     font-family: var(--font-code);
     font-size: 10px;

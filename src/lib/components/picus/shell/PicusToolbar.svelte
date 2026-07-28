@@ -18,15 +18,18 @@
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import PicusConnectionPill from '../PicusConnectionPill.svelte';
+  import PicusDialectChip from '../PicusDialectChip.svelte';
+  import PicusRoleChip from '../PicusRoleChip.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { connectionsStore, connectionColorVar } from '$lib/stores/picus/connections.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import { queryStore } from '$lib/stores/picus/query.svelte';
+  import { picusResultsStore } from '$lib/stores/picus/result.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { schemaStore } from '$lib/stores/picus/schema.svelte';
-  import { DML_OPERATION_LABELS } from '$lib/types/picus';
+  import { DML_OPERATION_LABELS, declaredEngine, folderEngine } from '$lib/types/picus';
 
   interface Props {
     /** Bubbles up to the shell, which owns the confirm dialog. */
@@ -62,13 +65,15 @@
   ];
 
   const queryState = $derived(tab ? queryStore.read(tab.id) : null);
-  // The server's row ESTIMATE, not a count — a toolbar label is not worth scanning
-  // a large table for. `null` when the server has none, so "unknown" and "empty"
-  // never render the same.
-  const tableRowCount = $derived(
-    tab?.table ? (schemaStore.relation(tab.table)?.estimatedRows ?? null) : null,
-  );
+  // How long the result is belongs to the STATUS BAR, in one place, for query
+  // tabs and table tabs alike — a second copy here would have to be kept in step
+  // with it, and the copy this toolbar used to draw came from the schema cache's
+  // estimate rather than from the result on screen, so the two could disagree.
+  // What stays is the statement's own timing, which is not a fact about length.
+  const result = $derived(tab ? picusResultsStore.forOwner(tab.id) : null);
   const openFile = $derived(tab?.file ? picusProjectStore.fileByPath(tab.file) : null);
+  /** The folder the open file lives in — where its engine and its role come from. */
+  const openFolder = $derived(tab?.file ? picusProjectStore.folderOfFile(tab.file) : null);
 
   /** Tables and views have rows and a structure; sequences and triggers don't. */
   const hasSubviews = $derived(tab?.objectKind === 'table' || tab?.objectKind === 'view' || (kind === 'table' && !tab?.objectKind));
@@ -137,8 +142,8 @@
     <Button
       variant="icon"
       size="sm"
-      disabled={!queryState?.running}
-      tooltip={{ content: 'Cancel the running query', shortcut: 'Ctrl+Shift+C' }}
+      disabled={!queryState?.running && !result?.counting}
+      tooltip={{ content: 'Cancel the running query, or the row count behind it', shortcut: 'Ctrl+Shift+C' }}
       ariaLabel="Cancel"
       onclick={() => { if (tab && conn) void queryStore.cancel(tab.id, conn.id); }}
     >
@@ -149,12 +154,8 @@
     </Button>
 
     <span class="ptb-spacer"></span>
-    {#if queryState?.result}
-      <div class="ptb-info">
-        <span>{queryState.result.rowCount} rows</span>
-        <span class="ptb-dot">·</span>
-        <span>{queryState.result.elapsedMs} ms</span>
-      </div>
+    {#if result}
+      <div class="ptb-info"><span>{result.elapsedMs} ms</span></div>
     {/if}
     <Dropdown items={connectionMenu} position="fixed" direction="down" width="280px">
       {#snippet trigger({ open, toggle })}
@@ -204,9 +205,6 @@
     </Button>
 
     <span class="ptb-spacer"></span>
-    {#if hasSubviews && tableRowCount != null}
-      <div class="ptb-info"><span>~{tableRowCount.toLocaleString()} rows</span></div>
-    {/if}
     <Dropdown items={connectionMenu} position="fixed" direction="down" width="280px">
       {#snippet trigger({ open, toggle })}
         <PicusConnectionPill connection={conn} density="toolbar" {open} onclick={toggle} />
@@ -217,7 +215,7 @@
     <Button variant="icon" size="sm" title="Save (preserves encoding + line endings)" ariaLabel="Save" onclick={() => notYet('Saving')}>
       {#snippet iconStart()}<Save size={14} />{/snippet}
     </Button>
-    <Button variant="icon" size="sm" title="Compare with the other branch" ariaLabel="Compare with the other branch" onclick={() => notYet('Branch comparison')}>
+    <Button variant="icon" size="sm" title="Compare with the other engine's version of this change" ariaLabel="Compare with the other engine's version" onclick={() => notYet('Cross-engine comparison')}>
       {#snippet iconStart()}<GitCompare size={14} />{/snippet}
     </Button>
     <Button variant="icon" size="sm" title="Find in file" ariaLabel="Find in file" onclick={() => notYet('Find in file')}>
@@ -225,6 +223,24 @@
     </Button>
 
     <span class="ptb-spacer"></span>
+    {#if openFolder}
+      <!-- Which folder decides this file's engine, and whether that folder says so
+           itself or inherits it. The chip is the shortest honest answer to "what
+           dialect am I editing", which has no global answer in Picus. -->
+      <div class="ptb-info">
+        <PicusDialectChip
+          engine={folderEngine(openFolder.node)}
+          inherited={declaredEngine(openFolder.node) === null}
+          from={openFolder.dialectFrom ?? ''}
+        />
+        <PicusRoleChip
+          role={openFolder.node.effectiveRole}
+          inherited={openFolder.node.role === null}
+          from={openFolder.roleFrom ?? ''}
+        />
+        <span class="ptb-dot">·</span>
+      </div>
+    {/if}
     {#if openFile}
       <div class="ptb-info">
         <span>{(openFile.size / 1024).toFixed(1)} KB</span>
@@ -250,7 +266,7 @@
     <div class="ptb-info">
       <span>{picusProjectStore.inventory.length} objects</span>
       <span class="ptb-dot">·</span>
-      <span>{picusProjectStore.branches.length} branches</span>
+      <span>{picusProjectStore.folderCount} folders</span>
     </div>
   {/if}
 </div>

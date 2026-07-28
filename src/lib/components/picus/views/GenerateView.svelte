@@ -2,7 +2,7 @@
   /**
    * Generate DML — the bridge between the two halves of Picus.
    *
-   * One datum described once, written into every branch that expects it. The
+   * One datum described once, written into every folder that expects it. The
    * page reads top to bottom as the flow itself: where the values come from →
    * where they are going and under what rules → what the SQL looks like → what
    * will change on disk.
@@ -61,7 +61,7 @@
   <header class="gv-head">
     <h1>Generate DML</h1>
     <p>
-      One datum described once, written into every branch that expects it. Each destination
+      One datum described once, written into every folder that expects it. Each destination
       decides for itself whether it needs a procedural block and under which conditions it
       may run.
     </p>
@@ -166,7 +166,7 @@
         <Alert
           variant="info"
           compact
-          text="No destination yet. Add the files this change has to be written into — one per branch that expects it."
+          text="No destination yet. Add the files this change has to be written into — one per folder that expects it."
         />
       </div>
     {:else if !dmlStore.enabledTargets.length}

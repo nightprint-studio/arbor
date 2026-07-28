@@ -19,9 +19,9 @@
  */
 
 import {
-  BookOpen, Check, Command, Database, FileCode2, FolderOpen, FolderTree, FormInput,
+  BookOpen, Check, Command, Database, FileCode2, FolderCog, FolderOpen, FolderTree, FormInput,
   Info, Keyboard, Layers, PanelBottom, PanelLeft, Pencil, Play, Plus, RefreshCw,
-  Settings, Table2, Trash2, TriangleAlert, Wrench,
+  Settings, Table2, Tags, Trash2, TriangleAlert, Wrench,
 } from 'lucide-svelte';
 
 import type { IconComponent } from '$lib/types/icon';
@@ -53,6 +53,8 @@ const ICONS: Record<string, IconComponent> = {
   panelBottom: PanelBottom as unknown as IconComponent,
   check: Check as unknown as IconComponent,
   wrench: Wrench as unknown as IconComponent,
+  folderCog: FolderCog as unknown as IconComponent,
+  tags: Tags as unknown as IconComponent,
   pencil: Pencil as unknown as IconComponent,
   info: Info as unknown as IconComponent,
   trash: Trash2 as unknown as IconComponent,
@@ -205,6 +207,47 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       when: attached,
       action: () => a.run(() => void picusProjectStore.refresh()),
     },
+    {
+      id: 'classify',
+      title: 'Classify a folder — set its engine and its role…',
+      subtitle: picusProjectStore.unclassifiedFolders.length
+        ? `${picusProjectStore.unclassifiedFolders.length} folder(s) of scripts have no engine`
+        : 'Every folder holding scripts has an engine',
+      icon: 'folderCog',
+      shortcut: 'Ctrl+Shift+F',
+      when: attached && picusProjectStore.folderCount > 0,
+      action: () => a.run(() => picusUiStore.openFolderClassify()),
+    },
+    {
+      // The other half of classifying, and the half that scales: this one is
+      // about a NAME, and answers for every folder that has it — including the
+      // ones the next release will add. Addressable by name because a rule
+      // nobody can find later is a rule nobody trusts.
+      id: 'aliases',
+      title: 'Folder names in this project — what POS, MSQ, CONSEGNE mean…',
+      subtitle: picusProjectStore.aliases.length
+        ? `${picusProjectStore.aliases.length} name(s) declared for this repository`
+        : 'This repository declares no names of its own yet',
+      icon: 'tags',
+      when: attached,
+      action: () => a.run(() => picusUiStore.openSettings('aliases')),
+    },
+    // The folders nobody could classify are addressable one by one, because they
+    // are the ones that stop the repository working and they are a short list by
+    // construction. Every other folder is reachable through the dialog's filter,
+    // which is where an entry per folder would only have been noise.
+    //
+    // Folders in an engine Picus does not support are NOT in this list: they have
+    // an answer, and the palette offering to fix them would be the same question
+    // the tree and the banner have already stopped asking.
+    ...picusProjectStore.unclassifiedFolders.map((e): Raw => ({
+      id: `classify:${e.node.path}`,
+      title: `Set the engine of ${e.node.name}…`,
+      subtitle: `${e.node.path} · ${e.node.files.length} file(s) generated into nothing`,
+      icon: 'folderCog',
+      when: true,
+      action: () => a.run(() => picusUiStore.openFolderClassify(e.node.path)),
+    })),
   ];
 
   const checkItems: Raw[] = [

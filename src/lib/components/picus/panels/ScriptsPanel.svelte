@@ -1,60 +1,68 @@
 <script lang="ts">
   /**
-   * Scripts panel — the repository on disk, one sub-tree per dialect branch.
+   * Scripts panel — the repository on disk, exactly as it is on disk.
    *
    * This is where the product's structural rule is visible: the dialect belongs
-   * to the FOLDER. The same logical change lives twice, in two syntaxes, under
-   * two branches — so the tree shows the dialect on the branch and the role on
-   * the folder, and every file row carries its encoding and line ending, because
-   * a file silently rewritten as UTF-8 is one of the failures Picus exists to
-   * catch.
+   * to the FOLDER. Any directory may declare an engine and a purpose, everything
+   * under it inherits that until something overrides it, and the panel shows the
+   * real hierarchy rather than a two-level shape invented from folder names —
+   * because a repository that keeps its engine five levels down was previously
+   * rendered as a flat run of identical rows.
+   *
+   * The panel owns the framing (whose repository this is, what could not be read,
+   * what Picus inferred); the tree itself is `ScriptsTree`.
    *
    * The repository shown is **the active connection's**: Picus is database
    * oriented, so you open a database and its scripts are what you get. A
    * connection with none attached is offered a folder to point at, rather than
    * leaving the panel to look broken.
    */
-  import { FolderTree, ChevronRight, Folder, FileCode2, RefreshCw, FolderOpen, Database } from 'lucide-svelte';
+  import { FolderTree, RefreshCw, FolderOpen, Database, FolderCog } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
-  import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
-  import Badge from '$lib/components/shared/ui/Badge.svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
-  import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
-  import PicusDialectChip from '../PicusDialectChip.svelte';
-  import PicusRoleChip from '../PicusRoleChip.svelte';
   import NoticeList from './NoticeList.svelte';
+  import ScriptsTree from './ScriptsTree.svelte';
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
-  import type { ScriptFile } from '$lib/types/picus';
+  import { FOREIGN_ENGINES, folderEngine, isForeignEngine, type ForeignEngine } from '$lib/types/picus';
 
   let query = $state('');
-  const needle = $derived(query.trim().toLowerCase());
 
   const connection = $derived(connectionsStore.active);
   const attached = $derived(picusProjectStore.attached);
+  const unclassified = $derived(picusProjectStore.unclassifiedFolders);
+  /**
+   * Folders in an engine Picus does not read. Kept apart from `unclassified` on
+   * purpose and rendered as a statement rather than a warning: there is nothing
+   * for the user to do about them, and a warning that cannot be acted on is how
+   * a panel teaches people to ignore its warnings.
+   */
+  const unsupported = $derived(picusProjectStore.unsupportedFolders);
 
-  function matches(f: ScriptFile): boolean {
-    return !needle || f.name.toLowerCase().includes(needle) || f.path.toLowerCase().includes(needle);
-  }
+  const foreignEngineNames = $derived.by(() => {
+    const names = [
+      ...new Set(
+        unsupported
+          .map((e) => folderEngine(e.node))
+          .filter(isForeignEngine)
+          .map((e) => FOREIGN_ENGINES[e]),
+      ),
+    ];
+    if (names.length <= 1) return names[0] ?? 'another engine';
+    return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  });
 
   function openFile(path: string) {
     const file = picusProjectStore.fileByPath(path);
     if (!file) return;
     picusTabsStore.openFile(file.path, file.name, picusProjectStore.dialectOfFile(file.path));
   }
-
-  /** Marker meaning for the coloured dot on a file row. */
-  const STATUS_HINT = {
-    modified: 'Modified since the last index',
-    new: 'Created by a generation and not yet reviewed',
-    error: 'Has a blocking finding',
-  } as const;
 </script>
 
 <PanelShell title="Scripts on disk" count={picusProjectStore.fileCount}>
@@ -74,6 +82,16 @@
     <Button
       variant="icon"
       size="xs"
+      tooltip={{ content: 'Say what a folder is — its engine and its purpose', shortcut: 'Ctrl+Shift+F' }}
+      ariaLabel="Classify a folder"
+      disabled={!attached || !picusProjectStore.folderCount}
+      onclick={() => picusUiStore.openFolderClassify()}
+    >
+      {#snippet iconStart()}<FolderCog size={13} />{/snippet}
+    </Button>
+    <Button
+      variant="icon"
+      size="xs"
       tooltip={attached
         ? 'Point this connection at another folder of scripts'
         : 'Attach the folder of scripts this database is installed from'}
@@ -86,7 +104,7 @@
   {/snippet}
 
   {#snippet toolbar()}
-    <SearchBar bind:query showRegex={false} placeholder="Filter files" ariaLabel="Filter files" />
+    <SearchBar bind:query showRegex={false} placeholder="Filter folders and files" ariaLabel="Filter folders and files" />
   {/snippet}
 
   {#if !connection}
@@ -101,9 +119,9 @@
         <div class="sp-attach-text">
           <strong>{connection.name} has no scripts attached.</strong>
           <span>
-            Point it at the folder this database is installed from — the one holding a
-            branch per dialect. Picus reads the layout, indexes the objects and checks the
-            branches against each other.
+            Point it at the folder this database is installed from. Picus reads the tree as
+            it is, works out which directories hold which engine, indexes the objects and
+            checks the engines against each other.
           </span>
         </div>
       </StateBlock>
@@ -116,7 +134,7 @@
         Attach a folder…
       </Button>
     </div>
-  {:else if picusProjectStore.loading && !picusProjectStore.branches.length}
+  {:else if picusProjectStore.loading && !picusProjectStore.folderCount}
     <StateBlock tone="loading">
       {#snippet spinner()}<Spinner size={14} />{/snippet}
       <span>Reading {picusProjectStore.root}…</span>
@@ -135,11 +153,11 @@
         </Button>
       </div>
     </div>
-  {:else if !picusProjectStore.branches.length}
+  {:else if !picusProjectStore.folderCount}
     <StateBlock
       tone="info"
       fill={false}
-      label="Nothing that looks like a script branch was found under this folder."
+      label="There is no folder of SQL scripts under this path."
     />
   {:else}
     <!-- The reader's questions come before the tree: a folder it could not
@@ -151,76 +169,42 @@
         <Alert
           variant="info"
           compact
-          text="This layout was inferred from the folder names — nothing has been written into the repository. Branches, roles and encodings below are Picus's reading of it."
+          text="This reading was inferred from the folder names — nothing has been written into the repository. Setting a folder's engine or role saves it, and only then."
         />
       </div>
     {/if}
 
-    {#each picusProjectStore.branches as branch (branch.id)}
-      <SidebarItem onclick={() => picusProjectStore.toggle(branch.id)}>
-        {#snippet icon()}
-          <span class="sp-twist" class:sp-open={picusProjectStore.isExpanded(branch.id)}>
-            <ChevronRight size={12} />
-          </span>
-        {/snippet}
-        <span class="sp-branch">{branch.label}</span>
-        {#snippet badges()}
-          <PicusDialectChip dialect={branch.dialect} />
-        {/snippet}
-      </SidebarItem>
+    {#if unclassified.length}
+      <!-- The one thing that stops the repository working at all: scripts in a
+           folder no engine covers. Nothing is generated into them, and nothing
+           about them is compared, until somebody says what they are. -->
+      <div class="sp-inferred">
+        <Alert
+          variant="warning"
+          compact
+          title={`${unclassified.length} folder${unclassified.length === 1 ? '' : 's'} of scripts with no engine`}
+          text="Right-click one in the tree — or press Ctrl+Shift+F — to say which database it is written for. If every folder of that name means the same thing, Picus offers to say it once for the whole project. Until then nothing is generated into them."
+        />
+      </div>
+    {/if}
 
-      {#if picusProjectStore.isExpanded(branch.id)}
-        {#each branch.folders as folder (folder.id)}
-          {@const files = folder.files.filter(matches)}
-          <SidebarItem indent={22} onclick={() => picusProjectStore.toggle(folder.id)}>
-            {#snippet icon()}
-              <span class="sp-twist" class:sp-open={picusProjectStore.isExpanded(folder.id)}>
-                <ChevronRight size={12} />
-              </span>
-            {/snippet}
-            <Folder size={13} class="sp-folder-icon" />
-            <span class="sp-folder">{folder.label}</span>
-            {#snippet badges()}
-              <PicusRoleChip role={folder.role} terse />
-              <Badge variant="count" label={String(files.length)} />
-            {/snippet}
-          </SidebarItem>
+    {#if unsupported.length}
+      <!-- Stated, never warned about: these folders have an answer. The point of
+           the line is that their absence from every count below is explained,
+           not that the user should do something. -->
+      <p class="sp-foreign">
+        {unsupported.length} folder{unsupported.length === 1 ? '' : 's'} in
+        {foreignEngineNames} — listed, never parsed, and left alone.
+      </p>
+    {/if}
 
-          {#if picusProjectStore.isExpanded(folder.id)}
-            {#each files as file (file.path)}
-              <SidebarItem
-                indent={40}
-                selected={picusTabsStore.active?.file === file.path}
-                onclick={() => picusTabsStore.openFile(file.path, file.name, branch.dialect)}
-              >
-                {#snippet icon()}<FileCode2 size={13} />{/snippet}
-                <span class="sp-file">{file.name}</span>
-                {#if file.status}
-                  <span class="sp-mark sp-{file.status}" title={STATUS_HINT[file.status]}></span>
-                {/if}
-                {#snippet badges()}
-                  <EncodingPill
-                    encoding={file.encoding}
-                    expected={file.expectedEncoding}
-                    eol={file.eol}
-                    compact
-                  />
-                {/snippet}
-              </SidebarItem>
-            {/each}
-            {#if !files.length}
-              <p class="sp-none">No file matches the filter.</p>
-            {/if}
-          {/if}
-        {/each}
-      {/if}
-    {/each}
+    <ScriptsTree filter={query} />
 
     <NoticeList notes={picusProjectStore.notes} label="What Picus inferred" onOpen={openFile} />
 
     <p class="sp-hint">
-      The dialect is a property of the folder: the same data is written in two different
-      forms, once per branch.
+      A folder declares its engine and its purpose; everything under it inherits them until
+      something says otherwise. A quiet chip is inherited — the solid one is where it is set.
     </p>
     <p class="sp-root" title={picusProjectStore.root}>
       <Database size={11} />
@@ -230,50 +214,18 @@
 </PanelShell>
 
 <style>
-  .sp-twist {
-    display: inline-flex;
-    color: var(--text-disabled);
-    transition: transform var(--transition-fast);
-  }
-  .sp-twist.sp-open { transform: rotate(90deg); }
-
-  .sp-branch {
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-secondary);
-  }
-  .sp-folder { overflow: hidden; text-overflow: ellipsis; }
-  .sp-file {
-    font-family: var(--font-code);
-    font-size: 11.5px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* Working-copy markers: new / modified / has a blocking finding. */
-  .sp-mark {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    margin-left: 4px;
-  }
-  .sp-modified { background: var(--warning); }
-  .sp-new { background: var(--success); }
-  .sp-error { background: var(--error); }
-
-  .sp-none,
-  .sp-hint {
-    padding: 6px 12px 6px 44px;
+  /* Somebody else's engines: a fact, in the same register as the root path
+     below it — never the amber of something that needs attention. */
+  .sp-foreign {
+    padding: 2px 12px 6px;
     font-size: 11px;
-    color: var(--text-disabled);
-    font-style: italic;
+    line-height: 1.5;
+    color: var(--text-muted);
   }
+
   .sp-hint {
     padding: 10px 12px;
-    font-style: normal;
+    font-size: 11px;
     line-height: 1.5;
     color: var(--text-muted);
   }
@@ -307,6 +259,4 @@
   .sp-error-actions { display: flex; gap: 6px; }
 
   .sp-inferred { padding: 4px 12px 8px; }
-
-  :global(.sp-folder-icon) { color: var(--text-muted); flex-shrink: 0; }
 </style>

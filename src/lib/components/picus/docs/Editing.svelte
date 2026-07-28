@@ -36,7 +36,8 @@
 </ul>
 <p>
   Keywords are per dialect, taken from the tab: a connection's engine for a query, the
-  folder's branch for a script. There is no global "current dialect" to get wrong.
+  engine of the folder the file lives in for a script — inherited from wherever it was
+  declared. There is no global "current dialect" to get wrong.
 </p>
 
 <h2>Ghost text</h2>

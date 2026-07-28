@@ -2,7 +2,7 @@
 //!
 //! `picus-parse` names twenty-one kinds because it reports what the source says.
 //! An *inventory* is a narrower thing: it lists the objects a maintainer compares
-//! between branches. A column, a constraint or a tablespace is not one of those —
+//! between dialects. A column, a constraint or a tablespace is not one of those —
 //! it is part of something else, and giving it a row would bury the four hundred
 //! rows that matter under four thousand that do not.
 //!
@@ -56,7 +56,7 @@ impl InventoryKind {
     /// Two foldings are deliberate:
     ///
     /// * a **materialized view** is a view for comparison purposes — the two
-    ///   branches routinely spell the same object differently and a maintainer
+    ///   dialects routinely spell the same object differently and a maintainer
     ///   comparing them wants one row, not two;
     /// * a package **body** shares the package's row, because a spec and a body
     ///   with the same name are one object to a human. They are still told apart
@@ -81,7 +81,7 @@ impl InventoryKind {
     /// Does this kind exist in both engines?
     ///
     /// `false` for packages, which are Oracle-only. It is the single most
-    /// important false positive the cross-branch rules have to avoid: an Oracle
+    /// important false positive the cross-dialect rules have to avoid: an Oracle
     /// package has no PostgreSQL counterpart to be missing from, and reporting
     /// one would put a permanent, unfixable finding at the top of the report.
     pub fn exists_in_both_engines(self) -> bool {

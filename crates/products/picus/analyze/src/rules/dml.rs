@@ -14,12 +14,11 @@ use crate::rule::RuleId;
 
 pub(crate) fn run(context: &Context<'_>, output: &mut Output) {
     let version_table = context.version_table.as_deref();
-    for (script, placement) in context.project.placed() {
-        let branch_id = placement.branch.id.as_str();
+    for (script, _) in context.project.placed() {
         for statement in &script.parsed.statements {
             for shape in &statement.dml {
                 let line = line_col(script.source, shape.table.range.start).0;
-                let anchor = || Anchor::at(script.path, branch_id, line);
+                let anchor = || Anchor::at(script.path, line);
 
                 if unguarded_write(shape, version_table) {
                     output.findings.push(unguarded_write_finding(anchor(), shape));
@@ -120,8 +119,8 @@ fn column_less_insert_finding(anchor: Anchor, shape: &DmlShape) -> Finding {
         anchor,
         format!("INSERT into {table} without a column list"),
         format!(
-            "The values bind to {table}'s physical column order. Add a column upstream — in either \
-             branch — and every value in this statement shifts one place to the right: the script \
+            "The values bind to {table}'s physical column order. Add a column upstream — for either \
+             dialect — and every value in this statement shifts one place to the right: the script \
              still runs, and the data lands in the wrong columns.",
         ),
     )
