@@ -16,6 +16,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   CellValue,
   Column,
+  Predicate,
   Dialect,
   DmlOperation,
   DmlRow,
@@ -358,9 +359,18 @@ export interface DmlModel {
   operation: DmlOperation;
   /** Full column set of the table — drives value formatting and ordering. */
   columns: Column[];
-  /** The comparison key: the WHERE of updates, the existence check. */
+  /** The comparison key: what **identifies a row** — the conflict target of an
+   *  upsert, the existence check of a guard, and what reconciliation matches on. */
   keyColumns: Column[];
   rows: DmlRow[];
+  /**
+   * The WHERE of an update or a delete, when it is more than "match the key".
+   *
+   * Separate from `keyColumns` on purpose: the key says *which row*, this says
+   * *which rows*. It replaces the key-based WHERE rather than narrowing it —
+   * AND-ing them would silently tighten a filter somebody wrote deliberately.
+   */
+  whereClause?: Predicate | null;
   /** Lowercase identifiers on PostgreSQL (a per-project convention). */
   lowercasePostgres: boolean;
   /** Where the installed version lives. `dateColumn: null` means the project

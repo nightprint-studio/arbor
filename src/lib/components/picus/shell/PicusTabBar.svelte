@@ -8,7 +8,7 @@
    * "which database is this query about" is answered without reading a word.
    */
   import {
-    FileText, Table2, Play, FormInput, Layers, Eye, ListOrdered, Zap,
+    FileText, Table2, Play, FormInput, Layers, Eye, ListOrdered, Zap, Replace,
     X, XCircle, ArrowRightFromLine, Copy,
   } from 'lucide-svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -25,6 +25,7 @@
     table: Table2,
     file: FileText,
     inventory: Layers,
+    restructure: Replace,
   };
 
   /** A `table` tab covers four object kinds — the icon says which. */

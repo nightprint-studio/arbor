@@ -619,6 +619,7 @@ mod tests {
             columns: vec![column("COD", "varchar(30)"), column("VALORE", "numeric")],
             key_columns: vec![column("COD", "varchar(30)")],
             rows: vec![row],
+            where_clause: None,
             lowercase_postgres: false,
             version_table: VersionTableConfig::default(),
         }

@@ -16,7 +16,7 @@
    * Every action here is reachable from the keyboard; the canonical list lives
    * in `picus-shortcuts.ts` and this file's `onKeyDown` must stay in step with it.
    */
-  import { Database, FolderTree, FormInput, Layers, TriangleAlert } from 'lucide-svelte';
+  import { Braces, Database, FolderTree, FormInput, Layers, TriangleAlert } from 'lucide-svelte';
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
   import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
   import ActivityBar, { type ActivityRailItem } from '$lib/components/shared/ui/ActivityBar.svelte';
@@ -37,12 +37,14 @@
   import ScriptsPanel from './panels/ScriptsPanel.svelte';
   import GeneratePanel from './panels/GeneratePanel.svelte';
   import InventoryPanel from './panels/InventoryPanel.svelte';
+  import AstPanel from './panels/AstPanel.svelte';
   import PicusBottomDock from './panels/PicusBottomDock.svelte';
   import GenerateView from './views/GenerateView.svelte';
   import QueryView from './views/QueryView.svelte';
   import TableView from './views/TableView.svelte';
   import FileView from './views/FileView.svelte';
   import InventoryView from './views/InventoryView.svelte';
+  import RestructureView from './views/RestructureView.svelte';
   import PicusSettingsModal from './PicusSettingsModal.svelte';
   import PicusShortcutsModal from './PicusShortcutsModal.svelte';
   import PicusNavigateTo from './PicusNavigateTo.svelte';
@@ -74,6 +76,8 @@
   import { picusSettingsStore } from '$lib/stores/picus/settings.svelte';
 
   let sidebarWidth = $state(280);
+  /** Width of the right tool panel. Session-only UI state, like the sidebar's. */
+  let toolWidth = $state(300);
   let paletteQuery = $state('');
   /** Set while the write confirmation is up. */
   let confirmWrite = $state(false);
@@ -98,6 +102,17 @@
       onclick: () => picusUiStore.selectSection(s.id),
     })),
   );
+
+  const railRight = $derived<ActivityRailItem[]>([
+    {
+      id: 'ast',
+      icon: Braces as unknown as IconComponent,
+      tooltip: 'Syntax tree — how the parser reads the open document',
+      shortcut: 'Ctrl+Shift+Y',
+      active: picusUiStore.toolOpen && picusUiStore.toolSection === 'ast',
+      onclick: () => picusUiStore.selectTool('ast'),
+    },
+  ]);
 
   // Consistency lives apart, at the bottom: it opens the DOCK, not a sidebar.
   const railBottom = $derived<ActivityRailItem[]>([
@@ -401,6 +416,13 @@
     if (mod && key === ',') { picusUiStore.openSettings(); e.preventDefault(); return; }
     if (mod && key === 'b' && !e.shiftKey) { picusUiStore.toggleSidebar(); e.preventDefault(); return; }
     if (mod && key === 'j') { picusUiStore.toggleBottom(); e.preventDefault(); return; }
+    // The syntax tree of the open document. `Y` because every other letter near
+    // "tree"/"AST" is taken here, and it is the one IntelliJ's PSI viewer plugin
+    // uses for the same panel.
+    if (mod && e.shiftKey && key === 'y') { picusUiStore.selectTool('ast'); e.preventDefault(); return; }
+    // Structural search and replace. `R` for replace; it is a tab rather than a
+    // dialog because a migration is refined over minutes, not typed once.
+    if (mod && e.shiftKey && key === 'r') { picusTabsStore.openRestructure(); e.preventDefault(); return; }
 
     // Sections — e.code so the digits survive non-US layouts.
     if (mod && !e.shiftKey && e.code === 'Digit1') { picusUiStore.selectSection('connections'); e.preventDefault(); return; }
@@ -513,6 +535,12 @@
         <ActivityBar side="left" ariaLabel="Picus sections" topItems={railTop} bottomItems={railBottom} />
       {/snippet}
 
+      {#snippet rightRail()}
+        <!-- The tool windows: they describe the DOCUMENT, where the left rail
+             describes the repository. -->
+        <ActivityBar side="right" ariaLabel="Picus tools" topItems={railRight} />
+      {/snippet}
+
       {#snippet panels()}
         {#if picusUiStore.sidebarOpen}
           <PanelCard
@@ -545,6 +573,8 @@
                   <TableView {tab} />
                 {:else if tab.kind === 'file'}
                   <FileView {tab} />
+                {:else if tab.kind === 'restructure'}
+                  <RestructureView />
                 {:else}
                   <InventoryView />
                 {/if}
@@ -558,6 +588,18 @@
             </PanelCard>
           {/if}
         </div>
+
+        {#if picusUiStore.toolOpen}
+          <PanelCard
+            orientation="right"
+            initialSize={toolWidth}
+            minSize={220}
+            maxSize={520}
+            onResize={(px) => (toolWidth = px)}
+          >
+            <AstPanel />
+          </PanelCard>
+        {/if}
       {/snippet}
     </WorkspaceShell>
   </div>

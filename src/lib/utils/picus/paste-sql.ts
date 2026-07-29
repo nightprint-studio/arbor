@@ -82,7 +82,7 @@ export function parsePastedInserts(text: string, known: Column[] = []): PastedIn
     const row: DmlRow = {};
     names.forEach((name, i) => {
       const column = remember(columns, seen, name, values[i], known);
-      row[column.name] = unquote(values[i]);
+      row[column.name] = readValue(values[i]);
     });
     rows.push(row);
   }
@@ -157,11 +157,29 @@ function splitSqlValues(list: string): string[] {
   return out;
 }
 
-/** Strip the surrounding quotes of a SQL literal and unescape doubled quotes. */
-function unquote(value: string): string {
+/**
+ * A written SQL value, read into the model's own notation.
+ *
+ * Three cases, and the third is what keeps the round trip honest:
+ *
+ *  * a **quoted literal** loses its quotes and its doubling — it is a value;
+ *  * a **bare number** stays as it is — also a value, re-emitted bare because the
+ *    column's inferred type says it was written bare;
+ *  * **anything else is SQL**: `SYSDATE`, `SEQ.nextval`, `(SELECT …)`, another
+ *    column. It arrives with the `=` prefix, which is how the model says "this is
+ *    an expression, do not quote it".
+ *
+ * Without that last line a pasted `SYSDATE` would come back as the string
+ * `'SYSDATE'` — the statement would still be valid SQL and would install a
+ * five-character description where a date was meant, which is the worst kind of
+ * wrong. A value that genuinely begins with `=` is escaped as `==`.
+ */
+function readValue(value: string): string {
   const v = value.trim();
   if (v.length >= 2 && v.startsWith("'") && v.endsWith("'")) {
-    return v.slice(1, -1).replace(/''/g, "'");
+    const text = v.slice(1, -1).replace(/''/g, "'");
+    return text.startsWith('=') ? `=${text}` : text;
   }
-  return v;
+  if (/^-?\d+(\.\d+)?$/.test(v)) return v;
+  return `=${v}`;
 }

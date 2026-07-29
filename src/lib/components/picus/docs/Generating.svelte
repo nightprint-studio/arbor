@@ -37,6 +37,47 @@
   <i>table, operation, comparison key, rows</i>.
 </p>
 
+<h2>Values, and expressions</h2>
+<p>
+  A cell is a <b>value</b> and gets quoted. A cell that starts with <code>=</code> is
+  <b>SQL</b> and is emitted as written:
+</p>
+<table>
+  <thead><tr><th>Typed</th><th>Emitted</th></tr></thead>
+  <tbody>
+    <tr><td><code>Alfa</code></td><td><code>'Alfa'</code></td></tr>
+    <tr><td><code>=SYSDATE</code></td><td><code>SYSDATE</code> · <code>CURRENT_TIMESTAMP</code> on PostgreSQL</td></tr>
+    <tr><td><code>=SEQ_CATALOGO.nextval</code></td><td><code>SEQ_CATALOGO.nextval</code></td></tr>
+    <tr><td><code>=(SELECT MAX(ID) + 1 FROM CATALOGO)</code></td><td>the subquery, untouched</td></tr>
+    <tr><td><code>=ALTRA_COLONNA</code></td><td>the column reference</td></tr>
+    <tr><td><code>=NULL</code></td><td><code>NULL</code></td></tr>
+    <tr><td><code>==A</code></td><td><code>'=A'</code> — the escape, for a value that starts with one</td></tr>
+  </tbody>
+</table>
+<p>
+  <b>Declared, never guessed.</b> Picus cannot decide for you whether
+  <code>SEQ_ORDINI.nextval</code> is a sequence or the text of a label, and guessing wrong in
+  one direction inserts a string where a number was meant while guessing wrong in the other
+  passes your literal through unquoted. One character removes the question — and it means the
+  word <code>SYSDATE</code> typed into a description column is a description.
+</p>
+<p>
+  An expression is <b>not type-checked</b>: its value is decided by the database at install
+  time, so refusing <code>=SEQ.nextval</code> for not being a number would be refusing a
+  correct answer. Only "now" is translated per dialect; everything else is your SQL and Picus
+  does not interpret it. An <code>=</code> on its own is refused — it says nothing.
+</p>
+<p>
+  Pasted statements arrive already in this notation: a quoted literal comes in as a value, and
+  anything that is not a literal comes in with its <code>=</code>. Round-tripping a statement
+  through the form therefore cannot change what it means.
+</p>
+<p>
+  An <b>empty</b> cell is different from <code>=NULL</code>, and the difference matters: an
+  empty cell means <i>not supplied</i>, so the column is left out of the statement entirely and
+  its default applies. <code>=NULL</code> writes a null.
+</p>
+
 <h2>Which table, and where its columns come from</h2>
 <p>
   The table list holds what the <b>connected database</b> has and what the <b>repository's
@@ -71,6 +112,46 @@
   form says so explicitly rather than assuming. Without one there is no primary key to fall
   back to, so an update, a delete or an upsert asks for it, and Generate stays unavailable
   until it has one: a statement whose <code>WHERE</code> is empty touches every row.
+</p>
+
+<h2>Which rows an update or a delete touches</h2>
+<p>
+  With nothing built, the <b>comparison key</b> above is the filter: the statement matches the
+  one row that key identifies. Build a <b>WHERE</b> and it <i>replaces</i> the key rather than
+  narrowing it — the two answer different questions (<i>which row</i> against <i>which
+  rows</i>), and <code>AND</code>-ing them together would silently tighten a filter you wrote
+  deliberately.
+</p>
+<p>
+  It is a tree, not a text box: a condition is a column, an operator and as many values as
+  that operator takes; a group is a bracket with its own <code>AND</code> or <code>OR</code>.
+  So <code>(A AND (B OR C))</code> is a shape you can see rather than a string to parse in
+  your head — and, more to the point, a shape <i>Picus</i> still understands, which is what
+  every other rule in the product rests on. A free-text clause would be one field and no work,
+  and the point at which the tool stops knowing what your script does.
+</p>
+<ul>
+  <li>Operators: <code>=</code>, <code>&lt;&gt;</code>, <code>&lt;</code>, <code>&lt;=</code>,
+    <code>&gt;</code>, <code>&gt;=</code>, <code>LIKE</code>, <code>NOT LIKE</code>,
+    <code>IN</code>, <code>NOT IN</code>, <code>IS NULL</code>, <code>IS NOT NULL</code>,
+    <code>BETWEEN</code>. Each is spelled identically in both dialects, so one clause reads the
+    same in the Oracle branch and in the PostgreSQL one.</li>
+  <li><b>A value takes the same <code>=</code> prefix</b> as anywhere else, so
+    <code>DATA_AGG &lt; =SYSDATE</code> works without the clause becoming opaque.</li>
+  <li><b>Groups are always parenthesised</b> in the emitted SQL, even where precedence would
+    not require it. <code>A AND (B OR C)</code> and <code>A AND B OR C</code> are different
+    statements; leaving the reader to know SQL's precedence table is how the wrong rows get
+    deleted.</li>
+  <li><b>An unfinished condition stops the generation</b> and says which. A
+    <code>BETWEEN</code> missing its second bound could be completed a dozen ways, and picking
+    one would be inventing a filter for a statement that deletes rows.</li>
+</ul>
+<p>
+  And the refusal that matters most: <b>an update or a delete with neither a key nor a WHERE is
+  refused</b>. It would be <code>DELETE FROM …</code> — every row in the table — which is one
+  keystroke away from happening by accident and is not recoverable. Somebody who genuinely
+  means to empty a table can write that statement by hand; the tool that writes into four
+  hundred scripts at once does not get to.
 </p>
 
 <h2>Destinations and their rules</h2>

@@ -172,7 +172,7 @@ pub struct FileDigest {
 }
 
 impl Digests {
-    fn into_map(self) -> BTreeMap<String, String> {
+    pub(crate) fn into_map(self) -> BTreeMap<String, String> {
         match self {
             Digests::ByPath(map) => map,
             Digests::Listed(list) => list.into_iter().map(|f| (f.path, f.digest)).collect(),
@@ -611,7 +611,7 @@ pub(crate) fn unchanged_since_preview(
 /// A target's file comes from the interface, and the interface builds it from the
 /// tree — but this is the function that writes, and "the caller would never send
 /// that" is not a property a writing function gets to assume.
-fn destination(root: &Path, relative: &str) -> Result<PathBuf, String> {
+pub(crate) fn destination(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let refused = relative.is_empty()
         || relative.starts_with('/')
         || relative.starts_with('\\')
@@ -629,7 +629,7 @@ fn destination(root: &Path, relative: &str) -> Result<PathBuf, String> {
 /// The folder's answer is the nearest declaration at or above it, so a file about
 /// to be created three levels down takes the encoding somebody pinned at the top
 /// rather than the project-wide default.
-fn conventions(snapshot: &ScriptSnapshot, relative: &str) -> (String, Eol) {
+pub(crate) fn conventions(snapshot: &ScriptSnapshot, relative: &str) -> (String, Eol) {
     if let Some(source) = snapshot.source(relative) {
         return (source.encoding.clone(), eol_of(source.eol));
     }
@@ -644,7 +644,7 @@ fn eol_of(line_ending: LineEnding) -> Eol {
     }
 }
 
-fn line_ending_of(eol: Eol) -> LineEnding {
+pub(crate) fn line_ending_of(eol: Eol) -> LineEnding {
     match eol {
         Eol::Crlf => LineEnding::Crlf,
         Eol::Lf => LineEnding::Lf,
@@ -652,7 +652,7 @@ fn line_ending_of(eol: Eol) -> LineEnding {
 }
 
 /// A written path back in the form the interface speaks.
-fn relative_to(root: &Path, path: &Path) -> String {
+pub(crate) fn relative_to(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|_| path.to_string_lossy().to_string())

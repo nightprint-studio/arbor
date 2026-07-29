@@ -11,7 +11,7 @@
    * confirmation and names exactly which files it will touch.
    */
   import {
-    FormInput, Files, Code2, GitCompare, Check, Play, Download, Plus, RefreshCw,
+    FormInput, Files, Code2, Filter, GitCompare, Check, Play, Download, Plus, RefreshCw,
   } from 'lucide-svelte';
   import Card from '$lib/components/shared/ui/Card.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -21,6 +21,7 @@
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import DmlValueGrid from '../generate/DmlValueGrid.svelte';
+  import WhereBuilder from '../generate/WhereBuilder.svelte';
   import DmlKeyPicker from '../generate/DmlKeyPicker.svelte';
   import PasteSqlPanel from '../generate/PasteSqlPanel.svelte';
   import CsvImportGrid from '../generate/CsvImportGrid.svelte';
@@ -202,6 +203,29 @@
              sources have no grid to pick it in, and with no live schema there is no
              primary key to fall back on either — so it is asked for here. -->
         <DmlKeyPicker />
+      {/if}
+
+      {#if dmlStore.usesWhere}
+        <!-- Only where there is a WHERE to build. An INSERT has none, and a card
+             offering to filter one would be a control that does nothing. -->
+        <section class="gv-where" aria-label="Which rows this touches">
+          <h3 class="gv-where-head">
+            <Filter size={12} />
+            Which rows
+            <span class="gv-where-note">
+              {#if dmlStore.hasWhere}
+                this replaces the comparison key
+              {:else}
+                empty — matches the comparison key
+              {/if}
+            </span>
+          </h3>
+          <WhereBuilder
+            node={dmlStore.whereClause}
+            columns={dmlStore.columns}
+            onChange={(next) => dmlStore.setWhereClause(next)}
+          />
+        </section>
       {/if}
 
       {#if dmlStore.source === 'form'}
@@ -473,6 +497,17 @@
   .gv-card-title :global(svg) { color: var(--text-muted); }
 
   .gv-body { padding: 12px; }
+
+  .gv-where { display: flex; flex-direction: column; gap: 4px; }
+  .gv-where-head {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .gv-where-note { font-weight: 400; color: var(--text-muted); }
 
   .gv-row {
     display: flex;

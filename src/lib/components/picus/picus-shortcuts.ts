@@ -39,6 +39,14 @@ export const PICUS_SHORTCUTS: PicusShortcutGroup[] = [
       { keys: ['Ctrl', '4'], description: 'Inventory' },
       { keys: ['Ctrl', 'B'], description: 'Toggle the sidebar' },
       { keys: ['Ctrl', 'J'], description: 'Toggle the bottom panel' },
+      {
+        keys: ['Ctrl', 'Shift', 'Y'],
+        description: 'Syntax tree of the open document — click a node to select its text',
+      },
+      {
+        keys: ['Ctrl', 'Shift', 'R'],
+        description: 'Structural search and replace across the repository',
+      },
       { keys: ['Ctrl', 'Tab'], description: 'Next tab' },
       { keys: ['Ctrl', 'Shift', 'Tab'], description: 'Previous tab' },
       { keys: ['Ctrl', 'W'], description: 'Close the current tab' },

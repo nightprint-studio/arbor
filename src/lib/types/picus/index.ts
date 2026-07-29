@@ -828,6 +828,77 @@ export interface Finding {
 export type DmlSource = 'form' | 'paste' | 'csv';
 export type DmlOperation = 'insert' | 'upsert' | 'update' | 'delete';
 
+// ── The WHERE of an update or a delete ───────────────────────────────────────
+//
+// `picus_ast::predicate` on the wire, shape for shape. A tree and not a string:
+// a free-text WHERE would be one field and no work, and also the point at which
+// Picus stops knowing what a script does — nothing to validate, nothing to
+// compare between dialects. Where a condition's *value* needs SQL, the operand
+// carries it through the same `=` prefix every DML value uses.
+
+export type PredicateJoin = 'and' | 'or';
+
+export type PredicateOperator =
+  | 'equals' | 'notEquals'
+  | 'less' | 'lessOrEqual' | 'greater' | 'greaterOrEqual'
+  | 'like' | 'notLike'
+  | 'in' | 'notIn'
+  | 'isNull' | 'isNotNull'
+  | 'between';
+
+export type Predicate =
+  | { kind: 'condition'; column: string; operator: PredicateOperator; operands: string[] }
+  | { kind: 'group'; join: PredicateJoin; of: Predicate[] };
+
+/** How many operands an operator takes. Mirrors `Operator::operands`. */
+export type OperandArity = 'none' | 'one' | 'two' | 'many';
+
+export function operandArity(operator: PredicateOperator): OperandArity {
+  switch (operator) {
+    case 'isNull':
+    case 'isNotNull':
+      return 'none';
+    case 'between':
+      return 'two';
+    case 'in':
+    case 'notIn':
+      return 'many';
+    default:
+      return 'one';
+  }
+}
+
+/** The SQL each operator becomes — identical in both dialects, which is why the
+ *  emitter needs no per-engine table for them. */
+export const PREDICATE_OPERATORS: { id: PredicateOperator; label: string }[] = [
+  { id: 'equals', label: '=' },
+  { id: 'notEquals', label: '<>' },
+  { id: 'less', label: '<' },
+  { id: 'lessOrEqual', label: '<=' },
+  { id: 'greater', label: '>' },
+  { id: 'greaterOrEqual', label: '>=' },
+  { id: 'like', label: 'LIKE' },
+  { id: 'notLike', label: 'NOT LIKE' },
+  { id: 'in', label: 'IN' },
+  { id: 'notIn', label: 'NOT IN' },
+  { id: 'isNull', label: 'IS NULL' },
+  { id: 'isNotNull', label: 'IS NOT NULL' },
+  { id: 'between', label: 'BETWEEN' },
+];
+
+/**
+ * Does this predicate describe anything at all?
+ *
+ * A group of nothing is nothing, however deeply nested — and that matters because
+ * an empty WHERE on a DELETE means every row in the table.
+ */
+export function predicateIsEmpty(predicate: Predicate): boolean {
+  return predicate.kind === 'condition'
+    ? !predicate.column.trim()
+    : predicate.of.every(predicateIsEmpty);
+}
+
+
 export const DML_OPERATION_LABELS: Record<DmlOperation, string> = {
   insert: 'INSERT',
   upsert: 'INSERT if missing',
@@ -925,7 +996,7 @@ export interface QueryLogEntry {
 
 // ── Editor tabs ──────────────────────────────────────────────────────────────
 
-export type TabKind = 'generate' | 'query' | 'table' | 'file' | 'inventory';
+export type TabKind = 'generate' | 'query' | 'table' | 'file' | 'inventory' | 'restructure';
 
 export interface PicusTab {
   id: string;

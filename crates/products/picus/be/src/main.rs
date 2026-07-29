@@ -78,6 +78,12 @@ mod columns;
 mod reconcile;
 // Named sets of destinations — "where a change like this always goes".
 mod destinations;
+// The syntax tree of one script, for the AST panel — `arbor-syntax` pointed at
+// Picus's grammar and Picus's already-decoded text.
+mod ast;
+// Structural search and replace across the repository: find → preview → apply,
+// with the same digest guarantee a generation has.
+mod restructure;
 // Where one statement ends and the next begins, so Run can execute exactly one.
 mod statements;
 

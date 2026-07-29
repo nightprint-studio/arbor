@@ -1,0 +1,24 @@
+[package]
+name         = "arbor-syntax"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Language-agnostic tooling over a Tree-sitter tree: a navigable outline of the syntax tree with byte ranges back to the source, and a structural search-and-replace with placeholders. Knows no language — the caller brings the grammar, so Picus points it at SQL and Bennu at Java."
+
+[dependencies]
+# The grammar runtime, and nothing above it. Pinned to the one version the
+# workspace shares: `tree-sitter` is a `links = "tree-sitter"` crate, so two
+# versions in one build is a link error rather than a warning.
+tree-sitter = "0.25"
+# The outline and the matches both cross an IPC seam on their way to a frontend.
+serde = { workspace = true }
+
+[dev-dependencies]
+# A real grammar to test against, and deliberately **not** the one this crate is
+# first used for: a language-agnostic matcher proved only against SQL is a
+# matcher that has quietly learned SQL. Java is already in the workspace for
+# Bennu, so this adds nothing to the build that was not there.
+tree-sitter-java = "0.23"
+serde_json = { workspace = true }

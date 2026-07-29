@@ -23,5 +23,6 @@
 //! ## Public API: use the [`prelude`]
 
 pub mod dml;
+pub mod predicate;
 pub mod prelude;
 pub mod target;

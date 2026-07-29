@@ -4,12 +4,13 @@
    * panel the rest of the suite uses. Topics live in `./docs/`; this file only
    * wires the navigation.
    */
-  import { BookOpen, Rocket, Database, FolderTree, FormInput, TriangleAlert, Keyboard, Lightbulb, Zap } from 'lucide-svelte';
+  import { BookOpen, Rocket, Database, FolderTree, FormInput, Replace, TriangleAlert, Keyboard, Lightbulb, Zap } from 'lucide-svelte';
   import DocsShell, { type DocsNavItem, type DocsNavGroup } from '$lib/components/shared/DocsShell.svelte';
   import GettingStarted from './docs/GettingStarted.svelte';
   import Connections from './docs/Connections.svelte';
   import Scripts from './docs/Scripts.svelte';
   import Generating from './docs/Generating.svelte';
+  import Restructuring from './docs/Restructuring.svelte';
   import Consistency from './docs/Consistency.svelte';
   import Editing from './docs/Editing.svelte';
   import Abbreviations from './docs/Abbreviations.svelte';
@@ -42,6 +43,7 @@
       id: 'scripts', label: 'Scripts', icon: FolderTree, items: [
         { id: 'scripts', label: 'Repository & encoding', icon: FolderTree },
         { id: 'generating', label: 'Generating DML', icon: FormInput },
+        { id: 'restructuring', label: 'Structural replace', icon: Replace },
         { id: 'consistency', label: 'Consistency rules', icon: TriangleAlert },
       ],
     },
@@ -59,6 +61,7 @@
     'connections': Connections,
     'scripts': Scripts,
     'generating': Generating,
+    'restructuring': Restructuring,
     'consistency': Consistency,
     'shortcuts': Shortcuts,
   };

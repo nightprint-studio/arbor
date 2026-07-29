@@ -43,6 +43,7 @@ fn model(operation: DmlOperation) -> DmlModel {
             row(&[("COD_PARAMETRO", "SOGLIA_MAX"), ("VALORE", "1500"), ("DESCRIZIONE", "Soglia massima")]),
             row(&[("COD_PARAMETRO", "GIORNI_RETE"), ("VALORE", "30"), ("DESCRIZIONE", "Giorni di rete")]),
         ],
+        where_clause: None,
         lowercase_postgres: false,
         version_table: VersionTableConfig::default(),
     }
@@ -443,11 +444,23 @@ fn a_portable_target_never_folds_identifiers_even_when_the_project_asks() {
 
 #[test]
 fn a_portable_target_writes_the_now_both_engines_accept() {
+    // `=SYSDATE`, with the prefix: since expressions are declared rather than
+    // guessed, the bare word is a description that happens to read like SQL.
     let mut m = model(DmlOperation::Insert);
-    m.rows = vec![row(&[("COD_PARAMETRO", "X"), ("DESCRIZIONE", "SYSDATE")])];
+    m.rows = vec![row(&[("COD_PARAMETRO", "X"), ("DESCRIZIONE", "=SYSDATE")])];
     let out = emitted(&m, &portable());
     assert!(out.contains("CURRENT_TIMESTAMP"), "got:\n{out}");
     assert!(!out.contains("SYSDATE"), "got:\n{out}");
+}
+
+#[test]
+fn a_value_that_reads_like_sql_is_quoted_without_the_prefix() {
+    // The other half of the same decision, in the emitter rather than in the unit:
+    // a description column holding the word SYSDATE gets a description.
+    let mut m = model(DmlOperation::Insert);
+    m.rows = vec![row(&[("COD_PARAMETRO", "X"), ("DESCRIZIONE", "SYSDATE")])];
+    let out = emitted(&m, &plain(EngineKind::Oracle));
+    assert!(out.contains("'SYSDATE'"), "got:\n{out}");
 }
 
 #[test]
@@ -490,4 +503,130 @@ fn every_plain_operation_a_portable_folder_is_for_is_accepted() {
         let out = emit_for_target(&m, &portable()).expect("accepted");
         assert!(out.contains("PARAMETRI"), "{operation:?}: {out}");
     }
+}
+
+// ── A composite WHERE ────────────────────────────────────────────────────────
+
+fn condition(column: &str, operator: Operator, operands: &[&str]) -> Predicate {
+    Predicate::Condition {
+        column: column.to_string(),
+        operator,
+        operands: operands.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+#[test]
+fn a_where_replaces_the_key_rather_than_narrowing_it() {
+    // The key says *which row*; a predicate says *which rows*. AND-ing them would
+    // silently narrow a filter somebody wrote deliberately.
+    let mut m = model(DmlOperation::Delete);
+    m.rows.truncate(1);
+    m.where_clause = Some(Predicate::Group {
+        join: Join::And,
+        of: vec![condition("VALORE", Operator::Greater, &["1000"])],
+    });
+    assert_eq!(
+        emitted(&m, &plain(EngineKind::Oracle)),
+        "\
+-- PARAMETRI · Oracle · update
+DELETE FROM PARAMETRI
+ WHERE VALORE > 1000;"
+    );
+}
+
+#[test]
+fn every_operator_is_spelled_the_same_in_both_dialects() {
+    // Which is why there is no per-engine table for them — only the *values* go
+    // through the dialect, and this asserts the whole set at once.
+    let mut m = model(DmlOperation::Delete);
+    m.rows.truncate(1);
+    m.where_clause = Some(Predicate::Group {
+        join: Join::And,
+        of: vec![
+            condition("COD_PARAMETRO", Operator::Like, &["SOGLIA%"]),
+            condition("COD_PARAMETRO", Operator::NotIn, &["A", "B"]),
+            condition("VALORE", Operator::Between, &["10", "20"]),
+            condition("DESCRIZIONE", Operator::IsNotNull, &[]),
+        ],
+    });
+    let oracle = emitted(&m, &plain(EngineKind::Oracle));
+    assert!(
+        oracle.contains(
+            "(COD_PARAMETRO LIKE 'SOGLIA%' AND COD_PARAMETRO NOT IN ('A', 'B') \
+             AND VALORE BETWEEN 10 AND 20 AND DESCRIZIONE IS NOT NULL)"
+        ),
+        "got:\n{oracle}"
+    );
+    // Byte-for-byte the same clause on the other engine.
+    let postgres = emitted(&m, &plain(EngineKind::Postgres));
+    let clause = |sql: &str| sql.lines().last().unwrap_or("").to_string();
+    assert_eq!(clause(&oracle), clause(&postgres));
+}
+
+#[test]
+fn a_nested_group_is_parenthesised_even_where_precedence_would_not_need_it() {
+    // `A AND (B OR C)` and `A AND B OR C` are different statements, and the tree
+    // said which. Relying on the reader to know SQL's precedence table is how the
+    // wrong rows get deleted.
+    let mut m = model(DmlOperation::Delete);
+    m.rows.truncate(1);
+    m.where_clause = Some(Predicate::Group {
+        join: Join::And,
+        of: vec![
+            condition("COD_PARAMETRO", Operator::Equals, &["SOGLIA_MAX"]),
+            Predicate::Group {
+                join: Join::Or,
+                of: vec![
+                    condition("VALORE", Operator::Less, &["10"]),
+                    condition("VALORE", Operator::Greater, &["90"]),
+                ],
+            },
+        ],
+    });
+    assert_eq!(
+        emitted(&m, &plain(EngineKind::Oracle)),
+        "\
+-- PARAMETRI · Oracle · update
+DELETE FROM PARAMETRI
+ WHERE (COD_PARAMETRO = 'SOGLIA_MAX' AND (VALORE < 10 OR VALORE > 90));"
+    );
+}
+
+#[test]
+fn a_condition_value_takes_the_equals_prefix_like_any_other() {
+    let mut m = model(DmlOperation::Update);
+    m.rows.truncate(1);
+    m.where_clause = Some(Predicate::Group {
+        join: Join::And,
+        of: vec![condition("DESCRIZIONE", Operator::NotEquals, &["=UPPER(COD_PARAMETRO)"])],
+    });
+    let out = emitted(&m, &plain(EngineKind::Oracle));
+    assert!(out.contains("WHERE DESCRIZIONE <> UPPER(COD_PARAMETRO);"), "got:\n{out}");
+}
+
+#[test]
+fn a_delete_with_neither_a_key_nor_a_where_is_refused() {
+    // The refusal that matters most: `DELETE FROM PARAMETRI` is every row in the
+    // table, it is one keystroke away, and it is not recoverable.
+    let mut m = model(DmlOperation::Delete);
+    m.rows.truncate(1);
+    m.key_columns.clear();
+    let refusal = emit_for_target(&m, &plain(EngineKind::Oracle)).expect_err("must refuse");
+    assert!(refusal.contains("every row in the table"), "{refusal}");
+
+    // …and an empty predicate is no predicate at all, however it is nested.
+    m.where_clause = Some(Predicate::Group { join: Join::Or, of: vec![Predicate::empty()] });
+    assert!(emit_for_target(&m, &plain(EngineKind::Oracle)).is_err());
+}
+
+#[test]
+fn an_unfinished_condition_stops_the_statement_rather_than_guessing() {
+    let mut m = model(DmlOperation::Delete);
+    m.rows.truncate(1);
+    m.where_clause = Some(Predicate::Group {
+        join: Join::And,
+        of: vec![condition("VALORE", Operator::Between, &["10"])],
+    });
+    let refusal = emit_for_target(&m, &plain(EngineKind::Oracle)).expect_err("must refuse");
+    assert!(refusal.contains("as many values as its operator takes"), "{refusal}");
 }

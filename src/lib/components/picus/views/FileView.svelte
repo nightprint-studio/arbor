@@ -15,6 +15,8 @@
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import CodeEditor from '$lib/components/shared/ui/code-editor/CodeEditor.svelte';
+  import AstBridge from '../AstBridge.svelte';
+  import { astStore } from '$lib/stores/picus/ast.svelte';
   import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
   import PicusDialectChip from '../PicusDialectChip.svelte';
   import { sqlLanguage } from '../picus-sql-language';
@@ -100,7 +102,12 @@
    */
   // Structural, matching Bennu's `EditorController`: the shared editor's
   // imperative surface is what a host binds to, not the component's whole type.
-  let editor = $state<{ scrollToLineCol: (line: number, col?: number) => void } | null>(null);
+  let editor = $state<{
+    scrollToLineCol: (line: number, col?: number) => void;
+    selectByteRange: (startByte: number, endByte: number) => void;
+    caretByteOffset: () => number;
+    getValue: () => string;
+  } | null>(null);
   $effect(() => {
     const line = tab.revealLine;
     const nonce = tab.revealNonce;
@@ -176,8 +183,12 @@
           {language}
           {diagnostics}
           oninput={(v) => { edited = v; picusTabsStore.markDirty(tab.id, true); }}
+          oncaret={() => { if (editor) void astStore.revealAt(editor.caretByteOffset()); }}
         />
       {/key}
+      <!-- Keeps the syntax-tree panel describing THIS buffer, and turns a click in
+           it into a selection here. -->
+      <AstBridge {editor} text={edited ?? buffer ?? ''} />
     </div>
   </div>
 {/if}

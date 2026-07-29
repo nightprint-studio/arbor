@@ -14,7 +14,7 @@
    */
   import { onDestroy } from 'svelte';
   import { EditorState, Compartment, type Extension } from '@codemirror/state';
-  import { EditorView, type KeyBinding } from '@codemirror/view';
+  import { EditorView, placeholder as cmPlaceholder, type KeyBinding } from '@codemirror/view';
   import { indentUnit as cmIndentUnit } from '@codemirror/language';
   import { setDiagnostics as cmSetDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
   import { openSearchPanel } from '@codemirror/search';
@@ -38,6 +38,7 @@
     tabSize,
     indentUnit,
     initialState,
+    placeholder,
     keyBindings,
     oninput,
     oncaret,
@@ -71,6 +72,14 @@
     indentUnit?: string;
     /** Cursor + scroll to restore at mount (e.g. the tab's last-known position). */
     initialState?: EditorViewSnapshot;
+    /**
+     * Grey text shown while the buffer is empty.
+     *
+     * For the editors that are a *field* rather than a document — a pattern box, a
+     * snippet — where an example is the shortest explanation of the syntax there
+     * is. Static at mount, like the rest of the extension set.
+     */
+    placeholder?: string;
     /**
      * Keys this host claims back from CodeMirror, e.g. `Mod-Enter` to run a
      * statement. Installed above every built-in binding — see the option of the
@@ -171,6 +180,7 @@
         extensions,
         indentCompartment.of(indentExtensions()),
         minimapCompartment.of(minimap ? minimapExtension() : []),
+        placeholder ? cmPlaceholder(placeholder) : [],
         updateListener,
       ],
     });
@@ -422,6 +432,19 @@
       selection: { anchor, head },
       effects: EditorView.scrollIntoView(anchor, { y: 'nearest' }),
     });
+  }
+
+  /** Select `[startByte, endByte)` — the byte-aware sibling of {@link selectRange}.
+   *
+   *  Everything a backend hands back is in UTF-8 bytes (a syntax node's range, a
+   *  structural match), and every one of those offsets is wrong by the number of
+   *  non-ASCII characters before it if it reaches CodeMirror unconverted. Which is
+   *  every accented comment in the files this is pointed at, so the conversion is
+   *  not an edge case and does not belong at the call site. */
+  export function selectByteRange(startByte: number, endByte: number) {
+    if (!view) return;
+    const b2u = makeByteToU16(view.state.doc.toString());
+    selectRange(b2u(startByte), b2u(endByte));
   }
 
   /** Copy the current selection to the clipboard (no-op when nothing is selected). */

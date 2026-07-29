@@ -8,4 +8,5 @@
 pub use picus_types::prelude::{Column, DialectScope, EngineKind};
 
 pub use crate::dml::{DmlModel, DmlOperation, DmlRow, VersionTableConfig};
+pub use crate::predicate::{Arity, Join, Operator, Predicate};
 pub use crate::target::{FolderRole, Target, TargetGuards, TargetWrap, VersionGuard};

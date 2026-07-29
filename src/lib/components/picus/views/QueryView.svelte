@@ -21,6 +21,8 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import CodeEditor from '$lib/components/shared/ui/code-editor/CodeEditor.svelte';
+  import AstBridge from '../AstBridge.svelte';
+  import { astStore } from '$lib/stores/picus/ast.svelte';
   import PicusDialectChip from '../PicusDialectChip.svelte';
   import { sqlLanguage } from '../picus-sql-language';
   import { sqlDiagnostics } from '../sql-intel';
@@ -177,8 +179,13 @@
         {diagnostics}
         keyBindings={runKeys}
         oninput={(v) => queryStore.setSql(tab.id, v)}
+        oncaret={() => { if (editor) void astStore.revealAt(editor.caretByteOffset()); }}
       />
     {/key}
+    <!-- Keeps the syntax-tree panel describing THIS buffer. Worth having on a
+         query as much as on a script: the panel is how you find out why the
+         statement under the cursor ends where it does. -->
+    <AstBridge {editor} text={state.sql} />
   </div>
 </div>
 

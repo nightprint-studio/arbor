@@ -21,6 +21,7 @@ import { queryStore } from './query.svelte';
 /** The generator is a singleton tab: there is one generation in flight. */
 const GENERATE_TAB_ID = 'generate';
 const INVENTORY_TAB_ID = 'inventory';
+const RESTRUCTURE_TAB_ID = 'restructure';
 
 /**
  * The generator is pinned: it holds work in progress that no bulk "close
@@ -124,6 +125,13 @@ function createTabsStore() {
 
     openGenerate() {
       open({ id: GENERATE_TAB_ID, kind: 'generate', title: 'Generate DML' });
+    },
+
+    /** The structural search-and-replace workspace. One tab, like the generator:
+     *  it holds a pattern somebody is refining, and a second copy would be two
+     *  half-finished migrations. */
+    openRestructure() {
+      open({ id: RESTRUCTURE_TAB_ID, kind: 'restructure', title: 'Structural replace' });
     },
 
     openInventory() {

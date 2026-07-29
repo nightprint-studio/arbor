@@ -38,12 +38,14 @@
   without ever holding the window. <kbd>F5</kbd> re-reads the folder from disk.
 </p>
 
-<h2>The five zones</h2>
+<h2>The zones</h2>
 <ul>
   <li><b>Title bar</b> — project, and the connection every new tab binds to.</li>
   <li><b>Activity bar</b> — Connections, Scripts on disk, Generate DML, Inventory. The
     consistency indicator sits apart at the bottom: it opens the bottom panel, not a sidebar.</li>
   <li><b>Sidebar</b> — the active section's tree.</li>
+  <li><b>Right rail</b> — the tools that describe the <i>document</i> rather than the project.
+    The <b>Syntax tree</b> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Y</kbd>) lives here.</li>
   <li><b>Centre</b> — tabs: the generator, query editors, tables, script files, the inventory.</li>
   <li><b>Bottom panel</b> — Results, Consistency, Output, Changes. Every answer the window
     produces arrives here, the rows a query returned included; running a statement reveals it,

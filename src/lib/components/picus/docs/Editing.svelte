@@ -116,3 +116,34 @@
   no match the editor still completes keywords, closes blocks and reports nothing about
   objects, which is the right behaviour for a script opened with no database open.
 </p>
+
+<h2>The syntax tree</h2>
+<p>
+  <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Y</kbd>, or the braces icon on the right rail. It shows
+  how the parser actually read the document in front of you, and it answers one question:
+  <b>why did it read it that way?</b>
+</p>
+<ul>
+  <li><b>Clicking a node selects its text</b> in the editor, and moving the caret opens the tree
+    down to the node holding it. Both directions matter: one is "show me what this is", the
+    other is "show me where that is".</li>
+  <li><b>The punctuation is shown by default.</b> The commas and the keywords are noisy, and
+    they are very often the answer — a statement that ends earlier than you expected usually
+    ends at a character you did not notice. The filter button hides them for the reading where
+    they are not the point.</li>
+  <li><b>A field name is on the row where the grammar gives one</b>: it is the difference
+    between "an identifier" and "the table being written to".</li>
+  <li><b>It descends into a routine's body.</b> PostgreSQL hands a <code>$$ … $$</code> body back
+    as a single string, which is exactly where an update script does its work — so the body is
+    read separately and its statements appear in the tree, at their real positions in the file.
+    A <code>$$ … $$</code> anywhere else is left as the string literal it is.</li>
+  <li><b>A file that will not parse still has a tree</b>, with its error nodes and the tokens
+    the parser had to invent to keep going — which is the reading this panel is most useful
+    for, so it is not the one it refuses.</li>
+  <li>A very large file is walked up to a budget and the panel says <b>truncated</b> rather
+    than implying the file ends there.</li>
+</ul>
+<p>
+  It follows the <i>buffer</i>, not the file on disk: the moment you want the tree is usually
+  the moment you have just typed something that reads differently than you meant.
+</p>

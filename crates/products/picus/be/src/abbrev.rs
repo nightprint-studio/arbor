@@ -319,6 +319,7 @@ fn model_for(
             .collect::<Result<Vec<_>, _>>()?,
         key_columns: keys.iter().map(|(name, _)| column(name)).collect::<Result<Vec<_>, _>>()?,
         rows: Vec::new(),
+        where_clause: None,
         lowercase_postgres: false,
         version_table: Default::default(),
     })

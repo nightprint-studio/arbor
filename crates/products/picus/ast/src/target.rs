@@ -234,6 +234,7 @@ mod tests {
             columns: Vec::new(),
             key_columns: Vec::new(),
             rows: Vec::new(),
+            where_clause: None,
             lowercase_postgres: false,
             version_table: Default::default(),
         }

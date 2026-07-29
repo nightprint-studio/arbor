@@ -37,6 +37,13 @@ picus-db-postgres = { path = "../db-provider/postgres" }
 # construction, so a second product can take it; this backend supplies the three
 # things only it can — the schema, the dialect, and the emitter.
 arbor-sql-abbrev = { path = "../../../foundation/sql-abbrev" }
+# Language-agnostic tooling over a Tree-sitter tree: the outline the AST panel
+# draws, and the structural search-and-replace behind the migration flow. In
+# `foundation/` and SQL-free by construction — Picus supplies the grammar, Bennu
+# will supply its own.
+arbor-syntax = { path = "../../../foundation/syntax" }
+# The grammar itself, so the two above can be handed a `Language`.
+tree-sitter = "0.25"
 picus-ast  = { path = "../ast" }
 picus-emit = { path = "../emit" }
 # …and what a repository of scripts IS: its per-dialect branches, each folder's

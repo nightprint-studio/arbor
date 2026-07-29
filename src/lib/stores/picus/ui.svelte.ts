@@ -12,6 +12,17 @@ import type { FolderEngine, FolderRole } from '$lib/types/picus';
 /** The four left-rail sections. */
 export type SidebarSection = 'connections' | 'scripts' | 'generate' | 'inventory';
 
+/**
+ * The right rail's sections — the tool windows that describe the document rather
+ * than the project.
+ *
+ * A second rail rather than a fifth left section: the left rail answers "which
+ * part of the repository", and these answer "what is in front of me". IntelliJ
+ * splits them the same way, and a panel about the open file competing for space
+ * with the file tree is the arrangement that makes both useless.
+ */
+export type ToolSection = 'ast';
+
 /** The bottom dock's tabs. Consistency is the default — it is the panel the
  *  product is judged on. */
 export type BottomTab = 'results' | 'consistency' | 'output' | 'changes';
@@ -62,6 +73,11 @@ function createPicusUiStore() {
   let sidebarOpen = $state(true);
   let bottomOpen = $state(true);
   let bottomTab = $state<BottomTab>('consistency');
+
+  /** The right rail's panel. Closed by default: it is a reading tool you reach
+   *  for, not a thing that should be taking width on first open. */
+  let toolOpen = $state(false);
+  let toolSection = $state<ToolSection>('ast');
 
   let tableSubview = $state<TableSubview>('data');
 
@@ -166,6 +182,8 @@ function createPicusUiStore() {
     get sidebarOpen() { return sidebarOpen; },
     get bottomOpen() { return bottomOpen; },
     get bottomTab() { return bottomTab; },
+    get toolOpen() { return toolOpen; },
+    get toolSection() { return toolSection; },
     get tableSubview() { return tableSubview; },
     get paletteOpen() { return paletteOpen; },
     get settingsOpen() { return settingsOpen; },
@@ -209,6 +227,20 @@ function createPicusUiStore() {
     },
     toggleSidebar() { sidebarOpen = !sidebarOpen; },
     closeSidebar() { sidebarOpen = false; },
+
+    /** Right-rail click: same section → collapse, another → switch and open.
+     *  The left rail's rule, so the two behave the same way. */
+    selectTool(section: ToolSection) {
+      if (toolOpen && toolSection === section) { toolOpen = false; return; }
+      toolSection = section;
+      toolOpen = true;
+    },
+    /** Open without the collapse-on-repeat behaviour — palette and shortcuts. */
+    showTool(section: ToolSection) {
+      toolSection = section;
+      toolOpen = true;
+    },
+    closeTool() { toolOpen = false; },
 
     toggleBottom() { bottomOpen = !bottomOpen; },
     closeBottom() { bottomOpen = false; },

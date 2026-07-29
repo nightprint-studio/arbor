@@ -44,11 +44,13 @@
 
 import {
   GENERIC_ENGINE,
+  predicateIsEmpty,
   type Column,
   type DmlOperation,
   type DmlRow,
   type DmlSource,
   type FolderRole,
+  type Predicate,
   type Target,
   type TargetGuards,
 } from '$lib/types/picus';
@@ -105,6 +107,16 @@ function createDmlStore() {
   let source = $state<DmlSource>('form');
   let table = $state('');
   let operation = $state<DmlOperation>('upsert');
+
+  /**
+   * The WHERE of an update or a delete.
+   *
+   * Held whatever the operation is, and only *sent* for the two that have one:
+   * switching to `insert` to check something and back must not throw away a
+   * clause somebody built condition by condition.
+   */
+  let whereClause = $state<Predicate>({ kind: 'group', join: 'and', of: [] });
+  const usesWhere = $derived(operation === 'update' || operation === 'delete');
 
   /**
    * Form mode: the rows being composed, one value per column each.
@@ -239,6 +251,10 @@ function createDmlStore() {
     columns,
     keyColumns,
     rows,
+    // Sent only when it describes something, and only for the two operations that
+    // have a WHERE at all. An empty tree is not "match nothing" — it is "no
+    // predicate", which is what the backend reads `undefined` as.
+    whereClause: usesWhere && !predicateIsEmpty(whereClause) ? whereClause : undefined,
     lowercasePostgres: picusSettingsStore.lowercasePostgres,
     // Where the installed version is recorded — a per-project fact, not a
     // constant: the table, the column and whether a date is stamped at all all
@@ -487,6 +503,19 @@ function createDmlStore() {
     get source() { return source; },
     get table() { return table; },
     get operation() { return operation; },
+    get whereClause() { return whereClause; },
+    /** Does this operation have a WHERE at all? */
+    get usesWhere() { return usesWhere; },
+    /** True when the clause would replace the comparison key. */
+    get hasWhere() { return usesWhere && !predicateIsEmpty(whereClause); },
+
+    setWhereClause(next: Predicate) {
+      whereClause = next;
+      // The statement changes, so anything computed from it is about an earlier
+      // one — the same rule every other edit here follows.
+      generated = false;
+      applied = false;
+    },
     /** The form row currently being edited — what the value grid binds to. */
     get values() { return formRows[activeFormRow] ?? {}; },
     /** Every form row, for the strip that lets you walk them. */

@@ -7,10 +7,12 @@
    *  • **Validation is live.** A non-numeric value in a numeric column is
    *    flagged while you type, not when you save. The message says what is
    *    wrong, in the column's own terms.
-   *  • **Special values are not literals.** `NULL`, `SYSDATE`,
-   *    `CURRENT_TIMESTAMP` are marked as expressions and pass through
-   *    unquoted — translated per dialect on emission (`SYSDATE` becomes
-   *    `CURRENT_TIMESTAMP` on PostgreSQL).
+   *  • **An expression is declared, never guessed.** A leading `=` means the cell
+   *    is SQL — `=SYSDATE`, `=SEQ_ORDINI.nextval`, `=(SELECT MAX(ID)+1 FROM T)`,
+   *    `=ALTRA_COLONNA` — and it passes through as written, with "now" translated
+   *    per dialect. Everything else is a value and gets quoted, including the word
+   *    `SYSDATE` typed into a description. `==` escapes a value that really does
+   *    start with an equals sign.
    *  • **The key is explicit.** It decides the WHERE of updates and the
    *    existence check of "skip if present"; leaving it unset falls back to the
    *    primary key, and the grid says so.
@@ -34,7 +36,7 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
-  import { looksLikeExpression, nowFunction } from '$lib/utils/picus/sql-values';
+  import { isNow, nowFunction, readValue } from '$lib/utils/picus/sql-values';
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
 
   const columns = $derived(dmlStore.columns);
@@ -147,7 +149,7 @@
   {#each columns as col (col.name)}
     {@const value = dmlStore.values[col.name] ?? ''}
     {@const error = dmlStore.validation[col.name] ?? null}
-    {@const expression = looksLikeExpression(value)}
+    {@const written = readValue(value)}
     <div class="vg-row" role="row">
       <span class="vg-col" role="cell">
         <span class="vg-col-name">{col.name}</span>
@@ -166,18 +168,22 @@
           size="sm"
           error={error}
           ariaLabel={`Value for ${col.name}`}
-          placeholder={col.primaryKey ? 'required' : 'empty = NULL'}
+          placeholder={col.primaryKey ? 'required' : 'empty leaves the column out'}
           oninput={(v) => dmlStore.setValue(col.name, v)}
         />
-        {#if expression}
+        {#if written.kind === 'expression'}
+          <!-- Marked because the difference is invisible in the emitted statement
+               until it is too late: one of these two goes in with quotes. -->
           <span
             class="vg-expr"
             use:tooltip={{
-              content: 'Written as an expression, not a quoted literal',
-              description: `Oracle: ${nowFunction('oracle')} · PostgreSQL: ${nowFunction('postgres')}`,
+              content: 'SQL, emitted as written — not a quoted value',
+              description: isNow(written.sql)
+                ? `Translated per dialect — Oracle: ${nowFunction('oracle')} · PostgreSQL: ${nowFunction('postgres')}`
+                : 'Passed through exactly. Picus does not interpret it.',
             }}
           >
-            <Sigma size={11} /> expr
+            <Sigma size={11} /> SQL
           </span>
         {/if}
       </span>

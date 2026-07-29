@@ -630,6 +630,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbor-syntax"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tree-sitter",
+ "tree-sitter-java",
+]
+
+[[package]]
 name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6013,6 +6023,7 @@ dependencies = [
  "arbor-ipc",
  "arbor-rpc",
  "arbor-sql-abbrev",
+ "arbor-syntax",
  "picus-analyze",
  "picus-ast",
  "picus-core",
@@ -6026,6 +6037,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tree-sitter",
 ]
 
 [[package]]

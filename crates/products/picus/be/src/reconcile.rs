@@ -868,6 +868,7 @@ mod tests {
             columns: vec![column("CHIAVE", "varchar(30)"), column("ORDINE", "numeric")],
             key_columns: vec![column("CHIAVE", "varchar(30)"), column("ORDINE", "numeric")],
             rows: vec![],
+            where_clause: None,
             lowercase_postgres: false,
             version_table: VersionTableConfig::default(),
         };
@@ -903,6 +904,7 @@ mod tests {
                 default_value: None,
             }],
             rows: vec![],
+            where_clause: None,
             lowercase_postgres: false,
             version_table: VersionTableConfig::default(),
         };

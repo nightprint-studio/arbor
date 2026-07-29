@@ -19,9 +19,10 @@
  */
 
 import {
-  Bookmark, BookmarkPlus, BookOpen, Check, Command, Database, FileCode2, FileCog, FolderCog,
+  Bookmark, BookmarkPlus, BookOpen, Braces, Check, Command, Database, FileCode2, FileCog, FolderCog,
   FolderOpen, FolderTree, FormInput, Info, Keyboard, Layers, PackageMinus, PackagePlus,
-  PanelBottom, PanelLeft, Pencil, Play, Plus, RefreshCw, Search, Settings, Table2, Tags, Trash2,
+  PanelBottom, PanelLeft, Pencil, Play, Plus, RefreshCw, Replace, Search, Settings, Table2, Tags,
+  Trash2,
   TriangleAlert, Wrench, Zap,
 } from 'lucide-svelte';
 
@@ -75,6 +76,8 @@ const ICONS: Record<string, IconComponent> = {
   search: Search as unknown as IconComponent,
   bookmark: Bookmark as unknown as IconComponent,
   bookmarkPlus: BookmarkPlus as unknown as IconComponent,
+  braces: Braces as unknown as IconComponent,
+  replace: Replace as unknown as IconComponent,
 };
 
 export function picusPaletteIcon(name: string): IconComponent {
@@ -163,6 +166,15 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
     { id: 'write', title: 'Write the generated SQL to the scripts', icon: 'check', shortcut: 'Ctrl+Shift+W', when: dmlStore.generated && !dmlStore.applied, action: () => a.run(a.requestWrite) },
     { id: 'preview', title: 'Show what would change on disk', icon: 'wrench', when: dmlStore.generated, action: () => a.run(() => { picusUiStore.showBottom('changes'); void dmlStore.ensurePreview(); }) },
     { id: 'dest', title: 'Add a destination…', icon: 'plus', when: attached, action: () => a.run(() => picusUiStore.openAddDestination()) },
+    {
+      id: 'restructure',
+      title: 'Structural search and replace across the repository',
+      subtitle: 'A pattern is the statement with holes in it — $name$ for one node, $name...$ for a list',
+      icon: 'replace',
+      shortcut: 'Ctrl+Shift+R',
+      when: attached,
+      action: () => a.run(() => picusTabsStore.openRestructure()),
+    },
     { id: 'set-save', title: 'Save these destinations as a set…', subtitle: 'Kept with the repository; update files are stored as their folder', icon: 'bookmarkPlus', when: attached && dmlStore.targets.length > 0, action: () => a.run(() => picusUiStore.openDestinationSetSave()) },
     // Every saved set is addressable by name — arming one is the shortest path
     // there is from "a new datum" to "every file that expects it".
@@ -200,6 +212,15 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       action: () => a.run(() => picusUiStore.openNavigate()),
     },
     { id: 'newquery', title: 'New query', icon: 'play', shortcut: 'Ctrl+T', when: true, action: () => a.run(() => picusTabsStore.openQuery()) },
+    {
+      id: 'ast',
+      title: 'Syntax tree — how the parser reads the open document',
+      subtitle: 'Click a node to select its text; move the caret and the tree follows',
+      icon: 'braces',
+      shortcut: 'Ctrl+Shift+Y',
+      when: tab?.kind === 'file' || tab?.kind === 'query',
+      action: () => a.run(() => picusUiStore.showTool('ast')),
+    },
     // `picusTabsStore.activeConnection`, NOT `connectionsStore.active`: the tab's
     // own binding, falling back to the sidebar only when it has none. They differ
     // the moment a tab is rebound to another database, and using the sidebar

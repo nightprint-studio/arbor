@@ -11,6 +11,8 @@
 //! become a coincidence.
 
 use picus_types::prelude::Column;
+
+use crate::predicate::Predicate;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -96,6 +98,19 @@ pub struct DmlModel {
     /// of an upsert, and the existence test of a skip-if-present guard.
     pub key_columns: Vec<Column>,
     pub rows: Vec<DmlRow>,
+    /// The `WHERE` of an update or a delete, when it is more than "match the
+    /// comparison key".
+    ///
+    /// Separate from [`Self::key_columns`], and deliberately: the key is what
+    /// **identifies a row** — it drives reconciliation, the conflict target of an
+    /// upsert and the existence test of a skip-if-present guard — while this is a
+    /// **filter**, which may name columns that identify nothing and match many
+    /// rows at once. Folding the two together would make "which rows does this
+    /// touch" and "which row is this" the same question, and they are not.
+    ///
+    /// `None`, or a predicate that describes nothing, means the key is the filter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub where_clause: Option<Predicate>,
     /// Lowercase identifiers when emitting PostgreSQL. A per-project convention,
     /// never applied to Oracle.
     #[serde(default)]
@@ -150,6 +165,7 @@ mod tests {
             columns: vec![column("CODE", "varchar(10)"), column("VALUE", "numeric"), column("NOTE", "text")],
             key_columns: vec![column("CODE", "varchar(10)")],
             rows: vec![],
+            where_clause: None,
             lowercase_postgres: false,
             version_table: VersionTableConfig::default(),
         }

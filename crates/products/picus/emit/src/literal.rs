@@ -14,17 +14,58 @@ pub fn is_numeric_type(data_type: &str) -> bool {
         .any(|k| t.contains(k))
 }
 
-/// The values a user means as **expressions**, not as string literals.
+/// How a cell was written.
 ///
-/// A closed list on purpose. The alternative — guessing whether something looks
-/// like an expression — would eventually pass a user's literal text through
-/// unquoted, and in a tool that writes SQL into someone's database that is not a
-/// bug you find in review.
-const EXPRESSIONS: [&str; 5] = ["SYSDATE", "CURRENT_TIMESTAMP", "CURRENT_DATE", "NOW()", "NULL"];
+/// ## Why a prefix and not a guess
+///
+/// A tool that writes SQL into somebody's database cannot decide *for* the user
+/// whether `SEQ_ORDINI.nextval` is a sequence or the text of a label. Guessing
+/// wrong in one direction inserts a string where a number was meant; wrong in the
+/// other, it passes a user's literal through unquoted — which is not a bug you
+/// find in review.
+///
+/// So the intent is **written down**. A leading `=` means "this is an
+/// expression, emit it as SQL"; everything else is a value and gets quoted. It is
+/// one character, it is the convention every spreadsheet has taught everyone, and
+/// there is nothing to infer.
+///
+/// `==` escapes it, for the value that genuinely starts with an equals sign.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Written<'a> {
+    /// Nothing was typed. Not the same as `NULL`: a column nobody supplied is left
+    /// out of the statement entirely, so its default still applies.
+    Nothing,
+    /// A value. Quoted, or emitted bare when the column is numeric.
+    Value(&'a str),
+    /// SQL. Passed through, with the two spellings of "now" translated per dialect.
+    Expression(&'a str),
+}
 
-pub fn looks_like_expression(value: &str) -> bool {
+/// Read a cell as the user wrote it.
+pub fn read(value: &str) -> Written<'_> {
+    let raw = value.trim();
+    if raw.is_empty() {
+        return Written::Nothing;
+    }
+    if raw.starts_with("==") {
+        // `==A` is the value `=A`: the escape eats one of the two, and what is
+        // left still starts with an equals sign. Doubling to escape is the rule
+        // SQL already uses for a quote inside a literal, so it is the one nobody
+        // here has to be taught.
+        return Written::Value(&raw[1..]);
+    }
+    match raw.strip_prefix('=') {
+        Some(expression) => Written::Expression(expression.trim()),
+        None => Written::Value(raw),
+    }
+}
+
+/// The spellings of "now" that mean the same thing in both dialects.
+const NOW: [&str; 4] = ["SYSDATE", "CURRENT_TIMESTAMP", "CURRENT_DATE", "NOW()"];
+
+fn is_now(value: &str) -> bool {
     let v = value.trim().to_ascii_uppercase();
-    EXPRESSIONS.contains(&v.as_str())
+    NOW.contains(&v.as_str())
 }
 
 /// The scope's "now".
@@ -62,26 +103,34 @@ pub fn ident(name: &str, scope: DialectScope, lowercase: bool) -> String {
 
 /// Render one value as SQL.
 ///
-/// Empty → `NULL`; a recognised expression passes through, translated for the
-/// dialect; a number stays bare when the column is numeric; everything else
+/// Empty → `NULL`; an `=` expression passes through, with "now" translated for
+/// the dialect; a number stays bare when the column is numeric; everything else
 /// becomes a quoted literal with its quotes doubled.
 pub fn literal(value: Option<&str>, column: &Column, scope: DialectScope) -> String {
-    let raw = value.unwrap_or("").trim();
-    if raw.is_empty() {
-        return "NULL".to_string();
+    match read(value.unwrap_or("")) {
+        Written::Nothing => "NULL".to_string(),
+        Written::Expression(sql) => expression(sql, scope),
+        Written::Value(raw) => {
+            if is_numeric_type(&column.data_type) && is_plain_number(raw) {
+                return raw.to_string();
+            }
+            format!("'{}'", raw.replace('\'', "''"))
+        }
     }
-    if looks_like_expression(raw) {
-        let upper = raw.to_ascii_uppercase();
-        return match upper.as_str() {
-            "NULL" => "NULL".to_string(),
-            "SYSDATE" | "NOW()" | "CURRENT_TIMESTAMP" => now_function(scope).to_string(),
-            other => other.to_string(),
-        };
+}
+
+/// An `=` cell, as SQL.
+///
+/// Passed through as written, with one exception that earns itself: the two
+/// dialects spell "now" differently, and a portable script needs the spelling they
+/// share. Everything else — a sequence, a subquery, another column, a function
+/// call — is the user's SQL and Picus does not touch it. It cannot: a rewrite of
+/// somebody's expression is a rewrite of something only they understand.
+fn expression(sql: &str, scope: DialectScope) -> String {
+    if is_now(sql) {
+        return now_function(scope).to_string();
     }
-    if is_numeric_type(&column.data_type) && is_plain_number(raw) {
-        return raw.to_string();
-    }
-    format!("'{}'", raw.replace('\'', "''"))
+    sql.to_string()
 }
 
 /// A decimal number with no exponent, no sign games and no spaces — conservative
@@ -107,7 +156,19 @@ fn is_plain_number(s: &str) -> bool {
 /// Reported rather than silently corrected: the point is to tell the user before
 /// the script runs, not to guess what they meant.
 pub fn validate_value(value: &str, column: &Column) -> Option<String> {
-    let raw = value.trim();
+    let raw = match read(value) {
+        // An expression is the user's SQL. Picus cannot type-check it — the value
+        // is decided by the database at install time — and pretending otherwise
+        // would mean refusing a correct `SEQ.nextval` because it is not a number.
+        // The one thing it can say is that the `=` was left on its own.
+        Written::Expression(sql) => {
+            return sql
+                .is_empty()
+                .then(|| "an = on its own says nothing — write the SQL after it".to_string());
+        }
+        Written::Value(raw) => raw,
+        Written::Nothing => "",
+    };
 
     if raw.is_empty() {
         // An empty cell means *not supplied*, and a column that is not supplied is
@@ -123,9 +184,6 @@ pub fn validate_value(value: &str, column: &Column) -> Option<String> {
         let supplied_by_the_database = column.primary_key || column.default_value.is_some();
         return (column.not_null && !supplied_by_the_database)
             .then(|| "required (NOT NULL, and the column has no default)".to_string());
-    }
-    if looks_like_expression(raw) {
-        return None;
     }
     if is_numeric_type(&column.data_type) && !is_plain_number(raw) {
         return Some(format!("not a number ({})", column.data_type));
@@ -182,19 +240,26 @@ mod tests {
     }
 
     #[test]
-    fn empty_becomes_null_and_null_stays_null() {
+    fn empty_becomes_null_and_an_explicit_null_stays_null() {
         let c = col("NOTE", "varchar(50)");
-        assert_eq!(literal(Some(""), &c, DialectScope::One(EngineKind::Oracle)), "NULL");
-        assert_eq!(literal(None, &c, DialectScope::One(EngineKind::Oracle)), "NULL");
-        assert_eq!(literal(Some("null"), &c, DialectScope::One(EngineKind::Oracle)), "NULL");
+        let oracle = DialectScope::One(EngineKind::Oracle);
+        assert_eq!(literal(Some(""), &c, oracle), "NULL");
+        assert_eq!(literal(None, &c, oracle), "NULL");
+        // `=NULL`, not `null`: since the prefix, the bare word is the word. See
+        // `a_value_that_reads_like_sql_is_still_a_value_without_the_prefix`.
+        assert_eq!(literal(Some("=null"), &c, oracle), "null");
+        assert_eq!(literal(Some("=NULL"), &c, oracle), "NULL");
     }
 
     #[test]
     fn now_is_translated_per_dialect() {
         let c = col("D", "date");
-        assert_eq!(literal(Some("SYSDATE"), &c, DialectScope::One(EngineKind::Oracle)), "SYSDATE");
-        assert_eq!(literal(Some("SYSDATE"), &c, DialectScope::One(EngineKind::Postgres)), "CURRENT_TIMESTAMP");
-        assert_eq!(literal(Some("now()"), &c, DialectScope::One(EngineKind::Oracle)), "SYSDATE");
+        assert_eq!(literal(Some("=SYSDATE"), &c, DialectScope::One(EngineKind::Oracle)), "SYSDATE");
+        assert_eq!(
+            literal(Some("=SYSDATE"), &c, DialectScope::One(EngineKind::Postgres)),
+            "CURRENT_TIMESTAMP"
+        );
+        assert_eq!(literal(Some("=now()"), &c, DialectScope::One(EngineKind::Oracle)), "SYSDATE");
     }
 
     #[test]
@@ -202,10 +267,76 @@ mod tests {
         // Neither `SYSDATE` nor `now()` — the standard spelling, which is the
         // intersection and is what `DIA001` will accept back from the file.
         let c = col("D", "date");
-        for written in ["SYSDATE", "now()", "CURRENT_TIMESTAMP"] {
+        for written in ["=SYSDATE", "=now()", "=CURRENT_TIMESTAMP"] {
             assert_eq!(literal(Some(written), &c, DialectScope::Portable), "CURRENT_TIMESTAMP");
         }
         assert_eq!(now_function(DialectScope::Portable), "CURRENT_TIMESTAMP");
+    }
+
+    // ── The `=` prefix ────────────────────────────────────────────────────────
+
+    #[test]
+    fn an_expression_is_whatever_the_user_wrote_after_the_equals() {
+        // The whole point: not a closed list. A sequence, a subquery, another
+        // column, a function nobody here has heard of — all of them are SQL and
+        // none of them is Picus's to interpret.
+        let c = col("ID", "numeric");
+        let oracle = DialectScope::One(EngineKind::Oracle);
+        for (written, expected) in [
+            ("=SEQ_CATALOGO.nextval", "SEQ_CATALOGO.nextval"),
+            ("=(SELECT MAX(ID) + 1 FROM CATALOGO_WIDGET)", "(SELECT MAX(ID) + 1 FROM CATALOGO_WIDGET)"),
+            ("=CHIAVE", "CHIAVE"),
+            ("=NULL", "NULL"),
+            ("=UPPER(TRIM(' x '))", "UPPER(TRIM(' x '))"),
+        ] {
+            assert_eq!(literal(Some(written), &c, oracle), expected, "{written}");
+        }
+    }
+
+    #[test]
+    fn a_value_that_reads_like_sql_is_still_a_value_without_the_prefix() {
+        // The behaviour the prefix exists to make unambiguous, and the reason it
+        // is a **breaking** change worth making: `SYSDATE` typed into a
+        // description column is a description.
+        let c = col("NOTE", "varchar(50)");
+        let oracle = DialectScope::One(EngineKind::Oracle);
+        assert_eq!(literal(Some("SYSDATE"), &c, oracle), "'SYSDATE'");
+        assert_eq!(literal(Some("SEQ.nextval"), &c, oracle), "'SEQ.nextval'");
+        // …including NULL. An empty cell is how "nothing" is said; the word is a
+        // word.
+        assert_eq!(literal(Some("NULL"), &c, oracle), "'NULL'");
+    }
+
+    #[test]
+    fn a_doubled_equals_is_a_value_that_starts_with_one() {
+        let c = col("NOTE", "varchar(50)");
+        let oracle = DialectScope::One(EngineKind::Oracle);
+        assert_eq!(literal(Some("==A"), &c, oracle), "'=A'");
+        assert_eq!(literal(Some("=="), &c, oracle), "'='");
+        assert_eq!(read("==A"), Written::Value("=A"));
+    }
+
+    #[test]
+    fn an_expression_is_not_type_checked_but_an_empty_one_is_refused() {
+        let n = col("V", "numeric");
+        assert_eq!(validate_value("=SEQ.nextval", &n), None, "a sequence is not a number yet");
+        assert_eq!(validate_value("=(SELECT MAX(V) FROM T)", &n), None);
+        let short = col("CODE", "varchar(3)");
+        assert_eq!(validate_value("=UPPER(QUALCOSA_DI_LUNGO)", &short), None, "no length limit");
+
+        let refused = validate_value("=", &n).expect("an = alone says nothing");
+        assert!(refused.contains("write the SQL after it"), "{refused}");
+    }
+
+    #[test]
+    fn reading_a_cell_keeps_nothing_apart_from_null() {
+        // Three different intentions, three different answers — and the first two
+        // are the pair the generator rests on: an unsupplied column is left OUT of
+        // the statement, so its default applies.
+        assert_eq!(read(""), Written::Nothing);
+        assert_eq!(read("   "), Written::Nothing);
+        assert_eq!(read("=NULL"), Written::Expression("NULL"));
+        assert_eq!(read("ciao"), Written::Value("ciao"));
     }
 
     #[test]
@@ -253,7 +384,9 @@ mod tests {
 
         let n = col("V", "numeric");
         assert_eq!(validate_value("nope", &n).as_deref(), Some("not a number (numeric)"));
-        assert_eq!(validate_value("SYSDATE", &n), None, "an expression is not type-checked");
+        assert_eq!(validate_value("=SYSDATE", &n), None, "an expression is not type-checked");
+        // …and without the prefix it is a value, so it is: the point of the prefix.
+        assert_eq!(validate_value("SYSDATE", &n).as_deref(), Some("not a number (numeric)"));
 
         c.not_null = true;
         assert_eq!(

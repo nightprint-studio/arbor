@@ -19,6 +19,7 @@ members = [
     "crates/foundation/rpc",
     "crates/foundation/rpc-macros",
     "crates/foundation/sql-abbrev",
+    "crates/foundation/syntax",
     "crates/products/corvus/core",
     "crates/products/corvus/plugin",
     "crates/products/corvus/plugin-ns",
