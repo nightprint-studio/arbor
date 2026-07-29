@@ -99,7 +99,15 @@
       toastStore.show(`${file} has no engine. Say which database it is for first.`, 'warning');
       return;
     }
-    dmlStore.addTarget({ file, dialect: engine, role: entry.node.effectiveRole });
+    dmlStore.addTarget({
+      file,
+      dialect: engine,
+      role: entry.node.effectiveRole,
+      // Which product's scripts live here — so a repository installing several
+      // into one version table stamps the right row without the user restating
+      // the predicate on every destination. `null` for the ordinary repository.
+      product: entry.node.effectiveProduct,
+    });
     toastStore.show(`${file} added as a destination.`, 'success');
     onClose();
   }

@@ -25,6 +25,7 @@
  */
 
 import type {
+  Column,
   Finding,
   FolderAlias,
   InventoryObject,
@@ -183,6 +184,28 @@ export function suppressionNote(s: RejectedSuppression): ProjectNote {
 /** Run the rules over the repository. Slow by nature — never awaited on a paint. */
 export function analyzeScripts(root: string): Promise<AnalyzeScriptsResult> {
   return picus('picus_analyze_scripts', { root });
+}
+
+// ── The columns of a table nothing is connected to ───────────────────────────
+
+/**
+ * The columns this repository's scripts write into `table`.
+ *
+ * For the tables no connected database knows — which in a script repository is
+ * most of them, most of the time, and without this the generator's form came up
+ * with no fields at all for one of them.
+ *
+ * Read from the `INSERT` and `UPDATE` statements rather than from
+ * `CREATE TABLE`: those are the columns the repository **actually writes**, which
+ * is what is worth offering, in the order it writes them. Types record how the
+ * literals are written rather than describing a schema — see the backend module
+ * for what that buys and what it costs.
+ *
+ * Empty when nothing in the repository writes to the table. That is a true
+ * answer, not a failure, and the caller says so in those terms.
+ */
+export function scriptColumns(root: string, table: string): Promise<Column[]> {
+  return picus('picus_script_columns', { root, table });
 }
 
 // ── Where one object is named ────────────────────────────────────────────────

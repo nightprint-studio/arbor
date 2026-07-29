@@ -19,14 +19,16 @@
  */
 
 import {
-  BookOpen, Check, Command, Database, FileCode2, FileCog, FolderCog, FolderOpen, FolderTree,
-  FormInput, Info, Keyboard, Layers, PackageMinus, PackagePlus, PanelBottom, PanelLeft, Pencil,
-  Play, Plus, RefreshCw, Settings, Table2, Tags, Trash2, TriangleAlert, Wrench, Zap,
+  Bookmark, BookmarkPlus, BookOpen, Check, Command, Database, FileCode2, FileCog, FolderCog,
+  FolderOpen, FolderTree, FormInput, Info, Keyboard, Layers, PackageMinus, PackagePlus,
+  PanelBottom, PanelLeft, Pencil, Play, Plus, RefreshCw, Search, Settings, Table2, Tags, Trash2,
+  TriangleAlert, Wrench, Zap,
 } from 'lucide-svelte';
 
 import type { IconComponent } from '$lib/types/icon';
 import { connectionsStore } from '$lib/stores/picus/connections.svelte';
 import { consistencyStore } from '$lib/stores/picus/consistency.svelte';
+import { destinationSetsStore } from '$lib/stores/picus/destination-sets.svelte';
 import { dmlStore } from '$lib/stores/picus/dml.svelte';
 import { picusProjectStore } from '$lib/stores/picus/project.svelte';
 import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
@@ -70,6 +72,9 @@ const ICONS: Record<string, IconComponent> = {
   outOfProject: PackageMinus as unknown as IconComponent,
   intoProject: PackagePlus as unknown as IconComponent,
   zap: Zap as unknown as IconComponent,
+  search: Search as unknown as IconComponent,
+  bookmark: Bookmark as unknown as IconComponent,
+  bookmarkPlus: BookmarkPlus as unknown as IconComponent,
 };
 
 export function picusPaletteIcon(name: string): IconComponent {
@@ -158,12 +163,42 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
     { id: 'write', title: 'Write the generated SQL to the scripts', icon: 'check', shortcut: 'Ctrl+Shift+W', when: dmlStore.generated && !dmlStore.applied, action: () => a.run(a.requestWrite) },
     { id: 'preview', title: 'Show what would change on disk', icon: 'wrench', when: dmlStore.generated, action: () => a.run(() => { picusUiStore.showBottom('changes'); void dmlStore.ensurePreview(); }) },
     { id: 'dest', title: 'Add a destination…', icon: 'plus', when: attached, action: () => a.run(() => picusUiStore.openAddDestination()) },
+    { id: 'set-save', title: 'Save these destinations as a set…', subtitle: 'Kept with the repository; update files are stored as their folder', icon: 'bookmarkPlus', when: attached && dmlStore.targets.length > 0, action: () => a.run(() => picusUiStore.openDestinationSetSave()) },
+    // Every saved set is addressable by name — arming one is the shortest path
+    // there is from "a new datum" to "every file that expects it".
+    ...destinationSetsStore.sets.map((set): Raw => {
+      const unusable = set.destinations.filter((d) => d.problem).length;
+      return {
+        id: `set:${set.name}`,
+        title: `Destinations: ${set.name}`,
+        subtitle: unusable
+          ? `${set.destinations.length - unusable} of ${set.destinations.length} usable — replaces what is armed`
+          : `${set.destinations.length} destination${set.destinations.length === 1 ? '' : 's'} — replaces what is armed`,
+        icon: 'bookmark',
+        when: true,
+        action: () => a.run(() => {
+          destinationSetsStore.apply(set.name);
+          picusTabsStore.openGenerate();
+        }),
+      };
+    }),
     { id: 'src-form', title: 'Source: guided form', icon: 'form', shortcut: 'Alt+1', when: true, action: () => a.run(() => { dmlStore.setSource('form'); picusTabsStore.openGenerate(); }) },
     { id: 'src-paste', title: 'Source: paste SQL', icon: 'form', shortcut: 'Alt+2', when: true, action: () => a.run(() => { dmlStore.setSource('paste'); picusTabsStore.openGenerate(); }) },
     { id: 'src-csv', title: 'Source: CSV', icon: 'form', shortcut: 'Alt+3', when: true, action: () => a.run(() => { dmlStore.setSource('csv'); picusTabsStore.openGenerate(); }) },
   ];
 
   const databaseItems: Raw[] = [
+    // Discoverable here as well as on its key, and worth the entry: the
+    // directives are the half nobody finds by pressing the shortcut.
+    {
+      id: 'navigate',
+      title: 'Go to a script, an object or a connection…',
+      subtitle: 'Type part of the name — sort:new, ext:sql and in:FOLDER narrow it',
+      icon: 'search',
+      shortcut: 'Ctrl+Shift+O',
+      when: true,
+      action: () => a.run(() => picusUiStore.openNavigate()),
+    },
     { id: 'newquery', title: 'New query', icon: 'play', shortcut: 'Ctrl+T', when: true, action: () => a.run(() => picusTabsStore.openQuery()) },
     // `picusTabsStore.activeConnection`, NOT `connectionsStore.active`: the tab's
     // own binding, falling back to the sidebar only when it has none. They differ

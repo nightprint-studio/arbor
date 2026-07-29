@@ -216,6 +216,13 @@ impl Builder<'_> {
             // of the report is not a conclusion a folder name is allowed to
             // reach on their behalf.
             excluded: self.existing.and_then(|c| c.declaration(path)).and_then(|d| d.excluded),
+            // Declared too, never inferred: which product a folder's scripts
+            // belong to is not something a directory name can be trusted to say,
+            // and guessing it wrong stamps the wrong row of the version table.
+            product: self
+                .existing
+                .and_then(|c| c.declaration(path))
+                .and_then(|d| d.product.clone()),
             files,
             children: self.children_of(path, dirs, by_dir),
             ..FolderNode::new(path, name)
@@ -338,6 +345,11 @@ fn proposed_config(name: &str, tree: &[FolderNode], default_encoding: &str) -> P
         // takes its default: it is a fact about how the team works, and guessing
         // it from a directory listing would be a guess dressed up as a setting.
         analysis: AnalysisSettings::default(),
+        // Nothing here either: how many products a repository installs, and which
+        // row of the version table each stamps, is not readable from a directory
+        // listing. The empty list is exactly right for the ordinary repository.
+        products: Vec::new(),
+        destination_sets: Vec::new(),
         folders,
         // Nothing classifies a single file on a first read. A `[[file]]`
         // declaration is a correction to a file Picus placed wrongly, and there is
@@ -917,6 +929,8 @@ mod tests {
             generation: GenerationSettings::default(),
             naming: NamingScheme::default(),
             analysis: AnalysisSettings::default(),
+            products: Vec::new(),
+            destination_sets: Vec::new(),
             folders: Vec::new(),
             files: Vec::new(),
             aliases: Vec::new(),

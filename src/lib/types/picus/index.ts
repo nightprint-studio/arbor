@@ -573,6 +573,19 @@ export interface FolderNode {
   excluded: boolean | null;
   /** After inheritance — whether this folder is part of the project at all. */
   effectiveExcluded: boolean;
+  /**
+   * Which installed product's scripts live here, DECLARED on this folder. `null`
+   * means inherit.
+   *
+   * Only meaningful for a repository that installs more than one product into one
+   * database and records a version per product — the row a generated block reads
+   * and stamps is then a property of *where the script is going*. Names a
+   * {@link ProductSetting}; what a name means is declared once, project-wide.
+   */
+  product: string | null;
+  /** After inheritance. `null` for the ordinary repository, which installs one
+   *  thing and declares none of this. */
+  effectiveProduct: string | null;
   children: FolderNode[];
   files: ScriptFile[];
 }
@@ -872,6 +885,22 @@ export interface Target {
   enabled: boolean;
   wrap: TargetWrap;
   guards: TargetGuards;
+  /**
+   * Which row of the version table this destination reads and stamps.
+   *
+   * `undefined` — the ordinary case — means the project's own filter, usually
+   * empty because the version table holds one row. It is set for a repository
+   * that installs **several products** into one table (`MODULO = 'PORTALE'`):
+   * the row to touch is a property of where the script is going, and two
+   * destinations of the same generation can want different ones. Which is why it
+   * lives here and not on the model, which every destination shares.
+   *
+   * Filled in from the destination folder's declared product when the target is
+   * added, and editable per destination for a one-off. `''` is not the same as
+   * absent: it says *this destination wants no predicate*, which a product whose
+   * table is not shared needs to be able to say under a project that filters.
+   */
+  versionFilter?: string;
 }
 
 // ── Query results ────────────────────────────────────────────────────────────

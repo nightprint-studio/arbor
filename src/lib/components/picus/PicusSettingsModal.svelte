@@ -24,6 +24,7 @@
   import Input from '$lib/components/shared/ui/Input.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import ProjectAliases from './settings/ProjectAliases.svelte';
+  import ProjectProducts from './settings/ProjectProducts.svelte';
   import { RULE_FAMILIES } from './settings/rule-catalogue';
   import type { InitialisationModel } from '$lib/ipc/picus/project';
   import {
@@ -384,6 +385,20 @@
                   v.split(',').map((n) => n.trim()).filter(Boolean),
                 )}
             />
+          </FormRow>
+        </div>
+
+        <!-- A repository that installs several products into ONE version table:
+             the row a generated block reads and stamps is then a property of where
+             the script is going, not of the project. Declared here, assigned to
+             folders in the classifier. -->
+        <div class="card">
+          <FormRow
+            label="Products"
+            description="When this repository installs more than one product into the same version table. Each names the predicate that selects its row; folders then say which product's scripts they hold, and a generated block stamps the right one without the predicate being retyped per destination."
+            wideControl
+          >
+            <ProjectProducts />
           </FormRow>
         </div>
 

@@ -89,6 +89,31 @@ pub struct Target {
     pub wrap: TargetWrap,
     #[serde(default)]
     pub guards: TargetGuards,
+    /// Which row of the version table this destination reads and stamps.
+    ///
+    /// `None` — the ordinary case — means the project's own filter, which is
+    /// usually empty because the version table holds one row. It is set for a
+    /// repository that installs **several products** into one table
+    /// (`MODULO = 'PORTALE'`): the row to touch is then a property of where the
+    /// script is going, and two destinations of the same generation can want
+    /// different ones. That is why it lives here and not on the model, which is
+    /// shared by every destination and would have to pick one.
+    ///
+    /// Resolved from the destination folder's declared product; a caller may also
+    /// set it directly for a one-off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_filter: Option<String>,
+}
+
+impl Target {
+    /// The predicate this destination's version guard reads and stamps through —
+    /// the target's own when it has one, the model's otherwise.
+    ///
+    /// One accessor, so the four places that build a `WHERE` cannot disagree about
+    /// precedence.
+    pub fn version_predicate<'a>(&'a self, model: &'a DmlModel) -> &'a str {
+        self.version_filter.as_deref().unwrap_or(&model.version_table.filter)
+    }
 }
 
 impl Target {
@@ -123,6 +148,35 @@ impl Target {
         None
     }
 
+    /// Does this destination describe the database's **starting state** rather
+    /// than a change to it?
+    ///
+    /// The distinction the whole product turns on, in one place so the emitter,
+    /// the reconciler and the refusals cannot read it differently.
+    pub fn seeds(&self) -> bool {
+        matches!(self.role, FolderRole::Init | FolderRole::Data)
+    }
+
+    /// What this destination will actually emit for `operation`.
+    ///
+    /// An **upsert into a seeding script is a plain insert.** "Insert it if it is
+    /// missing, update it if it is there" is a question about install time, and an
+    /// initialisation runs once against an empty database — at install time the
+    /// answer is always *missing*. The question really being asked is about
+    /// **authoring** time: is this row already in the initialisation? That is
+    /// answered by reading the scripts, not by a `MERGE`.
+    ///
+    /// Which also dissolves a refusal that read as a limitation and was a category
+    /// error: an upsert has no portable spelling, so a portable initialisation
+    /// could not take one — while the thing actually wanted, a plain `INSERT`, is
+    /// as portable as SQL gets.
+    pub fn operation_for(&self, operation: DmlOperation) -> DmlOperation {
+        match operation {
+            DmlOperation::Upsert if self.seeds() => DmlOperation::Insert,
+            other => other,
+        }
+    }
+
     /// Why this target cannot receive **this** model — `None` when it can.
     ///
     /// The same mechanism as [`rule_conflict`](Self::rule_conflict), widened to
@@ -134,7 +188,8 @@ impl Target {
         if let Some(conflict) = self.rule_conflict() {
             return Some(conflict.to_string());
         }
-        if self.dialect.is_portable() && model.operation == DmlOperation::Upsert {
+        if self.dialect.is_portable() && self.operation_for(model.operation) == DmlOperation::Upsert
+        {
             return Some(
                 "an upsert has no portable spelling: Oracle writes `MERGE … USING DUAL` and \
                  PostgreSQL `INSERT … ON CONFLICT`. Write it into the dialect folders, or use a \
@@ -160,6 +215,7 @@ mod tests {
             enabled: true,
             wrap,
             guards: TargetGuards { version, ..TargetGuards::default() },
+            version_filter: None,
         }
     }
 
@@ -222,6 +278,45 @@ mod tests {
     }
 
     #[test]
+    fn an_upsert_into_a_seeding_script_is_a_plain_insert() {
+        // An initialisation runs once against an empty database, so "insert it if
+        // it is missing" has one answer at install time. The question is really
+        // about authoring time, and reading the scripts answers it.
+        let mut init = target(TargetWrap::Plain, None);
+        init.role = FolderRole::Init;
+        assert_eq!(init.operation_for(DmlOperation::Upsert), DmlOperation::Insert);
+
+        let mut data = target(TargetWrap::Plain, None);
+        data.role = FolderRole::Data;
+        assert_eq!(data.operation_for(DmlOperation::Upsert), DmlOperation::Insert);
+
+        // An update script means it: the database it runs against is not empty.
+        assert_eq!(
+            target(TargetWrap::Plain, None).operation_for(DmlOperation::Upsert),
+            DmlOperation::Upsert
+        );
+        // And nothing else is touched.
+        for operation in [DmlOperation::Insert, DmlOperation::Update, DmlOperation::Delete] {
+            assert_eq!(init.operation_for(operation), operation);
+        }
+    }
+
+    #[test]
+    fn a_portable_initialisation_takes_an_upsert_because_it_is_an_insert() {
+        // The refusal that read as a limitation and was a category error: there is
+        // no portable `MERGE`, but a portable `INSERT` is as portable as SQL gets —
+        // and an insert is what an upsert into an initialisation means.
+        let mut init = portable(TargetWrap::Plain, None);
+        init.role = FolderRole::Init;
+        assert_eq!(init.refuses(&model(DmlOperation::Upsert)), None);
+
+        // The update folder still gets the refusal, and still names both spellings.
+        let refusal =
+            portable(TargetWrap::Plain, None).refuses(&model(DmlOperation::Upsert)).expect("refused");
+        assert!(refusal.contains("MERGE"), "{refusal}");
+    }
+
+    #[test]
     fn a_portable_target_refuses_an_upsert_and_accepts_the_plain_operations() {
         // The one restriction that depends on the model rather than the folder.
         let refusal = portable(TargetWrap::Plain, None)
@@ -238,6 +333,35 @@ mod tests {
         }
         // …and a dialect target still takes an upsert, as it always did.
         assert!(target(TargetWrap::Plain, None).refuses(&model(DmlOperation::Upsert)).is_none());
+    }
+
+    #[test]
+    fn a_destination_that_names_no_row_takes_the_projects() {
+        let m = model(DmlOperation::Insert);
+        assert_eq!(target(TargetWrap::Block, None).version_predicate(&m), "");
+    }
+
+    #[test]
+    fn a_destinations_own_row_wins_over_the_projects() {
+        // The whole point: two destinations of ONE generation stamping different
+        // rows of the same version table.
+        let mut m = model(DmlOperation::Insert);
+        m.version_table.filter = "MODULO = 'CORE'".into();
+        let mut portal = target(TargetWrap::Block, None);
+        portal.version_filter = Some("MODULO = 'PORTALE'".into());
+        assert_eq!(portal.version_predicate(&m), "MODULO = 'PORTALE'");
+        assert_eq!(target(TargetWrap::Block, None).version_predicate(&m), "MODULO = 'CORE'");
+    }
+
+    #[test]
+    fn a_destination_can_declare_that_it_wants_no_predicate_at_all() {
+        // `Some("")` is not `None`: a product whose scripts read the table's only
+        // row must be able to say so under a project that filters by default.
+        let mut m = model(DmlOperation::Insert);
+        m.version_table.filter = "MODULO = 'CORE'".into();
+        let mut t = target(TargetWrap::Block, None);
+        t.version_filter = Some(String::new());
+        assert_eq!(t.version_predicate(&m), "");
     }
 
     #[test]

@@ -112,6 +112,7 @@ import {
   setExcluded as setExcludedOnDisk,
   setFileEngine,
   setFolderAlias,
+  setFolderProduct,
 } from '$lib/ipc/picus/project';
 import { consistencyStore } from './consistency.svelte';
 
@@ -596,6 +597,30 @@ function createProjectStore() {
       classifying = true;
       try {
         acceptWrite(await confirmProject(root, [folderEdit(path, change)]));
+        return '';
+      } catch (e) {
+        return String(e);
+      } finally {
+        classifying = false;
+      }
+    },
+
+    /**
+     * Say which installed product a folder's scripts belong to — or clear it.
+     *
+     * Separate from `classify` rather than a third field on it, because it is a
+     * different question with a different answer type: engine and role are closed
+     * sets Picus knows, a product name is the repository's own vocabulary.
+     * `null` clears the declaration and the folder inherits again.
+     *
+     * Only meaningful for a repository that installs more than one product into
+     * one version table — see `ProjectSettings.products`.
+     */
+    async setProduct(path: string, product: string | null): Promise<string> {
+      if (!root) return 'No repository is attached.';
+      classifying = true;
+      try {
+        acceptWrite(await setFolderProduct(root, path, product));
         return '';
       } catch (e) {
         return String(e);

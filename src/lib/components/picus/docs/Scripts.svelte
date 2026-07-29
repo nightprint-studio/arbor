@@ -389,8 +389,23 @@ excluded = false`}</code></pre>
   procedure — which statements touch it, in which file, in which folder. The Inventory tab
   shows that as a matrix whose columns are <b>engine × role</b>, not folders: a repository
   with a folder per released version has hundreds of those, and a column each answers a
-  question nobody asks. A zero in a column is one engine staying silent about something
-  another one says, or the updates staying silent about something the initialisation says.
+  question nobody asks.
+</p>
+<p>
+  There is <b>one table per kind</b> — tables, views, sequences, each its own — because the
+  question people bring here is about one kind at a time. The columns line up across all of
+  them, so an Oracle package and a PostgreSQL function are still compared by looking
+  straight down. A collapsed legend above the tables says what the numbers and the marks
+  mean.
+</p>
+<p>
+  A number is how many statements <b>change</b> the object there, and more than one is
+  perfectly normal — a table created once and altered by four update scripts reads 5.
+  Nothing is marked for that. What <i>is</i> marked, in red, is a <b>gap</b>: one side
+  staying silent about something another side installs. That judgement is exactly the one
+  <code>CONS001</code> makes, so what is marked here is what the consistency report raises —
+  a dash that is not a gap is left plain. An object nothing here installs, and one covered
+  by a portable folder at the same role, are therefore never marked.
 </p>
 <p>
   The per-folder detail is not lost — expand an object's row and every column breaks down

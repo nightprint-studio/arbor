@@ -60,6 +60,7 @@ fn scoped(scope: DialectScope, wrap: TargetWrap, guards: TargetGuards) -> Target
         role: FolderRole::Update,
         enabled: true,
         wrap,
+        version_filter: None,
         guards,
     }
 }

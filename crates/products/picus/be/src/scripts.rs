@@ -633,6 +633,7 @@ mod tests {
             enabled: true,
             wrap: TargetWrap::Plain,
             guards: Default::default(),
+            version_filter: None,
         }
     }
 
@@ -853,6 +854,413 @@ mod tests {
             joined.coverage_keys().iter().all(|k| !k.contains("/MSQ")),
             "{:?}",
             joined.coverage_keys()
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The row the fixture's initialisation already installs — `SOGLIA`, not the
+    /// `SOGLIA_SCONTO` the plain model writes.
+    fn model_for_an_existing_row() -> DmlModel {
+        let mut row = std::collections::BTreeMap::new();
+        row.insert("COD".to_string(), "SOGLIA".to_string());
+        // A different value: this is the case the feature exists for — the row is
+        // there and what is being written is a change to it.
+        row.insert("VALORE".to_string(), "99".to_string());
+        DmlModel { rows: vec![row], ..model() }
+    }
+
+    #[test]
+    fn an_update_script_replaces_a_row_the_scripts_already_install() {
+        // `SOGLIA` is inserted by ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql, so an
+        // update script re-stating it must delete by key first — otherwise it
+        // fails on the key of every database that has already been installed.
+        let root = repository("replace-update");
+        let state = state();
+        let targets = [target("ORACLE/AGGIORNAMENTO/4_13__4_14.sql", FolderRole::Update)];
+
+        let snapshot = snapshot_for(&state, &root.to_string_lossy()).expect("opens");
+        let planned =
+            crate::apply::plan(&snapshot, &model_for_an_existing_row(), &targets).expect("plans");
+
+        let after = &planned[0].prepared.after;
+        assert!(after.contains("DELETE FROM PARAMETRI"), "{after}");
+        assert!(after.contains("WHERE COD = 'SOGLIA'"), "{after}");
+        assert!(after.contains("INSERT INTO PARAMETRI"), "{after}");
+        // The delete matches on the comparison key alone. Matching the whole row
+        // would leave a hand-edited row in place and then insert a second copy.
+        assert!(!after.contains("VALORE = 99\n"), "the key alone identifies the row:\n{after}");
+        assert!(
+            planned[0].prepared.reasons.iter().any(|r| r.contains("already installed")),
+            "the diff has to say why it is a delete-then-insert: {:?}",
+            planned[0].prepared.reasons
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_initialisation_changes_the_row_that_is_already_there() {
+        // The other half of the same rule: an initialisation describes the end
+        // state, so a row already in it is edited rather than added a second time.
+        let root = repository("replace-init");
+        let state = state();
+        let targets = [target("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", FolderRole::Init)];
+
+        let snapshot = snapshot_for(&state, &root.to_string_lossy()).expect("opens");
+        let planned =
+            crate::apply::plan(&snapshot, &model_for_an_existing_row(), &targets).expect("plans");
+
+        let after = &planned[0].prepared.after;
+        assert!(after.contains("'SOGLIA', 99"), "the row carries the new value:\n{after}");
+        assert_eq!(
+            after.matches("'SOGLIA'").count(),
+            1,
+            "exactly one row for that key, not two:\n{after}"
+        );
+        // Nothing was appended: there is no block, because there was nothing new.
+        assert!(!after.contains("picus: generated"), "{after}");
+        // And the accented comment above it is untouched, as always.
+        assert!(after.starts_with("-- soglia già applicata\r\n"), "{after}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_upsert_into_the_initialisation_inserts_or_changes_the_row_that_is_there() {
+        // The user's rule, in one test: on the initialisation an upsert needs no
+        // `MERGE` at all. If the row is not there it is a plain insert; if it is,
+        // the original insert is changed.
+        let root = repository("upsert-init");
+        let state = state();
+        let targets = [target("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", FolderRole::Init)];
+        let snapshot = snapshot_for(&state, &root.to_string_lossy()).expect("opens");
+
+        // A row that is already there: changed where it is.
+        let existing = DmlModel { operation: DmlOperation::Upsert, ..model_for_an_existing_row() };
+        let planned = crate::apply::plan(&snapshot, &existing, &targets).expect("plans");
+        let after = &planned[0].prepared.after;
+        assert!(!after.contains("MERGE"), "an initialisation needs no MERGE:\n{after}");
+        assert!(after.contains("'SOGLIA', 99"), "{after}");
+        assert_eq!(after.matches("'SOGLIA'").count(), 1, "one row for that key:\n{after}");
+
+        // A row nobody installs: a plain insert.
+        let fresh = DmlModel { operation: DmlOperation::Upsert, ..model() };
+        let planned = crate::apply::plan(&snapshot, &fresh, &targets).expect("plans");
+        let after = &planned[0].prepared.after;
+        assert!(!after.contains("MERGE"), "{after}");
+        assert!(after.contains("INSERT INTO PARAMETRI"), "{after}");
+        assert!(after.contains("SOGLIA_SCONTO"), "{after}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_portable_initialisation_finds_the_row_the_scripts_already_install() {
+        // The destination that most needs reconciling was the only one never given
+        // it: a portable folder has no single engine, so "what do this engine's
+        // scripts say" was answered with nothing at all — and the row was appended
+        // beside the one already there, with the same key.
+        let root = repository("portable-known");
+        std::fs::create_dir_all(root.join("COMUNE/INIZIALIZZAZIONE")).expect("mkdir");
+        std::fs::write(
+            root.join("COMUNE/INIZIALIZZAZIONE/parametri.sql"),
+            // Written the way the repositories this exists for write it: lower
+            // case on the portable side, upper on Oracle's. Same row.
+            cp1252("insert into parametri (cod, valore) values ('SOGLIA', 10);\r\n"),
+        )
+        .expect("write");
+        // Portable is never inferred from a folder name — it is a promise about
+        // what runs where, and only the repository can make it. So the fixture
+        // declares it, exactly as a real project does.
+        std::fs::create_dir_all(root.join(".arbor/picus")).expect("mkdir");
+        std::fs::write(
+            root.join(".arbor/picus/project.toml"),
+            "version = 3\nname = \"PROD_CORE\"\n\n\
+             [[folder]]\npath = \"COMUNE/INIZIALIZZAZIONE\"\n\
+             dialect = \"generic\"\nrole = \"init\"\n",
+        )
+        .expect("write");
+
+        let state = state();
+        let mut portable = target("COMUNE/INIZIALIZZAZIONE/parametri.sql", FolderRole::Init);
+        portable.dialect = DialectScope::Portable;
+        let targets = [portable];
+
+        let snapshot = snapshot_for(&state, &root.to_string_lossy()).expect("opens");
+        let planned =
+            crate::apply::plan(&snapshot, &model_for_an_existing_row(), &targets).expect("plans");
+        let after = &planned[0].prepared.after;
+
+        assert_eq!(
+            after.matches("'SOGLIA'").count(),
+            1,
+            "one row for that key, not the old one plus a new one:\n{after}"
+        );
+        assert!(after.contains("'SOGLIA', 99"), "and it carries the new value:\n{after}");
+        assert!(!after.contains("picus: generated"), "nothing was appended:\n{after}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_portable_initialisation_takes_an_upsert() {
+        // What the refusal used to block: a portable folder could not receive an
+        // upsert at all, when the thing wanted was a plain INSERT.
+        let root = repository("upsert-portable");
+        std::fs::create_dir_all(root.join("COMUNE/INIZIALIZZAZIONE")).expect("mkdir");
+        std::fs::write(
+            root.join("COMUNE/INIZIALIZZAZIONE/parametri.sql"),
+            cp1252("-- portabile\r\n"),
+        )
+        .expect("write");
+
+        let state = state();
+        let mut portable = target("COMUNE/INIZIALIZZAZIONE/parametri.sql", FolderRole::Init);
+        portable.dialect = DialectScope::Portable;
+        let targets = [portable];
+
+        let snapshot = snapshot_for(&state, &root.to_string_lossy()).expect("opens");
+        let upsert = DmlModel { operation: DmlOperation::Upsert, ..model() };
+        let planned = crate::apply::plan(&snapshot, &upsert, &targets).expect("plans");
+        let after = &planned[0].prepared.after;
+        assert!(!after.contains("nothing generated"), "{after}");
+        assert!(after.contains("INSERT INTO PARAMETRI"), "{after}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_conditional_delete_does_not_erase_the_whole_table() {
+        // What took the feature to zero on a real repository. These scripts
+        // delete-and-reinsert constantly, and the repository is walked in **tree**
+        // order — not install order — so one `DELETE … WHERE` in one folder was
+        // erasing everything learned from every other. Seventeen thousand INSERTs
+        // reduced to nothing by one line, and the only symptom was a block appended
+        // beside the row it should have changed.
+        let root = repository("conditional-delete");
+        std::fs::write(
+            root.join("ORACLE/AGGIORNAMENTO/4_11__4_12.sql"),
+            cp1252(
+                "-- 4.11 -> 4.12\r\n\
+                 DELETE FROM PARAMETRI WHERE COD = 'QUALCOSALTRO';\r\n",
+            ),
+        )
+        .expect("write");
+
+        let state = state();
+        let targets = [target("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", FolderRole::Init)];
+        let snapshot = snapshot_for(&state, &root.to_string_lossy()).expect("opens");
+        let planned =
+            crate::apply::plan(&snapshot, &model_for_an_existing_row(), &targets).expect("plans");
+        let after = &planned[0].prepared.after;
+
+        assert!(after.contains("'SOGLIA', 99"), "the row was still found:\n{after}");
+        assert_eq!(after.matches("'SOGLIA'").count(), 1, "and changed, not duplicated:\n{after}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_unconditional_delete_does_erase_it() {
+        // The other half of the same rule: "every row of this table is gone" is
+        // readable without evaluating anything, so it is believed.
+        let root = repository("unconditional-delete");
+        std::fs::write(
+            root.join("ORACLE/AGGIORNAMENTO/4_11__4_12.sql"),
+            cp1252("-- 4.11 -> 4.12\r\nDELETE FROM PARAMETRI;\r\n"),
+        )
+        .expect("write");
+
+        let state = state();
+        let targets = [target("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", FolderRole::Init)];
+        let snapshot = snapshot_for(&state, &root.to_string_lossy()).expect("opens");
+        let planned =
+            crate::apply::plan(&snapshot, &model_for_an_existing_row(), &targets).expect("plans");
+        let after = &planned[0].prepared.after;
+
+        // Nothing is remembered, so the row is appended as new — and the old one
+        // stays exactly as it was.
+        assert!(after.contains("picus: generated"), "{after}");
+        assert!(after.contains("'SOGLIA', 10"), "the original is untouched:\n{after}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_key_column_the_older_rows_predate_is_named_in_the_diff() {
+        // The failure that is invisible without this: the comparison key includes a
+        // column added later — an audit flag — so every row already in the scripts
+        // is unmatchable, and the block is appended beside them in silence. The
+        // diff now says which column it is, which is the difference between "Picus
+        // is broken" and "take CUSTOMIZED out of the key".
+        let root = repository("key-gap");
+        let state = state();
+        let targets = [target("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", FolderRole::Init)];
+
+        let column = |name: &str, ty: &str| Column {
+            name: name.to_string(),
+            data_type: ty.to_string(),
+            primary_key: false,
+            not_null: false,
+            default_value: None,
+        };
+        let mut row = std::collections::BTreeMap::new();
+        row.insert("COD".to_string(), "SOGLIA".to_string());
+        row.insert("VALORE".to_string(), "99".to_string());
+        row.insert("PERSONALIZZATO".to_string(), "0".to_string());
+        let wide_key = DmlModel {
+            columns: vec![
+                column("COD", "varchar(30)"),
+                column("VALORE", "numeric"),
+                column("PERSONALIZZATO", "numeric"),
+            ],
+            // The trap: a key naming a column the file's own INSERT never mentions.
+            key_columns: vec![column("COD", "varchar(30)"), column("PERSONALIZZATO", "numeric")],
+            rows: vec![row],
+            ..model()
+        };
+
+        let snapshot = snapshot_for(&state, &root.to_string_lossy()).expect("opens");
+        let planned = crate::apply::plan(&snapshot, &wide_key, &targets).expect("plans");
+        let reasons = planned[0].prepared.reasons.join(" ");
+        assert!(reasons.contains("PERSONALIZZATO"), "the diff has to name it: {reasons}");
+        assert!(reasons.contains("comparison key"), "{reasons}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_key_one_column_too_wide_is_diagnosed_by_naming_the_column() {
+        // The failure with no visible symptom: every key column IS named by the
+        // scripts, so nothing looks wrong — the key simply includes a **value**
+        // column, and comparing on it can never match a row whose value is what is
+        // being changed. Without naming the column there is nothing to act on.
+        let root = repository("key-too-wide");
+        let state = state();
+        let targets = [target("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", FolderRole::Init)];
+
+        let named = |name: &str, ty: &str| Column {
+            name: name.to_string(),
+            data_type: ty.to_string(),
+            primary_key: false,
+            not_null: false,
+            default_value: None,
+        };
+        let mut row = std::collections::BTreeMap::new();
+        row.insert("COD".to_string(), "SOGLIA".to_string());
+        row.insert("VALORE".to_string(), "99".to_string());
+        let over_keyed = DmlModel {
+            // VALORE is what is being changed, so it cannot also identify the row.
+            key_columns: vec![named("COD", "varchar(30)"), named("VALORE", "numeric")],
+            rows: vec![row],
+            ..model()
+        };
+
+        let snapshot = snapshot_for(&state, &root.to_string_lossy()).expect("opens");
+        let planned = crate::apply::plan(&snapshot, &over_keyed, &targets).expect("plans");
+        let reasons = planned[0].prepared.reasons.join(" ");
+
+        assert!(reasons.contains("compared on COD, VALORE"), "say what was compared: {reasons}");
+        assert!(
+            reasons.contains("nearest row in the scripts differs on VALORE"),
+            "and which column the nearest row disagrees on: {reasons}"
+        );
+        assert!(reasons.contains("comparison key"), "{reasons}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_table_nothing_installs_says_the_row_is_new() {
+        // The other kind of nothing, which used to look identical.
+        let root = repository("never-installed");
+        let state = state();
+        let targets = [target("ORACLE/INIZIALIZZAZIONE/02_PARAMETRI.sql", FolderRole::Init)];
+        let elsewhere = DmlModel { table: "CATALOGO_WIDGET".to_string(), ..model() };
+
+        let snapshot = snapshot_for(&state, &root.to_string_lossy()).expect("opens");
+        let planned = crate::apply::plan(&snapshot, &elsewhere, &targets).expect("plans");
+        let reasons = planned[0].prepared.reasons.join(" ");
+        assert!(reasons.contains("nothing in this engine's scripts inserts into CATALOGO_WIDGET"), "{reasons}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_row_nobody_installs_is_still_a_plain_insert() {
+        // The guard on the whole feature: reconciliation must not change what
+        // happens in the ordinary case.
+        let root = repository("replace-none");
+        let state = state();
+        let targets = [target("ORACLE/AGGIORNAMENTO/4_13__4_14.sql", FolderRole::Update)];
+
+        let snapshot = snapshot_for(&state, &root.to_string_lossy()).expect("opens");
+        let planned = crate::apply::plan(&snapshot, &model(), &targets).expect("plans");
+        let after = &planned[0].prepared.after;
+        assert!(after.contains("INSERT INTO PARAMETRI"), "{after}");
+        assert!(!after.contains("DELETE FROM"), "nothing installs SOGLIA_SCONTO:\n{after}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn statements_land_inside_a_block_that_already_guards_the_same_versions() {
+        // A second block on one version range would run twice on a fresh install
+        // and, on an upgraded database, find the version already carried forward
+        // and do nothing at all.
+        let root = repository("existing-guard");
+        let guarded = "-- 4.13 -> 4.14\r\n\
+                       DECLARE\r\n\
+                       \x20 v_version VARCHAR2(30);\r\n\
+                       BEGIN\r\n\
+                       \x20 SELECT VERSIONE INTO v_version FROM VERSIONE_DB;\r\n\
+                       \x20 IF v_version <> '4.13' THEN\r\n\
+                       \x20   RETURN;\r\n\
+                       \x20 END IF;\r\n\
+                       \x20 INSERT INTO LISTINI (COD) VALUES ('L');\r\n\
+                       \x20 UPDATE VERSIONE_DB SET VERSIONE = '4.14';\r\n\
+                       \x20 COMMIT;\r\n\
+                       END;\r\n/\r\n";
+        std::fs::write(
+            root.join("ORACLE/AGGIORNAMENTO/4_13__4_14.sql"),
+            cp1252(guarded),
+        )
+        .expect("write");
+
+        let state = state();
+        let mut guarded_target = target("ORACLE/AGGIORNAMENTO/4_13__4_14.sql", FolderRole::Update);
+        guarded_target.wrap = TargetWrap::Block;
+        guarded_target.guards.version =
+            Some(picus_ast::prelude::VersionGuard { from: "4.13".into(), to: "4.14".into() });
+        let targets = [guarded_target];
+
+        let snapshot = snapshot_for(&state, &root.to_string_lossy()).expect("opens");
+        let planned = crate::apply::plan(&snapshot, &model(), &targets).expect("plans");
+        let after = &planned[0].prepared.after;
+
+        // One guard, not two.
+        assert_eq!(after.matches("IF v_version <> '4.13'").count(), 1, "{after}");
+        assert_eq!(after.matches("DECLARE").count(), 1, "{after}");
+        // The new statement sits above the UPDATE that carries the version on.
+        let inserted = after.find("SOGLIA_SCONTO").expect("the row was written");
+        let carries = after.find("UPDATE VERSIONE_DB").expect("the guard still closes");
+        assert!(inserted < carries, "the row has to run before the version moves:\n{after}");
+        // And it carries a marker, which is what lets the next run find it again
+        // instead of adding a second copy inside the same guard.
+        assert!(after.contains("picus: generated"), "{after}");
+
+        // Which is the property worth asserting: generate the same thing again and
+        // nothing at all changes.
+        let bytes = encoding_of("windows-1252", after);
+        std::fs::write(root.join("ORACLE/AGGIORNAMENTO/4_13__4_14.sql"), bytes).expect("write");
+        state.scripts().invalidate(&root);
+        let snapshot = snapshot_for(&state, &root.to_string_lossy()).expect("re-opens");
+        let again = crate::apply::plan(&snapshot, &model(), &targets).expect("re-plans");
+        assert!(
+            again[0].prepared.is_noop(),
+            "a second run inside the same guard must change nothing:\n{}",
+            again[0].prepared.after
         );
 
         let _ = std::fs::remove_dir_all(&root);

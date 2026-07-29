@@ -141,6 +141,13 @@ fn existing_block(
             end = Some(statement.range.end);
         }
 
+        // Nothing at the top level: the marker may sit **inside** somebody else's
+        // procedural block, which is where a generation lands when the file already
+        // guards this version range. There are no statement boundaries to lean on
+        // in there — the whole block is one statement, and it starts above the
+        // marker — so the extent is measured from the nested DML instead.
+        let end = end.or_else(|| nested_end(source, parsed, table, body_from, stop_at));
+
         // A marker whose statements are about another table belongs to another
         // block. Skip it rather than claiming it.
         if let Some(end) = end {
@@ -148,6 +155,41 @@ fn existing_block(
         }
     }
     None
+}
+
+/// The end of the last nested statement on `table` between two offsets.
+///
+/// `picus-parse` gives a nested `INSERT` no range of its own — the enclosing block
+/// is the statement — so it is reconstructed from the pieces that do carry one:
+/// the last value row, extended to the end of its line so the terminator comes
+/// with it.
+///
+/// Conservative by construction: a shape with no rows (an `INSERT … SELECT`) has
+/// nothing to measure and is not claimed, which means a generation is appended
+/// rather than a hand-written statement being swallowed.
+fn nested_end(
+    source: &str,
+    parsed: &ParsedFile,
+    table: &str,
+    from: usize,
+    stop_at: usize,
+) -> Option<usize> {
+    let mut end: Option<usize> = None;
+    for statement in &parsed.statements {
+        for shape in &statement.dml {
+            if !is(&shape.table, table) {
+                continue;
+            }
+            let Some(last) = shape.rows.last() else { continue };
+            let starts = shape.table.range.start;
+            if starts < from || starts >= stop_at {
+                continue;
+            }
+            let at = line_end(source, last.range.end.min(source.len()));
+            end = Some(end.map_or(at, |previous: usize| previous.max(at)));
+        }
+    }
+    end
 }
 
 /// The byte offset of every line that reads like one of this project's markers.

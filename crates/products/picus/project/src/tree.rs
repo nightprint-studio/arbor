@@ -241,6 +241,21 @@ pub struct FolderNode {
     pub excluded: Option<bool>,
     /// After inheritance.
     pub effective_excluded: bool,
+    /// Which installed product's scripts live here. `None` = inherit.
+    ///
+    /// A repository that ships more than one product records a version per
+    /// product — one row of the version table each, told apart by a predicate —
+    /// and the scripts of each product are, in practice, in their own folders.
+    /// Naming the product on the folder is what lets a generated block stamp the
+    /// right row without the user restating the predicate on every destination.
+    ///
+    /// A free string rather than an enum: the set is the repository's, not
+    /// Picus's. What it *means* is declared once, under `[[product]]` in the
+    /// project file.
+    pub product: Option<String>,
+    /// After inheritance. `None` when nothing above says either — a repository
+    /// installing one product never declares any of this.
+    pub effective_product: Option<String>,
     pub children: Vec<FolderNode>,
     pub files: Vec<ScriptFile>,
 }
@@ -258,6 +273,8 @@ impl FolderNode {
             effective_role: FolderRole::Ignored,
             excluded: None,
             effective_excluded: false,
+            product: None,
+            effective_product: None,
             children: Vec::new(),
             files: Vec::new(),
         }

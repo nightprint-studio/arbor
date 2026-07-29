@@ -49,7 +49,9 @@
     engineSelectOptions,
   } from './engine-choices';
   import { classifyFolder } from './folder-classify';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
+  import { picusSettingsStore } from '$lib/stores/picus/settings.svelte';
   import {
     DIALECTS,
     FOLDER_ROLE_LABELS,
@@ -73,6 +75,8 @@
   let selectedPath = $state(path);
   let engine = $state<string>(opened ? declaredEngine(opened.node) ?? CLEAR_ID : CLEAR_ID);
   let role = $state<string>(opened?.node.role ?? CLEAR_ID);
+  /** Which product's scripts live here — only asked when the project has any. */
+  let product = $state<string>(opened?.node.product ?? CLEAR_ID);
 
   const needle = $derived(query.trim().toLowerCase());
   const visible = $derived(
@@ -86,6 +90,21 @@
     ...ROLE_CHOICES.map((r) => ({ value: r as string, label: FOLDER_ROLE_LABELS[r] })),
     { value: CLEAR_ID, label: 'Inherit' },
   ];
+
+  /**
+   * A third answer, and only for the repositories that need one.
+   *
+   * The field appears only once the project has declared products — otherwise it
+   * is a control whose every value means the same thing, which is the most
+   * reliable way to make somebody think they have misconfigured something.
+   */
+  const productOptions = $derived([
+    ...picusSettingsStore.products
+      .filter((p) => p.name.trim())
+      .map((p) => ({ value: p.name, label: p.name })),
+    { value: CLEAR_ID, label: 'Inherit' },
+  ]);
+  const hasProducts = $derived(productOptions.length > 1);
 
   /** Where this folder currently stands, in words — the sentence Apply changes. */
   const standing = $derived.by(() => {
@@ -120,6 +139,7 @@
     const entry = picusProjectStore.entryFor(folderPath);
     engine = entry ? declaredEngine(entry.node) ?? CLEAR_ID : CLEAR_ID;
     role = entry?.node.role ?? CLEAR_ID;
+    product = entry?.node.product ?? CLEAR_ID;
   }
 
   let applying = $state(false);
@@ -132,6 +152,19 @@
       dialect: engineFromChoice(engine),
       role: role === CLEAR_ID ? null : (role as FolderRole),
     });
+    // The product is a separate write because it is a separate declaration — and
+    // it is only sent when it actually changed, so a repository that declares no
+    // products never touches this path at all. Second, not first: the engine and
+    // the role are what the dialog is for, and they must land even if this fails.
+    if (ok && hasProducts) {
+      const wanted = product === CLEAR_ID ? null : product;
+      if (wanted !== (entry.node.product ?? null)) {
+        const message = await picusProjectStore.setProduct(entry.node.path, wanted);
+        if (message) {
+          toastStore.show(`The product could not be saved — ${message}`, 'error');
+        }
+      }
+    }
     applying = false;
     if (ok) onClose();
   }
@@ -224,6 +257,15 @@
         <FormField label="Role" hint="What the scripts here are for — it decides how generated SQL is written into them.">
           <RadioGroup bind:value={role} options={roleOptions} size="sm" />
         </FormField>
+
+        {#if hasProducts}
+          <FormField
+            label="Product"
+            hint="Which installed product's scripts live here. It decides which row of the version table a generated block reads and stamps, so a repository installing several into one table stamps the right one without the predicate being retyped per destination. Everything below inherits it."
+          >
+            <Select bind:value={product} options={productOptions} />
+          </FormField>
+        {/if}
       {/if}
     </div>
   </div>

@@ -61,14 +61,22 @@ import {
 import {
   applyScripts,
   previewApply,
+  scriptColumns,
   type ApplyResult,
   type PreviewFile,
 } from '$lib/ipc/picus/scripts';
+import type { DestinationSetInput, ResolvedDestination } from '$lib/ipc/picus/project';
 import { parseCsv, proposeCsvMapping } from '$lib/utils/picus/csv';
 import { parsePastedInserts } from '$lib/utils/picus/paste-sql';
 import { picusProjectStore } from './project.svelte';
 import { schemaStore } from './schema.svelte';
 import { picusSettingsStore } from './settings.svelte';
+
+/** A destination of a set that could not be armed, and the folder it named. */
+export interface RefusedDestination {
+  folder: string;
+  reason: string;
+}
 
 /**
  * Coalescing window before a model change reaches the backend.
@@ -98,8 +106,18 @@ function createDmlStore() {
   let table = $state('');
   let operation = $state<DmlOperation>('upsert');
 
-  /** Form mode: one value per column. */
-  let values = $state<Record<string, string>>({});
+  /**
+   * Form mode: the rows being composed, one value per column each.
+   *
+   * A list rather than a single record because "add three parameters" is the
+   * ordinary case, not an advanced one, and doing it as three generations means
+   * three blocks, three markers and three diffs for one logical change. The grid
+   * shows **one at a time** — see `DmlValueGrid` for why that beats widening the
+   * table into a spreadsheet.
+   */
+  let formRows = $state<Record<string, string>[]>([{}]);
+  /** Which of them the grid is editing. Clamped on read, never on change. */
+  let formCursor = $state(0);
   /** Explicit comparison-key selection; empty falls back to the primary key. */
   let keySelection = $state<Record<string, boolean>>({});
 
@@ -111,6 +129,29 @@ function createDmlStore() {
 
   /** Rows read from the paste/CSV sources. Form mode derives its single row. */
   let importedRows = $state<DmlRow[]>([]);
+  /**
+   * Columns the pasted statements named, when no live schema knows the table.
+   *
+   * The generator used to be unusable without a database connection: the column
+   * set came only from `schemaStore`, so with nothing connected there were no
+   * fields, no types and nothing to emit — in a product whose subject is scripts
+   * on disk. A pasted `INSERT` already carries its columns, so it supplies them.
+   * See `utils/picus/paste-sql.ts` for why the inferred types are faithful rather
+   * than a guess about the schema.
+   */
+  let importedColumns = $state<Column[]>([]);
+  /**
+   * Columns read out of the repository's own statements, for a table no
+   * connected database knows.
+   *
+   * The gap this closes: picking a table that only the scripts install left the
+   * form with **no fields at all** — the table was selectable and then there was
+   * nothing to type into, which is worse than not offering it. See
+   * `ipc/picus/scripts.ts::scriptColumns` for where they come from.
+   */
+  let scriptSideColumns = $state<Column[]>([]);
+  /** `table` the columns above were read for; anything else means they are stale. */
+  let scriptColumnsFor = $state('');
 
   /** Destinations. Empty until the user adds one from the open repository. */
   let targets = $state<Target[]>([]);
@@ -120,20 +161,74 @@ function createDmlStore() {
   let generated = $state(false);
   let applied = $state(false);
 
-  // Only real tables: DML is written against something writable, so a view
-  // never shows up here even though it has columns.
-  const columns = $derived<Column[]>(schemaStore.table(table)?.columns ?? []);
+  /**
+   * The columns this generation works from.
+   *
+   * The live table's when a database is connected — its types carry the length
+   * limits and NOT NULL flags validation reports on, and it knows the primary key.
+   * Otherwise the ones the source itself named. Only real tables are looked up:
+   * DML is written against something writable, so a view never shows up here even
+   * though it has columns.
+   */
+  const columns = $derived<Column[]>(
+    schemaStore.table(table)?.columns
+      ?? (importedColumns.length ? importedColumns : scriptColumnsHere()),
+  );
+
+  /** The script-side columns, but only for the table they were read for. */
+  function scriptColumnsHere(): Column[] {
+    return scriptColumnsFor === table.toUpperCase() ? scriptSideColumns : [];
+  }
+
+  /**
+   * The source dictates the table, so it is shown rather than asked for.
+   *
+   * A pasted `INSERT INTO PARAMETRI (…)` has already said which table it is
+   * about. Asking again — through a dropdown that is empty unless a database is
+   * connected — was asking the user to repeat themselves, and to do it through a
+   * control that could not answer.
+   */
+  const tableIsFromSource = $derived(source === 'paste' && importedColumns.length > 0);
 
   const keyColumns = $derived.by<Column[]>(() => {
     const picked = columns.filter((c) => keySelection[c.name]);
     return picked.length ? picked : columns.filter((c) => c.primaryKey);
   });
 
+  /** The form row being edited. Clamped here so a delete cannot leave it dangling. */
+  const activeFormRow = $derived(Math.min(formCursor, Math.max(0, formRows.length - 1)));
+
+  /** A form row nobody has typed anything into — not worth writing, not an error. */
+  function isBlank(row: Record<string, string>): boolean {
+    return !Object.values(row).some((v) => v.trim());
+  }
+
+  /**
+   * Which form rows carry values, by index.
+   *
+   * A blank row is what an "add another" button leaves behind when the user
+   * changes their mind, and emitting it would produce a statement of nothing but
+   * NULLs. It is skipped rather than reported: nobody meant it.
+   *
+   * Kept as indices, not as rows, because everything the backend says about a row
+   * comes back keyed by its position in `rows` — and that has to be translatable
+   * back to the form row the user is looking at.
+   */
+  const filledFormRows = $derived(
+    formRows.map((row, i) => (isBlank(row) ? -1 : i)).filter((i) => i >= 0),
+  );
+
   const rows = $derived<DmlRow[]>(
     source === 'form'
-      ? [columns.reduce<DmlRow>((acc, c) => { acc[c.name] = values[c.name] ?? ''; return acc; }, {})]
+      ? filledFormRows.map((i) =>
+          columns.reduce<DmlRow>((acc, c) => { acc[c.name] = formRows[i][c.name] ?? ''; return acc; }, {}))
       : importedRows,
   );
+
+  /** Where a form row sits in the model, or -1 when it is blank and not sent. */
+  function modelIndexOf(formRow: number): number {
+    return filledFormRows.indexOf(formRow);
+  }
 
   const enabledTargets = $derived(targets.filter((t) => t.enabled));
   const csvHeaders = $derived(parseCsv(csvText).headers);
@@ -275,6 +370,32 @@ function createDmlStore() {
       const timer = setTimeout(() => void runValidate(key), REFRESH_DEBOUNCE_MS);
       return () => clearTimeout(timer);
     });
+
+    // A table only the scripts know: ask the repository what its statements write
+    // into it. Not debounced — the table changes when somebody picks one, not as
+    // they type — and skipped entirely the moment a live schema can answer, which
+    // it should where it can: real types carry the length limits and the key.
+    $effect(() => {
+      const wanted = table.trim().toUpperCase();
+      const root = picusProjectStore.root;
+      if (!wanted || !root || schemaStore.table(table) || importedColumns.length) return;
+      if (scriptColumnsFor === wanted) return;
+      let live = true;
+      void scriptColumns(root, table)
+        .then((found) => {
+          if (!live) return;
+          scriptSideColumns = found;
+          scriptColumnsFor = wanted;
+        })
+        .catch(() => {
+          if (!live) return;
+          // Settled either way: the key advances so a backend that is not up does
+          // not leave this asking again on every keystroke.
+          scriptSideColumns = [];
+          scriptColumnsFor = wanted;
+        });
+      return () => { live = false; };
+    });
   });
 
   // ── The write: preview, then apply what was previewed ──────────────────────
@@ -328,20 +449,31 @@ function createDmlStore() {
   const validation = $derived.by(() => {
     const out: Record<string, string> = {};
     if (source !== 'form') return out;
+    const at = modelIndexOf(activeFormRow);
+    if (at < 0) return out;
     for (const p of problems) {
-      if (p.row === 0) out[p.column] = p.reason;
+      if (p.row === at) out[p.column] = p.reason;
     }
     return out;
   });
 
-  /** Rows that fail their column types, per imported row index. */
+  /**
+   * Rows that fail their column types, per row index.
+   *
+   * Filled for **every** source, form included. With one form row it was
+   * redundant with `validation`; with several it is the only thing that says a
+   * row you are not currently looking at is the one holding the bad value.
+   */
   const rowIssues = $derived.by(() => {
     const out = new Map<number, string[]>();
-    if (source === 'form') return out;
     for (const p of problems) {
-      const list = out.get(p.row);
+      // Keyed by the index the CALLER thinks in: the form's own row numbering
+      // where the form is the source, the imported list's otherwise. The blank
+      // rows the model skips are what makes those two differ.
+      const key = source === 'form' ? (filledFormRows[p.row] ?? p.row) : p.row;
+      const list = out.get(key);
       if (list) list.push(`${p.column}: ${p.reason}`);
-      else out.set(p.row, [`${p.column}: ${p.reason}`]);
+      else out.set(key, [`${p.column}: ${p.reason}`]);
     }
     return out;
   });
@@ -355,10 +487,29 @@ function createDmlStore() {
     get source() { return source; },
     get table() { return table; },
     get operation() { return operation; },
-    get values() { return values; },
+    /** The form row currently being edited — what the value grid binds to. */
+    get values() { return formRows[activeFormRow] ?? {}; },
+    /** Every form row, for the strip that lets you walk them. */
+    get formRows() { return formRows; },
+    get formCursor() { return activeFormRow; },
     get keySelection() { return keySelection; },
     get columns() { return columns; },
     get keyColumns() { return keyColumns; },
+    /** The source named the table, so it is shown rather than asked for. */
+    get tableIsFromSource() { return tableIsFromSource; },
+    /**
+     * No live database knows this table, so the columns and their types were read
+     * from SQL — the pasted statements, or the repository's own.
+     *
+     * Worth saying out loud in the interface: everything downstream behaves
+     * slightly differently, and the user should know before they read the
+     * generated block rather than after.
+     */
+    get columnsFromSource() { return !schemaStore.table(table) && columns.length > 0; },
+    /** …and specifically from the repository, rather than from a paste. */
+    get columnsFromScripts() {
+      return !schemaStore.table(table) && !importedColumns.length && scriptColumnsHere().length > 0;
+    },
     get rows() { return rows; },
     get model() { return model; },
     get validation() { return validation; },
@@ -484,11 +635,27 @@ function createDmlStore() {
      */
     get generateBlockedReason(): string | null {
       if (!table.trim()) return 'No table chosen.';
+      if (!columns.length) return 'Nothing is known about this table’s columns.';
       if (!enabledTargets.length) return 'No destination is enabled.';
       if (!rows.length) return 'There are no rows to write.';
+      // Three of the four operations are defined by which row they find, and
+      // nothing can supply that on its own: with no database connected there is no
+      // primary key to fall back on, so the user has to say which columns identify
+      // a row. Said here rather than left to a statement with an empty WHERE.
+      if (operation !== 'insert' && !keyColumns.length) {
+        return 'No comparison key — tick the columns that identify a row.';
+      }
       if (!validated) return 'Checking the values…';
-      const bad = source === 'form' ? Object.keys(validation).length : rowIssues.size;
-      return bad ? 'Some values cannot be written as typed.' : null;
+      // `rowIssues`, not `validation`: the latter describes the row on screen, and
+      // with several rows the offending one is usually not the one being looked
+      // at. Generating from a form whose third row is invalid because the first
+      // one looks fine is exactly the mistake the check exists to prevent.
+      if (rowIssues.size) {
+        return rowIssues.size === 1
+          ? 'Some values cannot be written as typed.'
+          : `${rowIssues.size} rows have values that cannot be written as typed.`;
+      }
+      return null;
     },
 
     /** True when there is something worth generating and nothing invalid. */
@@ -504,9 +671,11 @@ function createDmlStore() {
 
     setTable(next: string) {
       table = next;
-      values = {};
+      formRows = [{}];
+      formCursor = 0;
       keySelection = {};
       importedRows = [];
+      importedColumns = [];
       csvMapping = {};
       generated = false;
       applied = false;
@@ -519,7 +688,8 @@ function createDmlStore() {
     },
 
     setValue(column: string, value: string) {
-      values = { ...values, [column]: value };
+      const at = activeFormRow;
+      formRows = formRows.map((row, i) => (i === at ? { ...row, [column]: value } : row));
       generated = false;
       applied = false;
     },
@@ -529,8 +699,49 @@ function createDmlStore() {
       generated = false;
     },
 
+    /** Move to another form row. Out-of-range indices are clamped, not refused. */
+    selectFormRow(index: number) {
+      formCursor = Math.max(0, Math.min(index, formRows.length - 1));
+    },
+
+    /**
+     * Add a row after the current one and move to it.
+     *
+     * `copy` carries the current values across, which is what makes entering
+     * twenty near-identical parameter rows bearable: change the code, change the
+     * label, next. A blank row is the other half — the two are one button with a
+     * modifier rather than two verbs, because they answer the same question.
+     */
+    addFormRow(copy = false) {
+      const at = activeFormRow;
+      const seed = copy ? { ...(formRows[at] ?? {}) } : {};
+      formRows = [...formRows.slice(0, at + 1), seed, ...formRows.slice(at + 1)];
+      formCursor = at + 1;
+      generated = false;
+      applied = false;
+    },
+
+    /**
+     * Drop a form row. The last one is emptied rather than removed: a form with
+     * no rows at all is a state with no way back to typing.
+     */
+    removeFormRow(index?: number) {
+      const at = index ?? activeFormRow;
+      if (formRows.length <= 1) {
+        formRows = [{}];
+        formCursor = 0;
+      } else {
+        formRows = formRows.filter((_, i) => i !== at);
+        formCursor = Math.max(0, Math.min(at, formRows.length - 1));
+      }
+      generated = false;
+      applied = false;
+    },
+
+    /** Empty every row and go back to one. The form's "start again". */
     clearForm() {
-      values = {};
+      formRows = [{}];
+      formCursor = 0;
       generated = false;
       applied = false;
     },
@@ -538,11 +749,26 @@ function createDmlStore() {
     setPasteText(text: string) { pasteText = text; },
     setCsvText(text: string) { csvText = text; },
 
-    /** Re-read pasted INSERTs into rows. Reports what it could not read. */
+    /**
+     * Re-read pasted INSERTs into rows. Reports what it could not read.
+     *
+     * Takes the **table and the column set from the statements**, so this source
+     * works with nothing connected. The live schema is passed in so its types win
+     * where it knows the column; when it does not, the paste's own columns stand.
+     */
     parsePaste() {
-      const res = parsePastedInserts(pasteText, columns);
+      const res = parsePastedInserts(pasteText, schemaStore.table(table)?.columns ?? []);
       pasteErrors = res.errors;
       importedRows = res.rows;
+      importedColumns = res.columns;
+      if (res.table && res.table !== table.toUpperCase()) {
+        // The statements name the table; adopt it rather than writing their rows
+        // into whatever was selected before.
+        table = res.table;
+        formRows = [{}];
+        formCursor = 0;
+        keySelection = {};
+      }
       generated = res.rows.length > 0 && res.errors.length === 0;
       applied = false;
       return res;
@@ -584,7 +810,13 @@ function createDmlStore() {
      * Re-adding an existing file focuses it instead of duplicating: two
      * destinations writing the same file would each think they own it.
      */
-    addTarget(input: { file: string; dialect: Target['dialect']; role: FolderRole }): Target {
+    addTarget(input: {
+      file: string;
+      dialect: Target['dialect'];
+      role: FolderRole;
+      /** The destination folder's product, when the repository declares any. */
+      product?: string | null;
+    }): Target {
       const existing = targets.find((t) => t.file === input.file);
       if (existing) {
         existing.enabled = true;
@@ -616,12 +848,121 @@ function createDmlStore() {
               ...preset.guards,
               version: preset.guards.version ? { ...preset.guards.version } : null,
             },
+        // Resolved once, here, from the folder's declared product — and then
+        // *materialised on the target*, not looked up again at emission time. A
+        // destination should keep saying what it said when it was reviewed, even
+        // if somebody edits the product list in between; the field is visible and
+        // editable in the destination editor for exactly that reason.
+        //
+        // `undefined` for the ordinary repository, which declares no products: the
+        // backend then falls back to the project's own filter, exactly as before
+        // any of this existed.
+        versionFilter: input.product
+          ? picusSettingsStore.versionFilterFor(input.product)
+          : undefined,
       };
       targets = [...targets, target];
       expandedTargetId = target.id;
       previewTargetId = target.id;
       generated = false;
       return target;
+    },
+
+    /**
+     * Replace the destinations with a resolved set, and answer with what could
+     * not be used.
+     *
+     * **Replace, not add**: a set is a statement about where a change like this
+     * goes, and merging it into whatever was already on screen would produce a
+     * list nobody chose — with the previous release's update file still armed,
+     * which is a write into a shipped script.
+     *
+     * Entries the backend could not resolve are skipped and returned so the caller
+     * can say which. One dead folder costs one destination, never the set.
+     *
+     * The folder comes back beside the reason rather than folded into it: two
+     * refusals concatenated into one toast are a paragraph nobody reads, and what
+     * the reader needs first is *which* destinations went, not why each did.
+     */
+    applyDestinationSet(resolved: ResolvedDestination[]): RefusedDestination[] {
+      const refused: RefusedDestination[] = [];
+      this.resetTargets();
+      for (const entry of resolved) {
+        if (entry.problem || !entry.file || !entry.dialect) {
+          refused.push({
+            folder: entry.folder,
+            reason: entry.problem ?? `${entry.folder} could not be resolved.`,
+          });
+          continue;
+        }
+        const target = this.addTarget({
+          file: entry.file,
+          dialect: entry.dialect as Target['dialect'],
+          role: entry.role,
+          product: entry.product ?? null,
+        });
+        target.wrap = entry.wrap;
+        target.guards = {
+          // The bounds come from the naming scheme where it could work them out —
+          // which is the whole payoff of storing a folder rather than a path: a
+          // release template arrives with `4.12 → 4.13` already in it. Empty
+          // strings where it could not, so the fields are there to be typed in.
+          version: entry.versionGuard
+            ? { from: entry.fromVersion ?? '', to: entry.toVersion ?? '' }
+            : null,
+          skipIfPresent: entry.skipIfPresent,
+          requireObject: entry.requireObject,
+          transactional: entry.transactional,
+        };
+        normalise(target);
+      }
+      // The first armed destination, so the preview is showing something.
+      previewTargetId = targets.find((t) => t.enabled)?.id ?? '';
+      expandedTargetId = null;
+      generated = false;
+      applied = false;
+      return refused;
+    },
+
+    /**
+     * The current destinations as a savable set.
+     *
+     * The **folder** is stored alongside the file, and the version **bounds** are
+     * dropped while the guard itself is kept: the bounds are re-derived from the
+     * naming scheme on every apply, and last release's numbers filled in
+     * automatically would look right and be wrong.
+     *
+     * The file name is sent for **every** destination, including the update ones.
+     * Whether it can be dropped in favour of "the next file the scheme names" is
+     * decided by the backend, which can read the folder — this side used to drop
+     * it for any `update` role on the theory that the scheme would always know,
+     * and for a folder whose file names the scheme cannot parse that threw away
+     * the only thing making the entry work.
+     */
+    captureDestinationSet(name: string): DestinationSetInput {
+      return {
+        name,
+        entries: targets.map((t) => {
+          const cut = t.file.lastIndexOf('/');
+          const folder = cut === -1 ? '' : t.file.slice(0, cut);
+          const file = cut === -1 ? t.file : t.file.slice(cut + 1);
+          return {
+            folder,
+            file,
+            wrap: t.wrap,
+            versionGuard: !!t.guards.version,
+            // Sent for the same reason as the file, and kept or dropped by the
+            // same decision on the backend: an entry the naming scheme can read
+            // gets fresh bounds every release, one it cannot has nowhere else to
+            // get them and used to come back with an empty guard.
+            fromVersion: t.guards.version?.from,
+            toVersion: t.guards.version?.to,
+            skipIfPresent: t.guards.skipIfPresent,
+            requireObject: t.guards.requireObject,
+            transactional: t.guards.transactional,
+          };
+        }),
+      };
     },
 
     removeTarget(id: string) {
@@ -667,6 +1008,22 @@ function createDmlStore() {
       generated = false;
     },
 
+    /**
+     * Which row of the version table this destination reads and stamps.
+     *
+     * `null` hands it back to the project's own filter — the difference between
+     * "this destination has nothing to say about it" and "this destination wants
+     * no predicate", which is `''`. Both are real answers for a repository that
+     * installs several products.
+     */
+    setVersionFilter(id: string, filter: string | null) {
+      const t = targets.find((x) => x.id === id);
+      if (!t) return;
+      if (filter === null) delete t.versionFilter;
+      else t.versionFilter = filter;
+      generated = false;
+    },
+
     setVersionBound(id: string, which: 'from' | 'to', value: string) {
       const t = targets.find((x) => x.id === id);
       if (!t?.guards.version) return;
@@ -685,6 +1042,11 @@ function createDmlStore() {
      * Propagate one target's rules to every OTHER target with the same role.
      * Never across roles: an initialisation script must not inherit an update
      * script's version guard.
+     *
+     * `versionFilter` is deliberately **not** propagated. It is a fact about which
+     * product the destination belongs to, not a rule the user chose — and two
+     * update scripts of two different products are exactly the case it exists for,
+     * so copying it would overwrite the right answer with another right answer.
      */
     copyRulesToSameRole(id: string): number {
       const src = targets.find((x) => x.id === id);

@@ -66,6 +66,15 @@ function createPicusUiStore() {
   let tableSubview = $state<TableSubview>('data');
 
   let paletteOpen = $state(false);
+  /**
+   * The go-to overlay — scripts, indexed objects and connections in one box.
+   *
+   * Distinct from the palette, and deliberately: the palette answers "what can I
+   * do", this answers "where is it". Merging them is tempting and wrong — the
+   * result is a list where a verb and a filename compete for the same rank, and
+   * neither question gets a good answer.
+   */
+  let navigateOpen = $state(false);
   let settingsOpen = $state(false);
   let shortcutsOpen = $state(false);
   let aboutOpen = $state(false);
@@ -85,6 +94,22 @@ function createPicusUiStore() {
   let connectionDeleteId = $state<string | null>(null);
   /** The destination picker — reachable from the generator AND the sidebar. */
   let addDestinationOpen = $state(false);
+  /**
+   * The "save these destinations under a name" dialog.
+   *
+   * Owned here for the same reason as the pickers above: naming a set is offered
+   * from the sidebar, from the Destinations card and from the palette, and the
+   * dialog must not depend on which of the three is on screen.
+   */
+  let destinationSetSaveOpen = $state(false);
+  /**
+   * The name the save dialog opens on. `''` is "new set"; a name is "replace this
+   * one", which is how a set is overwritten — retyping an existing name exactly
+   * was the only way, and nothing said so.
+   */
+  let destinationSetSaveName = $state('');
+  /** Set the user asked to forget, waiting on its confirmation. */
+  let destinationSetDeleteName = $state<string | null>(null);
   /**
    * Connection whose script repository is being attached; `null` means closed.
    *
@@ -152,6 +177,9 @@ function createPicusUiStore() {
     get connectionDetailsId() { return connectionDetailsId; },
     get connectionDeleteId() { return connectionDeleteId; },
     get addDestinationOpen() { return addDestinationOpen; },
+    get destinationSetSaveOpen() { return destinationSetSaveOpen; },
+    get destinationSetSaveName() { return destinationSetSaveName; },
+    get destinationSetDeleteName() { return destinationSetDeleteName; },
     get scriptRootPickerId() { return scriptRootPickerId; },
     get folderClassifyPath() { return folderClassifyPath; },
     get fileClassifyPath() { return fileClassifyPath; },
@@ -163,7 +191,8 @@ function createPicusUiStore() {
     get anyModalOpen() {
       return settingsOpen || shortcutsOpen || aboutOpen || connectionEditorOpen
         || connectionDetailsId !== null || connectionDeleteId !== null
-        || addDestinationOpen || paletteOpen || scriptRootPickerId !== null
+        || addDestinationOpen || paletteOpen || navigateOpen || scriptRootPickerId !== null
+        || destinationSetSaveOpen || destinationSetDeleteName !== null
         || folderClassifyPath !== null || fileClassifyPath !== null || aliasOffer !== null;
     },
 
@@ -202,6 +231,10 @@ function createPicusUiStore() {
       settingsOpen = false;
       settingsSection = '';
     },
+    get navigateOpen() { return navigateOpen; },
+    openNavigate() { navigateOpen = true; },
+    closeNavigate() { navigateOpen = false; },
+
     openShortcuts() { shortcutsOpen = true; },
     closeShortcuts() { shortcutsOpen = false; },
     openAbout() { aboutOpen = true; },
@@ -245,6 +278,21 @@ function createPicusUiStore() {
 
     openAddDestination() { addDestinationOpen = true; },
     closeAddDestination() { addDestinationOpen = false; },
+
+    /** Name the destinations as they stand. `name` opens it on an existing set,
+     *  which is how one is replaced. */
+    openDestinationSetSave(name = '') {
+      destinationSetSaveName = name;
+      destinationSetSaveOpen = true;
+    },
+    closeDestinationSetSave() {
+      destinationSetSaveOpen = false;
+      destinationSetSaveName = '';
+    },
+
+    /** Ask for a set to be forgotten — the shell puts the confirmation up. */
+    requestDestinationSetDelete(name: string) { destinationSetDeleteName = name; },
+    cancelDestinationSetDelete() { destinationSetDeleteName = null; },
 
     /** Attach (or re-point) the script repository of one connection. */
     openScriptRootPicker(connectionId: string) { scriptRootPickerId = connectionId; },

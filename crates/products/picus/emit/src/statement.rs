@@ -5,7 +5,7 @@
 //! model, spelled differently here — which is the whole reason the model carries no
 //! dialect.
 
-use picus_ast::prelude::{DialectScope, DmlModel, DmlOperation, DmlRow, EngineKind};
+use picus_ast::prelude::{DialectScope, DmlModel, DmlOperation, DmlRow, EngineKind, Target};
 
 use crate::literal::{ident, literal};
 
@@ -19,7 +19,17 @@ use crate::literal::{ident, literal};
 pub type EmitResult = Result<String, &'static str>;
 
 /// Emit one row as a single statement valid in `scope`.
-pub fn plain_statement(model: &DmlModel, row: &DmlRow, scope: DialectScope) -> EmitResult {
+///
+/// Takes the operation as an argument rather than reading `model.operation`,
+/// because what a destination emits is not always what the model says: an upsert
+/// into a seeding script is a plain insert. `Target::operation_for` owns that
+/// rule; this signature is what makes it impossible to bypass.
+pub fn statement_for(
+    model: &DmlModel,
+    row: &DmlRow,
+    scope: DialectScope,
+    operation: DmlOperation,
+) -> EmitResult {
     let lc = model.lowercase_postgres;
     let table = ident(&model.table, scope, lc);
     let cols = model.supplied_columns(row);
@@ -48,7 +58,7 @@ pub fn plain_statement(model: &DmlModel, row: &DmlRow, scope: DialectScope) -> E
         keys.iter().map(|c| format!("{} = {}", id(&c.name), val(&c.name))).collect::<Vec<_>>().join(sep)
     };
 
-    Ok(match model.operation {
+    Ok(match operation {
         DmlOperation::Insert => format!(
             "INSERT INTO {table} ({})\nVALUES ({});",
             col_list(&cols),
@@ -68,6 +78,18 @@ pub fn plain_statement(model: &DmlModel, row: &DmlRow, scope: DialectScope) -> E
         DmlOperation::Delete => {
             format!("DELETE FROM {table}\n WHERE {};", key_predicate(" AND "))
         }
+
+        // Two statements, one intention. The `DELETE` matches on the **comparison
+        // key alone** and not on the whole row: the point is to make the row be
+        // this, so a row somebody has since edited by hand must still be replaced
+        // — matching on every column would leave it in place and then insert a
+        // second copy, which is the one outcome nobody wants.
+        DmlOperation::Replace => format!(
+            "DELETE FROM {table}\n WHERE {};\nINSERT INTO {table} ({})\nVALUES ({});",
+            key_predicate(" AND "),
+            col_list(&cols),
+            val_list(&cols)
+        ),
 
         DmlOperation::Upsert => match scope.dialect() {
             // No portable arm, because there is no portable upsert: the two
@@ -105,6 +127,14 @@ pub fn plain_statement(model: &DmlModel, row: &DmlRow, scope: DialectScope) -> E
             ),
         },
     })
+}
+
+/// Emit one row the way `target` would — the ordinary entry point.
+///
+/// Goes through `Target::operation_for`, so a caller cannot accidentally emit a
+/// `MERGE` into an initialisation that meant a plain insert.
+pub fn plain_statement(model: &DmlModel, row: &DmlRow, target: &Target) -> EmitResult {
+    statement_for(model, row, target.dialect, target.operation_for(model.operation))
 }
 
 /// Kept byte-identical to `Target::refuses`' wording: the user may meet this

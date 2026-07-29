@@ -25,6 +25,20 @@ pub enum DmlOperation {
     Upsert,
     Update,
     Delete,
+    /// Delete the row by its comparison key, then insert it — "make the row be
+    /// exactly this, whatever it was".
+    ///
+    /// The shape an **update script** needs when the row is already installed. An
+    /// upsert says the same thing more elegantly, but it is the one operation with
+    /// no portable spelling and, on Oracle, a `MERGE` that reads nothing like the
+    /// hand-written scripts it sits among. Two plain statements are what these
+    /// repositories already write by hand, they run on both engines, and they are
+    /// re-runnable: the `DELETE` is a no-op the first time.
+    ///
+    /// Deliberately **not** the same as `Delete` followed by `Insert` as two
+    /// generations: it is one intention, so it is one operation, one block and one
+    /// marker.
+    Replace,
 }
 
 /// One row of values, keyed by column name.

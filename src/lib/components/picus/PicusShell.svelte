@@ -45,11 +45,13 @@
   import InventoryView from './views/InventoryView.svelte';
   import PicusSettingsModal from './PicusSettingsModal.svelte';
   import PicusShortcutsModal from './PicusShortcutsModal.svelte';
+  import PicusNavigateTo from './PicusNavigateTo.svelte';
   import PicusAboutModal from './PicusAboutModal.svelte';
   import PicusConnectionModal from './PicusConnectionModal.svelte';
   import PicusConnectionDetailsModal from './PicusConnectionDetailsModal.svelte';
   import PicusDocsPanel from './PicusDocsPanel.svelte';
   import AddDestinationModal from './generate/AddDestinationModal.svelte';
+  import SaveDestinationSetModal from './generate/SaveDestinationSetModal.svelte';
   import ClassifyFolderModal from './ClassifyFolderModal.svelte';
   import ClassifyFileModal from './ClassifyFileModal.svelte';
   import AliasOfferModal from './AliasOfferModal.svelte';
@@ -66,6 +68,7 @@
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { consistencyStore } from '$lib/stores/picus/consistency.svelte';
+  import { destinationSetsStore } from '$lib/stores/picus/destination-sets.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import { queryStore } from '$lib/stores/picus/query.svelte';
   import { picusSettingsStore } from '$lib/stores/picus/settings.svelte';
@@ -390,6 +393,11 @@
     }
 
     if (mod && key === 'k') { picusUiStore.togglePalette(); e.preventDefault(); return; }
+    // Go to a script, an object or a connection by typing part of its name.
+    // `O` and not IntelliJ's `N` because Ctrl+Shift+N already opens a connection
+    // here, and silently moving a binding somebody has in their fingers is worse
+    // than taking the second-best letter.
+    if (mod && e.shiftKey && key === 'o') { picusUiStore.openNavigate(); e.preventDefault(); return; }
     if (mod && key === ',') { picusUiStore.openSettings(); e.preventDefault(); return; }
     if (mod && key === 'b' && !e.shiftKey) { picusUiStore.toggleSidebar(); e.preventDefault(); return; }
     if (mod && key === 'j') { picusUiStore.toggleBottom(); e.preventDefault(); return; }
@@ -571,6 +579,13 @@
   />
 {/if}
 
+{#if picusUiStore.navigateOpen}
+  <!-- Separate from the palette on purpose: that one answers "what can I do",
+       this one "where is it". One box ranking a verb against a filename answers
+       neither question well. -->
+  <PicusNavigateTo onClose={() => picusUiStore.closeNavigate()} />
+{/if}
+
 {#if confirmWrite}
   <!-- The counts and the file list come from the PREVIEW, which is already on
        screen in the Changes dock: the dialog confirms what was reviewed, it does
@@ -614,6 +629,30 @@
   <!-- Mounted on the shell, not on the generator view: the sidebar can open it
        while another tab is on screen. -->
   <AddDestinationModal onClose={() => picusUiStore.closeAddDestination()} />
+{/if}
+
+{#if picusUiStore.destinationSetSaveOpen}
+  <!-- Naming the armed destinations. Here for the same reason: offered from the
+       sidebar, from the Destinations card and from the palette. -->
+  <SaveDestinationSetModal
+    initialName={picusUiStore.destinationSetSaveName}
+    onClose={() => picusUiStore.closeDestinationSetSave()}
+  />
+{/if}
+
+{#if picusUiStore.destinationSetDeleteName}
+  <ConfirmModal
+    title="Forget this set"
+    message={`${picusUiStore.destinationSetDeleteName} will be removed from the repository's configuration.`}
+    detail="The scripts themselves are untouched — a set is only a list of where things go."
+    variant="warning"
+    confirmLabel="Forget"
+    onConfirm={() => {
+      void destinationSetsStore.remove(picusUiStore.destinationSetDeleteName!);
+      picusUiStore.cancelDestinationSetDelete();
+    }}
+    onCancel={() => picusUiStore.cancelDestinationSetDelete()}
+  />
 {/if}
 
 {#if picusUiStore.folderClassifyPath !== null}

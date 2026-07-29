@@ -46,7 +46,7 @@ use picus_core::prelude::PicusState;
 use picus_project::prelude::{
     alias_key, discover, file_stem, name_matches, parent_of, AliasScope, FileDeclaration,
     FolderDeclaration, FolderEngine, FolderRole, InferenceAlias, InitialisationModel, LineEnding,
-    Project, ProjectConfig, ProposalNote,
+    ProductSettings, Project, ProjectConfig, ProposalNote,
 };
 use serde::{Deserialize, Serialize};
 
@@ -339,6 +339,13 @@ pub struct ProjectSettings {
     /// Object names the rules say nothing about. See
     /// [`AnalysisSettings::excluded_objects`].
     pub excluded_objects: Vec<String>,
+    /// The products this repository installs, when it installs more than one, and
+    /// the predicate that selects each one's version row. See [`ProductSettings`].
+    ///
+    /// Empty for the ordinary repository. A folder says which of these it belongs
+    /// to through `picus_set_folder_product`, not from here: this declares what a
+    /// product *is*, and that declares where its scripts *are*.
+    pub products: Vec<ProductSettings>,
 }
 
 impl ProjectSettings {
@@ -358,6 +365,7 @@ impl ProjectSettings {
             compare_dialects: config.analysis.compare_dialects,
             disabled_rules: config.analysis.disabled_rules.clone(),
             excluded_objects: config.analysis.excluded_objects.clone(),
+            products: config.products.clone(),
         }
     }
 
@@ -432,6 +440,25 @@ impl ProjectSettings {
         }
         objects.sort();
         config.analysis.excluded_objects = objects;
+
+        // A product with no name is a row the user started and abandoned; keeping
+        // it would leave a `[[product]]` no folder can ever name. A duplicate name
+        // is worse than useless — the lookup takes the first, so the second would
+        // be a predicate that silently never applies.
+        let mut products: Vec<ProductSettings> = Vec::new();
+        for written in &self.products {
+            let name = written.name.trim();
+            if name.is_empty()
+                || products.iter().any(|seen| seen.name.eq_ignore_ascii_case(name))
+            {
+                continue;
+            }
+            products.push(ProductSettings {
+                name: name.to_string(),
+                version_filter: written.version_filter.trim().to_string(),
+            });
+        }
+        config.products = products;
     }
 }
 
@@ -492,7 +519,7 @@ pub(crate) fn config_problems(config: &ProjectConfig) -> Vec<String> {
 /// declaration changes what every descendant *effectively* is, and re-resolving
 /// is the only thing that knows the inheritance rule. Shared by both writers so
 /// the two can never answer with differently-shaped truth.
-fn save_and_replan(
+pub(crate) fn save_and_replan(
     state: &PicusState,
     root: &Path,
     config: &ProjectConfig,
@@ -574,6 +601,49 @@ fn picus_set_excluded(
             "{path} is not a folder or a script in this project — refresh if it has just been added"
         ));
     }
+    config.tidy();
+    save_and_replan(state, &root, &config)
+}
+
+/// Say which installed product a folder's scripts belong to — or forget it.
+///
+/// The counterpart of `[[product]]` in the project file: that says *what a product
+/// is* (which row of the version table is its), and this says *where its scripts
+/// live*. Together they mean a generated block written into `PORTALE/…` reads and
+/// stamps the portal's row without anyone retyping the predicate per generation.
+///
+/// Folders only. A product is a body of scripts, not a file, and the inheritance
+/// makes a subtree the natural unit: naming the product once at the top of
+/// `PORTALE/` answers for every version folder underneath it, including next
+/// month's.
+///
+/// Passing `None` clears the declaration and the folder goes back to inheriting.
+/// The name is **not** checked against the declared products here: a repository
+/// perfectly reasonably names the folders first and writes the `[[product]]`
+/// blocks after, and refusing the first half of that would be refusing the order
+/// people work in. A name nothing declares is reported by
+/// `ProjectConfig::problems`, which is where the rest of the configuration's
+/// loose ends are already reported.
+#[arbor_rpc::handler]
+fn picus_set_folder_product(
+    state: &PicusState,
+    root: String,
+    path: String,
+    product: Option<String>,
+) -> Result<ConfirmedProject, String> {
+    let root = PathBuf::from(&root);
+    let proposal = discover(&root).map_err(|e| e.to_string())?;
+    if proposal.project.folder_at(&path).is_none() {
+        return Err(format!(
+            "{path} is not a folder in this project — refresh if it has just been added"
+        ));
+    }
+    let mut config = proposal.config;
+    // Blank is the same as absent. A user who clears the field means "forget it",
+    // and writing `product = ""` would leave a declaration that looks deliberate
+    // and matches nothing.
+    let wanted = product.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+    config.declaration_mut(&path).product = wanted;
     config.tidy();
     save_and_replan(state, &root, &config)
 }
@@ -735,6 +805,8 @@ mod tests {
             generation: Default::default(),
             naming: NamingScheme::default(),
             analysis: Default::default(),
+            products: Vec::new(),
+            destination_sets: Vec::new(),
             folders: vec![FolderDeclaration {
                 path: "AGGIORNAMENTO".to_string(),
                 role: Some(FolderRole::Update),

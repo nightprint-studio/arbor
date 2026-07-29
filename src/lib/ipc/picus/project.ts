@@ -151,6 +151,22 @@ export interface ProjectSettings {
    * the Inventory with their coverage.
    */
   excludedObjects: string[];
+  /**
+   * The products this repository installs, when it installs more than one.
+   *
+   * Empty for the ordinary repository. This declares what a product **is** — the
+   * predicate that selects its row of the version table; {@link setFolderProduct}
+   * declares where its scripts **are**.
+   */
+  products: ProductSetting[];
+}
+
+/** One installed product, and the predicate that selects its version row. */
+export interface ProductSetting {
+  /** What folders name to say they belong here. Matched case-insensitively. */
+  name: string;
+  /** `MODULO = 'PORTALE'`. Empty means this product's table holds one row. */
+  versionFilter: string;
 }
 
 /**
@@ -241,6 +257,118 @@ export function setExcluded(
   excluded: boolean,
 ): Promise<ConfirmedProject> {
   return picus('picus_set_excluded', { root, path, excluded });
+}
+
+// ── Named sets of destinations ───────────────────────────────────────────────
+
+/**
+ * One entry of a set, **resolved against the repository as it is now**.
+ *
+ * Everything `dmlStore.addTarget` needs plus the rules, so applying a set is a
+ * loop over these and nothing else. See {@link destinationSets} for why the
+ * resolution happens on the backend.
+ */
+export interface ResolvedDestination {
+  /** The folder as stored — how a failed entry is still named to the user. */
+  folder: string;
+  /** Project-relative file path. Empty when the entry could not be resolved. */
+  file: string;
+  /** The file does not exist yet — the ordinary case for a new update script. */
+  createsFile: boolean;
+  dialect?: FolderEngine;
+  role: FolderRole;
+  /** The folder's product, for the version row. Absent when none is declared. */
+  product?: string;
+  wrap: 'block' | 'plain';
+  versionGuard: boolean;
+  skipIfPresent: boolean;
+  requireObject: boolean;
+  transactional: boolean;
+  /** What the naming scheme says this file moves between, when it could say. */
+  fromVersion?: string;
+  toVersion?: string;
+  /** This entry names one fixed file instead of following the folder's naming
+   *  scheme, so it keeps writing into that file next release. Not a failure —
+   *  for a folder the scheme cannot read it is the only thing that works — but
+   *  the set's "still works next release" promise does not cover it. */
+  pinned: boolean;
+  /** Why this entry cannot be used. Per entry, so one dead folder costs one
+   *  destination rather than the whole set. */
+  problem?: string;
+}
+
+export interface ResolvedSet {
+  name: string;
+  destinations: ResolvedDestination[];
+}
+
+/**
+ * The named sets of destinations this repository declares, resolved.
+ *
+ * Resolved on the backend rather than pasted on the frontend, because half the
+ * paths in a set are different every release: an entry stores a **folder**, and
+ * turning that into "this release's update file, moving 4.12 to 4.13" needs the
+ * repository's naming scheme, which lives there. Doing it here would be a second
+ * implementation of a rule that must not drift.
+ */
+export function destinationSets(root: string): Promise<ResolvedSet[]> {
+  return picus('picus_destination_sets', { root });
+}
+
+/** What a set looks like on the way in — folders and rules, never resolved paths. */
+export interface DestinationSetInput {
+  name: string;
+  entries: {
+    folder: string;
+    /** The file as it stands. Whether it can be dropped in favour of "the next
+     *  update file, whatever the scheme calls it" is decided on the backend,
+     *  which can read the folder — send it always. */
+    file?: string;
+    wrap?: 'block' | 'plain';
+    versionGuard?: boolean;
+    /** The guard's bounds as they stand. Kept only for an entry whose file the
+     *  naming scheme cannot re-derive — decided on the backend, like `file`. */
+    fromVersion?: string;
+    toVersion?: string;
+    skipIfPresent?: boolean;
+    requireObject?: boolean;
+    transactional?: boolean;
+  }[];
+}
+
+/** Save a set under its name, replacing one of the same name. */
+export function saveDestinationSet(
+  root: string,
+  set: DestinationSetInput,
+): Promise<ConfirmedProject> {
+  return picus('picus_save_destination_set', { root, set });
+}
+
+export function deleteDestinationSet(root: string, name: string): Promise<ConfirmedProject> {
+  return picus('picus_delete_destination_set', { root, name });
+}
+
+/**
+ * Say which installed product a folder's scripts belong to — or forget it.
+ *
+ * The counterpart of `products` in {@link ProjectSettings}: that says *what a
+ * product is* (which row of the version table is its), this says *where its
+ * scripts live*. Together they mean a generated block written into `PORTALE/…`
+ * stamps the portal's row without anyone retyping the predicate per generation.
+ *
+ * Folders only, and it inherits: naming the product once at the top of `PORTALE/`
+ * answers for every version folder underneath, including next month's.
+ *
+ * Two-valued, like {@link setFileEngine} and for the same reason — this names one
+ * row and one field, so not calling it is what leaves it alone. `null` clears the
+ * declaration and the folder goes back to inheriting.
+ */
+export function setFolderProduct(
+  root: string,
+  path: string,
+  product: string | null,
+): Promise<ConfirmedProject> {
+  return picus('picus_set_folder_product', { root, path, product });
 }
 
 /**

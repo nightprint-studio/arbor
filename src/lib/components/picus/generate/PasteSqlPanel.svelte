@@ -10,13 +10,44 @@
    *
    * Anything unreadable is reported rather than guessed. A half-understood
    * INSERT silently turned into three files is worse than an error message.
+   *
+   * The text is edited in the same `CodeEditor` the query tabs use, bound to the
+   * active connection: highlighting, and completion over that database's tables
+   * and columns. It was a bare `<textarea>`, which meant the one place in the
+   * product where you *type SQL by hand into a form* was the one place with no
+   * help at all — and pasting a statement you then have to correct is the normal
+   * case, not the exception.
    */
   import { ClipboardPaste, TriangleAlert, FileUp } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import DataGrid, { type DataGridColumn } from '$lib/components/shared/ui/DataGrid.svelte';
+  import CodeEditor from '$lib/components/shared/ui/code-editor/CodeEditor.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
+  import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
+  import { connectionsStore } from '$lib/stores/picus/connections.svelte';
+  import { sqlLanguage } from '../picus-sql-language';
+
+  /**
+   * Which database completion should offer.
+   *
+   * The tab's connection when there is one, the sidebar's selection otherwise —
+   * the generator is not a query tab, so it often has neither, and then the
+   * descriptor is the portable superset with no completion source. Highlighting
+   * still works, which is the half that never needs a server.
+   */
+  const conn = $derived(picusTabsStore.activeConnection ?? connectionsStore.active);
+  const language = $derived(sqlLanguage(conn?.dialect, conn?.id));
+
+  /** Read the paste without reaching for the mouse — the same key that runs a query. */
+  const keys = [
+    {
+      key: 'Mod-Enter',
+      preventDefault: true,
+      run: () => { dmlStore.parsePaste(); return true; },
+    },
+  ];
 
   const previewColumns = $derived<DataGridColumn[]>(
     dmlStore.columns.map((c) => ({
@@ -34,13 +65,19 @@
 </script>
 
 <div class="ps">
-  <textarea
-    class="ps-text"
-    spellcheck="false"
-    aria-label="SQL statements to re-read"
-    value={dmlStore.pasteText}
-    oninput={(e) => dmlStore.setPasteText(e.currentTarget.value)}
-  ></textarea>
+  <!-- Keyed on the descriptor, as in the query tabs: the extension set is built
+       once at mount, so rebinding to another database has to rebuild it or
+       completion keeps offering the previous connection's tables. -->
+  <div class="ps-editor">
+    {#key language}
+      <CodeEditor
+        value={dmlStore.pasteText}
+        {language}
+        keyBindings={keys}
+        oninput={(v) => dmlStore.setPasteText(v)}
+      />
+    {/key}
+  </div>
 
   {#if dmlStore.pasteErrors.length}
     <div class="ps-errors" role="alert">
@@ -70,8 +107,9 @@
   <div class="ps-actions">
     <span class="ps-hint">
       <ClipboardPaste size={12} />
-      Table, columns and values are extracted and re-emitted per destination — the
-      pasted text itself is never copied across.
+      The table, the columns and the values are read out of the statements and re-emitted
+      per destination — the pasted text itself is never copied across, and there is no
+      table to pick.
     </span>
     <span class="ps-spacer"></span>
     <Button
@@ -82,7 +120,12 @@
       {#snippet iconStart()}<FileUp size={12} />{/snippet}
       Load from a file
     </Button>
-    <Button variant="primary" size="sm" onclick={() => dmlStore.parsePaste()}>
+    <Button
+      variant="primary"
+      size="sm"
+      tooltip={{ content: 'Read the statements into rows', shortcut: 'Ctrl+Enter' }}
+      onclick={() => dmlStore.parsePaste()}
+    >
       Read and generate
     </Button>
   </div>
@@ -91,22 +134,16 @@
 <style>
   .ps { display: flex; flex-direction: column; gap: 10px; }
 
-  .ps-text {
-    width: 100%;
-    min-height: 150px;
-    resize: vertical;
-    padding: 10px 12px;
-    background: var(--bg-input);
+  /* A fixed box rather than a resizable one: the editor manages its own scroll,
+     and the grid of read rows below it is the thing that grows. */
+  .ps-editor {
+    display: flex;
+    height: 190px;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    color: var(--text-primary);
-    font-family: var(--font-code);
-    font-size: 11.5px;
-    line-height: 1.6;
-    white-space: pre;
-    outline: none;
+    overflow: hidden;
   }
-  .ps-text:focus { border-color: var(--border-focus); }
+  .ps-editor > :global(*) { flex: 1; min-width: 0; min-height: 0; }
 
   .ps-errors {
     padding: 9px 12px;

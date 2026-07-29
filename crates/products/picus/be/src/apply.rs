@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 use arbor_fs::prelude::encoding::EncodingContext;
 use picus_analyze::prelude::fold_identifier;
-use picus_ast::prelude::{DmlModel, DmlOperation, FolderRole, Target};
+use picus_ast::prelude::{DmlModel, DmlOperation, DmlRow, EngineKind, FolderRole, Target};
 use picus_core::prelude::{digest, InsertionRule, PicusConfig, PicusState, ScriptSnapshot};
 use picus_emit::prelude::emit_for_target;
 use picus_parse::prelude::SqlParser;
@@ -39,6 +39,7 @@ use picus_project::prelude::{
 use picus_rewrite::prelude::{commit, prepare_one, Eol, PreparedFile, SourceText, Splice};
 use serde::{Deserialize, Serialize};
 
+use crate::reconcile;
 use crate::scripts::snapshot_for;
 
 /// One destination file, resolved to the bytes that would land in it.
@@ -206,9 +207,32 @@ pub(crate) fn plan(
     let table = fold_identifier(&model.table);
     let mut parser = SqlParser::new();
     let mut out: Vec<PlannedFile> = Vec::with_capacity(targets.len());
+    // What each engine's scripts already say about these rows — read at most once
+    // per engine, because it is a parse of every script written for it.
+    let mut seen: BTreeMap<EngineKind, reconcile::KnownRows> = BTreeMap::new();
+    // Rows to rewrite in files nobody named as a destination.
+    let mut elsewhere: Vec<reconcile::Rewrite> = Vec::new();
+
+    // ── Pass one: read every destination and work out where its block goes ────
+    //
+    // Separate from the writing pass for one reason, and it is not tidiness: a
+    // block Picus is about to replace is **its own previous output**, and it must
+    // not count as evidence that a row is installed. That is true across the whole
+    // generation, not per file — the block this run writes into the initialisation
+    // would otherwise, on the very next run, be what tells the update script the
+    // row already exists. So every destination's placement has to be known before
+    // any of them is reconciled.
+    struct Read {
+        source: SourceText,
+        parsed: picus_parse::prelude::ParsedFile,
+        placement: crate::placement::BlockPlacement,
+    }
+    let mut reads: Vec<Read> = Vec::with_capacity(targets.len());
+    let mut ours: Vec<reconcile::Ours> = Vec::new();
+    let mut claimed: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
 
     for target in targets {
-        if out.iter().any(|f| f.path == target.file) {
+        if !claimed.insert(target.file.as_str()) {
             // Two targets on one file would each be prepared against the original
             // text, and the second would silently undo the first.
             return Err(format!(
@@ -236,19 +260,235 @@ pub(crate) fn plan(
             rule,
             &snapshot.config.generation.marker,
         );
+        if placement.replaces_existing {
+            ours.push(reconcile::Ours {
+                path: target.file.clone(),
+                range: placement.range.clone(),
+            });
+        }
+        reads.push(Read { source, parsed, placement });
+    }
 
-        let splice = Splice {
-            range: placement.range,
-            replacement: block_text(model, target, &snapshot.config.generation.marker)?,
-            reason: placement.reason,
+    // ── Pass two: reconcile and splice ────────────────────────────────────────
+    for (target, read) in targets.iter().zip(reads) {
+        let Read { source, parsed, placement } = read;
+
+        // What the scripts already say about these rows, for every engine this
+        // destination runs on. Read once per engine and reused — it is a parse of
+        // every script written for that engine, and a generation commonly has two
+        // destinations in each.
+        //
+        // A **portable** destination runs on both, so it asks both. It used to ask
+        // neither, on the reasoning that "already there" would have to be true of
+        // both to mean anything — which was wrong twice over. The question being
+        // decided is whether to write the row again, and a row installed on either
+        // engine is one a plain `INSERT` in a portable file duplicates there; and
+        // the common case is a row sitting in the portable scripts themselves,
+        // which both answers see. The result was that the destination which most
+        // needed reconciling was the only one that never got it.
+        let engines: &[EngineKind] = match target.dialect.dialect() {
+            Some(EngineKind::Oracle) => &[EngineKind::Oracle],
+            Some(EngineKind::Postgres) => &[EngineKind::Postgres],
+            None => &[EngineKind::Oracle, EngineKind::Postgres],
         };
-        let prepared = prepare_one(&source, &[splice]).map_err(|e| e.to_string())?;
+        for engine in engines {
+            if !seen.contains_key(engine) {
+                let read = reconcile::known_rows(snapshot, &mut parser, model, *engine);
+                seen.insert(*engine, read);
+            }
+        }
+        // The union has to outlive the borrow, so it is bound here rather than in
+        // the branch that builds it.
+        let merged: Option<reconcile::KnownRows> = match engines {
+            [_only] => None,
+            many => Some(reconcile::KnownRows::union(many.iter().filter_map(|e| seen.get(e)))),
+        };
+        let known = match (&merged, engines) {
+            (Some(union), _) => Some(union),
+            (None, [only]) => seen.get(only),
+            (None, _) => None,
+        };
+
+        let outcome = reconcile::plan_rows(model, target, known, &ours);
+
+        // A block already guarding this exact version range takes the statements
+        // *inside* it. Two blocks on one range would run twice on a fresh install
+        // and, on an upgraded database, the second would find the version already
+        // carried forward and do nothing.
+        let guard_block = target.guards.version.as_ref().and_then(|guard| {
+            reconcile::version_block(
+                &source.text,
+                &parsed,
+                &model.version_table.table,
+                &guard.from,
+                &guard.to,
+            )
+        });
+
+        // Whether what gets written is a **body** or a whole block. Body when the
+        // statements are going inside somebody else's guard — either for the first
+        // time, or because the marker Picus left there last run is what the
+        // placement just found. The second case is what keeps a re-run
+        // byte-identical: without it a regeneration would replace its own bare
+        // statements with a complete `DECLARE … BEGIN`, nested inside the guard.
+        let inside = guard_block.as_ref().filter(|block| {
+            !placement.replaces_existing || block.holds(&placement.range)
+        });
+
+        let mut splices: Vec<Splice> = Vec::new();
+
+        // Rows already installed that this destination rewrites where they are,
+        // rather than adding a second copy. Only in the initialisation: an update
+        // script says what changes, and editing history is not what it is for.
+        for rewrite in &outcome.rewrites {
+            if rewrite.path != target.file {
+                elsewhere.push(rewrite.clone());
+                continue;
+            }
+            splices.push(Splice {
+                range: rewrite.range.clone(),
+                replacement: rewrite.replacement.clone(),
+                reason: rewrite.reason.clone(),
+            });
+        }
+
+        if !outcome.appended.is_empty() {
+            let appended = model_of(model, &outcome.appended, outcome.operation);
+            let (range, body, reason) = match inside {
+                // Inside an existing guard: the statements alone, indented to the
+                // block's own body — and **carrying the marker**, which is what
+                // lets the next generation find them again and replace them in
+                // place rather than adding a second copy inside the same block.
+                Some(site) => (
+                    // Replacing what was written last time where there is such a
+                    // thing, inserting above the closing UPDATE where there is not.
+                    if placement.replaces_existing {
+                        placement.range.clone()
+                    } else {
+                        site.at..site.at
+                    },
+                    body_text(&appended, target, &site.indent, &snapshot.config.generation.marker)?,
+                    format!(
+                        "added inside the block already guarding {} → {}, above the statement \
+                         that carries the version forward",
+                        target.guards.version.as_ref().map(|v| v.from.as_str()).unwrap_or(""),
+                        target.guards.version.as_ref().map(|v| v.to.as_str()).unwrap_or(""),
+                    ),
+                ),
+                None => (
+                    placement.range.clone(),
+                    block_text(&appended, target, &snapshot.config.generation.marker)?,
+                    placement.reason.clone(),
+                ),
+            };
+            splices.push(Splice {
+                range,
+                replacement: body,
+                reason: match &outcome.note {
+                    Some(note) => format!("{reason}; {note}"),
+                    None => reason,
+                },
+            });
+        }
+
+        // Splices have to reach the rewriter in file order, and a rewrite of a row
+        // higher up the file can perfectly well follow the appended block here.
+        splices.sort_by_key(|s| s.range.start);
+        let prepared = prepare_one(&source, &splices).map_err(|e| e.to_string())?;
 
         out.push(PlannedFile {
             path: target.file.clone(),
             digest: if source.exists { digest(&source.bytes) } else { String::new() },
             prepared,
         });
+    }
+
+    // Rows that were already installed in a file nobody named as a destination.
+    // They are edited where they are — the alternative is a second row with the
+    // same key — and the file joins the diff with its own reason, so nothing is
+    // written that was not shown.
+    for (path, rewrites) in group_by_path(elsewhere) {
+        if out.iter().any(|f| f.path == path) {
+            // Already being written as a destination; its rewrites went in above.
+            continue;
+        }
+        let full = destination(&snapshot.root, &path)?;
+        let (label, eol) = conventions(snapshot, &path);
+        let encoding = label_to_encoding(&label);
+        let context = EncodingContext::new().with_legacy(encoding).with_dominant(encoding);
+        let source = SourceText::read(&full, &context, encoding, eol).map_err(|e| e.to_string())?;
+
+        let mut splices: Vec<Splice> = rewrites
+            .into_iter()
+            .map(|r| Splice { range: r.range, replacement: r.replacement, reason: r.reason })
+            .collect();
+        splices.sort_by_key(|s| s.range.start);
+        let prepared = prepare_one(&source, &splices).map_err(|e| e.to_string())?;
+
+        out.push(PlannedFile {
+            path,
+            digest: if source.exists { digest(&source.bytes) } else { String::new() },
+            prepared,
+        });
+    }
+
+    Ok(out)
+}
+
+/// The same model carrying a different set of rows and, where the destination
+/// needs it, a different operation.
+fn model_of(model: &DmlModel, rows: &[DmlRow], operation: DmlOperation) -> DmlModel {
+    DmlModel { rows: rows.to_vec(), operation, ..model.clone() }
+}
+
+fn group_by_path(rewrites: Vec<reconcile::Rewrite>) -> Vec<(String, Vec<reconcile::Rewrite>)> {
+    let mut by_path: BTreeMap<String, Vec<reconcile::Rewrite>> = BTreeMap::new();
+    for rewrite in rewrites {
+        by_path.entry(rewrite.path.clone()).or_default().push(rewrite);
+    }
+    by_path.into_iter().collect()
+}
+
+/// The statements, indented to sit inside a block that already exists.
+///
+/// **With the marker**, and that is not decoration: it is the only thing that lets
+/// the next generation find these statements and replace them, instead of adding a
+/// second copy inside the same guard on every run. `placement::place` looks for a
+/// marker line anywhere in the file and takes the consecutive statements on the
+/// table underneath it, which is exactly this shape — so nothing else had to
+/// learn about blocks-within-blocks.
+///
+/// The marker names only what Picus wrote. The surrounding guard is somebody
+/// else's and is never claimed.
+fn body_text(
+    model: &DmlModel,
+    target: &Target,
+    indent: &str,
+    marker: &MarkerTemplate,
+) -> Result<String, String> {
+    let mut out = String::new();
+    if let Some(line) = marker.render(&MarkerFields {
+        table: Some(&model.table),
+        operation: Some(operation_word(model.operation)),
+        from_version: target.guards.version.as_ref().map(|v| v.from.as_str()),
+        to_version: target.guards.version.as_ref().map(|v| v.to.as_str()),
+        // No hash: the statements below carry no trailing newline of their own
+        // here, and a digest over indented text would differ from the same block
+        // written unindented. The marker's job inside a guard is to be findable.
+        hash: None,
+    }) {
+        out.push_str(indent);
+        out.push_str(&line);
+        out.push('\n');
+    }
+    for row in &model.rows {
+        let statement = picus_emit::prelude::plain_statement(model, row, target)
+            .map_err(|refusal| format!("{}: {refusal}", target.file))?;
+        for line in statement.lines() {
+            out.push_str(indent);
+            out.push_str(line);
+            out.push('\n');
+        }
     }
     Ok(out)
 }
@@ -299,6 +539,7 @@ fn operation_word(operation: DmlOperation) -> &'static str {
         DmlOperation::Upsert => "upsert",
         DmlOperation::Update => "update",
         DmlOperation::Delete => "delete",
+        DmlOperation::Replace => "replace",
     }
 }
 
@@ -515,6 +756,8 @@ mod tests {
             generation: Default::default(),
             naming: NamingScheme::default(),
             analysis: Default::default(),
+            products: Vec::new(),
+            destination_sets: Vec::new(),
             folders: Vec::new(),
             files: Vec::new(),
             aliases: Vec::new(),

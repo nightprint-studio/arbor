@@ -130,6 +130,17 @@ pub struct ProjectConfig {
     /// rules it has been told not to run.
     #[serde(default)]
     pub analysis: AnalysisSettings,
+    /// The products this repository installs, when it installs more than one.
+    /// `product` singular in the file for the same reason `folder` is.
+    ///
+    /// Empty for the ordinary repository, which installs one thing and has one
+    /// version row. See [`ProductSettings`].
+    #[serde(default, rename = "product")]
+    pub products: Vec<ProductSettings>,
+    /// Named sets of destinations — "where a change like this always goes".
+    /// See [`DestinationSet`].
+    #[serde(default, rename = "destinations")]
+    pub destination_sets: Vec<DestinationSet>,
     /// What each folder declares, keyed by its project-relative path. `folder`
     /// singular in the file because TOML spells an array of tables `[[folder]]`.
     ///
@@ -251,6 +262,129 @@ impl Default for VersionTableSettings {
             also: Vec::new(),
         }
     }
+}
+
+/// One installed product, and how its row in the version table is told apart.
+///
+/// A repository that ships more than one product records a version per product,
+/// most often as rows of one table discriminated by a column
+/// (`MODULO = 'PORTALE'`). Which row a generated block should read and stamp is
+/// then a property of **where the script is going**, not of the project — and
+/// nothing in the SQL says it, so the repository does:
+///
+/// ```toml
+/// [[product]]
+/// name = "PORTALE"
+/// version_filter = "MODULO = 'PORTALE'"
+///
+/// [[folder]]
+/// path = "PORTALE/AGGIORNAMENTO"
+/// product = "PORTALE"
+/// ```
+///
+/// The alternative was asking for the predicate on every destination, every time.
+/// That works — and it is still available, because a destination may override —
+/// but it is the same sentence retyped per generation, which is exactly the class
+/// of repetition this product exists to remove.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ProductSettings {
+    /// What folders name to say they belong here. Matched case-insensitively.
+    pub name: String,
+    /// The predicate that selects this product's row — `MODULO = 'PORTALE'`.
+    /// Empty means this product's scripts read the table's only row, which is
+    /// also what the project-wide filter means when it is empty.
+    #[serde(default)]
+    pub version_filter: String,
+}
+
+/// A named set of destinations — "where a change like this always goes".
+///
+/// Every repository writes the same datum into the same four or six places, over
+/// and over: the Oracle initialisation, the PostgreSQL initialisation, this
+/// release's Oracle update script, its PostgreSQL twin. Rebuilding that list per
+/// generation is the single most repetitive thing about the product.
+///
+/// ## Why an entry names a folder and not a file
+///
+/// Because half of those paths are different every release. `4_13.sql` becomes
+/// `4_14.sql`, and a template of literal paths is stale the moment it is most
+/// useful. An entry names the **folder**; the file is either fixed (an
+/// initialisation script, which really does keep its name) or left to the
+/// folder's naming scheme, which already knows what the next update file is
+/// called — and, with it, the versions the guard should carry.
+///
+/// This lives in the project file rather than in the profile because it describes
+/// the repository's shape: a colleague opening the same folder should find the
+/// same sets, not have to reconstruct them.
+///
+/// ```toml
+/// [[destinations]]
+/// name = "Release"
+///
+/// [[destinations.entry]]
+/// folder = "ORACLE/AGGIORNAMENTO"
+/// wrap = "block"
+/// version_guard = true
+///
+/// [[destinations.entry]]
+/// folder = "ORACLE/INIZIALIZZAZIONE"
+/// file = "parametri.sql"
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DestinationSet {
+    /// What the user picks it by. Matched case-insensitively; unique per project.
+    pub name: String,
+    /// `entry` singular in the file for the same TOML reason as `folder`.
+    #[serde(default, rename = "entry")]
+    pub entries: Vec<DestinationEntry>,
+}
+
+/// One destination of a set.
+///
+/// The rules are the ones that survive a release. The version guard's **bounds**
+/// are not stored when the naming scheme can work them out again: they are
+/// `4.12 → 4.13` this month and something else next month, and a template that
+/// filled in last release's numbers would be worse than one that filled in
+/// nothing — it would look right.
+///
+/// Which leaves the case where the scheme *cannot* work them out. There the file
+/// name is kept too (see [`DestinationEntry::file`]), the entry names one fixed
+/// file for ever, and the bounds are the only thing that can say which versions
+/// that file moves between — so they are stored. The invariant is one sentence:
+/// **the file records what cannot be derived, and nothing else.**
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DestinationEntry {
+    /// Project-relative folder path. The engine, the role and the product all come
+    /// from it, exactly as they do when a destination is added by hand.
+    pub folder: String,
+    /// The file inside it. Absent means **the next update file**, named by the
+    /// folder's scheme — which is what makes a set usable for more than one
+    /// release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// `"block"` or `"plain"`. Absent takes the role's preset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrap: Option<String>,
+    /// Whether this destination carries a version guard at all. Its bounds are
+    /// filled in when the set is applied, from the naming scheme where it can.
+    #[serde(default)]
+    pub version_guard: bool,
+    /// The guard's bounds, stored **only** for an entry whose file is fixed —
+    /// where there is no scheme to re-derive them from. Absent otherwise, and
+    /// always ignored when the scheme has an answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_version: Option<String>,
+    #[serde(default)]
+    pub skip_if_present: bool,
+    #[serde(default)]
+    pub require_object: bool,
+    #[serde(default)]
+    pub transactional: bool,
 }
 
 /// How generated blocks are written.
@@ -495,6 +629,12 @@ pub struct FolderDeclaration {
     /// Overrides the project's default encoding from here down.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encoding: Option<String>,
+    /// Which installed product's scripts live here, from here down. Absent means
+    /// "inherit". Names a [`ProductSettings`]; a name no product declares is
+    /// reported by [`problems`](ProjectConfig::problems) and otherwise behaves as
+    /// though nothing was said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub product: Option<String>,
     /// Leave this folder — and everything under it — out of the project
     /// entirely. Absent means "inherit"; a descendant may set it back to `false`.
     ///
@@ -842,8 +982,78 @@ impl ProjectConfig {
                 Some(_) => {}
             }
         }
+        for folder in &self.folders {
+            let Some(named) = folder.product.as_deref() else { continue };
+            if self.product(named).is_none() {
+                out.push(format!(
+                    "{}: `product = \"{named}\"` names no `[[product]]`, so generated blocks there \
+                     read the project's version row rather than that product's",
+                    folder.path
+                ));
+            }
+        }
         out.extend(crate::alias::problems(&self.aliases));
         out
+    }
+
+    /// One destination set by name, case-insensitively.
+    pub fn destination_set(&self, name: &str) -> Option<&DestinationSet> {
+        let name = name.trim();
+        self.destination_sets.iter().find(|s| s.name.trim().eq_ignore_ascii_case(name))
+    }
+
+    /// Add a set, or replace the one of that name. Returns `true` when it replaced.
+    ///
+    /// Replace rather than append, because "save this as Release" said twice means
+    /// the second one — and two sets of one name would leave the picker showing
+    /// the same entry twice with different contents behind it.
+    pub fn put_destination_set(&mut self, set: DestinationSet) -> bool {
+        let name = set.name.trim().to_string();
+        match self
+            .destination_sets
+            .iter()
+            .position(|s| s.name.trim().eq_ignore_ascii_case(&name))
+        {
+            Some(at) => {
+                self.destination_sets[at] = DestinationSet { name, ..set };
+                true
+            }
+            None => {
+                self.destination_sets.push(DestinationSet { name, ..set });
+                self.destination_sets.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                false
+            }
+        }
+    }
+
+    /// Forget a set. Returns `true` when there was one to forget.
+    pub fn remove_destination_set(&mut self, name: &str) -> bool {
+        let before = self.destination_sets.len();
+        let name = name.trim();
+        self.destination_sets.retain(|s| !s.name.trim().eq_ignore_ascii_case(name));
+        self.destination_sets.len() != before
+    }
+
+    /// One declared product by name, case-insensitively. `None` when nothing
+    /// declares it — which is a state the user is told about rather than one that
+    /// invents a predicate.
+    pub fn product(&self, name: &str) -> Option<&ProductSettings> {
+        let name = name.trim();
+        self.products.iter().find(|p| p.name.trim().eq_ignore_ascii_case(name))
+    }
+
+    /// The predicate that selects the version row for scripts belonging to
+    /// `product` — the product's own when it declares one, the project-wide filter
+    /// otherwise.
+    ///
+    /// The fallback is what keeps this feature free for the repositories that do
+    /// not need it: with no `[[product]]` anywhere, every destination gets the
+    /// project's filter exactly as it did before any of this existed.
+    pub fn version_filter_for(&self, product: Option<&str>) -> &str {
+        product
+            .and_then(|name| self.product(name))
+            .map(|p| p.version_filter.as_str())
+            .unwrap_or(&self.version_table.filter)
     }
 }
 
@@ -865,6 +1075,8 @@ mod tests {
             generation: GenerationSettings::default(),
             naming: NamingScheme::default(),
             analysis: AnalysisSettings::default(),
+            products: Vec::new(),
+            destination_sets: Vec::new(),
             folders: vec![
                 FolderDeclaration {
                     path: "AGGIORNAMENTO".to_string(),
@@ -1307,5 +1519,128 @@ mod tests {
         let parsed = ProjectConfig::parse(&text).unwrap();
         // `load` is what enforces it; assert the condition it checks.
         assert!(parsed.version > CURRENT_VERSION);
+    }
+
+    #[test]
+    fn a_repository_with_no_products_gives_every_folder_the_project_filter() {
+        // The ordinary case, and the one that must not pay for this feature.
+        let mut config = sample();
+        config.version_table.filter = "MODULO = 'CORE'".to_string();
+        assert_eq!(config.version_filter_for(None), "MODULO = 'CORE'");
+        assert_eq!(config.version_filter_for(Some("PORTALE")), "MODULO = 'CORE'");
+    }
+
+    #[test]
+    fn a_declared_product_supplies_its_own_row() {
+        let mut config = sample();
+        config.version_table.filter = "MODULO = 'CORE'".to_string();
+        config.products = vec![ProductSettings {
+            name: "Portale".to_string(),
+            version_filter: "MODULO = 'PORTALE'".to_string(),
+        }];
+        // Matched however it was spelled on the folder — the name is written by
+        // hand in two places and must not have to agree letter for letter.
+        assert_eq!(config.version_filter_for(Some("PORTALE")), "MODULO = 'PORTALE'");
+        assert_eq!(config.version_filter_for(Some("  portale ")), "MODULO = 'PORTALE'");
+        assert_eq!(config.version_filter_for(None), "MODULO = 'CORE'");
+    }
+
+    #[test]
+    fn a_product_may_declare_that_it_reads_the_only_row() {
+        // An empty filter on a product is an answer, not an omission: it says this
+        // product's table is not shared, under a project whose default filters.
+        let mut config = sample();
+        config.version_table.filter = "MODULO = 'CORE'".to_string();
+        config.products =
+            vec![ProductSettings { name: "LEGACY".to_string(), version_filter: String::new() }];
+        assert_eq!(config.version_filter_for(Some("LEGACY")), "");
+    }
+
+    #[test]
+    fn a_folder_naming_a_product_nobody_declared_is_reported() {
+        let mut config = sample();
+        config.declaration_mut("AGGIORNAMENTO").product = Some("PORTALE".to_string());
+        let problems = config.problems();
+        assert!(
+            problems.iter().any(|p| p.contains("PORTALE") && p.contains("AGGIORNAMENTO")),
+            "{problems:?}"
+        );
+    }
+
+    fn set(name: &str, folders: &[&str]) -> DestinationSet {
+        DestinationSet {
+            name: name.to_string(),
+            entries: folders
+                .iter()
+                .map(|f| DestinationEntry { folder: f.to_string(), ..DestinationEntry::default() })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn saving_a_set_under_a_name_that_exists_replaces_it() {
+        // "Save as Release" said twice means the second one. Two sets of one name
+        // would show the same entry twice in the picker with different contents
+        // behind it.
+        let mut config = sample();
+        assert!(!config.put_destination_set(set("Release", &["A"])));
+        assert!(config.put_destination_set(set("release", &["A", "B"])), "matched case-insensitively");
+        assert_eq!(config.destination_sets.len(), 1);
+        assert_eq!(config.destination_set("RELEASE").unwrap().entries.len(), 2);
+        // The name is stored as it was last written, not as it was first created.
+        assert_eq!(config.destination_sets[0].name, "release");
+    }
+
+    #[test]
+    fn forgetting_a_set_says_whether_there_was_one() {
+        let mut config = sample();
+        config.put_destination_set(set("Release", &["A"]));
+        assert!(config.remove_destination_set(" release "));
+        assert!(!config.remove_destination_set("Release"));
+        assert!(config.destination_sets.is_empty());
+    }
+
+    #[test]
+    fn a_set_survives_a_round_trip_through_the_file() {
+        let mut config = sample();
+        config.put_destination_set(DestinationSet {
+            name: "Release".into(),
+            entries: vec![
+                // The two shapes that matter: a fixed file, and one left to the
+                // naming scheme.
+                DestinationEntry {
+                    folder: "ORACLE/INIZIALIZZAZIONE".into(),
+                    file: Some("parametri.sql".into()),
+                    wrap: Some("plain".into()),
+                    ..DestinationEntry::default()
+                },
+                DestinationEntry {
+                    folder: "ORACLE/AGGIORNAMENTO".into(),
+                    file: None,
+                    wrap: Some("block".into()),
+                    version_guard: true,
+                    skip_if_present: true,
+                    ..DestinationEntry::default()
+                },
+            ],
+        });
+        let text = toml::to_string_pretty(&config).unwrap();
+        let back = ProjectConfig::parse(&text).expect("parses");
+        assert_eq!(back.destination_sets, config.destination_sets);
+        // The distinction the whole feature rests on: "no file" must not come back
+        // as an empty name.
+        assert_eq!(back.destination_sets[0].entries[1].file, None);
+    }
+
+    #[test]
+    fn products_survive_a_round_trip_through_the_file() {
+        let mut config = sample();
+        config.products = vec![
+            ProductSettings { name: "CORE".into(), version_filter: "MODULO = 'CORE'".into() },
+            ProductSettings { name: "PORTALE".into(), version_filter: "MODULO = 'PORTALE'".into() },
+        ];
+        let text = toml::to_string_pretty(&config).unwrap();
+        let back = ProjectConfig::parse(&text).expect("parses");
+        assert_eq!(back.products, config.products);
     }
 }

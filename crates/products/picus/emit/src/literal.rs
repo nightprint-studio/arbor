@@ -110,9 +110,19 @@ pub fn validate_value(value: &str, column: &Column) -> Option<String> {
     let raw = value.trim();
 
     if raw.is_empty() {
-        // A primary key left empty is usually about to be filled by a sequence or
-        // by the row's own key, so it is not flagged here.
-        return (column.not_null && !column.primary_key).then(|| "required (NOT NULL)".to_string());
+        // An empty cell means *not supplied*, and a column that is not supplied is
+        // left out of the statement entirely (`DmlModel::supplied_columns`) — so
+        // what decides this is not whether the column accepts NULL, but whether
+        // the database has something to put there when nobody says.
+        //
+        //  • a **default** does. `customized NUMBER DEFAULT 0 NOT NULL` is the
+        //    ordinary shape of an audit column, and reporting it as required was
+        //    demanding a value for the one case the default exists to cover;
+        //  • a **primary key** usually does too — a sequence, a trigger, or the
+        //    row's own key — so it has never been flagged here.
+        let supplied_by_the_database = column.primary_key || column.default_value.is_some();
+        return (column.not_null && !supplied_by_the_database)
+            .then(|| "required (NOT NULL, and the column has no default)".to_string());
     }
     if looks_like_expression(raw) {
         return None;
@@ -246,9 +256,28 @@ mod tests {
         assert_eq!(validate_value("SYSDATE", &n), None, "an expression is not type-checked");
 
         c.not_null = true;
-        assert_eq!(validate_value("", &c).as_deref(), Some("required (NOT NULL)"));
+        assert_eq!(
+            validate_value("", &c).as_deref(),
+            Some("required (NOT NULL, and the column has no default)")
+        );
         c.primary_key = true;
         assert_eq!(validate_value("", &c), None, "a key is often filled by a sequence");
+    }
+
+    #[test]
+    fn a_not_null_column_with_a_default_is_not_required() {
+        // The ordinary shape of an audit column — `CUSTOMIZED NUMBER DEFAULT 0 NOT
+        // NULL` — and reporting it as required demanded a value for exactly the
+        // case the default exists to cover. An empty cell means *not supplied*, and
+        // an unsupplied column is left out of the statement, so the default applies.
+        let mut c = col("CUSTOMIZED", "numeric");
+        c.not_null = true;
+        c.default_value = Some("0".to_string());
+        assert_eq!(validate_value("", &c), None);
+
+        // Take the default away and it is required again.
+        c.default_value = None;
+        assert!(validate_value("", &c).is_some());
     }
 
     #[test]

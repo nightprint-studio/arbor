@@ -10,7 +10,9 @@
    * Nothing is written from this page directly: the final action asks for
    * confirmation and names exactly which files it will touch.
    */
-  import { FormInput, Files, Code2, GitCompare, Check, Play, Download, Plus } from 'lucide-svelte';
+  import {
+    FormInput, Files, Code2, GitCompare, Check, Play, Download, Plus, RefreshCw,
+  } from 'lucide-svelte';
   import Card from '$lib/components/shared/ui/Card.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
@@ -19,12 +21,16 @@
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import DmlValueGrid from '../generate/DmlValueGrid.svelte';
+  import DmlKeyPicker from '../generate/DmlKeyPicker.svelte';
   import PasteSqlPanel from '../generate/PasteSqlPanel.svelte';
   import CsvImportGrid from '../generate/CsvImportGrid.svelte';
   import TargetEditor from '../generate/TargetEditor.svelte';
+  import DestinationSets from '../generate/DestinationSets.svelte';
   import SqlPreview from '../generate/SqlPreview.svelte';
   import PatchDiffCard from '../generate/PatchDiffCard.svelte';
+  import { untrack } from 'svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
@@ -38,11 +44,33 @@
 
   let { onWrite }: Props = $props();
 
-  // Tables only: a view has columns but is not writable, so it is never a
-  // destination for generated DML.
-  const tableOptions = $derived(
-    schemaStore.tables.map((t) => ({ value: t.name, label: t.name })),
-  );
+  /**
+   * Tables you can write into — from the **database and the repository both**.
+   *
+   * Sourcing this from the live schema alone made the whole page dead on a machine
+   * with no database connected: an empty dropdown, nothing to pick, nothing to
+   * generate. In a product whose subject is scripts on disk, that is the common
+   * case, not the edge one — the repository's own index knows every table its
+   * scripts install, and that is a perfectly good answer to "which table".
+   *
+   * Tables only: a view has columns but is not writable, so it is never a
+   * destination for generated DML. Objects the repository merely reads are left
+   * out for the same reason — nothing here installs them, so writing rows into
+   * them from these scripts is not a thing this project does.
+   */
+  const tableOptions = $derived.by(() => {
+    const live = new Set(schemaStore.tables.map((t) => t.name.toUpperCase()));
+    const options = schemaStore.tables.map((t) => ({ value: t.name, label: t.name }));
+    for (const obj of picusProjectStore.inventory) {
+      if (obj.kind !== 'table' || obj.external) continue;
+      if (live.has(obj.name.toUpperCase())) continue;
+      // Marked, because the difference matters downstream: a table only the
+      // scripts know has no column types, so the form cannot offer fields for it
+      // and the values are taken as written.
+      options.push({ value: obj.name, label: `${obj.name}  ·  from the scripts` });
+    }
+    return options;
+  });
 
   const operationTabs: TabItem[] = (
     ['insert', 'upsert', 'update', 'delete'] as DmlOperation[]
@@ -55,6 +83,28 @@
   ];
 
   const blockTargets = $derived(dmlStore.enabledTargets.filter((t) => t.wrap === 'block').length);
+
+  /**
+   * Keep the patch section describing the current payload.
+   *
+   * The section only exists after an explicit **Generate**, and any edit takes it
+   * away again — so this reads disk exactly when somebody has just said "build
+   * this", never on a keystroke. Which is what the section was missing: it used to
+   * offer the diff once and then show that first answer through every later
+   * generation.
+   *
+   * `ensurePreview` is self-guarding, so watching the payload key is enough: a
+   * landed preview does not re-trigger it, and neither does a failed one. The
+   * bottom dock runs the same effect for the same reason; both being no-ops for
+   * each other is the point of the guard. `untrack` keeps the call itself out of
+   * the dependencies — it writes the very state this effect would otherwise read.
+   */
+  $effect(() => {
+    if (!dmlStore.generated || !dmlStore.enabledTargets.length) return;
+    if (!picusProjectStore.attached) return;
+    void dmlStore.previewKey;
+    untrack(() => void dmlStore.ensurePreview());
+  });
 </script>
 
 <div class="gv">
@@ -92,11 +142,23 @@
     <div class="gv-body">
       <div class="gv-row">
         <span class="gv-label">Table</span>
-        <Select
-          value={dmlStore.table}
-          options={tableOptions}
-          onchange={(v) => dmlStore.setTable(v)}
-        />
+        {#if dmlStore.tableIsFromSource}
+          <!-- The pasted statements named it. Shown, not asked for: re-picking
+               what the source already says is a question with one right answer. -->
+          <span class="gv-table-fixed" use:tooltip={'Read from the pasted statements'}>
+            {dmlStore.table}
+          </span>
+        {:else}
+          <Select
+            value={dmlStore.table}
+            options={tableOptions}
+            searchable={tableOptions.length > 8}
+            searchPlaceholder="Filter tables"
+            placeholder="Choose a table"
+            emptyMessage="No table is known yet — connect a database, or attach the script repository."
+            onchange={(v) => dmlStore.setTable(v)}
+          />
+        {/if}
         <span class="gv-label gv-label-gap">Operation</span>
         <Tabs
           items={operationTabs}
@@ -107,6 +169,40 @@
           onSelect={(id) => dmlStore.setOperation(id as DmlOperation)}
         />
       </div>
+
+      {#if dmlStore.columnsFromSource}
+        <!-- Said once, plainly: everything downstream behaves slightly differently
+             and the user should know why before they read the generated SQL. -->
+        <p class="gv-inferred">
+          No connected database knows <code>{dmlStore.table}</code>, so the columns and their
+          types come from
+          {#if dmlStore.columnsFromScripts}
+            what the repository's own statements write into it — which is why there are
+            {dmlStore.columns.length} of them and not the table's full set.
+          {:else}
+            the statements themselves.
+          {/if}
+          A value written bare is emitted bare, a quoted one is re-quoted. Length limits and
+          <code>NOT NULL</code> are not checked, and there is no primary key to fall back on.
+        </p>
+      {:else if dmlStore.table && !dmlStore.columns.length}
+        <!-- The state that used to be an empty form with no explanation: a table
+             picked, and nothing to type into it. -->
+        <Alert
+          variant="warning"
+          compact
+          title={`Nothing is known about ${dmlStore.table}'s columns`}
+          text="No connected database has it, and nothing in this repository writes to it — so there is no column list to read. Connect a database that has the table, or paste an INSERT and let it say what the columns are."
+        />
+      {/if}
+
+      {#if dmlStore.source !== 'form' && dmlStore.columns.length}
+        <!-- The comparison key: the WHERE of an update or delete, and the conflict
+             target of an upsert. Form mode picks it in the value grid; the imported
+             sources have no grid to pick it in, and with no live schema there is no
+             primary key to fall back on either — so it is asked for here. -->
+        <DmlKeyPicker />
+      {/if}
 
       {#if dmlStore.source === 'form'}
         <DmlValueGrid />
@@ -149,6 +245,9 @@
         size="sm"
         label={`${dmlStore.enabledTargets.length} of ${dmlStore.targets.length} enabled`}
       />
+      <!-- The same six places, every generation. Saved as folders rather than as
+           paths, so a set still works next release. -->
+      <DestinationSets />
       <Button
         variant="ghost"
         size="xs"
@@ -191,24 +290,69 @@
   </Card>
 
   <!-- ── 4. What changes on disk ───────────────────────────────────────────── -->
-  <!-- The preview is what the backend would actually write, so it costs a disk
-       read and is asked for rather than assumed. The section says which of the
-       three states it is in instead of appearing and disappearing. -->
+  <!-- The preview is what the backend would actually write, read from disk. It is
+       built by the effect above whenever this section exists — which is only after
+       an explicit Generate — and **Recompute** is the manual override for the one
+       thing an effect cannot notice: a destination file changing underneath.
+       Both of those replace an earlier arrangement where the only way to build a
+       preview was a button inside the "no files yet" branch. The moment one
+       landed, that button was gone, and the first payload's cards then sat here
+       through every later generation looking current. A diff that is silently
+       stale and cannot be recomputed is worse than no diff. -->
   {#if dmlStore.generated && dmlStore.enabledTargets.length}
+    {@const stale = dmlStore.previewFiles.length > 0 && !dmlStore.previewFresh}
     <section class="gv-patches" aria-label="Changes to the scripts">
       <h2 class="gv-section">
         <GitCompare size={13} /> Changes to the scripts
         {#if dmlStore.previewing}<Spinner size={11} />{/if}
+        <span class="gv-section-spacer"></span>
+        {#if dmlStore.previewFiles.length || dmlStore.previewError}
+          <Button
+            variant={stale ? 'primary' : 'ghost'}
+            size="xs"
+            disabled={dmlStore.previewing || !picusProjectStore.attached}
+            tooltip={stale
+              ? 'What is shown describes an earlier version of this generation — read the files again'
+              : 'Read the destination files again'}
+            onclick={() => void dmlStore.rebuildPreview()}
+          >
+            {#snippet iconStart()}<RefreshCw size={12} />{/snippet}
+            {stale ? 'Recompute' : 'Refresh'}
+          </Button>
+        {/if}
       </h2>
+
+      {#if stale}
+        <!-- Said before the cards rather than after, because the cards are what
+             gets reviewed and approving a stale one is the mistake this whole
+             two-step exists to prevent. The write refuses on it too — but being
+             refused at the last step is a worse way to find out. -->
+        <Alert
+          variant="warning"
+          compact
+          title="These are not the current changes"
+          text="Something moved since they were computed — a value, a destination, one of its rules. Recompute before writing; the write refuses a diff nobody reviewed."
+        />
+      {/if}
 
       {#if dmlStore.previewError}
         <Alert variant="error" title="The patch could not be computed" text={dmlStore.previewError} />
+      {:else if dmlStore.previewing}
+        <Card variant="subtle">
+          <div class="gv-preview-ask">
+            <Spinner size={13} />
+            <span>Reading the destination files…</span>
+          </div>
+        </Card>
       {:else if !dmlStore.previewFiles.length}
+        <!-- Reached when there is nothing to read from: no repository attached.
+             The effect above builds the preview in every other case, so an empty
+             state with a button would be a button nobody ever needs to press. -->
         <Card variant="subtle">
           <div class="gv-preview-ask">
             <span>
-              The exact bytes each destination would receive are read from disk — ask for them
-              and review the result before anything is written.
+              The exact bytes each destination would receive are read from the repository —
+              and this connection has none attached, so there is nothing to compare against.
             </span>
             <Button
               variant="secondary"
@@ -225,9 +369,14 @@
           </div>
         </Card>
       {:else}
-        {#each dmlStore.previewFiles as file (file.path)}
-          <PatchDiffCard {file} target={dmlStore.targets.find((t) => t.file === file.path) ?? null} />
-        {/each}
+        <!-- Dimmed rather than hidden while stale: the previous diff is still the
+             best available answer, and the banner above says what it is. Same
+             treatment the generated SQL gets, for the same reason. -->
+        <div class="gv-patch-list" class:gv-dim={stale}>
+          {#each dmlStore.previewFiles as file (file.path)}
+            <PatchDiffCard {file} target={dmlStore.targets.find((t) => t.file === file.path) ?? null} />
+          {/each}
+        </div>
       {/if}
     </section>
   {/if}
@@ -335,6 +484,28 @@
   .gv-label { font-size: 11.5px; color: var(--text-muted); }
   .gv-label-gap { margin-left: 6px; }
 
+  /* The table the source dictates: a value, not a control. Styled as an input
+     that cannot be typed in rather than as text, so the row still reads as a form
+     row and nobody hunts for the dropdown that used to be here. */
+  .gv-table-fixed {
+    padding: 3px 9px;
+    background: var(--bg-hover);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-code);
+    font-size: 11.5px;
+    color: var(--text-primary);
+  }
+
+  .gv-inferred {
+    margin-bottom: 12px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--text-muted);
+    max-width: 88ch;
+  }
+  .gv-inferred code { font-family: var(--font-code); font-size: 11px; }
+
   .gv-form-actions {
     display: flex;
     justify-content: flex-end;
@@ -362,6 +533,18 @@
     color: var(--text-muted);
     padding-top: 4px;
   }
+  .gv-section-spacer { flex: 1; }
+
+  .gv-patch-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: opacity var(--transition-fast);
+  }
+  /* Showing a diff for a payload that has moved on. Dimmed rather than blanked:
+     the previous answer is still the best one available, and the banner above
+     says exactly what it is. */
+  .gv-dim { opacity: 0.5; }
 
   .gv-write { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .gv-write-text { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 3px; }

@@ -77,7 +77,7 @@ pub fn emit_for_target(model: &DmlModel, target: &Target) -> EmitResult {
         TargetWrap::Plain => model
             .rows
             .iter()
-            .map(|row| statement::plain_statement(model, row, target.dialect))
+            .map(|row| statement::plain_statement(model, row, target))
             .collect::<Result<Vec<_>, _>>()?
             .join("\n\n"),
         TargetWrap::Block => block::block(model, target)?,

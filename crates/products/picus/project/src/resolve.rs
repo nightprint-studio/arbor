@@ -66,6 +66,22 @@ fn resolve_in(
     role: Option<FolderRole>,
     excluded: bool,
 ) {
+    resolve_within(nodes, engine, role, excluded, None)
+}
+
+/// The recursion proper, carrying the product as well.
+///
+/// `product` is threaded as a borrowed `Option<&str>` rather than owned: it
+/// inherits down every level of a tree with thousands of folders, and cloning a
+/// string per node to hand it to its children would be paying for a repository
+/// shape almost nobody has.
+fn resolve_within(
+    nodes: &mut [FolderNode],
+    engine: Option<FolderEngine>,
+    role: Option<FolderRole>,
+    excluded: bool,
+    product: Option<&str>,
+) {
     for node in nodes {
         let engine = node.engine.or(engine);
         let role = node.role.or(role);
@@ -80,6 +96,13 @@ fn resolve_in(
         // `Ignored` is the honest fallback rather than a dismissal: a folder
         // nobody classified must not receive generated SQL.
         node.effective_role = role.unwrap_or(FolderRole::Ignored);
+        // Same three-valued shape, minus the escape hatch: there is deliberately
+        // no way to declare "no product" under a folder that has one, because a
+        // subfolder of a product's scripts belongs to that product.
+        node.effective_product = match node.product.as_deref() {
+            Some(own) => Some(own.to_string()),
+            None => product.map(str::to_string),
+        };
         // A file is the last link of the same chain, on both axes: it takes its
         // folder's answer unless it declares one, exactly as the folder takes its
         // parent's. Done here rather than anywhere else so there is one
@@ -89,7 +112,11 @@ fn resolve_in(
             file.effective_engine = file.engine.or(engine);
             file.effective_excluded = file.excluded.unwrap_or(excluded);
         }
-        resolve_in(&mut node.children, engine, role, excluded);
+        // Destructured so the children's mutable borrow and the product's shared
+        // one are disjoint — `node.effective_product` is what the subtree inherits,
+        // and it has just been computed.
+        let FolderNode { effective_product, children, .. } = node;
+        resolve_within(children, engine, role, excluded, effective_product.as_deref());
     }
 }
 
@@ -115,6 +142,14 @@ mod tests {
     /// A folder declaring an engine Picus recognises and does not read.
     fn foreign_node(path: &str, engine: ForeignEngine) -> FolderNode {
         engine_node(path, Some(FolderEngine::Unsupported(engine)), None)
+    }
+
+    fn product_node(path: &str, product: Option<&str>) -> FolderNode {
+        let name = crate::path::last_segment(path).to_string();
+        FolderNode {
+            product: product.map(str::to_string),
+            ..FolderNode::new(path, name)
+        }
     }
 
     fn nest(mut parent: FolderNode, children: Vec<FolderNode>) -> FolderNode {
@@ -393,5 +428,49 @@ mod tests {
         let once = tree.clone();
         resolve(&mut tree, None, None);
         assert_eq!(tree, once);
+    }
+
+    #[test]
+    fn a_product_declared_once_reaches_every_folder_below_it() {
+        // The whole point of putting it on a folder rather than on each
+        // destination: `PORTALE` is said at the top and next month's version
+        // folder inherits it without anyone touching the file again.
+        let mut tree = vec![nest(
+            product_node("PORTALE", Some("PORTALE")),
+            vec![nest(
+                product_node("PORTALE/AGGIORNAMENTO", None),
+                vec![product_node("PORTALE/AGGIORNAMENTO/4_13/ORA", None)],
+            )],
+        )];
+        resolve(&mut tree, None, None);
+        for folder in tree[0].walk() {
+            assert_eq!(folder.effective_product.as_deref(), Some("PORTALE"), "{}", folder.path);
+        }
+    }
+
+    #[test]
+    fn a_folder_that_names_its_own_product_overrides_the_one_above() {
+        // A repository that nests one product's scripts inside another's tree.
+        let mut tree = vec![nest(
+            product_node("INSTALL", Some("CORE")),
+            vec![product_node("INSTALL/PORTALE", Some("PORTALE"))],
+        )];
+        resolve(&mut tree, None, None);
+        assert_eq!(tree[0].effective_product.as_deref(), Some("CORE"));
+        assert_eq!(tree[0].children[0].effective_product.as_deref(), Some("PORTALE"));
+    }
+
+    #[test]
+    fn a_repository_that_declares_no_product_resolves_to_none_everywhere() {
+        // The ordinary repository, which installs one thing. Nothing about this
+        // feature may cost it anything.
+        let mut tree = vec![nest(
+            node("ORACLE", Some(EngineKind::Oracle), None),
+            vec![node("ORACLE/AGGIORNAMENTO", None, Some(FolderRole::Update))],
+        )];
+        resolve(&mut tree, None, None);
+        for folder in tree[0].walk() {
+            assert_eq!(folder.effective_product, None, "{}", folder.path);
+        }
     }
 }

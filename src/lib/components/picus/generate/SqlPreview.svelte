@@ -48,6 +48,8 @@
   const language = $derived(sqlLanguage(isDialect(target?.dialect) ? target.dialect : null));
   /** This destination's own rules contradict each other — stated, not swallowed. */
   const conflict = $derived(target ? dmlStore.ruleConflictFor(target.id) : null);
+  /** A destination that describes the starting state rather than a change to it. */
+  const seeding = $derived(target?.role === 'init' || target?.role === 'data');
 
   async function copy() {
     try {
@@ -110,7 +112,13 @@
   {#if target}
     <p class="sp-note">
       <Code2 size={12} />
-      {#if target.wrap === 'block'}
+      {#if seeding && dmlStore.operation === 'upsert'}
+        <!-- Said where the SQL is, because the SQL does not look like what was
+             asked for and the difference is the point. -->
+        Written as a plain <b>INSERT</b>: an initialisation runs once against an empty
+        database, so "insert if missing" is answered here rather than by the engine — a row
+        already in the initialisation is changed where it is.
+      {:else if target.wrap === 'block'}
         Wrapped in {target.dialect === 'oracle' ? 'a PL/SQL block' : 'a DO block'}
         {#if target.guards.version}
           , guarded on version {target.guards.version.from} and closing at {target.guards.version.to}

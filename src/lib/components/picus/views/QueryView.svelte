@@ -82,6 +82,23 @@
     picusUiStore.showBottom('results');
     void queryStore.run(tab.id, conn.id, scope);
   }
+
+  /**
+   * Run from inside the editor.
+   *
+   * The window-level handler in `PicusShell` never sees these: CodeMirror binds
+   * `Mod-Enter` to `insertBlankLine` and stops the event, so with the caret in the
+   * editor — the only place it ever is when you press it — Ctrl+Enter split the
+   * line and ran nothing. Claimed here, at the one keystroke's true origin, and
+   * always consumed so the newline cannot come back.
+   *
+   * Static bindings reading live state, never a rebuilt array: the extension set is
+   * assembled once at mount.
+   */
+  const runKeys = [
+    { key: 'Mod-Enter', preventDefault: true, run: () => { run('statement'); return true; } },
+    { key: 'Mod-Shift-Enter', preventDefault: true, run: () => { run('buffer'); return true; } },
+  ];
 </script>
 
 <div class="qv">
@@ -158,6 +175,7 @@
         value={state.sql}
         {language}
         {diagnostics}
+        keyBindings={runKeys}
         oninput={(v) => queryStore.setSql(tab.id, v)}
       />
     {/key}

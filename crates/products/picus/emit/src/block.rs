@@ -8,12 +8,10 @@
 //! The generated identifiers (`before_changes`, `v_version`, …) are English, like
 //! the rest of Arbor's code.
 
-use picus_ast::prelude::{
-    DialectScope, DmlModel, DmlOperation, EngineKind, Target, VersionTableConfig,
-};
+use picus_ast::prelude::{DialectScope, DmlModel, DmlOperation, EngineKind, Target};
 
 use crate::literal::{ident, literal};
-use crate::statement::{plain_statement, EmitResult};
+use crate::statement::{statement_for, EmitResult};
 
 const INDENT: &str = "    ";
 
@@ -24,9 +22,15 @@ fn indent(text: &str) -> String {
     text.lines().map(|l| format!("{INDENT}{l}")).collect::<Vec<_>>().join("\n")
 }
 
-/// `WHERE …` for version tables holding one row per module; empty otherwise.
-fn version_filter(v: &VersionTableConfig) -> String {
-    let f = v.filter.trim();
+/// `WHERE …` selecting the version row this destination reads and stamps; empty
+/// when the table holds a single row.
+///
+/// Asked of the **target**, not of the model, because a repository that installs
+/// several products keeps a row per product and one generation writes into more
+/// than one of them. `Target::version_predicate` owns the precedence, so the four
+/// call sites below cannot disagree about it.
+fn version_filter(model: &DmlModel, target: &Target) -> String {
+    let f = target.version_predicate(model).trim();
     if f.is_empty() {
         String::new()
     } else {
@@ -72,7 +76,7 @@ fn oracle_block(model: &DmlModel, target: &Target) -> EmitResult {
             guard.from,
             v.version_column,
             v.table,
-            version_filter(v),
+            version_filter(model, target),
             guard.from
         ));
     }
@@ -88,7 +92,7 @@ fn oracle_block(model: &DmlModel, target: &Target) -> EmitResult {
 
     let last = model.rows.len().saturating_sub(1);
     for (i, row) in model.rows.iter().enumerate() {
-        let body = indent(&plain_statement(model, row, DialectScope::One(EngineKind::Oracle))?);
+        let body = indent(&statement_for(model, row, DialectScope::One(EngineKind::Oracle), target.operation_for(model.operation))?);
         // A delete is skip-if-present's own no-op: deleting a row that isn't there
         // already does nothing, so guarding it would only add noise.
         if g.skip_if_present && model.operation != DmlOperation::Delete {
@@ -123,7 +127,7 @@ fn oracle_block(model: &DmlModel, target: &Target) -> EmitResult {
             guard.to,
             v.table,
             sets.join(", "),
-            version_filter(v)
+            version_filter(model, target)
         ));
     }
 
@@ -161,7 +165,7 @@ fn postgres_block(model: &DmlModel, target: &Target) -> EmitResult {
         out.push_str(&format!(
             "  -- guard: only applies when starting from {}\n  SELECT {v_column} INTO v_version FROM {v_table}{};\n  IF v_version <> '{}' THEN\n    RETURN;\n  END IF;\n\n",
             guard.from,
-            version_filter(v),
+            version_filter(model, target),
             guard.from
         ));
     }
@@ -173,7 +177,7 @@ fn postgres_block(model: &DmlModel, target: &Target) -> EmitResult {
 
     let last = model.rows.len().saturating_sub(1);
     for (i, row) in model.rows.iter().enumerate() {
-        let body = indent(&plain_statement(model, row, DialectScope::One(EngineKind::Postgres))?);
+        let body = indent(&statement_for(model, row, DialectScope::One(EngineKind::Postgres), target.operation_for(model.operation))?);
         if g.skip_if_present && model.operation != DmlOperation::Delete {
             let predicate = model
                 .key_columns
@@ -207,7 +211,7 @@ fn postgres_block(model: &DmlModel, target: &Target) -> EmitResult {
             "\n  -- carry the database to {}\n  UPDATE {v_table} SET {}{};\n",
             guard.to,
             sets.join(", "),
-            version_filter(v)
+            version_filter(model, target)
         ));
     }
 

@@ -250,6 +250,8 @@ fn config_for(project: &Project) -> ProjectConfig {
         // ran a stricter analysis than a real project does would let a rule pass its
         // tests and never fire in anger.
         analysis: AnalysisSettings::default(),
+        products: Vec::new(),
+        destination_sets: Vec::new(),
         folders: project
             .walk()
             .filter(|node| node.engine.is_some() || node.role.is_some())

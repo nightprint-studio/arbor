@@ -14,7 +14,7 @@
    */
   import { onDestroy } from 'svelte';
   import { EditorState, Compartment, type Extension } from '@codemirror/state';
-  import { EditorView } from '@codemirror/view';
+  import { EditorView, type KeyBinding } from '@codemirror/view';
   import { indentUnit as cmIndentUnit } from '@codemirror/language';
   import { setDiagnostics as cmSetDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
   import { openSearchPanel } from '@codemirror/search';
@@ -38,6 +38,7 @@
     tabSize,
     indentUnit,
     initialState,
+    keyBindings,
     oninput,
     oncaret,
     onViewState,
@@ -70,6 +71,13 @@
     indentUnit?: string;
     /** Cursor + scroll to restore at mount (e.g. the tab's last-known position). */
     initialState?: EditorViewSnapshot;
+    /**
+     * Keys this host claims back from CodeMirror, e.g. `Mod-Enter` to run a
+     * statement. Installed above every built-in binding — see the option of the
+     * same name in `extensions.ts` for why that is not optional. Static at mount:
+     * bind stable functions that read live state rather than swapping the array.
+     */
+    keyBindings?: readonly KeyBinding[];
     oninput?: (text: string) => void;
     /** Live caret position (1-based line/col) — drives a host footer Ln/Col. */
     oncaret?: (line: number, col: number) => void;
@@ -137,6 +145,7 @@
   function mount(target: HTMLDivElement) {
     const { extensions } = createCodeEditorExtensions(language, {
       readOnly, onGoto, rulerColumn, emmet, indentGuides, stickyScroll, scrollbarOverview,
+      keyBindings,
     });
 
     const updateListener = EditorView.updateListener.of((u) => {

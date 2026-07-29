@@ -29,6 +29,10 @@ export const PICUS_SHORTCUTS: PicusShortcutGroup[] = [
     label: 'Navigation',
     shortcuts: [
       { keys: ['Ctrl', 'K'], description: 'Command palette' },
+      {
+        keys: ['Ctrl', 'Shift', 'O'],
+        description: 'Go to a script, an object or a connection',
+      },
       { keys: ['Ctrl', '1'], description: 'Connections' },
       { keys: ['Ctrl', '2'], description: 'Scripts on disk' },
       { keys: ['Ctrl', '3'], description: 'Generate DML' },

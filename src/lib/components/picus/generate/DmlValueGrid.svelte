@@ -17,10 +17,21 @@
    *
    * Keyboard: Tab walks value → key → next value, so a whole row is fillable
    * without the mouse.
+   *
+   * ## Several rows, one at a time
+   *
+   * The form composes as many rows as you like, and shows **one**. The obvious
+   * alternative — a spreadsheet, a column per column — falls over on the tables
+   * this product exists for: forty columns is a horizontal scroll where the type,
+   * the NOT NULL flag and the validation message have nowhere to live. Keeping the
+   * column-major layout and putting the rows on a strip above it means every row
+   * is entered with the same affordances the single row had, and the strip says at
+   * a glance which of them is the one with the bad value.
    */
-  import { KeyRound, Sigma } from 'lucide-svelte';
+  import { ChevronLeft, ChevronRight, Copy, KeyRound, Plus, Sigma, Trash2 } from 'lucide-svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
+  import Button from '$lib/components/shared/ui/Button.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import { looksLikeExpression, nowFunction } from '$lib/utils/picus/sql-values';
@@ -30,7 +41,100 @@
   const keyNames = $derived(new Set(dmlStore.keyColumns.map((c) => c.name)));
   /** Only the explicit picks are "chosen"; the rest are the primary-key fallback. */
   const explicitKey = $derived(Object.values(dmlStore.keySelection).some(Boolean));
+
+  const rows = $derived(dmlStore.formRows);
+  const at = $derived(dmlStore.formCursor);
+
+  /**
+   * What a row's chip says.
+   *
+   * The comparison key where there is one — that is what identifies the row, so
+   * it is what tells two of them apart — falling back to the first value typed,
+   * and to the position when nothing has been typed at all.
+   */
+  function chipLabel(row: Record<string, string>, index: number): string {
+    const key = dmlStore.keyColumns.map((c) => row[c.name]?.trim()).filter(Boolean).join(' · ');
+    if (key) return key;
+    const first = columns.map((c) => row[c.name]?.trim()).find(Boolean);
+    return first || `Row ${index + 1}`;
+  }
 </script>
+
+<!-- The strip only appears once there is more than one row, or once the user has
+     reached for it. A single-row form is the common case and must not grow a
+     navigator it has nothing to navigate. -->
+<div class="vg-rows">
+  <div class="vg-chips" role="tablist" aria-label="Rows to write">
+    {#each rows as row, i (i)}
+      {@const issues = dmlStore.rowIssues.get(i)}
+      <button
+        type="button"
+        role="tab"
+        class="vg-chip"
+        class:vg-chip-on={i === at}
+        class:vg-chip-bad={!!issues}
+        aria-selected={i === at}
+        use:tooltip={issues ? issues.join('\n') : undefined}
+        onclick={() => dmlStore.selectFormRow(i)}
+      >
+        <span class="vg-chip-n">{i + 1}</span>
+        <span class="vg-chip-label">{chipLabel(row, i)}</span>
+      </button>
+    {/each}
+  </div>
+
+  <span class="vg-rows-spacer"></span>
+
+  {#if rows.length > 1}
+    <Button
+      variant="icon"
+      size="xs"
+      ariaLabel="Previous row"
+      disabled={at === 0}
+      tooltip={'Previous row'}
+      onclick={() => dmlStore.selectFormRow(at - 1)}
+    >
+      {#snippet iconStart()}<ChevronLeft size={13} />{/snippet}
+    </Button>
+    <Button
+      variant="icon"
+      size="xs"
+      ariaLabel="Next row"
+      disabled={at === rows.length - 1}
+      tooltip={'Next row'}
+      onclick={() => dmlStore.selectFormRow(at + 1)}
+    >
+      {#snippet iconStart()}<ChevronRight size={13} />{/snippet}
+    </Button>
+  {/if}
+  <Button
+    variant="icon"
+    size="xs"
+    ariaLabel="Duplicate this row"
+    tooltip={'Duplicate this row — the fast way to enter a near-identical one'}
+    onclick={() => dmlStore.addFormRow(true)}
+  >
+    {#snippet iconStart()}<Copy size={13} />{/snippet}
+  </Button>
+  <Button
+    variant="icon"
+    size="xs"
+    ariaLabel="Add a row"
+    tooltip={'Add an empty row'}
+    onclick={() => dmlStore.addFormRow(false)}
+  >
+    {#snippet iconStart()}<Plus size={13} />{/snippet}
+  </Button>
+  <Button
+    variant="icon"
+    size="xs"
+    ariaLabel="Remove this row"
+    tooltip={rows.length > 1 ? 'Remove this row' : 'Empty this row'}
+    onclick={() => dmlStore.removeFormRow()}
+  >
+    {#snippet iconStart()}<Trash2 size={13} />{/snippet}
+  </Button>
+</div>
 
 <div class="vg" role="table" aria-label="Values to write">
   <div class="vg-head" role="row">
@@ -101,7 +205,12 @@
 </div>
 
 <p class="vg-note">
-  {#if !dmlStore.keyColumns.length}
+  <!-- Only once there are columns to pick a key from. Saying "pick at least one
+       column" over an empty grid is advice nobody can follow, and it hid the
+       actual problem: the table's columns are not known at all. -->
+  {#if !columns.length}
+    Nothing to fill in yet.
+  {:else if !dmlStore.keyColumns.length}
     <span class="vg-warn">No comparison key.</span>
     Updates would have no WHERE clause and "skip if present" could not check anything —
     pick at least one column.
@@ -110,15 +219,75 @@
   {:else}
     Key falls back to the primary key: <code>{dmlStore.keyColumns.map((c) => c.name).join(', ')}</code>.
   {/if}
-  {#if connectionsStore.active}
-    Types come from {connectionsStore.active.name}.
-  {:else}
-    Types come from the script inventory — no connection is open.
+  {#if columns.length}
+    {#if dmlStore.columnsFromScripts}
+      Columns and types come from what this repository's scripts write — no connected
+      database has this table.
+    {:else if connectionsStore.active}
+      Types come from {connectionsStore.active.name}.
+    {:else}
+      Types come from the statements themselves — no connection is open.
+    {/if}
   {/if}
-
+  {#if rows.length > 1}
+    {rows.length} rows go into one block — a row with nothing typed in it is skipped.
+  {/if}
 </p>
 
 <style>
+  /* The row strip. Sits above the grid rather than beside it, because the grid is
+     already as wide as the window allows and the strip has to be able to wrap. */
+  .vg-rows {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    padding-bottom: 8px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .vg-rows-spacer { flex: 1; min-width: 8px; }
+
+  .vg-chips { display: flex; gap: 4px; flex-wrap: wrap; min-width: 0; }
+  .vg-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    max-width: 220px;
+    padding: 2px 8px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+  }
+  .vg-chip:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .vg-chip-on {
+    background: var(--accent-subtle);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  /* A row holding a value that cannot be written — the reason the strip exists:
+     with one row on screen at a time, this is the only thing that says the
+     problem is somewhere else. */
+  .vg-chip-bad { border-color: var(--error); color: var(--error); }
+  .vg-chip-n {
+    font-variant-numeric: tabular-nums;
+    font-size: 9.5px;
+    color: var(--text-disabled);
+    flex-shrink: 0;
+  }
+  .vg-chip-on .vg-chip-n { color: inherit; }
+  .vg-chip-label {
+    font-family: var(--font-code);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .vg {
     display: grid;
     grid-template-columns: minmax(140px, 200px) minmax(200px, 1fr) minmax(90px, 130px) 44px;

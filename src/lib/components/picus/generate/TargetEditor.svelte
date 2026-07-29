@@ -35,7 +35,11 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
+  import { picusSettingsStore } from '$lib/stores/picus/settings.svelte';
   import { GENERIC_ENGINE, type Target } from '$lib/types/picus';
+
+  /** What a destination that says nothing about it falls back to. */
+  const projectFilter = $derived(picusSettingsStore.versionTable.filter);
 
   /**
    * What each rule turns into, per dialect — shown inline, never hidden.
@@ -181,6 +185,45 @@
               reads the version table, returns early on a mismatch
             {/if}
           </span>
+
+          {#if target.guards.version}
+            <!-- Which ROW of the version table, for a repository that installs
+                 several products into one. Shown only under the guard, because
+                 outside it there is nothing that reads or stamps a version — an
+                 always-visible field here would be a question with no consequence.
+                 Pre-filled from the destination folder's declared product; typing
+                 in it is the one-off escape hatch. -->
+            <div class="te-sub">
+              <span class="te-sub-label">Version row</span>
+              <Input
+                value={target.versionFilter ?? ''}
+                size="sm"
+                block={false}
+                ariaLabel="Predicate selecting this destination's version row"
+                placeholder={projectFilter || 'the table holds one row'}
+                oninput={(v) => dmlStore.setVersionFilter(target.id, String(v))}
+              />
+              <span class="te-why">
+                {#if target.versionFilter === undefined}
+                  the project's own — this destination says nothing about it
+                {:else if target.versionFilter.trim() === ''}
+                  no predicate: reads and stamps the table's only row
+                {:else}
+                  <code>WHERE {target.versionFilter}</code>
+                {/if}
+              </span>
+              {#if target.versionFilter !== undefined}
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  tooltip={'Go back to the project’s own predicate'}
+                  onclick={() => dmlStore.setVersionFilter(target.id, null)}
+                >
+                  Clear
+                </Button>
+              {/if}
+            </div>
+          {/if}
         </div>
 
         <div class="te-rule">
@@ -357,6 +400,20 @@
 
   .te-inline { display: inline-flex; align-items: center; gap: 7px; }
   .te-inline-text { color: var(--text-secondary); }
+
+  /* A field that belongs to the rule above it — indented so the rule still reads
+     as one thing rather than as two switches at the same level. */
+  .te-sub {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    width: 100%;
+    padding-left: 26px;
+    margin-top: 6px;
+  }
+  .te-sub-label { font-size: 11.5px; color: var(--text-muted); }
+  .te-sub code { font-family: var(--font-code); }
 
   /* The translation note: what this switch becomes in the emitted SQL. */
   .te-why {

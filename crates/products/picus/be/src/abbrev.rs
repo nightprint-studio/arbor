@@ -37,7 +37,7 @@ use arbor_sql_abbrev::prelude::{
 use picus_ast::prelude::{Column, DialectScope, DmlModel, DmlOperation, DmlRow, EngineKind};
 use picus_core::prelude::PicusState;
 use picus_db_api::prelude::{SchemaSnapshot, TableInfo};
-use picus_emit::prelude::plain_statement;
+use picus_emit::prelude::statement_for;
 use serde::Serialize;
 
 /// What the editor gets back for the line it is on.
@@ -249,7 +249,7 @@ fn emit_insert(
     let row = row_of(&named);
     // Every row is a copy — see `Statement::Insert`. Emitted `rows` times so the
     // user has the block to edit rather than one line to duplicate by hand.
-    let one = plain_statement(&model, &row, scope).map_err(str::to_string)?;
+    let one = statement_for(&model, &row, scope, model.operation).map_err(str::to_string)?;
     Ok(std::iter::repeat_n(one, rows.max(1)).collect::<Vec<_>>().join("\n"))
 }
 
@@ -279,7 +279,7 @@ fn emit_update(
     let model = model_for(table, DmlOperation::Update, &set, &keys, schema)?;
     let mut row = row_of(&set);
     row.extend(row_of(&keys));
-    plain_statement(&model, &row, scope).map_err(str::to_string)
+    statement_for(&model, &row, scope, model.operation).map_err(str::to_string)
 }
 
 /// Build the generator's model for one abbreviation.

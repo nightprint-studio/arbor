@@ -22,6 +22,9 @@
         `placement`, etc.). Wins over `title` when both are set. */
     tooltip?: TooltipInput;
     ariaLabel?: string;
+    /** Set when this button opens something — a dropdown, a disclosure. Omitted
+     *  entirely when absent, so an ordinary button gains no spurious state. */
+    ariaExpanded?: boolean;
     /** Optional CSS color override (e.g. 'var(--brand-linear)') applied to background for primary,
         text for ghost/icon. Use sparingly — most callers should pick a variant. */
     color?: string;
@@ -45,6 +48,7 @@
     title,
     tooltip,
     ariaLabel,
+    ariaExpanded,
     color,
     onclick,
     iconStart,
@@ -101,6 +105,7 @@
   type={inert ? 'button' : type}
   use:tooltipAction={tipInput}
   aria-label={ariaLabel}
+  aria-expanded={ariaExpanded}
   aria-busy={loading || undefined}
   aria-disabled={inert || undefined}
   disabled={inert && !ariaInert}

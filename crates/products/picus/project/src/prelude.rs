@@ -6,9 +6,9 @@
 
 pub use crate::alias::{alias_key, name_matches, AliasScope, AliasVocabulary, InferenceAlias};
 pub use crate::config::{
-    AnalysisSettings, EncodingSettings, FileDeclaration, FolderDeclaration, GenerationSettings,
-    InitialisationModel, ProjectConfig, VersionTableSettings, CURRENT_VERSION, DEFAULT_ENCODING,
-    PROJECT_CONFIG_RELATIVE_PATH,
+    AnalysisSettings, DestinationEntry, DestinationSet, EncodingSettings, FileDeclaration,
+    FolderDeclaration, GenerationSettings, InitialisationModel, ProductSettings, ProjectConfig,
+    VersionTableSettings, CURRENT_VERSION, DEFAULT_ENCODING, PROJECT_CONFIG_RELATIVE_PATH,
 };
 pub use crate::discover::{
     discover, label_to_encoding, plan, scan, Proposal, ProposalNote, SourceFile, SAMPLE_BYTES,

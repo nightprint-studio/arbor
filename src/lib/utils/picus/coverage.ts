@@ -157,26 +157,53 @@ export function bucketCoverage(obj: InventoryObject, bucket: CoverageBucket): nu
 }
 
 /**
- * The columns that say nothing about `obj` — the gaps, as labels.
+ * The columns that are a real gap for `obj`, by bucket key.
  *
- * A dialect column is **not** a gap when the portable column at the same role
- * covers the object: the portable scripts run on that engine too, so the object
- * really is installed there and calling it missing would be reporting the
- * opposite of the truth. This is the display-side counterpart of the backend's
- * lane rule, which is why the two must agree — the matrix and `CONS001` are read
- * side by side, and a cell flagged here that the report does not raise reads as
- * one of them being broken.
+ * **The single definition of "gap" in the frontend**, and it has to be: the same
+ * question is asked by the matrix (which cells to mark), by the sidebar (which
+ * objects get a warning) and by the header count, and three separate `=== 0`
+ * tests answered it three different ways. The result was a table lit up with
+ * marks against a report holding two findings — a tool contradicting itself,
+ * which costs more trust than the marks were ever worth.
+ *
+ * A zero is **not** a gap when:
+ *
+ *  - the object is **external** — nothing here creates, alters or writes to it,
+ *    so its zeroes are the boundary of the repository rather than something to
+ *    go and fix. The backend never reports these either;
+ *  - a **portable** column at the same role covers it. Portable scripts run on
+ *    both engines, so the object really is installed there and calling the
+ *    dialect column missing would report the opposite of the truth. This mirrors
+ *    the backend's lane rule, and the two must agree: a cell marked here that
+ *    `CONS001` does not raise reads as one of them being broken.
  */
-export function coverageGaps(obj: InventoryObject, buckets: CoverageBucket[]): string[] {
+export function gapKeys(obj: InventoryObject, buckets: CoverageBucket[]): Set<string> {
+  if (obj.external) return new Set();
   const portableRoles = new Set(
     buckets
       .filter((b) => b.dialect === GENERIC_ENGINE && bucketCoverage(obj, b) > 0)
       .map((b) => b.role),
   );
-  return buckets
-    .filter((b) => bucketCoverage(obj, b) === 0)
-    .filter((b) => !(isDialect(b.dialect) && portableRoles.has(b.role)))
-    .map((b) => b.label);
+  return new Set(
+    buckets
+      .filter((b) => bucketCoverage(obj, b) === 0)
+      .filter((b) => !(isDialect(b.dialect) && portableRoles.has(b.role)))
+      .map((b) => b.key),
+  );
+}
+
+/** The same gaps, as column labels — for a tooltip or a sentence. */
+export function coverageGaps(obj: InventoryObject, buckets: CoverageBucket[]): string[] {
+  const keys = gapKeys(obj, buckets);
+  return buckets.filter((b) => keys.has(b.key)).map((b) => b.label);
+}
+
+/** Objects with at least one real gap — the figure the header reports. */
+export function objectsWithGaps(
+  objects: InventoryObject[],
+  buckets: CoverageBucket[],
+): InventoryObject[] {
+  return objects.filter((o) => gapKeys(o, buckets).size > 0);
 }
 
 /** One line of the per-object detail: a folder and what it says about the object. */

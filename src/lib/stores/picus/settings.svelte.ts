@@ -35,6 +35,7 @@ import {
   projectSettings as readProjectSettings,
   setProjectSettings,
   type InitialisationModel,
+  type ProductSetting,
   type ProjectSettings,
 } from '$lib/ipc/picus/project';
 import { DEFAULT_VERSION_TABLE, type VersionTableConfig } from '$lib/types/picus';
@@ -88,6 +89,11 @@ function createSettingsStore() {
   let excludedObjects = $state<string[]>([]);
   /** Other tables that also record a version — one per installed module. */
   let otherVersionTables = $state<string[]>([]);
+  /**
+   * The products this repository installs, and the predicate that selects each
+   * one's version row. Empty for the ordinary repository.
+   */
+  let products = $state<ProductSetting[]>([]);
   /** The project settings differ from what is on disk. */
   let projectDirty = $state(false);
   let projectSaving = $state(false);
@@ -106,6 +112,7 @@ function createSettingsStore() {
       compareDialects,
       disabledRules,
       excludedObjects,
+      products,
     };
   }
 
@@ -125,6 +132,7 @@ function createSettingsStore() {
     compareDialects = s.compareDialects;
     disabledRules = [...s.disabledRules];
     excludedObjects = [...s.excludedObjects];
+    products = s.products.map((p) => ({ ...p }));
     projectDirty = false;
   }
 
@@ -193,6 +201,25 @@ function createSettingsStore() {
     get disabledRules() { return disabledRules; },
     get excludedObjects() { return excludedObjects; },
     get otherVersionTables() { return otherVersionTables; },
+    get products() { return products; },
+
+    /**
+     * The predicate that selects the version row for a folder's product.
+     *
+     * The project's own filter when the folder names no product, or names one
+     * nothing declares — the same fallback the backend applies, and deliberately
+     * the same shape, because a generated block that stamped a different row than
+     * the preview showed would be the worst bug this feature could have.
+     */
+    versionFilterFor(product: string | null | undefined): string {
+      const named = product?.trim();
+      if (!named) return versionTable.filter;
+      const declared = products.find((p) => p.name.trim().toLowerCase() === named.toLowerCase());
+      return declared ? declared.versionFilter : versionTable.filter;
+    },
+
+    /** Replace the product list. Blanks and duplicate names are dropped on save. */
+    setProducts(next: ProductSetting[]) { products = next; projectDirty = true; },
     get projectDirty() { return projectDirty; },
     get projectSaving() { return projectSaving; },
     get defaultEncoding() { return defaultEncoding; },

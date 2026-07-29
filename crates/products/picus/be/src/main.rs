@@ -72,6 +72,12 @@ mod apply;
 // The SQL abbreviation expander, joined to a live connection: the language is a
 // foundation crate, this supplies the schema, the dialect and the emitter.
 mod abbrev;
+// The columns of a table no connected database knows, read from the scripts.
+mod columns;
+// What the scripts already say about these rows and this version range.
+mod reconcile;
+// Named sets of destinations — "where a change like this always goes".
+mod destinations;
 // Where one statement ends and the next begins, so Run can execute exactly one.
 mod statements;
 

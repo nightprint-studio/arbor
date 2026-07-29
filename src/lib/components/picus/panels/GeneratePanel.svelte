@@ -1,34 +1,27 @@
 <script lang="ts">
   /**
-   * Generate panel — the sidebar face of the DML generator: pick a source, see
-   * at a glance which destinations are armed.
+   * Generate panel — the sidebar face of the DML generator: which set of places
+   * is armed, and which destinations that came to.
    *
    * The rules of each destination are edited in the centre area, not here: this
-   * panel answers "where is this going?", the tab answers "in what form?".
+   * panel answers "where is this going?", the tab answers "in what form?". Which
+   * is why the **source** is not offered here any more — the Generate tab picks
+   * it in the card's own header, and `Alt+1/2/3` do it from anywhere, so a third
+   * copy in the sidebar was spending the panel's best space on the one question
+   * it does not answer.
    */
-  import { FormInput, ClipboardPaste, FileSpreadsheet, Files, Check, Plus } from 'lucide-svelte';
+  import { FormInput, Files, Check, Plus } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
+  import DestinationSetList from '../generate/DestinationSetList.svelte';
   import PicusDialectChip from '../PicusDialectChip.svelte';
   import PicusRoleChip from '../PicusRoleChip.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
-  import type { DmlSource } from '$lib/types/picus';
-
-  const SOURCES: { id: DmlSource; label: string; hint: string; icon: any }[] = [
-    { id: 'form', label: 'Guided form', hint: 'Columns read from the schema', icon: FormInput },
-    { id: 'paste', label: 'Existing INSERTs', hint: 'Paste them and they get re-read', icon: ClipboardPaste },
-    { id: 'csv', label: 'CSV file', hint: 'One row per record', icon: FileSpreadsheet },
-  ];
-
-  function pick(source: DmlSource) {
-    dmlStore.setSource(source);
-    picusTabsStore.openGenerate();
-  }
 </script>
 
 <PanelShell title="Generate DML">
@@ -46,18 +39,8 @@
     </Button>
   {/snippet}
 
-  <SidebarSection label="Source" expanded>
-    {#each SOURCES as s (s.id)}
-      <SidebarItem selected={dmlStore.source === s.id} onclick={() => pick(s.id)}>
-        {#snippet icon()}
-          {@const Icon = s.icon}
-          <Icon size={13} />
-        {/snippet}
-        <span class="gp-label">{s.label}</span>
-        {#snippet subtitle()}{s.hint}{/snippet}
-      </SidebarItem>
-    {/each}
-  </SidebarSection>
+  <!-- The same six places, every release. Named once, kept with the repository. -->
+  <DestinationSetList />
 
   <SidebarSection
     label="Destinations"
@@ -117,8 +100,6 @@
 </PanelShell>
 
 <style>
-  .gp-label { overflow: hidden; text-overflow: ellipsis; }
-
   .gp-chips { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 
   .gp-path {

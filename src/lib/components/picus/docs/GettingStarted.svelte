@@ -52,6 +52,32 @@
     the open-findings counter (click it to jump to the report), and the project path.</li>
 </ul>
 
+<h2>Finding things</h2>
+<p>
+  Two boxes, and they answer different questions. <kbd>Ctrl</kbd>+<kbd>K</kbd> is the
+  <b>command palette</b>: what can I do. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> is
+  <b>Go to</b>: where is it — every script, every indexed object, every connection, in one
+  list. They are separate because merging them produces a ranking where a verb and a
+  filename compete, and neither question gets a good answer.
+</p>
+<p>
+  Go to matches loosely and in order, so <code>agg pos</code> finds
+  <code>AGGIORNAMENTO/2024/POS/4_13.sql</code> — every term has to land somewhere, in the
+  name or in the path, and the matched letters are lit in the row. Three directives narrow
+  it further, typed inline anywhere in the query:
+</p>
+<ul>
+  <li><code>sort:new</code> — most recently changed first. Also <code>sort:name</code>,
+    <code>sort:name-desc</code>, <code>sort:path</code>.</li>
+  <li><code>ext:sql</code> — only that extension.</li>
+  <li><code>in:AGGIORNAMENTO</code> — only under a path containing that.</li>
+</ul>
+<p>
+  <kbd>Tab</kbd> cycles the categories, the arrows move, <kbd>Enter</kbd> opens. Anything
+  not recognised as a directive stays part of the search text, so a colon in a name never
+  makes the box refuse to find it.
+</p>
+
 <h2>The rule everything else follows</h2>
 <p>
   <b>The dialect belongs to the script, not to the project.</b> There is no "current

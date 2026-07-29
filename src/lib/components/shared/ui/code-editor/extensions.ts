@@ -18,7 +18,7 @@
 import {
   EditorView, lineNumbers, keymap, hoverTooltip,
   highlightActiveLine, highlightActiveLineGutter, drawSelection,
-  ViewPlugin, Decoration, type DecorationSet, type PluginValue, type ViewUpdate,
+  ViewPlugin, Decoration, type DecorationSet, type KeyBinding, type PluginValue, type ViewUpdate,
 } from '@codemirror/view';
 import { EditorState, StateField, StateEffect, Prec, type Extension, type Text } from '@codemirror/state';
 import { history, defaultKeymap, historyKeymap, indentWithTab, deleteLine } from '@codemirror/commands';
@@ -117,6 +117,18 @@ export interface CodeEditorExtensionsOptions {
   scrollbarOverview?: boolean;
   /** Language-intelligence hook bag (reserved; opaque to the core today). */
   intel?: unknown;
+  /**
+   * Bindings the **host** owns, installed above everything CodeMirror binds.
+   *
+   * Without this an editor silently eats its window's shortcuts: `Mod-Enter` is
+   * `insertBlankLine` in `defaultKeymap`, so a host that means "run the selection"
+   * gets a blank line and no run, and the failure is invisible — the key does
+   * *something*, just not the thing. Anything listed here wins outright.
+   *
+   * Return `true` from a binding to consume the key. Returning `false` lets it
+   * fall through to CodeMirror, which is how a host claims a key conditionally.
+   */
+  keyBindings?: readonly KeyBinding[];
 }
 
 /** Build the full extension set for one editor bound to `lang`. Returns the
@@ -256,6 +268,13 @@ export function createCodeEditorExtensions(
   if (hoverSource) {
     exts.push(hoverTooltip(hoverSource, { hoverTime: 350 }));
   }
+
+  // Host-owned keys. `Prec.highest`, so they beat `defaultKeymap` — which is the whole
+  // point: the keys a host wants back (`Mod-Enter`, `Mod-Shift-Enter`) are ones CodeMirror
+  // already binds to something plausible, so losing the race looks like a broken shortcut
+  // rather than a stolen one. Registered AFTER the completion keymap above and at the same
+  // precedence, so while the popup is open completion still owns Enter / Tab / Escape.
+  if (opts.keyBindings?.length) exts.push(Prec.highest(keymap.of([...opts.keyBindings])));
 
   // Emmet Tab expansion (markup buffers). Pushed BEFORE the base keymap so its Tab binding is
   // tried first; on no abbreviation it returns false and Tab falls through to `indentWithTab`.
