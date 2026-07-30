@@ -301,7 +301,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 9px 14px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--text-secondary);
     border-bottom: 1px solid var(--border-subtle);
@@ -311,7 +311,7 @@
 
   .hint {
     padding: 7px 14px 5px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     border-bottom: 1px solid var(--border-subtle);
   }
@@ -322,7 +322,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 2px 8px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--text-secondary);
     cursor: pointer;
@@ -351,14 +351,14 @@
   .dot-ok      { color: var(--success); }
   .dot-no      { color: var(--text-disabled); }
   .dot-unknown { color: var(--text-disabled); }
-  .dot-pending { font-size: 20px; color: var(--text-disabled); line-height: 1; }
+  .dot-pending { font-size: var(--font-size-2xl); color: var(--text-disabled); line-height: 1; }
 
   .name-col {
     display: flex; flex-direction: column; gap: 1px;
     width: 140px; flex-shrink: 0;
   }
-  .name { font-size: 12.5px; font-weight: 500; color: var(--text-primary); }
-  .cmd  { font-size: 10.5px; color: var(--text-muted); font-family: var(--font-code);
+  .name { font-size: var(--font-size-sm); font-weight: 500; color: var(--text-primary); }
+  .cmd  { font-size: var(--font-size-2xs); color: var(--text-muted); font-family: var(--font-code);
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
 
   .path-col      { flex: 1; min-width: 0; }
@@ -370,7 +370,7 @@
     border: 1px solid var(--border);
     border-radius: 5px;
     padding: 4px 8px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
     outline: none;
     transition: border-color 0.15s;
@@ -420,12 +420,12 @@
   }
   .custom-row:last-child { border-bottom: none; }
   .custom-info    { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .custom-name    { font-size: 12.5px; font-weight: 500; color: var(--text-primary); }
-  .custom-cmd     { font-size: 11px; color: var(--text-muted); font-family: var(--font-code); }
+  .custom-name    { font-size: var(--font-size-sm); font-weight: 500; color: var(--text-primary); }
+  .custom-cmd     { font-size: var(--font-size-xs); color: var(--text-muted); font-family: var(--font-code); }
   .custom-actions { display: flex; align-items: center; gap: 5px; }
 
   .default-pill {
-    font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: var(--radius-sm);
+    font-size: var(--font-size-2xs); font-weight: 600; padding: 1px 6px; border-radius: var(--radius-sm);
     background: var(--accent-subtle); color: var(--accent); text-transform: uppercase;
   }
   .action-btn {
@@ -438,14 +438,14 @@
   .action-btn:hover         { background: var(--bg-hover); color: var(--text-primary); }
   .action-btn.danger:hover  { color: var(--error); background: var(--error-subtle); }
 
-  .empty-msg { padding: 12px 14px; font-size: 12px; color: var(--text-muted); font-style: italic; }
+  .empty-msg { padding: 12px 14px; font-size: var(--font-size-sm); color: var(--text-muted); font-style: italic; }
 
   .save-row { display: flex; justify-content: flex-end; padding-top: 4px; }
 
   .btn {
     display: flex; align-items: center; gap: 5px;
     padding: 5px 14px; border-radius: var(--radius-md);
-    font-size: 12.5px; font-weight: 500;
+    font-size: var(--font-size-sm); font-weight: 500;
     cursor: pointer; border: 1px solid transparent;
     transition: background 0.12s, opacity 0.12s;
   }

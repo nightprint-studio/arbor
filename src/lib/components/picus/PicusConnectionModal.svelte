@@ -18,6 +18,7 @@
    * Keyboard-first: the first field is focused on open, Tab walks the form in
    * reading order, Ctrl+Enter saves, Esc cancels.
    */
+  import { untrack } from 'svelte';
   import { Database, KeyRound, Plug, ShieldCheck, CircleAlert, CheckCircle2, FolderOpen, X } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -28,6 +29,7 @@
   import FormField from '$lib/components/shared/ui/FormField.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import Collapsible from '$lib/components/shared/ui/Collapsible.svelte';
+  import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import ColorPalettePicker from '$lib/components/shared/ui/ColorPalettePicker.svelte';
@@ -68,24 +70,20 @@
       .catch(() => { providers = []; });
   });
 
-  let name = $state(existing?.name ?? '');
-  let alias = $state(existing?.alias ?? '');
-  let dialect = $state<Dialect>(existing?.engine ?? 'postgres');
-  let host = $state(existing?.host ?? '');
-  let port = $state(existing?.port ?? 5432);
-  let service = $state(existing?.database ?? '');
-  let schema = $state(existing?.schema ?? '');
-  let username = $state(existing?.user ?? '');
-  let colorIdx = $state(existing?.colorIdx ?? 2);
-  let readOnly = $state(existing?.readOnly ?? false);
-  let tls = $state(existing?.tls ?? false);
+  let name = $state('');
+  let alias = $state('');
+  let dialect = $state<Dialect>('postgres');
+  let host = $state('');
+  let port = $state(5432);
+  let service = $state('');
+  let schema = $state('');
+  let username = $state('');
+  let colorIdx = $state(2);
+  let readOnly = $state(false);
+  let tls = $state(false);
   /** The free-form driver parameters. The script root is not among them — it is a
    *  field of the spec in its own right, edited below with a folder picker. */
-  let extraParams = $state(
-    Object.entries(existing?.params ?? {})
-      .map(([k, v]) => `${k}=${v}`)
-      .join('\n'),
-  );
+  let extraParams = $state('');
 
   /**
    * The folder of SQL scripts this database is installed from.
@@ -94,8 +92,48 @@
    * this connection is what brings these scripts into view. Optional by design —
    * a connection used only to run queries never needs one.
    */
-  let scriptRoot = $state(existing?.scriptRoot ?? '');
+  let scriptRoot = $state('');
   let rootPickerOpen = $state(false);
+
+  /**
+   * Fill the form from the connection being edited.
+   *
+   * The fields cannot be initialised from `existing` directly. It is derived from
+   * a store, and a `$state(existing?.host ?? '')` initialiser captures only what
+   * was there at **mount** — so a dialog opened while the connections were still
+   * loading came up blank and stayed blank, describing a connection it had, and
+   * then quietly saved those blanks over it. (Svelte says this out loud:
+   * `state_referenced_locally`, eleven times in this file alone.)
+   *
+   * Seeded once per spec, and never again while it is the same one, so a
+   * re-render cannot overwrite what is being typed. `seeded` is a plain `let` on
+   * purpose — making it reactive would have writing it re-enter the effect that
+   * writes it — and the field writes are untracked for the same reason.
+   */
+  let seeded: string | null = null;
+  $effect(() => {
+    const spec = existing;
+    const key = spec?.id ?? '';
+    if (key === seeded) return;
+    seeded = key;
+    untrack(() => {
+      name = spec?.name ?? '';
+      alias = spec?.alias ?? '';
+      dialect = spec?.engine ?? 'postgres';
+      host = spec?.host ?? '';
+      port = spec?.port ?? 5432;
+      service = spec?.database ?? '';
+      schema = spec?.schema ?? '';
+      username = spec?.user ?? '';
+      colorIdx = spec?.colorIdx ?? 2;
+      readOnly = spec?.readOnly ?? false;
+      tls = spec?.tls ?? false;
+      scriptRoot = spec?.scriptRoot ?? '';
+      extraParams = Object.entries(spec?.params ?? {})
+        .map(([k, v]) => `${k}=${v}`)
+        .join('\n');
+    });
+  });
 
   /**
    * The password.
@@ -163,6 +201,32 @@
   );
 
   const valid = $derived(name.trim() !== '' && host.trim() !== '' && service.trim() !== '');
+
+  // ── Pages ───────────────────────────────────────────────────────────────────
+  //
+  // One scroll of five headed sections became four pages. The split is by *when*
+  // you touch them, not by what they are made of: Identity is filled in once and
+  // then never again, Server is what you come back to when something moved,
+  // Scripts is a decision about a folder, Advanced is the engine's own vocabulary
+  // and is usually empty.
+  //
+  // Identity opens first because Name is required and because it is what the
+  // dialog is called after. The other two required fields live on Server, so both
+  // pages carry a dot while anything on them is missing — a Save button that is
+  // disabled for a reason on a page you cannot see is the failure a tabbed form
+  // invites, and the dot is the whole defence against it.
+  type Page = 'identity' | 'server' | 'scripts' | 'session';
+  let page = $state<Page>('identity');
+
+  const identityIncomplete = $derived(name.trim() === '');
+  const serverIncomplete = $derived(host.trim() === '' || service.trim() === '');
+
+  const pages = $derived<TabItem[]>([
+    { id: 'identity', label: 'Identity', badge: identityIncomplete ? '!' : undefined },
+    { id: 'server', label: 'Server', badge: serverIncomplete ? '!' : undefined },
+    { id: 'scripts', label: 'Scripts' },
+    { id: 'session', label: 'Session' },
+  ]);
 
   /** Set one key in the `key=value` block, preserving the rest and the order. */
   function setParam(key: string, value: string): string {
@@ -292,8 +356,19 @@
 
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div class="cm" onkeydown={onKeyDown} role="form">
+    <div class="cm-tabs">
+      <Tabs
+        items={pages}
+        value={page}
+        variant="underline"
+        size="sm"
+        ariaLabel="Connection settings"
+        onSelect={(id) => (page = id as Page)}
+      />
+    </div>
+
+    {#if page === 'identity'}
     <section class="cm-section">
-      <h2>Identity</h2>
       <div class="cm-grid">
         <FormField label="Name" required>
           <Input bind:element={firstField} value={name} placeholder="ORCL-DEV" oninput={(v) => (name = v)} />
@@ -315,9 +390,10 @@
         />
       </FormField>
     </section>
+    {/if}
 
+    {#if page === 'server'}
     <section class="cm-section">
-      <h2>Server</h2>
       <FormField label="Engine">
         <Select value={dialect} options={dialectOptions} onchange={(v) => switchDialect(v as Dialect)} />
       </FormField>
@@ -366,9 +442,10 @@
         </Alert>
       {/if}
     </section>
+    {/if}
 
+    {#if page === 'scripts'}
     <section class="cm-section">
-      <h2>Scripts</h2>
       <FormField
         label="Script repository"
         hint="The folder this database is installed from. Picus reads its directory tree as it is and works out which parts are written for which engine. Opening this connection brings its scripts, its inventory and its consistency report into the window. Optional: a connection used only for queries needs none."
@@ -404,9 +481,10 @@
         </div>
       </FormField>
     </section>
+    {/if}
 
+    {#if page === 'session'}
     <section class="cm-section">
-      <h2>Session</h2>
       <FormField label="Read-only">
         <Toggle
           checked={readOnly}
@@ -471,9 +549,15 @@
         </div>
       </Collapsible>
     </section>
+    {/if}
 
+    <!-- Credentials belong to **Server**: the password is part of reaching the
+         database, not a category of its own, and separating them meant filling in
+         a host on one page and the password that goes with it on another. It is a
+         second block only because it is last in this file — the page it renders on
+         is the one above. -->
+    {#if page === 'server'}
     <section class="cm-section">
-      <h2>Credentials</h2>
       <Alert variant="info" compact>
         <span class="cm-secret">
           <KeyRound size={12} />
@@ -513,6 +597,7 @@
         </div>
       {/if}
     </section>
+    {/if}
   </div>
 
   {#snippet footer()}
@@ -561,13 +646,13 @@
 {/if}
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
 
   .cm-keychain {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-tertiary);
   }
 
@@ -580,15 +665,21 @@
     padding: 16px;
   }
 
-  .cm-section { display: flex; flex-direction: column; gap: 12px; }
-  .cm-section h2 {
-    margin: 0;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-muted);
+  /* The page strip stays put while the page under it scrolls: on a short page it
+     would otherwise sit in the middle of the dialog. */
+  .cm-tabs {
+    position: sticky;
+    top: -16px;
+    z-index: 1;
+    margin: -16px -16px 0;
+    padding: 0 16px;
+    background: var(--bg-modal);
+    border-bottom: 1px solid var(--border-subtle);
   }
+
+  /* No `h2`: the page is named by the tab above it, and repeating that name as a
+     heading inside the page is the same word twice on one screen. */
+  .cm-section { display: flex; flex-direction: column; gap: 12px; }
 
   .cm-grid {
     display: grid;
@@ -607,12 +698,12 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
   .cm-preview code {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .cm-nondefault { color: var(--warning); }
@@ -623,7 +714,7 @@
   .cm-root > :global(:first-child) { flex: 1; min-width: 0; }
 
   .cm-advanced { display: flex; flex-direction: column; gap: 12px; padding-top: 4px; }
-  .cm-advanced-head { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); }
+  .cm-advanced-head { font-size: var(--font-size-xs); font-weight: 600; color: var(--text-secondary); }
 
   .cm-secret { display: inline-flex; align-items: flex-start; gap: 6px; line-height: 1.5; }
   .cm-secret :global(svg) { margin-top: 2px; flex-shrink: 0; }
@@ -636,7 +727,7 @@
     background: var(--success-subtle);
     border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
     border-radius: var(--radius-md);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .cm-test :global(svg) { color: var(--success); }

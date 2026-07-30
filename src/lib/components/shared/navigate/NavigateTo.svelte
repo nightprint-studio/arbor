@@ -375,7 +375,7 @@
     border: none;
     outline: none;
     color: var(--text-primary);
-    font-size: 14px;
+    font-size: var(--font-size-lg);
   }
   .nv-field::placeholder { color: var(--text-disabled); }
 
@@ -395,12 +395,12 @@
     border-radius: var(--radius-sm);
     background: var(--bg-base);
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-secondary);
     white-space: nowrap;
   }
   .nv-count {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     font-variant-numeric: tabular-nums;
   }
@@ -409,7 +409,7 @@
 
   .nv-group {
     padding: 8px 14px 3px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.07em;
     text-transform: uppercase;
@@ -426,7 +426,7 @@
     border: none;
     text-align: left;
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
   }
   .nv-on { background: var(--bg-active); }
@@ -438,7 +438,7 @@
   .nv-name :global(b) { color: var(--accent); font-weight: 700; }
   .nv-detail {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -448,22 +448,22 @@
   .nv-detail :global(b) { color: var(--text-secondary); font-weight: 600; }
   .nv-tag {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     padding: 0 4px;
   }
 
-  .nv-note { padding: 14px; font-size: 12px; line-height: 1.55; color: var(--text-muted); }
+  .nv-note { padding: 14px; font-size: var(--font-size-sm); line-height: 1.55; color: var(--text-muted); }
   .nv-help {
     display: grid;
     grid-template-columns: max-content minmax(0, 1fr);
     gap: 5px 12px;
     padding: 0 14px 14px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
   }
-  .nv-help dt code { font-family: var(--font-code); font-size: 11px; color: var(--text-secondary); }
+  .nv-help dt code { font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-secondary); }
   .nv-help dd { color: var(--text-muted); }
 
   .nv-foot {
@@ -473,7 +473,7 @@
     padding: 7px 12px;
     border-top: 1px solid var(--border-subtle);
     background: var(--bg-elevated);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     flex-shrink: 0;
   }

@@ -72,7 +72,7 @@
     transform: translateY(-50%);
   }
   .tt-title {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--text-secondary);
     margin-bottom: 6px;
@@ -90,7 +90,7 @@
     grid-template-columns: 8px 1fr auto;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .tt-dot {
     width: 8px;
@@ -107,7 +107,7 @@
     margin-top: 6px;
     padding-top: 6px;
     border-top: 1px solid var(--border-subtle);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
   }
 </style>

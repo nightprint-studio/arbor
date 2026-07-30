@@ -335,7 +335,7 @@
   }
 
   .target-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
     white-space: nowrap;
@@ -355,7 +355,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     padding: 4px 8px;
     outline: none;
     cursor: pointer;
@@ -381,7 +381,7 @@
     border: none;
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     cursor: pointer;
     transition: opacity var(--transition-fast);
@@ -410,7 +410,7 @@
     color: var(--text-muted);
     text-align: center;
   }
-  .empty-hint p { font-size: 13px; line-height: 1.6; }
+  .empty-hint p { font-size: var(--font-size-md); line-height: 1.6; }
   .empty-hint.success p { color: var(--success); }
 
   :global(.hint-icon) { color: var(--text-disabled); opacity: 0.6; }
@@ -439,7 +439,7 @@
     border: none;
     cursor: pointer;
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     padding: 2px 4px;
     border-radius: var(--radius-sm);
@@ -449,7 +449,7 @@
 
   .count-hint {
     margin-left: auto;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
   }
 
@@ -484,14 +484,14 @@
   :global(.branch-icon-svg) { color: var(--text-muted); flex-shrink: 0; }
 
   .remote-prefix {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-disabled);
     font-family: var(--font-code);
     flex-shrink: 0;
   }
 
   .branch-name {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--text-primary);
     min-width: 0;
@@ -503,14 +503,14 @@
   }
 
   .branch-oid {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     font-family: var(--font-code);
     flex-shrink: 0;
   }
 
   .branch-summary {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     flex: 1;
     overflow: hidden;
@@ -525,7 +525,7 @@
     align-items: center;
     gap: 5px;
     color: var(--warning, #e2a335);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     flex: 1;
     margin-right: auto;
   }

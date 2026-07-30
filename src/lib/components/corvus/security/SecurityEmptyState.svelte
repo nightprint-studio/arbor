@@ -33,13 +33,13 @@
   }
   .state-title {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-primary);
   }
   .state-hint {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 1.5;
     max-width: 240px;
   }

@@ -251,9 +251,9 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
   .hdr-name {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -280,13 +280,13 @@
   }
   .sec-head h3 {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     letter-spacing: 0.02em;
     color: var(--text-primary);
   }
   .sec-count {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--text-muted);
     background: var(--bg-overlay);
@@ -297,7 +297,7 @@
   }
   .sec-note {
     margin: -2px 0 2px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     line-height: 1.45;
   }
@@ -323,7 +323,7 @@
     align-items: center;
     gap: 8px;
     padding: 7px 10px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     border-top: 1px solid var(--border-subtle);
   }
@@ -348,7 +348,7 @@
     justify-content: space-between;
     gap: 10px;
   }
-  .spell-status { font-size: 11px; color: var(--text-muted); }
+  .spell-status { font-size: var(--font-size-xs); color: var(--text-muted); }
   .spell-status.ok { color: var(--success); }
-  .spell-prog { font-size: 10.5px; color: var(--text-muted); font-family: var(--font-code); }
+  .spell-prog { font-size: var(--font-size-2xs); color: var(--text-muted); font-family: var(--font-code); }
 </style>

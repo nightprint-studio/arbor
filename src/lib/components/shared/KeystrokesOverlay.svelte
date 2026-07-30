@@ -339,17 +339,17 @@
   /* ── Size variants ────────────────────────────────────────────────────── */
   .sz-sm .ks-body    { padding: 7px 11px 8px 10px; gap: 3px; }
   .sz-sm .ks-stripe  { width: 2px; }
-  .sz-sm .ks-key     { font-size: 10px; min-width: 1.6em; height: 1.6em; padding: 0 0.5em; border-radius: 5px; }
-  .sz-sm .ks-action  { font-size: 10px; max-width: 30ch; }
+  .sz-sm .ks-key     { font-size: var(--font-size-2xs); min-width: 1.6em; height: 1.6em; padding: 0 0.5em; border-radius: 5px; }
+  .sz-sm .ks-action  { font-size: var(--font-size-2xs); max-width: 30ch; }
   .sz-sm .ks-card    { border-radius: 11px; }
 
-  .sz-md .ks-key     { font-size: 12px; }
-  .sz-md .ks-action  { font-size: 11px; }
+  .sz-md .ks-key     { font-size: var(--font-size-sm); }
+  .sz-md .ks-action  { font-size: var(--font-size-xs); }
 
   .sz-lg .ks-body    { padding: 12px 18px 13px 14px; gap: 6px; }
   .sz-lg .ks-stripe  { width: 4px; }
-  .sz-lg .ks-key     { font-size: 15px; min-width: 2.1em; height: 2.1em; padding: 0 0.75em; border-radius: 9px; border-bottom-width: 3px; }
-  .sz-lg .ks-action  { font-size: 13px; max-width: 44ch; }
+  .sz-lg .ks-key     { font-size: var(--font-size-lg); min-width: 2.1em; height: 2.1em; padding: 0 0.75em; border-radius: 9px; border-bottom-width: 3px; }
+  .sz-lg .ks-action  { font-size: var(--font-size-md); max-width: 44ch; }
   .sz-lg .ks-card    { border-radius: 16px; }
   .sz-lg .ks-count   { font-size: 0.85em; padding: 2px 9px; }
 

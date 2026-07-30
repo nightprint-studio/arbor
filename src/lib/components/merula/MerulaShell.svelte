@@ -629,7 +629,7 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     color: var(--text-secondary);
-    font-size: 11px; font-weight: 600;
+    font-size: var(--font-size-xs); font-weight: 600;
     cursor: pointer;
     opacity: 0.25;
     transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);

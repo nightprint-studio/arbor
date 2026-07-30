@@ -740,7 +740,7 @@
   .chip {
     display: inline-flex; align-items: center; gap: 3px;
     padding: 3px 7px;
-    font-size: 10px; font-weight: 500;
+    font-size: var(--font-size-2xs); font-weight: 500;
     background: transparent;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
@@ -758,12 +758,12 @@
   }
   .chip-badge {
     background: var(--accent); color: var(--bg-base);
-    border-radius: 99px; padding: 0 4px; font-size: 9px;
+    border-radius: 99px; padding: 0 4px; font-size: var(--font-size-3xs);
   }
   .chip-clear { background: transparent; border-color: transparent; }
   .chip-clear:hover { background: var(--bg-hover); border-color: var(--border-subtle); color: var(--text-secondary); }
 
-  .result-count { font-size: 10px; color: var(--text-muted); margin-left: 2px; }
+  .result-count { font-size: var(--font-size-2xs); color: var(--text-muted); margin-left: 2px; }
 
   /* ── Dropdowns ──────────────────────────────────────────────────────────── */
   .drop-backdrop { position: fixed; inset: 0; z-index: var(--z-backdrop); background: transparent; border: none; padding: 0; cursor: default; }
@@ -779,7 +779,7 @@
   .chip-drop-item {
     display: flex; align-items: center; gap: 6px;
     width: 100%; padding: 5px 8px; text-align: left;
-    font-size: 11px; font-family: var(--font-ui-sans);
+    font-size: var(--font-size-xs); font-family: var(--font-ui-sans);
     background: transparent; border: none; color: var(--text-secondary);
     border-radius: var(--radius-sm); cursor: pointer;
     transition: background var(--transition-fast);
@@ -787,7 +787,7 @@
   .chip-drop-item:hover { background: var(--bg-hover); }
   .chip-drop-selected { color: var(--accent); }
   .check { margin-left: auto; }
-  .kind-count { margin-left: auto; font-size: 10px; color: var(--text-muted); }
+  .kind-count { margin-left: auto; font-size: var(--font-size-2xs); color: var(--text-muted); }
 
   .kind-dot {
     width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
@@ -801,7 +801,7 @@
     background: color-mix(in srgb, var(--accent) 8%, transparent);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
-    font-size: 10.5px; line-height: 1.45;
+    font-size: var(--font-size-2xs); line-height: 1.45;
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
   }
@@ -839,10 +839,10 @@
   .card-spacer { flex: 1; }
   .card-time {
     display: inline-flex; align-items: center; gap: 3px;
-    font-size: 10px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0;
+    font-size: var(--font-size-2xs); color: var(--text-muted); white-space: nowrap; flex-shrink: 0;
   }
   .hash-chip {
-    font-family: var(--font-code); font-size: 11px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
     color: var(--accent); white-space: nowrap; flex-shrink: 0;
   }
   .card-msg {
@@ -853,23 +853,23 @@
     display: flex; align-items: center; gap: 6px; min-width: 0;
   }
   .ref-badge {
-    font-size: 10px; font-family: var(--font-code); color: var(--text-muted);
+    font-size: var(--font-size-2xs); font-family: var(--font-code); color: var(--text-muted);
     background: transparent; border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); padding: 1px 4px; white-space: nowrap; flex-shrink: 0;
   }
   .card-author {
-    font-size: 10px; color: var(--text-muted);
+    font-size: var(--font-size-2xs); color: var(--text-muted);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .consumed-pill {
-    font-size: 9px; font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase;
+    font-size: var(--font-size-3xs); font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase;
     padding: 1px 5px; border-radius: 99px;
     background: var(--accent-subtle); color: var(--accent);
   }
 
   /* ── Kind badge + dot colors ─────────────────────────────────────────────── */
   .kind-badge {
-    font-size: 10px; font-weight: 600;
+    font-size: var(--font-size-2xs); font-weight: 600;
     padding: 1px 6px; border-radius: var(--radius-sm);
     white-space: nowrap; flex-shrink: 0;
   }
@@ -888,7 +888,7 @@
   }
   .rec-btn {
     display: inline-flex; align-items: center; gap: 4px;
-    padding: 3px 8px; font-size: 10.5px; font-weight: 500;
+    padding: 3px 8px; font-size: var(--font-size-2xs); font-weight: 500;
     background: transparent;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
@@ -922,7 +922,7 @@
     background: var(--bg-base);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-ui-sans);
     color: var(--text-secondary);
   }
@@ -944,7 +944,7 @@
   .preview-files {
     list-style: none; margin: 0; padding: 0;
     max-height: 180px; overflow-y: auto;
-    font-family: var(--font-code); font-size: 10px;
+    font-family: var(--font-code); font-size: var(--font-size-2xs);
     color: var(--text-secondary);
   }
   .preview-files li {
@@ -959,10 +959,10 @@
     border-top: 1px dashed var(--border-subtle);
   }
   .skipped-header { color: var(--color-stash); }
-  .skipped-reason { color: var(--text-muted); font-style: italic; font-size: 9px; }
+  .skipped-reason { color: var(--text-muted); font-style: italic; font-size: var(--font-size-3xs); }
   .skipped-pill {
     display: inline-flex; align-items: center; gap: 3px;
-    font-size: 9px; font-weight: 600; letter-spacing: 0.2px;
+    font-size: var(--font-size-3xs); font-weight: 600; letter-spacing: 0.2px;
     padding: 1px 5px; border-radius: 99px;
     background: color-mix(in srgb, var(--color-stash) 14%, transparent);
     color: var(--color-stash);
@@ -970,7 +970,7 @@
   }
   .log-only-note {
     display: inline-flex; align-items: center; gap: 4px;
-    font-size: 10.5px; color: var(--text-muted);
+    font-size: var(--font-size-2xs); color: var(--text-muted);
     font-style: italic;
   }
   .log-only-note :global(svg) { color: var(--color-stash); }
@@ -986,8 +986,8 @@
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
   }
   .load-more-btn:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border); }
-  .load-more-count { color: var(--text-muted); font-size: 10px; }
-  .list-end { text-align: center; padding: 8px; font-size: 10px; color: var(--text-muted); }
+  .load-more-count { color: var(--text-muted); font-size: var(--font-size-2xs); }
+  .list-end { text-align: center; padding: 8px; font-size: var(--font-size-2xs); color: var(--text-muted); }
 
   /* ── State messages ──────────────────────────────────────────────────────── */
   .state-msg {

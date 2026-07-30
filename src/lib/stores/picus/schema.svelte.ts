@@ -16,8 +16,8 @@
  * actually opens.
  */
 
-import type { SchemaSnapshot, SequenceInfo, TableInfo, TriggerInfo } from '$lib/types/picus';
-import { readSchema, tableDetail } from '$lib/ipc/picus/db';
+import type { SchemaSnapshot, SequenceInfo, TableInfo, TriggerDetail, TriggerInfo } from '$lib/types/picus';
+import { readSchema, tableDetail, triggerDetail } from '$lib/ipc/picus/db';
 
 const EMPTY: SchemaSnapshot = { tables: [], views: [], sequences: [], triggers: [] };
 
@@ -39,6 +39,16 @@ function createSchemaStore() {
 
   /** Tables and views together — the things that have columns and rows. */
   const relations = $derived<TableInfo[]>([...snapshot.tables, ...snapshot.views]);
+
+  /**
+   * Trigger definitions already read, by connection and name.
+   *
+   * Kept apart from the snapshot rather than merged into it: a definition is not
+   * part of what a catalogue read returns, so folding it in would make the
+   * snapshot's contents depend on which tabs somebody happened to open. Cleared
+   * with the snapshot, since a definition belongs to the connection it came from.
+   */
+  let definitions = $state<Record<string, TriggerDetail>>({});
 
   /** Replace a relation in place once its full detail has been read. */
   function merge(detail: TableInfo) {
@@ -116,6 +126,7 @@ function createSchemaStore() {
     /** Forget everything — on disconnect, so the tree can't show a dead schema. */
     clear() {
       snapshot = { ...EMPTY };
+      definitions = {};
       connectionId = '';
       loadedAt = null;
       error = '';
@@ -191,6 +202,32 @@ function createSchemaStore() {
         return full;
       } catch {
         return this.relation(name);
+      }
+    },
+
+    /** A trigger definition already read, or `null` — never a fetch. */
+    triggerDefinition(name: string): TriggerDetail | null {
+      return definitions[`${connectionId}::${name.toUpperCase()}`] ?? null;
+    },
+
+    /**
+     * Read one trigger's definition, once.
+     *
+     * Held per connection and name, so re-opening the tab is instant and switching
+     * database cannot show the previous server's answer. A failure is not cached:
+     * the next open asks again rather than remembering that it did not work.
+     */
+    async loadTriggerDefinition(name: string): Promise<TriggerDetail | null> {
+      if (!connectionId) return null;
+      const key = `${connectionId}::${name.toUpperCase()}`;
+      const held = definitions[key];
+      if (held) return held;
+      try {
+        const detail = await triggerDetail(connectionId, name);
+        definitions = { ...definitions, [key]: detail };
+        return detail;
+      } catch {
+        return null;
       }
     },
   };

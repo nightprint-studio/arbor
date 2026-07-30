@@ -63,7 +63,7 @@
   .sev-card.empty:hover { transform: none; }
 
   .sev-label {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -76,7 +76,7 @@
     color: var(--text-primary);
   }
   .sev-age {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     margin-top: 2px;
   }

@@ -741,7 +741,7 @@
   .list-header {
     padding: 10px 12px;
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -754,7 +754,7 @@
     padding: 10px 12px;
     margin: 2px 0 0;
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -856,7 +856,7 @@
   .list-action-btn.danger:hover{ background: var(--error-subtle); color: var(--error); }
 
   .badge {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 1px 5px;
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans);
@@ -1001,7 +1001,7 @@
   .group-label { flex: 1; }
 
   .group-count {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     background: var(--bg-overlay);
     color: var(--text-muted);
     padding: 1px 5px;
@@ -1046,7 +1046,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     outline: none;
     transition: border-color var(--transition-fast);
   }
@@ -1105,7 +1105,7 @@
   }
   .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
-  .btn-xs { padding: 3px 8px; font-size: 11px; }
+  .btn-xs { padding: 3px 8px; font-size: var(--font-size-xs); }
 
   /* "Use theme fonts" header toggle — sits between the Theme Editor title
      and the Import / Export buttons. Compact pill-style so it doesn't
@@ -1120,7 +1120,7 @@
     background: var(--bg-overlay);
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     user-select: none;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);

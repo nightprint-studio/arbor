@@ -97,6 +97,6 @@
     background: var(--bg-overlay);
     padding: 1px 5px;
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 </style>

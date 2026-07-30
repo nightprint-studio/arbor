@@ -116,7 +116,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     cursor: pointer;
     text-align: left;
@@ -127,7 +127,7 @@
   .ticket-pick-id {
     flex-shrink: 0;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--accent);
     background: var(--accent-subtle);
@@ -139,7 +139,7 @@
   .ticket-pick-title {
     flex: 1;
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -147,7 +147,7 @@
   }
   .ticket-pick-change {
     flex-shrink: 0;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     color: var(--text-muted);
     margin-left: auto;
   }

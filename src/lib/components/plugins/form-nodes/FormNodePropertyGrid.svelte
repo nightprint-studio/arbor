@@ -174,7 +174,7 @@
   }
 
   .pf-propgrid-empty {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-style: italic;
     padding: 4px 0;
@@ -206,7 +206,7 @@
     display: flex;
     align-items: center;
     gap: 3px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-family: var(--font-mono);
     white-space: nowrap;
@@ -228,7 +228,7 @@
   }
 
   .pf-pg-value {
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
     font-family: var(--font-mono);
     white-space: nowrap;

@@ -312,26 +312,26 @@
   }
 
   .stage-label {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     letter-spacing: 0.1px;
     pointer-events: none;
   }
 
   .stage-meta {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-code);
     pointer-events: none;
     opacity: 0.85;
   }
 
   .step-name {
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     pointer-events: none;
   }
 
   .step-elapsed {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-code);
     pointer-events: none;
   }

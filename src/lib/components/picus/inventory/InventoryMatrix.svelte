@@ -73,9 +73,10 @@
           <th class="im-obj-th" scope="col">Object</th>
           {#each buckets as bucket (bucket.key)}
             <!-- Spelled out rather than left to two terse chips: `ORA · init`
-                 assumes the reader knows both vocabularies, and the number
-                 underneath counts *statements*, which is not what "3 folders"
-                 leads anyone to expect. Both are said. -->
+                 assumes the reader knows both vocabularies. The line underneath
+                 is the SCOPE this column counts over — folders and files — while
+                 the cells below it count statements; the tooltip says so, since
+                 two different units in one column want stating once. -->
             <th scope="col" class="im-slot-th">
               <span class="im-slot">
                 <PicusDialectChip engine={bucket.dialect} terse />
@@ -91,7 +92,8 @@
                     + (bucket.folders.length > 12 ? `\n… and ${bucket.folders.length - 12} more` : ''),
                 }}
               >
-                {bucket.folders.length} folder{bucket.folders.length === 1 ? '' : 's'} · statements
+                {bucket.folders.length} folder{bucket.folders.length === 1 ? '' : 's'}
+                · {bucket.fileCount} file{bucket.fileCount === 1 ? '' : 's'}
               </span>
             </th>
           {/each}
@@ -217,7 +219,7 @@
     display: flex;
     align-items: center;
     gap: 7px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -237,7 +239,7 @@
     border-radius: var(--radius-md);
   }
 
-  .im-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
+  .im-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: var(--font-size-sm); }
   .im-obj-col { width: 42%; }
   .im-table th, .im-table td { border-bottom: 1px solid var(--border-subtle); }
   .im-table tbody tr:last-child > * { border-bottom: none; }
@@ -249,7 +251,7 @@
     background: var(--bg-elevated);
     text-align: left;
     padding: 7px 10px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -260,7 +262,7 @@
      this is what they stand for. */
   .im-slot-label {
     display: block;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-secondary);
     text-transform: none;
     letter-spacing: 0;
@@ -268,7 +270,7 @@
   }
   .im-slot-name {
     display: block;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     text-transform: none;
     letter-spacing: 0;
@@ -285,7 +287,7 @@
   }
   .im-obj-name {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -310,7 +312,7 @@
   .im-obj-external { color: var(--text-muted); }
   .im-external {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
@@ -318,7 +320,7 @@
   }
 
   /* Statements the columns do not account for — never rounded away. */
-  .im-stray { flex-shrink: 0; font-size: 10px; color: var(--warning); }
+  .im-stray { flex-shrink: 0; font-size: var(--font-size-2xs); color: var(--warning); }
 
   .im-cell {
     padding: 0;
@@ -351,7 +353,7 @@
   .im-detail-grid { display: flex; gap: 22px; flex-wrap: wrap; }
   .im-detail-col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .im-detail-head {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -363,7 +365,7 @@
     align-items: baseline;
     gap: 8px;
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-secondary);
   }
   .im-detail-path {

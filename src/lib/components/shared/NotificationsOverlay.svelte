@@ -21,7 +21,7 @@
           <span>Clear all</span>
         </button>
       {/if}
-      <button class="mac-close-btn" onclick={() => uiStore.setNotificationsOverlayOpen(false)} use:tooltip={'Close'} aria-label="Close"></button>
+      <button class="close-btn" onclick={() => uiStore.setNotificationsOverlayOpen(false)} use:tooltip={'Close'} aria-label="Close"></button>
     </div>
   </div>
 
@@ -70,7 +70,7 @@
     color: var(--text-muted);
     border-radius: var(--radius-sm);
     cursor: pointer;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     transition: background var(--transition-fast), color var(--transition-fast);
   }

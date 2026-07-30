@@ -174,11 +174,11 @@
   .state-msg {
     padding: 12px 14px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
 
   .section-tab-name {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 500;
     color: var(--accent);
     background: var(--accent-subtle);
@@ -208,7 +208,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);
   }
@@ -219,7 +219,7 @@
   .btn-ghost-sm:disabled { opacity: 0.4; cursor: default; }
 
   .status-text {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
   .status-saved { color: var(--success); }
@@ -234,13 +234,13 @@
     color: var(--text-secondary);
     border-left: 2px solid var(--accent);
     border-radius: var(--radius-sm);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.45;
   }
   .info-row :global(svg) { color: var(--accent); flex-shrink: 0; margin-top: 2px; }
   .info-row code {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     padding: 1px 4px;
     background: rgba(255, 255, 255, 0.04);
     border-radius: 3px;

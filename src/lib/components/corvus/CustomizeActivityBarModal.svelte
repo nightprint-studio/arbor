@@ -610,7 +610,7 @@
     border: none;
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     letter-spacing: 0.02em;
     cursor: pointer;
@@ -641,7 +641,7 @@
   }
 
   .hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     margin: 0;
     line-height: 1.6;
@@ -666,7 +666,7 @@
     display: flex;
     align-items: baseline;
     gap: 8px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.6px;
     text-transform: uppercase;
@@ -679,7 +679,7 @@
     letter-spacing: 0;
     text-transform: none;
     color: var(--text-disabled);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
   }
 
   .item-list {
@@ -752,14 +752,14 @@
   }
 
   .emoji-icon {
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     line-height: 1;
   }
 
   /* ── Item label ────────────────────────────────────────────────────────────── */
   .item-label {
     flex: 1;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;

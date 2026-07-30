@@ -283,7 +283,7 @@
   }
 
   .tab-project {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--terminal-bright-blue);
     background: color-mix(in srgb, var(--terminal-blue) 14%, transparent);
     border: 1px solid color-mix(in srgb, var(--terminal-blue) 28%, transparent);
@@ -346,7 +346,7 @@
   .shell-option:hover { background: var(--bg-hover); color: var(--text-primary); }
   .shell-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .custom-pill {
-    font-size: 9px; font-weight: 600;
+    font-size: var(--font-size-3xs); font-weight: 600;
     padding: 1px 5px; border-radius: var(--radius-sm);
     background: var(--accent-subtle); color: var(--accent);
     text-transform: uppercase; letter-spacing: 0.04em;
@@ -355,10 +355,10 @@
     height: 1px; background: var(--border-subtle);
     margin: 4px 0;
   }
-  .shell-option.settings-link { color: var(--text-muted); font-size: 11.5px; }
+  .shell-option.settings-link { color: var(--text-muted); font-size: var(--font-size-xs); }
   .shell-empty {
     padding: 8px 10px;
-    font-size: 11.5px; font-style: italic;
+    font-size: var(--font-size-xs); font-style: italic;
     color: var(--text-muted);
   }
 

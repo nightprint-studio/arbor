@@ -101,7 +101,7 @@
   .cm-item {
     display: flex; align-items: center; gap: 8px;
     width: 100%; padding: 6px 10px; text-align: left;
-    font-size: 12px; color: var(--text-primary);
+    font-size: var(--font-size-sm); color: var(--text-primary);
     background: transparent; border: none; border-radius: var(--radius-sm);
     cursor: pointer; font-family: var(--font-ui-sans);
     transition: background var(--transition-fast);
@@ -110,7 +110,7 @@
   .cm-sep { height: 1px; background: var(--border-subtle); margin: 3px 6px; }
   .cm-group {
     padding: 5px 10px 2px;
-    font-size: 9px; font-weight: 600; letter-spacing: 0.5px;
+    font-size: var(--font-size-3xs); font-weight: 600; letter-spacing: 0.5px;
     text-transform: uppercase; color: var(--text-muted);
   }
   .cm-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }

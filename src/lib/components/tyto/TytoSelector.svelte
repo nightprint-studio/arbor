@@ -356,7 +356,7 @@
   .rect.is-hover .mon-name { background: #4aa3ff; }
   .dims, .mon-name {
     position: absolute; top: -22px; left: 0;
-    font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+    font-size: var(--font-size-xs); font-weight: 600; font-variant-numeric: tabular-nums;
     color: #fff; background: var(--accent, #f28b82);
     padding: 1px 6px; border-radius: 4px; white-space: nowrap;
   }
@@ -394,7 +394,7 @@
   .tb-mode.on { background: var(--accent, #f28b82); color: var(--text-on-accent, #fff); }
   .tb-mode:disabled { opacity: 0.4; cursor: default; }
 
-  .tb-hint { font-size: 12.5px; color: var(--text-secondary, #cbd5e1); }
+  .tb-hint { font-size: var(--font-size-sm); color: var(--text-secondary, #cbd5e1); }
   .tb-hint strong { color: var(--text-primary, #fff); }
 
   /* Record / Screenshot segmented toggle. */
@@ -407,7 +407,7 @@
     display: inline-flex; align-items: center; gap: 5px;
     height: 24px; padding: 0 10px;
     border: none; border-radius: 999px; cursor: pointer;
-    font-size: 12px; font-weight: 600;
+    font-size: var(--font-size-sm); font-weight: 600;
     background: transparent; color: var(--text-secondary, #cbd5e1);
     transition: background var(--transition-fast, 0.12s), color var(--transition-fast, 0.12s);
   }
@@ -418,11 +418,11 @@
     display: inline-flex; align-items: center; gap: 7px;
     height: 28px; padding: 0 12px;
     border: 1px solid transparent; border-radius: 999px;
-    font-size: 12.5px; font-weight: 600; cursor: pointer;
+    font-size: var(--font-size-sm); font-weight: 600; cursor: pointer;
     transition: background var(--transition-fast, 0.12s), filter var(--transition-fast, 0.12s);
   }
   .tb-btn .tb-k {
-    font-size: 10px; font-weight: 600;
+    font-size: var(--font-size-2xs); font-weight: 600;
     padding: 1px 5px; border-radius: 5px;
     background: rgba(255, 255, 255, 0.16); color: inherit;
   }

@@ -65,11 +65,11 @@
   .provider-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
   .provider-top  { display: flex; align-items: center; gap: 10px; }
   .provider-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
-  .provider-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-  .provider-desc { font-size: 11px; color: var(--text-muted); }
+  .provider-name { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
+  .provider-desc { font-size: var(--font-size-xs); color: var(--text-muted); }
 
   .badge-soon {
-    font-size: 10px; font-weight: 600; padding: 2px 7px;
+    font-size: var(--font-size-2xs); font-weight: 600; padding: 2px 7px;
     background: var(--bg-overlay); border: 1px solid var(--border-subtle);
     border-radius: 99px; color: var(--text-muted);
   }

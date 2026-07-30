@@ -8,7 +8,7 @@
 // prelude rather than two. Defined in `picus-types`, the leaf both halves share.
 pub use picus_types::prelude::{
     Column, EngineKind, ForeignKey, IndexInfo, RelationKind, SchemaSnapshot, SequenceInfo,
-    TableInfo, TriggerInfo,
+    TableInfo, TriggerDetail, TriggerInfo,
 };
 
 pub use crate::capability::{EngineCapabilities, SchemaGroup};

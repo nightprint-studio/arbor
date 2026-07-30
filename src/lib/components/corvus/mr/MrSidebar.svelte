@@ -374,7 +374,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
     outline: none;
     transition: border-color var(--transition-fast);
@@ -437,13 +437,13 @@
     text-align: center;
   }
   .state-title {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-primary);
     margin: 0;
   }
   .state-hint {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-muted);
     line-height: 1.5;
     max-width: 220px;
@@ -460,12 +460,12 @@
   }
   .state-pat-hint code {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--accent);
   }
   .state-error-text {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--status-error, #f87171);
     word-break: break-word;
   }
@@ -479,7 +479,7 @@
     align-items: center;
     gap: 5px;
     padding: 5px 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     background: transparent;
     border: 1px solid var(--border);
@@ -553,12 +553,12 @@
   }
   .mr-time {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     white-space: nowrap;
   }
   .draft-badge {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--text-muted);
     background: var(--bg-elevated);
@@ -572,7 +572,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     flex-wrap: nowrap;
     overflow: hidden;
@@ -596,13 +596,13 @@
   .mr-dot { color: var(--text-disabled); flex-shrink: 0; }
   .mr-comments { flex-shrink: 0; }
   .mr-label {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     padding: 1px 5px;
     border-radius: var(--radius-sm);
     white-space: nowrap;
     flex-shrink: 0;
   }
-  .mr-label-more { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
+  .mr-label-more { font-size: var(--font-size-2xs); color: var(--text-muted); flex-shrink: 0; }
 
 </style>

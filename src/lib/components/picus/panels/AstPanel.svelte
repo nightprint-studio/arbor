@@ -184,13 +184,13 @@
     align-items: center;
     gap: 5px;
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .ap-row.ap-error { color: var(--error); }
 
   .ap-field {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--accent);
     flex-shrink: 0;
   }
@@ -205,7 +205,7 @@
 
   .ap-text {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-secondary);
     overflow: hidden;
     text-overflow: ellipsis;

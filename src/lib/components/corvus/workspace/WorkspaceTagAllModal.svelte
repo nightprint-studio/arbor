@@ -171,7 +171,7 @@
 
 <style>
   .ws-pill {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--accent);
     background: var(--accent-subtle);
@@ -195,7 +195,7 @@
     padding: 11px 14px;
   }
   .field label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-muted);
@@ -220,16 +220,16 @@
     resize: vertical;
   }
   input:focus, textarea:focus { outline: none; border-color: var(--accent); }
-  textarea { min-height: 60px; font-family: var(--font-code); font-size: 12px; }
+  textarea { min-height: 60px; font-family: var(--font-code); font-size: var(--font-size-sm); }
 
   .field-hint.err {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--error);
   }
   .field-hint code {
     background: var(--bg-overlay);
     padding: 0 4px;
     border-radius: var(--radius-sm);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
   }
 </style>

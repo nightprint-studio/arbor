@@ -152,7 +152,7 @@
   }
 
   .chart-title {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -174,7 +174,7 @@
   }
 
   .axis-lbl {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     fill: var(--text-muted);
     font-family: var(--font-ui-sans);
   }
@@ -194,6 +194,6 @@
     box-shadow: 0 4px 16px rgba(0,0,0,0.4);
     white-space: nowrap;
   }
-  .tt-label { font-size: 11px; color: var(--text-secondary); font-family: var(--font-ui-sans); }
-  .tt-value { font-size: 12px; color: var(--text-primary); font-family: var(--font-ui-sans); font-weight: 600; }
+  .tt-label { font-size: var(--font-size-xs); color: var(--text-secondary); font-family: var(--font-ui-sans); }
+  .tt-value { font-size: var(--font-size-sm); color: var(--text-primary); font-family: var(--font-ui-sans); font-weight: 600; }
 </style>

@@ -94,7 +94,7 @@
   .message strong {
     font-weight: 600;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     background: var(--bg-overlay);
     padding: 1px 5px;
     border-radius: var(--radius-sm);
@@ -102,7 +102,7 @@
 
   .message :global(code) {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
 
@@ -121,5 +121,5 @@
   .irreversible :global(code) {
     color: var(--text-secondary);
   }
-  .irreversible :global(code) { font-family: var(--font-code); font-size: 10px; }
+  .irreversible :global(code) { font-family: var(--font-code); font-size: var(--font-size-2xs); }
 </style>

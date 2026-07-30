@@ -75,7 +75,7 @@
       <button class="hdr-btn" onclick={refresh} disabled={loading || !tabId} use:tooltip={'Refresh'}>
         <RefreshCw size={12} class={loading ? 'spin' : ''} />
       </button>
-      <button class="mac-close-btn" onclick={close} use:tooltip={'Close'} aria-label="Close"></button>
+      <button class="close-btn" onclick={close} use:tooltip={'Close'} aria-label="Close"></button>
     </div>
   </div>
 
@@ -211,7 +211,7 @@
     border-radius: var(--radius-sm);
   }
   .risk-caption {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.5px;
     text-transform: uppercase;
@@ -240,7 +240,7 @@
     padding: 6px 8px;
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     transition: background var(--transition-fast);
   }
@@ -263,7 +263,7 @@
   .sev-row.empty .sev-label { color: var(--text-disabled); }
 
   .sev-count {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 700;
     color: var(--text-primary);
     font-variant-numeric: tabular-nums;
@@ -273,7 +273,7 @@
   .sev-row.empty .sev-count { color: var(--text-disabled); }
 
   .sev-age {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     min-width: 56px;
     text-align: right;
@@ -287,7 +287,7 @@
     gap: 8px;
     padding: 24px 16px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-family: var(--font-ui-sans);
   }
   .overlay-state.err   { color: var(--error); flex-direction: column; }
@@ -295,7 +295,7 @@
 
   .err-msg {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     word-break: break-word;
     max-width: 280px;
     text-align: center;
@@ -307,7 +307,7 @@
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     cursor: pointer;
   }
@@ -316,7 +316,7 @@
   .trunc-note {
     margin: 0 10px 6px;
     padding: 5px 8px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--warning);
     background: var(--warning-subtle);
     border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
@@ -345,7 +345,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
   }

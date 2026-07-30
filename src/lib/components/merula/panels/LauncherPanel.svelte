@@ -145,7 +145,7 @@
   /* Launch-quantization selector in the header. */
   .lp-quant { display: inline-flex; align-items: center; gap: 3px; }
   .lp-quant-label {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.3px;
@@ -182,7 +182,7 @@
     gap: 5px;
     height: 28px;
     padding: 0 10px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--text-muted);
     background: var(--bg-elevated);
@@ -213,7 +213,7 @@
   }
   .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
   .col-name {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--text);
     white-space: nowrap;
@@ -227,7 +227,7 @@
     max-width: 50%;
     padding: 1px 6px;
     border-radius: 999px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: color-mix(in srgb, #000 55%, var(--c));
     background: var(--c);
@@ -250,7 +250,7 @@
     gap: 7px;
     height: 28px;
     padding: 0 10px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text);
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);

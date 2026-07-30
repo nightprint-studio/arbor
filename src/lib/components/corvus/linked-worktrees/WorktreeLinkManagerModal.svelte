@@ -1106,7 +1106,7 @@
   }
   .sidebar-title {
     flex: 1;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -1188,7 +1188,7 @@
   }
   .link-card-meta { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
   .link-card-count {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     background: var(--bg-overlay);
     border-radius: 999px;
@@ -1200,7 +1200,7 @@
     background: color-mix(in srgb, var(--accent) 18%, transparent);
   }
   .off-pill {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     letter-spacing: 0.04em;
     padding: 1px 5px;
@@ -1236,11 +1236,11 @@
   }
   .link-title {
     margin: 0;
-    font-size: 15px;
+    font-size: var(--font-size-lg);
     font-weight: 600;
     color: var(--text-primary);
   }
-  .title-input { font-size: 14px; font-weight: 600; }
+  .title-input { font-size: var(--font-size-lg); font-weight: 600; }
 
   .sync-toggle {
     display: inline-flex; align-items: center; gap: 5px;
@@ -1250,7 +1250,7 @@
     border: 1px solid var(--border);
     background: var(--bg-overlay);
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     cursor: pointer;
     transition: all var(--transition-fast);
@@ -1269,7 +1269,7 @@
     background: rgba(220,50,50,0.12);
     border: 1px solid rgba(220,50,50,0.25);
     border-radius: var(--radius-sm);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--error);
   }
 
@@ -1296,7 +1296,7 @@
   }
   .card-header h3 {
     margin: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -1314,7 +1314,7 @@
     padding: 16px;
     text-align: center;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-style: italic;
   }
 
@@ -1331,7 +1331,7 @@
     background: var(--bg-base);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     transition: background var(--transition-fast), border-color var(--transition-fast);
   }
@@ -1356,7 +1356,7 @@
     border-radius: 999px;
     background: var(--accent-subtle);
     border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--accent);
     font-family: var(--font-code);
     max-width: 200px;
@@ -1367,7 +1367,7 @@
   }
   .member-path {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     flex: 1; min-width: 0;
     overflow: hidden;
@@ -1397,7 +1397,7 @@
   /* Status pill: synced / out-of-sync / off */
   .status-pill {
     flex-shrink: 0;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -1427,7 +1427,7 @@
     border-radius: 9px;
     background: rgba(220,50,50,0.18);
     color: var(--error);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     flex-shrink: 0;
   }
 
@@ -1459,7 +1459,7 @@
     border: none;
     border-radius: var(--radius-sm);
     padding: 3px 9px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     color: var(--text-muted);
     cursor: pointer;
@@ -1474,7 +1474,7 @@
 
   .picker-empty {
     padding: 8px 10px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-style: italic;
     text-align: center;
@@ -1516,7 +1516,7 @@
     border-bottom: 1px dashed var(--border-subtle);
   }
   .picker-group-label {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -1525,12 +1525,12 @@
   .picker-group-header.lvl-2 .picker-group-label {
     text-transform: none;
     letter-spacing: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .picker-group-sublabel {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     flex: 1; min-width: 0;
     overflow: hidden;
@@ -1540,7 +1540,7 @@
   }
   .picker-group-count {
     margin-left: auto;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     background: var(--bg-overlay);
     border-radius: 999px;
@@ -1575,7 +1575,7 @@
   /* Inline chips next to the worktree name. */
   .main-chip, .linked-chip {
     flex-shrink: 0;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -1597,7 +1597,7 @@
     border: 1px solid transparent;
     background: transparent;
     border-radius: var(--radius-sm);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     cursor: pointer;
     text-align: left;
@@ -1611,7 +1611,7 @@
   .picker-name { font-weight: 500; flex-shrink: 0; }
   .picker-path {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     flex: 1; min-width: 0;
     overflow: hidden;
@@ -1647,11 +1647,11 @@
     border-radius: 999px;
     background: var(--accent-subtle);
     border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .alias-chip-repo { color: var(--text-secondary); font-weight: 500; }
   .alias-chip-sep  { color: var(--text-disabled); }
-  .alias-chip-branch { color: var(--accent); font-family: var(--font-code); font-size: 10.5px; }
+  .alias-chip-branch { color: var(--accent); font-family: var(--font-code); font-size: var(--font-size-2xs); }
   .alias-link {
     display: inline-flex; align-items: center;
     color: var(--text-disabled);
@@ -1687,13 +1687,13 @@
     display: flex; align-items: center; gap: 10px;
     padding: 8px 12px;
     border-bottom: 1px solid var(--border-subtle);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
   .last-sync-row:last-child { border-bottom: none; }
   .ls-label {
     width: 70px;
     flex-shrink: 0;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--text-muted);
@@ -1702,7 +1702,7 @@
     color: var(--text-primary);
     display: inline-flex; align-items: center; gap: 4px;
   }
-  .ls-value.muted { color: var(--text-muted); font-size: 11px; }
+  .ls-value.muted { color: var(--text-muted); font-size: var(--font-size-xs); }
   .ls-value.branch :global(svg) { color: var(--accent); }
 
   /* ── Inputs / buttons ── */
@@ -1711,7 +1711,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 5px 9px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     outline: none;
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
@@ -1749,7 +1749,7 @@
     display: inline-flex; align-items: center; gap: 5px;
     padding: 4px 10px;
     border-radius: var(--radius-sm);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     cursor: pointer;
     border: 1px solid transparent;

@@ -73,7 +73,7 @@
   </button>
 {/if}
 {#if !hideClose}
-  <button class="mac-close-btn" onclick={onClose} aria-label="Close" use:tooltip={'Close'}></button>
+  <button class="close-btn" onclick={onClose} aria-label="Close" use:tooltip={'Close'}></button>
 {/if}
 
 <style>

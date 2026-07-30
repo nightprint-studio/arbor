@@ -100,7 +100,7 @@
     gap: 4px;
     padding: 2px 8px;
     border-radius: 999px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     line-height: 1.4;
     white-space: nowrap;
   }
@@ -126,7 +126,7 @@
 
   .sf-path {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     padding: 2px 6px;

@@ -98,10 +98,10 @@
   .gsc.recording { border-color: var(--accent); background: var(--accent-subtle); cursor: default; }
   .gsc :global(.gsc-pencil) { color: var(--text-muted); flex-shrink: 0; }
   .gsc-rec {
-    font-size: 11px; font-style: italic; color: var(--accent);
+    font-size: var(--font-size-xs); font-style: italic; color: var(--accent);
     animation: gsc-pulse 1.1s ease-in-out infinite;
   }
-  .gsc-none { font-size: 11px; color: var(--text-muted); font-style: italic; }
-  .gsc-hint { margin-left: 8px; font-size: 11px; color: var(--warning); }
+  .gsc-none { font-size: var(--font-size-xs); color: var(--text-muted); font-style: italic; }
+  .gsc-hint { margin-left: 8px; font-size: var(--font-size-xs); color: var(--warning); }
   @keyframes gsc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 </style>

@@ -45,7 +45,7 @@
     flex-shrink: 0;
     padding: 0 12px;
     background: var(--bg-elevated);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     user-select: none;
   }

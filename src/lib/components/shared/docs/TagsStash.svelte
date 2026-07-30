@@ -69,11 +69,11 @@
 <h3>Applying a stash</h3>
 <div class="feature-grid two-col">
   <div class="feature-card">
-    <div class="fc-title">Apply <span style="font-size:10px;opacity:0.6">(▶)</span></div>
+    <div class="fc-title">Apply <span style="font-size:var(--font-size-2xs);opacity:0.6">(▶)</span></div>
     <div class="fc-desc">Re-applies the stash to the working directory. The stash entry is <strong>kept</strong> on the stack — useful when you want to apply the same changes to multiple branches.</div>
   </div>
   <div class="feature-card">
-    <div class="fc-title">Pop <span style="font-size:10px;opacity:0.6">(↵)</span></div>
+    <div class="fc-title">Pop <span style="font-size:var(--font-size-2xs);opacity:0.6">(↵)</span></div>
     <div class="fc-desc">Applies the stash and <strong>removes</strong> it from the stack in one step. Equivalent to <code>git stash pop</code>.</div>
   </div>
 </div>

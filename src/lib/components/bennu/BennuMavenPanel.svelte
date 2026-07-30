@@ -90,5 +90,5 @@
   .mv { padding: 4px 0; }
   .mv-goal-ic { color: var(--success); display: flex; }
   .mv-plugin-ic { color: var(--text-muted); display: flex; }
-  .mv-hint { font-size: 10px; color: var(--text-disabled); }
+  .mv-hint { font-size: var(--font-size-2xs); color: var(--text-disabled); }
 </style>

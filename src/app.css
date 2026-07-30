@@ -184,10 +184,22 @@ html, body { height: 100vh; overflow: hidden; }
   --font-ui-sans: var(--theme-font-ui-active, 'Segoe UI'), 'Inter', system-ui, -apple-system, sans-serif;
   --font-code:    var(--theme-font-code-active, 'JetBrains Mono'), 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   --font-scale: 1;
+  /* The type scale. EIGHT sizes, and nothing between them.
+     Before this there were seventeen hardcoded ones across the products —
+     8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 14, 15, 16, 18, 20 —
+     which is not a scale but drift: half a pixel is not a level of hierarchy
+     anybody perceives, while it is more than enough to stop the baselines of
+     two neighbouring components from lining up. Everything now lands on one
+     of these, so `--font-scale` (the Appearance setting) actually moves the
+     whole interface instead of the half of it that happened to use a token. */
+  --font-size-3xs:  calc(9px  * var(--font-scale));
+  --font-size-2xs:  calc(10px * var(--font-scale));
   --font-size-xs:   calc(11px * var(--font-scale));
   --font-size-sm:   calc(12px * var(--font-scale));
   --font-size-md:   calc(13px * var(--font-scale));
   --font-size-lg:   calc(14px * var(--font-scale));
+  --font-size-xl:   calc(16px * var(--font-scale));
+  --font-size-2xl:  calc(20px * var(--font-scale));
 
   /* Radius — themes can override to characterise their look (sharp Solarized
      vs rounded Catppuccin etc.). --radius-xl is fixed (large modal corners). */
@@ -404,44 +416,36 @@ body {
 }
 .btn-tonal:hover:not(:disabled):not([aria-disabled='true']) { filter: brightness(1.12); }
 
-/* ---- Mac-style close button (red dot) ────────────────────────────────
-   Default look — small coloured circle in modal / panel headers. Behavior
-   swaps to a flat IntelliJ-style X glyph when the user picks the Windows
-   variant in Appearance settings; the swap is driven by an attribute on
-   the <html> element so the 15+ existing callsites don't need to change.
-   The button itself has no children (callers just set aria-label) — both
-   variants draw their visual via pseudo-elements / background.
+/* ---- In-app close button ──────────────────────────────────────────────
+   The ✕ that dismisses a modal or a dock panel. NOT a window control: the
+   title-bar trio is `WindowControls`, and it keeps whichever platform look
+   the user picked in Appearance.
+
+   It used to be a filled red disc, following that same Mac setting. But a
+   saturated red circle sitting inside a panel header — over a result grid,
+   in the corner of a dialog — is not a macOS convention either; macOS puts
+   traffic lights on WINDOWS and an ✕ on everything else. What it reads as
+   is "recording" or "something is wrong", which is a loud claim to make
+   about a control whose job is to close a panel. Red means state here.
+
+   The button has no children (callers only set aria-label): the glyph is
+   two rotated pseudo-elements, so no call site has to change.
    ──────────────────────────────────────────────────────────────────── */
-.mac-close-btn {
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: #ff5f57;
+.close-btn {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
   border: none;
   cursor: pointer;
   flex-shrink: 0;
   padding: 0;
-  transition: filter var(--transition-fast),
-              background var(--transition-fast),
-              color var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
-.mac-close-btn:hover  { filter: brightness(0.8); }
-.mac-close-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-/* Windows / IntelliJ variant — bigger, flat, glyph drawn via two rotated
-   pseudo-elements so no markup changes are needed. Red flash on hover for
-   the conventional close affordance. */
-[data-window-controls="windows"] .mac-close-btn {
-  width: 24px;
-  height: 24px;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  position: relative;
-  filter: none;
-}
-[data-window-controls="windows"] .mac-close-btn::before,
-[data-window-controls="windows"] .mac-close-btn::after {
+.close-btn::before,
+.close-btn::after {
   content: '';
   position: absolute;
   left: 5px;
@@ -452,20 +456,17 @@ body {
   border-radius: 1px;
   pointer-events: none;
 }
-[data-window-controls="windows"] .mac-close-btn::before { transform: translateY(-50%) rotate(45deg); }
-[data-window-controls="windows"] .mac-close-btn::after  { transform: translateY(-50%) rotate(-45deg); }
-[data-window-controls="windows"] .mac-close-btn:hover {
-  background: #e81123;
-  color: #ffffff;
-  filter: none;
-}
+.close-btn::before { transform: translateY(-50%) rotate(45deg); }
+.close-btn::after  { transform: translateY(-50%) rotate(-45deg); }
+.close-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.close-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ---- Window-controls slot ─────────────────────────────────────────────
    Every title bar that hosts <WindowControls> wraps it (plus its divider)
    in this slot. The Windows/IntelliJ trio hugs the trailing corner, the
    Mac trio moves to the LEADING edge like the real traffic lights — the
    swap is one rule here, driven by the same <html data-window-controls>
-   attribute that restyles `.mac-close-btn`, so no title bar (Corvus,
+   attribute that restyles `.close-btn`, so no title bar (Corvus,
    Merula, Bennu, Tyto, launcher, explorer) knows about the setting.
    `row-reverse` keeps the divider between the trio and the app chrome.
    ──────────────────────────────────────────────────────────────────── */
@@ -529,7 +530,7 @@ input[type="number"]::-webkit-outer-spin-button {
   height: 17px;
   line-height: 17px;
   border-radius: 999px;
-  font-size: 10.5px;
+  font-size: var(--font-size-2xs);
   font-weight: 500;
   white-space: nowrap;
   max-width: 140px;
@@ -923,7 +924,7 @@ input[type="radio"]:disabled {
   min-width: 0;
   min-height: 0;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
   cursor: default;
 }

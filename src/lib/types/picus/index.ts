@@ -353,6 +353,20 @@ export interface TriggerInfo {
   forEachRow: boolean;
 }
 
+/**
+ * What a trigger does, as the server would write it.
+ *
+ * Deliberately not part of {@link TriggerInfo}: a routine body dwarfs the four facts
+ * beside it, and the snapshot carrying it is cached and handed over on connect.
+ */
+export interface TriggerDetail {
+  /** The `CREATE TRIGGER …` statement, reconstructed by the server. */
+  definition: string;
+  /** The routine's source, when the server will hand it over. */
+  functionBody?: string;
+  functionName?: string;
+}
+
 /** The schema of one connection, as far as it has been read. */
 export interface SchemaSnapshot {
   tables: TableInfo[];

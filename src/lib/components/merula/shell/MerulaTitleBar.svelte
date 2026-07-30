@@ -194,7 +194,7 @@
   menuWidth="240px"
   docs={{ active: merulaStore.docsOpen, tooltip: 'Documentation (F1)', onclick: () => merulaStore.toggleDocs() }}
   commandPalette={{ active: merulaStore.paletteOpen, tooltip: 'Command palette (Ctrl+K)', onclick: () => merulaStore.togglePalette() }}
-  settings={{ menu: settingsMenu, menuWidth: '220px', tooltip: 'Settings' }}
+  settings={{ menu: settingsMenu, menuWidth: '260px', tooltip: 'Settings' }}
 >
   {#snippet logo()}
     <ArborLogo size={22} />
@@ -365,7 +365,7 @@
     height: 28px; margin-left: 4px; padding: 0 9px;
     background: var(--bg-input); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md); color: var(--text-primary);
-    font-size: 12px; font-weight: 500; cursor: pointer;
+    font-size: var(--font-size-sm); font-weight: 500; cursor: pointer;
     transition: border-color var(--transition-fast);
     -webkit-app-region: no-drag;
   }
@@ -411,7 +411,7 @@
   /* Active export format — shown on the button so the target is legible at a
      glance (and tracks the format picked from the chevron menu). */
   .gtb-export-fmt {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.3px;
     font-variant-numeric: tabular-nums;
@@ -434,7 +434,7 @@
     height: 26px; padding: 0 9px;
     background: transparent; border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md); color: var(--text-secondary);
-    font-size: 11.5px; cursor: pointer;
+    font-size: var(--font-size-xs); cursor: pointer;
     transition: border-color var(--transition-fast), color var(--transition-fast);
     -webkit-app-region: no-drag;
   }

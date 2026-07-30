@@ -87,7 +87,7 @@
     letter-spacing: -0.2px;
   }
   .doc-block :global(h2) {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     color: var(--text-secondary);
     margin: 22px 0 10px;
@@ -99,17 +99,17 @@
   .doc-block :global(h2 code) {
     text-transform: none;
     letter-spacing: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .doc-block :global(h3) {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 700;
     color: var(--text-primary);
     margin: 16px 0 6px;
     letter-spacing: 0.2px;
   }
   .doc-block :global(h4) {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     color: var(--text-muted);
     margin: 12px 0 4px;
@@ -146,7 +146,7 @@
   .doc-block :global(kbd) {
     display: inline-block;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     background: var(--bg-overlay);
     border: 1px solid var(--border);
     border-bottom-width: 2px;
@@ -157,7 +157,7 @@
   }
   .doc-block :global(code) {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     background: var(--bg-overlay);
     padding: 1px 4px;
     border-radius: var(--radius-sm);
@@ -177,7 +177,7 @@
   .doc-block :global(pre code) {
     background: none;
     padding: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     border-radius: 0;
   }
@@ -195,7 +195,7 @@
   .doc-block :global(th) {
     text-align: left;
     padding: 7px 12px;
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;

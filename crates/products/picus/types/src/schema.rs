@@ -111,6 +111,26 @@ pub struct TriggerInfo {
     pub for_each_row: bool,
 }
 
+/// What a trigger does, as the server itself would write it.
+///
+/// Kept out of [`TriggerInfo`] — and therefore out of the schema snapshot — because
+/// a routine body is orders of magnitude larger than the four facts above it, and a
+/// database with hundreds of triggers would carry every one of them to answer a
+/// question asked about one.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TriggerDetail {
+    /// The `CREATE TRIGGER …` statement, reconstructed by the server.
+    pub definition: String,
+    /// The routine the trigger fires, in full. Empty when the server will not hand
+    /// it over — a C function, or one the session may not read.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub function_body: String,
+    /// The routine's name, so the body has something to be labelled with.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub function_name: String,
+}
+
 /// One connection's schema, as far as it has been read.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -148,17 +148,17 @@
   .ec-list-blockers li { gap: 5px; }
   .ec-blocker-name { font-weight: 500; }
   .ec-blocker-req {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     padding: 1px 5px;
     border-radius: 999px;
     font-family: var(--font-code);
   }
-  .ec-blocker-reason { color: var(--error); font-size: 11px; }
+  .ec-blocker-reason { color: var(--error); font-size: var(--font-size-xs); }
 
   .ec-hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-style: italic;
   }

@@ -86,8 +86,12 @@
    * Re-asked when the word changes; the lists fill in behind the dialog and
    * nothing waits on them.
    */
-  let folderPaths = $state<string[]>(offer.folderPaths);
-  let filePaths = $state<string[]>(offer.filePaths ?? []);
+  // Empty, not `offer.folderPaths`: reading a prop in a `$state` initialiser
+  // captures the value at mount and nothing after it. The effect below already
+  // owns the answer for every word INCLUDING the one the dialog opens on, so
+  // seeding here was both a second source of truth and a stale one.
+  let folderPaths = $state<string[]>([]);
+  let filePaths = $state<string[]>([]);
 
   $effect(() => {
     const asked = word;
@@ -263,12 +267,12 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
 
   .ao { display: flex; flex-direction: column; gap: 12px; }
 
   .ao-message { margin: 0; font-size: var(--font-size-sm); line-height: 1.55; color: var(--text-primary); }
-  .ao-message code { font-family: var(--font-code); font-size: 11.5px; color: var(--text-secondary); }
+  .ao-message code { font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-secondary); }
 
   .ao-reach { display: flex; flex-direction: column; gap: 4px; }
   .ao-reach-head { margin: 0; font-size: var(--font-size-xs); color: var(--text-muted); }
@@ -281,7 +285,7 @@
     border-radius: var(--radius-md);
     background: var(--bg-input);
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     line-height: 1.6;
     color: var(--text-secondary);
     white-space: pre;
@@ -289,5 +293,5 @@
 
   .ao-note { margin: 0; font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted); }
 
-  .ao-foot { flex: 1; font-size: 11px; line-height: 1.45; color: var(--text-muted); text-align: left; }
+  .ao-foot { flex: 1; font-size: var(--font-size-xs); line-height: 1.45; color: var(--text-muted); text-align: left; }
 </style>

@@ -549,7 +549,7 @@
     align-items: center;
     gap: 6px;
     margin: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.6px;
@@ -567,7 +567,7 @@
   .ept-recipe-warn code,
   :global(.ept-body code) {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     background: var(--bg-overlay);
     color: var(--accent);
     padding: 0 4px;
@@ -660,7 +660,7 @@
     font-weight: 500;
   }
   .ept-recipe-blurb {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     line-height: 1.4;
   }
@@ -679,7 +679,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
   .ept-footer-actions {

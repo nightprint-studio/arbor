@@ -174,11 +174,11 @@
     border-bottom: 1px solid var(--border-subtle);
     color: var(--text-muted);
   }
-  .uh-title { flex: 1; min-width: 0; font-size: 11.5px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .uh-title { flex: 1; min-width: 0; font-size: var(--font-size-xs); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .uh-title code { font-family: var(--font-code); color: var(--text-primary); }
-  .uh-count { font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; padding: 0 5px; border-radius: var(--radius-sm); background: var(--bg-overlay); color: var(--text-muted); }
+  .uh-count { font-size: var(--font-size-2xs); font-weight: 700; font-variant-numeric: tabular-nums; padding: 0 5px; border-radius: var(--radius-sm); background: var(--bg-overlay); color: var(--text-muted); }
 
-  .usages-state { display: flex; align-items: center; gap: 7px; padding: 12px 14px; font-size: 11.5px; color: var(--text-secondary); }
+  .usages-state { display: flex; align-items: center; gap: 7px; padding: 12px 14px; font-size: var(--font-size-xs); color: var(--text-secondary); }
   .usages-state.muted { color: var(--text-muted); }
   .usages-state code { font-family: var(--font-code); color: var(--text-secondary); }
 
@@ -191,9 +191,9 @@
   }
   .usage.active { background: var(--bg-selected); }
   .u-icon { display: flex; flex-shrink: 0; color: var(--text-disabled); }
-  .u-file { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
+  .u-file { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: var(--font-size-xs); color: var(--text-muted); }
   .u-file :global(svg) { color: var(--text-disabled); }
-  .u-pos { font-family: var(--font-code); font-size: 10.5px; color: var(--text-muted); flex-shrink: 0; min-width: 34px; font-variant-numeric: tabular-nums; }
-  .u-preview { flex: 1; min-width: 0; font-family: var(--font-code); font-size: 11.5px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .u-pos { font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted); flex-shrink: 0; min-width: 34px; font-variant-numeric: tabular-nums; }
+  .u-preview { flex: 1; min-width: 0; font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .u-preview.on { color: var(--text-primary); }
 </style>

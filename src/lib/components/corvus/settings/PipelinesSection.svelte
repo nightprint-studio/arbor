@@ -174,7 +174,7 @@
   .state-msg {
     padding: 12px 14px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
 
   /* Vertical stack: stepper on top, meta row (Reset link + save status)
@@ -211,7 +211,7 @@
     border: none;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     transition: color var(--transition-fast);
   }
@@ -220,7 +220,7 @@
   .reset-link :global(svg) { flex-shrink: 0; }
 
   .status-text {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
   .status-saved { color: var(--success); }
@@ -233,7 +233,7 @@
     margin-top: 12px;
     padding: 9px 11px;
     border-radius: var(--radius-sm);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.45;
   }
   .info-row {
@@ -253,7 +253,7 @@
   .info-row code,
   .warn-row code {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     padding: 1px 4px;
     background: rgba(255, 255, 255, 0.04);
     border-radius: 3px;

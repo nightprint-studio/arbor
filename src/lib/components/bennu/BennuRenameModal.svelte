@@ -170,23 +170,23 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-  .hdr-old { font-family: var(--font-code); font-size: 11px; color: var(--text-muted); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
+  .hdr-old { font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-muted); }
 
   .body { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .field-row { padding: 14px 16px 8px; flex-shrink: 0; }
 
   .preview { flex: 1; min-height: 0; overflow-y: auto; padding: 0 16px 12px; }
-  .pv-state { display: flex; align-items: center; gap: 7px; padding: 16px 2px; font-size: 12px; color: var(--text-secondary); }
+  .pv-state { display: flex; align-items: center; gap: 7px; padding: 16px 2px; font-size: var(--font-size-sm); color: var(--text-secondary); }
   .pv-state.muted { color: var(--text-muted); }
 
   .pv-head { display: flex; align-items: center; gap: 8px; padding: 6px 0 8px; position: sticky; top: 0; background: var(--bg-base); }
-  .pv-target { flex: 1; min-width: 0; font-family: var(--font-code); font-size: 11.5px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pv-count { font-size: 10.5px; color: var(--text-muted); flex-shrink: 0; }
+  .pv-target { flex: 1; min-width: 0; font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pv-count { font-size: var(--font-size-2xs); color: var(--text-muted); flex-shrink: 0; }
 
   .pv-warn {
     display: flex; align-items: center; gap: 6px;
-    padding: 6px 9px; margin-bottom: 8px; font-size: 11px;
+    padding: 6px 9px; margin-bottom: 8px; font-size: var(--font-size-xs);
     color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--warning) 26%, transparent); border-radius: var(--radius-sm);
   }
@@ -194,15 +194,15 @@
   .pv-files { display: flex; flex-direction: column; gap: 10px; }
   .pv-file-head {
     display: flex; align-items: center; gap: 6px;
-    font-size: 11.5px; color: var(--text-primary); font-weight: 500;
+    font-size: var(--font-size-xs); color: var(--text-primary); font-weight: 500;
     padding-bottom: 3px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 3px;
   }
   .pv-file-head :global(svg) { color: var(--text-muted); }
-  .pv-file-n { font-size: 10px; color: var(--text-muted); font-weight: 600; }
+  .pv-file-n { font-size: var(--font-size-2xs); color: var(--text-muted); font-weight: 600; }
 
-  .pv-edit { display: flex; align-items: center; gap: 8px; padding: 3px 4px; font-size: 11.5px; }
+  .pv-edit { display: flex; align-items: center; gap: 8px; padding: 3px 4px; font-size: var(--font-size-xs); }
   .pv-reason {
-    flex-shrink: 0; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+    flex-shrink: 0; font-size: var(--font-size-3xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
     padding: 1px 5px; border-radius: var(--radius-sm); min-width: 66px; text-align: center;
     background: var(--bg-overlay); color: var(--text-muted);
   }
@@ -211,5 +211,5 @@
   .pv-diff { flex: 1; min-width: 0; font-family: var(--font-code); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pv-diff s { color: var(--text-disabled); }
   .pv-diff b { color: var(--success); font-weight: 600; }
-  .pv-inf { font-size: 9px; color: var(--warning); flex-shrink: 0; }
+  .pv-inf { font-size: var(--font-size-3xs); color: var(--warning); flex-shrink: 0; }
 </style>

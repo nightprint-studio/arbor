@@ -193,7 +193,7 @@
     border-radius: var(--radius-sm);
     padding: 4px 8px;
     color: var(--text-primary);
-    font-family: var(--font-ui-sans); font-size: 12px;
+    font-family: var(--font-ui-sans); font-size: var(--font-size-sm);
     outline: none;
   }
   .fp-filter input:focus { border-color: var(--border-focus, var(--accent)); }

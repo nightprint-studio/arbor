@@ -373,7 +373,7 @@
     margin-bottom: var(--space-3);
   }
   .boot-tagline {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     letter-spacing: 2.5px;
     text-transform: uppercase;
@@ -458,13 +458,13 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     letter-spacing: 0.2px;
   }
   .boot-count {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--text-muted);
     letter-spacing: 0.6px;

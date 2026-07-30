@@ -141,7 +141,7 @@
   menuWidth="250px"
   docs={{ active: picusUiStore.docsOpen, tooltip: 'Documentation (F1)', onclick: () => picusUiStore.toggleDocs() }}
   commandPalette={{ active: picusUiStore.paletteOpen, tooltip: 'Command palette (Ctrl+K)', onclick: () => picusUiStore.togglePalette() }}
-  settings={{ menu: settingsMenu, menuWidth: '220px', tooltip: 'Settings' }}
+  settings={{ menu: settingsMenu, menuWidth: '260px', tooltip: 'Settings' }}
 >
   {#snippet logo()}
     <ArborLogo size={22} />
@@ -200,7 +200,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     white-space: nowrap;
     cursor: pointer;
     -webkit-app-region: no-drag;
@@ -211,7 +211,7 @@
 
   .ptb-sep {
     color: var(--text-disabled);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     padding: 0 1px;
     -webkit-app-region: no-drag;
   }

@@ -143,7 +143,7 @@
   .sp-spacer { flex: 1; }
   .sp-path {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     max-width: 340px;
     overflow: hidden;
@@ -172,7 +172,7 @@
     gap: 6px;
     padding: 7px 10px;
     border-top: 1px solid var(--border-subtle);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
   .sp-note :global(svg) { color: var(--text-disabled); flex-shrink: 0; }

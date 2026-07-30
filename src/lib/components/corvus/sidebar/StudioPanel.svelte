@@ -919,7 +919,7 @@
     color: var(--text-secondary);
     border: 1px solid var(--border-subtle);
     border-radius: 10px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
@@ -939,7 +939,7 @@
   }
   .kind-count {
     font-family: var(--font-code);
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     color: var(--text-muted);
     padding: 0 4px;
     background: rgba(0,0,0,0.18);
@@ -965,7 +965,7 @@
     background: transparent;
     border: none;
     color: var(--text-primary);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     outline: none;
     min-width: 0;
     padding: 0;
@@ -993,13 +993,13 @@
     display: flex; align-items: center; justify-content: center;
     gap: 6px;
     padding: 24px 12px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     text-align: center;
   }
   .state-msg.muted { color: var(--text-muted); }
   .state-msg.err   { color: var(--error, #e06c75); }
-  .state-msg code  { font-family: var(--font-code); font-size: 10.5px; padding: 0 3px; background: var(--bg-overlay); border-radius: 3px; }
+  .state-msg code  { font-family: var(--font-code); font-size: var(--font-size-2xs); padding: 0 3px; background: var(--bg-overlay); border-radius: 3px; }
 
   /* ── Broken-references section ────────────────────────────────────
      Collapsible banner above the file tree. Warning palette so it
@@ -1020,7 +1020,7 @@
     background: transparent;
     border: none;
     color: var(--text-primary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     text-align: left;
     transition: background var(--transition-fast);
@@ -1032,7 +1032,7 @@
   .rs-broken-count {
     display: inline-flex; align-items: center;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     padding: 0 6px;
     height: 14px;
@@ -1065,7 +1065,7 @@
   .rs-broken-group-head:hover { background: var(--bg-hover); }
   .rs-broken-value {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--warning, #e5c07b);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1075,7 +1075,7 @@
   }
   .rs-broken-group-count {
     font-family: var(--font-code);
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     color: var(--text-muted);
     flex-shrink: 0;
   }
@@ -1095,14 +1095,14 @@
     text-align: left;
     cursor: pointer;
     border-radius: 3px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     transition: background var(--transition-fast), color var(--transition-fast);
     min-width: 0;
   }
   .rs-broken-site:hover { background: var(--bg-hover); color: var(--text-primary); }
   .rs-broken-site-field {
     font-family: var(--font-code);
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     color: var(--warning, #e5c07b);
     flex-shrink: 0;
   }
@@ -1120,13 +1120,13 @@
     width: 18px; height: 18px;
     flex-shrink: 0;
   }
-  .node-icon-folder { font-size: 11px; }
+  .node-icon-folder { font-size: var(--font-size-xs); }
   :global(.i-json) { color: #cbcb41; }
   :global(.i-toml) { color: #9c4221; }
   .node-name {
     flex: 1;
     min-width: 0;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
   }
   .node-name.truncate {
@@ -1134,7 +1134,7 @@
   }
   .node-meta, .node-count {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     flex-shrink: 0;
     margin-left: 4px;
@@ -1151,7 +1151,7 @@
     width: 14px; height: 14px;
     border-radius: 50%;
     flex-shrink: 0;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     line-height: 1;
     margin-left: 4px;
   }
@@ -1197,7 +1197,7 @@
     display: inline-flex; align-items: center; gap: 4px;
     padding: 1px 6px;
     margin-right: 4px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-code);
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 14%, transparent);

@@ -211,14 +211,14 @@
   }
 
   .result-header-title {
-    font-size: 11px; font-weight: 600; color: var(--text-primary);
+    font-size: var(--font-size-xs); font-weight: 600; color: var(--text-primary);
     font-family: var(--font-ui-sans);
   }
   .result-header-hint {
-    font-size: 10px; color: var(--text-muted); font-family: var(--font-ui-sans);
+    font-size: var(--font-size-2xs); color: var(--text-muted); font-family: var(--font-ui-sans);
   }
   .result-manual-badge {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     background: rgba(77,120,204,.15);
     color: var(--accent);
     border: 1px solid rgba(77,120,204,.3);
@@ -229,7 +229,7 @@
   .result-reset-btn {
     margin-left: auto;
     background: none; border: none; cursor: pointer;
-    font-size: 10px; color: var(--text-muted); font-family: var(--font-ui-sans);
+    font-size: var(--font-size-2xs); color: var(--text-muted); font-family: var(--font-ui-sans);
     padding: 2px 6px; border-radius: var(--radius-sm);
     transition: color var(--transition-fast), background var(--transition-fast);
   }
@@ -243,7 +243,7 @@
   .result-highlight {
     position: absolute; inset: 0;
     margin: 0; padding: 8px 12px;
-    font-family: var(--font-code); font-size: 12px; line-height: 1.6;
+    font-family: var(--font-code); font-size: var(--font-size-sm); line-height: 1.6;
     color: var(--text-primary); background: var(--bg-base);
     white-space: pre; overflow: hidden;
     pointer-events: none; user-select: none;
@@ -256,7 +256,7 @@
     resize: none; outline: none;
     background: transparent; border: none;
     color: transparent; caret-color: var(--text-primary);
-    font-family: var(--font-code); font-size: 12px; line-height: 1.6;
+    font-family: var(--font-code); font-size: var(--font-size-sm); line-height: 1.6;
     padding: 8px 12px; min-height: 0;
     overflow: auto; z-index: 1;
     tab-size: 2;

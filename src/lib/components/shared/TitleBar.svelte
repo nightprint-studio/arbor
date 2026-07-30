@@ -175,7 +175,7 @@
     active: uiStore.activePanel === 'settings',
     tooltip: tooltipForAction('Settings', 'settings'),
     menu: settingsMenu,
-    menuWidth: '230px',
+    menuWidth: '260px',
     menuMaxHeight: 460,
   }}
 >
@@ -290,7 +290,7 @@
     gap: 4px;
     padding: 0 6px;
     height: 100%;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     user-select: none;
   }

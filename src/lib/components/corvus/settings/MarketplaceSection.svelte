@@ -195,7 +195,7 @@
 
 <style>
   .unit-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     margin-left: 4px;
   }

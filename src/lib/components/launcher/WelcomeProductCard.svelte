@@ -100,7 +100,7 @@
     color: var(--text-primary);
   }
   .pc-role {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     color: var(--text-muted);
     margin-top: 2px;
     white-space: nowrap;
@@ -112,7 +112,7 @@
      sentence, and every card reserves the same height so the grid stays even. */
   .pc-blurb {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--font-size-md);
     line-height: 1.5;
     color: var(--text-secondary);
     min-height: calc(1.5em * 3);
@@ -122,7 +122,7 @@
   .pc-ver { margin-left: auto; display: flex; align-items: center; }
   .pc-ver-label {
     font-family: var(--font-code);
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     color: var(--text-muted);
   }
 

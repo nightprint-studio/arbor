@@ -94,7 +94,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--text-secondary);
     letter-spacing: 0.02em;
@@ -105,7 +105,7 @@
   .ff-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ff-required { color: var(--error); font-weight: 600; }
   .ff-optional {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 400;
     color: var(--text-muted);
     letter-spacing: 0;
@@ -119,7 +119,7 @@
   }
 
   .ff-description {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     line-height: 1.45;
   }
@@ -131,14 +131,14 @@
   }
 
   .ff-hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     line-height: 1.45;
   }
   .ff-hint :global(strong) { color: var(--text-primary); font-weight: 600; }
   .ff-hint :global(code) {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     background: var(--bg-overlay);
     border: 1px solid var(--border-subtle);
     padding: 0 4px;
@@ -147,7 +147,7 @@
   }
 
   .ff-error {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--error);
     line-height: 1.45;
   }

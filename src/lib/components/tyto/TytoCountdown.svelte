@@ -119,7 +119,7 @@
 
   .label {
     display: inline-flex; align-items: center; gap: 8px;
-    font-size: 13px; font-weight: 600; letter-spacing: 0.3px;
+    font-size: var(--font-size-md); font-weight: 600; letter-spacing: 0.3px;
     color: var(--text-secondary, #cbd5e1);
   }
   .rec-dot {
@@ -133,7 +133,7 @@
     border: 1px solid var(--border, #333);
     background: var(--bg-input, rgba(0, 0, 0, 0.35));
     color: var(--text-secondary, #cbd5e1);
-    font-size: 11.5px; font-weight: 600;
+    font-size: var(--font-size-xs); font-weight: 600;
     padding: 5px 12px; border-radius: 999px; cursor: pointer;
     transition: background var(--transition-fast, 0.12s), color var(--transition-fast, 0.12s);
   }

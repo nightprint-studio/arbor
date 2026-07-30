@@ -293,7 +293,7 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
 
   .ad { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .ad-toolbar { flex-shrink: 0; padding: 12px 16px; border-bottom: 1px solid var(--border-subtle); }
@@ -304,7 +304,7 @@
     align-items: center;
     gap: 7px;
     padding: 9px 16px 5px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -314,7 +314,7 @@
      from the left of the row rather than wrapping the header onto two lines. */
   .ad-group-name {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     letter-spacing: 0;
     text-transform: none;
@@ -326,7 +326,7 @@
   }
   .ad-preset {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 400;
     letter-spacing: 0;
     text-transform: none;
@@ -358,10 +358,10 @@
   .ad-row:hover:not(:disabled) :global(.ad-tick) { color: var(--success); }
   .ad-row :global(.ad-tick) { color: transparent; }
 
-  .ad-name { font-family: var(--font-code); font-size: 11.5px; white-space: nowrap; }
+  .ad-name { font-family: var(--font-code); font-size: var(--font-size-xs); white-space: nowrap; }
   .ad-path {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -379,11 +379,11 @@
     padding: 48px 16px;
     color: var(--text-disabled);
   }
-  .ad-empty p { margin: 0; font-size: 12px; }
+  .ad-empty p { margin: 0; font-size: var(--font-size-sm); }
 
   .ad-foot {
     flex: 1;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.45;
     color: var(--text-muted);
     text-align: left;

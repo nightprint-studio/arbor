@@ -321,7 +321,7 @@
 
 <style>
   .cm-host-tag {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--accent);
@@ -402,7 +402,7 @@
   .cm-nav-empty {
     padding: 14px 10px;
     color: var(--text-disabled);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-style: italic;
   }
 
@@ -454,7 +454,7 @@
   }
   .cm-section-tag {
     margin-left: auto;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 10%, transparent);
     padding: 1px 6px;

@@ -739,7 +739,7 @@
     height: 100%;
     overflow-y: auto;
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     background: var(--bg-base);
     scrollbar-width: thin;
@@ -759,7 +759,7 @@
   .header-title {
     flex: 1;
     font-weight: 600;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     letter-spacing: 0.3px;
     color: var(--text-secondary);
     text-transform: uppercase;
@@ -772,13 +772,13 @@
     gap: 6px;
     padding: 16px 12px;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-style: italic;
   }
   .state-wrap { padding: 10px; }
   .state-wrap :global(p.card-desc) {
     margin: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     line-height: 1.45;
   }
@@ -833,18 +833,18 @@
     justify-content: space-between;
     align-items: center;
     font-weight: 600;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
 
-  .form-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-secondary); }
+  .form-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--font-size-xs); color: var(--text-secondary); }
   .form-label,
   .form-label-row {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .form-label-row { display: flex; align-items: center; gap: 4px; }
-  .form-optional  { color: var(--text-muted); font-size: 10px; }
+  .form-optional  { color: var(--text-muted); font-size: var(--font-size-2xs); }
 
   .form-actions {
     display: flex;
@@ -863,7 +863,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
     cursor: pointer;
     text-align: left;
@@ -875,12 +875,12 @@
   .ticket-pick-title {
     flex: 1;
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .ticket-pick-change {
     flex-shrink: 0;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     color: var(--text-muted);
     margin-left: auto;
   }
@@ -905,10 +905,10 @@
   .nodev-body { display: flex; flex-direction: column; gap: 8px; }
   .nodev-body p {
     margin: 0;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     line-height: 1.5;
   }
-  .nodev-hint { color: var(--text-muted) !important; font-size: 10.5px !important; }
+  .nodev-hint { color: var(--text-muted) !important; font-size: var(--font-size-2xs) !important; }
 
 </style>

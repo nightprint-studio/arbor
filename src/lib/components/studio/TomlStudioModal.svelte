@@ -234,10 +234,10 @@
 </Studio>
 
 <style>
-  .ts-bindings-empty { color: var(--text-muted); font-size: 11px; padding: 12px; margin: 0; line-height: 1.5; }
-  .ts-schema-hint { color: var(--text-secondary); font-size: 11px; line-height: 1.5; margin: 0; }
+  .ts-bindings-empty { color: var(--text-muted); font-size: var(--font-size-xs); padding: 12px; margin: 0; line-height: 1.5; }
+  .ts-schema-hint { color: var(--text-secondary); font-size: var(--font-size-xs); line-height: 1.5; margin: 0; }
   .ts-bindings-empty code, .ts-schema-hint code {
-    font-family: var(--font-code); font-size: 11px; padding: 1px 4px; border-radius: 3px;
+    font-family: var(--font-code); font-size: var(--font-size-xs); padding: 1px 4px; border-radius: 3px;
     background: var(--bg-overlay); color: var(--text-primary);
   }
 </style>

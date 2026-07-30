@@ -51,28 +51,28 @@
 </FloatingPicker>
 
 <style>
-  .up-title { flex: 1; min-width: 0; font-size: 11.5px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .up-title { flex: 1; min-width: 0; font-size: var(--font-size-xs); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .up-title code { font-family: var(--font-code); color: var(--text-primary); }
   .up-count {
-    font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
+    font-size: var(--font-size-2xs); font-weight: 700; font-variant-numeric: tabular-nums;
     padding: 0 5px; border-radius: var(--radius-sm);
     background: var(--bg-overlay); color: var(--text-muted);
   }
 
-  .up-empty { padding: 12px 14px; font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+  .up-empty { padding: 12px 14px; font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted); }
   .up-empty code { font-family: var(--font-code); color: var(--text-secondary); }
   .up-empty kbd {
-    font-family: var(--font-code); font-size: 10px; padding: 0 4px;
+    font-family: var(--font-code); font-size: var(--font-size-2xs); padding: 0 4px;
     background: var(--bg-overlay); border: 1px solid var(--border); border-radius: var(--radius-sm);
   }
 
   .up-icon { display: flex; flex-shrink: 0; color: var(--text-disabled); }
   .up-pos {
-    font-family: var(--font-code); font-size: 10.5px; color: var(--text-muted);
+    font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted);
     flex-shrink: 0; min-width: 38px; font-variant-numeric: tabular-nums;
   }
   .up-preview {
-    flex: 1; min-width: 0; font-family: var(--font-code); font-size: 11.5px;
+    flex: 1; min-width: 0; font-family: var(--font-code); font-size: var(--font-size-xs);
     color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .up-preview.on { color: var(--text-primary); }

@@ -2,23 +2,27 @@
   /**
    * Script file view — a file from the repository, opened in the editor.
    *
-   * The banner above the buffer is the point: it states the encoding, the line
-   * ending, and whether either has drifted from what the folder expects. Saving
-   * preserves both; a character that cannot be represented in the destination
-   * encoding blocks the save rather than being replaced by `?`.
+   * What the file *is* — path, engine, encoding, line ending — is stated once, on
+   * the window's toolbar, along with Save. This view used to carry a second bar
+   * repeating all of it. What stays here is the one claim that is about the text
+   * rather than about the tab: an encoding that has drifted from what the folder
+   * declares.
+   *
+   * Saving preserves the encoding and the line endings, and a character the
+   * destination encoding cannot represent **blocks** the save rather than being
+   * written as `?` — the same guarantee the generator's writes carry, through the
+   * same `prepare_one` / `commit` pair.
    *
    * The buffer is highlighted with its folder's own dialect, because the same
    * text means different things in PL/SQL and PL/pgSQL.
    */
-  import { TriangleAlert, FileCode2 } from 'lucide-svelte';
+  import { TriangleAlert } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import CodeEditor from '$lib/components/shared/ui/code-editor/CodeEditor.svelte';
   import DocumentBridge from '../DocumentBridge.svelte';
   import { astStore } from '$lib/stores/picus/ast.svelte';
-  import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
-  import PicusDialectChip from '../PicusDialectChip.svelte';
   import { sqlLanguage } from '../picus-sql-language';
   import { sqlDiagnostics } from '../sql-intel';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -27,6 +31,8 @@
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusEditorStore, type PicusEditorHandle } from '$lib/stores/picus/editor.svelte';
   import { openObjectNamed } from '../goto-object';
+  import { openEditorContextMenu, type EditorTarget } from '../editor-context-menu';
+  import { saveOpenScript } from '../save-script';
   import { isDialect, type PicusTab } from '$lib/types/picus';
 
   interface Props {
@@ -58,7 +64,27 @@
   const loaded = $derived(tab.file ? picusProjectStore.textFor(tab.file) : null);
   const loadError = $derived(tab.file ? picusProjectStore.textErrorFor(tab.file) : '');
   const loadingText = $derived(!!tab.file && picusProjectStore.isTextLoading(tab.file));
-  const text = $derived(loaded?.text ?? '');
+
+  /**
+   * The text this view last put on screen, kept across the store's cache being
+   * emptied.
+   *
+   * Re-reading the repository throws every buffer away — deliberately, since they
+   * came from the previous read — and **a save triggers a re-read**. Without this
+   * the view fell back to its loading state for the moment in between, which
+   * unmounts CodeMirror; the editor came back a frame later scrolled to the top,
+   * so saving halfway down a long script threw you back to line 1. It is keyed by
+   * path so it can never hand one file's text to another.
+   */
+  let shown = $state<{ path: string; text: string } | null>(null);
+  $effect(() => {
+    const path = tab.file;
+    const fresh = loaded?.text;
+    if (path && fresh !== undefined) shown = { path, text: fresh };
+  });
+  const held = $derived(shown && shown.path === tab.file ? shown.text : null);
+
+  const text = $derived(loaded?.text ?? held ?? '');
 
   /**
    * The encoding the backend actually decoded with wins over the tree's entry:
@@ -83,9 +109,10 @@
   );
   const language = $derived(sqlLanguage(dialect, catalogue));
 
-  // The buffer as edited. Nothing persists it yet (saving arrives with the
-  // rewriter), but the diagnostics have to follow what is on screen — markers
-  // anchored to the text as it was loaded would drift on the first keystroke.
+  // The buffer as edited. The diagnostics follow what is on screen rather than
+  // what was loaded — markers anchored to the text on disk would drift on the
+  // first keystroke — and the toolbar compares this against the loaded text to
+  // know whether there is anything to save.
   let edited = $state<string | null>(null);
   $effect(() => { void tab.file; edited = null; });
   const buffer = $derived(edited ?? text);
@@ -108,7 +135,8 @@
     | ({
         scrollToLineCol: (line: number, col?: number) => void;
         caretByteOffset: () => number;
-      } & PicusEditorHandle)
+      } & PicusEditorHandle &
+        EditorTarget)
     | null
   >(null);
   $effect(() => {
@@ -167,29 +195,25 @@
       </Button>
     </div>
   </StateBlock>
-{:else if !loaded && loadingText}
+{:else if held === null && loadingText}
   <StateBlock tone="loading">
     {#snippet spinner()}<Spinner size={14} />{/snippet}
     <span>Reading {file.name}…</span>
   </StateBlock>
 {:else}
   <div class="fv">
-    <div class="fv-bar" class:fv-bad={drifted}>
-      <FileCode2 size={13} />
-      <span class="fv-path">{file.path}</span>
-      {#if engine}<PicusDialectChip {engine} />{/if}
-      <EncodingPill
-        {encoding}
-        expected={file.expectedEncoding}
-        {eol}
-        onChange={() => toastStore.show('Re-encoding a file arrives with the rewriter.', 'info')}
-      />
-      <span class="fv-source">{SOURCE_LABEL[file.encodingSource]}</span>
-      <span class="fv-spacer"></span>
-      {#if drifted}
-        <span class="fv-warn">
-          <TriangleAlert size={12} />
-          expected {file.expectedEncoding}
+    <!-- No bar of its own. The path, the engine, the encoding and the drift all
+         live on the window's toolbar one row up: this view had a second copy of
+         every one of them, so an editor opened on a script started two rows of
+         chrome down and the same facts were stated twice. What is genuinely this
+         view's — the drift warning, which is about the file and not about the tab
+         — sits inside the editor's own frame below. -->
+    {#if drifted}
+      <div class="fv-drift">
+        <TriangleAlert size={12} />
+        <span>
+          This file is {encoding} where {SOURCE_LABEL[file.encodingSource].toLowerCase()}
+          says {file.expectedEncoding}. Saving keeps it as it is.
         </span>
         <Button
           variant="secondary"
@@ -198,10 +222,21 @@
         >
           Convert back
         </Button>
-      {/if}
-    </div>
+      </div>
+    {/if}
 
-    <div class="fv-code">
+    <!-- Same menu as a query tab, plus the verb this tab actually has. Raised from
+         the wrapper: CodeMirror owns the DOM inside and rebuilds it whenever the
+         extension set changes. -->
+    <div
+      class="fv-code"
+      oncontextmenu={(e) =>
+        openEditorContextMenu(e, {
+          editor,
+          dialect,
+          onSave: () => { if (tab.file) void saveOpenScript(tab.file); },
+        })}
+    >
       <!-- Keyed on the descriptor: the editor builds its extensions at mount, so a
            change of borrowed catalogue (connecting, or switching database) has to
            rebuild them rather than keep the previous one's tables. -->
@@ -226,45 +261,25 @@
 <style>
   .fv { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 
-  .fv-bar {
+  /* A file whose encoding drifted is already wrong on disk — and unlike the
+     facts on the toolbar, this one is a claim about the file rather than a label
+     for the tab, so it stays here where the text it describes is. */
+  .fv-drift {
     display: flex;
     align-items: center;
     gap: 8px;
-    height: 30px;
     flex-shrink: 0;
-    padding: 0 10px;
-    background: var(--bg-elevated);
-    border-bottom: 1px solid var(--border-subtle);
-    font-size: 11.5px;
-    white-space: nowrap;
+    padding: 5px 10px;
+    background: color-mix(in srgb, var(--error) 9%, var(--bg-base));
+    border-bottom: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
+    font-size: var(--font-size-xs);
   }
-  /* A file whose encoding drifted is already wrong on disk — say so loudly. */
-  .fv-bar.fv-bad {
-    background: color-mix(in srgb, var(--error) 9%, var(--bg-elevated));
-    border-bottom-color: color-mix(in srgb, var(--error) 30%, transparent);
-  }
-  .fv-bar :global(svg) { color: var(--text-disabled); flex-shrink: 0; }
-
-  .fv-path {
-    font-family: var(--font-code);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 380px;
-  }
-  .fv-source { color: var(--text-disabled); font-size: 10.5px; }
-  .fv-spacer { flex: 1; }
-  .fv-warn {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: var(--error);
-    font-weight: 600;
-  }
-  .fv-warn :global(svg) { color: var(--error); }
+  .fv-drift :global(svg) { color: var(--error); flex-shrink: 0; }
+  .fv-drift span { flex: 1; min-width: 0; color: var(--text-secondary); }
 
   .fv-fail { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-  .fv-fail strong { font-size: 12px; }
-  .fv-fail span { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); max-width: 70ch; }
+  .fv-fail strong { font-size: var(--font-size-sm); }
+  .fv-fail span { font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted); max-width: 70ch; }
 
   .fv-code { flex: 1; min-height: 0; display: flex; overflow: hidden; }
   .fv-code > :global(*) { flex: 1; min-width: 0; min-height: 0; }

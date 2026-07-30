@@ -97,6 +97,7 @@ import {
   analyzeScripts,
   openScripts,
   refreshScripts,
+  saveScript,
   scriptText,
   toNotes,
 } from '$lib/ipc/picus/scripts';
@@ -575,6 +576,36 @@ function createProjectStore() {
         textErrors = { ...textErrors, [path]: String(e) };
       } finally {
         textLoading = { ...textLoading, [path]: false };
+      }
+    },
+
+    /**
+     * Write a script back, and re-check the repository against what is now on disk.
+     *
+     * The analysis is not a courtesy here — it is the point. Every rule this
+     * product runs is about the *content* of the scripts (a version chain, a
+     * duplicated insert, a dangerous DML, an encoding), so a save that left the
+     * previous verdict on screen would be showing a report about a file that no
+     * longer exists in that form. The refresh comes first: the backend threw its
+     * snapshot away on the write, and analysing before re-reading would only make
+     * it read the file twice.
+     *
+     * Returns the failure's own words, or an empty string. A refused save — text
+     * the file's encoding cannot represent — leaves the buffer exactly as it is,
+     * which is the only safe thing to do with edits that could not be written.
+     */
+    async saveText(path: string, text: string): Promise<string> {
+      if (!root || !path) return 'No repository is attached.';
+      try {
+        const written = await saveScript(root, path, text);
+        texts = { ...texts, [path]: written };
+        const { [path]: _dropped, ...rest } = textErrors;
+        textErrors = rest;
+        await this.refresh();
+        void this.analyze();
+        return '';
+      } catch (e) {
+        return String(e);
       }
     },
 

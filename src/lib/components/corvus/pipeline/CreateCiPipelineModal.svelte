@@ -346,7 +346,7 @@
   .provider-icon-gitlab { color: var(--brand-gitlab); }
 
   .modal-repo {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-code);
     color: var(--text-muted);
     white-space: nowrap;
@@ -362,7 +362,7 @@
     gap: 10px;
     padding: 32px 16px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     text-align: center;
   }
 
@@ -370,12 +370,12 @@
 
   .success-state { color: var(--success); }
   .success-title {
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     font-weight: 600;
     color: var(--text-primary);
     margin: 0;
   }
-  .success-hint { font-size: 12px; color: var(--text-muted); margin: 0; line-height: 1.5; }
+  .success-hint { font-size: var(--font-size-sm); color: var(--text-muted); margin: 0; line-height: 1.5; }
 
   /* ── Form ──────────────────────────────────────────────────────────────── */
   .form {
@@ -385,7 +385,7 @@
   }
 
   .field-hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     line-height: 1.5;
     margin: 0;
@@ -400,7 +400,7 @@
   }
   .warn-hint code {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--warning);
   }
 
@@ -421,7 +421,7 @@
     border-radius: var(--radius-md);
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
     text-align: left;
     outline: none;
@@ -446,7 +446,7 @@
     background: var(--bg-base);
     color: var(--text-secondary);
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     cursor: pointer;
     transition: border-color var(--transition-fast), color var(--transition-fast);
@@ -460,7 +460,7 @@
   }
 
   .var-header {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.4px;
     text-transform: uppercase;
@@ -482,7 +482,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     outline: none;
     transition: border-color var(--transition-fast);
     min-width: 0;
@@ -516,7 +516,7 @@
     background: var(--error-subtle);
     border: 1px solid color-mix(in srgb, var(--error) 25%, transparent);
     color: var(--error);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     word-break: break-word;
   }

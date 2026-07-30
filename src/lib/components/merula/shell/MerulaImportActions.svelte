@@ -64,9 +64,9 @@
 {/if}
 
 <style>
-  .lead { margin: 0 0 10px; font-size: 13px; color: var(--text-primary); }
+  .lead { margin: 0 0 10px; font-size: var(--font-size-md); color: var(--text-primary); }
   .opts { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; }
-  .opts li { font-size: 12px; color: var(--text-secondary); line-height: 1.45; }
+  .opts li { font-size: var(--font-size-sm); color: var(--text-secondary); line-height: 1.45; }
   .opts strong { color: var(--text-primary); font-weight: 600; }
-  .opts code { font-family: var(--font-code); font-size: 11px; color: var(--text-secondary); }
+  .opts code { font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-secondary); }
 </style>

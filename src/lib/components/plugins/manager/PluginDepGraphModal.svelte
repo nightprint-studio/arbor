@@ -212,7 +212,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     padding: 2px 7px;
     border-radius: 999px;
@@ -283,7 +283,7 @@
   }
 
   .dg-nav-group-label {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -313,7 +313,7 @@
     cursor: pointer;
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     text-align: left;
     transition: background var(--transition-fast), color var(--transition-fast),
                 border-color var(--transition-fast), box-shadow var(--transition-fast);
@@ -335,7 +335,7 @@
 
   .dg-nav-name    { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dg-nav-version {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
@@ -344,7 +344,7 @@
   :global(.dg-nav-arrow) { opacity: 0.55; flex-shrink: 0; }
   :global(.dg-nav-err) { color: var(--error); flex-shrink: 0; }
   .dg-nav-err-count {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     color: var(--text-on-accent);
     background: var(--error);
     border-radius: 999px;
@@ -375,7 +375,7 @@
   }
   .dg-plugin-titles { flex: 1; display: flex; flex-direction: column; gap: 2px; }
   .dg-plugin-head h2 {
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     font-weight: 600;
     color: var(--text-primary);
     margin: 0;
@@ -384,20 +384,20 @@
     gap: 8px;
   }
   .dg-plugin-ver {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-weight: 400;
     font-variant-numeric: tabular-nums;
   }
   .dg-plugin-head p {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     margin: 0;
     line-height: 1.5;
   }
 
   .dg-muted-tag {
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     padding: 2px 7px;
     border-radius: 999px;
     background: var(--bg-base);
@@ -438,7 +438,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -450,7 +450,7 @@
   :global(.dg-arrow-rev) { transform: rotate(180deg); }
   .dg-card-count {
     margin-left: auto;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-base);
     border: 1px solid var(--border-subtle);
@@ -461,7 +461,7 @@
 
   .dg-card-empty {
     padding: 12px 14px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-style: italic;
   }
@@ -496,7 +496,7 @@
     border: none;
     color: var(--accent);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     cursor: pointer;
     padding: 0;
@@ -512,7 +512,7 @@
     font-weight: 450;
   }
   .dg-row-desc {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     font-family: var(--font-code);
     line-height: 1.3;
@@ -528,7 +528,7 @@
   /* ── Tags ─────────────────────────────────────────────────────────────── */
 
   .dg-tag-soft, .dg-tag-warn, .dg-tag-err, .dg-tag-ok {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     padding: 2px 6px;
     border-radius: 999px;
     text-transform: uppercase;

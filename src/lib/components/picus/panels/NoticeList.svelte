@@ -71,7 +71,7 @@
     align-items: center;
     gap: 6px;
     padding: 7px 12px 4px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -84,7 +84,7 @@
     align-items: flex-start;
     gap: 7px;
     padding: 5px 12px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--text-secondary);
   }
@@ -106,7 +106,7 @@
     border: none;
     color: var(--text-disabled);
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     cursor: pointer;
     text-align: left;
     overflow-wrap: anywhere;

@@ -72,7 +72,7 @@
 
 <style>
   .kind-badge {
-    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
+    font-size: var(--font-size-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
     color: var(--accent); background: var(--accent-subtle);
     padding: 1px 7px; border-radius: 999px;
   }
@@ -92,20 +92,20 @@
   .media-el { display: block; width: 100%; height: 100%; object-fit: contain; }
   .frame-note {
     position: absolute; left: 10px; bottom: 10px;
-    font-size: 10.5px; font-weight: 500;
+    font-size: var(--font-size-2xs); font-weight: 500;
     color: #fff; background: rgba(0,0,0,0.42);
     padding: 3px 8px; border-radius: 6px;
   }
   .frame-dur {
     position: absolute; right: 10px; bottom: 10px;
-    font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+    font-size: var(--font-size-sm); font-weight: 700; font-variant-numeric: tabular-nums;
     background: rgba(0,0,0,0.5); padding: 2px 8px; border-radius: 6px;
   }
 
   .meta { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; }
   .meta li {
     display: flex; align-items: center; gap: 8px;
-    font-size: 12px; color: var(--text-secondary);
+    font-size: var(--font-size-sm); color: var(--text-secondary);
     padding: 7px 10px; background: var(--bg-input); border-radius: var(--radius-sm);
   }
   .meta li :global(svg) { color: var(--text-muted); flex-shrink: 0; }

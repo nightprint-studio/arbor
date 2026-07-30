@@ -131,7 +131,7 @@
     flex-shrink: 0;
   }
   .sts-title {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.3px;
     text-transform: uppercase;
@@ -163,7 +163,7 @@
     gap: 8px;
   }
   :global(.sts-body .sts-row-label) {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -181,7 +181,7 @@
     background: var(--bg-overlay);
     color: var(--text-primary);
     border-radius: var(--radius-sm);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     text-align: left;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);

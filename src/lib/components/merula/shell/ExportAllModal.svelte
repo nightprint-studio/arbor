@@ -211,7 +211,7 @@
   .loading { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); padding: 24px 0; }
 
   .listhead { display: flex; align-items: center; justify-content: space-between; flex: none; }
-  .count { font-size: 12px; color: var(--text-secondary); }
+  .count { font-size: var(--font-size-sm); color: var(--text-secondary); }
   .bulk { display: flex; gap: 4px; }
 
   .files {
@@ -225,16 +225,16 @@
 
   label { display: flex; align-items: center; gap: 10px; padding: 6px 10px; cursor: pointer; }
   label:hover { background: var(--bg-hover); }
-  .name { flex: 1; display: flex; flex-direction: column; font-size: 13px; min-width: 0; }
-  .rel { font-size: 11px; color: var(--text-disabled); font-family: var(--font-code); }
-  .cycles { font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+  .name { flex: 1; display: flex; flex-direction: column; font-size: var(--font-size-md); min-width: 0; }
+  .rel { font-size: var(--font-size-xs); color: var(--text-disabled); font-family: var(--font-code); }
+  .cycles { font-size: var(--font-size-xs); color: var(--text-secondary); white-space: nowrap; }
   .cycles em { color: var(--text-disabled); font-style: normal; }
-  .why { margin: 0 10px 6px 34px; font-size: 11px; color: var(--danger); }
+  .why { margin: 0 10px 6px 34px; font-size: var(--font-size-xs); color: var(--danger); }
 
   .opts { display: flex; flex-direction: column; gap: 2px; flex: none; }
   .dir { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .path {
-    flex: 1; font-size: 12px; font-family: var(--font-code); color: var(--text-secondary);
+    flex: 1; font-size: var(--font-size-sm); font-family: var(--font-code); color: var(--text-secondary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
 </style>

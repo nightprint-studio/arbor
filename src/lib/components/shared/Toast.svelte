@@ -44,7 +44,7 @@
     gap: 9px;
     padding: 9px 11px 9px 14px;
     border-radius: var(--radius-lg);
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     line-height: 1.35;
     color: var(--text-primary);
     /* 95% opaque already — bumped to 100% so the lost blur diffusion does
@@ -117,7 +117,7 @@
     cursor: pointer;
     padding: 3px 9px;
     border-radius: var(--radius-sm);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
   }

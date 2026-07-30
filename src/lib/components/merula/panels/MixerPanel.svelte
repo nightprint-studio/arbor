@@ -212,10 +212,10 @@
   .clip-led.on { background: var(--error); box-shadow: 0 0 6px var(--error); }
   .clip-led:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
   .nm {
-    font-size: 11px; font-weight: 600;
+    font-size: var(--font-size-xs); font-weight: 600;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .master-name .nm { font-size: 9.5px; letter-spacing: 0.6px; color: var(--text-muted); }
+  .master-name .nm { font-size: var(--font-size-3xs); letter-spacing: 0.6px; color: var(--text-muted); }
 
   /* Fader zone — the only flexible region: it soaks up the panel height so the
      meter grows tall on a big panel and shrinks (never the knobs) on a small one. */
@@ -236,8 +236,8 @@
 
   .knobs-row { display: flex; align-items: flex-start; justify-content: center; gap: 5px; flex-shrink: 0; }
   .kcol { display: flex; flex-direction: column; align-items: center; gap: 1px; }
-  .kval { font-size: 9px; color: var(--text-muted); font-family: var(--font-code); line-height: 1; }
-  .kunit { margin-left: 2px; opacity: 0.6; font-size: 8px; }
+  .kval { font-size: var(--font-size-3xs); color: var(--text-muted); font-family: var(--font-code); line-height: 1; }
+  .kunit { margin-left: 2px; opacity: 0.6; font-size: var(--font-size-3xs); }
 
   .ms-row { display: flex; gap: 3px; align-items: center; min-height: 18px; }
   .ms {
@@ -254,5 +254,5 @@
   /* Muted but not persistible (calculated gain) — dashed outline = "live only". */
   .ms.on.calc { background: color-mix(in srgb, var(--warning) 55%, var(--bg-input)); border: 1px dashed var(--warning); color: var(--text-primary); }
 
-  .dsp { font-size: 9.5px; font-family: var(--font-code); color: var(--text-muted); }
+  .dsp { font-size: var(--font-size-3xs); font-family: var(--font-code); color: var(--text-muted); }
 </style>

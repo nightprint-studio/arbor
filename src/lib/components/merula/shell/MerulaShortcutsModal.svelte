@@ -127,28 +127,28 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-  .sc-lead { font-size: 12px; color: var(--text-secondary); margin: 0 0 14px; line-height: 1.5; }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
+  .sc-lead { font-size: var(--font-size-sm); color: var(--text-secondary); margin: 0 0 14px; line-height: 1.5; }
 
   .sc-table { width: 100%; border-collapse: collapse; }
   .sc-table td { padding: 6px 0; vertical-align: middle; border-bottom: 1px solid var(--border-subtle); }
   .sc-keys { width: 160px; white-space: nowrap; }
-  .sc-desc { font-size: 12px; color: var(--text-secondary); }
+  .sc-desc { font-size: var(--font-size-sm); color: var(--text-secondary); }
   .sc-scope {
-    margin-left: 8px; padding: 0 5px; font-size: 9px; font-weight: 700;
+    margin-left: 8px; padding: 0 5px; font-size: var(--font-size-3xs); font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.4px;
     color: var(--text-muted); background: var(--bg-overlay);
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
   }
-  .sc-plus { color: var(--text-disabled); font-size: 10px; margin: 0 3px; }
+  .sc-plus { color: var(--text-disabled); font-size: var(--font-size-2xs); margin: 0 3px; }
   .sc-section {
     padding-top: 14px !important; padding-bottom: 4px !important;
-    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+    font-size: var(--font-size-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
     color: var(--text-muted); border-bottom: none !important;
   }
   kbd {
     display: inline-block;
-    font-family: var(--font-code); font-size: 10.5px; line-height: 1.6;
+    font-family: var(--font-code); font-size: var(--font-size-2xs); line-height: 1.6;
     padding: 1px 6px; min-width: 18px; text-align: center;
     color: var(--text-secondary);
     background: var(--bg-overlay);

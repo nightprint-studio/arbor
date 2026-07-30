@@ -40,7 +40,7 @@
     background: var(--bg-overlay);
     color: var(--text-muted);
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     flex-shrink: 0;
   }

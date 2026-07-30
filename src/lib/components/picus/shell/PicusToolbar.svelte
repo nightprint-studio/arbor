@@ -12,17 +12,21 @@
    * visible control, never a hidden global mode.
    */
   import {
-    Play, Square, Save, GitCompare, Download, Plus, FormInput, RefreshCw, Check, Search,
+    Play, Square, Save, GitCompare, Download, Plus, FormInput, RefreshCw, Check,
     ListOrdered, Lock,
   } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import PicusConnectionPill from '../PicusConnectionPill.svelte';
   import PicusDialectChip from '../PicusDialectChip.svelte';
   import PicusRoleChip from '../PicusRoleChip.svelte';
+  import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
+  import { picusEditorStore } from '$lib/stores/picus/editor.svelte';
+  import { saveOpenScript } from '../save-script';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { connectionsStore, connectionColorVar } from '$lib/stores/picus/connections.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
@@ -85,6 +89,27 @@
 
   function notYet(what: string) {
     toastStore.show(`${what} arrives with the backend milestone.`, 'info');
+  }
+
+  // ── Saving a script ─────────────────────────────────────────────────────────
+  //
+  // The buffer lives in the editor, which registers itself with `picusEditorStore`
+  // — the same registration Ctrl+F already goes through. Reading it here rather
+  // than threading the text up through the view keeps one owner of "what is in the
+  // editor right now".
+  const fileText = $derived(tab?.file ? picusProjectStore.textFor(tab.file) : null);
+  const fileDirty = $derived(
+    !!tab?.file && !!fileText && picusEditorStore.active?.getValue() !== fileText.text,
+  );
+  let saving = $state(false);
+
+  /** The button's half of Save: the busy state. The verb itself is shared with Ctrl+S. */
+  async function saveFile() {
+    const path = tab?.file;
+    if (!path || saving) return;
+    saving = true;
+    await saveOpenScript(path);
+    saving = false;
   }
 
   /** Run, and reveal the answer — the dock is where every answer in this window is. */
@@ -186,7 +211,12 @@
          the identity, so it moved here. -->
     {#if conn}
       <div class="ptb-info">
-        <span class="ptb-host">{conn.schema}@{conn.host}</span>
+        <!-- The engine and the installed version; the host and schema are in the
+             pill's own tooltip beside them. `public@localhost:5432/postgres`
+             used to be spelled out here, next to a chip already saying
+             PostgreSQL and a pill already saying which connection this is —
+             three ways of naming one database, on one row, none of them the
+             thing you look at this bar to check. -->
         <PicusDialectChip engine={conn.dialect} />
         {#if conn.dbVersion}
           <Badge variant="tone" tone="neutral" size="sm" label={`db ${conn.dbVersion}`} />
@@ -196,7 +226,14 @@
             <Lock size={11} /> read-only
           </span>
         {/if}
-        {#if result}
+        <!-- Said where the button that started it is. A statement in flight showed
+             nothing at all up here — Run merely went grey — while the only sign of
+             life was a small spinner in the dock's own header, which is a
+             different panel and often a closed one. -->
+        {#if queryState?.running}
+          <span class="ptb-dot">·</span>
+          <span class="ptb-running"><Spinner size={11} /> running…</span>
+        {:else if result}
           <span class="ptb-dot">·</span>
           <span>{formatElapsed(result.elapsedMs)}</span>
         {/if}
@@ -257,17 +294,37 @@
     </Dropdown>
 
   {:else if kind === 'file'}
-    <Button variant="icon" size="sm" title="Save (preserves encoding + line endings)" ariaLabel="Save" onclick={() => notYet('Saving')}>
-      {#snippet iconStart()}<Save size={14} />{/snippet}
+    <Button
+      variant="ghost"
+      size="sm"
+      disabled={!fileDirty || saving}
+      tooltip={{
+        content: 'Write this file back in its own encoding and line endings, then re-check the repository',
+        shortcut: 'Ctrl+S',
+      }}
+      ariaLabel="Save"
+      onclick={() => void saveFile()}
+    >
+      {#snippet iconStart()}
+        {#if saving}<Spinner size={13} />{:else}<Save size={14} />{/if}
+      {/snippet}
+      Save
     </Button>
     <Button variant="icon" size="sm" title="Compare with the other engine's version of this change" ariaLabel="Compare with the other engine's version" onclick={() => notYet('Cross-engine comparison')}>
       {#snippet iconStart()}<GitCompare size={14} />{/snippet}
     </Button>
-    <Button variant="icon" size="sm" title="Find in file" ariaLabel="Find in file" onclick={() => notYet('Find in file')}>
-      {#snippet iconStart()}<Search size={14} />{/snippet}
-    </Button>
+    <!-- No magnifier: Ctrl+F opens the editor's own panel, and a button that
+         duplicates a binding everyone already has is a button that has to be kept
+         in step with it. -->
 
     <span class="ptb-spacer"></span>
+    <!-- The file's own facts, which used to be a SECOND bar under this one:
+         path, engine, encoding, line ending, and whether the encoding has drifted
+         from what the folder declares. Two rows of chrome above an editor, saying
+         things that fit on one. -->
+    {#if openFile}
+      <span class="ptb-path" use:tooltip={openFile.path}>{openFile.path}</span>
+    {/if}
     {#if openFolder}
       <!-- Which folder decides this file's engine, and whether that folder says so
            itself or inherits it. The chip is the shortest honest answer to "what
@@ -290,9 +347,12 @@
       <div class="ptb-info">
         <span>{(openFile.size / 1024).toFixed(1)} KB</span>
         <span class="ptb-dot">·</span>
-        <span>{openFile.encoding}</span>
-        <span class="ptb-dot">·</span>
-        <span>{openFile.eol}</span>
+        <EncodingPill
+          encoding={fileText?.encoding ?? openFile.encoding}
+          expected={openFile.expectedEncoding}
+          eol={fileText?.eol ?? openFile.eol}
+          compact
+        />
       </div>
     {/if}
 
@@ -317,16 +377,21 @@
 </div>
 
 <style>
+  /* A floating strip, not a band welded to the card's edges.
+     It is elevated because it is furniture rather than document — but it used to
+     run wall to wall, so the grey met the card's rounded corners and the whole
+     top of the window read as one grey mass. A few pixels of `bg-base` around it
+     is what makes it a toolbar sitting on a page instead of a stripe painted
+     across one; same reason the panels themselves float inside the rails. */
   .ptb {
     display: flex;
     align-items: center;
     gap: 4px;
     height: 32px;
     flex-shrink: 0;
+    margin: 3px 6px;
     padding: 0 8px;
-    border-bottom: 1px solid var(--border-subtle);
-    /* Elevated, like the chrome above it: this strip is part of the window's
-       furniture, not part of the document. */
+    border-radius: var(--radius-sm);
     background: var(--bg-elevated);
   }
   .ptb-spacer { flex: 1; }
@@ -342,12 +407,26 @@
     align-items: center;
     gap: 6px;
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     white-space: nowrap;
   }
   .ptb-dot { color: var(--text-disabled); }
-  .ptb-host { font-family: var(--font-code); font-size: 10.5px; }
+  .ptb-running { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); }
+  /* Elided from the left: the tail of a script path is what identifies it, and the
+     head is the same six folders on every file in the repository. */
+  .ptb-path {
+    min-width: 0;
+    max-width: 46ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
+    font-family: var(--font-code);
+    font-size: var(--font-size-2xs);
+    color: var(--text-muted);
+  }
   .ptb-ro {
     display: inline-flex;
     align-items: center;

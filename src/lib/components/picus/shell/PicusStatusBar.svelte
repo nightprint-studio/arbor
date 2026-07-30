@@ -24,7 +24,6 @@
   import { consistencyStore } from '$lib/stores/picus/consistency.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import { formatRowTotal, picusResultsStore } from '$lib/stores/picus/result.svelte';
-  import { DIALECTS } from '$lib/types/picus';
 
   let { footerExtra }: { footerExtra?: Snippet } = $props();
 
@@ -54,15 +53,18 @@
 
 <div class="pf">
   {#if conn}
-    <PicusConnectionPill connection={conn} density="status" onclick={() => picusUiStore.showSection('connections')} />
-    <span class="pf-sep"></span>
-    <span class="pf-item" use:tooltip={`${DIALECTS[conn.dialect].label} · ${conn.host}`}>
-      {DIALECTS[conn.dialect].short}
-    </span>
-    <span class="pf-sep"></span>
-    <span class="pf-item" use:tooltip={'Application version stamped in the version table'}>
-      db {conn.dbVersion}
-    </span>
+    <!-- The connection, once.
+         The engine and the installed version used to be spelled out again right
+         here, three chips after the toolbar one row up had already said both —
+         which put `appalti_local` on screen four times and `PostgreSQL` three,
+         and taught the eye to skip all of them. The bar above owns the tab's
+         binding; this one owns the window, so it keeps the name and hands the
+         rest to the pill's tooltip. -->
+    <PicusConnectionPill
+      connection={conn}
+      density="status"
+      onclick={() => picusUiStore.showSection('connections')}
+    />
   {:else}
     <span class="pf-item pf-muted">No connection</span>
   {/if}
@@ -155,7 +157,7 @@
     background: var(--bg-elevated);
     border-top: 1px solid var(--border-subtle);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     user-select: none;
   }
@@ -185,6 +187,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
   }
 </style>

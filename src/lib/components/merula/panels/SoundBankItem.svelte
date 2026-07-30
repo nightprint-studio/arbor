@@ -130,7 +130,7 @@
   .sbi-icon { display: flex; color: var(--text-muted); flex-shrink: 0; }
   .sbi-name {
     flex: 1; min-width: 0;
-    font-family: var(--font-code); font-size: 11.5px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .sbi-copy { display: flex; color: var(--text-disabled); flex-shrink: 0; opacity: 0; transition: opacity var(--transition-fast); }
@@ -157,20 +157,20 @@
 
   .sbi-info { padding: 2px 10px 8px 26px; }
   .sbi-desc {
-    margin: 0 0 5px; font-size: 11px; line-height: 1.5; color: var(--text-secondary);
+    margin: 0 0 5px; font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-secondary);
   }
   .sbi-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
   .sbi-kind {
-    font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    font-size: var(--font-size-3xs); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
     color: var(--text-muted); background: var(--bg-overlay);
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
     padding: 1px 5px;
   }
   .sbi-arts-label {
-    font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-disabled);
+    font-size: var(--font-size-3xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-disabled);
   }
   .sbi-art {
-    font-family: var(--font-code); font-size: 9px; line-height: 1.5;
+    font-family: var(--font-code); font-size: var(--font-size-3xs); line-height: 1.5;
     padding: 0 5px; border-radius: var(--radius-sm);
     color: var(--text-secondary); background: var(--bg-overlay);
     border: 1px solid var(--border-subtle);

@@ -123,7 +123,7 @@
   .variant-inline {
     gap: 5px;
     padding: 4px 9px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans);

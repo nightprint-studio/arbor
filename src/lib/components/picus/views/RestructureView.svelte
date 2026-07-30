@@ -126,6 +126,7 @@
               value={store.pattern}
               {language}
               placeholder={'INSERT INTO CATALOGO_WIDGET ($cols...$) VALUES ($vals...$)'}
+              wrap
               keyBindings={findKeys}
               oninput={(v) => store.setPattern(v)}
             />
@@ -146,6 +147,7 @@
               value={store.replacement}
               {language}
               placeholder={'INSERT INTO CATALOGO_WIDGET (CHIAVE, ETICHETTA) VALUES ($vals[cols=chiave]$, $vals[cols=etichetta]$)'}
+              wrap
               keyBindings={findKeys}
               oninput={(v) => store.setReplacement(v)}
             />
@@ -398,20 +400,20 @@
     container-type: inline-size;
   }
 
-  .rv-head h1 { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+  .rv-head h1 { font-size: var(--font-size-lg); font-weight: 600; color: var(--text-primary); }
   .rv-head p {
     margin-top: 3px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--text-muted);
   }
-  .rv-head code { font-family: var(--font-code); font-size: 11px; color: var(--accent); }
+  .rv-head code { font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--accent); }
 
   .rv-more {
     background: none;
     border: none;
     padding: 0 0 0 4px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
     cursor: pointer;
     text-decoration: underline;
@@ -428,11 +430,11 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--text-primary);
   }
-  .rv-hint { font-size: 11px; color: var(--text-muted); }
+  .rv-hint { font-size: var(--font-size-xs); color: var(--text-muted); }
 
   /* Tall enough for a statement that wraps, short enough that the matches stay in
      view — a pattern is two or three lines, not a document. */
@@ -445,7 +447,7 @@
   .rv-grid { height: 55vh; min-height: 240px; display: flex; flex-direction: column; }
 
   .rv-inline { display: inline-flex; align-items: center; gap: 5px; }
-  .rv-inline span { font-size: 11px; color: var(--text-muted); }
+  .rv-inline span { font-size: var(--font-size-xs); color: var(--text-muted); }
 
   .rv-scope {
     display: flex;
@@ -460,14 +462,14 @@
     min-width: 180px;
     flex: 1;
   }
-  .rv-field span { font-size: 11px; color: var(--text-secondary); }
+  .rv-field span { font-size: var(--font-size-xs); color: var(--text-secondary); }
 
   .rv-patches { display: flex; flex-direction: column; gap: 8px; }
   .rv-section {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--text-primary);
   }

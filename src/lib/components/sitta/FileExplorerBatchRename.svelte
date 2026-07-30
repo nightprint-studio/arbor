@@ -167,20 +167,20 @@
   .br-row-opts { align-items: center; flex-wrap: wrap; gap: 16px; }
   .br-field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
   .br-field-sm { flex: 0 0 auto; }
-  .br-label { font-size: 11px; color: var(--text-muted); font-weight: 600; }
-  .br-input { background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-primary); font-family: var(--font-ui-sans); font-size: 12.5px; padding: 5px 8px; outline: none; }
+  .br-label { font-size: var(--font-size-xs); color: var(--text-muted); font-weight: 600; }
+  .br-input { background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-primary); font-family: var(--font-ui-sans); font-size: var(--font-size-sm); padding: 5px 8px; outline: none; }
   .br-input:focus { border-color: var(--border-focus); box-shadow: 0 0 0 2px rgba(61,127,255,0.2); }
   .br-field-sm .br-input { width: 76px; }
-  .br-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
-  .br-hint { font-size: 11px; color: var(--text-disabled); }
+  .br-check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--font-size-sm); color: var(--text-secondary); cursor: pointer; }
+  .br-hint { font-size: var(--font-size-xs); color: var(--text-disabled); }
   .br-hint code { font-family: var(--font-code); background: var(--bg-hover); padding: 0 4px; border-radius: 3px; }
   .br-preview { flex: 1; overflow-y: auto; padding: 8px 16px; display: flex; flex-direction: column; gap: 2px; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
-  .br-prow { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 0; min-width: 0; }
+  .br-prow { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-sm); padding: 3px 0; min-width: 0; }
   .br-prow.nochange { opacity: 0.5; }
   .br-old { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: right; }
   .br-arrow { color: var(--text-disabled); flex-shrink: 0; display: inline-flex; }
   .br-new { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
   .br-new-bad { color: var(--danger); display: inline-flex; align-items: center; gap: 4px; }
-  .br-foot { font-size: 11.5px; color: var(--text-muted); }
+  .br-foot { font-size: var(--font-size-xs); color: var(--text-muted); }
   .br-foot-btns { display: flex; gap: 8px; }
 </style>

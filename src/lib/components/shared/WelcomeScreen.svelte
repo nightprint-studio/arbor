@@ -413,8 +413,8 @@
   }
   .welcome-plugin-icon { color: var(--accent); display: inline-flex; }
   .welcome-plugin-text { display: flex; flex-direction: column; gap: 2px; }
-  .welcome-plugin-title { font-size: 13px; font-weight: 500; }
-  .welcome-plugin-desc  { font-size: 11px; color: var(--text-secondary); }
+  .welcome-plugin-title { font-size: var(--font-size-md); font-weight: 500; }
+  .welcome-plugin-desc  { font-size: var(--font-size-xs); color: var(--text-secondary); }
 
   /* ── Recent section ── */
   .recent-section {
@@ -427,7 +427,7 @@
     align-items: center;
     gap: 6px;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.5px;
     text-transform: uppercase;
@@ -472,7 +472,7 @@
   .recent-item:hover { background: rgba(255, 255, 255, 0.04); }
 
   .recent-item-name {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 500;
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
@@ -484,7 +484,7 @@
   }
 
   .recent-item-dir {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     font-family: var(--font-code);
     flex: 1;
@@ -537,7 +537,7 @@
     text-decoration-color: rgba(204, 167, 58, 0.5);
   }
   .missing-pill {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;

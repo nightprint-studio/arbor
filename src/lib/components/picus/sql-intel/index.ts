@@ -16,6 +16,7 @@
  * | `tokens.ts` | Scanning: where the text is code and where it is a string, a comment or a `$$` body. Statement splitting. |
  * | `analysis.ts` | One statement's meaning: table references, **alias resolution**, and what the caret is in the middle of. |
  * | `keywords.ts` | The per-dialect vocabularies — one for suggesting, a wider one for *excluding*. |
+ * | `continuations.ts` | What the grammar allows at the caret, before anything is looked up. |
  * | `schema-view.ts` | The single gate between "does not exist" and "not read yet". |
  * | `completion.ts` | The `CompletionSource`. |
  * | `hover.ts` | The `hoverTooltip` source. |

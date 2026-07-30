@@ -41,7 +41,7 @@
 .pe-col-title {
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: 10.5px;
+  font-size: var(--font-size-2xs);
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -82,7 +82,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 5px 8px 5px 24px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--text-primary);
   font-family: var(--font-ui-sans);
 }
@@ -107,7 +107,7 @@
 }
 .pe-empty, .pe-muted {
   color: var(--text-muted);
-  font-size: 11.5px;
+  font-size: var(--font-size-xs);
   text-align: center;
   padding: 8px 10px;
   margin: 0;
@@ -125,7 +125,7 @@
 .pe-cat .collapsible-header {
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 600;
   color: var(--text-secondary);
   font-family: var(--font-ui-sans);
@@ -146,7 +146,7 @@
 .pe-cat-label { flex: 0 1 auto; }
 .pe-cat-count {
   margin-left: auto;
-  font-size: 9.5px;
+  font-size: var(--font-size-3xs);
   font-weight: 600;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
@@ -166,7 +166,7 @@
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-family: var(--font-ui-sans);
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -196,8 +196,8 @@
   padding: 28px 14px;
   text-align: center;
 }
-.pe-seq-empty p { margin: 0; font-size: 12.5px; }
-.pe-seq-empty .pe-muted { font-size: 11.5px; }
+.pe-seq-empty p { margin: 0; font-size: var(--font-size-sm); }
+.pe-seq-empty .pe-muted { font-size: var(--font-size-xs); }
 
 .pe-btn-primary {
   display: inline-flex;
@@ -208,7 +208,7 @@
   color: var(--text-on-accent);
   border: 1px solid var(--accent);
   border-radius: var(--radius-md);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
   cursor: pointer;
   font-family: var(--font-ui-sans);
@@ -252,13 +252,13 @@
   background: var(--bg-base);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  font-size: 10.5px;
+  font-size: var(--font-size-2xs);
   font-weight: 600;
   color: var(--text-secondary);
 }
 .pe-stage-header svg.pe-stage-mode { color: var(--text-muted); flex-shrink: 0; }
 .pe-stage-name {
-  font-size: 12.5px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
   color: var(--text-primary);
   overflow: hidden;
@@ -267,14 +267,14 @@
   min-width: 0;
 }
 .pe-stage-count {
-  font-size: 10.5px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 .pe-stage-empty {
   margin: 0;
   padding: 12px 14px;
-  font-size: 11.5px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
   font-style: italic;
 }
@@ -291,7 +291,7 @@
   padding: 0;
   min-height: 28px;
   border-left: 2px solid transparent;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 .pe-step-main {
   display: flex;
@@ -334,7 +334,7 @@
   flex-shrink: 0;
 }
 .pe-step-kind {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -343,7 +343,7 @@
   min-width: 0;
 }
 .pe-step-flag {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--warning, #d19a66);
 }
 
@@ -405,7 +405,7 @@
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  font-size: 11.5px;
+  font-size: var(--font-size-xs);
   font-family: var(--font-ui-sans);
 }
 .pe-bc-crumb {
@@ -439,7 +439,7 @@
 /* ── Step row extras (summary line + drill button) ────────────────── */
 .pe-step-summary {
   margin-left: 6px;
-  font-size: 10.5px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -511,7 +511,7 @@
   background: var(--bg-base);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: lowercase;
@@ -531,11 +531,11 @@
   padding: 3px 6px;
   color: var(--text-primary);
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 .pe-branch-expr:focus { outline: none; border-color: var(--border-focus); }
 .pe-branch-count {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   margin-left: auto;
@@ -553,7 +553,7 @@
   list-style: none;
   padding: 6px 8px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-style: italic;
 }
 .pe-branch-add-row {
@@ -570,7 +570,7 @@
   border: 1px dashed var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 10.5px;
+  font-size: var(--font-size-2xs);
   cursor: pointer;
   font-family: var(--font-ui-sans);
 }

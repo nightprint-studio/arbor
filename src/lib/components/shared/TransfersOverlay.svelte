@@ -84,7 +84,7 @@
           <Trash2 size={13} /><span>Clear</span>
         </button>
       {/if}
-      <button class="mac-close-btn" onclick={() => uiStore.setTransfersOverlayOpen(false)}
+      <button class="close-btn" onclick={() => uiStore.setTransfersOverlayOpen(false)}
               use:tooltip={'Close'} aria-label="Close"></button>
     </div>
   </div>
@@ -151,7 +151,7 @@
     height: 22px; padding: 0 6px;
     border: none; background: transparent; color: var(--text-muted);
     border-radius: var(--radius-sm); cursor: pointer;
-    font-size: 11px; font-family: var(--font-ui-sans);
+    font-size: var(--font-size-xs); font-family: var(--font-ui-sans);
     transition: background var(--transition-fast), color var(--transition-fast);
   }
   .clear-btn:hover { background: var(--bg-elevated); color: var(--text-primary); }
@@ -180,10 +180,10 @@
     font-size: var(--font-size-sm); color: var(--text-primary);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .t-pct { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .t-pct { font-size: var(--font-size-2xs); color: var(--text-muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
   .t-foot { display: flex; align-items: baseline; gap: 8px; }
-  .t-phase { flex: 1; min-width: 0; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .t-time { flex-shrink: 0; font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .t-phase { flex: 1; min-width: 0; font-size: var(--font-size-2xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t-time { flex-shrink: 0; font-size: var(--font-size-2xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
   .t-actions { display: flex; align-items: center; flex-shrink: 0; }
   .t-btn {

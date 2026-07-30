@@ -80,7 +80,7 @@
   .dir-btn {
     display: flex; align-items: center; gap: 5px;
     padding: 4px 10px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     background: var(--bg-elevated);
     border: 1px solid var(--border);

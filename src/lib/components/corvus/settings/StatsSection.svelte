@@ -249,14 +249,14 @@
     display: flex; flex-direction: column; gap: 2px;
   }
   .excl-title {
-    font-size: 13px; font-weight: 600;
+    font-size: var(--font-size-md); font-weight: 600;
     color: var(--text-primary); font-family: var(--font-ui-sans);
   }
   .excl-hint {
-    font-size: 11px; color: var(--text-disabled); font-family: var(--font-ui-sans);
+    font-size: var(--font-size-xs); color: var(--text-disabled); font-family: var(--font-ui-sans);
   }
   .excl-hint code {
-    font-family: var(--font-code); font-size: 10px;
+    font-family: var(--font-code); font-size: var(--font-size-2xs);
     background: var(--bg-hover); padding: 1px 4px; border-radius: var(--radius-sm);
     color: var(--text-muted);
   }
@@ -280,7 +280,7 @@
     display: inline-flex; align-items: center; gap: 4px;
     padding: 3px 4px 3px 8px;
     border-radius: var(--radius-sm);
-    font-size: 12px; font-family: var(--font-code);
+    font-size: var(--font-size-sm); font-family: var(--font-code);
     border: 1px solid transparent;
   }
   .chip-ext    { background: hsl(220,35%,16%); border-color: hsl(220,40%,24%); color: hsl(220,75%,70%); }
@@ -308,7 +308,7 @@
     width: 110px; height: 100%;
     background: transparent; border: none; outline: none;
     padding: 0 8px;
-    font-size: 12px; font-family: var(--font-code);
+    font-size: var(--font-size-sm); font-family: var(--font-code);
     color: var(--text-primary);
   }
   .inline-input::placeholder { color: var(--text-disabled); }
@@ -329,18 +329,18 @@
   .save-btn {
     padding: 7px 20px; background: var(--accent); color: var(--text-on-accent);
     border: none; border-radius: var(--radius-sm);
-    font-size: 13px; font-family: var(--font-ui-sans); font-weight: 600;
+    font-size: var(--font-size-md); font-family: var(--font-ui-sans); font-weight: 600;
     cursor: pointer; transition: background var(--transition-fast), opacity var(--transition-fast);
   }
   .save-btn:hover:not(:disabled) { background: var(--accent-hover, color-mix(in srgb, var(--accent) 85%, white)); }
   .save-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-  .saved-hint { font-size: 11px; color: var(--text-disabled); font-family: var(--font-ui-sans); }
-  .save-error { font-size: 12px; color: var(--diff-del-bg-strong, #e87474); font-family: var(--font-ui-sans); margin: 0 0 8px; }
+  .saved-hint { font-size: var(--font-size-xs); color: var(--text-disabled); font-family: var(--font-ui-sans); }
+  .save-error { font-size: var(--font-size-sm); color: var(--diff-del-bg-strong, #e87474); font-family: var(--font-ui-sans); margin: 0 0 8px; }
 
   /* ── Empty state ─────────────────────────────────────────────────────────── */
   .empty-state {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 8px; padding: 48px 16px;
-    color: var(--text-muted); font-size: 13px; font-family: var(--font-ui-sans);
+    color: var(--text-muted); font-size: var(--font-size-md); font-family: var(--font-ui-sans);
   }
 </style>

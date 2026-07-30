@@ -85,13 +85,13 @@
   }
   h2 {
     margin: 0;
-    font-size: 18px;
+    font-size: var(--font-size-xl);
     font-weight: 600;
     color: var(--text-primary);
   }
   p {
     margin: 0;
-    font-size: 13.5px;
+    font-size: var(--font-size-md);
     line-height: 1.5;
     color: var(--text-muted);
   }

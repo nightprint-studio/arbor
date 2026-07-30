@@ -356,8 +356,8 @@
 
   /* Aliases editor */
   .aliases { display: flex; flex-direction: column; gap: 5px; padding: 4px 10px 8px; }
-  .alias-hint { margin: 0 0 2px; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
-  .alias-hint code { font-family: var(--font-code); font-size: 10.5px; }
+  .alias-hint { margin: 0 0 2px; font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted); }
+  .alias-hint code { font-family: var(--font-code); font-size: var(--font-size-2xs); }
   .alias-row { display: flex; align-items: center; gap: 5px; }
   .alias-row :global(.alias-arrow) { color: var(--text-disabled); flex-shrink: 0; }
   .alias-in {
@@ -365,7 +365,7 @@
     height: 24px; padding: 0 7px;
     background: var(--bg-input); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); color: var(--text-primary);
-    font-family: var(--font-code); font-size: 11.5px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
   }
   .alias-in::placeholder { color: var(--text-disabled); }
   .alias-in:focus { outline: none; border-color: var(--border-focus); }
@@ -394,7 +394,7 @@
   .pack.installed { border-color: color-mix(in srgb, var(--success) 35%, var(--border-subtle)); }
   .pack-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .pack-name { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary); }
-  .pack-desc { margin: 0; font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
+  .pack-desc { margin: 0; font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-secondary); }
   .pack-meta {
     display: inline-flex; align-items: center; gap: 4px;
     font-size: var(--font-size-xs); color: var(--text-muted); font-family: var(--font-code);
@@ -427,9 +427,9 @@
   .pack-actions .pack-del:nth-of-type(1):hover:not(:disabled) { color: var(--accent); background: var(--accent-subtle); }
   .pack-actions .pack-del:nth-of-type(1):focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
 
-  .pack-hint { margin: 2px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
+  .pack-hint { margin: 2px 0 0; font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted); }
   .pack-hint strong { color: var(--text-secondary); font-weight: 600; }
-  .pack-err { margin: 2px 0 0; font-size: 11px; line-height: 1.5; color: var(--error); }
+  .pack-err { margin: 2px 0 0; font-size: var(--font-size-xs); line-height: 1.5; color: var(--error); }
 
   .pack-dl { display: flex; flex-direction: column; gap: 5px; }
   .pack-dl-head { display: flex; align-items: baseline; justify-content: space-between; }

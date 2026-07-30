@@ -127,7 +127,7 @@
     align-items: center;
     gap: 8px;
     padding: 7px 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.45;
     border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
@@ -186,14 +186,14 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--text-primary);
   }
   .presence-choice.active .presence-choice-title { color: var(--accent); }
   .presence-choice.danger.active .presence-choice-title { color: var(--danger); }
   .presence-choice-sub {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .presence-choice-sub code {
@@ -218,7 +218,7 @@
     padding: 6px 12px;
     border-bottom: 1px solid var(--border-subtle);
     background: var(--bg-overlay);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     flex-shrink: 0;
   }
   .presence-preview-title {
@@ -270,7 +270,7 @@
     justify-content: center;
     color: var(--text-muted);
     font-style: italic;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     padding: 24px;
   }
 </style>

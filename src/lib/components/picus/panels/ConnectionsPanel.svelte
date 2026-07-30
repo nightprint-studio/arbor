@@ -206,10 +206,10 @@
       {/if}
     {/each}
 
-    <p class="cp-hint">
-      A connection's colour follows it everywhere — the tab of every document bound to
-      it wears the same mark.
-    </p>
+    <!-- The colour convention used to be explained here, permanently, under the
+         list. It is a thing you learn in one glance the first time two tabs wear
+         the same mark, and after that it is a paragraph taking up the panel for
+         the rest of the session. The Docs say it once; the panel shows it. -->
   {/if}
 </PanelShell>
 
@@ -224,13 +224,6 @@
 {/if}
 
 <style>
-  .cp-hint {
-    padding: 10px 12px;
-    font-size: 11px;
-    line-height: 1.5;
-    color: var(--text-muted);
-  }
-
   .cp-empty {
     display: flex;
     flex-direction: column;
@@ -239,5 +232,5 @@
     padding: 4px 2px;
     text-align: left;
   }
-  .cp-empty p { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+  .cp-empty p { font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted); }
 </style>

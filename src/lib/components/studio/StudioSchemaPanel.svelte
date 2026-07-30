@@ -353,7 +353,7 @@
     gap: 12px; flex: 1;
   }
 
-  .ssp-hint { color: var(--text-muted); font-size: 11px; line-height: 1.6; }
+  .ssp-hint { color: var(--text-muted); font-size: var(--font-size-xs); line-height: 1.6; }
 
   .ssp-meta {
     display: flex; flex-direction: column; gap: 4px;
@@ -363,7 +363,7 @@
   }
   .ssp-meta-row {
     display: flex; justify-content: space-between; gap: 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .ssp-meta-row > span:first-child { color: var(--text-muted); }
   .ssp-meta-val {
@@ -377,7 +377,7 @@
   }
 
   .ssp-label {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -396,7 +396,7 @@
     border-radius: var(--radius-sm);
     cursor: pointer;
     font-family: inherit;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     transition: border-color var(--transition-fast), background var(--transition-fast);
   }
   .ssp-root-trigger:hover { border-color: var(--accent); }
@@ -415,7 +415,7 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .ssp-root-trigger-kind {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--syntax-type, var(--accent));
@@ -438,7 +438,7 @@
     color: var(--text-primary);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
-    font-size: 11px; cursor: pointer;
+    font-size: var(--font-size-xs); cursor: pointer;
     transition: background var(--transition-fast), border-color var(--transition-fast);
   }
   .ssp-btn:hover:not(:disabled) { background: var(--bg-base); border-color: var(--accent); }
@@ -481,7 +481,7 @@
   .ssp-stat-num {
     display: block;
     font-family: var(--font-code);
-    font-size: 18px; font-weight: 700;
+    font-size: var(--font-size-xl); font-weight: 700;
     line-height: 1.1;
     color: var(--text-primary);
   }
@@ -490,7 +490,7 @@
   .ssp-stat-num-unknown  { color: var(--text-muted); }
   .ssp-stat-label {
     display: block;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -507,14 +507,14 @@
   }
   .ssp-section-text {
     font-family: var(--font-ui-sans);
-    font-size: 10px; font-weight: 600;
+    font-size: var(--font-size-2xs); font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--text-disabled);
   }
   .ssp-section-count {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     padding: 0 5px;
@@ -524,7 +524,7 @@
   .ssp-filter {
     margin-left: auto;
     width: 110px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 2px 6px;
     background: var(--bg-base);
     color: var(--text-primary);
@@ -556,7 +556,7 @@
     color: inherit;
     cursor: pointer;
     text-align: left;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     transition: background var(--transition-fast);
   }
   .ssp-type-row:hover { background: var(--bg-hover); }
@@ -565,7 +565,7 @@
     width: 18px; height: 18px;
     border-radius: 3px;
     font-family: var(--font-code);
-    font-size: 10px; font-weight: 700;
+    font-size: var(--font-size-2xs); font-weight: 700;
     color: #fff;
     flex-shrink: 0;
   }
@@ -576,13 +576,13 @@
   .ssp-type-kind-enum   { background: #c678dd; }
   .ssp-type-kind-alias  { background: var(--text-muted); }
   .ssp-type-name {
-    font-family: var(--font-code); font-size: 11px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
     color: var(--text-primary);
     flex: 1;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .ssp-type-meta {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     flex-shrink: 0;
   }
@@ -597,7 +597,7 @@
     color: var(--accent);
     border-radius: 7px;
     font-family: var(--font-code);
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     flex-shrink: 0;
   }
@@ -606,6 +606,6 @@
     padding: 10px;
     text-align: center;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 </style>

@@ -467,7 +467,7 @@
     cursor: pointer;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
   }
   .notes-meta-btn:hover { background: var(--bg-hover); border-color: var(--border); color: var(--text-secondary); }
@@ -581,13 +581,13 @@
 
   .sha-compact {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     flex-shrink: 0;
   }
 
   .refs-overflow {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     border-radius: 999px;
@@ -628,7 +628,7 @@
     border: 1px solid var(--border-subtle);
     border-radius: 4px;
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
   }
   .plugin-commit-action:hover {

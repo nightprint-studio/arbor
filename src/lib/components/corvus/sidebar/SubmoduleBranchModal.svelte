@@ -128,7 +128,7 @@
 
   .header-sub {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -149,7 +149,7 @@
     align-items: center;
     gap: 8px;
     padding: 16px 16px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
   }
@@ -174,7 +174,7 @@
     border-radius: var(--radius-sm);
     cursor: pointer;
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     text-align: left;
     transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
@@ -203,7 +203,7 @@
   }
 
   .current-pill {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     letter-spacing: 0.3px;
     color: var(--text-muted);

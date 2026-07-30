@@ -112,5 +112,5 @@
 <style>
   .docs-search { padding: 6px 8px; }
   .docs { padding: 4px 0 12px; }
-  .docs-empty { padding: 14px 12px; font-size: 11.5px; color: var(--text-muted); font-style: italic; }
+  .docs-empty { padding: 14px 12px; font-size: var(--font-size-xs); color: var(--text-muted); font-style: italic; }
 </style>

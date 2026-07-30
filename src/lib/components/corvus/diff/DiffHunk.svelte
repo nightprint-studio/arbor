@@ -237,7 +237,7 @@
     cursor: pointer;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
   }
   .hunk-action-btn:hover {
@@ -329,7 +329,7 @@
     text-align: right;
     padding-right: 8px;
     color: var(--text-disabled);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     user-select: none;
     flex-shrink: 0;
     border-right: 1px solid var(--border-subtle);

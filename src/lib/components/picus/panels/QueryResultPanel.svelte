@@ -25,7 +25,7 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
-  import Alert from '$lib/components/shared/ui/Alert.svelte';
+  import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import DataGrid, {
     type DataGridColumn,
     type DataGridValue,
@@ -58,10 +58,24 @@
   const tabState = $derived(tab ? queryStore.read(tab.id) : null);
   const result = $derived(tab ? picusResultsStore.forOwner(tab.id) : null);
 
-  const paneTabs: TabItem[] = [
-    { id: 'results', label: 'Results' },
-    { id: 'messages', label: 'Messages' },
-  ];
+  /**
+   * The two panes.
+   *
+   * Called **Rows**, not "Results": the dock tab above this row is already called
+   * Results, so the word appeared twice, one line under the other, naming two
+   * different scopes. The pane holds rows; the tab holds the result.
+   *
+   * Messages carries the number of errors in it, because a failed statement's
+   * reason lands there while the eye is on an empty grid — and a pane that has
+   * something to say should say so from the outside.
+   */
+  const errorCount = $derived(
+    (tabState?.messages ?? []).filter((m) => m.level === 'error').length,
+  );
+  const paneTabs = $derived<TabItem[]>([
+    { id: 'results', label: 'Rows' },
+    { id: 'messages', label: 'Messages', badge: errorCount || undefined },
+  ]);
 
   const gridColumns = $derived<DataGridColumn[]>(
     (result?.columns ?? []).map((c) => ({
@@ -130,6 +144,31 @@
     resultEditStore.bind(result?.resultId ?? '');
   });
 
+  /**
+   * Everything the row counter cannot fit, for the pointer that asks.
+   *
+   * Three separate facts, and which of them apply depends on the result: the total
+   * may be the planner's guess rather than a count, the window may still be
+   * filling, and while it is, sorting and the per-column filters stand down —
+   * over a window they would order and hide a fraction of the rows while looking
+   * like they had done all of them.
+   */
+  const partialNote = $derived.by(() => {
+    if (!result) return '';
+    const lines = [
+      result.approximate
+        ? `Estimated by the planner${result.counting ? ' — counting the exact number now' : ''}.`
+        : `${result.total.toLocaleString()} row(s) in the result.`,
+    ];
+    if (!result.complete) {
+      lines.push(
+        `${result.loaded.toLocaleString()} loaded; the rest arrives as you scroll.`,
+        'Sorting and the per-column filters wait until the whole result is loaded.',
+      );
+    }
+    return lines.join(' ');
+  });
+
   /** Columns whose value was not fetched — their cells hold a size. */
   const masked = $derived(new Set(result?.maskedColumns ?? []));
 
@@ -191,10 +230,16 @@
 </script>
 
 {#if !tab || !tabState}
-  <StateBlock tone="info" fill={false} label="Open a query tab to run a statement." />
+  <div class="qr">
+    <BottomPanelHeader title="Results" onClose={() => picusUiStore.closeBottom()} />
+    <StateBlock tone="info" fill={false} label="Open a query tab to run a statement." />
+  </div>
 {:else}
   <div class="qr">
-    <div class="qr-head">
+    <!-- The panel's own header — the dock no longer supplies one. The pane switch
+         lives inside it rather than on a second row, which is the row this
+         arrangement saves. -->
+    <BottomPanelHeader title="Results" onClose={() => picusUiStore.closeBottom()}>
       <Tabs
         items={paneTabs}
         value={tabState.pane}
@@ -203,20 +248,26 @@
         ariaLabel="Result pane"
         onSelect={(id) => queryStore.setPane(tab.id, id as 'results' | 'messages')}
       />
-      <span class="qr-spacer"></span>
+      {#snippet actions()}
       {#if tabState.running}
         <span class="qr-stats"><Spinner size={11} /> running…</span>
       {:else if result}
         <!-- The total is the server's ESTIMATE until the background count lands,
              and carries a `~` for exactly as long as that is true. Precision the
-             product does not have must not be implied by the way it is printed. -->
-        <span
-          class="qr-stats"
-          use:tooltip={result.approximate
-            ? `Estimated by the planner${result.counting ? ' — counting the exact number now' : ''}. ${result.loaded.toLocaleString()} row(s) loaded.`
-            : `${result.loaded.toLocaleString()} of ${result.total.toLocaleString()} row(s) loaded.`}
-        >
-          {formatRowTotal(result)} rows · {formatElapsed(tabState.elapsedMs ?? result.elapsedMs)}
+             product does not have must not be implied by the way it is printed.
+
+             "Still filling" is said HERE, in four words, and not in the full-width
+             notice this used to put above the grid. That notice was forty words of
+             permanent chrome explaining the sorting rules to someone who had not
+             asked to sort, and it cost a whole band of a panel that was already
+             giving the rows less height than its own headers. The sentence is
+             still available — it is the tooltip — and the count it was built
+             around is now next to the count it qualifies. -->
+        <span class="qr-stats" use:tooltip={partialNote}>
+          {result.complete
+            ? formatRowTotal(result)
+            : `${result.loaded.toLocaleString()} of ${formatRowTotal(result)}`} rows
+          · {formatElapsed(tabState.elapsedMs ?? result.elapsedMs)}
         </span>
       {:else if tabState.affected !== null}
         <!-- A write has no result to read a time off, which is why the tab keeps
@@ -261,7 +312,8 @@
         dialect={conn?.dialect ?? 'postgres'}
         table={sourceTable}
       />
-    </div>
+      {/snippet}
+    </BottomPanelHeader>
 
     <div class="qr-body">
       {#if tabState.pane === 'results'}
@@ -269,20 +321,6 @@
           <StateBlock tone="error" label={tabState.error} />
         {:else if result}
           <div class="qr-grid">
-            {#if !result.complete}
-              <!-- Said on the Results tab, not only in Messages: landing here is
-                   exactly when believing you are looking at the whole thing is
-                   expensive. The counter climbs as windows arrive and the notice
-                   leaves of its own accord once there is nothing left to say. -->
-              <div class="qr-cap">
-                <Alert variant="info" compact>
-                  Showing {result.loaded.toLocaleString()} of {formatRowTotal(result)} rows — the
-                  rest arrives as you scroll. Sorting and the per-column filters wait until the
-                  whole result is loaded: over a window they would order and hide a fraction of it
-                  while looking like they had done all of it.
-                </Alert>
-              </div>
-            {/if}
             <ResultEditBar onStore={() => void resultEditStore.storeActive()} />
             <DataGrid
               columns={gridColumns}
@@ -352,22 +390,10 @@
 <style>
   .qr { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; height: 100%; }
 
-  .qr-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    height: 30px;
-    flex-shrink: 0;
-    padding: 0 8px;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-  .qr-spacer { flex: 1; }
   .qr-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
   .qr-body > :global(*) { flex: 1; min-width: 0; min-height: 0; }
 
-  /* The "still filling" notice sits above the grid and does not scroll with it. */
   .qr-grid { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-  .qr-cap { flex-shrink: 0; padding: 6px 8px 0; }
 
   /* Quiet by default and accented when it is an affordance: "read-only rows" is a
      fact, "editable" is an invitation, and they should not weigh the same. */
@@ -376,7 +402,7 @@
     padding: 1px 6px;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--text-disabled);
@@ -392,7 +418,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     white-space: nowrap;
   }
@@ -403,10 +429,10 @@
     gap: 10px;
     padding: 1px 12px;
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.7;
   }
   .qr-log-time { color: var(--text-disabled); flex-shrink: 0; }
   .qr-log-error { color: var(--error); }
-  .qr-log-empty { padding: 8px 12px; font-size: 11.5px; color: var(--text-disabled); font-style: italic; }
+  .qr-log-empty { padding: 8px 12px; font-size: var(--font-size-xs); color: var(--text-disabled); font-style: italic; }
 </style>

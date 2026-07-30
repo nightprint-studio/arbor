@@ -100,7 +100,7 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .cg-head code { font-family: var(--font-code); color: var(--accent); }
@@ -127,12 +127,12 @@
 
   .cg-value {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
   }
   .cg-spacer { flex: 1; }
-  .cg-files { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+  .cg-files { font-size: var(--font-size-2xs); color: var(--text-muted); white-space: nowrap; }
 </style>

@@ -210,7 +210,7 @@
     font-weight: 500;
   }
   .split-menu-sub {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
   }
   .split-menu-sub :global(code) {

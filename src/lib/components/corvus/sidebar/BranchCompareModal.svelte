@@ -161,7 +161,7 @@
 
   .ref-label {
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--text-primary);
     overflow: hidden;
@@ -237,7 +237,7 @@
   }
   .file-list-title {
     flex: 1;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -292,7 +292,7 @@
 
   .file-status {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     flex-shrink: 0;
     width: 11px;
@@ -301,7 +301,7 @@
 
   .file-path {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     flex: 1;
     min-width: 0;
     overflow: hidden;
@@ -315,8 +315,8 @@
     gap: 3px;
     flex-shrink: 0;
   }
-  .fstat-add { font-size: 10px; font-weight: 600; color: var(--success); }
-  .fstat-del { font-size: 10px; font-weight: 600; color: var(--error); }
+  .fstat-add { font-size: var(--font-size-2xs); font-weight: 600; color: var(--success); }
+  .fstat-del { font-size: var(--font-size-2xs); font-weight: 600; color: var(--error); }
 
   .diff-area {
     flex: 1;

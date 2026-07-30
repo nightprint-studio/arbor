@@ -218,14 +218,14 @@
     border-radius: 999px;
     background: var(--bg-base);
     border: 1px solid var(--border);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: inherit;
     flex-shrink: 0;
     transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
   }
-  .sz-sm .badge { width: 16px; height: 16px; font-size:  9px; }
-  .sz-md .badge { width: 20px; height: 20px; font-size: 10px; }
+  .sz-sm .badge { width: 16px; height: 16px; font-size:  var(--font-size-3xs); }
+  .sz-md .badge { width: 20px; height: 20px; font-size: var(--font-size-2xs); }
 
   .st-active .badge {
     background: var(--accent);

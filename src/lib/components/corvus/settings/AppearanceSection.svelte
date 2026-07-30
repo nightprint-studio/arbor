@@ -190,7 +190,7 @@
     border: none;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     padding: 3px 7px;
     border-radius: var(--radius-sm);

@@ -82,12 +82,12 @@
     color: var(--text-primary);
   }
   .version {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     font-family: var(--font-mono);
   }
   .desc {
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     line-height: 1.35;
     display: -webkit-box;
@@ -110,7 +110,7 @@
     flex-shrink: 0;
   }
   .letter {
-    font-size: 16px;
+    font-size: var(--font-size-xl);
     font-weight: 700;
     font-family: var(--font-mono);
   }

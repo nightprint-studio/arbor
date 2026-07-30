@@ -60,7 +60,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
   }
   .il-head :global(svg) { color: var(--text-muted); }
@@ -70,13 +70,13 @@
     grid-template-columns: max-content minmax(0, 1fr);
     gap: 7px 12px;
     padding: 4px 2px 2px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
   }
   .il dt { display: flex; justify-content: center; }
   .il dd { color: var(--text-muted); }
   .il dd :global(b) { color: var(--text-secondary); font-weight: 600; }
-  .il code { font-family: var(--font-code); font-size: 10.5px; }
+  .il code { font-family: var(--font-code); font-size: var(--font-size-2xs); }
 
   .il-n {
     display: inline-block;
@@ -97,7 +97,7 @@
     padding: 0 5px;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     white-space: nowrap;
   }

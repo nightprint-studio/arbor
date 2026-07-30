@@ -253,7 +253,7 @@
     border-radius: 999px;
     background: rgba(255,196,77,0.12);
     color: var(--warning, #ffc44d);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.3px;
   }
@@ -304,13 +304,13 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .footer-status .muted { color: var(--text-muted); }
   .footer-status kbd {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 1px 5px;
     border-radius: 3px;
     background: var(--bg-overlay);

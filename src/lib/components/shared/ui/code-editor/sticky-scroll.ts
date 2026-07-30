@@ -166,7 +166,7 @@ const stickyTheme = EditorView.baseTheme({
     boxShadow: '0 2px 6px rgba(0,0,0,0.25)',
     // Match the editor's own font/size so the pinned lines read exactly like the code below them.
     fontFamily: 'var(--font-code)',
-    fontSize: '12.5px',
+    fontSize: 'var(--font-size-sm)',
     lineHeight: '1.55',
   },
   '.cm-sticky-row': {

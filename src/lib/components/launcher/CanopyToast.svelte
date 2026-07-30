@@ -18,5 +18,5 @@
     box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.8);
   }
   .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
-  .msg { font-size: 13px; color: #dfe5ee; font-weight: 500; }
+  .msg { font-size: var(--font-size-md); color: #dfe5ee; font-weight: 500; }
 </style>

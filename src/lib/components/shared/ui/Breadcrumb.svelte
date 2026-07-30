@@ -182,7 +182,7 @@
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1;
     user-select: none;
   }
@@ -229,7 +229,7 @@
   }
 
   .bc-badge {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     padding: 1px 5px;
@@ -280,7 +280,7 @@
     color: var(--text-primary);
     padding: 3px 8px;
     font-family: inherit;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1;
     outline: none;
   }

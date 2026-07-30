@@ -216,7 +216,7 @@ const overviewTheme = EditorView.baseTheme({
     border: '1px solid var(--border, #3a3a40)',
     boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
     fontFamily: 'var(--font-code)',
-    fontSize: '11.5px',
+    fontSize: 'var(--font-size-xs)',
     lineHeight: '1.5',
     color: 'var(--text-primary)',
     whiteSpace: 'pre',

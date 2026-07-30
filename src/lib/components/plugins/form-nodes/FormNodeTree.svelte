@@ -982,7 +982,7 @@
   .pf-tree-results-head {
     flex-shrink: 0;
     padding: 5px 8px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.3px;
     text-transform: uppercase;
@@ -1001,7 +1001,7 @@
     border-radius: 3px;
     cursor: pointer;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .pf-tree-result:hover { background: var(--bg-hover); }
@@ -1023,7 +1023,7 @@
   .pf-tree-hits {
     flex-shrink: 0;
     font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--accent);
     padding: 0 2px;
   }
@@ -1059,7 +1059,7 @@
     align-items: center;
     gap: 6px;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .pf-tree-loading-text {
     font-style: italic;
@@ -1077,7 +1077,7 @@
   .pf-tree-val {
     margin-left: auto;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
@@ -1169,7 +1169,7 @@
     color: var(--text-muted);
     cursor: pointer;
     padding: 0 4px;
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     line-height: 1;
     border-radius: var(--radius-sm);
   }

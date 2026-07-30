@@ -797,7 +797,7 @@
   .branch-name { flex: 1; min-width: 0; }
 
   .current-pill {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     letter-spacing: 0.4px;
     color: var(--accent);
@@ -809,7 +809,7 @@
   }
 
   .local-only-badge {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     letter-spacing: 0.3px;
     color: var(--color-tag);
@@ -825,7 +825,7 @@
     display: flex;
     align-items: center;
     gap: 1px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     flex-shrink: 0;
   }
   .sync-badge.ahead  { color: var(--success); }
@@ -852,7 +852,7 @@
   .group-count {
     flex-shrink: 0;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     line-height: 1;
     padding: 2px 6px;
     border-radius: 999px;
@@ -902,7 +902,7 @@
     border-radius: var(--radius-md);
     box-shadow: 0 4px 16px rgba(0,0,0,0.4);
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--text-primary);
     white-space: nowrap;

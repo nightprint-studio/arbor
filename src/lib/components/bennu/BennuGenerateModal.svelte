@@ -422,7 +422,7 @@
   .gen-fields { flex: 1; min-height: 0; }
 
   .gen-label {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -432,21 +432,21 @@
   .gen-fields-head { display: flex; align-items: center; justify-content: space-between; }
   .gen-selall {
     background: transparent; border: none; padding: 0;
-    font-size: 11px; color: var(--accent); cursor: pointer;
+    font-size: var(--font-size-xs); color: var(--accent); cursor: pointer;
   }
   .gen-selall:hover:not(:disabled) { text-decoration: underline; }
   .gen-selall:disabled { color: var(--text-disabled); cursor: not-allowed; }
 
-  .gen-target { font-size: 11.5px; color: var(--text-muted); }
+  .gen-target { font-size: var(--font-size-xs); color: var(--text-muted); }
   .gen-target code {
     font-family: var(--font-code);
     color: var(--text-secondary);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
   }
 
   .gen-mock-note {
     margin: 0;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     line-height: 1.4;
   }
@@ -454,11 +454,11 @@
 
   .gen-inline-note {
     margin: -2px 0 0;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     line-height: 1.4;
   }
-  .gen-inline-note code { font-family: var(--font-code); font-size: 10px; }
+  .gen-inline-note code { font-family: var(--font-code); font-size: var(--font-size-2xs); }
 
   .gen-field-list {
     display: flex;
@@ -506,14 +506,14 @@
   }
   .gen-field-name {
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .gen-field-req {
     flex-shrink: 0;
-    font-size: 8.5px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     letter-spacing: 0.03em;
     text-transform: uppercase;
@@ -538,7 +538,7 @@
     width: 14px;
     height: 14px;
     border-radius: var(--radius-sm);
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     font-family: var(--font-code);
     color: var(--text-disabled);
@@ -554,7 +554,7 @@
   .gen-field-type {
     margin-left: 6px;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     flex-shrink: 0;
   }
@@ -566,7 +566,7 @@
     justify-content: space-between;
     gap: 10px;
   }
-  .gen-opt-name { font-size: 12px; color: var(--text-secondary); flex-shrink: 0; }
+  .gen-opt-name { font-size: var(--font-size-sm); color: var(--text-secondary); flex-shrink: 0; }
 
   /* ── Right column ── */
   .gen-right {
@@ -595,6 +595,6 @@
   }
 
   /* ── Footer ── */
-  .gen-hint { font-size: 11px; color: var(--text-muted); }
+  .gen-hint { font-size: var(--font-size-xs); color: var(--text-muted); }
   .gen-actions { display: flex; align-items: center; gap: 8px; }
 </style>

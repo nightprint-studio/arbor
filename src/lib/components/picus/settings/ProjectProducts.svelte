@@ -127,7 +127,7 @@
 <style>
   .pp { display: flex; flex-direction: column; gap: 10px; }
 
-  .pp-empty { font-size: 11.5px; line-height: 1.55; color: var(--text-muted); max-width: 80ch; }
+  .pp-empty { font-size: var(--font-size-xs); line-height: 1.55; color: var(--text-muted); max-width: 80ch; }
 
   .pp-list { display: flex; flex-direction: column; gap: 6px; }
   .pp-head,
@@ -138,7 +138,7 @@
     align-items: center;
   }
   .pp-head span {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.07em;
     text-transform: uppercase;
@@ -147,7 +147,7 @@
 
   .pp-warn {
     grid-column: 1 / -1;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.45;
     color: var(--warning);
   }
@@ -157,7 +157,7 @@
   .pp-hint {
     flex: 1;
     min-width: 240px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.45;
     color: var(--text-muted);
   }

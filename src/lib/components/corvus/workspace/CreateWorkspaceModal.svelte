@@ -306,7 +306,7 @@
   }
   .field label,
   .field .label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-muted);
@@ -323,7 +323,7 @@
     border: none;
     color: var(--accent);
     cursor: pointer;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     padding: 0;
   }
   .link-btn:hover { text-decoration: underline; }
@@ -450,7 +450,7 @@
   .repo-row.legacy-worktree { font-style: italic; opacity: 0.85; }
   .worktree-tag {
     flex-shrink: 0;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -488,7 +488,7 @@
     white-space: nowrap;
   }
   .repo-path {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     font-family: var(--font-ui);
     overflow: hidden;
@@ -505,7 +505,7 @@
     gap: 8px;
     color: var(--text-muted);
     text-align: center;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
 
 </style>

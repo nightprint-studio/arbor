@@ -133,7 +133,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     text-transform: uppercase;
     letter-spacing: 0.6px;
     color: var(--text-muted);
@@ -161,7 +161,7 @@
     border-radius: var(--radius-md);
     overflow: hidden;
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.4;
     user-select: none;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
@@ -188,7 +188,7 @@
   .mk-pv-title {
     margin-left: 6px;
     color: var(--pv-muted);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
   }
   .mk-pv-strong { color: var(--pv-fg); font-weight: 600; }
 
@@ -209,7 +209,7 @@
     gap: 1px;
   }
   .mk-pv-sect-h {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -224,7 +224,7 @@
     padding: 3px 6px;
     border-radius: 4px;
     color: var(--pv-fg);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
   }
   .mk-pv-item.mk-pv-active {
     background: color-mix(in srgb, var(--pv-accent) 18%, transparent);
@@ -242,7 +242,7 @@
     color: var(--pv-warning);
     width: 8px;
     text-align: center;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
   }
 
   /* Main column — graph + diff */
@@ -268,7 +268,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     min-width: 0;
   }
   .mk-pv-node {
@@ -289,7 +289,7 @@
   .mk-pv-meta {
     color: var(--pv-faint);
     font-family: var(--font-mono);
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     flex-shrink: 0;
   }
 
@@ -300,7 +300,7 @@
     border-radius: 4px;
     padding: 6px 8px;
     font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -318,7 +318,7 @@
     padding: 4px 10px;
     background: var(--pv-elevated);
     border-top: 1px solid var(--pv-border);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
   }
   .mk-pv-status-chip {
     display: inline-flex;

@@ -138,7 +138,7 @@
     background: var(--sev-bg);
     color: var(--sev-color);
     border: 1px solid color-mix(in srgb, var(--sev-color) 35%, transparent);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -154,7 +154,7 @@
     min-width: 0;
   }
   .title {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--text-primary);
     overflow: hidden;
@@ -165,7 +165,7 @@
     display: flex;
     flex-wrap: nowrap;
     gap: 4px 6px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     overflow: hidden;
     /* Single-line, anything past the viewport edge is clipped. The full
@@ -213,7 +213,7 @@
     gap: 8px;
     align-self: center;
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
   }
   .age {

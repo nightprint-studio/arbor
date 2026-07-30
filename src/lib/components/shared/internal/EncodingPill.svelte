@@ -103,7 +103,7 @@
     gap: 3px;
     height: 16px;
     padding: 0 5px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     font-family: var(--font-code);
     line-height: 1;
@@ -128,7 +128,7 @@
   .enc-pill.compact {
     height: 14px;
     padding: 0 4px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     gap: 2px;
   }
 

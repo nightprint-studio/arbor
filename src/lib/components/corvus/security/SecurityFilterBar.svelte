@@ -199,7 +199,7 @@
   .sf-search input {
     flex: 1; width: 100%;
     padding: 4px 24px 4px 24px;
-    font-size: 11px; font-family: var(--font-ui-sans);
+    font-size: var(--font-size-xs); font-family: var(--font-ui-sans);
     background: var(--bg-base);
     color: var(--text-primary);
     border: 1px solid var(--border);
@@ -237,7 +237,7 @@
   .chip {
     display: inline-flex; align-items: center; gap: 3px;
     padding: 3px 7px;
-    font-size: 10px; font-weight: 500;
+    font-size: var(--font-size-2xs); font-weight: 500;
     font-family: var(--font-ui-sans);
     color: var(--text-muted);
     background: var(--bg-elevated);
@@ -257,7 +257,7 @@
     width: 100%;
     padding: 5px 8px;
     text-align: left;
-    font-size: 11px; font-family: var(--font-ui-sans);
+    font-size: var(--font-size-xs); font-family: var(--font-ui-sans);
     color: var(--text-primary);
     background: transparent;
     border: none;
@@ -270,9 +270,9 @@
   :global(.sf-row .chip-drop-empty) {
     display: flex; align-items: center; justify-content: center;
     padding: 10px 8px;
-    font-size: 11px; color: var(--text-muted); font-style: italic;
+    font-size: var(--font-size-xs); color: var(--text-muted); font-style: italic;
   }
-  :global(.sf-row .check) { margin-left: auto; font-size: 11px; }
+  :global(.sf-row .check) { margin-left: auto; font-size: var(--font-size-xs); }
   :global(.sf-row .sev-dot) {
     width: 8px; height: 8px;
     border-radius: 50%;

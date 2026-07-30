@@ -383,16 +383,16 @@
   }
   .st-count {
     margin-left: auto;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     white-space: nowrap;
   }
 
-  .st-folder { font-size: 12px; }
+  .st-folder { font-size: var(--font-size-sm); }
   /* Only on names that repeat — the version that tells eleven ORA folders apart. */
   .st-parent { color: var(--text-disabled); }
 
-  .st-file { font-family: var(--font-code); font-size: 11.5px; }
+  .st-file { font-family: var(--font-code); font-size: var(--font-size-xs); }
 
   /* Outside the project: dimmed, with the name struck through. Deliberately a
      neutral treatment and not an error one — nothing is wrong with these rows,
@@ -426,7 +426,7 @@
   .st-empty {
     padding: 18px 12px;
     text-align: center;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-style: italic;
     color: var(--text-muted);
   }

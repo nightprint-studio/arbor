@@ -205,11 +205,11 @@
     margin-bottom: 14px;
   }
   .section-header h2 {
-    font-size: 15px; font-weight: 600; margin: 0 0 3px;
+    font-size: var(--font-size-lg); font-weight: 600; margin: 0 0 3px;
     color: var(--text-primary); font-family: var(--font-ui-sans);
   }
   .section-header p {
-    margin: 0; font-size: 12px; color: var(--text-secondary); line-height: 1.45;
+    margin: 0; font-size: var(--font-size-sm); color: var(--text-secondary); line-height: 1.45;
     font-family: var(--font-ui-sans);
   }
 
@@ -222,19 +222,19 @@
   }
   .card-section-title {
     display: inline-flex; align-items: center; gap: 5px;
-    font-size: 11px; font-weight: 600; color: var(--text-secondary);
+    font-size: var(--font-size-xs); font-weight: 600; color: var(--text-secondary);
     text-transform: uppercase; letter-spacing: 0.5px;
     margin-bottom: 8px;
   }
 
   .row-hint {
-    display: block; font-size: 11px; color: var(--text-muted);
+    display: block; font-size: var(--font-size-xs); color: var(--text-muted);
     line-height: 1.4;
   }
   .block-hint { margin-bottom: 8px; }
 
   .row-input {
-    padding: 4px 8px; font-size: 12px; color: var(--text-primary);
+    padding: 4px 8px; font-size: var(--font-size-sm); color: var(--text-primary);
     background: var(--bg-input);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); outline: none;
@@ -254,7 +254,7 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     font-family: var(--font-code);
-    font-size: 10.5px; color: var(--text-secondary);
+    font-size: var(--font-size-2xs); color: var(--text-secondary);
   }
   .ext-x {
     display: flex; align-items: center; justify-content: center;
@@ -264,7 +264,7 @@
     transition: background var(--transition-fast), color var(--transition-fast);
   }
   .ext-x:hover { background: var(--bg-hover); color: var(--color-error, #e06c75); }
-  .empty-exts { font-size: 11px; color: var(--text-muted); font-style: italic; }
+  .empty-exts { font-size: var(--font-size-xs); color: var(--text-muted); font-style: italic; }
 
   .add-row {
     display: flex; gap: 6px; align-items: center;
@@ -274,7 +274,7 @@
 
   .btn {
     display: inline-flex; align-items: center; gap: 4px;
-    padding: 4px 10px; font-size: 11.5px; font-weight: 500;
+    padding: 4px 10px; font-size: var(--font-size-xs); font-weight: 500;
     background: var(--accent-subtle); color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
     border-radius: var(--radius-sm); cursor: pointer;
@@ -297,12 +297,12 @@
   }
   .saved-pill {
     display: inline-flex; align-items: center; gap: 4px;
-    font-size: 11px; color: var(--accent);
+    font-size: var(--font-size-xs); color: var(--accent);
   }
 
   .state-msg {
     padding: 20px; color: var(--text-muted);
-    font-size: 12px; font-family: var(--font-ui-sans);
+    font-size: var(--font-size-sm); font-family: var(--font-ui-sans);
     text-align: center;
   }
   .state-msg.err { color: var(--color-error, #e06c75); }

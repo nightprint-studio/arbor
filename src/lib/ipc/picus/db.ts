@@ -23,6 +23,7 @@ import type {
   SchemaGroup,
   SchemaSnapshot,
   TableInfo,
+  TriggerDetail,
   Target,
   VersionTableConfig,
 } from '$lib/types/picus';
@@ -251,6 +252,17 @@ export function readSchema(id: string): Promise<SchemaSnapshot> {
 /** One relation in full: constraints and indexes, paid for only when a tab opens. */
 export function tableDetail(id: string, name: string): Promise<TableInfo> {
   return picus('picus_table_detail', { id, name });
+}
+
+/**
+ * What a trigger does — its `CREATE TRIGGER` and the routine it fires.
+ *
+ * Lazy for the same reason `tableDetail` is: a routine body is far larger than the
+ * facts beside it, and a schema with hundreds of triggers would carry every one of
+ * them to answer a question asked about one.
+ */
+export function triggerDetail(id: string, name: string): Promise<TriggerDetail> {
+  return picus('picus_trigger_detail', { id, name });
 }
 
 // ── Statements and held results ──────────────────────────────────────────────

@@ -69,7 +69,7 @@
         autocomplete="off"
         spellcheck="false"
       />
-      <button class="mac-close-btn" onclick={close} use:tooltip={'Close'} aria-label="Close"></button>
+      <button class="close-btn" onclick={close} use:tooltip={'Close'} aria-label="Close"></button>
     {/snippet}
 
     <div class="list">
@@ -116,7 +116,7 @@
     outline: none;
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 13px;
+    font-size: var(--font-size-md);
   }
 
   .search-input::placeholder { color: var(--text-disabled); }
@@ -133,7 +133,7 @@
     padding: 24px;
     text-align: center;
     color: var(--text-disabled);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
   .empty em { color: var(--text-muted); font-style: normal; font-weight: 500; }
 
@@ -163,7 +163,7 @@
   }
 
   .item-name {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 500;
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
@@ -173,7 +173,7 @@
   }
 
   .item-path {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     font-family: var(--font-code);
     overflow: hidden;
@@ -192,7 +192,7 @@
   .item:hover  .item-open { opacity: 1; color: var(--accent); }
 
   .hint {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
   }
 
@@ -202,7 +202,7 @@
     border-radius: var(--radius-sm);
     padding: 0 4px;
     font-family: var(--font-code);
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     color: var(--text-muted);
   }
 </style>

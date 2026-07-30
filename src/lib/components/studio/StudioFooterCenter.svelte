@@ -112,7 +112,7 @@
     background: var(--bg-overlay);
     color: var(--text-primary);
     border-radius: 4px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
   }
   .sf-btn:hover:not(:disabled) { background: var(--bg-hover); }

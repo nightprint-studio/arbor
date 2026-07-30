@@ -183,7 +183,7 @@
   }
   .result-list li {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     word-break: break-all;
   }

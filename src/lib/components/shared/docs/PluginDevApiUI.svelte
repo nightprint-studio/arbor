@@ -569,7 +569,7 @@ end)`, '.lua')}</pre>
   Every bottom panel — built-in or plugin-contributed — wears the same
   standardized header chrome: a 34-px bar on <code>--bg-base</code> with the
   panel title on the left, optional inline content, plugin/built-in
-  toolbar actions on the right, and a red dot close button at the very end
+  toolbar actions on the right, and a close button at the very end
   (the same widget used by modal headers). For plugin-bottom panels the
   title comes from <code>arbor.ui.set_panel_content(id, &#123;title, …&#125;)</code>;
   the close button is wired automatically and clears the active bottom

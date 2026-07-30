@@ -64,7 +64,7 @@
     padding: 0 5px;
     border-radius: var(--radius-sm);
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.2px;
     white-space: nowrap;
@@ -97,7 +97,7 @@
     border: none;
     background: transparent;
     color: var(--chip-color);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1;
     cursor: pointer;
     opacity: 0;

@@ -331,18 +331,18 @@
 
 <style>
   .prd-title {
-    font-size: 13px; font-weight: 600; color: var(--text-primary);
+    font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     max-width: 360px;
   }
-  .prd-id     { font-family: var(--font-code); font-size: 11px; color: var(--text-muted); }
-  .prd-meta   { font-size: 11px; color: var(--text-muted); }
+  .prd-id     { font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-muted); }
+  .prd-meta   { font-size: var(--font-size-xs); color: var(--text-muted); }
   .prd-spacer { flex: 1; }
 
   .prd-status {
     display: inline-flex; align-items: center; gap: 4px;
     padding: 2px 8px; border-radius: 999px;
-    font-size: 11px; font-weight: 600;
+    font-size: var(--font-size-xs); font-weight: 600;
     border: 1px solid var(--border-subtle);
     background: var(--bg-hover); color: var(--text-secondary);
     flex-shrink: 0;
@@ -365,7 +365,7 @@
   .prd-btn-danger:hover:not(:disabled) { color: var(--error); border-color: var(--error); }
   .prd-btn-active { color: var(--accent); border-color: var(--accent); background: var(--accent-subtle); }
   .prd-btn-copied { color: var(--success); }
-  .prd-btn-label { font-size: 11px; }
+  .prd-btn-label { font-size: var(--font-size-xs); }
 
   /* Body fills the Modal's body card. */
   .prd-body {
@@ -409,13 +409,13 @@
   .prd-output-dot.status-running   { background: var(--accent); }
   .prd-output-dot.status-cancelled { background: var(--text-muted); }
   .prd-output-name {
-    font-size: 12px; font-weight: 600; color: var(--text-primary);
+    font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     max-width: 320px;
   }
-  .prd-output-kind { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+  .prd-output-kind { font-size: var(--font-size-2xs); color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
   .prd-output-exit {
-    font-family: var(--font-code); font-size: 11px; font-weight: 600;
+    font-family: var(--font-code); font-size: var(--font-size-xs); font-weight: 600;
     color: var(--error);
     background: color-mix(in srgb, var(--error) 12%, transparent);
     border-radius: var(--radius-sm);

@@ -412,11 +412,11 @@
     padding: 6px 10px;
     background: var(--bg-overlay);
     border-bottom: 1px solid var(--border-subtle);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     flex-shrink: 0;
   }
   .sdp-spacer { flex: 1; }
-  .sdp-meta { color: var(--text-muted); font-size: 11px; }
+  .sdp-meta { color: var(--text-muted); font-size: var(--font-size-xs); }
 
   .sdp-chunk-nav {
     display: inline-flex; align-items: center; gap: 2px;
@@ -433,7 +433,7 @@
   }
   .sdp-chunk-btn:hover { background: var(--bg-overlay); color: var(--text-primary); }
   .sdp-chunk-counter {
-    font-family: var(--font-ui-sans); font-size: 10px;
+    font-family: var(--font-ui-sans); font-size: var(--font-size-2xs);
     color: var(--text-muted); padding: 0 4px;
   }
 
@@ -450,7 +450,7 @@
     padding: 2px 8px;
     background: transparent; color: var(--text-secondary);
     border: none; border-radius: 3px;
-    font-size: 11px; cursor: pointer;
+    font-size: var(--font-size-xs); cursor: pointer;
   }
   .sdp-subtoggle-btn:hover { background: var(--bg-overlay); color: var(--text-primary); }
   .sdp-subtoggle-btn.active { background: var(--accent-subtle); color: var(--accent); }
@@ -459,7 +459,7 @@
   .sdp-tree-pane {
     flex: 1; overflow: auto;
     background: var(--bg-base);
-    font-family: var(--font-code); font-size: 11px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
     padding: 4px 0;
   }
   .sdp-row {
@@ -496,7 +496,7 @@
     display: inline-flex; align-items: center; justify-content: center;
     width: 14px; height: 14px;
     border-radius: 3px;
-    font-family: var(--font-code); font-size: 11px; font-weight: 700;
+    font-family: var(--font-code); font-size: var(--font-size-xs); font-weight: 700;
     color: #fff;
     flex-shrink: 0;
   }
@@ -506,13 +506,13 @@
   .sdp-status-partial  { background: var(--text-muted); color: var(--bg-base); }
 
   .sdp-key {
-    font-family: var(--font-code); font-size: 11px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
     color: var(--text-primary);
     font-weight: 500;
     flex-shrink: 0;
   }
   .sdp-preview {
-    font-family: var(--font-code); font-size: 11px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
     color: var(--text-secondary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     min-width: 0;
@@ -542,7 +542,7 @@
   }
   .sdp-partial-count {
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     margin-left: auto;
     padding: 1px 6px;
     background: var(--bg-overlay);
@@ -554,14 +554,14 @@
     padding: 20px;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
 
   /* ── Text diff body ──────────────────────────────────────────── */
   .sdp-text-pane {
     flex: 1; overflow: auto;
     background: var(--bg-base);
-    font-family: var(--font-code); font-size: 11px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
   }
   .sdp-hunk { border-top: 1px solid var(--border-subtle); }
   .sdp-hunk:first-child { border-top: none; }
@@ -570,7 +570,7 @@
     padding: 4px 12px;
     background: var(--bg-overlay);
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
   }
   .sdp-line {
     display: grid;
@@ -579,7 +579,7 @@
   }
   .sdp-num {
     color: var(--text-disabled);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     text-align: right;
     padding-right: 8px;
     user-select: none;

@@ -105,7 +105,7 @@
     border-radius: 50%;
     background: var(--accent-subtle);
     color: var(--accent);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     display: flex;
     align-items: center;
@@ -155,8 +155,8 @@
     white-space: nowrap;
   }
 
-  .name-line { font-size: 12px; font-weight: 500; color: var(--text-primary); }
-  .secondary-line { font-size: 10px; color: var(--text-muted); }
+  .name-line { font-size: var(--font-size-sm); font-weight: 500; color: var(--text-primary); }
+  .secondary-line { font-size: var(--font-size-2xs); color: var(--text-muted); }
 
   .copy-glyph {
     display: inline-flex;
@@ -170,6 +170,6 @@
   .copy-line.copied .copy-glyph { opacity: 1; color: var(--success); }
 
   /* Non-copyable fallback — keeps the same vertical rhythm. */
-  .static-name      { font-size: 12px; font-weight: 500; color: var(--text-primary); }
-  .static-secondary { font-size: 10px; color: var(--text-muted); }
+  .static-name      { font-size: var(--font-size-sm); font-weight: 500; color: var(--text-primary); }
+  .static-secondary { font-size: var(--font-size-2xs); color: var(--text-muted); }
 </style>

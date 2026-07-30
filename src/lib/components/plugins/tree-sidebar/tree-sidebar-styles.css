@@ -58,7 +58,7 @@
   outline: none;
   color: var(--text-primary);
   font-family: var(--font-ui-sans);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   padding: 2px 0;
   min-width: 0;
 }
@@ -68,7 +68,7 @@
   background: transparent;
   border: none;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   line-height: 1;
   padding: 0 4px;
   cursor: pointer;
@@ -109,7 +109,7 @@
   padding: 4px 8px;
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-base));
   border-top: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   color: var(--text-secondary);
 }
 .plugin-tree-search-hint .hint-action {
@@ -119,7 +119,7 @@
   border: none;
   padding: 2px 8px;
   border-radius: var(--radius-sm);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   cursor: pointer;
 }
 .plugin-tree-search-hint .hint-action:hover { filter: brightness(1.1); }
@@ -128,7 +128,7 @@
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   line-height: 1;
   padding: 0 2px;
 }
@@ -155,7 +155,7 @@
 }
 .dec-badge {
   font-family: var(--font-code);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   line-height: 1;
   padding: 2px 5px;
   border-radius: 999px;
@@ -186,7 +186,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -201,7 +201,7 @@
   color: var(--text-secondary);
   cursor: pointer;
   font-family: var(--font-ui-sans);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   padding: 2px 6px;
   transition: background var(--transition-fast), color var(--transition-fast),
               border-color var(--transition-fast);

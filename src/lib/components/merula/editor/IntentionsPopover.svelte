@@ -38,11 +38,11 @@
 </FloatingPicker>
 
 <style>
-  .it-title { flex: 1; min-width: 0; font-size: 11.5px; color: var(--text-secondary); }
+  .it-title { flex: 1; min-width: 0; font-size: var(--font-size-xs); color: var(--text-secondary); }
   .it-icon { display: flex; flex-shrink: 0; color: var(--accent); }
   .it-label {
-    flex: 1; min-width: 0; font-size: 12px; color: var(--text-primary);
+    flex: 1; min-width: 0; font-size: var(--font-size-sm); color: var(--text-primary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .it-empty { padding: 12px 14px; font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+  .it-empty { padding: 12px 14px; font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted); }
 </style>

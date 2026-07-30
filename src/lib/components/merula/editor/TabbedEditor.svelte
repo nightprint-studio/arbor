@@ -547,7 +547,7 @@
     padding: 0 10px;
     background: var(--bg-base);
     border-top: 1px solid var(--border-subtle);
-    font-size: 11px; color: var(--text-muted);
+    font-size: var(--font-size-xs); color: var(--text-muted);
     user-select: none;
   }
   .ed-pos { display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -569,7 +569,7 @@
     border-bottom: 1px solid var(--border-subtle);
   }
   .ed-crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; overflow: hidden; }
-  .crumb { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+  .crumb { font-size: var(--font-size-xs); color: var(--text-muted); white-space: nowrap; }
   .crumb.last { color: var(--text-secondary); font-weight: 500; }
   :global(.crumb-sep) { color: var(--text-disabled); flex-shrink: 0; }
 
@@ -595,7 +595,7 @@
   .ed-goto input {
     background: transparent; border: none; outline: none;
     color: var(--text-primary); font-family: var(--font-ui-sans);
-    font-size: 12px; width: 140px;
+    font-size: var(--font-size-sm); width: 140px;
   }
   .ed-goto input::placeholder { color: var(--text-disabled); }
 
@@ -610,13 +610,13 @@
     border-radius: var(--radius-md); box-shadow: var(--shadow-popup);
     padding: 7px 9px;
   }
-  .rf-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); }
+  .rf-title { font-size: var(--font-size-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); }
   .ed-refactor input {
     background: var(--bg-input); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); padding: 4px 7px; outline: none;
-    color: var(--text-primary); font-family: var(--font-code); font-size: 12px;
+    color: var(--text-primary); font-family: var(--font-code); font-size: var(--font-size-sm);
   }
   .ed-refactor input:focus { border-color: var(--border-focus, var(--accent)); }
   .ed-refactor input::placeholder { color: var(--text-disabled); }
-  .rf-err { font-size: 10.5px; color: var(--error); line-height: 1.3; }
+  .rf-err { font-size: var(--font-size-2xs); color: var(--error); line-height: 1.3; }
 </style>

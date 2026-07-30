@@ -555,7 +555,7 @@
     flex-direction: column;
     height: 100%;
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
   }
   :global(.tpm-header-icon) { color: var(--accent); flex-shrink: 0; }
@@ -581,7 +581,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     outline: none;
     transition: border-color var(--transition-fast);
@@ -619,7 +619,7 @@
     border: 1px solid var(--border);
     border-radius: 999px;
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     cursor: pointer;
     white-space: nowrap;
@@ -640,7 +640,7 @@
   /* ── FilterButton / sort dropdown children content ── */
   .chip-drop-group {
     padding: 5px 10px 3px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     letter-spacing: 0.6px;
     text-transform: uppercase;
@@ -655,7 +655,7 @@
     background: transparent;
     border: none;
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
     cursor: pointer;
     text-align: left;
@@ -669,14 +669,14 @@
     align-items: center;
     gap: 6px;
     padding: 10px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
 
   /* Sort-specific content */
   .sort-section-label {
     padding: 4px 10px 2px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -696,13 +696,13 @@
   }
   .team-key {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
   }
-  .check { margin-left: auto; color: var(--accent); font-size: 11px; }
+  .check { margin-left: auto; color: var(--accent); font-size: var(--font-size-xs); }
   .ms-date {
     margin-left: auto;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
   }
 
@@ -726,7 +726,7 @@
     gap: 8px;
     padding: 32px 20px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
   :global(.tpm-state-icon) { opacity: 0.4; }
   :global(.tpm-state-muted) { color: var(--text-disabled); }
@@ -736,7 +736,7 @@
     background: transparent;
     border: 1px solid currentColor;
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: inherit;
     cursor: pointer;
     opacity: 0.8;
@@ -792,7 +792,7 @@
   }
   .tpm-item-title {
     flex: 1;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
@@ -801,7 +801,7 @@
   }
   .tpm-time {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     padding-top: 1px;
   }
@@ -813,13 +813,13 @@
   }
   .tpm-identifier {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     flex-shrink: 0;
   }
-  .tpm-sep { color: var(--text-disabled); font-size: 10px; }
+  .tpm-sep { color: var(--text-disabled); font-size: var(--font-size-2xs); }
   .tpm-status-name {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     max-width: 80px;
     white-space: nowrap;
@@ -827,13 +827,13 @@
     text-overflow: ellipsis;
   }
   .tpm-label {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 1px 5px;
     border-radius: 999px;
     white-space: nowrap;
   }
   .tpm-label-more {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
   }
   .tpm-assignee { margin-left: auto; }
@@ -852,7 +852,7 @@
     border-radius: 50%;
     background: var(--bg-hover);
     border: 1px solid var(--border);
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     color: var(--text-muted);
   }

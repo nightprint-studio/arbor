@@ -1223,7 +1223,7 @@
     gap: 10px;
     padding: 8px 4px;
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     cursor: pointer;
@@ -1317,7 +1317,7 @@
     font-weight: 500;
   }
   .ws-active-badge {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
@@ -1327,7 +1327,7 @@
     border-radius: var(--radius-md);
   }
   .ws-count {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     padding: 1px 6px;
@@ -1338,7 +1338,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
@@ -1366,7 +1366,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     letter-spacing: 0.04em;
     color: var(--warning);
@@ -1376,7 +1376,7 @@
     font-variant-numeric: tabular-nums;
   }
   .ws-progress {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     display: flex;
     align-items: center;
@@ -1399,7 +1399,7 @@
   .ws-empty {
     padding: 14px;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     text-align: center;
   }
 
@@ -1440,7 +1440,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -1468,7 +1468,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -1487,7 +1487,7 @@
   }
   .orphan-id {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     padding: 1px 5px;
@@ -1507,7 +1507,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-on-accent);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     font-style: normal;
     cursor: pointer;
@@ -1571,7 +1571,7 @@
   }
 
   .repo-branch {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     padding: 1px 5px;
@@ -1596,7 +1596,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-variant-numeric: tabular-nums;
     padding: 1px 5px;
     border-radius: var(--radius-sm);
@@ -1628,7 +1628,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     padding: 1px 6px 1px 4px;
     border-radius: var(--radius-md);
@@ -1654,7 +1654,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-variant-numeric: tabular-nums;
   }
   .ws-sync-agg .agg-ahead,
@@ -1682,7 +1682,7 @@
     white-space: nowrap;
     color: var(--text-muted);
     font-family: var(--font-ui);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
   }
 
   .repo-actions {
@@ -1755,7 +1755,7 @@
   }
   .popover-title {
     padding: 6px 8px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;

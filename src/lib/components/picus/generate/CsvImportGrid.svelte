@@ -167,7 +167,7 @@
     border-radius: var(--radius-md);
     color: var(--text-primary);
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.6;
     white-space: pre;
     outline: none;
@@ -181,7 +181,7 @@
     padding-top: 4px;
   }
   .cg-section-title {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -191,7 +191,7 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-disabled);
   }
   .cg-bad {
@@ -207,14 +207,14 @@
     width: 190px;
     flex-shrink: 0;
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .cg-arrow { color: var(--text-disabled); flex-shrink: 0; }
-  .cg-ignored { font-size: 11px; color: var(--text-disabled); font-style: italic; }
-  .cg-empty { font-size: 11.5px; color: var(--text-disabled); font-style: italic; }
+  .cg-ignored { font-size: var(--font-size-xs); color: var(--text-disabled); font-style: italic; }
+  .cg-empty { font-size: var(--font-size-xs); color: var(--text-disabled); font-style: italic; }
 
   .cg-issues {
     margin: 0;
@@ -222,7 +222,7 @@
     background: var(--error-subtle);
     border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
     border-radius: var(--radius-md);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.6;
     color: var(--text-secondary);
   }
@@ -241,7 +241,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
 </style>

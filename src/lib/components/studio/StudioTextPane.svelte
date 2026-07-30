@@ -261,7 +261,7 @@
     padding: 6px 12px;
     background: var(--bg-overlay);
     border-top: 1px solid var(--border-subtle);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
 </style>

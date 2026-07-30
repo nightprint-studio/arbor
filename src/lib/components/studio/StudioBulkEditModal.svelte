@@ -707,7 +707,7 @@
   /* Header chrome (background, padding, close button) comes from
      `<ModalHeader>` + `<Modal>`. Only the format tag chip is local. */
   .be-format-tag {
-    font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+    font-size: var(--font-size-2xs); text-transform: uppercase; letter-spacing: 0.05em;
     padding: 2px 6px; border-radius: 4px;
     background: var(--bg-elevated); color: var(--text-secondary);
     font-weight: 500;
@@ -730,20 +730,20 @@
     min-width: 0;
   }
   .be-query-label {
-    font-size: 10px; text-transform: uppercase;
+    font-size: var(--font-size-2xs); text-transform: uppercase;
     color: var(--text-secondary);
     letter-spacing: 0.06em;
     flex-shrink: 0;
   }
   .be-query-code {
     flex: 1;
-    font-family: var(--font-mono); font-size: 12px;
+    font-family: var(--font-mono); font-size: var(--font-size-sm);
     color: var(--text-primary);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     min-width: 0;
   }
   .be-query-hits {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     flex-shrink: 0;
     display: inline-flex; align-items: center; gap: 4px;
@@ -757,7 +757,7 @@
   .be-row-label {
     width: 60px;
     padding-top: 5px;
-    font-size: 10px; text-transform: uppercase;
+    font-size: var(--font-size-2xs); text-transform: uppercase;
     color: var(--text-secondary); letter-spacing: 0.06em;
     flex-shrink: 0;
   }
@@ -771,7 +771,7 @@
   .be-radio {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 4px 10px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     border-radius: 4px;
     cursor: pointer;
@@ -798,7 +798,7 @@
   .be-tab {
     display: inline-flex; align-items: center; gap: 4px;
     padding: 4px 9px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     background: transparent;
     color: var(--text-secondary);
     border: 1px solid var(--border-subtle);
@@ -822,7 +822,7 @@
   .be-kind-chip {
     display: inline-flex; align-items: center; gap: 4px;
     padding: 3px 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     background: var(--bg-base);
     color: var(--text-secondary);
     border: 1px solid var(--border-subtle);
@@ -839,12 +839,12 @@
   .be-literal-input { min-width: 0; }
   .be-bool-toggle {
     display: inline-flex; align-items: center; gap: 6px;
-    font-family: var(--font-mono); font-size: 12px;
+    font-family: var(--font-mono); font-size: var(--font-size-sm);
     color: var(--text-primary);
   }
   .be-null-hint {
     display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     background: color-mix(in srgb, var(--warning) 8%, transparent);
     padding: 4px 8px;
@@ -857,7 +857,7 @@
     display: flex; flex-direction: column; gap: 4px;
   }
   .be-expr-input {
-    font-family: var(--font-mono); font-size: 12.5px;
+    font-family: var(--font-mono); font-size: var(--font-size-sm);
     color: var(--text-primary);
     background: var(--bg-base);
     border: 1px solid var(--border-subtle);
@@ -871,13 +871,13 @@
   }
   .be-expr-input:focus { border-color: var(--accent); }
   .be-expr-help summary {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     cursor: pointer;
     margin-top: 2px;
   }
   .be-expr-help-body {
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
@@ -890,7 +890,7 @@
   .be-expr-help-body ul { margin: 4px 0 4px 16px; padding: 0; }
   .be-expr-help-body li { margin: 2px 0; }
   .be-expr-help-body code {
-    font-family: var(--font-mono); font-size: 11px;
+    font-family: var(--font-mono); font-size: var(--font-size-xs);
     padding: 1px 4px; border-radius: 3px;
     background: var(--bg-base); color: var(--text-primary);
   }
@@ -901,7 +901,7 @@
     padding: 8px 10px;
     border-radius: 6px;
     border: 1px solid;
-    font-size: 12px; line-height: 1.45;
+    font-size: var(--font-size-sm); line-height: 1.45;
     flex-shrink: 0;
   }
   .be-banner-body { flex: 1; min-width: 0; }
@@ -913,7 +913,7 @@
   .be-banner-error :global(svg) { color: var(--error); flex-shrink: 0; margin-top: 2px; }
   .be-banner-code {
     display: inline-block;
-    font-family: var(--font-mono); font-size: 11px;
+    font-family: var(--font-mono); font-size: var(--font-size-xs);
     padding: 1px 6px; border-radius: 3px;
     background: var(--bg-base); color: var(--text-primary);
     margin-left: 4px;
@@ -922,7 +922,7 @@
     margin: 4px 0 0;
     padding: 0 0 0 18px;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .be-blocker-list code { font-family: var(--font-mono); color: var(--text-primary); }
 
@@ -933,7 +933,7 @@
     min-height: 0;
   }
   .be-list-header {
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     padding: 4px 4px 6px;
     display: flex; align-items: center; justify-content: space-between;
@@ -950,7 +950,7 @@
     border-radius: 6px;
   }
   .be-list :global(.tree-row) {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     align-items: center;
     gap: 6px;
   }
@@ -976,18 +976,18 @@
 
   .be-file-name {
     color: var(--text-primary);
-    font-family: var(--font-mono); font-size: 12px;
+    font-family: var(--font-mono); font-size: var(--font-size-sm);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     flex-shrink: 1; min-width: 0;
   }
   .be-file-count {
     margin-left: auto;
-    color: var(--text-secondary); font-size: 11px;
+    color: var(--text-secondary); font-size: var(--font-size-xs);
     flex-shrink: 0;
   }
 
   .be-kind-chip-sm {
-    font-size: 9.5px; text-transform: uppercase;
+    font-size: var(--font-size-3xs); text-transform: uppercase;
     letter-spacing: 0.04em;
     padding: 1px 5px; border-radius: 3px;
     background: var(--bg-elevated);
@@ -996,13 +996,13 @@
     flex-shrink: 0;
   }
   .be-site-path {
-    font-family: var(--font-mono); font-size: 11px;
+    font-family: var(--font-mono); font-size: var(--font-size-xs);
     color: var(--syntax-type, var(--accent));
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     flex-shrink: 1; min-width: 0;
   }
   .be-old, .be-new {
-    font-family: var(--font-mono); font-size: 11px;
+    font-family: var(--font-mono); font-size: var(--font-size-xs);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     flex-shrink: 1; min-width: 0;
     max-width: 280px;
@@ -1017,14 +1017,14 @@
   .be-skip-chip {
     display: inline-flex; align-items: center; gap: 3px;
     padding: 0 6px;
-    font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+    font-size: var(--font-size-2xs); text-transform: uppercase; letter-spacing: 0.05em;
     border-radius: 3px;
     background: color-mix(in srgb, var(--warning) 18%, transparent);
     color: var(--warning);
     flex-shrink: 0;
   }
   .be-skip-reason {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     flex-shrink: 1; min-width: 0;
@@ -1039,10 +1039,10 @@
   }
   .be-footer-hint {
     display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11.5px; color: var(--text-secondary);
+    font-size: var(--font-size-xs); color: var(--text-secondary);
   }
   .be-footer-hint kbd {
-    font-family: var(--font-mono); font-size: 10px;
+    font-family: var(--font-mono); font-size: var(--font-size-2xs);
     padding: 1px 5px;
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);

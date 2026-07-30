@@ -1659,7 +1659,7 @@
   {#if uiStore.searchVisible}
     <div class="search-bar">
       <GraphSearch />
-      <button class="mac-close-btn" onclick={() => { uiStore.setSearchVisible(false); graphStore.setSearch(''); graphStore.setHighlighted([]); }} use:tooltip={{ content: 'Close search', shortcut: 'Esc' }} aria-label="Close search"></button>
+      <button class="close-btn" onclick={() => { uiStore.setSearchVisible(false); graphStore.setSearch(''); graphStore.setHighlighted([]); }} use:tooltip={{ content: 'Close search', shortcut: 'Esc' }} aria-label="Close search"></button>
     </div>
   {/if}
 
@@ -2230,7 +2230,7 @@
     border: 1px solid rgba(77,120,204,0.4);
     border-radius: 999px;
     color: var(--accent);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-ui-sans);
     max-width: 180px;
     animation: fadeIn 120ms ease;
@@ -2290,7 +2290,7 @@
     background: var(--accent-subtle);
     border: 1px solid var(--accent);
     color: var(--accent);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     cursor: pointer;
     flex-shrink: 0;
@@ -2307,7 +2307,7 @@
   .dot { width: 6px; height: 6px; border-radius: 50%; }
   .dot-warn { background: var(--warning); box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning) 22%, transparent); }
   .off-pill {
-    font-size: 9px; padding: 0 5px; border-radius: 7px;
+    font-size: var(--font-size-3xs); padding: 0 5px; border-radius: 7px;
     background: var(--error-subtle); color: var(--error);
     text-transform: uppercase;
   }
@@ -2494,7 +2494,7 @@
     color: var(--color-tag);
     border: 1px solid color-mix(in srgb, var(--color-tag) 38%, transparent);
     font-family: var(--font-ui-sans);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.2px;
     cursor: pointer;
@@ -2549,7 +2549,7 @@
   .cell-hash {
     justify-content: flex-end;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     letter-spacing: 0.3px;
     border-left: 1px solid var(--border-subtle);
@@ -2565,7 +2565,7 @@
     border-radius: 999px;
     color: var(--accent);
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     cursor: pointer;
     flex-shrink: 0;

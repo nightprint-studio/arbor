@@ -1039,7 +1039,7 @@
     padding: 0;
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
   .dd-search input::placeholder { color: var(--text-disabled); }
 
@@ -1052,7 +1052,7 @@
   }
   .dd-empty {
     padding: 18px 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     text-align: center;
   }
@@ -1062,7 +1062,7 @@
     justify-content: center;
     gap: 6px;
     padding: 18px 10px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-style: italic;
   }
@@ -1087,7 +1087,7 @@
   }
   .dd-sep-label {
     display: block;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -1107,7 +1107,7 @@
     border-radius: var(--radius-sm);
     cursor: pointer;
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -1122,14 +1122,14 @@
     gap: 4px;
     padding: 4px 8px 2px;
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
   .dd-group-label { flex: 1; text-align: left; }
   .dd-count {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     padding: 1px 5px;
@@ -1212,7 +1212,7 @@
     line-height: 1.3;
   }
   .dd-item-sub {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1220,7 +1220,7 @@
     line-height: 1.3;
   }
   .dd-item-meta {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--dd-text-muted, var(--text-muted));
     flex-shrink: 0;
     font-variant-numeric: tabular-nums;

@@ -105,14 +105,14 @@
   .tv-empty {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     height: 100%; gap: 10px;
-    color: var(--text-disabled); font-size: 12px;
+    color: var(--text-disabled); font-size: var(--font-size-sm);
   }
   .tv-open {
     display: flex; align-items: center; gap: 5px;
     padding: 6px 14px;
     background: var(--bg-elevated); border: 1px solid var(--border);
     border-radius: var(--radius-md); color: var(--text-secondary);
-    font-size: 12px; cursor: pointer;
+    font-size: var(--font-size-sm); cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);
   }
   .tv-open:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }

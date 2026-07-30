@@ -276,13 +276,13 @@
   }
   .toggle-sub {
     padding-left: 40px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     line-height: 1.4;
   }
   .toggle-sub code {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     background: rgba(255,255,255,0.07);
     padding: 0 3px;
     border-radius: var(--radius-sm);
@@ -298,7 +298,7 @@
   .warnings :global(em)     { font-style: italic; color: var(--text-secondary); }
   .warnings :global(code) {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     background: rgba(255,255,255,0.07);
     padding: 1px 4px;
     border-radius: var(--radius-sm);

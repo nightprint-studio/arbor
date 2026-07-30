@@ -364,7 +364,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
 
@@ -395,7 +395,7 @@
     gap: 10px;
     flex-wrap: wrap;
     padding: 5px 0;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
   }
 
   .te-inline { display: inline-flex; align-items: center; gap: 7px; }
@@ -412,14 +412,14 @@
     padding-left: 26px;
     margin-top: 6px;
   }
-  .te-sub-label { font-size: 11.5px; color: var(--text-muted); }
+  .te-sub-label { font-size: var(--font-size-xs); color: var(--text-muted); }
   .te-sub code { font-family: var(--font-code); }
 
   /* The translation note: what this switch becomes in the emitted SQL. */
   .te-why {
     margin-left: auto;
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     white-space: nowrap;
   }

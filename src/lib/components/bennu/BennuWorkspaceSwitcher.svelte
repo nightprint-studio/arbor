@@ -146,14 +146,14 @@
   :global(.btb-project .btb-project-chev)       { color: var(--text-muted); transition: color var(--transition-fast); }
   :global(.btb-project:hover .btb-project-chev) { color: var(--text-secondary); }
   .btb-demo {
-    font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700;
+    font-size: var(--font-size-3xs); text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700;
     color: var(--warning); background: color-mix(in srgb, var(--warning) 18%, transparent);
     border-radius: var(--radius-sm); padding: 1px 5px;
   }
 
   /* Tree body */
   .ws-tree { padding: 4px; display: flex; flex-direction: column; }
-  .ws-none { padding: 16px 12px; font-size: 11px; color: var(--text-muted); text-align: center; }
+  .ws-none { padding: 16px 12px; font-size: var(--font-size-xs); color: var(--text-muted); text-align: center; }
 
   .ws-head {
     display: flex; align-items: center; gap: 9px; width: 100%;
@@ -167,7 +167,7 @@
   .ws-head-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   :global(.ws-head .ws-head-check) { color: var(--accent); flex-shrink: 0; }
   .ws-head-count {
-    font-size: 10px; color: var(--text-muted); background: var(--bg-overlay);
+    font-size: var(--font-size-2xs); color: var(--text-muted); background: var(--bg-overlay);
     padding: 1px 7px; border-radius: 9px; font-variant-numeric: tabular-nums; flex-shrink: 0;
   }
 
@@ -175,7 +175,7 @@
     display: flex; align-items: center; gap: 7px; width: 100%;
     padding: 5px 9px 5px 0; background: transparent; border: none; border-radius: var(--radius-sm);
     text-align: left; color: var(--text-secondary); cursor: pointer;
-    font-family: var(--font-ui-sans); font-size: 12px;
+    font-family: var(--font-ui-sans); font-size: var(--font-size-sm);
     transition: background var(--transition-fast), color var(--transition-fast);
   }
   .ws-proj:hover { background: var(--bg-hover); color: var(--text-primary); }

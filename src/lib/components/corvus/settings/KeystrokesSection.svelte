@@ -625,7 +625,7 @@
     border-bottom-width: 2px;
     border-radius: 7px;
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     letter-spacing: 0.3px;
     box-shadow:
@@ -651,13 +651,13 @@
     border-radius: 999px;
     color: color-mix(in srgb, var(--tone) 92%, var(--text-primary));
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     letter-spacing: 0.4px;
   }
   .preview-stage .ks-action {
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     letter-spacing: 0.15px;
     max-width: 36ch;
@@ -673,12 +673,12 @@
             color: transparent;
   }
   /* Size variants — mirror the overlay's. */
-  .preview-stage .ks-card.sz-sm .ks-key    { font-size: 10px; min-width: 1.6em; height: 1.6em; padding: 0 0.5em; border-radius: 5px; }
+  .preview-stage .ks-card.sz-sm .ks-key    { font-size: var(--font-size-2xs); min-width: 1.6em; height: 1.6em; padding: 0 0.5em; border-radius: 5px; }
   .preview-stage .ks-card.sz-sm .ks-body   { padding: 7px 11px 8px 10px; gap: 3px; }
-  .preview-stage .ks-card.sz-sm .ks-action { font-size: 10px; }
-  .preview-stage .ks-card.sz-lg .ks-key    { font-size: 15px; min-width: 2.1em; height: 2.1em; padding: 0 0.75em; border-radius: 9px; border-bottom-width: 3px; }
+  .preview-stage .ks-card.sz-sm .ks-action { font-size: var(--font-size-2xs); }
+  .preview-stage .ks-card.sz-lg .ks-key    { font-size: var(--font-size-lg); min-width: 2.1em; height: 2.1em; padding: 0 0.75em; border-radius: 9px; border-bottom-width: 3px; }
   .preview-stage .ks-card.sz-lg .ks-body   { padding: 12px 18px 13px 14px; gap: 6px; }
-  .preview-stage .ks-card.sz-lg .ks-action { font-size: 13px; }
+  .preview-stage .ks-card.sz-lg .ks-action { font-size: var(--font-size-md); }
 
   /* ── Try it out ──────────────────────────────────────────────────────── */
   .try-card { padding-top: 10px; }

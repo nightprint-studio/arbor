@@ -837,7 +837,7 @@
 
 <style>
   /* ── Header content ─────────────────────────────────────────────────────── */
-  .modal-identifier { font-family: var(--font-code); font-size: 12px; color: var(--text-muted); user-select: text; }
+  .modal-identifier { font-family: var(--font-code); font-size: var(--font-size-sm); color: var(--text-muted); user-select: text; }
   .modal-identifier-btn {
     background: transparent;
     border: 1px solid transparent;
@@ -852,7 +852,7 @@
     border-color: var(--border-subtle);
   }
   .modal-team {
-    font-size: 10px; color: var(--text-muted);
+    font-size: var(--font-size-2xs); color: var(--text-muted);
     background: var(--bg-overlay); border: 1px solid var(--border-subtle);
     padding: 1px 6px; border-radius: var(--radius-sm);
   }
@@ -886,21 +886,21 @@
   .meta-section { display: flex; flex-direction: column; gap: 4px; }
   .meta-label {
     display: flex; align-items: center; gap: 4px;
-    font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+    font-size: var(--font-size-2xs); font-weight: 600; letter-spacing: 0.04em;
     text-transform: uppercase; color: var(--text-muted);
   }
   .meta-value {
-    font-size: 12px; color: var(--text-primary);
+    font-size: var(--font-size-sm); color: var(--text-primary);
     display: flex; align-items: center; gap: 5px;
   }
   .meta-empty { color: var(--text-muted); font-style: italic; }
-  .meta-small { font-size: 11px; color: var(--text-muted); }
+  .meta-small { font-size: var(--font-size-xs); color: var(--text-muted); }
 
   /* Status dropdown */
   .status-dropdown-wrap { position: relative; }
   .status-btn {
     display: flex; align-items: center; gap: 5px;
-    padding: 4px 8px; font-size: 11px; font-weight: 500;
+    padding: 4px 8px; font-size: var(--font-size-xs); font-weight: 500;
     background: var(--bg-overlay); border: 1px solid var(--border);
     border-radius: var(--radius-md); cursor: pointer;
     font-family: var(--font-ui-sans); color: var(--text-primary);
@@ -923,13 +923,13 @@
   }
   .drop-group {
     padding: 5px 8px 2px;
-    font-size: 9px; font-weight: 600; letter-spacing: 0.5px;
+    font-size: var(--font-size-3xs); font-weight: 600; letter-spacing: 0.5px;
     text-transform: uppercase; color: var(--text-muted);
   }
   .drop-item {
     display: flex; align-items: center; gap: 6px;
     width: 100%; padding: 5px 8px; text-align: left;
-    font-size: 11px; font-family: var(--font-ui-sans);
+    font-size: var(--font-size-xs); font-family: var(--font-ui-sans);
     color: var(--text-primary); background: transparent; border: none;
     border-radius: var(--radius-sm); cursor: pointer;
     transition: background var(--transition-fast);
@@ -937,26 +937,26 @@
   .drop-item:hover { background: var(--bg-hover); }
   .drop-item-active { color: var(--accent); }
 
-  .priority-icon { font-size: 13px; }
+  .priority-icon { font-size: var(--font-size-md); }
 
-  .user-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .user-row { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-sm); }
   .user-avatar { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; }
   .user-avatar-ph {
     width: 18px; height: 18px; border-radius: 50%;
     background: var(--accent-subtle); color: var(--accent);
-    font-size: 9px; font-weight: 700;
+    font-size: var(--font-size-3xs); font-weight: 700;
     display: flex; align-items: center; justify-content: center;
   }
 
   .meta-labels { display: flex; flex-wrap: wrap; gap: 3px; }
-  .meta-label-chip { font-size: 10px; font-weight: 500; padding: 2px 6px; border-radius: var(--radius-sm); }
+  .meta-label-chip { font-size: var(--font-size-2xs); font-weight: 500; padding: 2px 6px; border-radius: var(--radius-sm); }
 
   .project-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
   .sidebar-actions { display: flex; flex-direction: column; gap: 5px; margin-top: 4px; }
   .action-btn {
     display: flex; align-items: center; gap: 6px;
-    padding: 6px 8px; font-size: 11px; font-weight: 500;
+    padding: 6px 8px; font-size: var(--font-size-xs); font-weight: 500;
     background: var(--bg-overlay); border: 1px solid var(--border);
     border-radius: var(--radius-md); color: var(--text-secondary);
     cursor: pointer; font-family: var(--font-ui-sans);
@@ -979,7 +979,7 @@
     margin: 0 0 16px;
   }
   .issue-title {
-    font-size: 16px; font-weight: 600; color: var(--text-primary);
+    font-size: var(--font-size-xl); font-weight: 600; color: var(--text-primary);
     line-height: 1.4; margin: 0;
     flex: 1; min-width: 0;
     user-select: text;
@@ -993,7 +993,7 @@
 
   .issue-description {
     position: relative;
-    font-size: 12.5px; line-height: 1.75; color: var(--text-secondary);
+    font-size: var(--font-size-sm); line-height: 1.75; color: var(--text-secondary);
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
@@ -1026,16 +1026,16 @@
   :global(.comment-body .md-pre) {
     background: var(--bg-overlay); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md); padding: 10px 12px; margin: 8px 0;
-    overflow-x: auto; font-family: var(--font-code); font-size: 11px;
+    overflow-x: auto; font-family: var(--font-code); font-size: var(--font-size-xs);
     line-height: 1.6;
   }
   :global(.issue-description .md-code),
   :global(.comment-body .md-code) {
-    font-family: var(--font-code); font-size: 11px; background: none; padding: 0;
+    font-family: var(--font-code); font-size: var(--font-size-xs); background: none; padding: 0;
   }
   :global(.issue-description .md-inline-code),
   :global(.comment-body .md-inline-code) {
-    font-family: var(--font-code); font-size: 11px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
     background: var(--bg-overlay); padding: 1px 5px; border-radius: var(--radius-sm);
     color: var(--accent); border: 1px solid var(--border-subtle);
   }
@@ -1043,9 +1043,9 @@
   :global(.comment-body strong) { color: var(--text-primary); font-weight: 600; }
   :global(.issue-description em),
   :global(.comment-body em) { color: var(--text-secondary); }
-  :global(.issue-description .md-h1) { font-size: 15px; font-weight: 700; color: var(--text-primary); margin: 12px 0 6px; display: block; }
-  :global(.issue-description .md-h2) { font-size: 13px; font-weight: 600; color: var(--text-primary); margin: 10px 0 4px; display: block; border-bottom: 1px solid var(--border-subtle); padding-bottom: 3px; }
-  :global(.issue-description .md-h3) { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 8px 0 4px; display: block; }
+  :global(.issue-description .md-h1) { font-size: var(--font-size-lg); font-weight: 700; color: var(--text-primary); margin: 12px 0 6px; display: block; }
+  :global(.issue-description .md-h2) { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); margin: 10px 0 4px; display: block; border-bottom: 1px solid var(--border-subtle); padding-bottom: 3px; }
+  :global(.issue-description .md-h3) { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-secondary); margin: 8px 0 4px; display: block; }
   :global(.issue-description .md-p),
   :global(.comment-body .md-p) { margin: 2px 0; }
   :global(.issue-description .md-spacer),
@@ -1073,14 +1073,14 @@
   :global(.issue-description p),
   :global(.comment-body p) { margin: 2px 0; }
   :global(.issue-description h1),
-  :global(.comment-body h1) { font-size: 15px; font-weight: 700; color: var(--text-primary); margin: 12px 0 6px; }
+  :global(.comment-body h1) { font-size: var(--font-size-lg); font-weight: 700; color: var(--text-primary); margin: 12px 0 6px; }
   :global(.issue-description h2),
-  :global(.comment-body h2) { font-size: 13px; font-weight: 600; color: var(--text-primary); margin: 10px 0 4px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 3px; }
+  :global(.comment-body h2) { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); margin: 10px 0 4px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 3px; }
   :global(.issue-description h3),
-  :global(.comment-body h3) { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 8px 0 4px; }
+  :global(.comment-body h3) { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-secondary); margin: 8px 0 4px; }
   :global(.issue-description h4), :global(.issue-description h5), :global(.issue-description h6),
   :global(.comment-body h4), :global(.comment-body h5), :global(.comment-body h6)
-    { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 6px 0 3px; }
+    { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-secondary); margin: 6px 0 3px; }
   :global(.issue-description:not(.rich-html) ul:not(.md-ul)),
   :global(.issue-description:not(.rich-html) ol:not(.md-ol)),
   :global(.comment-body:not(.rich-html) ul:not(.md-ul)),
@@ -1097,7 +1097,7 @@
   }
   :global(.issue-description code),
   :global(.comment-body code) {
-    font-family: var(--font-code); font-size: 11px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
     background: var(--bg-overlay); padding: 1px 5px; border-radius: var(--radius-sm);
     color: var(--accent); border: 1px solid var(--border-subtle);
   }
@@ -1120,7 +1120,7 @@
   :global(.comment-body details > summary::-webkit-details-marker) { display: none; }
   :global(.issue-description details > summary::before),
   :global(.comment-body details > summary::before) {
-    content: '▶'; font-size: 9px; color: var(--text-muted);
+    content: '▶'; font-size: var(--font-size-3xs); color: var(--text-muted);
     transition: transform 120ms ease; display: inline-block;
   }
   :global(.issue-description details[open] > summary::before),
@@ -1143,7 +1143,7 @@
      Bodies arriving pre-rendered from Jira carry the `.rich-html` class. */
   :global(.rich-html) {
     color: var(--text-primary);
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     line-height: 1.65;
   }
   :global(.rich-html) > :global(*:first-child) { margin-top: 0 !important; }
@@ -1164,11 +1164,11 @@
     letter-spacing: -0.01em;
   }
   :global(.rich-html h1) { font-size: 17px; font-weight: 700; }
-  :global(.rich-html h2) { font-size: 15px; }
-  :global(.rich-html h3) { font-size: 13.5px; }
-  :global(.rich-html h4) { font-size: 12.5px; color: var(--text-primary); }
+  :global(.rich-html h2) { font-size: var(--font-size-lg); }
+  :global(.rich-html h3) { font-size: var(--font-size-md); }
+  :global(.rich-html h4) { font-size: var(--font-size-sm); color: var(--text-primary); }
   :global(.rich-html h5),
-  :global(.rich-html h6) { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+  :global(.rich-html h6) { font-size: var(--font-size-sm); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
 
   /* Inline marks */
   :global(.rich-html strong),
@@ -1304,7 +1304,7 @@
     margin: 12px 0;
     overflow-x: auto;
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.6;
     color: var(--text-primary);
     box-shadow: inset 0 1px 0 color-mix(in srgb, white 4%, transparent);
@@ -1331,7 +1331,7 @@
     border-collapse: separate;
     border-spacing: 0;
     margin: 12px 0;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border));
     border-radius: var(--radius-md);
     overflow: hidden;
@@ -1351,7 +1351,7 @@
     background: color-mix(in srgb, var(--accent) 8%, var(--bg-overlay));
     color: var(--text-primary);
     font-weight: 600;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
@@ -1412,7 +1412,7 @@
     background: var(--bg-overlay);
     border: 1px solid var(--border-subtle);
     color: var(--text-secondary);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -1456,7 +1456,7 @@
     padding: 10px 14px;
   }
   .issue-no-desc {
-    font-size: 12px; color: var(--text-muted); font-style: italic;
+    font-size: var(--font-size-sm); color: var(--text-muted); font-style: italic;
     padding: 12px 16px; border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md); background: var(--bg-elevated);
     margin-bottom: 20px;
@@ -1477,36 +1477,36 @@
   @keyframes sk-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
   .drop-empty {
     display: flex; align-items: center; gap: 6px; justify-content: center;
-    padding: 10px 8px; font-size: 11px; color: var(--text-muted); font-style: italic;
+    padding: 10px 8px; font-size: var(--font-size-xs); color: var(--text-muted); font-style: italic;
   }
 
   /* ── Comments ────────────────────────────────────────────────────────────── */
   .comments-section { display: flex; flex-direction: column; gap: 12px; }
   .comments-header {
     display: flex; align-items: center; gap: 6px;
-    font-size: 12px; font-weight: 600; color: var(--text-secondary);
+    font-size: var(--font-size-sm); font-weight: 600; color: var(--text-secondary);
   }
   .comments-count {
     background: var(--bg-overlay); border: 1px solid var(--border-subtle);
-    font-size: 10px; color: var(--text-muted);
+    font-size: var(--font-size-2xs); color: var(--text-muted);
     padding: 0 5px; border-radius: 99px;
   }
   .comment { display: flex; flex-direction: column; gap: 5px; }
   .comment-header {
     display: flex; align-items: center; gap: 6px;
-    font-size: 11px; color: var(--text-muted);
+    font-size: var(--font-size-xs); color: var(--text-muted);
   }
   .comment-avatar { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; }
   .comment-avatar-ph {
     width: 18px; height: 18px; border-radius: 50%;
     background: var(--accent-subtle); color: var(--accent);
-    font-size: 9px; font-weight: 700;
+    font-size: var(--font-size-3xs); font-weight: 700;
     display: flex; align-items: center; justify-content: center;
   }
   .comment-author { font-weight: 500; color: var(--text-secondary); }
-  .comment-time { color: var(--text-muted); font-size: 10px; }
+  .comment-time { color: var(--text-muted); font-size: var(--font-size-2xs); }
   .comment-body {
-    font-size: 12px; line-height: 1.6; color: var(--text-secondary);
+    font-size: var(--font-size-sm); line-height: 1.6; color: var(--text-secondary);
     background: var(--bg-overlay); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md); padding: 8px 10px;
     user-select: text;
@@ -1533,7 +1533,7 @@
   .composer-avatar-ph {
     display: flex; align-items: center; justify-content: center;
     background: var(--accent-subtle); color: var(--accent);
-    font-size: 11px; font-weight: 700;
+    font-size: var(--font-size-xs); font-weight: 700;
     border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
   }
 
@@ -1563,7 +1563,7 @@
     background: transparent;
     resize: none;
     padding: 10px 12px 6px;
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     font-family: var(--font-ui-sans);
     color: var(--text-primary);
     line-height: 1.55;
@@ -1581,27 +1581,27 @@
 
   .composer-hint {
     display: inline-flex; align-items: center; gap: 4px;
-    font-size: 10px; color: var(--text-muted);
+    font-size: var(--font-size-2xs); color: var(--text-muted);
     user-select: none;
   }
   .kbd {
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 18px; height: 18px; padding: 0 4px;
     font-family: var(--font-code);
-    font-size: 9.5px; font-weight: 600;
+    font-size: var(--font-size-3xs); font-weight: 600;
     color: var(--text-secondary);
     background: var(--bg-base);
     border: 1px solid var(--border-subtle);
     border-bottom-width: 2px;
     border-radius: var(--radius-sm);
   }
-  .kbd-plus  { color: var(--text-disabled); font-size: 10px; margin: 0 1px; }
+  .kbd-plus  { color: var(--text-disabled); font-size: var(--font-size-2xs); margin: 0 1px; }
   .hint-text { margin-left: 4px; }
 
   .composer-actions { display: flex; align-items: center; gap: 6px; }
   .composer-cancel {
     padding: 5px 10px;
-    font-size: 11px; font-weight: 500;
+    font-size: var(--font-size-xs); font-weight: 500;
     color: var(--text-secondary);
     background: transparent;
     border: 1px solid transparent;
@@ -1616,7 +1616,7 @@
   .composer-send {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 5px 12px;
-    font-size: 11px; font-weight: 600;
+    font-size: var(--font-size-xs); font-weight: 600;
     background: var(--accent);
     color: var(--bg-base);
     border: none;
@@ -1647,12 +1647,12 @@
   }
   .attachments-header {
     display: flex; align-items: center; gap: 6px;
-    font-size: 12px; font-weight: 600; color: var(--text-secondary);
+    font-size: var(--font-size-sm); font-weight: 600; color: var(--text-secondary);
     margin-bottom: 2px;
   }
   .attachments-count {
     background: var(--bg-overlay); border: 1px solid var(--border-subtle);
-    font-size: 10px; color: var(--text-muted);
+    font-size: var(--font-size-2xs); color: var(--text-muted);
     padding: 0 5px; border-radius: 99px;
   }
 
@@ -1708,16 +1708,16 @@
 
   .att-meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .att-filename {
-    font-size: 12px; font-weight: 500; color: var(--text-primary);
+    font-size: var(--font-size-sm); font-weight: 500; color: var(--text-primary);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .att-sub {
     display: flex; align-items: center; gap: 5px;
-    font-size: 10px; color: var(--text-muted);
+    font-size: var(--font-size-2xs); color: var(--text-muted);
     white-space: nowrap; overflow: hidden;
   }
   .att-sub-dot { color: var(--text-disabled); }
-  .att-mime    { font-family: var(--font-code); font-size: 9.5px; opacity: 0.85;
+  .att-mime    { font-family: var(--font-code); font-size: var(--font-size-3xs); opacity: 0.85;
                  overflow: hidden; text-overflow: ellipsis; }
 
   .att-action {
@@ -1734,7 +1734,7 @@
   }
   .attachment.att-downloading .att-action { color: var(--accent); }
   .attachment.att-done        .att-action { color: var(--success); }
-  .att-action-done            { font-size: 14px; font-weight: 700; line-height: 1; }
+  .att-action-done            { font-size: var(--font-size-lg); font-weight: 700; line-height: 1; }
   .attachment.att-error {
     border-color: color-mix(in srgb, var(--error) 40%, var(--border));
     background: color-mix(in srgb, var(--error) 6%, var(--bg-elevated));
@@ -1748,12 +1748,12 @@
   }
   .commits-header {
     display: flex; align-items: center; gap: 6px;
-    font-size: 12px; font-weight: 600; color: var(--text-secondary);
+    font-size: var(--font-size-sm); font-weight: 600; color: var(--text-secondary);
     margin-bottom: 2px;
   }
   .commits-count {
     background: var(--bg-overlay); border: 1px solid var(--border-subtle);
-    font-size: 10px; color: var(--text-muted);
+    font-size: var(--font-size-2xs); color: var(--text-muted);
     padding: 0 5px; border-radius: 99px;
   }
   :global(.commits-spin) { color: var(--text-muted); }
@@ -1765,7 +1765,7 @@
   }
   .commits-pin-label {
     display: inline-flex; align-items: center; gap: 3px;
-    font-size: 10px; font-weight: 500;
+    font-size: var(--font-size-2xs); font-weight: 500;
     color: var(--text-muted);
     background: var(--bg-overlay);
     border: 1px solid var(--border-subtle);
@@ -1776,7 +1776,7 @@
   }
   .commits-pin-btn {
     display: inline-flex; align-items: center; gap: 3px;
-    font-size: 10px; font-weight: 500;
+    font-size: var(--font-size-2xs); font-weight: 500;
     color: var(--text-secondary);
     background: transparent;
     border: 1px solid var(--border-subtle);
@@ -1804,17 +1804,17 @@
   :global(.commits-missing-icon) { color: var(--warning, #fbbf24); flex-shrink: 0; margin-top: 1px; }
   .commits-missing-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
   .commits-missing-title {
-    font-size: 12px; font-weight: 600; color: var(--text-primary);
+    font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary);
   }
   .commits-missing-hint {
-    font-size: 11px; color: var(--text-muted); line-height: 1.5;
+    font-size: var(--font-size-xs); color: var(--text-muted); line-height: 1.5;
   }
   .commits-missing-action {
     align-self: flex-start;
     display: inline-flex; align-items: center; gap: 5px;
     margin-top: 4px;
     padding: 4px 10px;
-    font-size: 11px; font-weight: 500;
+    font-size: var(--font-size-xs); font-weight: 500;
     background: var(--accent-subtle);
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
@@ -1844,11 +1844,11 @@
     display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
   }
   .lc-sha {
-    font-family: var(--font-code); font-size: 10.5px;
+    font-family: var(--font-code); font-size: var(--font-size-2xs);
     color: var(--text-muted); flex-shrink: 0;
   }
   .lc-badge {
-    font-size: 9px; font-weight: 600; letter-spacing: 0.3px;
+    font-size: var(--font-size-3xs); font-weight: 600; letter-spacing: 0.3px;
     padding: 1px 5px; border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--accent);
@@ -1856,7 +1856,7 @@
     text-transform: uppercase; flex-shrink: 0;
   }
   .lc-ref {
-    font-size: 9.5px; font-weight: 500; padding: 1px 5px; border-radius: var(--radius-sm);
+    font-size: var(--font-size-3xs); font-weight: 500; padding: 1px 5px; border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--text-muted) 10%, transparent);
     color: var(--text-muted);
     border: 1px solid color-mix(in srgb, var(--text-muted) 20%, transparent);
@@ -1875,12 +1875,12 @@
   .lc-ref-remote { font-style: italic; opacity: 0.85; }
   .lc-ref-more   { font-style: italic; }
   .lc-summary {
-    font-size: 12px; font-weight: 500; color: var(--text-primary);
+    font-size: var(--font-size-sm); font-weight: 500; color: var(--text-primary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .lc-meta {
     display: flex; align-items: center; gap: 4px;
-    font-size: 10.5px; color: var(--text-muted);
+    font-size: var(--font-size-2xs); color: var(--text-muted);
   }
   .lc-dot { color: var(--text-disabled); }
   .lc-author { color: var(--text-muted); }

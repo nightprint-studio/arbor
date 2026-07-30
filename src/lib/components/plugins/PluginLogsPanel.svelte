@@ -496,7 +496,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
   }
@@ -529,7 +529,7 @@
     border-radius: 3px;
     color: var(--text-disabled);
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -569,7 +569,7 @@
     outline: none;
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .pl-search input::placeholder { color: var(--text-disabled); }
   .pl-search-clear {

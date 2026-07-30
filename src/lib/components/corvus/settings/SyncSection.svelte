@@ -223,11 +223,11 @@
 <style>
   .section-header { margin-bottom: 14px; }
   .section-header h2 {
-    font-size: 15px; font-weight: 600; margin: 0 0 3px;
+    font-size: var(--font-size-lg); font-weight: 600; margin: 0 0 3px;
     color: var(--text-primary); font-family: var(--font-ui-sans);
   }
   .section-header p {
-    margin: 0; font-size: 12px; color: var(--text-secondary); line-height: 1.45;
+    margin: 0; font-size: var(--font-size-sm); color: var(--text-secondary); line-height: 1.45;
     font-family: var(--font-ui-sans);
   }
 
@@ -240,7 +240,7 @@
   }
   .card-section-title {
     display: inline-flex; align-items: center; gap: 5px;
-    font-size: 11px; font-weight: 600; color: var(--text-secondary);
+    font-size: var(--font-size-xs); font-weight: 600; color: var(--text-secondary);
     text-transform: uppercase; letter-spacing: 0.5px;
     margin-bottom: 8px;
   }
@@ -251,8 +251,8 @@
     border-color: color-mix(in srgb, var(--warning) 40%, transparent);
     background: color-mix(in srgb, var(--warning) 8%, transparent);
   }
-  .notice-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
-  .notice-body { font-size: 11.5px; color: var(--text-secondary); line-height: 1.4; margin-top: 2px; }
+  .notice-title { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary); }
+  .notice-body { font-size: var(--font-size-xs); color: var(--text-secondary); line-height: 1.4; margin-top: 2px; }
 
   .pull-banner {
     display: flex; gap: 9px; align-items: flex-start;
@@ -262,21 +262,21 @@
     background: color-mix(in srgb, var(--warning) 8%, transparent);
     border-radius: var(--radius-sm);
   }
-  .pull-banner-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
-  .pull-banner-body { font-size: 11.5px; color: var(--text-secondary); line-height: 1.4; margin-top: 2px; }
+  .pull-banner-title { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary); }
+  .pull-banner-body { font-size: var(--font-size-xs); color: var(--text-secondary); line-height: 1.4; margin-top: 2px; }
 
   .provider-pill, .repo-row {
     display: inline-flex; align-items: center; gap: 6px;
-    font-size: 12px; color: var(--text-primary);
+    font-size: var(--font-size-sm); color: var(--text-primary);
   }
   .provider-pill {
     padding: 3px 10px; background: var(--bg-input);
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
   }
   .repo-row { gap: 8px; margin-bottom: 6px; }
-  .repo-name { font-family: var(--font-code); font-size: 12px; color: var(--accent); }
+  .repo-name { font-family: var(--font-code); font-size: var(--font-size-sm); color: var(--accent); }
   .badge {
-    font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.4px;
+    font-size: var(--font-size-3xs); text-transform: uppercase; letter-spacing: 0.4px;
     padding: 1px 6px; border-radius: 999px; font-weight: 600;
   }
   .badge.private { background: var(--bg-input); color: var(--text-muted); border: 1px solid var(--border-subtle); }
@@ -284,13 +284,13 @@
 
   .meta {
     display: flex; flex-wrap: wrap; gap: 14px;
-    font-size: 11px; color: var(--text-muted);
+    font-size: var(--font-size-xs); color: var(--text-muted);
     margin-bottom: 10px;
   }
   .meta span { display: inline-flex; align-items: center; gap: 4px; }
 
   .row-input {
-    padding: 4px 8px; font-size: 12px; color: var(--text-primary);
+    padding: 4px 8px; font-size: var(--font-size-sm); color: var(--text-primary);
     background: var(--bg-input);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); outline: none;
@@ -305,6 +305,6 @@
   }
   .saved-pill {
     display: inline-flex; align-items: center; gap: 4px;
-    font-size: 11px; color: var(--accent); margin-top: 2px;
+    font-size: var(--font-size-xs); color: var(--accent); margin-top: 2px;
   }
 </style>

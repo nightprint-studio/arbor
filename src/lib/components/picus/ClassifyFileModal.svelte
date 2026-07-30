@@ -201,7 +201,7 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
 
   .cf { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 
@@ -209,10 +209,10 @@
   .cf-warn { display: inline-flex; color: var(--warning); flex-shrink: 0; }
   .cf-gap { width: 12px; flex-shrink: 0; }
 
-  .cf-name { font-family: var(--font-code); font-size: 11.5px; white-space: nowrap; }
+  .cf-name { font-family: var(--font-code); font-size: var(--font-size-xs); white-space: nowrap; }
   .cf-path {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -229,14 +229,14 @@
     border-top: 1px solid var(--border-subtle);
     background: var(--bg-elevated);
   }
-  .cf-target { font-family: var(--font-code); font-size: 11.5px; color: var(--text-primary); }
-  .cf-standing { font-size: 11px; line-height: 1.5; color: var(--text-muted); }
+  .cf-target { font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-primary); }
+  .cf-standing { font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted); }
 
-  .cf-empty-text { margin: 0; font-size: 12px; }
+  .cf-empty-text { margin: 0; font-size: var(--font-size-sm); }
 
   .cf-foot {
     flex: 1;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.45;
     color: var(--text-muted);
     text-align: left;

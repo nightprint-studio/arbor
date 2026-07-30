@@ -332,20 +332,20 @@
   }
   .state-title {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-primary);
   }
   .state-hint {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 1.5;
     max-width: 240px;
   }
   .err-msg {
     color: var(--error);
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     word-break: break-word;
   }
   :global(.center-state .state-icon-warn)  { color: var(--warning); }
@@ -357,7 +357,7 @@
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     cursor: pointer;
   }
@@ -395,7 +395,7 @@
   }
   .cell-title {
     margin: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
@@ -414,7 +414,7 @@
   .trunc-note {
     padding: 8px 14px;
     margin: 0 12px 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--warning);
     background: var(--warning-subtle);
     border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
@@ -427,7 +427,7 @@
     align-items: center;
     justify-content: center;
     gap: 5px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
     padding: 6px 0;

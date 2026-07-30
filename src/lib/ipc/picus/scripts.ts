@@ -260,6 +260,18 @@ export function scriptText(root: string, path: string): Promise<ScriptText> {
   return picus('picus_script_text', { root, path });
 }
 
+/**
+ * Write one script back, in the encoding and line endings it was read with.
+ *
+ * Rejects rather than substitutes: text the declared encoding cannot represent —
+ * a `€` in a `windows-1252` script — comes back as an error with the reason, which
+ * is the whole point of a tool that exists to catch exactly that in other editors.
+ * The answer is the file **re-read from disk**, not an echo.
+ */
+export function saveScript(root: string, path: string, text: string): Promise<ScriptText> {
+  return picus('picus_save_script', { root, path, text });
+}
+
 // ── Writing ──────────────────────────────────────────────────────────────────
 
 /** One destination file, before and after, exactly as the write would leave it. */

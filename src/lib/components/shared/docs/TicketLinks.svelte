@@ -153,17 +153,17 @@ custom_pattern = "\\\\b(MYCO-\\\\d+)\\\\b"   # must have exactly one capture gro
 </div>
 
 <style>
-  .doc { font-family: var(--font-ui-sans); font-size: 13px; color: var(--text-primary); line-height: 1.6; }
-  h1 { font-size: 18px; font-weight: 700; margin: 0 0 12px; color: var(--text-primary); }
-  h2 { font-size: 14px; font-weight: 600; margin: 20px 0 8px; color: var(--text-primary); }
-  h3 { font-size: 12px; font-weight: 600; margin: 14px 0 6px; color: var(--text-secondary); }
+  .doc { font-family: var(--font-ui-sans); font-size: var(--font-size-md); color: var(--text-primary); line-height: 1.6; }
+  h1 { font-size: var(--font-size-xl); font-weight: 700; margin: 0 0 12px; color: var(--text-primary); }
+  h2 { font-size: var(--font-size-lg); font-weight: 600; margin: 20px 0 8px; color: var(--text-primary); }
+  h3 { font-size: var(--font-size-sm); font-weight: 600; margin: 14px 0 6px; color: var(--text-secondary); }
   p  { margin: 0 0 10px; color: var(--text-secondary); }
   ul { margin: 0 0 10px; padding-left: 18px; color: var(--text-secondary); }
   li { margin-bottom: 4px; }
   strong { color: var(--text-primary); font-weight: 600; }
   code {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     background: var(--bg-hover);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
@@ -182,14 +182,14 @@ custom_pattern = "\\\\b(MYCO-\\\\d+)\\\\b"   # must have exactly one capture gro
     background: none;
     border: none;
     padding: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     white-space: pre;
   }
   table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     margin: 8px 0 12px;
   }
   th, td {

@@ -111,8 +111,8 @@
     padding: 0 5px;
     font-variant-numeric: tabular-nums;
   }
-  .t-read .bpm { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
-  .t-read .unit { font-size: 8px; font-weight: 700; letter-spacing: 0.04em; color: var(--text-disabled); }
+  .t-read .bpm { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-secondary); }
+  .t-read .unit { font-size: var(--font-size-3xs); font-weight: 700; letter-spacing: 0.04em; color: var(--text-disabled); }
   /* Following the score (no override): plain readout, no hover affordance. */
   .t-read:not(.on) { cursor: default; }
   /* Overridden: the readout becomes an accented reset button. */
@@ -122,7 +122,7 @@
   .t-tap {
     width: 30px;
     margin-left: 2px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     letter-spacing: 0.06em;
     color: var(--text-secondary);

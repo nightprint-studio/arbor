@@ -34,6 +34,7 @@
   import Input from '$lib/components/shared/ui/Input.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import { isNow, nowFunction, readValue } from '$lib/utils/picus/sql-values';
@@ -138,6 +139,17 @@
   </Button>
 </div>
 
+<!-- No columns is an empty STATE, not an empty table with a sentence under it.
+     It used to draw the header row over nothing and add a bare grey line —
+     one of four different ways this screen said "there is nothing here yet",
+     none of which looked like the other three. -->
+{#if !columns.length}
+  <StateBlock
+    tone="info"
+    fill={false}
+    label="Choose a table above — its columns appear here, ready to fill in."
+  />
+{:else}
 <div class="vg" role="table" aria-label="Values to write">
   <div class="vg-head" role="row">
     <span role="columnheader">Column</span>
@@ -156,8 +168,12 @@
         {#if col.primaryKey}
           <span use:tooltip={'Primary key'}><Badge variant="tone" tone="accent" size="sm" label="PK" /></span>
         {:else if col.notNull}
+          <!-- Neutral, not amber. A NOT NULL column is a fact about the table,
+               true before anybody typed anything; painting it in the warning
+               colour makes an ordinary schema look like a list of problems. The
+               field that is actually left empty gets the amber, from `error`. -->
           <span use:tooltip={'NOT NULL — the database rejects an empty value'}>
-            <Badge variant="tone" tone="warning" size="sm" label="NN" />
+            <Badge variant="tone" tone="neutral" size="sm" label="NN" />
           </span>
         {/if}
       </span>
@@ -188,7 +204,12 @@
         {/if}
       </span>
 
-      <span class="vg-type" role="cell">{col.type}</span>
+      <!-- The declared type, elided rather than cut. `character varying(50)` is
+           wider than this column at any sensible width, and it used to be sliced
+           mid-token — "character varying(5" reads as a length of 5. -->
+      <span class="vg-type" role="cell">
+        <span class="vg-type-text" use:tooltip={col.type}>{col.type}</span>
+      </span>
 
       <span class="vg-key" role="cell">
         <button
@@ -211,12 +232,9 @@
 </div>
 
 <p class="vg-note">
-  <!-- Only once there are columns to pick a key from. Saying "pick at least one
-       column" over an empty grid is advice nobody can follow, and it hid the
-       actual problem: the table's columns are not known at all. -->
-  {#if !columns.length}
-    Nothing to fill in yet.
-  {:else if !dmlStore.keyColumns.length}
+  <!-- Only reached with columns on screen — the empty case is the state block
+       above, so "pick at least one column" is never advice over an empty grid. -->
+  {#if !dmlStore.keyColumns.length}
     <span class="vg-warn">No comparison key.</span>
     Updates would have no WHERE clause and "skip if present" could not check anything —
     pick at least one column.
@@ -225,20 +243,19 @@
   {:else}
     Key falls back to the primary key: <code>{dmlStore.keyColumns.map((c) => c.name).join(', ')}</code>.
   {/if}
-  {#if columns.length}
-    {#if dmlStore.columnsFromScripts}
-      Columns and types come from what this repository's scripts write — no connected
-      database has this table.
-    {:else if connectionsStore.active}
-      Types come from {connectionsStore.active.name}.
-    {:else}
-      Types come from the statements themselves — no connection is open.
-    {/if}
+  {#if dmlStore.columnsFromScripts}
+    Columns and types come from what this repository's scripts write — no connected
+    database has this table.
+  {:else if connectionsStore.active}
+    Types come from {connectionsStore.active.name}.
+  {:else}
+    Types come from the statements themselves — no connection is open.
   {/if}
   {#if rows.length > 1}
     {rows.length} rows go into one block — a row with nothing typed in it is skipped.
   {/if}
 </p>
+{/if}
 
 <style>
   /* The row strip. Sits above the grid rather than beside it, because the grid is
@@ -265,7 +282,7 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     transition: background var(--transition-fast), border-color var(--transition-fast);
   }
@@ -282,7 +299,7 @@
   .vg-chip-bad { border-color: var(--error); color: var(--error); }
   .vg-chip-n {
     font-variant-numeric: tabular-nums;
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     color: var(--text-disabled);
     flex-shrink: 0;
   }
@@ -296,8 +313,8 @@
 
   .vg {
     display: grid;
-    grid-template-columns: minmax(140px, 200px) minmax(200px, 1fr) minmax(90px, 130px) 44px;
-    font-size: 12px;
+    grid-template-columns: minmax(140px, 200px) minmax(200px, 1fr) minmax(110px, 170px) 44px;
+    font-size: var(--font-size-sm);
   }
 
   .vg-head,
@@ -306,7 +323,7 @@
   .vg-head > span {
     padding: 6px 8px;
     border-bottom: 1px solid var(--border);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -328,13 +345,19 @@
 
   .vg-col-name {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .vg-type-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .vg-type {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -355,7 +378,7 @@
     border-radius: var(--radius-sm);
     background: var(--info-subtle);
     color: var(--info);
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
   }
 
@@ -383,13 +406,13 @@
 
   .vg-note {
     margin-top: 10px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--text-muted);
   }
   .vg-note code {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .vg-warn { color: var(--warning); font-weight: 600; }

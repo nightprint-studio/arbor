@@ -127,7 +127,7 @@
   }
 
   .ps-title {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.3px;
     color: var(--text-secondary);
@@ -147,7 +147,7 @@
     padding: 0 4px;
     background: rgba(255, 255, 255, 0.06);
     border-radius: 999px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--text-muted);
     flex-shrink: 0;

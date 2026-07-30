@@ -640,12 +640,12 @@
   }
   .sip-kind {
     display: inline-flex; align-items: center; gap: 4px;
-    font-family: var(--font-code); font-size: 11px; font-weight: 600;
+    font-family: var(--font-code); font-size: var(--font-size-xs); font-weight: 600;
     padding: 2px 8px;
     background: var(--bg-overlay);
     border-radius: 10px;
   }
-  .sip-count { color: var(--text-muted); font-size: 11px; }
+  .sip-count { color: var(--text-muted); font-size: var(--font-size-xs); }
 
   /* Kind badge — same palette as the tree-pane row badges, kept in
      sync via the `kind` data attribute. The wrapper styles are
@@ -655,7 +655,7 @@
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 22px; height: 16px; padding: 0 4px;
     border-radius: 3px;
-    font-family: var(--font-code); font-size: 9px; font-weight: 600; line-height: 1;
+    font-family: var(--font-code); font-size: var(--font-size-3xs); font-weight: 600; line-height: 1;
     flex-shrink: 0;
   }
   .sip-row-badge-struct,
@@ -692,7 +692,7 @@
   }
 
   .sip-path {
-    color: var(--accent); font-family: var(--font-code); font-size: 11px;
+    color: var(--accent); font-family: var(--font-code); font-size: var(--font-size-xs);
     padding: 5px 10px;
     border-bottom: 1px solid var(--border-subtle);
     word-break: break-all; flex-shrink: 0;
@@ -709,13 +709,13 @@
     gap: 8px;
   }
   .sip-section-title {
-    font-size: 10px; color: var(--text-muted);
+    font-size: var(--font-size-2xs); color: var(--text-muted);
     text-transform: uppercase; letter-spacing: 0.06em;
     margin-bottom: 4px;
   }
   .sip-type {
     display: flex; gap: 6px; align-items: center;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     padding: 6px 8px;
     background: var(--bg-overlay);
     border-radius: var(--radius-sm);
@@ -725,7 +725,7 @@
   .sip-type-value.sip-type-external { color: var(--text-disabled); }
 
   .sip-pre {
-    font-family: var(--font-code); font-size: 11px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
     white-space: pre-wrap; margin: 0;
     padding: 8px;
     background: var(--bg-overlay);
@@ -739,7 +739,7 @@
     align-items: center; justify-content: center;
     gap: 10px; flex: 1;
     padding: 32px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
 
   /* ── Inline edit (detail-location) ─────────────────────────────── */
@@ -749,7 +749,7 @@
   .sip-edit-btn {
     margin-left: auto;
     display: inline-flex; align-items: center; gap: 3px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 2px 6px;
     background: var(--bg-overlay);
     color: var(--text-secondary);
@@ -761,7 +761,7 @@
   .sip-edit-btn:hover { background: var(--bg-elevated); color: var(--text-primary); }
   .sip-edit-banner {
     display: flex; align-items: center; gap: 6px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 4px 6px 4px 8px;
     margin-bottom: 6px;
     background: color-mix(in srgb, var(--accent) 10%, transparent);
@@ -772,7 +772,7 @@
   }
   .sip-edit-banner-dismiss {
     margin-left: auto;
-    font-size: 10px; padding: 1px 6px;
+    font-size: var(--font-size-2xs); padding: 1px 6px;
     background: transparent;
     border: 1px solid var(--border-subtle);
     border-radius: 3px;
@@ -785,7 +785,7 @@
   }
   .sip-edit-input {
     flex: 1; min-width: 0;
-    font-family: var(--font-code); font-size: 11px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
     padding: 5px 8px;
     background: var(--bg-base);
     border: 1px solid var(--accent);
@@ -815,14 +815,14 @@
   .sip-edit-cancel:hover { background: var(--bg-elevated); color: var(--text-primary); }
   .sip-edit-error {
     margin-top: 4px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--error, #e06c75);
   }
 
   /* ── Variant picker ───────────────────────────────────────────── */
   .sip-variant-picker {
     width: 100%;
-    font-family: var(--font-code); font-size: 11px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
     padding: 5px 8px;
     background: var(--bg-base);
     border: 1px solid var(--border-subtle);
@@ -842,7 +842,7 @@
     background: var(--bg-overlay);
     border-radius: var(--radius-sm);
   }
-  .sip-missing-row { display: flex; gap: 8px; align-items: center; font-size: 11px; padding: 2px 0; }
+  .sip-missing-row { display: flex; gap: 8px; align-items: center; font-size: var(--font-size-xs); padding: 2px 0; }
   .sip-missing-row-btn {
     width: 100%;
     background: transparent;
@@ -857,17 +857,17 @@
   .sip-missing-row-btn:hover :global(.sip-missing-plus) { color: var(--accent); }
   :global(.sip-missing-plus) { color: var(--text-muted); flex-shrink: 0; }
   .sip-missing-name { font-family: var(--font-code); color: var(--text-primary); }
-  .sip-missing-type { color: var(--text-muted); font-family: var(--font-code); font-size: 10px; }
+  .sip-missing-type { color: var(--text-muted); font-family: var(--font-code); font-size: var(--font-size-2xs); }
   .sip-missing-pill {
     background: color-mix(in srgb, var(--success, #98c379) 20%, transparent);
     color: var(--success, #98c379);
-    font-size: 9px; padding: 1px 6px; border-radius: 8px; margin-left: auto;
+    font-size: var(--font-size-3xs); padding: 1px 6px; border-radius: 8px; margin-left: auto;
   }
 
   /* ── Contents preview (first-level children) ─────────────────── */
   .sip-preview-empty {
     padding: 8px 10px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     border-radius: var(--radius-sm);
@@ -906,13 +906,13 @@
   }
   .sip-preview-key {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .sip-preview-value {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     min-width: 0;
@@ -920,7 +920,7 @@
   .sip-preview-more {
     margin-top: 4px;
     padding: 4px 6px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     text-align: center;
     font-style: italic;
@@ -929,7 +929,7 @@
   /* ── Used by list ─────────────────────────────────────────────── */
   .sip-usages-empty {
     padding: 8px 10px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     border-radius: var(--radius-sm);
@@ -960,7 +960,7 @@
   .sip-usages-row:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
   .sip-usages-key {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 14%, transparent);
     padding: 1px 5px;
@@ -969,13 +969,13 @@
   }
   .sip-usages-file {
     font-family: var(--font-ui-sans);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .sip-usages-path {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     max-width: 160px;

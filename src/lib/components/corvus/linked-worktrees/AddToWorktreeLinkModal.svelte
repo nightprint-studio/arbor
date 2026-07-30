@@ -114,37 +114,37 @@
 
   .body { display: flex; flex-direction: column; gap: 10px; }
 
-  .repo-line { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); padding: 6px 8px; background: var(--bg-overlay); border-radius: 5px; }
+  .repo-line { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-sm); color: var(--text-secondary); padding: 6px 8px; background: var(--bg-overlay); border-radius: 5px; }
   .repo-name { font-weight: 500; color: var(--text-primary); }
-  .repo-path { font-family: var(--font-code); font-size: 11px; color: var(--text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
+  .repo-path { font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
 
   .tabs { display: flex; gap: 4px; }
   .tabs button {
     flex: 1; padding: 6px 10px;
     background: transparent; border: 1px solid var(--border);
     border-radius: 5px; color: var(--text-secondary);
-    font-size: 12px; cursor: pointer;
+    font-size: var(--font-size-sm); cursor: pointer;
   }
   .tabs button.active { background: var(--accent-subtle); border-color: var(--accent); color: var(--accent); }
 
   .link-list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto; }
-  .link-row { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: none; background: transparent; font-size: 12px; color: var(--text-secondary); cursor: pointer; text-align: left; border-radius: 5px; }
+  .link-row { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: none; background: transparent; font-size: var(--font-size-sm); color: var(--text-secondary); cursor: pointer; text-align: left; border-radius: 5px; }
   .link-row:hover { background: var(--bg-hover); color: var(--text-primary); }
   .link-row .name { flex: 1; }
-  .link-row .count { font-size: 11px; color: var(--text-muted); }
+  .link-row .count { font-size: var(--font-size-xs); color: var(--text-muted); }
 
   .create { display: flex; gap: 6px; }
   .create .input { flex: 1; }
 
-  .info { padding: 8px 10px; background: var(--bg-overlay); border-radius: 5px; font-size: 11.5px; color: var(--text-muted); }
-  .empty { padding: 6px 10px; font-size: 12px; color: var(--text-muted); font-style: italic; }
+  .info { padding: 8px 10px; background: var(--bg-overlay); border-radius: 5px; font-size: var(--font-size-xs); color: var(--text-muted); }
+  .empty { padding: 6px 10px; font-size: var(--font-size-sm); color: var(--text-muted); font-style: italic; }
 
   .input {
     background: var(--bg-overlay);
     border: 1px solid var(--border);
     border-radius: 5px;
     padding: 5px 8px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     outline: none; transition: border-color 0.15s;
     font-family: inherit;
@@ -154,7 +154,7 @@
   .btn-primary {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 5px 12px; border-radius: 5px;
-    font-size: 12px; cursor: pointer;
+    font-size: var(--font-size-sm); cursor: pointer;
     border: 1px solid transparent; transition: background 0.12s;
     background: var(--accent); color: var(--text-on-accent);
   }
@@ -166,7 +166,7 @@
     background: var(--error-subtle);
     border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
     border-radius: 5px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--error);
   }
 </style>

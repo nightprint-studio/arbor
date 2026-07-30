@@ -506,7 +506,7 @@
               {onValueChange} {onClose} />
           </div>
         {/if}
-        <button class="mac-close-btn pf-shdr-close" onclick={handleCancel} aria-label="Close"
+        <button class="close-btn pf-shdr-close" onclick={handleCancel} aria-label="Close"
                 use:tooltip={'Close'}></button>
       </div>
     {:else}
@@ -753,7 +753,7 @@
   @keyframes pf-spin { to { transform: rotate(360deg); } }
 
   .pf-plugin-tag {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--accent);
@@ -912,7 +912,7 @@
   .pf-shdr-dirty {
     color: var(--accent);
     margin-left: 4px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     vertical-align: middle;
   }
   .pf-shdr-sub {
@@ -924,7 +924,7 @@
     min-width: 0;
   }
   .pf-shdr-meta {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     flex-shrink: 0;
   }
@@ -950,7 +950,7 @@
   }
   .pf-footer-status {
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .pf-footer-spacer { flex: 1; min-width: 4px; }
 </style>

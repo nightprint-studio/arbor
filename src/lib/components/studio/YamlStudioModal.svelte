@@ -343,13 +343,13 @@
   .ys-errors-wrap { padding: 16px; height: 100%; overflow: auto; }
   .ys-errors-body {
     background: var(--bg-overlay); color: var(--text-primary); padding: 10px; border-radius: 4px;
-    font-family: var(--font-code); font-size: 11px; margin: 6px 0 0; overflow: auto; white-space: pre-wrap;
+    font-family: var(--font-code); font-size: var(--font-size-xs); margin: 6px 0 0; overflow: auto; white-space: pre-wrap;
   }
-  .ys-errors-hint { color: var(--text-muted); font-size: 11px; margin: 6px 0 0; }
-  .ys-bindings-empty { color: var(--text-muted); font-size: 11px; padding: 12px; margin: 0; line-height: 1.5; }
-  .ys-schema-hint { color: var(--text-secondary); font-size: 11px; line-height: 1.5; margin: 0; }
+  .ys-errors-hint { color: var(--text-muted); font-size: var(--font-size-xs); margin: 6px 0 0; }
+  .ys-bindings-empty { color: var(--text-muted); font-size: var(--font-size-xs); padding: 12px; margin: 0; line-height: 1.5; }
+  .ys-schema-hint { color: var(--text-secondary); font-size: var(--font-size-xs); line-height: 1.5; margin: 0; }
   .ys-bindings-empty code, .ys-schema-hint code {
-    font-family: var(--font-code); font-size: 11px; padding: 1px 4px; border-radius: 3px;
+    font-family: var(--font-code); font-size: var(--font-size-xs); padding: 1px 4px; border-radius: 3px;
     background: var(--bg-overlay); color: var(--text-primary);
   }
 </style>

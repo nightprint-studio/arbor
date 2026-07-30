@@ -17,7 +17,7 @@
 <style>
   .sketch-banner {
     padding: 6px 12px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-style: italic;
     color: var(--text-disabled);
     border-bottom: 1px solid var(--border-subtle);

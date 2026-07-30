@@ -137,7 +137,7 @@
     min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
   }
 
@@ -146,7 +146,7 @@
     min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .ff-eq { color: var(--text-muted); }
@@ -155,7 +155,7 @@
   .ff-cond-cell { justify-self: start; }
   .ff-cond {
     font-family: var(--font-code);
-    font-size: 9.5px; font-weight: 700; letter-spacing: 0.4px;
+    font-size: var(--font-size-3xs); font-weight: 700; letter-spacing: 0.4px;
     color: var(--warning, #d19a66);
     cursor: help;
   }
@@ -166,7 +166,7 @@
     display: inline-flex; align-items: center; gap: 4px;
     max-width: 100%;
     color: var(--text-muted);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     cursor: help;
   }
   .ff-src :global(svg) { flex-shrink: 0; opacity: 0.8; }
@@ -177,7 +177,7 @@
 
   .ff-control {
     justify-self: start;
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.3px;

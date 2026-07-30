@@ -227,6 +227,6 @@
 
   /* ─── Size: sm ───────────────────────────────────────────────────────── */
   .stepper.s-sm .label  { font-size: var(--font-size-xs); }
-  .stepper.s-sm .detail { font-size: 10px; }
+  .stepper.s-sm .detail { font-size: var(--font-size-2xs); }
   .stepper.s-sm.l-vertical { gap: 6px; }
 </style>

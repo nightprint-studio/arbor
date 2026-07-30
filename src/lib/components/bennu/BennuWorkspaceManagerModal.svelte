@@ -229,8 +229,8 @@
 {/if}
 
 <style>
-  .hdr-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-  .hdr-sub   { flex: 1; font-size: 11px; color: var(--text-muted); }
+  .hdr-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
+  .hdr-sub   { flex: 1; font-size: var(--font-size-xs); color: var(--text-muted); }
 
   .mgr { display: flex; height: 100%; font-family: var(--font-ui-sans); }
 
@@ -252,29 +252,29 @@
   .ws-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-sm); }
   :global(.ws-row .ws-active-check) { color: var(--accent); flex-shrink: 0; }
   .ws-count {
-    font-size: 10px; color: var(--text-muted); background: var(--bg-overlay);
+    font-size: var(--font-size-2xs); color: var(--text-muted); background: var(--bg-overlay);
     padding: 1px 7px; border-radius: 9px; font-variant-numeric: tabular-nums; flex-shrink: 0;
   }
-  .list-empty { padding: 20px 10px; text-align: center; font-size: 11px; color: var(--text-muted); }
+  .list-empty { padding: 20px 10px; text-align: center; font-size: var(--font-size-xs); color: var(--text-muted); }
 
   /* ── Right detail ─────────────────────────────────────────────────────── */
   .detail { flex: 1; display: flex; flex-direction: column; padding: 16px 18px; min-width: 0; }
   .detail-head { display: flex; align-items: center; gap: 12px; }
   .detail-name { flex: 1; min-width: 0; }
   .active-pill {
-    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+    font-size: var(--font-size-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
     color: var(--accent); background: var(--accent-subtle);
     border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
     border-radius: var(--radius-sm); padding: 3px 8px; flex-shrink: 0;
   }
 
   .field-label {
-    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px;
+    font-size: var(--font-size-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px;
     color: var(--text-disabled); margin: 16px 0 8px;
   }
   .projects-label { display: flex; align-items: center; gap: 8px; }
   .count-badge {
-    font-size: 10px; color: var(--text-muted); background: var(--bg-overlay);
+    font-size: var(--font-size-2xs); color: var(--text-muted); background: var(--bg-overlay);
     padding: 1px 6px; border-radius: 8px; letter-spacing: 0;
   }
 
@@ -295,10 +295,10 @@
   }
   .proj-row:hover { background: var(--bg-hover); }
   :global(.proj-row .proj-icon) { color: var(--text-muted); flex-shrink: 0; }
-  .proj-name { font-size: 12px; color: var(--text-primary); flex-shrink: 0; }
+  .proj-name { font-size: var(--font-size-sm); color: var(--text-primary); flex-shrink: 0; }
   .proj-path {
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-size: 10.5px; color: var(--text-muted); font-family: var(--font-code);
+    font-size: var(--font-size-2xs); color: var(--text-muted); font-family: var(--font-code);
   }
   .proj-remove {
     display: flex; align-items: center; justify-content: center; flex-shrink: 0;
@@ -307,7 +307,7 @@
     transition: background var(--transition-fast), color var(--transition-fast);
   }
   .proj-remove:hover { background: var(--danger-subtle); color: var(--danger); }
-  .proj-empty { padding: 16px 8px; font-size: 11px; color: var(--text-muted); }
+  .proj-empty { padding: 16px 8px; font-size: var(--font-size-xs); color: var(--text-muted); }
 
   .detail-foot { display: flex; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); margin-top: 8px; }
   .spacer { flex: 1; }
@@ -316,5 +316,5 @@
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 12px; color: var(--text-muted); text-align: center;
   }
-  .detail-empty p { margin: 0; font-size: 12px; max-width: 280px; line-height: 1.5; }
+  .detail-empty p { margin: 0; font-size: var(--font-size-sm); max-width: 280px; line-height: 1.5; }
 </style>

@@ -1011,7 +1011,7 @@
   .pipe-tabs :global(.tabs-tab) {
     height: 100%;
     padding: 0 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   /* ── Shared: tab content wrapper ────────────────────────────────── */
@@ -1143,7 +1143,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
   }
@@ -1167,7 +1167,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);
   }
@@ -1178,7 +1178,7 @@
   .pipe-filter-count {
     margin-left: auto;
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
   }
 
@@ -1211,7 +1211,7 @@
     gap: 5px;
     padding: 2px 8px;
     border-radius: var(--radius-lg);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.2px;
   }
@@ -1226,13 +1226,13 @@
 
 
   .ci-repo-path {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     font-family: var(--font-code);
   }
 
   .ci-no-provider {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-muted);
     font-style: italic;
   }
@@ -1250,14 +1250,14 @@
   }
 
   .ci-state-title {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-primary);
     margin: 0;
   }
 
   .ci-state-hint {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-muted);
     line-height: 1.5;
     max-width: 320px;
@@ -1281,7 +1281,7 @@
     color: var(--accent);
     border-radius: var(--radius-md);
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-family: var(--font-ui-sans);
     font-weight: 500;
     transition: background var(--transition-fast), color var(--transition-fast);
@@ -1290,7 +1290,7 @@
 
   .ci-error-text {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--status-error, #f87171);
     word-break: break-all;
   }
@@ -1301,7 +1301,7 @@
     padding: 6px 10px;
     font-family: var(--font-ui-sans);
     color: var(--text-secondary) !important;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 1.5;
     max-width: 220px;
     text-align: center;
@@ -1309,7 +1309,7 @@
   .ci-pat-hint strong { color: var(--text-primary); }
   .ci-pat-hint code {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--accent);
   }
 
@@ -1357,7 +1357,7 @@
     gap: 5px;
     padding: 3px 8px;
     border-radius: 20px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     white-space: nowrap;
   }
@@ -1375,7 +1375,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-code);
     color: var(--text-muted);
     padding-left: 2px;
@@ -1398,7 +1398,7 @@
   }
 
   .ci-card-name {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--text-primary);
     white-space: nowrap;
@@ -1407,7 +1407,7 @@
   }
 
   .ci-card-id {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-code);
     color: var(--text-muted);
     white-space: nowrap;
@@ -1425,7 +1425,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 1px 6px;
     border-radius: var(--radius-sm);
     white-space: nowrap;
@@ -1453,7 +1453,7 @@
      variant="tone" tone="neutral">. The emoji-style icon is wrapped in
      this small inline-block so it doesn't fight the badge's font sizing. */
   .ci-chip-def-icon {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1;
     margin-right: 2px;
   }

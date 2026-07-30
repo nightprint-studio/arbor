@@ -175,7 +175,7 @@
   /* ── List items ──────────────────────────────────────────────────────────── */
   .ws-empty {
     padding: 18px 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     text-align: center;
   }
@@ -204,10 +204,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 13px;
+    font-size: var(--font-size-md);
   }
   .ws-row-count {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     padding: 2px 7px;
@@ -221,14 +221,14 @@
   .ws-group-row {
     padding: 7px 10px;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     font-weight: 600;
   }
   .ws-group-name  { flex: 1; }
   .ws-group-count {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     padding: 1px 5px;

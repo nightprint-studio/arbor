@@ -262,7 +262,7 @@
     padding: 0 8px;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.3px;
     text-transform: uppercase;

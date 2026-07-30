@@ -189,7 +189,7 @@
     align-items: center;
     gap: 5px;
     padding: 3px 8px 5px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;

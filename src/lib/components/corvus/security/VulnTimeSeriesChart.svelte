@@ -109,7 +109,7 @@
   }
   .vts-title {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);

@@ -2323,15 +2323,15 @@
     display: inline-flex; align-items: center; justify-content: center;
     flex-shrink: 0;
   }
-  .rs-title  { font-size: 13px; font-weight: 600; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
-  .rs-dirty  { color: var(--accent); font-size: 14px; line-height: 1; }
-  .rs-meta   { color: var(--text-muted); font-size: 11px; display: inline-flex; align-items: center; gap: 3px; }
+  .rs-title  { font-size: var(--font-size-md); font-weight: 600; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+  .rs-dirty  { color: var(--accent); font-size: var(--font-size-lg); line-height: 1; }
+  .rs-meta   { color: var(--text-muted); font-size: var(--font-size-xs); display: inline-flex; align-items: center; gap: 3px; }
   .rs-spacer { flex: 1; }
 
   /* ── Footer pills (Schema chip + Refs index chip) ─────────────────── */
   .rs-footer-pill {
     display: inline-flex; align-items: center; gap: 4px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     padding: 2px 8px;
     border-radius: 10px;
     background: var(--bg-overlay);
@@ -2345,7 +2345,7 @@
     cursor: pointer;
     font: inherit;
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     transition: background var(--transition-fast);
   }
   .rs-footer-pill-schema:hover {
@@ -2363,7 +2363,7 @@
     cursor: pointer;
     font: inherit;
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     transition: background var(--transition-fast), color var(--transition-fast);
   }
   .rs-footer-pill-refs:hover:not(:disabled) {
@@ -2382,7 +2382,7 @@
   }
   .rs-query-pane-empty,
   .rs-query-pane-status {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     padding: 4px 6px;
     line-height: 1.45;
@@ -2394,7 +2394,7 @@
   .rs-query-pane-error {
     display: flex; align-items: center; gap: 6px;
     padding: 6px 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--error, #e07a5f);
     background: color-mix(in srgb, var(--error, #e07a5f) 8%, transparent);
     border-radius: var(--radius-sm);
@@ -2426,7 +2426,7 @@
   }
   .rs-query-pane-card-head {
     display: flex; align-items: center; gap: 5px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
   }
   .rs-query-pane-card-tag { margin: 0; }
@@ -2437,14 +2437,14 @@
   }
   .rs-query-pane-card-path {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--syntax-type, var(--accent));
     overflow-wrap: anywhere;
     line-height: 1.35;
   }
   .rs-query-pane-card-preview {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2480,7 +2480,7 @@
     background: transparent;
     border: none;
     color: var(--text-secondary);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     border-radius: var(--radius-sm);
     transition: background var(--transition-fast), color var(--transition-fast);
@@ -2488,7 +2488,7 @@
   .rs-bindings-disk:hover { background: var(--bg-hover); color: var(--text-primary); }
 
   .rs-bindings-empty {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     line-height: 1.5;
     padding: 4px 4px 0;
@@ -2496,7 +2496,7 @@
   .rs-bindings-empty strong { color: var(--text-primary); font-weight: 600; }
   .rs-bindings-empty code {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     background: var(--bg-overlay);
     padding: 0 4px;
     border-radius: 3px;
@@ -2527,13 +2527,13 @@
     max-width: 300px;
   }
   .rs-tab-title-dim { color: var(--text-secondary); }
-  .rs-tab-dirty { color: var(--accent); font-size: 12px; line-height: 1; margin-left: 2px; }
+  .rs-tab-dirty { color: var(--accent); font-size: var(--font-size-sm); line-height: 1; margin-left: 2px; }
 
   /* Row chips, badges, etc. */
   .rs-row-tag {
     display: inline-flex; align-items: center;
     font-family: var(--font-code);
-    font-size: 10px; font-weight: 600;
+    font-size: var(--font-size-2xs); font-weight: 600;
     color: var(--syntax-keyword, var(--accent));
     background: color-mix(in srgb, var(--syntax-keyword, var(--accent)) 14%, transparent);
     padding: 1px 6px;
@@ -2545,14 +2545,14 @@
   }
   .rs-row-tag:hover { filter: brightness(1.15); }
 
-  .rs-row-key { font-family: var(--font-code); font-size: 12px; font-weight: 500; color: var(--text-primary); flex-shrink: 0; }
+  .rs-row-key { font-family: var(--font-code); font-size: var(--font-size-sm); font-weight: 500; color: var(--text-primary); flex-shrink: 0; }
   .rs-row-key-index { color: var(--text-muted); font-weight: 400; }
   .rs-row-sep { color: var(--text-disabled); font-family: var(--font-code); }
   .rs-preview-none { color: var(--text-disabled); font-style: italic; }
   .rs-row-option-tag {
     display: inline-flex; align-items: center;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--accent);
     padding: 0 4px;
     border-radius: 3px;
@@ -2561,7 +2561,7 @@
     flex-shrink: 0;
   }
   .rs-row-preview {
-    font-family: var(--font-code); font-size: 11px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
     color: var(--text-secondary);
     flex: 1; min-width: 0;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -2600,7 +2600,7 @@
   }
   .rs-row-xref-count {
     font-family: var(--font-code);
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     color: var(--accent);
   }
@@ -2628,16 +2628,16 @@
     padding: 10px;
     border-radius: 4px;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     margin: 6px 0 0;
     overflow: auto;
     white-space: pre-wrap;
   }
-  .rs-errors-hint { color: var(--text-muted); font-size: 11px; margin: 6px 0 0; }
+  .rs-errors-hint { color: var(--text-muted); font-size: var(--font-size-xs); margin: 6px 0 0; }
 
   /* ── Schema panel intro hint (rendered via the `intro` snippet
      passed to <StudioSchemaPanel>). */
-  .rs-schema-hint { color: var(--text-muted); font-size: 11px; line-height: 1.6; }
+  .rs-schema-hint { color: var(--text-muted); font-size: var(--font-size-xs); line-height: 1.6; }
 
   /* ── Query bar leftovers (rendered via `toolbarRight` snippet). */
   :global(.rs-query-spinner) {
@@ -2654,7 +2654,7 @@
     border: 1px solid transparent;
     border-radius: 3px;
     color: var(--text-secondary);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
   }

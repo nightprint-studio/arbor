@@ -250,7 +250,7 @@
 
   /* Emoji-as-icon fallback (plugin actions whose `icon` is a single emoji). */
   :global(.activity-bar .ab-emoji) {
-    font-size: 16px;
+    font-size: var(--font-size-xl);
     line-height: 1;
   }
 

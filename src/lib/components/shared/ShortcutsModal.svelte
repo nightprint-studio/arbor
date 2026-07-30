@@ -322,7 +322,7 @@
   }
   .sc-kbd-inline {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     background: var(--bg-overlay);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -379,7 +379,7 @@
     flex: 1;
     margin: 0;
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     letter-spacing: 0.01em;
     color: var(--text-primary);
@@ -387,7 +387,7 @@
   .sc-card-count {
     flex-shrink: 0;
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-variant-numeric: tabular-nums;
     color: var(--text-muted);
     background: var(--bg-overlay);
@@ -444,7 +444,7 @@
   /* Plugin attribution chip on plugin-contributed rows. */
   .sc-plugin {
     flex-shrink: 0;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     letter-spacing: 0.03em;
     text-transform: uppercase;
@@ -474,7 +474,7 @@
 
   .sc-recording-label {
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-style: italic;
     color: var(--accent);
     white-space: nowrap;

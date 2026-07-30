@@ -10,5 +10,5 @@ pub use crate::kind::{DialectScope, EngineKind, FolderEngine, ForeignEngine};
 pub use crate::role::FolderRole;
 pub use crate::schema::{
     Column, ForeignKey, IndexInfo, RelationKind, SchemaSnapshot, SequenceInfo, TableInfo,
-    TriggerInfo,
+    TriggerDetail, TriggerInfo,
 };

@@ -75,7 +75,7 @@
   onNativeMenu={publishNativeMenu}
   menuWidth="220px"
   docs={{ active: tytoUiStore.docsOpen, tooltip: { content: 'Documentation', shortcut: 'F1' }, onclick: () => tytoUiStore.toggleDocs() }}
-  settings={{ menu: settingsMenu, menuWidth: '230px', tooltip: 'Settings' }}
+  settings={{ menu: settingsMenu, menuWidth: '260px', tooltip: 'Settings' }}
 >
   {#snippet logo()}
     <ArborLogo size={22} />
@@ -192,7 +192,7 @@
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 15px; height: 15px; padding: 0 3px;
     border-radius: 5px;
-    font-size: 9.5px; font-weight: 700; line-height: 1;
+    font-size: var(--font-size-3xs); font-weight: 700; line-height: 1;
     font-variant-numeric: tabular-nums;
     color: var(--text-muted);
     background: color-mix(in srgb, var(--text-muted) 16%, transparent);
@@ -222,7 +222,7 @@
     padding: 0 13px;
     border: 1px solid transparent;
     border-radius: 999px;
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     font-weight: 650;
     cursor: pointer;
     transition: filter var(--transition-fast), background var(--transition-fast),

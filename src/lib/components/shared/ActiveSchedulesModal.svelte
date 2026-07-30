@@ -343,7 +343,7 @@
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.06);
     color: var(--text-secondary);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     margin-left: 2px;
   }
@@ -404,12 +404,12 @@
     margin-bottom: 2px;
   }
   .empty-title {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 500;
     color: var(--text-secondary);
   }
   .empty-desc {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     max-width: 360px;
     line-height: 1.5;
@@ -427,12 +427,12 @@
     gap: 4px;
   }
   .error-title {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--error);
   }
   .error-msg {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     font-family: var(--font-code);
     word-break: break-all;
@@ -475,7 +475,7 @@
   }
 
   .group-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -489,7 +489,7 @@
   }
   .group-count {
     color: var(--text-disabled);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
@@ -503,7 +503,7 @@
     padding: 2px 14px 4px 22px;
   }
   .sub-label {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     color: var(--text-muted);
     font-family: var(--font-code);
@@ -579,7 +579,7 @@
     min-width: 0;
   }
   .row-name {
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     font-family: var(--font-code);
     overflow: hidden;
@@ -594,7 +594,7 @@
     min-width: 0;
   }
   .row-kind {
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     color: var(--text-disabled);
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -608,7 +608,7 @@
     flex-shrink: 0;
   }
   .row-cadence {
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
     font-family: var(--font-code);
     font-variant-numeric: tabular-nums;

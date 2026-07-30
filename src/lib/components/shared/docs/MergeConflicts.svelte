@@ -153,7 +153,7 @@
     border-radius: var(--radius-md);
     overflow: hidden;
     margin: 12px 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     background: var(--bg-elevated);
     padding: 4px;

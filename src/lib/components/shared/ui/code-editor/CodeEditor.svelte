@@ -45,6 +45,7 @@
     indentUnit,
     initialState,
     placeholder,
+    wrap = false,
     keyBindings,
     marks = [],
     oninput,
@@ -87,6 +88,16 @@
      * is. Static at mount, like the rest of the extension set.
      */
     placeholder?: string;
+    /**
+     * Wrap long lines instead of scrolling sideways.
+     *
+     * Off for a document — a script has a column budget and horizontal scrolling
+     * is how you notice you blew it. On for the editors that are a *field* in a
+     * narrow box: a structural pattern is one long statement, and in a 300px
+     * panel it scrolled out of its own left edge, so you could not see the start
+     * of the thing you were typing. Static at mount, like the rest of the set.
+     */
+    wrap?: boolean;
     /**
      * Keys this host claims back from CodeMirror, e.g. `Mod-Enter` to run a
      * statement. Installed above every built-in binding — see the option of the
@@ -236,6 +247,7 @@
         indentCompartment.of(indentExtensions()),
         minimapCompartment.of(minimap ? minimapExtension() : []),
         placeholder ? cmPlaceholder(placeholder) : [],
+        wrap ? EditorView.lineWrapping : [],
         updateListener,
       ],
     });

@@ -449,7 +449,7 @@
     padding: 0 6px;
     background: rgba(255, 255, 255, 0.06);
     border-radius: 999px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--text-muted);
   }
@@ -483,7 +483,7 @@
     gap: 3px;
     padding: 1px 7px;
     border-radius: 999px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--text-muted);
     background: rgba(255,255,255,0.04);
@@ -504,7 +504,7 @@
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
   .pi-meta span { display: inline-flex; align-items: center; gap: 4px; }
@@ -522,7 +522,7 @@
     border-radius: var(--radius-sm);
     color: var(--accent);
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     cursor: pointer;
     max-width: 100%;
     overflow: hidden;
@@ -537,7 +537,7 @@
 
   .pi-keywords { display: flex; flex-wrap: wrap; gap: 4px; }
   .pi-kw {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 1px 7px;
     background: var(--bg-overlay);
     border: 1px solid var(--border-subtle);
@@ -557,7 +557,7 @@
     gap: 6px;
     padding-bottom: 4px;
     border-bottom: 1px solid var(--border-subtle);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.6px;
@@ -565,7 +565,7 @@
   }
   .pi-section-count {
     margin-left: 4px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     text-transform: none;
     letter-spacing: 0;
     color: var(--text-disabled);
@@ -616,7 +616,7 @@
   }
   .pi-sched-action {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
     align-self: flex-start;
   }
@@ -624,7 +624,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
   }
   .pi-sched-flags { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -632,7 +632,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     padding: 1px 5px;
     border-radius: 999px;
     background: var(--bg-overlay);
@@ -643,7 +643,7 @@
   /* ── Permissions ─────────────────────────────────────────────── */
   .pi-perms { display: flex; gap: 5px; flex-wrap: wrap; }
   .pi-perm {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 2px 7px;
     border-radius: 999px;
     border: 1px solid var(--border);
@@ -664,7 +664,7 @@
     padding: 2px 7px;
     border-radius: 999px;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   }
 

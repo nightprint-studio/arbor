@@ -41,17 +41,19 @@
 <h2>The zones</h2>
 <ul>
   <li><b>Title bar</b> — project, and the connection every new tab binds to.</li>
-  <li><b>Activity bar</b> — Connections, Scripts on disk, Generate DML, Inventory. The
-    consistency indicator sits apart at the bottom: it opens the bottom panel, not a sidebar.</li>
+  <li><b>Activity bar</b> — Connections, Scripts on disk, Generate DML, Inventory at the top.
+    Below them, apart, the buttons that open a <i>bottom</i> panel rather than a sidebar:
+    <b>Output</b>, <b>Changes</b> and the consistency indicator.</li>
   <li><b>Sidebar</b> — the active section's tree.</li>
-  <li><b>Right rail</b> — the tools that describe the <i>document</i> rather than the project.
-    The <b>Syntax tree</b> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Y</kbd>) lives here.</li>
+  <li><b>Right rail</b> — the tools that describe the <i>document</i> rather than the project:
+    the <b>Syntax tree</b> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Y</kbd>), the structural
+    replace, and <b>Results</b> — the rows the statement in this tab returned.</li>
   <li><b>Centre</b> — tabs: the generator, query editors, tables, script files, the inventory.</li>
-  <li><b>Bottom panel</b> — Results, Consistency, Output, Changes. Every answer the window
-    produces arrives here, the rows a query returned included; running a statement reveals it,
-    and it closes like any other panel.</li>
-  <li><b>Status bar</b> — connection, engine, database version, the open file's encoding,
-    the open-findings counter (click it to jump to the report), and the project path.</li>
+  <li><b>Bottom panel</b> — <b>one</b> panel at a time, the one whose button you pressed.
+    Every answer the window produces arrives down here, the rows a query returned included;
+    running a statement opens Results, and it closes like any other panel.</li>
+  <li><b>Status bar</b> — the connection, the open file's encoding, the open-findings counter
+    (click it to jump to the report), and the project path.</li>
 </ul>
 
 <h2>Finding things</h2>
@@ -78,6 +80,13 @@
   <kbd>Tab</kbd> cycles the categories, the arrows move, <kbd>Enter</kbd> opens. Anything
   not recognised as a directive stays part of the search text, so a colon in a name never
   makes the box refuse to find it.
+</p>
+
+<p>
+  This documentation can leave the window: the button beside the title exports it as a
+  Markdown README or as a self-contained styled HTML page, every topic in nav order, with
+  a table of contents. Useful when the answer belongs in a ticket, a wiki or the
+  repository rather than in a panel.
 </p>
 
 <h2>The rule everything else follows</h2>

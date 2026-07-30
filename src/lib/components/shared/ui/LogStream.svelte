@@ -116,7 +116,7 @@
     user-select: text;
     cursor: text;
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     background: var(--bg-base);
   }

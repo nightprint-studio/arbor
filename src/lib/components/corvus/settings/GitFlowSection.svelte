@@ -146,7 +146,7 @@
     color: var(--text-secondary);
     border-left: 2px solid var(--accent);
     border-radius: var(--radius-sm);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.45;
   }
   .override-pointer :global(svg) { color: var(--accent); flex-shrink: 0; margin-top: 2px; }

@@ -109,14 +109,11 @@
 </script>
 
 <div class="gv">
-  <header class="gv-head">
-    <h1>Generate DML</h1>
-    <p>
-      One datum described once, written into every folder that expects it. Each destination
-      decides for itself whether it needs a procedural block and under which conditions it
-      may run.
-    </p>
-  </header>
+  <!-- The tab is called "Generate DML"; the heading said it a second time and
+       then explained the feature underneath, for as long as the tab stayed open.
+       That is documentation — it goes in the Docs, where it can be read once and
+       not re-read every session — and the sixty pixels it held go to the cards
+       that actually do the work. -->
 
   <!-- Source and Destinations answer "what" and "where", and you move between
        them constantly — so they sit side by side while there is room, and stack
@@ -125,7 +122,7 @@
        narrow with it open. -->
   <div class="gv-cols">
   <!-- ── 1. Source ─────────────────────────────────────────────────────────── -->
-  <Card padding="none">
+  <Card variant="flat" padding="none">
     {#snippet header()}
       <span class="gv-card-title"><FormInput size={13} /> Source</span>
     {/snippet}
@@ -258,14 +255,23 @@
   </Card>
 
   <!-- ── 2. Destinations ───────────────────────────────────────────────────── -->
-  <Card padding="none">
+  <Card variant="flat" padding="none">
     {#snippet header()}
       <span class="gv-card-title"><Files size={13} /> Destinations</span>
     {/snippet}
     {#snippet actions()}
+      <!-- Amber only when destinations EXIST and none of them is armed, which is
+           a generation that would write nowhere. `0 of 0` is not that: it is the
+           card's opening state, before anybody has added anything, and dressing
+           it as a warning makes the first thing a new repository shows an alarm
+           about something the user has not done yet. -->
       <Badge
         variant="tone"
-        tone={dmlStore.enabledTargets.length ? 'accent' : 'warning'}
+        tone={dmlStore.enabledTargets.length
+          ? 'accent'
+          : dmlStore.targets.length
+            ? 'warning'
+            : 'neutral'}
         size="sm"
         label={`${dmlStore.enabledTargets.length} of ${dmlStore.targets.length} enabled`}
       />
@@ -306,7 +312,7 @@
   </div>
 
   <!-- ── 3. Preview ────────────────────────────────────────────────────────── -->
-  <Card padding="none">
+  <Card variant="flat" padding="none">
     {#snippet header()}
       <span class="gv-card-title"><Code2 size={13} /> Generated SQL</span>
     {/snippet}
@@ -362,7 +368,7 @@
       {#if dmlStore.previewError}
         <Alert variant="error" title="The patch could not be computed" text={dmlStore.previewError} />
       {:else if dmlStore.previewing}
-        <Card variant="subtle">
+        <Card variant="elevated">
           <div class="gv-preview-ask">
             <Spinner size={13} />
             <span>Reading the destination files…</span>
@@ -372,7 +378,7 @@
         <!-- Reached when there is nothing to read from: no repository attached.
              The effect above builds the preview in every other case, so an empty
              state with a button would be a button nobody ever needs to press. -->
-        <Card variant="subtle">
+        <Card variant="elevated">
           <div class="gv-preview-ask">
             <span>
               The exact bytes each destination would receive are read from the repository —
@@ -406,7 +412,7 @@
   {/if}
 
   <!-- ── 5. Write ──────────────────────────────────────────────────────────── -->
-  <Card variant="subtle">
+  <Card variant="elevated">
     <div class="gv-write">
       <div class="gv-write-text">
         <strong>{dmlStore.applied ? 'Written to disk' : 'Ready to write'}</strong>
@@ -479,19 +485,11 @@
     .gv-cols { grid-template-columns: minmax(0, 1fr); }
   }
 
-  .gv-head h1 { font-size: 16px; font-weight: 600; margin-bottom: 3px; }
-  .gv-head p {
-    font-size: 12px;
-    line-height: 1.55;
-    color: var(--text-muted);
-    max-width: 76ch;
-  }
-
   .gv-card-title {
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
   }
   .gv-card-title :global(svg) { color: var(--text-muted); }
@@ -503,7 +501,7 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--text-secondary);
   }
@@ -516,7 +514,7 @@
     flex-wrap: wrap;
     margin-bottom: 12px;
   }
-  .gv-label { font-size: 11.5px; color: var(--text-muted); }
+  .gv-label { font-size: var(--font-size-xs); color: var(--text-muted); }
   .gv-label-gap { margin-left: 6px; }
 
   /* The table the source dictates: a value, not a control. Styled as an input
@@ -528,18 +526,18 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
   }
 
   .gv-inferred {
     margin-bottom: 12px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--text-muted);
     max-width: 88ch;
   }
-  .gv-inferred code { font-family: var(--font-code); font-size: 11px; }
+  .gv-inferred code { font-family: var(--font-code); font-size: var(--font-size-xs); }
 
   .gv-form-actions {
     display: flex;
@@ -553,7 +551,7 @@
   .gv-preview-ask span {
     flex: 1;
     min-width: 240px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--text-muted);
   }
@@ -561,7 +559,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -583,7 +581,7 @@
 
   .gv-write { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .gv-write-text { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 3px; }
-  .gv-write-text strong { font-size: 12px; }
-  .gv-write-text span { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
-  .gv-write-text code { font-family: var(--font-code); font-size: 11px; }
+  .gv-write-text strong { font-size: var(--font-size-sm); }
+  .gv-write-text span { font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted); }
+  .gv-write-text code { font-family: var(--font-code); font-size: var(--font-size-xs); }
 </style>

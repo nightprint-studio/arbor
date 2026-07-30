@@ -271,7 +271,7 @@
     display: flex; flex-direction: column; gap: 12px;
   }
 
-  .field-hint { font-size: 11px; color: var(--text-muted); line-height: 1.45; }
+  .field-hint { font-size: var(--font-size-xs); color: var(--text-muted); line-height: 1.45; }
   .field-hint strong { color: var(--text-primary); font-weight: 600; }
 
   .path-input-row { display: flex; gap: 6px; }
@@ -282,7 +282,7 @@
     border: 1px solid var(--border);
     border-radius: 5px;
     padding: 5px 9px;
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     outline: none;
     transition: border-color 0.15s;
@@ -312,12 +312,12 @@
   .commit-pill > :global(svg) { color: var(--accent); flex-shrink: 0; }
   .commit-sha {
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     flex-shrink: 0;
   }
   .commit-summary {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-muted);
     min-width: 0;
   }
@@ -362,14 +362,14 @@
     cursor: pointer;
     user-select: none;
   }
-  .toggle-label { font-size: 12.5px; color: var(--text-secondary); }
+  .toggle-label { font-size: var(--font-size-sm); color: var(--text-secondary); }
 
   .error-msg {
     padding: 7px 10px;
     background: var(--error-subtle);
     border: 1px solid color-mix(in srgb, var(--error) 25%, transparent);
     border-radius: 5px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--error);
   }
 

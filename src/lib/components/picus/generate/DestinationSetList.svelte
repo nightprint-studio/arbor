@@ -166,7 +166,7 @@
 
   .dsl-empty {
     padding: 4px 12px 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--text-muted);
   }

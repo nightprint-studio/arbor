@@ -1103,7 +1103,7 @@
      badge would read accent-on-accent and disappear). Mirrors the
      StudioModal pattern. */
   .mk-tab-badge {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--accent);
     background: var(--accent-subtle);
@@ -1144,7 +1144,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     padding: 5px 8px;
     cursor: pointer;
     transition: border-color var(--transition-fast), background var(--transition-fast);
@@ -1161,7 +1161,7 @@
     background: transparent;
     border: none;
     color: var(--accent);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     padding: 2px 4px;
   }
@@ -1175,13 +1175,13 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .mk-auto-refresh-label {
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
   }
 
   /* Slot around the registry-status Alert — pulls it into the same gutter
@@ -1207,7 +1207,7 @@
   }
   .mk-footer-counter {
     flex: 1 0 100%;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
   .mk-footer-counter strong { color: var(--text-secondary); font-weight: 600; }

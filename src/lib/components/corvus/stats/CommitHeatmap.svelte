@@ -160,12 +160,12 @@
 
   .lbl-month {
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     fill: var(--text-muted);
   }
   .lbl-day {
     font-family: var(--font-ui-sans);
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     fill: var(--text-muted);
     dominant-baseline: middle;
   }
@@ -185,8 +185,8 @@
     box-shadow: 0 4px 16px rgba(0,0,0,0.4);
     white-space: nowrap;
   }
-  .tt-date  { font-size: 11px; color: var(--text-secondary); font-family: var(--font-ui-sans); }
-  .tt-count { font-size: 12px; color: var(--text-primary);   font-family: var(--font-ui-sans); font-weight: 600; }
+  .tt-date  { font-size: var(--font-size-xs); color: var(--text-secondary); font-family: var(--font-ui-sans); }
+  .tt-count { font-size: var(--font-size-sm); color: var(--text-primary);   font-family: var(--font-ui-sans); font-weight: 600; }
 
   .legend {
     display: flex;
@@ -195,7 +195,7 @@
     margin-top: 6px;
   }
   .legend-label {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
     margin: 0 4px;

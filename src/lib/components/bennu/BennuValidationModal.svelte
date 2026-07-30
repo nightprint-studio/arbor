@@ -324,17 +324,17 @@
   .vm { display: grid; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); height: 100%; min-height: 0; }
   .vm-left { display: flex; flex-direction: column; gap: 14px; padding: 14px; overflow-y: auto; border-right: 1px solid var(--border-subtle); min-height: 0; }
   .vm-sec { display: flex; flex-direction: column; gap: 7px; }
-  .vm-label { font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
-  .vm-target { font-size: 11.5px; color: var(--text-muted); }
-  .vm-target code, .vm-foot-hint code { font-family: var(--font-code); color: var(--text-secondary); font-size: 11.5px; }
+  .vm-label { font-size: var(--font-size-2xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+  .vm-target { font-size: var(--font-size-xs); color: var(--text-muted); }
+  .vm-target code, .vm-foot-hint code { font-family: var(--font-code); color: var(--text-secondary); font-size: var(--font-size-xs); }
 
-  .vm-field-input { width: 100%; padding: 6px 9px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text-primary); font-family: var(--font-code); font-size: 12.5px; outline: none; }
+  .vm-field-input { width: 100%; padding: 6px 9px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text-primary); font-family: var(--font-code); font-size: var(--font-size-sm); outline: none; }
   .vm-field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle); }
   .vm-field-input::placeholder { color: var(--text-disabled); }
-  .vm-note { margin: 0; display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text-muted); line-height: 1.4; }
+  .vm-note { margin: 0; display: flex; align-items: center; gap: 5px; font-size: var(--font-size-2xs); color: var(--text-muted); line-height: 1.4; }
 
   .vm-chips { display: flex; flex-wrap: wrap; gap: 5px; }
-  .vm-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: var(--bg-overlay); border: 1px solid transparent; border-radius: var(--radius-md); color: var(--text-secondary); font-family: var(--font-code); font-size: 11px; cursor: pointer; transition: background var(--transition-fast), border-color var(--transition-fast); }
+  .vm-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: var(--bg-overlay); border: 1px solid transparent; border-radius: var(--radius-md); color: var(--text-secondary); font-family: var(--font-code); font-size: var(--font-size-xs); cursor: pointer; transition: background var(--transition-fast), border-color var(--transition-fast); }
   .vm-chip:hover { background: var(--bg-hover); }
   .vm-chip.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
   .vm-chip-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--warning); }
@@ -343,7 +343,7 @@
 
   .vm-card { display: flex; flex-direction: column; gap: 9px; padding: 10px; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
   .vm-card-head { display: flex; align-items: center; gap: 6px; }
-  .vm-card-idx { flex-shrink: 0; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: var(--text-muted); background: var(--bg-overlay); border-radius: 5px; }
+  .vm-card-idx { flex-shrink: 0; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: var(--font-size-2xs); font-weight: 700; color: var(--text-muted); background: var(--bg-overlay); border-radius: 5px; }
   .vm-card-select { flex: 1; min-width: 0; }
   .vm-icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; background: transparent; color: var(--text-muted); border-radius: var(--radius-sm); cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast); }
   .vm-icon:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
@@ -352,7 +352,7 @@
 
   .vm-params { display: flex; flex-direction: column; gap: 6px; padding-left: 24px; }
   .vm-param-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .vm-param-name { font-size: 12px; color: var(--text-secondary); flex-shrink: 0; font-family: var(--font-code); }
+  .vm-param-name { font-size: var(--font-size-sm); color: var(--text-secondary); flex-shrink: 0; font-family: var(--font-code); }
   .vm-req { color: var(--danger); margin-left: 2px; }
   .vm-param-row :global(.input-wrap) { max-width: 170px; }
 
@@ -363,8 +363,8 @@
   .vm-preview { flex: 1; min-height: 0; display: flex; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; background: var(--bg-base); }
   .vm-preview > :global(.code-editor) { flex: 1; min-width: 0; min-height: 0; }
   .vm-preview :global(.cm-editor) { height: 100%; }
-  .vm-preview-empty { height: 100%; display: flex; align-items: center; justify-content: center; padding: 20px; text-align: center; font-size: 11.5px; color: var(--text-muted); }
+  .vm-preview-empty { height: 100%; display: flex; align-items: center; justify-content: center; padding: 20px; text-align: center; font-size: var(--font-size-xs); color: var(--text-muted); }
 
-  .vm-foot-hint { font-size: 11px; color: var(--text-muted); }
+  .vm-foot-hint { font-size: var(--font-size-xs); color: var(--text-muted); }
   .vm-actions { display: flex; align-items: center; gap: 8px; }
 </style>

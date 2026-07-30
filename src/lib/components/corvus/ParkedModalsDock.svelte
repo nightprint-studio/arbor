@@ -163,7 +163,7 @@
           </button>
           <button
             type="button"
-            class="mac-close-btn entry-close"
+            class="close-btn entry-close"
             disabled={isPending}
             tabindex={i === focusIdx ? 0 : -1}
             onclick={() => dismiss(entry.id)}
@@ -204,11 +204,11 @@
   .empty {
     padding: 18px 16px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     text-align: center;
   }
   .empty p { margin: 0; }
-  .empty-hint { margin-top: 6px !important; color: var(--text-disabled); font-size: 11px; }
+  .empty-hint { margin-top: 6px !important; color: var(--text-disabled); font-size: var(--font-size-xs); }
   .kbd-hint {
     display: inline-block;
     padding: 0 5px;
@@ -217,7 +217,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-mono);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     line-height: 14px;
   }
 
@@ -294,7 +294,7 @@
     white-space: nowrap;
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 1.3;
   }
   .entry-subtitle {
@@ -302,11 +302,11 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-muted);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     line-height: 1.2;
   }
 
-  /* Discard button — reuses the shared .mac-close-btn (mac dot / windows X
+  /* Discard button — reuses the shared .close-btn (mac dot / windows X
      via [data-window-controls]); align it to the row and never let it grow. */
   .entry-close {
     align-self: center;

@@ -543,7 +543,7 @@
 
   .empty-msg {
     padding: 6px 16px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-style: italic;
   }
@@ -578,7 +578,7 @@
   }
 
   .wt-project-icon {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 1;
     flex-shrink: 0;
     width: 16px;
@@ -586,7 +586,7 @@
   }
 
   .wt-name {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     flex: 1;
     min-width: 0;
@@ -612,7 +612,7 @@
     justify-content: center;
     padding: 1px 3px;
     border-radius: var(--radius-sm);
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
   }
   .wt-badge-main {
     color: var(--color-stash);
@@ -690,7 +690,7 @@
   .wt-group-count {
     flex-shrink: 0;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     line-height: 1;
     padding: 2px 6px;
     border-radius: 999px;

@@ -65,7 +65,7 @@
     <!-- Same red-dot affordance used by `<ModalHeader>` so the close
          control reads consistently across modals and bottom panels. -->
     <button
-      class="mac-close-btn bp-close"
+      class="close-btn bp-close"
       onclick={onClose}
       use:tooltip={'Close panel'}
       aria-label="Close panel"
@@ -96,7 +96,7 @@
   }
 
   .bp-title {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.3px;
     color: var(--text-secondary);
@@ -114,7 +114,7 @@
     padding: 0 4px;
     background: rgba(255, 255, 255, 0.06);
     border-radius: 999px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--text-muted);
     flex-shrink: 0;

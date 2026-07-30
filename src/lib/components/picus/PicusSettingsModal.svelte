@@ -664,7 +664,7 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
 
   /* Sticks to the bottom of the scrolling page: the rule list is long, and a Save
      button you have to scroll back up to find is a Save button people forget. */
@@ -680,12 +680,12 @@
     border: 1px solid var(--warning);
     border-radius: var(--radius-md);
   }
-  .ps-save-text { flex: 1; font-size: 11.5px; line-height: 1.5; color: var(--text-secondary); }
-  .ps-save-text code { font-family: var(--font-code); font-size: 11px; }
+  .ps-save-text { flex: 1; font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-secondary); }
+  .ps-save-text code { font-family: var(--font-code); font-size: var(--font-size-xs); }
 
   /* A second-level heading inside a page that already has one. */
   .ps-sub { margin-top: 18px; }
-  .ps-sub h3 { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+  .ps-sub h3 { font-size: var(--font-size-md); font-weight: 600; margin-bottom: 3px; }
 
   .ps-family {
     display: flex;
@@ -696,13 +696,13 @@
     margin-bottom: 4px;
   }
   .ps-family-name {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--text-muted);
   }
-  .ps-family-blurb { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+  .ps-family-blurb { font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted); }
 
   /* Table picker + Detect on one line: the button acts on the field beside it. */
   /* Table picker + Detect on one line. `flex: 1` because this sits inside a
@@ -718,7 +718,7 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.6;
     color: var(--text-secondary);
     white-space: pre;

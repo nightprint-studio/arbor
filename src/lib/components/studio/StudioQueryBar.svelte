@@ -730,7 +730,7 @@
     color: transparent;
     caret-color: var(--text-primary);
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     /* Explicit line-height so the overlay can match it exactly.
        Without this the input falls back to the UA default
        (~normal) and the tokens (which inherit from the wrap) land
@@ -761,7 +761,7 @@
     display: flex;
     align-items: center;
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 18px;
     white-space: pre;
     z-index: 0;
@@ -793,7 +793,7 @@
   .sqb-tok-plain    { color: var(--text-primary); }
   .sqb-tab-hint {
     font-family: var(--font-code);
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     padding: 1px 5px;
     border-radius: 4px;
     background: var(--bg-base);
@@ -806,7 +806,7 @@
     border: none;
     cursor: pointer;
     color: var(--text-muted);
-    font-size: 16px;
+    font-size: var(--font-size-xl);
     line-height: 1;
     padding: 0 2px;
     flex-shrink: 0;
@@ -826,7 +826,7 @@
     align-items: center;
     gap: 3px;
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     padding: 1px 6px;
     border-radius: 8px;
     background: color-mix(in srgb, var(--accent) 12%, var(--bg-base));
@@ -857,7 +857,7 @@
     border: none;
     cursor: pointer;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     padding: 3px 7px;
     border-radius: 4px;
     transition: background var(--transition-fast), color var(--transition-fast);
@@ -882,7 +882,7 @@
     align-items: baseline;
     gap: 2px;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .sqb-count-current { font-weight: 600; color: var(--accent); font-family: var(--font-code); }
@@ -910,14 +910,14 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--error, #e06c75);
     background: color-mix(in srgb, var(--error, #e06c75) 12%, transparent);
     padding: 4px 8px;
     border-radius: 4px;
   }
   .sqb-empty {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-style: italic;
     padding: 2px 4px;
@@ -942,7 +942,7 @@
     border-radius: 3px;
     cursor: pointer;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     min-width: 0;
     outline: none;
   }
@@ -952,7 +952,7 @@
   .sqb-hit-path    { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sqb-hit-tag     {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 0 4px;
     border-radius: 3px;
     background: color-mix(in srgb, var(--accent) 14%, transparent);

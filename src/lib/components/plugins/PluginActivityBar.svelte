@@ -73,7 +73,7 @@
     height: 14px;
     padding: 0 4px;
     border-radius: 8px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     line-height: 14px;
     text-align: center;

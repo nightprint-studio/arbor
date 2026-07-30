@@ -140,7 +140,7 @@
     overflow: visible;
   }
   .item-subtitle {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     line-height: 1.25;
     color: var(--text-muted);
     overflow: hidden;

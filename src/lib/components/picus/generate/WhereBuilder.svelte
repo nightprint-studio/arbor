@@ -264,9 +264,9 @@
     flex-wrap: wrap;
   }
   .wb-and,
-  .wb-none { font-size: 11px; color: var(--text-muted); }
+  .wb-none { font-size: var(--font-size-xs); color: var(--text-muted); }
 
   .wb-add { display: flex; gap: 4px; padding-top: 2px; }
 
-  .wb-empty { font-size: 11px; color: var(--text-muted); padding: 2px 0; }
+  .wb-empty { font-size: var(--font-size-xs); color: var(--text-muted); padding: 2px 0; }
 </style>

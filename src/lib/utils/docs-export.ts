@@ -718,9 +718,16 @@ export interface HtmlSectionEntry {
   html:     string;
 }
 
+/**
+ * `product` names the documentation being exported — "Arbor", "Picus", … It ends
+ * up in the `<title>` and in the Markdown heading, and it is a parameter rather
+ * than a constant because more than one product now has a docs panel and a README
+ * that calls itself Arbor is the wrong file however right its contents are.
+ */
 export function buildHtmlExport(
   sections: HtmlSectionEntry[],
   plugins:  PluginDocEntry[],
+  product = 'Arbor',
 ): string {
   // ── Sidebar TOC ───────────────────────────────────────────────────────────
   let tocHtml = `<p class="toc-title">Contents</p>\n`;
@@ -757,7 +764,7 @@ export function buildHtmlExport(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Arbor — Documentation</title>
+  <title>${product} — Documentation</title>
   <style>${HTML_CSS}</style>
 </head>
 <body>
@@ -800,11 +807,12 @@ export interface PluginDocEntry {
 export function buildReadme(
   sections: SectionEntry[],
   plugins:  PluginDocEntry[],
+  product = 'Arbor',
 ): string {
   const parts: string[] = [];
 
   // ── Header ────────────────────────────────────────────────────────────────
-  parts.push(`# Arbor — Documentation\n\n`);
+  parts.push(`# ${product} — Documentation\n\n`);
   parts.push(`> Auto-generated from the in-app documentation panel.\n\n`);
 
   // ── Table of contents ─────────────────────────────────────────────────────

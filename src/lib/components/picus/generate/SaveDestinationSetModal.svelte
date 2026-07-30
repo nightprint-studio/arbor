@@ -106,21 +106,21 @@
 </Modal>
 
 <style>
-  .ds-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .ds-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
   .ds-body { display: flex; flex-direction: column; gap: 10px; }
   .ds-existing { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .ds-existing-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     flex-shrink: 0;
   }
-  .ds-note { font-size: 11.5px; line-height: 1.55; color: var(--text-muted); }
-  .ds-note code { font-family: var(--font-code); font-size: 11px; }
+  .ds-note { font-size: var(--font-size-xs); line-height: 1.55; color: var(--text-muted); }
+  .ds-note code { font-family: var(--font-code); font-size: var(--font-size-xs); }
   .ds-replace {
     display: flex;
     align-items: center;
     gap: 5px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--warning);
   }
   .ds-spacer { flex: 1; }

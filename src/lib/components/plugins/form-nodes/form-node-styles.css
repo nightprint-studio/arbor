@@ -36,7 +36,7 @@
   .pf-required { color: var(--error); margin-left: 2px; }
 
   .pf-hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     line-height: 1.4;
     margin-top: 1px;
@@ -311,7 +311,7 @@
     align-items: center;
     gap: 10px;
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.6px;
     text-transform: uppercase;
@@ -335,7 +335,7 @@
   .pf-paragraph-normal  { color: var(--text-primary); }
   .pf-paragraph-muted   { color: var(--text-muted); }
   .pf-paragraph-heading { font-weight: 700; font-size: var(--font-size-md); color: var(--text-primary); }
-  .pf-paragraph-caption { font-size: 11px; color: var(--text-muted); }
+  .pf-paragraph-caption { font-size: var(--font-size-xs); color: var(--text-muted); }
 
   /* ── Alert / Code ─────────────────────────────────────────────────────────── */
   /* Alert nodes render via the shared Alert component; no extra CSS. */
@@ -350,7 +350,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     overflow-x: auto;
     line-height: 1.5;
@@ -451,7 +451,7 @@
     color: var(--accent);
     cursor: pointer;
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     text-align: left;
     transition: background var(--transition-fast), border-color var(--transition-fast);
   }
@@ -462,7 +462,7 @@
   .pf-copy-link:active { background: var(--accent-subtle); }
   .pf-copy-link-mono .pf-copy-link-text {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
   }
   .pf-copy-link-text {
@@ -545,7 +545,7 @@
     background: transparent;
     border-color: transparent;
     color: var(--text-primary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 400;
     gap: 7px;
     min-height: 26px;
@@ -571,7 +571,7 @@
      `.pf-action-btn` baseline (padding 4px 10px / font-size 12px) — so opting
      into a size only changes layout if you pick xs/md/lg. */
   .pf-action-btn.pf-action-sz-xs { padding: 2px 6px;   font-size: var(--font-size-xs); gap: 4px; }
-  .pf-action-btn.pf-action-sz-sm { padding: 4px 10px;  font-size: 12px;                gap: 6px; }
+  .pf-action-btn.pf-action-sz-sm { padding: 4px 10px;  font-size: var(--font-size-sm);                gap: 6px; }
   .pf-action-btn.pf-action-sz-md { padding: 5px 12px;  font-size: var(--font-size-sm); gap: 6px; }
   .pf-action-btn.pf-action-sz-lg { padding: 7px 16px;  font-size: var(--font-size-md); gap: 8px; }
 
@@ -639,7 +639,7 @@
     margin-bottom: 2px;
   }
   .pf-list-th {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -667,7 +667,7 @@
   .pf-list-cell-val { flex: 1 1 55%; min-width: 0; }
 
   .pf-list-eq {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-muted);
     flex-shrink: 0;
     user-select: none;
@@ -675,13 +675,13 @@
     align-self: center;
   }
 
-  .pf-list-cell { padding: 4px 7px; font-size: 12px; }
+  .pf-list-cell { padding: 4px 7px; font-size: var(--font-size-sm); }
   .pf-list-cb   { accent-color: var(--accent); justify-self: center; }
 
   .pf-list-empty-state {
     padding: 14px 8px;
     text-align: center;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-style: italic;
     user-select: none;
@@ -698,7 +698,7 @@
     border-radius: var(--radius-sm);
     cursor: pointer;
     color: var(--text-muted);
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     line-height: 1;
     flex-shrink: 0;
     transition: background var(--transition-fast), color var(--transition-fast);
@@ -726,7 +726,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     cursor: pointer;
     transition: background var(--transition-fast),
@@ -778,7 +778,7 @@
      kick in on overflow. */
   .pf-list-readonly {
     padding: 4px 7px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     min-width: 0;
     overflow: hidden;
@@ -841,7 +841,7 @@
   }
 
   .pf-validation-error {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--error);
     line-height: 1.4;
     margin-top: 1px;
@@ -988,7 +988,7 @@
     padding: 3px;
   }
   .pf-auto-group {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     padding: 6px 8px 3px;
     text-transform: uppercase;
@@ -1016,7 +1016,7 @@
   .pf-auto-label { flex: 1; }
   .pf-auto-value {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
 
@@ -1041,7 +1041,7 @@
     background: var(--accent-subtle);
     color: var(--accent);
     border-radius: 999px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   }
@@ -1207,7 +1207,7 @@
   .pf-sidebar-nav-hassearch { padding-top: 0; }
 
   .pf-nav-headline {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.8px;
@@ -1231,7 +1231,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     padding: 5px 22px 5px 9px;
     outline: none;
     transition: border-color var(--transition-fast);
@@ -1261,7 +1261,7 @@
   }
 
   .pf-nav-group {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.7px;
@@ -1277,7 +1277,7 @@
     align-items: center;
     gap: 8px;
     padding: 5px 10px 5px 14px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 450;
     color: var(--text-secondary);
     cursor: pointer;
@@ -1310,7 +1310,7 @@
     white-space: nowrap;
   }
   .pf-nav-meta {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1321,7 +1321,7 @@
   }
 
   .pf-nav-badge {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     padding: 1px 6px;
     border-radius: 999px;
@@ -1343,13 +1343,13 @@
   .pf-nav-empty {
     padding: 16px 14px;
     color: var(--text-disabled);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     text-align: center;
     font-style: italic;
   }
 
   .pf-nav-footline {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     padding: 6px 14px 8px;
     border-top: 1px solid var(--border-subtle);
@@ -1406,7 +1406,7 @@
   }
 
   .pf-card-title-text {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -1420,7 +1420,7 @@
   }
 
   .pf-counter {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     background: var(--bg-base);
     border: 1px solid var(--border-subtle);
     padding: 1px 7px;
@@ -1453,7 +1453,7 @@
     gap: 11px;
   }
   .pf-card-body > .pf-field .pf-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     letter-spacing: 0.15px;
     color: var(--text-secondary);
@@ -1482,7 +1482,7 @@
 
   .pf-row-label { flex: 0 0 165px; }
   .pf-row-label-title {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 450;
     color: var(--text-primary);
     display: flex;
@@ -1490,7 +1490,7 @@
     gap: 5px;
   }
   .pf-row-label-desc {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     line-height: 1.4;
     margin-top: 2px;
@@ -1518,7 +1518,7 @@
   }
   .pf-card-grid > .pf-card { min-width: 0; }
   .pf-row-ctrl .pf-label { display: none; }
-  .pf-row-ctrl .pf-input { font-size: 11.5px; }
+  .pf-row-ctrl .pf-input { font-size: var(--font-size-xs); }
 
   /* ── Config list ──────────────────────────────────────────────────────────── */
 
@@ -1556,10 +1556,10 @@
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
   }
 
-  .pf-cfg-name { font-size: 12px; color: var(--text-primary); flex: 1; }
+  .pf-cfg-name { font-size: var(--font-size-sm); color: var(--text-primary); flex: 1; }
 
   .pf-cfg-tag {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -1613,15 +1613,15 @@
   .pf-suggest-item:nth-child(2n) { border-right: none; }
   .pf-suggest-item:nth-last-child(-n+2) { border-bottom: none; }
 
-  .pf-suggest-name { font-size: 11px; font-weight: 500; color: var(--text-primary); }
-  .pf-suggest-cmd  { font-size: 10px; font-family: var(--font-code); color: var(--text-muted); }
+  .pf-suggest-name { font-size: var(--font-size-xs); font-weight: 500; color: var(--text-primary); }
+  .pf-suggest-cmd  { font-size: var(--font-size-2xs); font-family: var(--font-code); color: var(--text-muted); }
 
   .pf-suggest-add {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     margin-top: 4px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--accent);
     cursor: pointer;
     background: transparent;
@@ -1843,7 +1843,7 @@
   .pf-cat-heading {
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     padding: 8px 4px 4px 4px;
     margin: 0;
@@ -1854,7 +1854,7 @@
     justify-content: flex-start !important;
     text-align: left !important;
     padding: 6px 8px !important;
-    font-size: 12px !important;
+    font-size: var(--font-size-sm) !important;
     line-height: 1.2 !important;
     border-radius: 6px !important;
     overflow: hidden;
@@ -1892,7 +1892,7 @@
     text-align: left;
   }
   .pf-tree-desc {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     line-height: 1.2;
   }
@@ -1980,7 +1980,7 @@
     margin: 4px 2px;
   }
   .pf-menu-heading {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -2013,7 +2013,7 @@
     text-transform: none;
     letter-spacing: 0.1px;
     font-family: var(--font-mono);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     /* Flex row so the dimmed namespace prefix clips first while the bright
        leaf name always stays fully visible (the name is what matters). */
     display: flex;
@@ -2042,7 +2042,7 @@
   .pf-card-subtitle {
     color: var(--text-disabled);
     font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     padding: 6px 12px 0;
     border-bottom: 1px dashed var(--border-subtle);
     margin-bottom: 6px;
@@ -2114,7 +2114,7 @@
     padding: 4px 0 4px 10px;
   }
   .pf-card-body-dense > .pf-section > .pf-section-header .pf-section-title {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.6px;
@@ -2149,7 +2149,7 @@
   }
   .pf-field-compact > .pf-label {
     margin: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--text-secondary);
     text-transform: none;
@@ -2178,7 +2178,7 @@
   /* ── Plugin-emitted leaf nodes (type="field") ────────────────────────── */
   .pf-readonly-value {
     font-family: var(--font-mono);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
     background: var(--bg-base);
     border: 1px solid var(--border-subtle);
@@ -2217,7 +2217,7 @@
     width: 18px;
     flex-shrink: 0;
     font-family: var(--font-ui-sans);
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     letter-spacing: 0.4px;
     color: var(--text-on-accent, #fff);
@@ -2236,7 +2236,7 @@
     color: var(--text-primary);
     padding: 2px 6px;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-feature-settings: "tnum";
     text-align: right;
     outline: none;

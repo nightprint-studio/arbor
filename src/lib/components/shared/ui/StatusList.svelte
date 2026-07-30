@@ -185,7 +185,7 @@
   .summary { display: inline-flex; gap: 6px; }
 
   .pill {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     padding: 1px 7px;
     border-radius: var(--radius-md);
@@ -215,7 +215,7 @@
   .row:first-child { border-top: none; padding-top: 6px; }
 
   .row-label {
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--text-primary);
     flex-shrink: 0;
@@ -237,7 +237,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     padding: 1px 6px 1px 5px;
     border-radius: var(--radius-md);
     line-height: 14px;
@@ -249,7 +249,7 @@
 
   .foot {
     margin-top: 8px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     line-height: 1.4;
   }

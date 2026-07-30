@@ -1427,7 +1427,7 @@
     border-bottom: 1px solid var(--border-subtle);
   }
   .ed-crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; overflow: hidden; }
-  .crumb { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+  .crumb { font-size: var(--font-size-xs); color: var(--text-muted); white-space: nowrap; }
   .crumb.last { color: var(--text-secondary); font-weight: 500; }
 
   .ed-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
@@ -1447,7 +1447,7 @@
     height: 20px; padding: 0 8px;
     background: transparent; border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    color: var(--text-secondary); font-size: 11px; cursor: pointer;
+    color: var(--text-secondary); font-size: var(--font-size-xs); cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
   }
   .ed-tbtn:hover { background: var(--bg-hover); color: var(--text-primary); }
@@ -1466,7 +1466,7 @@
   .ed-sources-msg {
     flex: 1; min-width: 0;
     display: flex; align-items: center; gap: 6px;
-    font-size: 11px; color: var(--text-secondary);
+    font-size: var(--font-size-xs); color: var(--text-secondary);
   }
   .ed-sources-banner .ed-tbtn:disabled { opacity: 0.6; cursor: default; }
   .ed-sources-banner .ed-tbtn.primary:disabled:hover { filter: none; }
@@ -1487,7 +1487,7 @@
     padding: 2px 6px;
     border-radius: var(--radius-sm, 4px);
     background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-variant-numeric: tabular-nums;
     pointer-events: auto;
   }
@@ -1504,7 +1504,7 @@
     padding: 0 10px;
     background: var(--bg-base);
     border-top: 1px solid var(--border-subtle);
-    font-size: 11px; color: var(--text-muted);
+    font-size: var(--font-size-xs); color: var(--text-muted);
     user-select: none;
   }
   .ed-pos { display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -1526,7 +1526,7 @@
   .ed-goto input {
     background: transparent; border: none; outline: none;
     color: var(--text-primary); font-family: var(--font-ui-sans);
-    font-size: 12px; width: 140px;
+    font-size: var(--font-size-sm); width: 140px;
   }
   .ed-goto input::placeholder { color: var(--text-disabled); }
 
@@ -1543,7 +1543,7 @@
   .ed-rename input {
     background: transparent; border: none; outline: none;
     color: var(--text-primary); font-family: var(--font-code);
-    font-size: 12.5px; width: 160px;
+    font-size: var(--font-size-sm); width: 160px;
   }
   .ed-rename.invalid input { color: var(--error); }
   .ed-rename-preview {

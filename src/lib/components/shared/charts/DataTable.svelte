@@ -242,7 +242,7 @@
     background: transparent;
     border: none;
     color: var(--text-secondary);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -270,7 +270,7 @@
     align-items: center;
     border-bottom: 1px solid var(--border-subtle);
     color: var(--text-primary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     transition: background var(--transition-fast);
   }
   .dt-row:last-child { border-bottom: none; }
@@ -288,7 +288,7 @@
   }
   .dt-cell.right  { text-align: right; }
   .dt-cell.center { text-align: center; }
-  .dt-cell.code   { font-family: var(--font-code); font-size: 11px; }
+  .dt-cell.code   { font-family: var(--font-code); font-size: var(--font-size-xs); }
 
   .dt-cell-text {
     display: inline-block;
@@ -310,7 +310,7 @@
     background: color-mix(in srgb, var(--dt-pill-color) 15%, transparent);
     color: var(--dt-pill-color);
     border: 1px solid color-mix(in srgb, var(--dt-pill-color) 35%, transparent);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -321,6 +321,6 @@
     padding: 24px 16px;
     text-align: center;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
 </style>

@@ -184,8 +184,8 @@
   .insp-head { display: flex; align-items: center; gap: 9px; padding: 6px 12px 12px; }
   .insp-swatch { width: 10px; height: 28px; border-radius: 3px; background: var(--c); flex-shrink: 0; }
   .insp-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .insp-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
-  .insp-voice { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); font-family: var(--font-code); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .insp-name { font-size: var(--font-size-lg); font-weight: 600; color: var(--text-primary); }
+  .insp-voice { display: flex; align-items: center; gap: 4px; font-size: var(--font-size-xs); color: var(--text-muted); font-family: var(--font-code); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .insp-voice :global(svg) { color: var(--c); flex-shrink: 0; }
   .insp-flags { display: flex; gap: 4px; flex-shrink: 0; }
 
@@ -194,13 +194,13 @@
 
   .insp-section {
     padding: 12px 12px 5px;
-    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
+    font-size: var(--font-size-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
     color: var(--text-muted);
   }
 
   .insp-ctl { display: flex; align-items: center; gap: 8px; padding: 4px 12px; }
-  .insp-ctl-label { width: 34px; flex-shrink: 0; font-size: 11px; color: var(--text-secondary); }
-  .insp-ctl code { width: 40px; flex-shrink: 0; text-align: right; font-family: var(--font-code); font-size: 11px; color: var(--text-primary); }
+  .insp-ctl-label { width: 34px; flex-shrink: 0; font-size: var(--font-size-xs); color: var(--text-secondary); }
+  .insp-ctl code { width: 40px; flex-shrink: 0; text-align: right; font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-primary); }
 
   .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--bg-input); overflow: hidden; }
   .bar-fill { display: block; height: 100%; background: var(--c); border-radius: 3px; transition: width 90ms linear; }
@@ -209,20 +209,20 @@
   .pan-mid { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--border); }
   .pan-dot { position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%; background: var(--c); transform: translate(-50%, -50%); box-shadow: 0 0 0 2px var(--bg-base); }
 
-  .insp-row { display: flex; align-items: center; justify-content: space-between; padding: 3px 12px; font-size: 12px; color: var(--text-secondary); }
-  .insp-row code { font-family: var(--font-code); font-size: 11px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
+  .insp-row { display: flex; align-items: center; justify-content: space-between; padding: 3px 12px; font-size: var(--font-size-sm); color: var(--text-secondary); }
+  .insp-row code { font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
   .insp-row.code-first code { color: var(--text-muted); }
 
   .insp-delay { display: flex; align-items: flex-start; justify-content: center; gap: 14px; padding: 6px 12px 2px; }
   .dknob { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-  .dval { font-size: 9px; color: var(--text-muted); font-family: var(--font-code); line-height: 1; }
-  .insp-subhint { margin: 2px 12px 0; font-size: 10.5px; color: var(--text-muted); line-height: 1.4; }
+  .dval { font-size: var(--font-size-3xs); color: var(--text-muted); font-family: var(--font-code); line-height: 1; }
+  .insp-subhint { margin: 2px 12px 0; font-size: var(--font-size-2xs); color: var(--text-muted); line-height: 1.4; }
   .insp-subhint code { font-family: var(--font-code); color: var(--text-secondary); }
 
   .insp-hint {
     margin: 12px 12px 0; padding-top: 10px;
     border-top: 1px solid var(--border-subtle);
-    font-size: 11px; line-height: 1.5; color: var(--text-muted);
+    font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted);
   }
   .insp-hint code { font-family: var(--font-code); color: var(--text-secondary); }
   .insp-hint strong { color: var(--text-secondary); font-weight: 600; }

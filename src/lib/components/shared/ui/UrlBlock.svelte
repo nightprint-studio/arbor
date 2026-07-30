@@ -69,7 +69,7 @@
     min-width: 0;
   }
   .urlblock-label {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     text-transform: uppercase;
     letter-spacing: 0.4px;
     font-weight: 600;
@@ -84,7 +84,7 @@
   .urlblock-code {
     flex: 1;
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     background: var(--bg-input);
     border: 1px solid var(--border);

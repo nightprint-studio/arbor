@@ -165,13 +165,13 @@
 </Modal>
 
 <style>
-  .modal-title { font-weight: 600; font-size: 13px; margin-right: auto; }
+  .modal-title { font-weight: 600; font-size: var(--font-size-md); margin-right: auto; }
   .hdr-rescan {
     display: flex; align-items: center; gap: 5px;
     height: 22px; padding: 0 9px;
     background: transparent; border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    color: var(--text-secondary); font-size: 11px; cursor: pointer;
+    color: var(--text-secondary); font-size: var(--font-size-xs); cursor: pointer;
   }
   .hdr-rescan:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
   .hdr-rescan:disabled { opacity: 0.6; cursor: default; }
@@ -179,12 +179,12 @@
   .body { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
   .loading {
     flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px;
-    color: var(--text-muted); font-size: 12px;
+    color: var(--text-muted); font-size: var(--font-size-sm);
   }
   .summary {
     display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     padding: 10px 14px; border-bottom: 1px solid var(--border-subtle);
-    font-size: 12px; color: var(--text-secondary);
+    font-size: var(--font-size-sm); color: var(--text-secondary);
   }
   .summary strong { color: var(--text-primary); }
   .summary .muted { color: var(--text-muted); }
@@ -195,31 +195,31 @@
   .file-row {
     display: flex; align-items: center; gap: 6px; width: 100%;
     padding: 6px 12px; background: transparent; border: none; cursor: pointer;
-    color: var(--text-primary); font-size: 12px; text-align: left;
+    color: var(--text-primary); font-size: var(--font-size-sm); text-align: left;
   }
   .file-row:hover { background: var(--bg-hover); }
   .file-row :global(.fw) { color: var(--warning); flex-shrink: 0; }
   .fname { font-weight: 500; flex-shrink: 0; }
-  .fpath { color: var(--text-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .fpath { color: var(--text-muted); font-size: var(--font-size-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
   .count {
     flex-shrink: 0; min-width: 20px; text-align: center;
     padding: 1px 6px; border-radius: 9px;
     background: color-mix(in srgb, var(--warning) 18%, transparent);
-    color: var(--warning); font-size: 11px; font-weight: 600;
+    color: var(--warning); font-size: var(--font-size-xs); font-weight: 600;
   }
   .hits { display: flex; flex-direction: column; padding: 2px 0 6px 30px; }
   .hit {
     display: flex; align-items: center; gap: 8px;
     padding: 3px 12px; background: transparent; border: none; cursor: pointer;
-    color: var(--text-secondary); font-size: 12px; text-align: left;
+    color: var(--text-secondary); font-size: var(--font-size-sm); text-align: left;
     font-family: var(--font-mono, monospace);
   }
   .hit:hover { background: var(--bg-hover); color: var(--text-primary); }
   .hit .bad { color: var(--danger); }
   .hit .arrow { color: var(--text-muted); }
   .hit .fix { color: var(--success); }
-  .hit .off { margin-left: auto; color: var(--text-muted); font-size: 11px; }
+  .hit .off { margin-left: auto; color: var(--text-muted); font-size: var(--font-size-xs); }
 
-  .foot-hint { color: var(--text-muted); font-size: 11px; }
+  .foot-hint { color: var(--text-muted); font-size: var(--font-size-xs); }
   .foot-actions { display: flex; align-items: center; gap: 8px; }
 </style>

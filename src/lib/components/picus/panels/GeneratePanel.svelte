@@ -104,7 +104,7 @@
 
   .gp-path {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     overflow: hidden;
     text-overflow: ellipsis;
     display: block;
@@ -136,7 +136,7 @@
 
   .gp-hint {
     padding: 10px 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--text-muted);
   }

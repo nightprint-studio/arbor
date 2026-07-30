@@ -210,7 +210,7 @@
 
 <style>
   .stat-chip {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-code);
     color: var(--text-secondary);
     background: var(--bg-overlay);
@@ -220,7 +220,7 @@
   }
 
   .unit-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     margin-left: 4px;
   }

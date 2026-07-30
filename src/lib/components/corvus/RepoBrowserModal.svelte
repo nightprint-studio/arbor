@@ -765,7 +765,7 @@
                 </button>
                 <div class="rb-preview-sep"></div>
                 <button
-                  class="mac-close-btn"
+                  class="close-btn"
                   onclick={() => store.closeFilePreview()}
                   use:tooltip={'Close preview'}
                   aria-label="Close preview"
@@ -887,7 +887,7 @@
     flex-shrink: 0;
   }
   .rb-no-accounts {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     padding: 8px 4px;
     text-align: center;
@@ -906,7 +906,7 @@
     background: var(--bg-overlay);
     color: var(--text-primary);
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     transition: border-color var(--transition-fast), background var(--transition-fast);
   }
   .rb-account-btn:hover {
@@ -934,7 +934,7 @@
     justify-content: center;
     background: var(--accent-subtle);
     color: var(--accent);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     flex-shrink: 0;
     width: 26px; height: 26px;
@@ -953,14 +953,14 @@
     width: 100%;
     text-align: left;
     font-weight: 500;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .rb-account-provider {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     text-transform: capitalize;
     line-height: 1.2;
@@ -979,7 +979,7 @@
     background: transparent;
     color: var(--text-primary);
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     border-radius: var(--radius-sm);
     transition: background var(--transition-fast);
   }
@@ -993,7 +993,7 @@
   }
   .rb-account-menu-name { font-weight: 500; }
   .rb-account-menu-prov {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     text-transform: capitalize;
   }
@@ -1019,7 +1019,7 @@
     border: 1px solid var(--border-subtle);
     background: var(--bg-elevated);
     color: var(--text-primary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     outline: none;
     transition: border-color var(--transition-fast), background var(--transition-fast);
     box-sizing: border-box;
@@ -1052,7 +1052,7 @@
     border-bottom: 1px solid var(--border-subtle);
   }
   .rb-cache-meta {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
     white-space: nowrap;
@@ -1069,7 +1069,7 @@
     color: var(--text-secondary);
     cursor: pointer;
     padding: 2px 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     transition: background var(--transition-fast), color var(--transition-fast),
                 border-color var(--transition-fast);
@@ -1101,12 +1101,12 @@
     margin-bottom: 4px;
   }
   .rb-state-title {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--text-secondary);
   }
   .rb-state-msg {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     line-height: 1.4;
     max-width: 220px;
@@ -1125,7 +1125,7 @@
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.02em;
     transition: color var(--transition-fast), background var(--transition-fast);
@@ -1156,7 +1156,7 @@
     margin-left: 2px;
   }
   .rb-ns-count {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     border: 1px solid var(--border-subtle);
@@ -1179,7 +1179,7 @@
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     text-align: left;
     transition: background var(--transition-fast), color var(--transition-fast);
     border-left: 2px solid transparent;
@@ -1223,7 +1223,7 @@
     display: inline-flex;
     align-items: center;
     gap: 2px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     flex-shrink: 0;
     font-variant-numeric: tabular-nums;
@@ -1239,7 +1239,7 @@
     box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
   }
   .rb-repo-updated {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
@@ -1251,7 +1251,7 @@
     justify-content: space-between;
     gap: 6px;
     padding: 5px 8px 5px 12px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     border-top: 1px solid var(--border-subtle);
     flex-shrink: 0;
@@ -1271,7 +1271,7 @@
     color: var(--text-secondary);
     cursor: pointer;
     padding: 2px 7px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-ui-sans);
     transition: background var(--transition-fast), color var(--transition-fast),
                 border-color var(--transition-fast);
@@ -1311,7 +1311,7 @@
     padding: 6px 8px;
     border-bottom: 1px solid var(--border-subtle);
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     flex-shrink: 0;
     background: var(--bg-elevated);
@@ -1344,7 +1344,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     overflow: hidden;
     line-height: 1.5;
@@ -1404,7 +1404,7 @@
     gap: 12px;
     height: 100%;
     color: var(--text-disabled);
-    font-size: 13px;
+    font-size: var(--font-size-md);
   }
   .rb-right-empty p { margin: 0; }
 
@@ -1430,7 +1430,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-primary);
     overflow: hidden;
@@ -1438,7 +1438,7 @@
     text-overflow: ellipsis;
   }
   .rb-repo-desc {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     overflow: hidden;
     white-space: nowrap;
@@ -1454,7 +1454,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     color: var(--text-secondary);
     background: var(--bg-elevated);
@@ -1475,7 +1475,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--text-secondary);
     background: var(--bg-elevated);
@@ -1495,7 +1495,7 @@
     background: var(--bg-overlay);
     color: var(--text-secondary);
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
   }
   .rb-action-btn:hover { background: var(--bg-hover); border-color: var(--border); color: var(--text-primary); }
@@ -1515,7 +1515,7 @@
     align-items: center;
     gap: 6px;
     padding: 6px 16px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--diff-del-fg, #f87171);
     background: var(--diff-del-bg);
     border-bottom: 1px solid var(--border-subtle);
@@ -1559,7 +1559,7 @@
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     white-space: nowrap;
     transition: background var(--transition-fast), color var(--transition-fast);
     flex-shrink: 0;
@@ -1581,7 +1581,7 @@
     align-items: center;
     gap: 8px;
     padding: 14px 16px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-muted);
   }
   .rb-tree-entry {
@@ -1594,7 +1594,7 @@
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
-    font-size: 13px;
+    font-size: var(--font-size-md);
     text-align: left;
     transition: background var(--transition-fast), color var(--transition-fast);
     font-family: var(--font-code);
@@ -1602,11 +1602,11 @@
   .rb-tree-entry:hover { background: var(--bg-hover); color: var(--text-primary); }
   .rb-tree-entry.active { background: var(--accent-subtle); color: var(--accent); }
   .rb-tree-entry.is-dir { color: var(--text-primary); font-weight: 500; }
-  .rb-tree-entry--back { color: var(--text-muted); font-family: var(--font-ui-sans); font-size: 12px; }
+  .rb-tree-entry--back { color: var(--text-muted); font-family: var(--font-ui-sans); font-size: var(--font-size-sm); }
   .rb-entry-icon { flex-shrink: 0; color: var(--text-muted); display: flex; }
   .rb-tree-entry.is-dir .rb-entry-icon { color: var(--accent); }
   .rb-entry-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .rb-entry-size { font-size: 11px; color: var(--text-disabled); flex-shrink: 0; }
+  .rb-entry-size { font-size: var(--font-size-xs); color: var(--text-disabled); flex-shrink: 0; }
 
   /* Preview */
   .rb-preview {
@@ -1635,7 +1635,7 @@
     overflow: hidden;
   }
   .rb-preview-filename {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--text-primary);
     font-family: var(--font-code);
@@ -1644,12 +1644,12 @@
     white-space: nowrap;
   }
   .rb-preview-size {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-disabled);
     flex-shrink: 0;
   }
   .rb-preview-lang {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     background: var(--bg-base);
     border: 1px solid var(--border-subtle);
     padding: 1px 6px;
@@ -1706,7 +1706,7 @@
     gap: 10px;
     height: 100%;
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: var(--font-size-md);
   }
   .rb-preview-error { color: var(--text-secondary); }
   .rb-preview-image {
@@ -1727,7 +1727,7 @@
     margin: 0;
     padding: 14px 16px;
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 1.65;
     color: var(--text-secondary);
     white-space: pre;

@@ -66,7 +66,7 @@
   .inline-form-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 
   .form-hint {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     margin: 0;
     line-height: 1.5;
@@ -78,7 +78,7 @@
     border-radius: var(--radius-sm);
     color: #fff;
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     cursor: pointer;
     transition: filter var(--transition-fast);
@@ -96,7 +96,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     cursor: pointer;
     transition: all var(--transition-fast);
@@ -108,7 +108,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--error, #f87171);
   }
 </style>

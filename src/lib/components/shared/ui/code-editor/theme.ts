@@ -51,7 +51,7 @@ export const codeEditorTheme = EditorView.theme(
       backgroundColor: 'var(--bg-base)',
       color: 'var(--text-primary)',
       fontFamily: 'var(--font-code)',
-      fontSize: '12.5px',
+      fontSize: 'var(--font-size-sm)',
     },
     '&.cm-focused': { outline: 'none' },
     // `position: relative` makes the scroller the containing block for the ruler guide
@@ -81,7 +81,7 @@ export const codeEditorTheme = EditorView.theme(
     '.cm-foldGutter .cm-gutterElement:hover': { color: 'var(--text-primary)' },
     // Chevron markers (markerDOM in folding.ts). Muted, brighten on hover; the
     // collapsed marker is a touch stronger so a folded block reads at a glance.
-    '.cm-foldMarker': { fontSize: '10px', lineHeight: '1', color: 'var(--text-disabled)' },
+    '.cm-foldMarker': { fontSize: 'var(--font-size-2xs)', lineHeight: '1', color: 'var(--text-disabled)' },
     '.cm-foldGutter .cm-gutterElement:hover .cm-foldMarker': { color: 'var(--text-primary)' },
     '.cm-foldMarker-closed': { color: 'var(--text-muted)' },
     '.cm-foldPlaceholder': {
@@ -136,12 +136,12 @@ export const codeEditorTheme = EditorView.theme(
     // product-neutral is what stops the second one from forking the CSS.
     '.cm-tooltip .cm-hover-card': { padding: '6px 9px', maxWidth: '440px' },
     '.cm-hover-card .cm-hc-title': {
-      fontFamily: 'var(--font-code)', fontSize: '11.5px', color: 'var(--text-primary)',
+      fontFamily: 'var(--font-code)', fontSize: 'var(--font-size-xs)', color: 'var(--text-primary)',
       whiteSpace: 'pre-wrap', wordBreak: 'break-word',
     },
-    '.cm-hover-card .cm-hc-meta': { fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '3px' },
+    '.cm-hover-card .cm-hc-meta': { fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', marginTop: '3px' },
     '.cm-hover-card .cm-hc-doc': {
-      fontFamily: 'var(--font-ui-sans)', fontSize: '11px', color: 'var(--text-secondary)',
+      fontFamily: 'var(--font-ui-sans)', fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)',
       marginTop: '5px', paddingTop: '5px', borderTop: '1px solid var(--border-subtle)', whiteSpace: 'pre-wrap',
     },
 
@@ -149,20 +149,20 @@ export const codeEditorTheme = EditorView.theme(
     '.cm-panels': { backgroundColor: 'var(--bg-elevated)', color: 'var(--text-primary)' },
     '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--border-subtle)' },
     '.cm-panel.cm-search': {
-      padding: '6px 8px', fontFamily: 'var(--font-ui-sans)', fontSize: '12px',
+      padding: '6px 8px', fontFamily: 'var(--font-ui-sans)', fontSize: 'var(--font-size-sm)',
       display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px',
     },
-    '.cm-panel.cm-search label': { display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '11px', color: 'var(--text-muted)' },
+    '.cm-panel.cm-search label': { display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' },
     '.cm-panel.cm-search input, .cm-panel.cm-search input[type=text]': {
       backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)',
       border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)',
-      padding: '3px 6px', fontFamily: 'var(--font-code)', fontSize: '12px', outline: 'none',
+      padding: '3px 6px', fontFamily: 'var(--font-code)', fontSize: 'var(--font-size-sm)', outline: 'none',
     },
     '.cm-panel.cm-search input:focus': { borderColor: 'var(--border-focus, var(--accent))' },
     '.cm-panel.cm-search button, .cm-panel.cm-search .cm-button': {
       backgroundColor: 'var(--bg-input)', color: 'var(--text-secondary)',
       border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)',
-      backgroundImage: 'none', padding: '3px 8px', cursor: 'pointer', fontSize: '11px',
+      backgroundImage: 'none', padding: '3px 8px', cursor: 'pointer', fontSize: 'var(--font-size-xs)',
     },
     '.cm-panel.cm-search button:hover, .cm-panel.cm-search .cm-button:hover': {
       backgroundColor: 'var(--bg-hover)', color: 'var(--text-primary)',
@@ -210,7 +210,7 @@ export const codeEditorTheme = EditorView.theme(
       border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)',
     },
     '.cm-tooltip-autocomplete > ul > li': {
-      fontFamily: 'var(--font-code)', fontSize: '12px',
+      fontFamily: 'var(--font-code)', fontSize: 'var(--font-size-sm)',
       padding: '2px 6px', color: 'var(--text-primary)',
     },
     '.cm-tooltip-autocomplete > ul > li[aria-selected]': {

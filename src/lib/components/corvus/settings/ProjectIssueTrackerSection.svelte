@@ -376,7 +376,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-ui-sans);
     color: var(--text-muted);
   }
@@ -395,7 +395,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
     text-align: left;
     transition: border-color var(--transition-fast);
@@ -435,7 +435,7 @@
     width: 100%;
     box-sizing: border-box;
     padding: 4px 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     background: var(--bg-base);
     color: var(--text-primary);
@@ -454,7 +454,7 @@
     width: 100%;
     padding: 5px 8px;
     text-align: left;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     color: var(--text-primary);
     background: transparent;
@@ -467,7 +467,7 @@
   .proj-selected   { color: var(--accent); }
 
   .proj-name  { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .proj-check { margin-left: auto; font-size: 11px; flex-shrink: 0; }
+  .proj-check { margin-left: auto; font-size: var(--font-size-xs); flex-shrink: 0; }
 
   /* empty / error state — matches .chip-drop-empty */
   .proj-empty {
@@ -476,7 +476,7 @@
     gap: 6px;
     justify-content: center;
     padding: 10px 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-style: italic;
   }

@@ -129,7 +129,7 @@
     border-radius: 3px;
     padding: 0 6px;
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 1.4;
     height: 20px;
     min-width: 80px;
@@ -182,7 +182,7 @@
     border-radius: 50%;
     background: var(--bg-error, rgba(255, 90, 80, 0.18));
     color: var(--text-error, #ff6c5c);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     margin-left: 4px;
     cursor: help;

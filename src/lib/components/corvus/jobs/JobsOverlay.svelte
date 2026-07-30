@@ -113,7 +113,7 @@
           <Trash2 size={13} />
         </button>
       {/if}
-      <button class="mac-close-btn" onclick={() => uiStore.setJobsOverlayOpen(false)} use:tooltip={'Close'} aria-label="Close"></button>
+      <button class="close-btn" onclick={() => uiStore.setJobsOverlayOpen(false)} use:tooltip={'Close'} aria-label="Close"></button>
     </div>
   </div>
 
@@ -263,7 +263,7 @@
     border: none;
     cursor: pointer;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     font-weight: 600;
     letter-spacing: 0.03em;
@@ -276,13 +276,13 @@
   .category-header.is-running:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 
   .category-icon { display: flex; align-items: center; flex-shrink: 0; }
-  .category-name { flex: 1; text-align: left; text-transform: uppercase; font-size: 10px; letter-spacing: 0.07em; }
+  .category-name { flex: 1; text-align: left; text-transform: uppercase; font-size: var(--font-size-2xs); letter-spacing: 0.07em; }
 
   .run-badge {
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     padding: 1px 6px;
     background: color-mix(in srgb, var(--accent) 15%, transparent);
@@ -291,7 +291,7 @@
   }
 
   .count-badge {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     color: var(--text-disabled);
     padding: 0 2px;

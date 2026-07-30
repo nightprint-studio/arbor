@@ -330,8 +330,8 @@
     display: flex; flex-direction: column; align-items: center; text-align: center;
     gap: 10px; padding: 28px 20px;
   }
-  .pc-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
-  .pc-desc { font-size: 11px; color: var(--text-muted); line-height: 1.5; max-width: 220px; }
+  .pc-name { font-size: var(--font-size-lg); font-weight: 600; color: var(--text-primary); }
+  .pc-desc { font-size: var(--font-size-xs); color: var(--text-muted); line-height: 1.5; max-width: 220px; }
   .pc-action { display: flex; justify-content: center; }
   .pc-body {
     width: 100%; max-width: 240px;
@@ -343,15 +343,15 @@
   .provider-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
   .provider-top  { display: flex; align-items: center; gap: 10px; }
   .provider-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
-  .provider-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-  .provider-desc { font-size: 11px; color: var(--text-muted); }
+  .provider-name { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
+  .provider-desc { font-size: var(--font-size-xs); color: var(--text-muted); }
 
   .inline-form { display: flex; flex-direction: column; gap: 8px; }
   .inline-form-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 
   .btn-save {
     padding: 5px 14px; border: none; border-radius: var(--radius-sm);
-    font-family: var(--font-ui-sans); font-size: 12px; font-weight: 500; color: #fff;
+    font-family: var(--font-ui-sans); font-size: var(--font-size-sm); font-weight: 500; color: #fff;
     cursor: pointer; transition: filter var(--transition-fast); white-space: nowrap;
     display: flex; align-items: center; gap: 5px;
   }
@@ -361,16 +361,16 @@
   .btn-cancel {
     padding: 5px 10px; background: transparent;
     border: 1px solid var(--border); border-radius: var(--radius-sm);
-    font-family: var(--font-ui-sans); font-size: 11px; color: var(--text-muted);
+    font-family: var(--font-ui-sans); font-size: var(--font-size-xs); color: var(--text-muted);
     cursor: pointer; transition: all var(--transition-fast); white-space: nowrap;
   }
   .btn-cancel:hover { background: var(--bg-hover); color: var(--text-primary); }
 
-  .form-hint { font-size: 10.5px; color: var(--text-muted); margin: 0; line-height: 1.5; }
+  .form-hint { font-size: var(--font-size-2xs); color: var(--text-muted); margin: 0; line-height: 1.5; }
 
   .device-code-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .device-code {
-    font-family: var(--font-code); font-size: 18px; font-weight: 700; letter-spacing: 0.18em;
+    font-family: var(--font-code); font-size: var(--font-size-xl); font-weight: 700; letter-spacing: 0.18em;
     padding: 6px 12px; background: var(--bg-base); color: var(--accent);
     border: 1px solid var(--border); border-radius: var(--radius-sm); user-select: all;
   }
@@ -385,7 +385,7 @@
     display: flex; align-items: center; gap: 5px; padding: 5px 10px;
     background: transparent; color: var(--text-secondary);
     border: 1px solid var(--border); border-radius: var(--radius-sm);
-    font-family: var(--font-ui-sans); font-size: 11px;
+    font-family: var(--font-ui-sans); font-size: var(--font-size-xs);
     cursor: pointer; transition: all var(--transition-fast); white-space: nowrap;
   }
   .device-open:hover { color: var(--text-primary); background: var(--bg-hover); }
@@ -394,17 +394,17 @@
     display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
     padding: 4px 8px; background: transparent; color: var(--text-muted);
     border: 1px dashed var(--border); border-radius: var(--radius-sm);
-    font-family: var(--font-ui-sans); font-size: 11px;
+    font-family: var(--font-ui-sans); font-size: var(--font-size-xs);
     cursor: pointer; transition: all var(--transition-fast);
   }
   .advanced-toggle:hover { color: var(--text-primary); border-color: var(--accent); background: var(--bg-hover); }
 
-  .provider-error { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--error, #f87171); }
+  .provider-error { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-xs); color: var(--error, #f87171); }
 
   .text-input {
     padding: 5px 8px; background: var(--bg-input); color: var(--text-primary);
     border: 1px solid var(--border); border-radius: var(--radius-sm);
-    font-family: var(--font-ui-sans); font-size: 12px;
+    font-family: var(--font-ui-sans); font-size: var(--font-size-sm);
     outline: none; transition: border-color var(--transition-fast);
     flex: 1; min-width: 90px;
   }

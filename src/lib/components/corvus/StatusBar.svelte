@@ -392,10 +392,10 @@
 
   .item-error { color: var(--error); background: var(--error-subtle); }
   .item-changes { gap: 4px; }
-  .change-dot { font-size: 9px; color: var(--color-stash); }
+  .change-dot { font-size: var(--font-size-3xs); color: var(--color-stash); }
 
   .change-pill {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     padding: 0 4px;
     border-radius: var(--radius-sm);
@@ -414,7 +414,7 @@
     padding: 0 7px;
     height: 20px;
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     letter-spacing: 0.4px;
     white-space: nowrap;
@@ -429,7 +429,7 @@
     display: flex;
     align-items: center;
     gap: 3px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-disabled);
     padding: 0 5px;
     white-space: nowrap;
@@ -449,7 +449,7 @@
   }
 
   .repo-path {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     max-width: 340px;
     overflow: hidden;
@@ -473,7 +473,7 @@
     gap: 4px;
     padding: 0 6px;
     height: 100%;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     user-select: none;
   }
@@ -542,7 +542,7 @@
     border-radius: 7px;
     background: var(--severity-critical);
     color: #fff;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     line-height: 14px;
     text-align: center;

@@ -171,7 +171,7 @@
     background: none;
     color: var(--text-muted);
     font-family: inherit;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     line-height: 1.5;
     cursor: pointer;
   }

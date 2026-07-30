@@ -149,32 +149,32 @@
 
   .stage-body { flex: 1; min-width: 0; }
   .stage-kicker {
-    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px;
+    font-size: var(--font-size-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px;
     color: color-mix(in srgb, var(--stage-c) 75%, var(--text-muted));
   }
   .stage-target {
     font-size: 17px; font-weight: 680; color: var(--text-primary);
     margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .stage-detail { font-size: 11.5px; color: var(--text-secondary); margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .stage-detail { font-size: var(--font-size-xs); color: var(--text-secondary); margin-top: 3px; font-variant-numeric: tabular-nums; }
 
   .stage-status { flex-shrink: 0; align-self: flex-start; }
   .stage-rec {
     display: inline-flex; align-items: center; gap: 5px;
-    font-size: 11px; font-weight: 700; color: #fff;
+    font-size: var(--font-size-xs); font-weight: 700; color: #fff;
     background: var(--error); padding: 3px 9px; border-radius: 999px;
     font-variant-numeric: tabular-nums;
   }
   .stage-rec :global(svg) { animation: st-pulse 1.3s ease-in-out infinite; }
   @keyframes st-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
   .stage-ready {
-    font-size: 11px; font-weight: 600;
+    font-size: var(--font-size-xs); font-weight: 600;
     color: var(--success);
     background: color-mix(in srgb, var(--success) 15%, transparent);
     padding: 3px 10px; border-radius: 999px;
   }
   .stage-wait {
-    font-size: 11px; font-weight: 600;
+    font-size: var(--font-size-xs); font-weight: 600;
     color: var(--warning);
     background: color-mix(in srgb, var(--warning) 15%, transparent);
     padding: 3px 10px; border-radius: 999px;
@@ -184,7 +184,7 @@
   section { display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; }
   .section-label {
     margin: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.7px;

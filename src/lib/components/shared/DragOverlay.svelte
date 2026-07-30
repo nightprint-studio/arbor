@@ -55,7 +55,7 @@
     border-radius: 8px;
     background: var(--accent, #4c8dff);
     color: #fff;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;

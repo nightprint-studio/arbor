@@ -348,6 +348,13 @@ impl PgSession {
                 // it. See the note above: without this the session sits in an
                 // aborted transaction block and refuses everything afterwards.
                 let _ = self.client.simple_query("ROLLBACK").await;
+                // A cancellation is not a failure of the strategy, it is the user
+                // saying stop — and the fallback below RE-RUNS the statement, as the
+                // slow held-cursor read. Pressing Cancel would start the very query
+                // that was being escaped from, and the tab would sit there having
+                // already reported the cancel. Checked here rather than only after
+                // the match, which the fallback's early return never reaches.
+                self.check_cancelled(seq)?;
                 // On stderr rather than swallowed: this path is a fallback, so the
                 // user sees whatever the second attempt says, and the reason the
                 // first one was abandoned would otherwise be lost entirely.
@@ -622,6 +629,12 @@ impl DbSession for PgSession {
             }
         }
         Ok(info)
+    }
+
+    async fn trigger_detail(&self, name: &str) -> DbResult<TriggerDetail> {
+        catalog::read_trigger_detail(&self.client, self.schema(), name)
+            .await?
+            .ok_or_else(|| DbError::NotFound(format!("trigger {name}")))
     }
 
     async fn execute(&self, sql: &str, window: u32) -> DbResult<ExecuteResult> {

@@ -232,14 +232,14 @@
      below it — never the amber of something that needs attention. */
   .sp-foreign {
     padding: 2px 12px 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--text-muted);
   }
 
   .sp-hint {
     padding: 10px 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--text-muted);
   }
@@ -251,7 +251,7 @@
     gap: 5px;
     padding: 0 12px 10px;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -266,8 +266,8 @@
     padding: 4px 12px 12px;
   }
   .sp-attach-text { display: flex; flex-direction: column; gap: 4px; text-align: left; }
-  .sp-attach-text strong { font-size: 12px; }
-  .sp-attach-text span { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+  .sp-attach-text strong { font-size: var(--font-size-sm); }
+  .sp-attach-text span { font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted); }
 
   .sp-error { display: flex; flex-direction: column; gap: 8px; padding: 8px 12px; }
   .sp-error-actions { display: flex; gap: 6px; }

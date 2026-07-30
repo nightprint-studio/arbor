@@ -282,7 +282,7 @@
     gap: 4px;
     color: var(--accent);
     font-variant-numeric: tabular-nums;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
   }
   .parse-progress :global(svg.spinner),
   .parsing-badge :global(svg.spinner) {
@@ -372,15 +372,15 @@
 
   .tree-file { gap: 5px; }
 
-  .status-icon { font-weight: 700; flex-shrink: 0; font-size: 10px; width: 10px; text-align: center; }
+  .status-icon { font-weight: 700; flex-shrink: 0; font-size: var(--font-size-2xs); width: 10px; text-align: center; }
   .filename { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .stats { display: flex; gap: 3px; flex-shrink: 0; font-family: var(--font-code); font-size: 10px; }
+  .stats { display: flex; gap: 3px; flex-shrink: 0; font-family: var(--font-code); font-size: var(--font-size-2xs); }
   .add { color: var(--success); }
   .del { color: var(--error); }
 
   .binary-badge {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     padding: 1px 3px;

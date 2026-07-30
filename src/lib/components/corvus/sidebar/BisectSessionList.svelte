@@ -142,7 +142,7 @@
   .session-name {
     flex: 1;
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
   }
 
@@ -184,14 +184,14 @@
   }
 
   .meta-date {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     flex-shrink: 0;
   }
 
   .meta-hash {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--color-bisect);
     background: color-mix(in srgb, var(--color-bisect) 10%, transparent);
     border: 1px solid color-mix(in srgb, var(--color-bisect) 25%, transparent);
@@ -202,7 +202,7 @@
   .meta-counts {
     display: flex;
     gap: 4px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     margin-left: auto;
   }
   .bad-count  { color: var(--color-bisect); }

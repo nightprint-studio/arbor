@@ -77,7 +77,7 @@
     right: 2px;
     background: var(--accent);
     color: var(--bg-base);
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     line-height: 1;
     padding: 1px 3px;

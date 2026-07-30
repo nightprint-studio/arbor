@@ -805,7 +805,7 @@
     padding: 0 4px;
     background: rgba(255, 255, 255, 0.06);
     border-radius: 999px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--text-muted);
     flex-shrink: 0;
@@ -879,7 +879,7 @@
      the alert variant via inheritance, but we want monospace + padding. */
   .plugin-list :global(.alert code) {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     background: rgba(255,255,255,0.06);
     border-radius: var(--radius-sm);
     padding: 0 4px;
@@ -936,7 +936,7 @@
     padding: 7px 12px;
     background: color-mix(in srgb, var(--error) 12%, transparent);
     color: var(--error);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.4;
     border-bottom: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
     border-radius: var(--radius-md) var(--radius-md) 0 0;
@@ -972,12 +972,12 @@
   .plugin-info       { flex: 1; display: flex; flex-direction: column; gap: 3px; overflow: hidden; }
   .plugin-name-row   { display: flex; align-items: center; gap: 6px; }
   .plugin-name       { font-size: var(--font-size-sm); color: var(--text-primary); font-weight: 500; }
-  .plugin-version    { font-size: 10px; color: var(--text-disabled); background: rgba(255,255,255,0.06); padding: 0 5px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.06); }
+  .plugin-version    { font-size: var(--font-size-2xs); color: var(--text-disabled); background: rgba(255,255,255,0.06); padding: 0 5px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.06); }
   .plugin-desc       { font-size: var(--font-size-xs); color: var(--text-muted); }
   .expand-icon       { color: var(--text-disabled); flex-shrink: 0; display: flex; }
 
   /* Scheduler dot badge */
-  .sched-badge         { font-size: 10px; color: var(--text-disabled); line-height: 1; flex-shrink: 0; }
+  .sched-badge         { font-size: var(--font-size-2xs); color: var(--text-disabled); line-height: 1; flex-shrink: 0; }
   .sched-badge.running { color: var(--success); }
 
 
@@ -1065,7 +1065,7 @@
      long dependency chains don't push the layout. */
   .dep-chip-row { display: flex; flex-wrap: wrap; gap: 4px; }
   .dep-chip {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 2px 7px;
     border-radius: 999px;
     background: var(--bg-overlay);
@@ -1083,7 +1083,7 @@
     border-radius: var(--radius-sm);
     color: var(--accent);
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
   }
 
   /* Section divider */
@@ -1091,7 +1091,7 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.6px;
@@ -1104,7 +1104,7 @@
   .perms-list { display: flex; gap: 5px; flex-wrap: wrap; }
 
   .perm-tag {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 2px 7px;
     border-radius: 999px;
     border: 1px solid var(--border);
@@ -1119,13 +1119,13 @@
 
   /* Hooks tags */
   .hooks-tags { display: flex; flex-wrap: wrap; gap: 4px; }
-  .hook-fn   { color: var(--accent); background: var(--bg-overlay); padding: 2px 7px; border-radius: 999px; font-family: var(--font-code); font-size: 10px; border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); }
+  .hook-fn   { color: var(--accent); background: var(--bg-overlay); padding: 2px 7px; border-radius: 999px; font-family: var(--font-code); font-size: var(--font-size-2xs); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); }
 
   /* API reference list */
   .api-list  { display: flex; flex-direction: column; gap: 3px; }
   .api-row   { display: flex; align-items: baseline; gap: 8px; font-size: var(--font-size-xs); }
-  .api-fn    { color: var(--accent); background: var(--bg-overlay); padding: 1px 5px; border-radius: var(--radius-sm); font-family: var(--font-code); font-size: 10px; white-space: nowrap; flex-shrink: 0; }
-  .api-desc  { color: var(--text-disabled); font-size: 10px; }
+  .api-fn    { color: var(--accent); background: var(--bg-overlay); padding: 1px 5px; border-radius: var(--radius-sm); font-family: var(--font-code); font-size: var(--font-size-2xs); white-space: nowrap; flex-shrink: 0; }
+  .api-desc  { color: var(--text-disabled); font-size: var(--font-size-2xs); }
 
   .text-success { color: var(--success); }
   .text-muted   { color: var(--text-muted); }
@@ -1136,7 +1136,7 @@
      owns its own typography. */
   .panel-footer {
     flex: 1;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
   }
   /* Inline pill that behaves like the old <code>plugins/</code> but is a

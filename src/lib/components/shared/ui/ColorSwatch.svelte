@@ -146,7 +146,7 @@
   .cs-chip-glyph { background: var(--bg-overlay); }
   .cs-glyph {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--text-muted);
     text-transform: lowercase;
@@ -169,7 +169,7 @@
 
   .cs-label {
     flex: 1;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -177,7 +177,7 @@
   }
   .cs-caption {
     font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     flex-shrink: 0;
   }

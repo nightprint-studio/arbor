@@ -328,7 +328,7 @@
 
   .shortcut kbd {
     font-family: var(--font-mono, var(--font-ui-sans));
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 1px 5px;
     background: var(--bg-elevated);
     border: 1px solid var(--border);

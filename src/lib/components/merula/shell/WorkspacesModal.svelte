@@ -128,10 +128,10 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
   .ws { display: flex; flex-direction: column; gap: 12px; padding: 4px 2px; }
-  .ws-lead { font-size: 12px; color: var(--text-muted); margin: 0; line-height: 1.5; }
-  .ws-lead code { font-family: var(--font-code); font-size: 11px; }
+  .ws-lead { font-size: var(--font-size-sm); color: var(--text-muted); margin: 0; line-height: 1.5; }
+  .ws-lead code { font-family: var(--font-code); font-size: var(--font-size-xs); }
 
   .ws-new { display: flex; gap: 8px; align-items: center; }
   /* Let the field (whatever wrapper Input renders) take the row; the button hugs. */
@@ -160,7 +160,7 @@
   .ws-name {
     flex: 1; min-width: 0;
     background: transparent; border: none; outline: none;
-    color: var(--text-primary); font-size: 13px; font-weight: 600;
+    color: var(--text-primary); font-size: var(--font-size-md); font-weight: 600;
     font-family: var(--font-ui-sans);
     padding: 2px 4px; border-radius: var(--radius-sm);
   }
@@ -184,13 +184,13 @@
   .ws-swatch.sel { border-color: var(--text-primary); }
 
   .ws-projects { display: flex; flex-wrap: wrap; gap: 5px; }
-  .ws-empty { font-size: 11px; color: var(--text-disabled); font-style: italic; }
+  .ws-empty { font-size: var(--font-size-xs); color: var(--text-disabled); font-style: italic; }
   .ws-proj {
     display: flex; align-items: center; gap: 5px;
     padding: 3px 4px 3px 7px;
     background: var(--bg-input); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); color: var(--text-secondary);
-    font-size: 11.5px; max-width: 220px;
+    font-size: var(--font-size-xs); max-width: 220px;
   }
   .ws-proj-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ws-proj-x {
@@ -207,7 +207,7 @@
     padding: 4px 8px;
     background: transparent; border: 1px dashed var(--border);
     border-radius: var(--radius-sm); color: var(--text-secondary);
-    font-size: 11.5px; cursor: pointer;
+    font-size: var(--font-size-xs); cursor: pointer;
     transition: border-color var(--transition-fast), color var(--transition-fast);
   }
   .ws-add:hover { border-color: var(--wc); color: var(--text-primary); }

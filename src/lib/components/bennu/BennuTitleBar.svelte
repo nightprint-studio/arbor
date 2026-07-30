@@ -180,7 +180,7 @@
   menuWidth="240px"
   docs={{ active: bennuUiStore.docsOpen, tooltip: 'Documentation (F1)', onclick: () => bennuUiStore.toggleDocs() }}
   commandPalette={{ active: bennuUiStore.paletteOpen, tooltip: 'Command palette (Ctrl+K)', onclick: () => bennuUiStore.togglePalette() }}
-  settings={{ menu: settingsMenu, menuWidth: '220px', tooltip: 'Settings' }}
+  settings={{ menu: settingsMenu, menuWidth: '260px', tooltip: 'Settings' }}
 >
   {#snippet logo()}
     <ArborLogo size={22} />
@@ -289,7 +289,7 @@
     border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
     border-radius: var(--radius-sm);
     color: var(--warning); cursor: pointer;
-    font-family: var(--font-ui-sans); font-size: 11px; font-weight: 600;
+    font-family: var(--font-ui-sans); font-size: var(--font-size-xs); font-weight: 600;
     -webkit-app-region: no-drag;
     transition: background var(--transition-fast);
   }

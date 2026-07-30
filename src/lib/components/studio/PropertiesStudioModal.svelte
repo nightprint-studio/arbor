@@ -242,11 +242,11 @@
 </Studio>
 
 <style>
-  .ps-row-key { color: var(--text-primary); font-family: var(--font-code); font-size: 11px; white-space: nowrap; }
+  .ps-row-key { color: var(--text-primary); font-family: var(--font-code); font-size: var(--font-size-xs); white-space: nowrap; }
   .ps-row-key-index { color: var(--text-muted); font-style: italic; }
-  .ps-row-key-self { color: var(--accent); font-style: italic; font-size: 10.5px; opacity: 0.85; }
+  .ps-row-key-self { color: var(--accent); font-style: italic; font-size: var(--font-size-2xs); opacity: 0.85; }
   .ps-footer-path-pill {
-    font-family: var(--font-code); font-size: 10px; color: var(--text-muted); background: var(--bg-overlay);
+    font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted); background: var(--bg-overlay);
     padding: 2px 6px; border-radius: 999px; max-width: 280px; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap;
   }
@@ -255,13 +255,13 @@
   .ps-errors-wrap { padding: 16px; height: 100%; overflow: auto; }
   .ps-errors-body {
     background: var(--bg-overlay); color: var(--text-primary); padding: 10px; border-radius: 4px;
-    font-family: var(--font-code); font-size: 11px; margin: 6px 0 0; overflow: auto; white-space: pre-wrap;
+    font-family: var(--font-code); font-size: var(--font-size-xs); margin: 6px 0 0; overflow: auto; white-space: pre-wrap;
   }
-  .ps-errors-hint { color: var(--text-muted); font-size: 11px; margin: 6px 0 0; line-height: 1.5; }
+  .ps-errors-hint { color: var(--text-muted); font-size: var(--font-size-xs); margin: 6px 0 0; line-height: 1.5; }
   .ps-errors-hint code, .ps-bindings-empty code, .ps-schema-hint code {
-    font-family: var(--font-code); font-size: 11px; padding: 1px 4px; border-radius: 3px;
+    font-family: var(--font-code); font-size: var(--font-size-xs); padding: 1px 4px; border-radius: 3px;
     background: var(--bg-overlay); color: var(--text-primary);
   }
-  .ps-bindings-empty { color: var(--text-muted); font-size: 11px; padding: 12px; margin: 0; line-height: 1.5; }
-  .ps-schema-hint { color: var(--text-secondary); font-size: 11px; line-height: 1.5; margin: 0; }
+  .ps-bindings-empty { color: var(--text-muted); font-size: var(--font-size-xs); padding: 12px; margin: 0; line-height: 1.5; }
+  .ps-schema-hint { color: var(--text-secondary); font-size: var(--font-size-xs); line-height: 1.5; margin: 0; }
 </style>

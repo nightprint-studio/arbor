@@ -168,7 +168,7 @@
 
   .rec {
     display: inline-flex; align-items: center; gap: 6px;
-    font-size: 12px; font-weight: 700; letter-spacing: 0.5px;
+    font-size: var(--font-size-sm); font-weight: 700; letter-spacing: 0.5px;
     color: var(--error, #e5484d);
     flex-shrink: 0;
   }
@@ -183,7 +183,7 @@
 
   .time {
     flex: 1;
-    font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums;
+    font-size: var(--font-size-lg); font-weight: 600; font-variant-numeric: tabular-nums;
     color: var(--text-primary, #f3f5f9);
   }
 
@@ -191,7 +191,7 @@
   .top { display: flex; align-items: center; gap: 8px; }
   .target {
     flex: 1; min-width: 0;
-    font-size: 11.5px; color: var(--text-secondary);
+    font-size: var(--font-size-xs); color: var(--text-secondary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .big-time {
@@ -220,7 +220,7 @@
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
     border: none; cursor: pointer;
     background: var(--error, #e5484d); color: #fff;
-    font-size: 12px; font-weight: 650;
+    font-size: var(--font-size-sm); font-weight: 650;
     transition: filter var(--transition-fast, 0.12s);
   }
   .stop.pill { height: 30px; padding: 0 14px; border-radius: 999px; flex-shrink: 0; }
@@ -233,7 +233,7 @@
     height: 34px; border-radius: var(--radius-md, 9px);
     border: 1px solid var(--border, #2a2f3a); cursor: pointer;
     background: var(--bg-hover, #20242e); color: var(--text-primary);
-    font-size: 12.5px; font-weight: 600;
+    font-size: var(--font-size-sm); font-weight: 600;
     transition: background var(--transition-fast, 0.12s), filter var(--transition-fast, 0.12s);
   }
   .ctl:hover:not(:disabled) { background: var(--bg-overlay, #2a2f3a); }
@@ -249,7 +249,7 @@
     display: flex; align-items: center; justify-content: center; gap: 8px;
     background: var(--bg-elevated, #12151d);
     color: var(--warning, #f5a623);
-    font-size: 12px; font-weight: 650;
+    font-size: var(--font-size-sm); font-weight: 650;
   }
   .lost .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warning, #f5a623); animation: hud-pulse 1s ease-in-out infinite; }
 </style>

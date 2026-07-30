@@ -213,7 +213,7 @@
   .tab-tombstone-icon { color: var(--warning); }
 
   .tab-branch {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     max-width: 90px;
     overflow: hidden;

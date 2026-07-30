@@ -500,7 +500,7 @@
   .label-stack { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; line-height: 1.25; }
   .label-stack .label { white-space: normal; }
   .sublabel {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -516,7 +516,7 @@
 
   .menu-header {
     padding: 4px 8px 2px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -525,7 +525,7 @@
   }
 
   .item-badge {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     padding: 1px 5px;
     border-radius: var(--radius-sm);

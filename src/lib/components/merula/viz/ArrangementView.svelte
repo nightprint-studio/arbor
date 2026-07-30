@@ -724,7 +724,7 @@
     height: 22px; padding: 0 9px;
     background: var(--bg-hover); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); color: var(--text-secondary);
-    font-size: 11px; font-weight: 600; cursor: pointer;
+    font-size: var(--font-size-xs); font-weight: 600; cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
   }
   .tb-import:hover {
@@ -746,8 +746,8 @@
     padding: 0 4px 0 12px;
   }
   .corner-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  .corner-title { font-size: 11.5px; font-weight: 600; color: var(--text-primary); line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .corner-sub { font-size: 9.5px; color: var(--text-muted); }
+  .corner-title { font-size: var(--font-size-xs); font-weight: 600; color: var(--text-primary); line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .corner-sub { font-size: var(--font-size-3xs); color: var(--text-muted); }
   .corner-toggle {
     display: flex; align-items: center; justify-content: center;
     width: 22px; height: 22px; flex-shrink: 0; margin-left: auto;
@@ -767,7 +767,7 @@
   .ruler-tick { position: absolute; top: 21px; bottom: 0; border-left: 1px solid color-mix(in srgb, var(--border-subtle) 60%, transparent); }
   .ruler-tick.strong { border-left-color: var(--border-subtle); }
   .ruler-tick.hide-line { border-left-color: transparent; }
-  .ruler-tick span { position: absolute; bottom: 1px; left: 3px; font-size: 8.5px; color: var(--text-disabled); font-variant-numeric: tabular-nums; }
+  .ruler-tick span { position: absolute; bottom: 1px; left: 3px; font-size: var(--font-size-3xs); color: var(--text-disabled); font-variant-numeric: tabular-nums; }
 
   /* Named-section chips: a coloured label strip along the top of the ruler. */
   .ruler-chip {
@@ -778,7 +778,7 @@
   }
   .ruler-chip span {
     display: block; padding: 0 5px; line-height: 13px;
-    font-size: 8.5px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
+    font-size: var(--font-size-3xs); font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
     color: var(--text-secondary); white-space: nowrap;
   }
 
@@ -803,7 +803,7 @@
   }
   .ruler-marker:hover { background: color-mix(in srgb, var(--info) 42%, var(--bg-base)); }
   .ruler-marker:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
-  .ruler-marker .ml { font-size: 8.5px; font-weight: 700; letter-spacing: 0.3px; color: var(--text-secondary); }
+  .ruler-marker .ml { font-size: var(--font-size-3xs); font-weight: 700; letter-spacing: 0.3px; color: var(--text-secondary); }
 
   /* ── Rows ── */
   .arr-rows { display: flex; flex-direction: column; }
@@ -852,8 +852,8 @@
   .arr-resize.custom::after { background: color-mix(in srgb, var(--accent) 28%, transparent); }
   .arr-resize.custom:hover::after { background: color-mix(in srgb, var(--accent) 60%, transparent); }
   .arr-head-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding-left: 4px; }
-  .arr-name { font-size: 12.5px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .arr-voice { font-size: 10px; color: var(--text-muted); font-family: var(--font-code); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .arr-name { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .arr-voice { font-size: var(--font-size-2xs); color: var(--text-muted); font-family: var(--font-code); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Read-only status icons (controls live in the mixer). */
   .arr-status { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
@@ -877,9 +877,9 @@
     position: sticky; left: 0;
     display: flex; align-items: center; justify-content: flex-start;
     width: 520px; height: 160px; padding: 0 28px;
-    color: var(--text-muted); font-size: 12px;
+    color: var(--text-muted); font-size: var(--font-size-sm);
   }
-  .arr-empty code { font-family: var(--font-code); font-size: 11px; color: var(--text-secondary); }
+  .arr-empty code { font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-secondary); }
 
   /* ── Overlays ── */
   /* Start below the toolbar row + ruler so the playhead / cursor span only the
@@ -913,11 +913,11 @@
     display: flex; align-items: center; padding: 0 12px;
     background: var(--bg-base);
     border-right: 1px solid var(--border-subtle);
-    font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;
+    font-size: var(--font-size-3xs); text-transform: uppercase; letter-spacing: 0.5px;
     color: var(--text-disabled);
   }
   .arr-time-track { position: relative; width: var(--tl-w); flex-shrink: 0; }
   .time-tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid color-mix(in srgb, var(--border-subtle) 50%, transparent); }
   .time-tick.strong { border-left-color: var(--border-subtle); }
-  .time-tick span { position: absolute; bottom: 3px; left: 3px; font-size: 8.5px; color: var(--text-disabled); font-variant-numeric: tabular-nums; }
+  .time-tick span { position: absolute; bottom: 3px; left: 3px; font-size: var(--font-size-3xs); color: var(--text-disabled); font-variant-numeric: tabular-nums; }
 </style>

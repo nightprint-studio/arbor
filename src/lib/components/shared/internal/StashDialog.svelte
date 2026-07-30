@@ -112,7 +112,7 @@
   }
 
   .stash-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--text-secondary);
     text-transform: uppercase;
@@ -133,7 +133,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     padding: 6px 8px;
     outline: none;
     transition: border-color var(--transition-fast);

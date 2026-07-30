@@ -274,7 +274,7 @@
 <style>
   /* ── Header ──────────────────────────────────────────────────────────── */
   .modal-title {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-primary);
   }
@@ -284,7 +284,7 @@
     border-radius: 999px;
     background: var(--bg-tertiary);
     color: var(--text-secondary);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     line-height: 1.4;
   }
@@ -292,7 +292,7 @@
   /* ── Hint ────────────────────────────────────────────────────────────── */
   .hint {
     margin: 0 0 12px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--text-secondary);
   }
@@ -316,7 +316,7 @@
     padding: 8px 10px;
     border-bottom: 1px solid var(--border-subtle);
     background: var(--bg-base);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     position: relative;
     transition: background 100ms ease;
   }
@@ -352,7 +352,7 @@
   .index {
     color: var(--text-muted);
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     text-align: right;
     font-variant-numeric: tabular-nums;
   }
@@ -366,7 +366,7 @@
   .name {
     color: var(--text-primary);
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -374,7 +374,7 @@
   .dir {
     color: var(--text-muted);
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -383,14 +383,14 @@
   .meta {
     color: var(--text-secondary);
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
   .size {
     color: var(--text-secondary);
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     min-width: 56px;
@@ -442,7 +442,7 @@
     align-items: center;
     gap: 5px;
     padding: 4px 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .link-btn:disabled {

@@ -202,7 +202,7 @@
 
 <style>
   .section-tab-name {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 500;
     color: var(--accent);
     background: var(--accent-subtle);

@@ -230,7 +230,7 @@
 
   .sub-name {
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--text-primary);
     white-space: nowrap;
@@ -241,7 +241,7 @@
 
   .dirty-dot {
     color: var(--color-stash);
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     line-height: 1;
     vertical-align: middle;
     margin-left: 3px;
@@ -249,7 +249,7 @@
 
   .sub-path {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -280,7 +280,7 @@
     border: 1px solid var(--border-subtle);
     border-radius: 999px;
     color: var(--text-secondary);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-ui-sans);
     max-width: 90px;
     overflow: hidden;
@@ -297,7 +297,7 @@
     border: 1px solid color-mix(in srgb, var(--color-stash) 25%, transparent);
     border-radius: 999px;
     color: var(--color-stash);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-code);
     max-width: 90px;
     overflow: hidden;
@@ -314,7 +314,7 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-ui-sans);
     font-weight: 600;
     color: var(--color-submodule);
@@ -329,7 +329,7 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-ui-sans);
     font-weight: 600;
     color: var(--color-stash);

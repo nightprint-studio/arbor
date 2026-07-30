@@ -173,10 +173,10 @@
     height: 40px; flex-shrink: 0; padding: 0 12px;
     border-bottom: 1px solid var(--border-subtle);
   }
-  .lib-title { font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-secondary); }
+  .lib-title { font-size: var(--font-size-sm); font-weight: 650; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-secondary); }
   .lib-stats {
     display: inline-flex; align-items: center; gap: 6px;
-    font-size: 10.5px; color: var(--text-muted);
+    font-size: var(--font-size-2xs); color: var(--text-muted);
     background: var(--bg-input); border-radius: 999px; padding: 2px 9px;
   }
   .lib-stats b { color: var(--text-secondary); font-weight: 700; }
@@ -184,7 +184,7 @@
   .lib-stats .size { color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
   .lib-clear {
     margin-left: auto; background: none; border: none; cursor: pointer;
-    font-size: 11px; color: var(--text-muted);
+    font-size: var(--font-size-xs); color: var(--text-muted);
     transition: color var(--transition-fast);
   }
   .lib-clear:hover { color: var(--error); }
@@ -192,8 +192,8 @@
   .lib-filter { flex-shrink: 0; padding: 8px 8px 4px; }
 
   .lib-list { flex: 1; overflow: auto; padding: 6px; display: flex; flex-direction: column; gap: 5px; }
-  .empty-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
-  .empty-desc { font-size: 11.5px; color: var(--text-muted); margin-top: 3px; max-width: 200px; }
+  .empty-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-secondary); }
+  .empty-desc { font-size: var(--font-size-xs); color: var(--text-muted); margin-top: 3px; max-width: 200px; }
 
   .cap {
     display: flex; align-items: center; gap: 11px;
@@ -229,7 +229,7 @@
   .cap-thumb-img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
   .cap-dur {
     position: absolute; right: 3px; bottom: 3px;
-    font-size: 9px; font-weight: 600; font-variant-numeric: tabular-nums;
+    font-size: var(--font-size-3xs); font-weight: 600; font-variant-numeric: tabular-nums;
     background: rgba(0, 0, 0, 0.55); color: #fff;
     padding: 0 3px; border-radius: 3px;
   }
@@ -242,10 +242,10 @@
   .cap-thumb:hover .cap-thumb-hover { opacity: 1; }
 
   .cap-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; justify-content: center; }
-  .cap-name { font-size: 12px; font-weight: 500; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .cap-name { font-size: var(--font-size-sm); font-weight: 500; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .cap-meta {
     display: flex; align-items: center; gap: 5px;
-    font-size: 10.5px; color: var(--text-muted);
+    font-size: var(--font-size-2xs); color: var(--text-muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .cap-meta :global(svg) { flex-shrink: 0; }

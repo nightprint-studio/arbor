@@ -120,12 +120,12 @@
     color: var(--text-primary);
   }
   .version {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     font-family: var(--font-mono);
   }
   .desc {
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     line-height: 1.35;
     display: -webkit-box;
@@ -141,7 +141,7 @@
     margin-top: 2px;
   }
   .author {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     margin-left: auto;
     font-style: italic;

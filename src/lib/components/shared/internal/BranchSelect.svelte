@@ -96,7 +96,7 @@
     border-radius: var(--radius-md);
     color: var(--text-primary);
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     padding: 7px 10px;
     outline: none;
     cursor: pointer;

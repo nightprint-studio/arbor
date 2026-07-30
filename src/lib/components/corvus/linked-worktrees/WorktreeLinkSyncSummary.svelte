@@ -189,7 +189,7 @@
   .content { flex: 1; min-width: 0; }
 
   .title {
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--text-primary);
     overflow: hidden;
@@ -200,7 +200,7 @@
   .title .dim { color: var(--text-disabled); margin: 0 2px; }
   .title .branch {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
   }
 
@@ -209,7 +209,7 @@
     flex-wrap: wrap;
     gap: 5px;
     margin-top: 4px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
   }
   .stat {
     display: inline-flex; align-items: center; gap: 3px;
@@ -231,7 +231,7 @@
     background: var(--accent-subtle);
     border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
     color: var(--accent);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     cursor: pointer;
     flex-shrink: 0;

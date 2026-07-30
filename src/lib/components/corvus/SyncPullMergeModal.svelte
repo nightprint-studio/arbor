@@ -257,12 +257,12 @@
 
 <style>
   .body { display: flex; flex-direction: column; gap: 14px; }
-  .lead { margin: 0; font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
+  .lead { margin: 0; font-size: var(--font-size-sm); color: var(--text-secondary); line-height: 1.4; }
 
   section { display: flex; flex-direction: column; gap: 6px; }
   .group-title {
     display: inline-flex; align-items: center; gap: 5px;
-    font-size: 11px; font-weight: 600; color: var(--text-secondary);
+    font-size: var(--font-size-xs); font-weight: 600; color: var(--text-secondary);
     text-transform: uppercase; letter-spacing: 0.5px;
   }
 
@@ -274,37 +274,37 @@
     border-radius: var(--radius-sm);
   }
   .row-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-  .row-name { font-size: 12px; color: var(--text-primary); }
-  .row-sub { font-size: 10.5px; color: var(--text-muted); }
+  .row-name { font-size: var(--font-size-sm); color: var(--text-primary); }
+  .row-sub { font-size: var(--font-size-2xs); color: var(--text-muted); }
 
   .mod-list { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 0; }
   .mod-chip {
     display: inline-flex; align-items: center; gap: 4px;
-    padding: 2px 7px; font-size: 10.5px;
+    padding: 2px 7px; font-size: var(--font-size-2xs);
     background: var(--bg-elevated); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); color: var(--text-secondary);
     font-family: var(--font-code);
   }
   .mod-chip.missing { color: var(--text-muted); }
   .mod-tag {
-    font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.3px;
+    font-size: var(--font-size-3xs); text-transform: uppercase; letter-spacing: 0.3px;
     color: var(--accent); background: var(--accent-subtle);
     padding: 0 4px; border-radius: 999px;
   }
 
-  .hint { font-size: 10.5px; color: var(--text-muted); line-height: 1.4; }
+  .hint { font-size: var(--font-size-2xs); color: var(--text-muted); line-height: 1.4; }
 
   .missing-row {
     display: flex; align-items: center; gap: 6px;
-    font-size: 11px; color: var(--text-secondary);
+    font-size: var(--font-size-xs); color: var(--text-secondary);
     padding: 3px 2px;
   }
   .missing-name { color: var(--text-primary); }
-  .missing-url { color: var(--text-muted); font-family: var(--font-code); font-size: 10px; }
+  .missing-url { color: var(--text-muted); font-family: var(--font-code); font-size: var(--font-size-2xs); }
 
   .state {
     display: flex; align-items: center; gap: 8px; justify-content: center;
-    padding: 40px 20px; color: var(--text-muted); font-size: 12px;
+    padding: 40px 20px; color: var(--text-muted); font-size: var(--font-size-sm);
   }
   .state.err { color: var(--color-error, #e06c75); }
 </style>

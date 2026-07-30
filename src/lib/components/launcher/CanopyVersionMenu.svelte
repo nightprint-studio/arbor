@@ -47,7 +47,7 @@
   .trigger {
     display: flex; align-items: center; gap: 7px; padding: 9px 13px; border-radius: 9px;
     background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 200, 150, 0.16);
-    color: #d8cab8; font-family: var(--canopy-mono); font-size: 11.5px; cursor: pointer;
+    color: #d8cab8; font-family: var(--canopy-mono); font-size: var(--font-size-xs); cursor: pointer;
     transition: background 0.15s, border-color 0.15s; white-space: nowrap;
   }
   .trigger:hover, .trigger.open { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 200, 150, 0.28); }

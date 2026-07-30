@@ -107,12 +107,12 @@
     flex-shrink: 0;
   }
   .header-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
-  .header-sub  { font-size: 11px; color: var(--text-secondary); line-height: 1.4; white-space: normal; }
+  .header-sub  { font-size: var(--font-size-xs); color: var(--text-secondary); line-height: 1.4; white-space: normal; }
 
   .gi-body { display: flex; flex-direction: column; gap: 12px; }
   .gi-note {
     margin: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     line-height: 1.4;
   }
@@ -121,11 +121,11 @@
     background: var(--bg-base);
     padding: 1px 4px;
     border-radius: var(--radius-sm);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
   }
   .gi-error {
     display: flex; gap: 6px; align-items: flex-start;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--error);
     background: color-mix(in srgb, var(--error) 10%, transparent);
     border: 1px solid color-mix(in srgb, var(--error) 40%, transparent);

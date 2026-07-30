@@ -361,14 +361,14 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-  .hdr-state { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--text-muted); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
+  .hdr-state { display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-size-2xs); color: var(--text-muted); }
   .hdr-state.ready { color: var(--success); }
   .hdr-rebuild {
     display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
     background: transparent; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
     color: var(--text-secondary); cursor: pointer; padding: 3px 9px;
-    font-family: var(--font-ui-sans); font-size: 11px; font-weight: 500;
+    font-family: var(--font-ui-sans); font-size: var(--font-size-xs); font-weight: 500;
     transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
   }
   .hdr-rebuild:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-hover); border-color: var(--border-default); }
@@ -392,19 +392,19 @@
   }
   .stat:hover { border-color: var(--border-default); background: var(--bg-hover); }
   .stat.sel { border-color: var(--accent); background: var(--accent-subtle); }
-  .s-val { font-size: 15px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  .s-val { font-size: var(--font-size-lg); font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
   .stat.sel .s-val { color: var(--accent); }
-  .s-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); }
+  .s-label { font-size: var(--font-size-3xs); text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); }
 
   .kinds { padding: 0 12px 4px; flex-shrink: 0; }
   .search { padding: 6px 16px 8px; flex-shrink: 0; }
 
-  .state { display: flex; align-items: center; gap: 7px; padding: 14px 16px; font-size: 12px; color: var(--text-secondary); }
+  .state { display: flex; align-items: center; gap: 7px; padding: 14px 16px; font-size: var(--font-size-sm); color: var(--text-secondary); }
   .state.muted { color: var(--text-muted); }
   .unavail { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px; text-align: center; }
   .unavail :global(.unavail-icon) { color: var(--text-muted); margin-bottom: 4px; }
-  .unavail-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
-  .unavail-hint { font-size: 11.5px; color: var(--text-muted); max-width: 340px; line-height: 1.4; }
+  .unavail-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-secondary); }
+  .unavail-hint { font-size: var(--font-size-xs); color: var(--text-muted); max-width: 340px; line-height: 1.4; }
 
   .list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 8px 4px; }
   .row {
@@ -419,8 +419,8 @@
   .row :global(svg) { color: var(--text-muted); flex-shrink: 0; }
   .row :global(.r-go) { margin-left: auto; opacity: 0; }
   .row.openable:hover :global(.r-go), .row.openable.active :global(.r-go) { opacity: 0.7; }
-  .r-primary { font-size: 12px; color: var(--text-primary); font-weight: 500; flex-shrink: 0; }
-  .r-secondary { flex: 1; min-width: 0; font-size: 10.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+  .r-primary { font-size: var(--font-size-sm); color: var(--text-primary); font-weight: 500; flex-shrink: 0; }
+  .r-secondary { flex: 1; min-width: 0; font-size: var(--font-size-2xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 
-  .foot { flex-shrink: 0; padding: 6px 16px; font-size: 10.5px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); font-variant-numeric: tabular-nums; }
+  .foot { flex-shrink: 0; padding: 6px 16px; font-size: var(--font-size-2xs); color: var(--text-muted); border-top: 1px solid var(--border-subtle); font-variant-numeric: tabular-nums; }
 </style>

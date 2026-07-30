@@ -142,7 +142,7 @@
   }
 
   .match-count {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-code);
     color: var(--text-muted);
     background: var(--bg-overlay);
@@ -154,7 +154,7 @@
   }
 
   .no-match {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--error);
     padding: 0 4px;
     flex-shrink: 0;

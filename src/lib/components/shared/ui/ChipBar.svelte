@@ -115,8 +115,8 @@
                 border-color var(--transition-fast);
     min-height: 22px;
   }
-  .sz-md .chip { font-size: 11px; padding: 2px 10px; min-height: 22px; }
-  .sz-sm .chip { font-size: 10px; padding: 1px 7px;  min-height: 18px; }
+  .sz-md .chip { font-size: var(--font-size-xs); padding: 2px 10px; min-height: 22px; }
+  .sz-sm .chip { font-size: var(--font-size-2xs); padding: 1px 7px;  min-height: 18px; }
 
   .chip:hover:not(:disabled) {
     background: var(--bg-hover);
@@ -170,7 +170,7 @@
     border-radius: 999px;
     background: var(--bg-overlay);
     color: var(--text-disabled);
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     line-height: 1;
   }

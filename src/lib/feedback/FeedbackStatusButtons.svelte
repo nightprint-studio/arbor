@@ -176,7 +176,7 @@
     align-items: center;
     animation: spin 1.2s linear infinite;
   }
-  .job-done-dot { font-size: 8px; color: var(--success); }
+  .job-done-dot { font-size: var(--font-size-3xs); color: var(--success); }
 
   /* ── Parked-modals badge ──────────────────────────────────────────────────
      Same shape as the bell so the right cluster reads as a unified group. */
@@ -201,7 +201,7 @@
   .parked-badge:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
   .parked-badge-has   { color: var(--accent); }
   .parked-count {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     background: var(--accent);
     color: var(--text-on-accent);
@@ -234,7 +234,7 @@
   .notif-badge:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
   .notif-badge-has { color: var(--accent); }
   .notif-count {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     background: var(--accent);
     color: var(--text-on-accent);

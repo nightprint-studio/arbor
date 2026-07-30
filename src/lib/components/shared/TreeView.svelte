@@ -184,7 +184,7 @@
   .empty-state {
     padding: 18px 12px;
     text-align: center;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-style: italic;
   }
@@ -198,7 +198,7 @@
     min-height: 22px;
     padding-right: 6px;
     color: var(--text-primary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     cursor: default;
     transition: background var(--transition-fast);
   }
@@ -216,7 +216,7 @@
     /* Section rows look like IntelliJ's group headers: muted, slightly
        smaller, no selection highlight. They still expand on click. */
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.02em;
   }
@@ -252,7 +252,7 @@
   .badge {
     flex-shrink: 0;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     line-height: 1;
     padding: 2px 6px;
     border-radius: 999px;

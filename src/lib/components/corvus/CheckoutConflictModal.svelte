@@ -143,7 +143,7 @@
 
   p {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     line-height: 1.5;
     display: flex;
@@ -161,13 +161,13 @@
     border-radius: var(--radius-sm);
     padding: 1px 6px;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
   }
 
   .hint {
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
 </style>

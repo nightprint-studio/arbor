@@ -957,7 +957,7 @@
   }
   .big-action-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .big-action-title { font-weight: 600; font-size: var(--font-size-sm); }
-  .big-action-sub { font-size: 11px; color: var(--text-muted); }
+  .big-action-sub { font-size: var(--font-size-xs); color: var(--text-muted); }
 
   /* ── Fields ── */
   /* CodeMirror host: the editor (StudioTextPane) flexes to fill this box.
@@ -989,7 +989,7 @@
     border: 1px solid rgba(199,84,80,0.3);
     border-radius: var(--radius-sm);
     color: var(--error);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.45;
   }
   .inline-error :global(svg) { flex-shrink: 0; margin-top: 1px; }
@@ -1010,7 +1010,7 @@
     align-items: center;
     gap: 8px;
     font-weight: 600;
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     color: var(--text-primary);
     min-width: 0;
   }
@@ -1021,7 +1021,7 @@
     gap: 3px;
     padding: 1px 7px;
     border-radius: 999px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -1033,7 +1033,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
   .meta-stats .dot { opacity: 0.5; }
@@ -1068,7 +1068,7 @@
   }
   .ws-section-count {
     margin-left: auto;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     flex-shrink: 0;
   }
@@ -1080,7 +1080,7 @@
   }
   .ws-empty {
     padding: 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-style: italic;
   }
@@ -1108,7 +1108,7 @@
   }
   .shared-hint {
     margin-left: auto;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     flex-shrink: 0;
     overflow: hidden;
@@ -1158,7 +1158,7 @@
     gap: 3px;
     padding: 1px 7px;
     border-radius: 999px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -1189,7 +1189,7 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     cursor: pointer;
     flex-shrink: 0;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
@@ -1205,7 +1205,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     min-width: 0;
   }
   .meta-label {
@@ -1219,7 +1219,7 @@
   }
   .meta-value {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-secondary);
     background: var(--bg-overlay);
     border: 1px solid var(--border-subtle);
@@ -1251,7 +1251,7 @@
     border: none;
     border-radius: 4px;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);
@@ -1278,7 +1278,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     padding: 6px 10px;
     width: 100%;
     outline: none;
@@ -1315,7 +1315,7 @@
     color: var(--text-on-accent);
     border: 1px solid var(--accent);
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     cursor: pointer;
     flex-shrink: 0;
@@ -1344,7 +1344,7 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
   }
   .bundle-tree {
@@ -1369,7 +1369,7 @@
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     margin-top: 4px;
   }
   .bundle-line.group :global(svg) { color: var(--accent); }
@@ -1382,7 +1382,7 @@
   }
   .bl-count {
     margin-left: auto;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     flex-shrink: 0;
     font-variant-numeric: tabular-nums;

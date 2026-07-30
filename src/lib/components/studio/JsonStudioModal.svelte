@@ -312,9 +312,9 @@
         ariaLabel="Save .json with comments"
       >
         {#snippet header()}
-          <h3 style="margin: 0; font-size: 13px;">Save .json with JSONC features</h3>
+          <h3 style="margin: 0; font-size: var(--font-size-md);">Save .json with JSONC features</h3>
         {/snippet}
-        <div style="display: flex; flex-direction: column; gap: 10px; font-size: 12px; line-height: 1.5; color: var(--text-primary);">
+        <div style="display: flex; flex-direction: column; gap: 10px; font-size: var(--font-size-sm); line-height: 1.5; color: var(--text-primary);">
           <p style="margin: 0;">
             This file uses <strong>comments</strong> or <strong>trailing
             commas</strong>. Strict JSON parsers (most build tools,
@@ -324,15 +324,15 @@
           <div style="display: flex; flex-direction: column; gap: 6px;">
             <button type="button" class="js-jsonc-btn" style="text-align: left;" onclick={() => void onSaveAsJsonc()}>
               <strong>Save as .jsonc</strong>
-              <span style="display:block;color:var(--text-secondary);font-size:11px;">Rename the file to <code>.jsonc</code> and keep all JSONC features intact.</span>
+              <span style="display:block;color:var(--text-secondary);font-size:var(--font-size-xs);">Rename the file to <code>.jsonc</code> and keep all JSONC features intact.</span>
             </button>
             <button type="button" class="js-jsonc-btn" style="text-align: left;" onclick={() => void onStripAndSave()}>
               <strong>Strip & save</strong>
-              <span style="display:block;color:var(--text-secondary);font-size:11px;">Lose comments and trailing commas — pure JSON. Reversible via undo.</span>
+              <span style="display:block;color:var(--text-secondary);font-size:var(--font-size-xs);">Lose comments and trailing commas — pure JSON. Reversible via undo.</span>
             </button>
             <button type="button" class="js-jsonc-btn" style="text-align: left;" onclick={() => void onSaveAnyway()}>
               <strong>Save anyway</strong>
-              <span style="display:block;color:var(--text-secondary);font-size:11px;">Keep the <code>.json</code> path and the JSONC features. Strict parsers will break.</span>
+              <span style="display:block;color:var(--text-secondary);font-size:var(--font-size-xs);">Keep the <code>.json</code> path and the JSONC features. Strict parsers will break.</span>
             </button>
           </div>
           <div style="display: flex; justify-content: flex-end; padding-top: 4px;">
@@ -349,7 +349,7 @@
   .js-banner-wrap { padding: 6px 8px 0 8px; }
   .js-jsonc-banner {
     display: flex; align-items: center; gap: 12px;
-    padding: 8px 10px; border-radius: 6px; font-size: 11px; line-height: 1.45;
+    padding: 8px 10px; border-radius: 6px; font-size: var(--font-size-xs); line-height: 1.45;
   }
   .js-jsonc-banner-info { background: color-mix(in srgb, var(--info, #4a9eff) 14%, transparent); color: var(--text-primary); }
   .js-jsonc-banner-warn { background: color-mix(in srgb, var(--warning, #e5a050) 16%, transparent); color: var(--text-primary); }
@@ -357,7 +357,7 @@
   .js-jsonc-banner-actions { display: flex; gap: 6px; flex-shrink: 0; }
   .js-jsonc-btn {
     padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border-subtle);
-    background: var(--bg-overlay); color: var(--text-primary); font-size: 11px; cursor: pointer;
+    background: var(--bg-overlay); color: var(--text-primary); font-size: var(--font-size-xs); cursor: pointer;
   }
   .js-jsonc-btn:hover { background: var(--bg-hover); }
   .js-jsonc-btn-ghost { background: transparent; }
@@ -365,13 +365,13 @@
   .js-errors-wrap { padding: 16px; height: 100%; overflow: auto; }
   .js-errors-body {
     background: var(--bg-overlay); color: var(--text-primary); padding: 10px; border-radius: 4px;
-    font-family: var(--font-code); font-size: 11px; margin: 6px 0 0; overflow: auto; white-space: pre-wrap;
+    font-family: var(--font-code); font-size: var(--font-size-xs); margin: 6px 0 0; overflow: auto; white-space: pre-wrap;
   }
-  .js-errors-hint { color: var(--text-muted); font-size: 11px; margin: 6px 0 0; }
-  .js-bindings-empty { color: var(--text-muted); font-size: 11px; padding: 12px; margin: 0; line-height: 1.5; }
-  .js-schema-hint { color: var(--text-secondary); font-size: 11px; line-height: 1.5; margin: 0; }
+  .js-errors-hint { color: var(--text-muted); font-size: var(--font-size-xs); margin: 6px 0 0; }
+  .js-bindings-empty { color: var(--text-muted); font-size: var(--font-size-xs); padding: 12px; margin: 0; line-height: 1.5; }
+  .js-schema-hint { color: var(--text-secondary); font-size: var(--font-size-xs); line-height: 1.5; margin: 0; }
   .js-schema-hint code, .js-bindings-empty code {
-    font-family: var(--font-code); font-size: 11px; padding: 1px 4px; border-radius: 3px;
+    font-family: var(--font-code); font-size: var(--font-size-xs); padding: 1px 4px; border-radius: 3px;
     background: var(--bg-overlay); color: var(--text-primary);
   }
 </style>

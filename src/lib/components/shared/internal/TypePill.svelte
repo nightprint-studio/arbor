@@ -112,7 +112,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     letter-spacing: 0.5px;
     text-transform: uppercase;

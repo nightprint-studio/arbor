@@ -416,7 +416,7 @@
 <style>
   .commit-ref {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     padding: 1px 5px;
@@ -476,7 +476,7 @@
   }
   .note-ns {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--accent);
     background: var(--accent-subtle);
@@ -487,14 +487,14 @@
   }
   .note-date {
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     white-space: nowrap;
     cursor: default;
   }
   .note-ns-label {
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -507,7 +507,7 @@
     align-items: center;
     gap: 3px;
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     white-space: nowrap;
   }
   .status-label { opacity: 0.85; }
@@ -549,7 +549,7 @@
   }
   .note-content {
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     white-space: pre-wrap;
     word-break: break-word;
@@ -564,7 +564,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 1.55;
     padding: 7px 9px;
     resize: vertical;
@@ -581,7 +581,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     padding: 5px 9px;
     box-sizing: border-box;
     outline: none;
@@ -591,7 +591,7 @@
   .ns-input-error { border-color: var(--error, #e05252) !important; }
   .ns-error {
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--error, #e05252);
     margin-top: -4px;
   }

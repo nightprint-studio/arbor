@@ -61,7 +61,7 @@
   .message strong {
     font-weight: 600;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     background: var(--bg-overlay);
     padding: 1px 5px;
     border-radius: var(--radius-sm);
@@ -89,7 +89,7 @@
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);

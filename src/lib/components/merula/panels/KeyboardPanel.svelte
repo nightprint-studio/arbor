@@ -159,7 +159,7 @@
     background: var(--c);
     box-shadow: 0 0 10px color-mix(in srgb, var(--c) 60%, transparent);
   }
-  .wk .oct { font-size: 9px; font-weight: 600; color: var(--text-disabled); pointer-events: none; }
+  .wk .oct { font-size: var(--font-size-3xs); font-weight: 600; color: var(--text-disabled); pointer-events: none; }
   .wk.on .oct { color: color-mix(in srgb, #000 55%, var(--c)); }
 
   .bk {

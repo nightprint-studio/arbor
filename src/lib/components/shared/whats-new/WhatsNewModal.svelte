@@ -228,7 +228,7 @@
     flex-shrink: 0;
   }
   .header-version {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-code);
     color: var(--accent);
     background: var(--accent-subtle);
@@ -238,7 +238,7 @@
     flex-shrink: 0;
   }
   .header-date {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
     margin-left: 2px;
@@ -319,7 +319,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.12em;
@@ -343,7 +343,7 @@
   }
   .wn-hero-sub {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--font-size-md);
     line-height: 1.55;
     color: var(--text-secondary);
     max-width: 640px;
@@ -366,7 +366,7 @@
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 999px;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     cursor: pointer;
     transition:
@@ -399,7 +399,7 @@
     font-weight: 500;
   }
   .wn-chip-count {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-variant-numeric: tabular-nums;
     color: var(--text-muted);
     padding-left: 1px;
@@ -438,14 +438,14 @@
     flex-shrink: 0;
   }
   .wn-group-title {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-primary);
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
   .wn-group-count {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
     padding: 1px 7px;
@@ -502,7 +502,7 @@
     margin-top: 2px;
   }
   .wn-item-body {
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     line-height: 1.55;
     color: var(--text-secondary);
     overflow-wrap: anywhere;
@@ -553,13 +553,13 @@
   }
   .wn-empty-title {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--font-size-md);
     color: var(--text-primary);
     font-weight: 500;
   }
   .wn-empty-sub {
     margin: 0;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
 
@@ -573,7 +573,7 @@
     border: none;
     padding: 0;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     transition: color var(--transition-fast);
   }

@@ -302,14 +302,14 @@
 <style>
   .pb-clean {
     display: flex; align-items: center; gap: 6px;
-    padding: 14px 16px; color: var(--success); font-size: 12px;
+    padding: 14px 16px; color: var(--success); font-size: var(--font-size-sm);
   }
   .pb-tree { padding: 4px 0; }
 
   .pb-sec {
     display: flex; align-items: center; gap: 6px;
     width: 100%; text-align: left; box-sizing: border-box;
-    padding: 5px 12px 5px 6px; font-size: 12px; cursor: pointer;
+    padding: 5px 12px 5px 6px; font-size: var(--font-size-sm); cursor: pointer;
     background: transparent; border: none; font-family: var(--font-ui-sans);
     color: var(--text-primary); font-weight: 600;
   }
@@ -318,7 +318,7 @@
   .pb-sec-icon { display: flex; flex-shrink: 0; }
   .pb-sec-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pb-sec-count {
-    flex-shrink: 0; font-size: 10px; font-weight: 700; color: var(--text-muted);
+    flex-shrink: 0; font-size: var(--font-size-2xs); font-weight: 700; color: var(--text-muted);
     background: var(--bg-overlay); border-radius: var(--radius-sm); padding: 0 6px;
     font-variant-numeric: tabular-nums;
   }
@@ -328,7 +328,7 @@
   .pb-file {
     display: flex; align-items: center; gap: 6px;
     width: 100%; text-align: left; box-sizing: border-box;
-    padding: 4px 12px 4px 24px; font-size: 12px; cursor: pointer;
+    padding: 4px 12px 4px 24px; font-size: var(--font-size-sm); cursor: pointer;
     background: transparent; border: none; font-family: var(--font-ui-sans);
     color: var(--text-primary); font-weight: 500;
   }
@@ -339,7 +339,7 @@
   .pb-row {
     display: flex; align-items: center; gap: 8px;
     width: 100%; text-align: left; box-sizing: border-box;
-    padding: 4px 12px 4px 48px; font-size: 12px; cursor: pointer;
+    padding: 4px 12px 4px 48px; font-size: var(--font-size-sm); cursor: pointer;
     background: transparent; border: none; font-family: var(--font-ui-sans);
     transition: background var(--transition-fast);
   }
@@ -349,5 +349,5 @@
   .sev-warning { color: var(--warning); }
   .sev-info, .sev-hint { color: var(--info); }
   .pb-msg { flex-shrink: 0; max-width: 55%; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pb-detail { flex: 1; min-width: 0; font-size: 10.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pb-detail { flex: 1; min-width: 0; font-size: var(--font-size-2xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

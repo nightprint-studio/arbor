@@ -383,7 +383,7 @@
     height: 28px; padding: 0 12px;
     background: var(--bg-input); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md); color: var(--text-secondary);
-    font-size: 12px; cursor: pointer;
+    font-size: var(--font-size-sm); cursor: pointer;
     transition: border-color var(--transition-fast), color var(--transition-fast);
   }
   .bs-empty-action:hover { border-color: var(--border-focus, var(--accent)); color: var(--text-primary); }

@@ -112,7 +112,7 @@
   .progress-chip {
     margin-left: 8px;
     padding: 2px 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-code);
     background: var(--bg-overlay);
     border: 1px solid var(--border-subtle);

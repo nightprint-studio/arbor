@@ -248,7 +248,7 @@
   }
   .ops-meta { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
   .ops-elapsed {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--accent);
     font-variant-numeric: tabular-nums;
     padding: 1px 5px;

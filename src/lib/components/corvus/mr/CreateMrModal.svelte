@@ -333,7 +333,7 @@
     border-radius: var(--radius-md);
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     padding: 8px 10px;
     box-sizing: border-box;
     outline: none;
@@ -351,7 +351,7 @@
   }
   .field-branch { flex: 1; min-width: 0; }
   .branch-arrow {
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     color: var(--text-muted);
     padding-top: 22px;
     flex-shrink: 0;
@@ -397,18 +397,18 @@
     gap: 2px;
   }
   .check-title {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--text-primary);
   }
   .check-hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     line-height: 1.4;
   }
   .check-hint code {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     background: var(--bg-overlay);
     padding: 1px 4px;
     border-radius: var(--radius-sm);
@@ -456,7 +456,7 @@
   .merge-note {
     margin: 0;
     padding: 2px 0 2px 10px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     background: transparent;
     border: none;

@@ -156,14 +156,14 @@
   }
 
   .header-title {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-primary);
     letter-spacing: 0.01em;
   }
 
   .header-version {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-code);
     color: var(--accent);
     background: var(--accent-subtle);
@@ -175,7 +175,7 @@
 
   .header-sub {
     flex: 1;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
 
@@ -202,7 +202,7 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.7px;
@@ -230,13 +230,13 @@
   .card-row:hover { background: rgba(255,255,255,0.03); }
 
   .row-key {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     flex: 0 0 88px;
   }
 
   .row-val {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     flex: 1;
   }
@@ -249,7 +249,7 @@
   }
   .tech-chip {
     display: inline-block;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     padding: 2px 9px;
     border-radius: 999px;
@@ -286,7 +286,7 @@
   }
   .publisher-monogram {
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 700;
     letter-spacing: 0.5px;
     background: linear-gradient(135deg, #6b9eff 0%, #c8a8ff 100%);
@@ -301,14 +301,14 @@
     min-width: 0;
   }
   .publisher-name {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--text-primary);
     letter-spacing: 0.01em;
   }
   .publisher-tag {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
   }
 
@@ -336,7 +336,7 @@
   kbd {
     display: inline-block;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     background: var(--bg-overlay);
     border: 1px solid var(--border);
     border-bottom-width: 2px;
@@ -351,13 +351,13 @@
   .kbd-inline {
     min-width: 0;
     padding: 0 5px;
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     vertical-align: 1px;
   }
 
   .shortcuts-hint {
     margin: 8px 2px 0;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     line-height: 1.5;
   }
@@ -368,7 +368,7 @@
     justify-content: center;
     gap: 8px;
     width: 100%;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     letter-spacing: 0.01em;
   }
@@ -392,7 +392,7 @@
     border: 1px solid rgba(77, 120, 204, 0.3);
     border-radius: var(--radius-sm);
     color: var(--accent);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     cursor: pointer;
     transition: background var(--transition-fast), border-color var(--transition-fast);

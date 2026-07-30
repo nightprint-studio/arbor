@@ -107,7 +107,7 @@
     background: var(--bg-overlay);
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     white-space: nowrap;
     flex-shrink: 0;
     /* Titlebar hosts are drag regions — the pill must stay clickable. */
@@ -167,7 +167,7 @@
     gap: 5px;
     border: none;
     background: transparent;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
   .cp-status .cp-name { font-weight: 400; color: var(--text-secondary); }

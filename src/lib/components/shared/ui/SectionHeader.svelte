@@ -19,7 +19,7 @@
     margin-bottom: 20px;
   }
   .section-header h2 {
-    font-size: 18px;
+    font-size: var(--font-size-xl);
     font-weight: 600;
     color: var(--text-primary);
     margin: 0 0 4px;

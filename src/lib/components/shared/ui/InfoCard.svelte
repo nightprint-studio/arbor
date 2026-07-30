@@ -166,7 +166,7 @@
     flex-shrink: 0;
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
   }
-  .info-monogram { font-size: 15px; letter-spacing: 0.4px; }
+  .info-monogram { font-size: var(--font-size-lg); letter-spacing: 0.4px; }
 
   .info-main {
     flex: 1;
@@ -184,7 +184,7 @@
     min-width: 0;
   }
   .info-title {
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     font-weight: 600;
     color: var(--text-primary);
     overflow: hidden;
@@ -199,7 +199,7 @@
     align-items: center;
     gap: 6px;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.4;
     min-width: 0;
   }
@@ -214,7 +214,7 @@
   .info-meta-label {
     color: var(--text-disabled);
     text-transform: uppercase;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     letter-spacing: 0.5px;
     font-weight: 600;
   }
@@ -247,7 +247,7 @@
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
   }
   .info-action:hover:not(:disabled) {

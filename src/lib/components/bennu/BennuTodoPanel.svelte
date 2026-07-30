@@ -129,7 +129,7 @@
   .todo-bar { display: flex; align-items: center; gap: 5px; padding: 6px 10px; flex-shrink: 0; border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap; }
   .chip {
     display: inline-flex; align-items: center; gap: 4px;
-    font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
+    font-size: var(--font-size-2xs); font-weight: 700; letter-spacing: 0.3px;
     padding: 1px 7px; border-radius: 999px; cursor: pointer;
     background: var(--bg-overlay); border: 1px solid var(--border-subtle); color: var(--text-secondary);
   }
@@ -140,19 +140,19 @@
   .k-xxx { color: var(--error); }
   .k-hack { color: var(--text-secondary); }
 
-  .state { display: flex; align-items: center; gap: 7px; padding: 12px 14px; font-size: 12px; color: var(--text-secondary); }
+  .state { display: flex; align-items: center; gap: 7px; padding: 12px 14px; font-size: var(--font-size-sm); color: var(--text-secondary); }
   .todo-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--text-disabled); }
 
   .list { flex: 1; min-height: 0; overflow-y: auto; padding: 3px 0; }
   .grp {
     display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
     padding: 4px 10px; background: transparent; border: none; cursor: pointer;
-    font-size: 11.5px; color: var(--text-primary); font-family: var(--font-ui-sans);
+    font-size: var(--font-size-xs); color: var(--text-primary); font-family: var(--font-ui-sans);
   }
   .grp:hover { background: var(--bg-hover); }
   .grp :global(svg) { color: var(--text-muted); flex-shrink: 0; }
   .grp-name { font-weight: 500; }
-  .grp-n { font-size: 10px; color: var(--text-muted); }
+  .grp-n { font-size: var(--font-size-2xs); color: var(--text-muted); }
 
   .row {
     display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
@@ -160,7 +160,7 @@
     font-family: var(--font-ui-sans);
   }
   .row:hover { background: var(--bg-hover); }
-  .tag { flex-shrink: 0; font-size: 9px; font-weight: 700; letter-spacing: 0.3px; min-width: 42px; text-align: center; padding: 0 4px; border-radius: var(--radius-sm); background: var(--bg-overlay); }
-  .row-text { flex: 1; min-width: 0; font-size: 11.5px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row-line { font-family: var(--font-code); font-size: 10.5px; color: var(--text-muted); flex-shrink: 0; }
+  .tag { flex-shrink: 0; font-size: var(--font-size-3xs); font-weight: 700; letter-spacing: 0.3px; min-width: 42px; text-align: center; padding: 0 4px; border-radius: var(--radius-sm); background: var(--bg-overlay); }
+  .row-text { flex: 1; min-width: 0; font-size: var(--font-size-xs); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-line { font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted); flex-shrink: 0; }
 </style>

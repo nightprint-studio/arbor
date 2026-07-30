@@ -469,7 +469,7 @@
   }
 
   .search-empty {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     padding: 12px 14px;
     margin: 0;
@@ -481,7 +481,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--text-disabled);
     text-transform: uppercase;
@@ -497,7 +497,7 @@
     padding: 0 4px;
     background: var(--accent-subtle);
     color: var(--accent);
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     letter-spacing: 0;
     border-radius: var(--radius-sm);
@@ -546,7 +546,7 @@
     cursor: pointer;
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     text-align: left;
     transition: background var(--transition-fast), color var(--transition-fast);
     position: relative;
@@ -578,13 +578,13 @@
   /* ── Section header ─────────────────────────────────────────────── */
   .content :global(.section-header) { margin-bottom: 4px; }
   .content :global(.section-header h2) {
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     font-weight: 600;
     color: var(--text-primary);
     margin: 0 0 4px;
   }
   .content :global(.section-header p) {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     margin: 0;
     line-height: 1.5;
@@ -602,7 +602,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -623,7 +623,7 @@
   .content :global(.card-row:hover) { background: rgba(255,255,255,0.015); }
 
   .content :global(.card-row-note) {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     line-height: 1.55;
     padding: 8px 14px 10px;
@@ -652,7 +652,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     padding: 5px 8px;
     min-width: 160px;
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
@@ -700,7 +700,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 1.6;
     padding: 8px 10px;
     resize: vertical;
@@ -718,7 +718,7 @@
     height: 4px;
   }
   .content :global(.value-chip) {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-code);
     color: var(--text-secondary);
     background: var(--bg-overlay);
@@ -740,7 +740,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     background: var(--bg-input);
     transition: all var(--transition-fast);
@@ -765,7 +765,7 @@
     border-radius: var(--radius-md);
     padding: 10px 14px;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.55;
   }
   .content :global(.info-box svg) { flex-shrink: 0; margin-top: 1px; opacity: 0.7; }
@@ -778,7 +778,7 @@
     border: none;
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     cursor: pointer;
     transition: filter var(--transition-fast), opacity var(--transition-fast);
@@ -805,7 +805,7 @@
     background: transparent;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
@@ -844,20 +844,20 @@
     gap: 8px;
     padding: 36px 20px;
     color: var(--text-disabled);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     background: var(--bg-elevated);
     border: 1px dashed var(--border);
     border-radius: var(--radius-md);
     text-align: center;
   }
-  .content :global(.empty-hint) { font-size: 11px; color: var(--text-muted); max-width: 280px; line-height: 1.5; }
+  .content :global(.empty-hint) { font-size: var(--font-size-xs); color: var(--text-muted); max-width: 280px; line-height: 1.5; }
 
   .content :global(.loading-dots) { animation: pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
   /* ── Form ───────────────────────────────────────────────────────── */
   .content :global(.form-error) {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--error);
     margin: 0;
     padding: 0 2px;
@@ -868,14 +868,14 @@
     gap: 12px;
   }
   .content :global(.saved-label) {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--success, #6aab73);
   }
 
   /* ── Inline code ────────────────────────────────────────────────── */
   .content :global(code) {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-secondary);
     background: var(--bg-overlay);
     border: 1px solid var(--border-subtle);

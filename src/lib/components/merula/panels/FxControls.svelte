@@ -155,13 +155,13 @@
   .fx { padding: 2px 12px 4px; }
 
   .fx-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 0 6px; }
-  .fx-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); }
+  .fx-title { font-size: var(--font-size-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); }
 
   .fx-add {
     display: inline-flex; align-items: center; gap: 3px;
     padding: 2px 7px 2px 5px; border: 1px solid var(--border-subtle);
     background: var(--bg-input); border-radius: var(--radius-sm);
-    color: var(--text-secondary); font-size: 10.5px; cursor: pointer;
+    color: var(--text-secondary); font-size: var(--font-size-2xs); cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);
   }
   .fx-add:hover { background: var(--bg-hover); color: var(--text-primary); }
@@ -182,7 +182,7 @@
 
   .seg { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
   .seg-btn {
-    width: 26px; padding: 2px 0; font-size: 9px; font-weight: 600;
+    width: 26px; padding: 2px 0; font-size: var(--font-size-3xs); font-weight: 600;
     border: 1px solid var(--border-subtle); background: var(--bg-input);
     color: var(--text-muted); border-radius: var(--radius-sm); cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);
@@ -193,7 +193,7 @@
   .seg-btn:disabled { cursor: default; }
 
   .bknob { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-  .bval { font-size: 9px; color: var(--text-muted); font-family: var(--font-code); line-height: 1; }
+  .bval { font-size: var(--font-size-3xs); color: var(--text-muted); font-family: var(--font-code); line-height: 1; }
 
   .comp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 4px; padding: 2px 0 4px; justify-items: center; }
 
@@ -208,7 +208,7 @@
   .fx-rm:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
   .fx-rm:disabled { cursor: default; opacity: 0.5; }
 
-  .fx-empty { margin: 2px 0 4px; font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+  .fx-empty { margin: 2px 0 4px; font-size: var(--font-size-xs); color: var(--text-muted); line-height: 1.4; }
   .fx-link { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
   .fx-link:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); border-radius: 2px; }
 </style>

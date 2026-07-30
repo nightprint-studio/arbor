@@ -128,7 +128,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -141,7 +141,7 @@
     color: var(--text-primary);
   }
   .cg-hint {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     margin-top: 2px;
     min-height: 1em;

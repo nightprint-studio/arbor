@@ -268,7 +268,7 @@
   }
 
   .wz-title {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -329,7 +329,7 @@
 
   .wz-caption {
     padding: 9px 2px 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     text-align: center;
     min-height: 18px;

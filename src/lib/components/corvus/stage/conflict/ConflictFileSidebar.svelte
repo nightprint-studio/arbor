@@ -213,7 +213,7 @@
   }
   .sidebar-label {
     flex: 1;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -333,7 +333,7 @@
     width: 16px;
     height: 16px;
     border-radius: var(--radius-sm);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     line-height: 16px;
     text-align: center;
@@ -351,7 +351,7 @@
     font-size: var(--font-size-sm); color: var(--text-primary);
     font-family: var(--font-ui-sans); min-width: 0; flex: 1;
   }
-  .file-saving { font-size: 10px; color: var(--text-muted); }
+  .file-saving { font-size: var(--font-size-2xs); color: var(--text-muted); }
 
   .blocking-decision-badge {
     flex-shrink: 0;
@@ -361,7 +361,7 @@
     min-width: 14px;
     height: 14px;
     padding: 0 4px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     font-family: var(--font-code);
     border-radius: var(--radius-sm);
@@ -386,7 +386,7 @@
   .next-btn {
     display: flex; align-items: center; gap: 4px;
     padding: 6px 12px; background: none; border: none; cursor: pointer;
-    font-size: 11px; font-family: var(--font-ui-sans); width: 100%;
+    font-size: var(--font-size-xs); font-family: var(--font-ui-sans); width: 100%;
     transition: background var(--transition-fast);
   }
   :global(.mode-merge) .next-btn { color: var(--accent); }

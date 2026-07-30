@@ -450,7 +450,7 @@
     border: none;
     color: var(--accent);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     padding: 0;
     opacity: 0.85;
@@ -466,7 +466,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     cursor: pointer;
     user-select: none;
@@ -476,7 +476,7 @@
     width: 13px; height: 13px;
     cursor: pointer; flex-shrink: 0;
   }
-  .opt-note { color: var(--text-disabled); font-size: 10px; font-family: var(--font-code); }
+  .opt-note { color: var(--text-disabled); font-size: var(--font-size-2xs); font-family: var(--font-code); }
 
   /* Error panel */
   .error-panel {
@@ -494,7 +494,7 @@
   .error-text {
     margin: 0;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--error);
     white-space: pre-wrap;
     word-break: break-word;
@@ -512,7 +512,7 @@
     border: 1px solid color-mix(in srgb, var(--status-warning, #fbbf24) 28%, transparent);
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.45;
   }
   .inline-warn :global(svg) {
@@ -522,7 +522,7 @@
   }
   .inline-warn code {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     background: var(--bg-overlay);
     border: 1px solid var(--border-subtle);
     padding: 0 4px;
@@ -532,7 +532,7 @@
 
   /* Composed-path preview under the Folder name field */
   .path-preview {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     margin-top: 2px;
     overflow: hidden;
@@ -541,7 +541,7 @@
   }
   .path-preview code {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-secondary);
     background: var(--bg-overlay);
     border: 1px solid var(--border-subtle);
@@ -554,7 +554,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--error);
   }
 </style>

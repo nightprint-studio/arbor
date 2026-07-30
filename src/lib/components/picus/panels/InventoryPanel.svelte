@@ -122,7 +122,7 @@
 <style>
   .ip-name {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -130,7 +130,7 @@
 
   .ip-hint {
     padding: 10px 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--text-muted);
   }

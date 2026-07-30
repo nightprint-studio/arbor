@@ -412,7 +412,7 @@
 
   .title-input {
     width: 100%; padding: 10px 12px;
-    font-size: 15px; font-weight: 500;
+    font-size: var(--font-size-lg); font-weight: 500;
     font-family: var(--font-ui-sans);
     background: transparent; border: none; border-bottom: 1px solid var(--border-subtle);
     border-radius: 0;
@@ -425,7 +425,7 @@
 
   .desc-input {
     flex: 1; width: 100%; min-height: 140px; padding: 8px 12px;
-    font-size: 12px; line-height: 1.65;
+    font-size: var(--font-size-sm); line-height: 1.65;
     font-family: var(--font-ui-sans);
     background: transparent; border: none;
     color: var(--text-secondary); outline: none;
@@ -452,7 +452,7 @@
     padding: 2px 4px; min-height: 30px;
   }
   .prop-label {
-    font-size: 11px; color: var(--text-muted);
+    font-size: var(--font-size-xs); color: var(--text-muted);
     width: 60px; flex-shrink: 0; user-select: none;
   }
 
@@ -461,7 +461,7 @@
   .prop-btn {
     display: flex; align-items: center; gap: 4px;
     width: 100%; padding: 4px 6px;
-    font-size: 11px; font-family: var(--font-ui-sans);
+    font-size: var(--font-size-xs); font-family: var(--font-ui-sans);
     background: transparent; border: 1px solid transparent;
     border-radius: var(--radius-sm);
     color: var(--text-muted); cursor: pointer; text-align: left;
@@ -474,7 +474,7 @@
   .prop-val { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .status-icon-wrap { display: flex; align-items: center; flex-shrink: 0; line-height: 0; }
   .color-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .prio-icon { font-size: 11px; flex-shrink: 0; }
+  .prio-icon { font-size: var(--font-size-xs); flex-shrink: 0; }
   .label-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
   /* Dropdown panel */
@@ -492,13 +492,13 @@
 
   .drop-group {
     padding: 5px 8px 2px;
-    font-size: 9px; font-weight: 600; letter-spacing: 0.5px;
+    font-size: var(--font-size-3xs); font-weight: 600; letter-spacing: 0.5px;
     text-transform: uppercase; color: var(--text-muted);
   }
   .drop-item {
     display: flex; align-items: center; gap: 6px;
     width: 100%; padding: 5px 8px; text-align: left;
-    font-size: 11px; font-family: var(--font-ui-sans);
+    font-size: var(--font-size-xs); font-family: var(--font-ui-sans);
     color: var(--text-primary); background: transparent; border: none;
     border-radius: var(--radius-sm); cursor: pointer;
     transition: background var(--transition-fast);
@@ -508,13 +508,13 @@
   :global(.drop-check) { margin-left: auto; color: var(--accent); flex-shrink: 0; }
 
   .team-key {
-    font-family: var(--font-code); font-size: 9px;
+    font-family: var(--font-code); font-size: var(--font-size-3xs);
     color: var(--text-muted); background: var(--bg-elevated);
     padding: 0 3px; border-radius: 2px; flex-shrink: 0;
     margin-right: 2px;
   }
   .ms-date {
-    margin-left: auto; font-size: 10px;
+    margin-left: auto; font-size: var(--font-size-2xs);
     color: var(--text-muted); font-variant-numeric: tabular-nums;
     flex-shrink: 0;
   }
@@ -526,7 +526,7 @@
   }
   .label-chip {
     display: inline-flex; align-items: center; gap: 3px;
-    font-size: 10px; font-weight: 500;
+    font-size: var(--font-size-2xs); font-weight: 500;
     padding: 2px 3px 2px 6px; border-radius: var(--radius-sm);
   }
   .chip-remove {
@@ -548,7 +548,7 @@
      rest of the modal's prop rows. */
   .prop-date-input {
     flex: 1; width: 100%; padding: 4px 6px;
-    font-size: 11px; font-family: var(--font-ui-sans);
+    font-size: var(--font-size-xs); font-family: var(--font-ui-sans);
     background: transparent; border: 1px solid transparent;
     border-radius: var(--radius-sm); color: var(--text-primary); outline: none;
     transition: background var(--transition-fast), border-color var(--transition-fast);
@@ -565,7 +565,7 @@
   /* Error bar */
   .modal-error {
     display: flex; align-items: center; gap: 6px;
-    padding: 8px 14px; font-size: 11px;
+    padding: 8px 14px; font-size: var(--font-size-xs);
     color: var(--status-error, #f87171);
     background: rgba(248,113,113,0.08);
     border-top: 1px solid rgba(248,113,113,0.2);

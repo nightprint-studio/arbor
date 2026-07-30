@@ -668,11 +668,11 @@
   /* Header content */
   .header-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .title-text {
-    font-size: 12px; font-weight: 600; color: var(--text-primary);
+    font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary);
     text-transform: uppercase; letter-spacing: 0.04em;
   }
   .title-sub {
-    font-size: 11px; color: var(--text-muted);
+    font-size: var(--font-size-xs); color: var(--text-muted);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
 
@@ -695,12 +695,12 @@
   .search-wrap :global(.search-ic) { color: var(--text-muted); flex-shrink: 0; }
   .search-wrap input {
     flex: 1; background: transparent; border: none; outline: none;
-    color: var(--text-primary); font-family: var(--font-ui-sans); font-size: 12px;
+    color: var(--text-primary); font-family: var(--font-ui-sans); font-size: var(--font-size-sm);
     min-width: 0;
   }
   .clear {
     background: transparent; border: none; color: var(--text-muted);
-    font-size: 14px; cursor: pointer; padding: 0 4px;
+    font-size: var(--font-size-lg); cursor: pointer; padding: 0 4px;
   }
   .clear:hover { color: var(--text-primary); }
 
@@ -714,7 +714,7 @@
     border-radius: var(--radius-sm);
     padding: 3px 8px;
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     text-align: left;
     transition: border-color var(--transition-fast);
@@ -730,7 +730,7 @@
     border-radius: var(--radius-sm);
     padding: 3px 8px;
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast),
                 border-color var(--transition-fast);
@@ -765,7 +765,7 @@
     border-bottom: 1px solid var(--border-subtle);
     background: var(--bg-elevated);
     color: var(--text-secondary);
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+    font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: 0.04em;
     font-weight: 600;
     flex-shrink: 0;
   }
@@ -776,7 +776,7 @@
   .pane-count {
     margin-left: auto;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     text-transform: none; letter-spacing: 0;
     background: var(--bg-overlay);
@@ -790,7 +790,7 @@
   .pane-empty {
     display: flex; align-items: center; justify-content: center;
     gap: 8px; padding: 40px 16px;
-    color: var(--text-muted); font-size: 12px;
+    color: var(--text-muted); font-size: var(--font-size-sm);
   }
 
   /* Group rows */
@@ -800,7 +800,7 @@
     padding: 4px 12px;
     background: transparent; border: none;
     color: var(--text-secondary);
-    font-family: var(--font-ui-sans); font-size: 11px; font-weight: 600;
+    font-family: var(--font-ui-sans); font-size: var(--font-size-xs); font-weight: 600;
     cursor: pointer;
     text-transform: uppercase; letter-spacing: 0.04em;
   }
@@ -808,7 +808,7 @@
   .group-label { flex: 1; text-align: left; }
   .group-count {
     color: var(--text-muted);
-    font-family: var(--font-code); font-size: 10px;
+    font-family: var(--font-code); font-size: var(--font-size-2xs);
     background: var(--bg-overlay); padding: 1px 6px; border-radius: 999px;
   }
 
@@ -820,7 +820,7 @@
     gap: 8px;
     padding: 4px 12px 4px 28px;
     cursor: pointer;
-    font-family: var(--font-code); font-size: 11px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
     color: var(--text-primary);
     border-left: 2px solid transparent;
   }
@@ -839,7 +839,7 @@
     background: var(--bg-overlay);
     padding: 1px 5px;
     border-radius: var(--radius-sm);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
   }
   .ver-tag.ver-multi { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
   .ver-tag.ver-unknown { color: var(--text-muted); }
@@ -847,7 +847,7 @@
   .dep-tags { display: inline-flex; gap: 4px; align-items: center; }
 
   .scope-chip {
-    font-family: var(--font-code); font-size: 9px;
+    font-family: var(--font-code); font-size: var(--font-size-3xs);
     padding: 1px 5px;
     border-radius: 999px;
     border: 1px solid transparent;
@@ -873,7 +873,7 @@
 
   .badge {
     display: inline-flex; align-items: center; gap: 3px;
-    font-family: var(--font-code); font-size: 9px;
+    font-family: var(--font-code); font-size: var(--font-size-3xs);
     padding: 1px 5px;
     border-radius: var(--radius-sm);
     border: 1px solid transparent;
@@ -885,7 +885,7 @@
   .usages-summary {
     padding: 8px 14px;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     border-bottom: 1px solid var(--border-subtle);
   }
   .usage-block {
@@ -895,18 +895,18 @@
   .usage-block:last-child { border-bottom: none; }
   .usage-header {
     display: flex; align-items: center; gap: 8px;
-    font-family: var(--font-code); font-size: 11px;
+    font-family: var(--font-code); font-size: var(--font-size-xs);
     color: var(--text-primary);
     margin-bottom: 4px;
   }
   .usage-idx {
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
   }
   .usage-version { font-weight: 500; }
   .usage-path {
     display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
-    font-family: var(--font-code); font-size: 10.5px;
+    font-family: var(--font-code); font-size: var(--font-size-2xs);
     color: var(--text-secondary);
   }
   .usage-path :global(.path-arrow) { color: var(--text-muted); }
@@ -926,7 +926,7 @@
     padding: 6px 14px;
     border-top: 1px solid var(--border-subtle);
     background: var(--bg-elevated);
-    font-family: var(--font-ui-sans); font-size: 11px;
+    font-family: var(--font-ui-sans); font-size: var(--font-size-xs);
     color: var(--text-secondary);
     flex-shrink: 0;
   }
@@ -1001,8 +1001,8 @@
     margin-top: 1px;
   }
   .ri-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .ri-title { font-size: 12px; font-weight: 500; }
-  .ri-sub   { font-size: 10.5px; color: var(--text-muted); line-height: 1.35; }
+  .ri-title { font-size: var(--font-size-sm); font-weight: 500; }
+  .ri-sub   { font-size: var(--font-size-2xs); color: var(--text-muted); line-height: 1.35; }
   /* Outdated / Conflicts toggles — match the footer + badge palette so the
      same concept gets the same colour wherever it surfaces. The .active
      state already paints the whole button in the accent tint; we only
@@ -1019,9 +1019,9 @@
     text-align: left;
   }
   .state-title {
-    font-size: 13px; font-weight: 600; color: var(--text-primary);
+    font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary);
     margin-bottom: 4px;
   }
-  .state-sub  { font-size: 11px; color: var(--text-muted); max-width: 480px; line-height: 1.5; }
+  .state-sub  { font-size: var(--font-size-xs); color: var(--text-muted); max-width: 480px; line-height: 1.5; }
   .state-error { color: var(--error); }
 </style>

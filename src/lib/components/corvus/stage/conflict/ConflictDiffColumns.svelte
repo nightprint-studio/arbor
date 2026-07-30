@@ -285,11 +285,11 @@
   .theme-merge .bcol-header-theirs { border-top: 2px solid rgba(77,120,204,.5); }
 
   .bcol-header-title {
-    font-size: 11px; font-weight: 600; color: var(--text-primary);
+    font-size: var(--font-size-xs); font-weight: 600; color: var(--text-primary);
     font-family: var(--font-ui-sans);
   }
   .bcol-header-sub {
-    font-size: 10px; color: var(--text-muted); font-family: var(--font-ui-sans);
+    font-size: var(--font-size-2xs); color: var(--text-muted); font-family: var(--font-ui-sans);
   }
 
   .bcol-header-cb {
@@ -318,7 +318,7 @@
     border-top: 1px dashed var(--border-subtle);
     border-bottom: 1px dashed var(--border-subtle);
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-ui-sans);
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);
@@ -337,14 +337,14 @@
     min-width: 36px;
     padding: 0 8px;
     text-align: right;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-code);
     color: var(--text-disabled);
     user-select: none;
     line-height: 1.6;
   }
   .brow-code {
-    font-family: var(--font-code); font-size: 12px; line-height: 1.6;
+    font-family: var(--font-code); font-size: var(--font-size-sm); line-height: 1.6;
     color: var(--text-primary); white-space: pre;
     flex: 0 0 auto;
   }
@@ -378,7 +378,7 @@
     justify-content: flex-end;
   }
   .bregion-label {
-    font-size: 10px; font-weight: 600; color: var(--warning);
+    font-size: var(--font-size-2xs); font-weight: 600; color: var(--warning);
     font-family: var(--font-ui-sans);
     white-space: nowrap;
   }
@@ -393,7 +393,7 @@
     border-radius: var(--radius-sm);
     cursor: pointer;
     color: var(--text-secondary);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     font-family: var(--font-ui-sans);
     letter-spacing: 0.03em;
@@ -441,7 +441,7 @@
   .bregion-sep { background: var(--border-subtle); width: 4px; }
   .bregion-empty {
     padding: 6px 12px 6px 42px;
-    font-size: 11px; color: var(--text-disabled);
+    font-size: var(--font-size-xs); color: var(--text-disabled);
     font-family: var(--font-ui-sans); font-style: italic;
   }
 

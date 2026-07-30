@@ -150,7 +150,7 @@
     background: var(--error-subtle);
     border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
     border-radius: var(--radius-md);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.6;
   }
   .ps-errors-head {
@@ -164,7 +164,7 @@
 
   .ps-section { display: flex; align-items: center; gap: 8px; }
   .ps-section-title {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -185,7 +185,7 @@
     align-items: center;
     gap: 5px;
     max-width: 460px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.4;
     color: var(--text-muted);
   }

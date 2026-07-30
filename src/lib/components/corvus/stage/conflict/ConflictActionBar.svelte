@@ -110,7 +110,7 @@
   .cnav-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
   .cnav-counter {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     min-width: 40px;
     text-align: center;
@@ -126,7 +126,7 @@
     border: 1px solid var(--accent);
     background: var(--accent);
     color: var(--text-on-accent);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     font-family: var(--font-ui-sans);
     cursor: pointer;
@@ -138,7 +138,7 @@
   .cnav-staged {
     display: flex; align-items: center; gap: 5px;
     padding: 3px 10px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--success);
     font-family: var(--font-ui-sans);

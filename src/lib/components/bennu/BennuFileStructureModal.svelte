@@ -179,12 +179,12 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-  .hdr-file { font-family: var(--font-code); font-size: 11px; color: var(--text-muted); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
+  .hdr-file { font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-muted); }
 
   .fs { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .search { padding: 10px 12px 8px; flex-shrink: 0; }
-  .state { padding: 14px 16px; font-size: 12px; color: var(--text-muted); }
+  .state { padding: 14px 16px; font-size: var(--font-size-sm); color: var(--text-muted); }
 
   .list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 6px 8px; }
   .row {
@@ -195,10 +195,10 @@
   }
   .row.active { background: var(--bg-selected); }
   .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-  .r-label { font-size: 12.5px; color: var(--text-primary); flex-shrink: 0; white-space: nowrap; }
+  .r-label { font-size: var(--font-size-sm); color: var(--text-primary); flex-shrink: 0; white-space: nowrap; }
   .r-detail {
-    flex: 1; min-width: 0; font-family: var(--font-code); font-size: 11px; color: var(--text-muted);
+    flex: 1; min-width: 0; font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .r-kind { flex-shrink: 0; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-disabled); }
+  .r-kind { flex-shrink: 0; font-size: var(--font-size-3xs); text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-disabled); }
 </style>

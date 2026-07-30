@@ -267,7 +267,7 @@ end)`, '.lua')}</pre>
     gap: 4px;
     padding: 1px 9px 1px 8px;
     border-radius: 99px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     border: 1px solid;
     line-height: 1.5;
@@ -280,7 +280,7 @@ end)`, '.lua')}</pre>
     padding: 0 4px;
     background: var(--bg-overlay);
     border-radius: 99px;
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     font-style: normal;
     font-weight: 700;
   }

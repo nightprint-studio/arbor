@@ -114,7 +114,7 @@
   }
   .sxp-header {
     padding: 4px 8px 6px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -133,7 +133,7 @@
     border-radius: var(--radius-sm);
     cursor: pointer;
     text-align: left;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
   .sxp-item:hover { background: var(--bg-hover); }
   .sxp-item-icon { display: inline-flex; align-items: center; flex-shrink: 0; }
@@ -147,14 +147,14 @@
   }
   .sxp-item-path {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     flex-shrink: 0;
   }
   .sxp-item-chevron,
   .sxp-item-open {
     color: var(--accent);
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     line-height: 1;
     margin-left: 2px;
   }

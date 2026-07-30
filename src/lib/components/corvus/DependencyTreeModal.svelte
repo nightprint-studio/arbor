@@ -128,14 +128,14 @@
     gap: 1px;
   }
   .title-text {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--text-primary);
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
   .title-sub {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -170,14 +170,14 @@
     outline: none;
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     min-width: 0;
   }
   .clear {
     background: transparent;
     border: none;
     color: var(--text-muted);
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     cursor: pointer;
     padding: 0 4px;
   }
@@ -197,7 +197,7 @@
     gap: 10px;
     padding: 40px 16px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     text-align: center;
   }
   .state-error { color: var(--error); }

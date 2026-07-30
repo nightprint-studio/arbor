@@ -917,7 +917,7 @@
     background: var(--bg-overlay);
     padding: 0 5px;
     border-radius: 999px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     transition: background var(--transition-fast), color var(--transition-fast);
   }
@@ -1010,7 +1010,7 @@
     width: 16px;
     height: 16px;
     border-radius: var(--radius-sm);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     line-height: 16px;
     text-align: center;
@@ -1101,7 +1101,7 @@
     display: inline-block;
     padding: 0 6px;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
     background: var(--accent-subtle);
     border-radius: var(--radius-sm);
@@ -1112,7 +1112,7 @@
     gap: 6px;
     padding: 5px 12px;
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     cursor: pointer;
     background: transparent;

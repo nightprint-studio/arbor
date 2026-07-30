@@ -106,7 +106,7 @@
   }
 
   .dc-hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-style: italic;
   }

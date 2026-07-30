@@ -49,7 +49,7 @@
     border-radius: var(--radius-md);
     overflow: hidden;
     background: var(--bg-input);
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
   }
   .merula-code :global(.cm-editor) { background: transparent; }
   .merula-code :global(.cm-scroller) {

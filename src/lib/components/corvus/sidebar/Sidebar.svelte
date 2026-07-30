@@ -504,7 +504,7 @@
   .tag-name { flex: 1; min-width: 0; }
 
   .nearest-pill {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     letter-spacing: 0.4px;
     color: var(--color-tag);
@@ -516,7 +516,7 @@
   }
 
   .annotated-dot {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     letter-spacing: 0.3px;
     color: var(--text-muted);
@@ -530,7 +530,7 @@
 
   /* Same look as the branch local-only badge for visual consistency. */
   .local-only-badge {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     letter-spacing: 0.3px;
     color: var(--color-tag);
@@ -594,7 +594,7 @@
   }
 
   .changes-summary {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     flex: 1;
   }
@@ -611,7 +611,7 @@
     border: none;
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     cursor: pointer;
     transition: background var(--transition-fast), opacity var(--transition-fast);

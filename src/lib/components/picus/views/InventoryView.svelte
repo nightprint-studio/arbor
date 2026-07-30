@@ -127,15 +127,11 @@
 </script>
 
 <div class="iv">
+  <!-- No title and no standing explanation: the tab is already called Inventory,
+       and how to read the matrix is one collapsible away, below — where it can be
+       opened once and closed for good instead of costing four lines of the panel
+       every time the tab is looked at. What is left is the part that changes. -->
   <header class="iv-head">
-    <div>
-      <h1>Inventory</h1>
-      <p>
-        Every object the scripts define or touch, against every engine and role that could
-        define it. A marked dash is one side staying silent about something another side
-        installs. Open a row for the folder-by-folder detail behind its columns.
-      </p>
-    </div>
     <div class="iv-summary">
       {#if picusProjectStore.analyzing}
         <span class="iv-working"><Spinner size={12} /> Indexing…</span>
@@ -240,20 +236,18 @@
   }
   .iv > :global(*) { flex-shrink: 0; }
 
-  .iv-head { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
-  .iv-head h1 { font-size: 16px; font-weight: 600; margin-bottom: 3px; }
-  .iv-head p { font-size: 12px; line-height: 1.55; color: var(--text-muted); max-width: 70ch; }
+  .iv-head { display: flex; align-items: center; justify-content: flex-end; gap: 20px; flex-wrap: wrap; }
 
   .iv-summary { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; margin-left: auto; }
-  .iv-gaps { display: inline-flex; align-items: center; gap: 5px; color: var(--error); font-size: 12px; font-weight: 600; }
-  .iv-ok { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-size: 12px; font-weight: 600; }
-  .iv-working { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 12px; }
+  .iv-gaps { display: inline-flex; align-items: center; gap: 5px; color: var(--error); font-size: var(--font-size-sm); font-weight: 600; }
+  .iv-ok { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-size: var(--font-size-sm); font-weight: 600; }
+  .iv-working { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: var(--font-size-sm); }
   .iv-link {
     background: none;
     border: none;
     padding: 0;
     color: var(--accent);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     text-decoration: underline;
     text-underline-offset: 2px;
@@ -266,5 +260,5 @@
      split is that each table reads as its own answer. */
   .iv-tables { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
-  .iv-note { font-size: 11.5px; line-height: 1.55; color: var(--text-muted); max-width: 90ch; }
+  .iv-note { font-size: var(--font-size-xs); line-height: 1.55; color: var(--text-muted); max-width: 90ch; }
 </style>

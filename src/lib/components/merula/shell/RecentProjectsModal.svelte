@@ -82,11 +82,11 @@
   .rp-item.current { border-color: var(--accent-subtle); }
   .rp-icon { display: flex; color: var(--accent); flex-shrink: 0; }
   .rp-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .rp-name { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .rp-name { display: flex; align-items: center; gap: 7px; font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
   .rp-open {
-    font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px;
+    font-size: var(--font-size-3xs); text-transform: uppercase; letter-spacing: 0.4px;
     color: var(--accent); background: var(--accent-subtle);
     border-radius: var(--radius-sm); padding: 1px 5px;
   }
-  .rp-audience { font-size: 11.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rp-audience { font-size: var(--font-size-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

@@ -132,14 +132,14 @@
   .iu { display: flex; flex-direction: column; gap: 6px; }
 
   .iu-head { display: flex; align-items: baseline; gap: 8px; }
-  .iu-title { font-size: 11.5px; font-weight: 600; }
-  .iu-count { font-size: 10.5px; color: var(--text-muted); }
+  .iu-title { font-size: var(--font-size-xs); font-weight: 600; }
+  .iu-count { font-size: var(--font-size-2xs); color: var(--text-muted); }
 
   .iu-loading {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
 
@@ -156,7 +156,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     text-align: left;
     cursor: pointer;
   }
@@ -174,7 +174,7 @@
     margin-left: auto;
     flex-shrink: 0;
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     text-transform: uppercase;
     letter-spacing: 0.05em;

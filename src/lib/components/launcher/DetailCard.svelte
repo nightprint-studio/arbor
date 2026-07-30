@@ -103,14 +103,14 @@
   .head { display: flex; align-items: center; gap: 12px; }
   .ident { flex: 1; min-width: 0; }
   .name-row { display: flex; align-items: center; gap: 8px; }
-  .name { font-family: var(--canopy-display); font-weight: 600; font-size: 16px; color: #eef2f7; }
-  .bird { font-size: 11px; color: #c2a98f; font-style: italic; }
-  .role { font-size: 12px; color: #b39d88; margin-top: 2px; }
+  .name { font-family: var(--canopy-display); font-weight: 600; font-size: var(--font-size-xl); color: #eef2f7; }
+  .bird { font-size: var(--font-size-xs); color: #c2a98f; font-style: italic; }
+  .role { font-size: var(--font-size-sm); color: #b39d88; margin-top: 2px; }
   .status { text-align: right; }
   .status-row { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
   .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; display: inline-block; }
-  .status-label { font-size: 11px; color: #c5b39f; }
-  .ver { font-family: var(--canopy-mono); font-size: 11.5px; color: #b39d88; margin-top: 3px; }
+  .status-label { font-size: var(--font-size-xs); color: #c5b39f; }
+  .ver { font-family: var(--canopy-mono); font-size: var(--font-size-xs); color: #b39d88; margin-top: 3px; }
 
   .actions { display: flex; gap: 8px; margin-top: 12px; }
   .act-main { flex: 1; display: flex; }

@@ -185,7 +185,7 @@
 {/if}
 
 <style>
-  .lv-title { font-family: var(--font-code); font-size: 12px; }
+  .lv-title { font-family: var(--font-code); font-size: var(--font-size-sm); }
 
   .lv-body {
     display: flex;
@@ -200,7 +200,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-muted);
   }
 
@@ -214,7 +214,7 @@
     border-radius: var(--radius-sm);
     background: var(--bg-base);
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.6;
     white-space: pre-wrap;
     word-break: break-word;

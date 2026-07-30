@@ -26,7 +26,7 @@
     gap: 3px;
     padding: 1px 6px;
     border-radius: 999px;
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.3px;

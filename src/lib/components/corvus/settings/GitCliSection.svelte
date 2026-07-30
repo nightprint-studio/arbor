@@ -219,12 +219,12 @@
     color: var(--text-secondary);
     padding: 1px 6px;
     border-radius: 999px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     text-transform: lowercase;
   }
   .path {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     word-break: break-all;
   }
@@ -266,7 +266,7 @@
     color: var(--text-secondary);
     padding: 2px 8px;
     border-radius: var(--radius-sm);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     cursor: pointer;
     flex-shrink: 0;
     transition: border-color 100ms ease, color 100ms ease, background-color 100ms ease;
@@ -288,7 +288,7 @@
     background: var(--accent);
     transition: width 120ms ease;
   }
-  .progress-meta { font-size: 10px; font-family: var(--font-code); color: var(--text-secondary); }
+  .progress-meta { font-size: var(--font-size-2xs); font-family: var(--font-code); color: var(--text-secondary); }
 
   .error-card {
     margin-top: 12px;

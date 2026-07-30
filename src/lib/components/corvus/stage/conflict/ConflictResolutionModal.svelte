@@ -1409,7 +1409,7 @@
   }
 
   .header-title {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
@@ -1418,7 +1418,7 @@
   }
 
   .stash-chip {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-code);
     color: var(--warning);
     background: rgba(226, 163, 53, 0.10);
@@ -1440,7 +1440,7 @@
     gap: 4px;
     padding: 1px 7px;
     border-radius: 999px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     font-family: var(--font-code);
     letter-spacing: 0.2px;
@@ -1464,7 +1464,7 @@
     border: 1px solid color-mix(in srgb, var(--warning) 28%, transparent);
   }
   .label-chip-vs {
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     letter-spacing: 0.8px;
     text-transform: uppercase;
@@ -1474,7 +1474,7 @@
   }
 
   .header-progress {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
   }
@@ -1540,7 +1540,7 @@
   }
   .footer-spacer { flex: 1; }
   .footer-info {
-    font-size: 11px; color: var(--text-muted); font-family: var(--font-ui-sans);
+    font-size: var(--font-size-xs); color: var(--text-muted); font-family: var(--font-ui-sans);
   }
   .abort-confirm {
     display: flex; align-items: center; gap: 8px; flex: 1;

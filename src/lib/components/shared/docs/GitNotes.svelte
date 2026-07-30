@@ -101,10 +101,10 @@ git = "write"</code></pre>
   p  { margin: 0 0 8px; }
   ul { margin: 0 0 8px; padding-left: 18px; }
   li { margin-bottom: 4px; }
-  code { font-family: var(--font-code); font-size: 11px; background: var(--bg-overlay); padding: 1px 4px; border-radius: var(--radius-sm); color: var(--accent); }
+  code { font-family: var(--font-code); font-size: var(--font-size-xs); background: var(--bg-overlay); padding: 1px 4px; border-radius: var(--radius-sm); color: var(--accent); }
   pre { background: var(--bg-overlay); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 10px 12px; overflow-x: auto; margin: 8px 0 12px; }
   pre code { background: none; padding: 0; color: var(--text-secondary); }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 8px 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); margin: 8px 0 12px; }
   th { text-align: left; padding: 5px 8px; background: var(--bg-overlay); color: var(--text-primary); font-weight: 600; border-bottom: 1px solid var(--border); }
   td { padding: 5px 8px; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
 </style>

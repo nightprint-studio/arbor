@@ -234,7 +234,7 @@
   .jobs { display: flex; flex-direction: column; height: 100%; width: 100%; overflow: hidden; background: var(--bg-base); }
 
   .jobs-meta {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
   }
@@ -272,17 +272,17 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .job-cat {
-    font-size: 9px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    font-size: var(--font-size-3xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
     color: var(--text-muted);
     background: var(--bg-overlay);
     border-radius: var(--radius-sm);
     padding: 0 5px;
     flex-shrink: 0;
   }
-  .job-status-line { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job-status-line { font-size: var(--font-size-2xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .job-time {
-    font-size: 10px; color: var(--accent);
+    font-size: var(--font-size-2xs); color: var(--accent);
     font-variant-numeric: tabular-nums; flex-shrink: 0;
   }
 
@@ -298,7 +298,7 @@
 
   /* ── Output drill-in ───────────────────────────────────────────────────── */
   .job-sep { display: inline-block; width: 1px; height: 14px; background: var(--border-subtle); margin: 0 2px; flex-shrink: 0; }
-  .job-status { font-size: 10px; font-weight: 500; white-space: nowrap; }
+  .job-status { font-size: var(--font-size-2xs); font-weight: 500; white-space: nowrap; }
 
   .out-cmd {
     display: flex; align-items: center; gap: 6px;
@@ -307,7 +307,7 @@
     border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     overflow: hidden;
   }
   .out-cmd-label { color: var(--accent); font-weight: 700; flex-shrink: 0; }

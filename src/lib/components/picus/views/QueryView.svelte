@@ -29,6 +29,7 @@
   import { queryStore } from '$lib/stores/picus/query.svelte';
   import { picusEditorStore } from '$lib/stores/picus/editor.svelte';
   import { openObjectNamed } from '../goto-object';
+  import { openEditorContextMenu } from '../editor-context-menu';
   import { picusResultsStore } from '$lib/stores/picus/result.svelte';
   import type { PicusTab } from '$lib/types/picus';
 
@@ -170,7 +171,18 @@
     </div>
   {/if}
 
-  <div class="qv-editor">
+  <!-- The right-click menu is raised from the wrapper rather than from the editor:
+       CodeMirror owns its own DOM inside, and a listener there would have to be
+       re-attached every time the extension set is rebuilt. -->
+  <div
+    class="qv-editor"
+    oncontextmenu={(e) =>
+      openEditorContextMenu(e, {
+        editor,
+        dialect: conn?.dialect ?? null,
+        onRun: () => run('statement'),
+      })}
+  >
     <!-- Keyed on the descriptor: the editor builds its extensions once, at mount, so
          rebinding the tab to another database has to rebuild them — otherwise the
          completion would keep offering the previous connection's tables. -->
@@ -208,7 +220,7 @@
     padding: 0 10px;
     background: var(--bg-elevated);
     border-bottom: 1px solid var(--border-subtle);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     white-space: nowrap;
   }
   .qv-none { color: var(--text-disabled); font-style: italic; }

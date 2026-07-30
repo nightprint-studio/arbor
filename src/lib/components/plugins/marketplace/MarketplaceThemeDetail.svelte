@@ -187,7 +187,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     text-transform: uppercase;
     letter-spacing: 0.6px;
     color: var(--text-muted);
@@ -203,7 +203,7 @@
     margin-top: 2px;
   }
   .tag-mini {
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     background: color-mix(in srgb, var(--color-tag) 14%, transparent);
     border: 1px solid color-mix(in srgb, var(--color-tag) 32%, transparent);
     color: var(--color-tag);
@@ -234,7 +234,7 @@
   .src-key {
     color: var(--text-muted);
     text-transform: uppercase;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     letter-spacing: 0.5px;
   }
   .src-link {
@@ -253,7 +253,7 @@
     align-items: center;
     gap: 4px;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     background: var(--bg-overlay);
     padding: 1px 6px;
     border-radius: var(--radius-sm);

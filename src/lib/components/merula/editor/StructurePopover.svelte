@@ -77,9 +77,9 @@
 </FloatingPicker>
 
 <style>
-  .st-title { flex: 1; min-width: 0; font-size: 11.5px; color: var(--text-secondary); }
+  .st-title { flex: 1; min-width: 0; font-size: var(--font-size-xs); color: var(--text-secondary); }
   .st-count {
-    font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
+    font-size: var(--font-size-2xs); font-weight: 700; font-variant-numeric: tabular-nums;
     padding: 0 5px; border-radius: var(--radius-sm);
     background: var(--bg-overlay); color: var(--text-muted);
   }
@@ -92,18 +92,18 @@
   .st-icon.st-import { color: var(--text-muted); }
 
   .st-label {
-    flex: 1; min-width: 0; font-family: var(--font-code); font-size: 12px;
+    flex: 1; min-width: 0; font-family: var(--font-code); font-size: var(--font-size-sm);
     color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .st-kind {
-    flex-shrink: 0; font-size: 9px; font-weight: 700; text-transform: uppercase;
+    flex-shrink: 0; font-size: var(--font-size-3xs); font-weight: 700; text-transform: uppercase;
     letter-spacing: 0.4px; color: var(--text-muted);
   }
   .st-line {
     flex-shrink: 0; min-width: 28px; text-align: right;
-    font-family: var(--font-code); font-size: 10.5px; color: var(--text-disabled);
+    font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-disabled);
     font-variant-numeric: tabular-nums;
   }
 
-  .st-empty { padding: 12px 14px; font-size: 11.5px; color: var(--text-muted); }
+  .st-empty { padding: 12px 14px; font-size: var(--font-size-xs); color: var(--text-muted); }
 </style>

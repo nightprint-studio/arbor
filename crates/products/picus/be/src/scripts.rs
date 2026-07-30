@@ -42,6 +42,7 @@ use picus_core::prelude::{digest, CachedSource, PicusState, ScriptSnapshot};
 use picus_inventory::prelude::{Inventory, InventoryKind, InventoryObject, ParsedProject, ParsedScript};
 use picus_parse::prelude::{DialectScope, EngineKind, ParsedFile, SqlParser, StatementKind};
 use picus_project::prelude::{discover, label_to_encoding, LineEnding, ScriptFile};
+use picus_rewrite::prelude::{commit, prepare_one, SourceText, Splice};
 use serde::Serialize;
 
 use crate::project::OpenedProject;
@@ -245,6 +246,67 @@ fn picus_script_text(
         text: source.text.clone(),
         encoding: source.encoding.clone(),
         eol: source.eol,
+    })
+}
+
+/// Write one script back, in the encoding and line endings it was read with.
+///
+/// Goes through the same `prepare_one` / `commit` the generator writes with, and
+/// therefore inherits the property that matters most here: `verify_round_trip`
+/// refuses a file whose bytes would not survive being decoded and re-encoded, and
+/// the encode itself refuses text the declared encoding cannot represent. A `€`
+/// typed into a `windows-1252` script is an error with a reason, never a `?`
+/// written to disk — which is exactly the failure this repository exists to catch
+/// in other people's editors.
+///
+/// One splice covering the whole file rather than a diff: the editor hands back a
+/// buffer, not a set of edits, and inventing ranges for it would be a second, less
+/// tested path to the same bytes.
+///
+/// The snapshot is invalidated on success — what is on disk is no longer what was
+/// read — so the next question re-reads and the analysis that follows is run
+/// against the file as saved.
+#[arbor_rpc::handler]
+fn picus_save_script(
+    state: &PicusState,
+    root: String,
+    path: String,
+    text: String,
+) -> Result<ScriptText, String> {
+    let snapshot = snapshot_for(state, &root)?;
+    snapshot.source(&path).ok_or_else(|| {
+        format!("{path} is not one of this project's scripts — refresh if it has just been added")
+    })?;
+
+    let full = crate::apply::destination(&snapshot.root, &path)?;
+    let (label, eol) = crate::apply::conventions(&snapshot, &path);
+    let encoding = label_to_encoding(&label);
+    let context = EncodingContext::new().with_legacy(encoding).with_dominant(encoding);
+    let source =
+        SourceText::read(&full, &context, encoding, eol).map_err(|e| e.to_string())?;
+
+    let splice = Splice {
+        range: 0..source.text.len(),
+        replacement: text,
+        reason: "saved from the editor".to_string(),
+    };
+    let prepared = prepare_one(&source, &[splice]).map_err(|e| e.to_string())?;
+    commit(&[prepared]).map_err(|e| e.to_string())?;
+
+    state.scripts().invalidate(&snapshot.root);
+
+    Ok(ScriptText {
+        text: {
+            // Re-read rather than echoed: the bytes on disk are the answer, and a
+            // round trip through the encoding is the only proof they are what was
+            // meant. A caller that trusted the echo would show a buffer the file
+            // does not contain.
+            let written = SourceText::read(&full, &context, encoding, eol)
+                .map_err(|e| e.to_string())?;
+            written.text
+        },
+        encoding: label,
+        eol: crate::apply::line_ending_of(eol),
     })
 }
 

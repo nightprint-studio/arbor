@@ -123,6 +123,7 @@
               value={store.pattern}
               {language}
               placeholder={'INSERT INTO ORDINI ($cols...$) VALUES ($vals...$)'}
+              wrap
               keyBindings={patternKeys}
               oninput={(v) => store.setPattern(v)}
             />
@@ -139,6 +140,7 @@
               value={store.replacement}
               {language}
               placeholder={'INSERT INTO ORDINI ($cols$, STATO) VALUES ($vals$, \'NUOVO\')'}
+              wrap
               keyBindings={replacementKeys}
               oninput={(v) => store.setReplacement(v)}
             />
@@ -254,14 +256,16 @@
     flex-shrink: 0;
   }
   .br-field > span {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
 
-  /* Two or three lines: a pattern is a statement, not a document, and the matches
-     underneath are the part you are reading. */
+  /* Three or four wrapped lines: a pattern is a statement, not a document, and
+     the matches underneath are the part you are reading — but 62px with no
+     wrapping showed one line and a horizontal scrollbar, so the start of what
+     you were typing scrolled out of its own box. */
   .br-box {
-    height: 62px;
+    height: 84px;
     display: flex;
     min-width: 0;
     border: 1px solid var(--border-subtle);
@@ -271,7 +275,7 @@
 
   .br-note {
     padding: 6px 10px 0 10px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.45;
     color: var(--text-muted);
   }
@@ -315,7 +319,7 @@
     border: none;
     text-align: left;
     cursor: pointer;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
   }
 
@@ -323,7 +327,7 @@
     flex-shrink: 0;
     min-width: 22px;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     text-align: right;
   }
@@ -335,7 +339,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
   }
   .br-text { flex: 1; }
   .br-after {

@@ -100,8 +100,10 @@
   <div class="fl" bind:this={listEl}>
     {#each consistencyStore.groups as group (group.key)}
       <div class="fl-group-head">
-        <span>{group.label}</span>
-        <Badge variant="count" label={String(group.items.length)} />
+        <div class="fl-group-bar">
+          <span>{group.label}</span>
+          <Badge variant="count" label={String(group.items.length)} />
+        </div>
       </div>
 
       {#each group.items as finding (finding.id)}
@@ -191,9 +193,11 @@
 {#if consistencyStore.skipped.length}
   <div class="fl-skipped">
     <div class="fl-group-head">
-      <CircleSlash size={11} />
-      <span>Rules that could not run</span>
-      <Badge variant="count" label={String(consistencyStore.skipped.length)} />
+      <div class="fl-group-bar">
+        <CircleSlash size={11} />
+        <span>Rules that could not run</span>
+        <Badge variant="count" label={String(consistencyStore.skipped.length)} />
+      </div>
     </div>
     {#each consistencyStore.skipped as s, i (`${s.rule}:${s.scope}:${i}`)}
       <div class="fl-skip-row">
@@ -220,21 +224,32 @@
 <style>
   .fl { display: flex; flex-direction: column; }
 
+  /* The grey bar floats the way the editor's toolbar does — a few pixels off the
+     side walls, with the panel's own background around it — instead of running
+     wall to wall into the panel's rounded corners.
+
+     The gap is padding on the sticky element rather than a margin on the bar so
+     that rows scrolling underneath are masked by `bg-base` instead of showing
+     through the gutters. */
   .fl-group-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 3px 6px;
+    background: var(--bg-base);
+  }
+  .fl-group-bar {
     display: flex;
     align-items: center;
     gap: 7px;
-    padding: 6px 12px;
+    padding: 5px 10px;
     background: var(--bg-elevated);
-    border-bottom: 1px solid var(--border-subtle);
-    font-size: 10px;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-muted);
-    position: sticky;
-    top: 0;
-    z-index: 1;
   }
 
   .fl-row {
@@ -260,26 +275,26 @@
   .fl-body { flex: 1; min-width: 0; }
 
   .fl-title-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-  .fl-title { font-size: 12px; font-weight: 600; }
+  .fl-title { font-size: var(--font-size-sm); font-weight: 600; }
   .fl-mute {
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
   }
 
   /* The line that decides whether this matters. */
   .fl-consequence {
     margin-top: 3px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--text-secondary);
     max-width: 100ch;
   }
   .fl-reason {
     margin-top: 3px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-style: italic;
     color: var(--text-muted);
   }
@@ -294,20 +309,20 @@
     border: none;
     color: var(--text-muted);
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     cursor: pointer;
   }
   .fl-loc:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
   .fl-also { color: var(--text-disabled); }
 
   .fl-clean { display: flex; flex-direction: column; gap: 3px; text-align: left; }
-  .fl-clean strong { font-size: 12px; }
-  .fl-clean span { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+  .fl-clean strong { font-size: var(--font-size-sm); }
+  .fl-clean span { font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted); }
 
   .fl-pad { padding: 10px 12px; }
 
   .fl-skipped { display: flex; flex-direction: column; }
-  .fl-skipped .fl-group-head :global(svg) { color: var(--text-disabled); }
+  .fl-skipped .fl-group-bar :global(svg) { color: var(--text-disabled); }
   .fl-skip-row {
     display: flex;
     align-items: flex-start;
@@ -316,6 +331,6 @@
     border-bottom: 1px solid var(--border-subtle);
   }
   .fl-skip-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .fl-skip-reason { font-size: 11.5px; line-height: 1.5; color: var(--text-secondary); max-width: 100ch; }
-  .fl-skip-scope { font-family: var(--font-code); font-size: 10.5px; color: var(--text-disabled); }
+  .fl-skip-reason { font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-secondary); max-width: 100ch; }
+  .fl-skip-scope { font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-disabled); }
 </style>

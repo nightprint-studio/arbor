@@ -274,10 +274,10 @@
       </Tabs>
 
       <!-- Close button on the right edge (Windows-style placement).
-           The mac-close-btn visual stays — the red dot reads as
+           The close-btn visual stays — the red dot reads as
            "close" in either corner and matches the rest of arbor's
            modals. -->
-      <button class="mac-close-btn sm-close-right" onclick={onClose} aria-label="Close" use:tooltip={'Close'}></button>
+      <button class="close-btn sm-close-right" onclick={onClose} aria-label="Close" use:tooltip={'Close'}></button>
     {/snippet}
 
     {#snippet footer()}
@@ -390,7 +390,7 @@
     /* Theme-aware foreground so warm-accent themes (Ayu Dark yellow,
        Solarized, …) don't get unreadable white-on-yellow. */
     color: var(--text-on-accent);
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     padding: 1px 5px;
     border-radius: 8px;
     margin-left: 3px;
@@ -419,7 +419,7 @@
   .sm-footer-status {
     display: inline-flex; align-items: center; gap: 8px;
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   /* Body — horizontal flex row carrying floating cards (main + optional

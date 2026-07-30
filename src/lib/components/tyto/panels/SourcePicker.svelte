@@ -191,12 +191,12 @@
   }
   .tile.selected .tile-thumb { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2), 0 3px 12px color-mix(in srgb, var(--accent) 45%, transparent); }
   .tile-body { min-width: 0; flex: 1; }
-  .tile-title { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 550; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tile-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .tile-title { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-sm); font-weight: 550; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile-sub { font-size: var(--font-size-xs); color: var(--text-muted); margin-top: 2px; }
   :global(.tile-check) { color: var(--accent); flex-shrink: 0; }
 
   .pill {
-    font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
+    font-size: var(--font-size-3xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
     padding: 1px 5px; border-radius: 999px;
     background: color-mix(in srgb, var(--accent) 18%, transparent);
     color: var(--accent);
@@ -241,8 +241,8 @@
   .win-tile:active { transform: translateY(0); }
   .win-tile.selected { border-color: var(--accent); background: var(--accent-subtle); }
   .win-body { flex: 1; min-width: 0; }
-  .win-title { font-size: 12.5px; font-weight: 550; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .win-app { font-size: 10.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+  .win-title { font-size: var(--font-size-sm); font-weight: 550; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .win-app { font-size: var(--font-size-2xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
   .win-check {
     display: inline-flex; align-items: center; justify-content: center;
     width: 18px; height: 18px; flex-shrink: 0;
@@ -264,8 +264,8 @@
   .region-cta:hover { background: var(--bg-hover); border-color: var(--accent); color: var(--text-primary); transform: translateY(-1px); }
   .region-cta:active { transform: translateY(0); }
   .region-cta > :global(svg:first-child) { color: var(--accent); }
-  .region-cta-title { font-size: 13px; font-weight: 550; }
-  .region-cta-sub { font-size: 11px; color: var(--text-muted); }
+  .region-cta-title { font-size: var(--font-size-md); font-weight: 550; }
+  .region-cta-sub { font-size: var(--font-size-xs); color: var(--text-muted); }
 
   .region-card { display: flex; gap: 12px; padding: 12px; background: var(--bg-input); border: 1px solid var(--accent); border-radius: var(--radius-md); }
   .region-preview {
@@ -275,15 +275,15 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
   }
-  .region-dims { font-size: 11px; font-weight: 600; color: var(--text-primary); background: var(--bg-elevated); padding: 2px 6px; border-radius: var(--radius-sm); font-variant-numeric: tabular-nums; }
+  .region-dims { font-size: var(--font-size-xs); font-weight: 600; color: var(--text-primary); background: var(--bg-elevated); padding: 2px 6px; border-radius: var(--radius-sm); font-variant-numeric: tabular-nums; }
   .region-meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; justify-content: center; }
-  .region-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-  .region-sub { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .region-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
+  .region-sub { font-size: var(--font-size-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .region-actions { display: flex; gap: 12px; margin-top: 6px; }
   .link {
     display: inline-flex; align-items: center; gap: 4px;
     background: none; border: none; padding: 0; cursor: pointer;
-    font-size: 11.5px; color: var(--accent);
+    font-size: var(--font-size-xs); color: var(--accent);
   }
   .link:hover { text-decoration: underline; }
   .link.danger { color: var(--error); }

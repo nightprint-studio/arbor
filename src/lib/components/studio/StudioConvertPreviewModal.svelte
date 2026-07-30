@@ -125,7 +125,7 @@
   ariaLabel={dialogTitle}
 >
   {#snippet header()}
-    <h3 style="margin: 0; font-size: 13px;">{dialogTitle}</h3>
+    <h3 style="margin: 0; font-size: var(--font-size-md);">{dialogTitle}</h3>
   {/snippet}
 
   <div class="scv-body">
@@ -210,7 +210,7 @@
   }
   .scv-toolbar {
     padding: 8px 14px 0 14px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .scv-toggle {
@@ -223,7 +223,7 @@
   .scv-warnings ul {
     margin: 4px 0 0 16px;
     padding: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .scv-preview {
     flex: 1 1 auto;
@@ -238,7 +238,7 @@
     padding: 24px;
     text-align: center;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
 
   .scv-footer {

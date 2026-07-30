@@ -51,7 +51,7 @@
   }
   .strip-name { display: flex; align-items: center; gap: 4px; color: var(--text-muted); }
   .strip-name :global(svg) { color: var(--info); }
-  .nm { font-size: 9.5px; font-weight: 600; letter-spacing: 0.6px; }
+  .nm { font-size: var(--font-size-3xs); font-weight: 600; letter-spacing: 0.6px; }
 
   /* Converging sends: thin track-coloured bars, height ∝ each track's room send. */
   .sends {
@@ -67,9 +67,9 @@
     background: var(--c);
     transition: height 120ms linear;
   }
-  .sends-empty { align-self: center; font-size: 9px; color: var(--text-muted); font-family: var(--font-code); }
+  .sends-empty { align-self: center; font-size: var(--font-size-3xs); color: var(--text-muted); font-family: var(--font-code); }
 
   .knob { display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; }
-  .kval { font-size: 9px; color: var(--text-muted); font-family: var(--font-code); line-height: 1; }
-  .kunit { margin-left: 1px; opacity: 0.6; font-size: 8px; }
+  .kval { font-size: var(--font-size-3xs); color: var(--text-muted); font-family: var(--font-code); line-height: 1; }
+  .kunit { margin-left: 1px; opacity: 0.6; font-size: var(--font-size-3xs); }
 </style>

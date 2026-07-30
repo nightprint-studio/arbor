@@ -112,10 +112,10 @@
 
   .job-progress { display: flex; align-items: center; }
 
-  .job-time { font-size: 10px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .job-time { font-size: var(--font-size-2xs); color: var(--accent); font-variant-numeric: tabular-nums; }
 
   .exit-code {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-family: var(--font-code);
     font-weight: 600;
     border-radius: var(--radius-sm);
@@ -125,7 +125,7 @@
   .exit-code.exit-err { color: var(--error);   background: color-mix(in srgb, var(--error)   12%, transparent); }
 
   .exit-cancelled {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-family: var(--font-code);
     font-weight: 600;
     border-radius: var(--radius-sm);
@@ -148,7 +148,7 @@
   }
 
   .live-badge {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     letter-spacing: 0.06em;
     color: var(--accent);
@@ -161,7 +161,7 @@
   .job-meta { display: flex; gap: 5px; margin-top: 1px; }
 
   .job-plugin {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     border-radius: var(--radius-sm);

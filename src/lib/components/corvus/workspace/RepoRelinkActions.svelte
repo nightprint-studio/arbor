@@ -142,7 +142,7 @@
     padding: 4px 10px;
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     cursor: pointer;
     transition: background var(--transition-fast), border-color var(--transition-fast),

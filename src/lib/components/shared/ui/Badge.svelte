@@ -89,8 +89,8 @@
   }
 
   /* ---- Sizes ---- */
-  .sz-sm { font-size: 9px;  padding: 0 4px; height: 14px; }
-  .sz-md { font-size: 10px; padding: 1px 5px; height: 16px; }
+  .sz-sm { font-size: var(--font-size-3xs);  padding: 0 4px; height: 14px; }
+  .sz-md { font-size: var(--font-size-2xs); padding: 1px 5px; height: 16px; }
 
   /* ---- Variants ---- */
   .badge-pill {
@@ -100,16 +100,23 @@
     justify-content: center;
   }
 
+  /* A count is not a state.
+     This used to be a solid accent pill, which put four saturated blue bubbles
+     down the side of the schema tree — TABLES 695, VIEWS 229, SEQUENCES 28,
+     TRIGGERS 79 — making the loudest thing in the panel a set of numbers that
+     ask for nothing. The vivid accents are reserved for status; a tally gets the
+     same quiet bubble the panel headers already use. Something that IS urgent
+     wants `variant="tone"` and a tone. */
   .badge-count {
-    background: var(--accent);
-    color: var(--text-on-accent);
+    background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+    color: var(--text-muted);
     min-width: 16px;
     justify-content: center;
   }
 
   .badge-status {
     font-weight: 700;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     height: 14px;
     padding: 0 4px;
   }

@@ -594,7 +594,7 @@
   .header-title {
     flex: 1;
     font-weight: 600;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     letter-spacing: 0.3px;
     color: var(--text-secondary);
     text-transform: uppercase;
@@ -623,7 +623,7 @@
     border-radius: 999px;
     padding: 1px 7px 1px 5px;
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     cursor: pointer;
     flex-shrink: 0;
@@ -649,7 +649,7 @@
   }
   .filter-path {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -673,7 +673,7 @@
     outline: none;
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     padding: 0;
   }
   .search-input::placeholder { color: var(--text-disabled); }
@@ -707,7 +707,7 @@
   /* ── Search count ── */
   .search-count {
     padding: 3px 10px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     font-family: var(--font-ui-sans);
     border-bottom: 1px solid var(--border-subtle);
@@ -720,7 +720,7 @@
     gap: 7px;
     padding: 16px 14px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-family: var(--font-ui-sans);
   }
   .state-msg.err   { color: var(--error, #c75450); }
@@ -770,7 +770,7 @@
   }
 
   .node-date {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     flex-shrink: 0;
     font-variant-numeric: tabular-nums;

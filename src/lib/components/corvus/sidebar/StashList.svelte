@@ -229,7 +229,7 @@
   }
 
   .stash-id {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     font-family: var(--font-code);
   }

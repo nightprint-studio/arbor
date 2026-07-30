@@ -296,7 +296,7 @@
   .ff-tgl {
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 26px; height: 26px; padding: 0 5px;
-    font-size: 11px; font-weight: 600; font-family: var(--font-code);
+    font-size: var(--font-size-xs); font-weight: 600; font-family: var(--font-code);
     color: var(--text-muted);
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
@@ -309,13 +309,13 @@
     border-color: var(--accent);
     color: var(--accent);
   }
-  .ff-tgl-w { font-size: 10px; }
+  .ff-tgl-w { font-size: var(--font-size-2xs); }
 
   .ff-loading { display: flex; align-items: center; justify-content: center; padding: 24px; }
 
   .ff-meta {
     display: flex; align-items: center; gap: 6px;
-    padding: 4px 14px; font-size: 10.5px; color: var(--text-muted);
+    padding: 4px 14px; font-size: var(--font-size-2xs); color: var(--text-muted);
     border-bottom: 1px solid var(--border-subtle); flex-shrink: 0;
   }
   .ff-meta-live { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); }
@@ -326,11 +326,11 @@
   .ff-group-head {
     display: flex; align-items: center; gap: 6px;
     padding: 5px 14px 3px; color: var(--text-secondary);
-    font-size: 11px; font-weight: 600;
+    font-size: var(--font-size-xs); font-weight: 600;
   }
   .ff-group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ff-group-count {
-    margin-left: auto; font-size: 9.5px; font-weight: 500;
+    margin-left: auto; font-size: var(--font-size-3xs); font-weight: 500;
     color: var(--text-disabled);
     background: var(--bg-elevated); border-radius: 99px; padding: 0 6px;
   }
@@ -344,11 +344,11 @@
   .ff-hit:hover { background: var(--bg-hover); }
   .ff-hit.sel:hover { background: var(--accent-subtle); }
   .ff-loc {
-    font-family: var(--font-code); font-size: 10px; color: var(--text-disabled);
+    font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-disabled);
     flex-shrink: 0; min-width: 44px;
   }
   .ff-line-text {
-    font-family: var(--font-code); font-size: 11.5px; color: var(--text-secondary);
+    font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-secondary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
   }
   .ff-mark {

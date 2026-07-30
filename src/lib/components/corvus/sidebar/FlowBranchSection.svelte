@@ -72,7 +72,7 @@
     align-items: center;
     gap: 6px;
     padding: 5px 12px 3px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.4px;
     text-transform: uppercase;
@@ -89,7 +89,7 @@
     gap: 6px;
     padding: 3px 12px 3px 18px;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-code);
     transition: background var(--transition-fast);
   }

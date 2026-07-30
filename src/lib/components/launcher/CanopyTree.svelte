@@ -202,8 +202,8 @@
   }
   .cv-bar { width: 4px; flex: none; }
   .cv-body { padding: 9px 13px; min-width: 0; }
-  .cv-name { font-family: var(--canopy-display); font-weight: 600; font-size: 14px; color: #eef2f7; }
-  .cv-bird { font-weight: 400; font-style: italic; font-size: 11px; color: #7d8696; margin-left: 5px; }
-  .cv-role { font-family: var(--canopy-sans); font-size: 12px; color: #9aa3b2; margin-top: 2px; }
-  .cv-status { font-family: var(--canopy-mono); font-size: 11.5px; margin-top: 4px; }
+  .cv-name { font-family: var(--canopy-display); font-weight: 600; font-size: var(--font-size-lg); color: #eef2f7; }
+  .cv-bird { font-weight: 400; font-style: italic; font-size: var(--font-size-xs); color: #7d8696; margin-left: 5px; }
+  .cv-role { font-family: var(--canopy-sans); font-size: var(--font-size-sm); color: #9aa3b2; margin-top: 2px; }
+  .cv-status { font-family: var(--canopy-mono); font-size: var(--font-size-xs); margin-top: 4px; }
 </style>

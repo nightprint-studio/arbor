@@ -16,7 +16,7 @@ use crate::descriptor::DbProviderDescriptor;
 use crate::error::DbResult;
 use crate::kind::EngineKind;
 use crate::query::{ExecuteResult, ResultCount, ResultWindow};
-use crate::schema::{SchemaSnapshot, TableInfo};
+use crate::schema::{SchemaSnapshot, TableInfo, TriggerDetail};
 use crate::secret::Secret;
 
 /// One database engine.
@@ -88,6 +88,15 @@ pub trait DbSession: Send + Sync {
     /// The full detail of one relation: columns, primary key, foreign keys and
     /// indexes.
     async fn table_detail(&self, name: &str) -> DbResult<TableInfo>;
+
+    /// What a trigger actually does — its `CREATE TRIGGER` and the source of the
+    /// routine it fires.
+    ///
+    /// Lazy, for the same reason `table_detail` is: a schema with hundreds of
+    /// triggers would carry every routine body in the snapshot that is cached and
+    /// handed to the interface on connect, to answer a question asked about one of
+    /// them at a time.
+    async fn trigger_detail(&self, name: &str) -> DbResult<TriggerDetail>;
 
     /// Run a statement — **any** statement. The one door.
     ///

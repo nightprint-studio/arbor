@@ -17,16 +17,32 @@
    *
    * Search filters the nav (label + full-text via an offscreen index) and
    * highlights matches in the active section (F3 / Shift+F3 to cycle).
+   *
+   * It also **exports** — Markdown or styled HTML — through the same
+   * `docs-export` converter Arbor's own DocsPanel uses. It lives here rather than
+   * in each product's panel for the obvious reason: the conversion is identical,
+   * and a product whose documentation cannot leave the window is documentation
+   * nobody can put in a ticket, a wiki or a repository.
    */
   import { tick, untrack } from 'svelte';
   import { slide } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
-  import { ChevronRight } from 'lucide-svelte';
+  import { ChevronRight, FileDown } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
+  import Button from './ui/Button.svelte';
+  import Dropdown, { type DropdownItem } from './ui/Dropdown.svelte';
+  import Spinner from './ui/Spinner.svelte';
   import SearchBar from './ui/SearchBar.svelte';
+  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import PluginDocBlock from '$lib/components/shared/internal/PluginDocBlock.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
+  import { fsWriteTextFile } from '$lib/ipc/fs';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
+  import {
+    buildReadme, buildHtmlExport,
+    type SectionEntry, type HtmlSectionEntry,
+  } from '$lib/utils/docs-export';
   import {
     compileQuery, highlightLabel, textMatches, injectHighlights, clearHighlights,
   } from '$lib/utils/text-search';
@@ -41,6 +57,8 @@
     initialSection,
     width = '1040px',
     height = '700px',
+    product,
+    fileBase,
   }: {
     topItems?: DocsNavItem[];
     navGroups?: DocsNavGroup[];
@@ -51,7 +69,16 @@
     initialSection?: string;
     width?: string;
     height?: string;
+    /** Product name in the exported heading. Defaults to the panel's title. */
+    product?: string;
+    /** Base file name the save dialog proposes. Defaults to a slug of `product`. */
+    fileBase?: string;
   } = $props();
+
+  const productName = $derived(
+    product ?? (title.replace(/\s*Documentation\s*$/i, '').trim() || 'Arbor'),
+  );
+  const exportBase = $derived(fileBase ?? `${productName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-docs`);
 
   let activeSection = $state(
     untrack(() => initialSection ?? topItems[0]?.id ?? navGroups[0]?.items[0]?.id ?? ''),
@@ -75,7 +102,10 @@
   // ── Search ──────────────────────────────────────────────────────────────
   let searchQuery = $state('');
   let searchRegex = $state(false);
-  let searchEl = $state<HTMLElement | null>(null);
+  /** The hidden container every section is rendered into. Shared by the search
+   *  index and by the export — both need every topic mounted at once, and two
+   *  containers would be two copies of the same tree. */
+  let offscreenEl = $state<HTMLElement | null>(null);
   let contentEl = $state<HTMLElement | null>(null);
   let extracting = $state(false);
   let matchingIds = $state<Set<string>>(new Set());
@@ -115,9 +145,9 @@
     _cacheBuilding = (async () => {
       extracting = true;
       await tick(); await tick();
-      if (searchEl) {
+      if (offscreenEl) {
         for (const s of orderedSections) {
-          const el = searchEl.querySelector<HTMLElement>(`[data-section="${cssEscape(s.id)}"]`);
+          const el = offscreenEl.querySelector<HTMLElement>(`[data-section="${cssEscape(s.id)}"]`);
           if (el) textCache.set(s.id, extractText(el));
         }
       }
@@ -199,10 +229,90 @@
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
+
+  // ── Export ──────────────────────────────────────────────────────────────
+  //
+  // Every topic is mounted offscreen, its rendered DOM is converted, and only
+  // then is a destination asked for. Converting first is what lets the refusal
+  // — an unwritable path, a cancelled dialog — cost nothing: there is no
+  // half-written file to clean up, and the picker is the last step rather than
+  // the first.
+
+  let exportMode = $state(false);
+  let exporting = $state(false);
+  let pendingExport = $state<{ content: string; defaultName: string } | null>(null);
+
+  /** The section list with each group's label carried by its first item, which is
+   *  how the HTML export draws its table of contents. */
+  const exportOrder = $derived([
+    ...topItems.map((i) => ({ id: i.id, label: i.label, groupLabel: undefined as string | undefined })),
+    ...navGroups.flatMap((g) =>
+      g.items.map((item, idx) => ({
+        id: item.id,
+        label: item.label,
+        groupLabel: idx === 0 ? g.label : undefined,
+      })),
+    ),
+  ]);
+
+  async function exportAs(format: 'md' | 'html') {
+    if (exporting) return;
+    exporting = true;
+    exportMode = true;
+    await tick(); await tick();
+
+    try {
+      if (!offscreenEl) return;
+      const found = new Map<string, HTMLElement>();
+      for (const el of offscreenEl.querySelectorAll<HTMLElement>('[data-section]')) {
+        if (el.dataset.section) found.set(el.dataset.section, el);
+      }
+      const present = exportOrder.filter((s) => found.has(s.id));
+
+      if (format === 'md') {
+        const entries: SectionEntry[] = present.map((s) => ({
+          id: s.id, label: s.label, el: found.get(s.id)!,
+        }));
+        pendingExport = {
+          content: buildReadme(entries, [], productName),
+          defaultName: `${exportBase}.md`,
+        };
+      } else {
+        const entries: HtmlSectionEntry[] = present.map((s) => ({
+          id: s.id, label: s.label, groupLabel: s.groupLabel, html: found.get(s.id)!.innerHTML,
+        }));
+        pendingExport = {
+          content: buildHtmlExport(entries, [], productName),
+          defaultName: `${exportBase}.html`,
+        };
+      }
+    } finally {
+      exportMode = false;
+      exporting = false;
+    }
+  }
+
+  async function finishExport(filePath: string) {
+    const held = pendingExport;
+    pendingExport = null;
+    if (!held) return;
+    const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
+    try {
+      await fsWriteTextFile(filePath, held.content);
+      notificationsStore.add(`${productName} documentation exported`, fileName, 'success');
+    } catch (e) {
+      notificationsStore.add('Documentation export failed', String(e), 'error');
+    }
+  }
+
+  const exportItems: DropdownItem[] = [
+    { kind: 'item', id: 'md', label: 'Markdown README', meta: '.md', onclick: () => void exportAs('md') },
+    { kind: 'item', id: 'html', label: 'Styled HTML', meta: '.html', onclick: () => void exportAs('html') },
+  ];
 </script>
 
-{#if extracting}
-  <div bind:this={searchEl} class="docs-offscreen" aria-hidden="true">
+{#if extracting || exportMode}
+  <div bind:this={offscreenEl} class="docs-offscreen" aria-hidden="true">
     {#each orderedSections as s (s.id)}
       {#if sections[s.id]}
         {@const Comp = sections[s.id]}
@@ -217,6 +327,26 @@
     <ModalHeader {onClose}>
       {#if headerIcon}{@const HeaderIcon = headerIcon}<HeaderIcon size={14} />{/if}
       <span class="modal-title">{title}</span>
+      {#snippet actions()}
+        <!-- `fixed`, like every other menu opened from a title bar: an absolutely
+             positioned one is clipped by the modal's own overflow. -->
+        <Dropdown items={exportItems} position="fixed" direction="down" width="190px">
+          {#snippet trigger({ toggle })}
+            <Button
+              variant="icon"
+              size="xs"
+              tooltip="Export this documentation"
+              ariaLabel="Export documentation"
+              disabled={exporting}
+              onclick={toggle}
+            >
+              {#snippet iconStart()}
+                {#if exporting}<Spinner size={13} />{:else}<FileDown size={14} />{/if}
+              {/snippet}
+            </Button>
+          {/snippet}
+        </Dropdown>
+      {/snippet}
     </ModalHeader>
   {/snippet}
 
@@ -292,8 +422,20 @@
   </div>
 </Modal>
 
+<!-- After the modal in DOM order, so the picker stacks above it: both sit on the
+     same z-layer and the later one wins. -->
+{#if pendingExport}
+  <FileExplorerModal
+    mode="save"
+    title="Export documentation"
+    initialFilename={pendingExport.defaultName}
+    onConfirm={(path) => void finishExport(path)}
+    onCancel={() => { pendingExport = null; }}
+  />
+{/if}
+
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
 
   .docs-offscreen { position: fixed; left: -9999px; top: -9999px; visibility: hidden; pointer-events: none; width: 800px; }
 
@@ -331,7 +473,7 @@
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 18px; height: 14px; padding: 0 5px;
     background: var(--accent-subtle); color: var(--accent);
-    font-size: 9px; font-weight: 700; border-radius: var(--radius-sm); margin-right: 4px;
+    font-size: var(--font-size-3xs); font-weight: 700; border-radius: var(--radius-sm); margin-right: 4px;
   }
   .nav-group-chevron { display: flex; align-items: center; transition: transform 150ms ease; }
   .nav-group-chevron.open { transform: rotate(90deg); }
@@ -358,7 +500,7 @@
 
   /* ── Doc authoring utilities (lead paragraph + callout) ─────────────── */
   .docs-content :global(.doc-lead) {
-    font-size: 13px; color: var(--text-secondary);
+    font-size: var(--font-size-md); color: var(--text-secondary);
     border-left: 3px solid var(--accent); padding: 8px 0 8px 14px;
     margin-bottom: 18px; line-height: 1.75;
   }
@@ -388,6 +530,6 @@
     width: 20px; height: 20px; margin-top: 1px;
     background: var(--accent); color: #fff; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    font-size: 10px; font-weight: 700;
+    font-size: var(--font-size-2xs); font-weight: 700;
   }
 </style>

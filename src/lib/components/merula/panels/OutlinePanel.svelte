@@ -130,9 +130,9 @@
 
 <style>
   .outline { padding: 4px 0; }
-  .ol-line { font-size: 10px; color: var(--text-disabled); font-family: var(--font-code); }
+  .ol-line { font-size: var(--font-size-2xs); color: var(--text-disabled); font-family: var(--font-code); }
   .ol-secount {
-    font-size: 9px; font-weight: 700; line-height: 1;
+    font-size: var(--font-size-3xs); font-weight: 700; line-height: 1;
     padding: 2px 5px; border-radius: 999px;
     background: color-mix(in srgb, var(--accent) 16%, transparent);
     color: var(--text-secondary);

@@ -192,7 +192,7 @@
     border: 1px solid rgba(226, 163, 53, 0.3);
   }
   .wip-merge-badge {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     letter-spacing: 0.05em;
     color: var(--accent);
@@ -209,7 +209,7 @@
     gap: 3px;
     padding: 2px 8px;
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     font-weight: 500;
     cursor: pointer;
@@ -223,7 +223,7 @@
   .wip-resolve-btn:hover { background: rgba(226, 163, 53, 0.28); }
 
   .wip-pill {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     border-radius: var(--radius-sm);
     padding: 0 4px;
@@ -236,7 +236,7 @@
   .wip-deleted  { color: var(--error);   background: rgba(199,84,80,0.12);  border: 1px solid rgba(199,84,80,0.25); }
 
   .wip-staged {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--success);
     background: var(--success-subtle);
     border: 1px solid rgba(95,173,86,0.3);

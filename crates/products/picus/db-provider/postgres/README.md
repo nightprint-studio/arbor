@@ -56,6 +56,14 @@ holdable cursor are two executions, so without an `ORDER BY` a row may repeat or
 skipped exactly at that boundary. The old guarantee only held for people who waited
 out the materialisation, and nobody did.
 
+**A cancelled first window is not a failed one.** The streamed read falls back to the
+holdable cursor when it fails — a statement the user got wrong, a masking wrapper that
+would not apply — and that fallback re-runs the statement. A cancellation arrives on
+the same path and must not take it: pressing Cancel would start, the slow way, the
+very query being escaped from, on a tab that had already reported itself cancelled.
+The cancelled ordinal is therefore checked inside the error arm, after the `ROLLBACK`
+that keeps the session usable and before the second attempt.
+
 **Ordering wins over masking.** Masking means wrapping the statement in a subquery,
 and PostgreSQL does not have to hand a sub-select's rows on in the order it produced
 them — a parallel plan uses `Gather` rather than `Gather Merge` and interleaves them.
@@ -118,7 +126,7 @@ closed or the backend exits.
 | `session` | the live connection: schema, execute, windows, counting, cancel |
 | `cursor` | held results — the `DECLARE` / `MOVE` / `FETCH` / `CLOSE` construction (`cursor::sql`, pure) and the per-session registry that decides when one dies (`cursor::registry`). Read its module docs before changing anything about `WITH HOLD` |
 | `rows` | the reply → columns + cells mapping: server text in, `CellValue` out |
-| `catalog` | the `pg_catalog` queries — faster than `information_schema`, and the only place trigger bitmasks and expression-index columns exist. Note the single-relation entry point (`read_relation`): opening one tab must not read a whole catalogue |
+| `catalog` | the `pg_catalog` queries — faster than `information_schema`, and the only place trigger bitmasks and expression-index columns exist. Note the single-relation entry point (`read_relation`): opening one tab must not read a whole catalogue. A sequence bound equal to the type's own extreme is sent as `None`: it is not this sequence's limit, and `i64::MAX` does not survive a JSON number anyway. `read_trigger_detail` is lazy for the same reason as `read_relation`, and reaches `pg_get_functiondef` only through a `CASE` that has already checked the language — it *raises* on a C or `internal` routine |
 | `sql` | pure helpers: quoting, statement classification, statement scanning, trigger-bit decoding. Fully unit-tested without a database |
 | `tls` | rustls + the OS trust store, so an internal corporate CA works with no bundle shipped |
 | `error` | driver error → `DbError`, keeping the SQL position so the editor can place a squiggle |

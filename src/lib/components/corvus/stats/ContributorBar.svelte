@@ -93,7 +93,7 @@
     justify-content: center;
   }
   .avatar-initials {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 700;
     /* Avatar initials sit on a coloured circle (workspace palette) — pick
        the same foreground the workspace dots use so light themes get
@@ -112,7 +112,7 @@
   }
 
   .contrib-name {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
@@ -123,13 +123,13 @@
     min-width: 0;
   }
   .contrib-pct {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--accent);
     font-family: var(--font-ui-sans);
   }
   .contrib-count {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
     margin-left: auto;
@@ -149,7 +149,7 @@
   }
 
   .rank {
-    font-size: 18px;
+    font-size: var(--font-size-xl);
     flex-shrink: 0;
   }
 </style>

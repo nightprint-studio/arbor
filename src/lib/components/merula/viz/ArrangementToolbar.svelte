@@ -165,7 +165,7 @@
     border: none;
     border-radius: var(--radius-sm);
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-variant-numeric: tabular-nums;
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);
@@ -181,7 +181,7 @@
     position: absolute;
     right: 1px;
     bottom: 0;
-    font-size: 8px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     line-height: 1;
     color: var(--accent);

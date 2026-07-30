@@ -73,7 +73,7 @@
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: default;
     transition: background var(--transition-fast), color var(--transition-fast);
   }

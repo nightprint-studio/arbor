@@ -16,12 +16,16 @@
    * Every action here is reachable from the keyboard; the canonical list lives
    * in `picus-shortcuts.ts` and this file's `onKeyDown` must stay in step with it.
    */
-  import { Braces, Database, FolderTree, FormInput, Layers, Replace, TriangleAlert } from 'lucide-svelte';
+  import {
+    Braces, Database, FolderTree, FormInput, GitCompare, Layers, Replace, TableProperties,
+    Terminal, TriangleAlert,
+  } from 'lucide-svelte';
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
   import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
   import ActivityBar, { type ActivityRailItem } from '$lib/components/shared/ui/ActivityBar.svelte';
   import CommandPaletteShell, { type PaletteSection } from '$lib/components/shared/ui/CommandPaletteShell.svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
+  import ContextMenu from '$lib/components/shared/ContextMenu.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
@@ -64,6 +68,7 @@
     picusPaletteIcon,
   } from './picus-palette';
   import { findingsToText } from './panels/finding-text';
+  import { saveOpenScript } from './save-script';
 
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { picusUiStore, type SidebarSection } from '$lib/stores/picus/ui.svelte';
@@ -77,15 +82,45 @@
   import { picusEditorStore } from '$lib/stores/picus/editor.svelte';
   import { resultEditStore } from '$lib/stores/picus/result-edit.svelte';
   import { picusSettingsStore } from '$lib/stores/picus/settings.svelte';
+  import { picusContextMenuStore } from '$lib/stores/picus/contextmenu.svelte';
 
   let sidebarWidth = $state(280);
   /** Width of the right tool panel. Session-only UI state, like the sidebar's. */
   let toolWidth = $state(300);
+  /**
+   * How tall the dock opens — and stays, once dragged.
+   *
+   * It used to open at a flat 240px whatever the screen was, which on a 1000px
+   * window left the grid **88 pixels**: three rows and a half, under five bands of
+   * chrome, while an editor holding one line of SQL kept 670. The answer to a
+   * query is the thing that was asked for; it gets the larger share of the split.
+   *
+   * A proportion rather than a bigger constant, because the ratio is the point and
+   * 460px is generous on a laptop and mean on a 4K panel. Held in the shell like
+   * the two side panels, so a drag survives closing and reopening the dock — which
+   * it did not before, the size being passed in and never read back.
+   */
+  let bottomHeight = $state(dockHeightFor(globalThis.innerHeight ?? 900));
+  function dockHeightFor(windowHeight: number): number {
+    return Math.round(Math.min(720, Math.max(260, windowHeight * 0.46)));
+  }
   let paletteQuery = $state('');
   /** Set while the write confirmation is up. */
   let confirmWrite = $state(false);
 
   const tab = $derived(picusTabsStore.active);
+
+  /**
+   * A sequence and a trigger get no toolbar at all.
+   *
+   * Everything on it is about something they do not have: sub-views (they are one
+   * page), a new row, DML from the columns, a CSV export. What was left was a
+   * Refresh and the connection pill — a 30px band of chrome above a page of
+   * property cards, and one more grey strip in a window that had too many.
+   */
+  const toolbarless = $derived(
+    tab?.kind === 'table' && (tab.objectKind === 'sequence' || tab.objectKind === 'trigger'),
+  );
 
   // ── Activity rail ───────────────────────────────────────────────────────────
   const SECTION_ICONS: Record<SidebarSection, IconComponent> = {
@@ -125,8 +160,52 @@
     },
   ]);
 
-  // Consistency lives apart, at the bottom: it opens the DOCK, not a sidebar.
+  /** The document's answer, on the document's rail. */
+  const railRightBottom = $derived<ActivityRailItem[]>([
+    {
+      id: 'results',
+      icon: TableProperties as unknown as IconComponent,
+      tooltip: 'Results — the rows the statement in this tab returned',
+      active: picusUiStore.bottomOpen && picusUiStore.bottomTab === 'results',
+      // A run in flight, said on the rail as well: the dock it would appear in is
+      // often closed, which is exactly when knowing costs a click to find out.
+      dot: queryStore.read(picusTabsStore.active?.id ?? '').running ? 'accent' : false,
+      onclick: () => picusUiStore.showBottom('results'),
+    },
+  ]);
+
+  /**
+   * The dock's panels, reachable from the rails.
+   *
+   * They sit at the BOTTOM of the rails, apart from the sections above, because
+   * they open the dock rather than a sidebar — and they are split across the two
+   * rails by the same rule everything else here follows. The left rail is about
+   * the repository and the session: Consistency checks the scripts, Output is the
+   * log of what has been run on this connection. The right rail is about the
+   * document in front of you: the syntax tree, the structural replace, and now the
+   * rows the statement in it returned.
+   *
+   * They do not replace the dock's own tab strip. That strip says which panel is
+   * open and switches between them once it is; these say "open it", from anywhere,
+   * without first having to open something else. Same relationship IntelliJ has
+   * between a tool-window button and the tool window.
+   */
   const railBottom = $derived<ActivityRailItem[]>([
+    {
+      id: 'output',
+      icon: Terminal as unknown as IconComponent,
+      tooltip: 'Output — every statement this connection has run',
+      active: picusUiStore.bottomOpen && picusUiStore.bottomTab === 'output',
+      onclick: () => picusUiStore.showBottom('output'),
+    },
+    {
+      id: 'changes',
+      icon: GitCompare as unknown as IconComponent,
+      tooltip: 'Changes — the files a generation would write, before it writes them',
+      active: picusUiStore.bottomOpen && picusUiStore.bottomTab === 'changes',
+      dot: dmlStore.previewFiles.length ? 'accent' : false,
+      onclick: () => picusUiStore.showBottom('changes'),
+    },
     {
       id: 'consistency',
       icon: TriangleAlert,
@@ -549,6 +628,15 @@
       e.preventDefault();
       return;
     }
+    // …and the script in front of you. Two writes on one key, told apart by what
+    // is actually pending: a grid with dirty cells is the case above, an open file
+    // is this one, and they cannot both be true — a result grid belongs to a query
+    // tab and a script to a file tab.
+    if (mod && !e.shiftKey && key === 's' && tab?.kind === 'file' && tab.file) {
+      void saveOpenScript(tab.file);
+      e.preventDefault();
+      return;
+    }
 
     // Consistency.
     if (mod && e.shiftKey && key === 'k') {
@@ -582,7 +670,12 @@
       {#snippet rightRail()}
         <!-- The tool windows: they describe the DOCUMENT, where the left rail
              describes the repository. -->
-        <ActivityBar side="right" ariaLabel="Picus tools" topItems={railRight} />
+        <ActivityBar
+          side="right"
+          ariaLabel="Picus tools"
+          topItems={railRight}
+          bottomItems={railRightBottom}
+        />
       {/snippet}
 
       {#snippet panels()}
@@ -605,7 +698,9 @@
           <div class="card grow">
             <div class="doc">
               <PicusTabBar />
-              <PicusToolbar onGenerate={generate} onWrite={requestWrite} />
+              {#if !toolbarless}
+                <PicusToolbar onGenerate={generate} onWrite={requestWrite} />
+              {/if}
               <div class="doc-body">
                 {#if !tab}
                   <StateBlock tone="info" label="No document open. Ctrl+T opens a query, Ctrl+3 the generator." />
@@ -627,7 +722,13 @@
           </div>
 
           {#if picusUiStore.bottomOpen}
-            <PanelCard orientation="bottom" initialSize={240} minSize={120} maxSize={560}>
+            <PanelCard
+              orientation="bottom"
+              initialSize={bottomHeight}
+              minSize={120}
+              maxSize={900}
+              onResize={(px) => (bottomHeight = px)}
+            >
               <PicusBottomDock />
             </PanelCard>
           {/if}
@@ -809,6 +910,18 @@
   />
 {/if}
 
+<!-- One menu for the window, raised from wherever was right-clicked. Mounted here
+     rather than inside each surface so there is exactly one open at a time. -->
+{#if picusContextMenuStore.open}
+  <ContextMenu
+    items={picusContextMenuStore.items}
+    x={picusContextMenuStore.x}
+    y={picusContextMenuStore.y}
+    onSelect={(id) => picusContextMenuStore.select(id)}
+    onClose={() => picusContextMenuStore.close()}
+  />
+{/if}
+
 <Tooltip />
 
 <!-- Toasts / notifications / progress addressed to this window. -->
@@ -833,7 +946,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    padding-top: 5px;
+    padding-top: 6px;
     background: var(--bg-elevated);
   }
 
@@ -858,7 +971,10 @@
   .card.grow { flex: 1; }
   .card.grow > :global(*) { flex: 1; min-width: 0; min-height: 0; }
 
-  .doc { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  /* Two pixels above the tab strip so it does not start flush against the card's
+     top edge — the tabs lift on selection, and with nothing above them the lift
+     had nowhere to go. */
+  .doc { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding-top: 2px; }
   /* The document area only ever FILLS — it never scrolls itself. Scrolling
      belongs to each view: the fill views (query, table, file) have their own
      inner scrollers, and the document-flow views (generate, inventory) scroll

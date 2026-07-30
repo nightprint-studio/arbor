@@ -544,7 +544,7 @@
   }
 
   .tab-badge {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--accent);
     background: var(--accent-subtle);
@@ -610,7 +610,7 @@
   .tabs-solid .tabs-tab {
     padding: 4px 12px;
     border-radius: 3px;
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     line-height: 1;
     min-height: 26px;
@@ -737,7 +737,7 @@
     height: 22px;
   }
   .tabs-overflow-count {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -774,7 +774,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     text-align: left;
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);
@@ -802,7 +802,7 @@
     min-width: 0;
   }
   .tabs-overflow-badge {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     padding: 1px 5px;

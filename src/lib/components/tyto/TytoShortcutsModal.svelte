@@ -88,7 +88,7 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
 
   .sc-body { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 
@@ -124,13 +124,13 @@
   .sc-card-title {
     flex: 1;
     margin: 0;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--text-primary);
   }
   .sc-card-count {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-variant-numeric: tabular-nums;
     color: var(--text-muted);
     background: var(--bg-overlay);

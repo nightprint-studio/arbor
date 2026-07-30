@@ -226,7 +226,7 @@
   .header-text { flex: 1; min-width: 0; }
   .header-text h2 {
     margin: 0;
-    font-size: 16px;
+    font-size: var(--font-size-xl);
     font-weight: 600;
     color: var(--text-primary);
     word-break: break-word;
@@ -243,7 +243,7 @@
     gap: 4px;
   }
   .path-label {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.6px;
@@ -251,7 +251,7 @@
   }
   .path {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     background: var(--bg-base);
     border: 1px solid var(--border-subtle);

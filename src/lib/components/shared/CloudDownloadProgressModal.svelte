@@ -326,11 +326,11 @@
   }
   .cdp-head-text { flex: 1; min-width: 0; }
   .cdp-title {
-    font-size: 12px; font-weight: 600;
+    font-size: var(--font-size-sm); font-weight: 600;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .cdp-sub {
-    font-size: 10px; color: var(--text-secondary);
+    font-size: var(--font-size-2xs); color: var(--text-secondary);
     margin-top: 1px; font-family: var(--font-code);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
@@ -341,7 +341,7 @@
     border-radius: var(--radius-sm);
     padding: 2px 8px;
     cursor: pointer;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
   }
   .cdp-cancel:hover { color: var(--error); border-color: var(--error); }
   .cdp-close { padding: 2px 4px; }
@@ -363,7 +363,7 @@
   .cdp-phase {
     display: flex; align-items: center; gap: 8px;
     padding: 8px 16px;
-    font-size: 10px; font-weight: 600; letter-spacing: 0.05em;
+    font-size: var(--font-size-2xs); font-weight: 600; letter-spacing: 0.05em;
     text-transform: uppercase;
     color: var(--text-muted);
   }
@@ -375,7 +375,7 @@
   }
   .cdp-phase-active { color: var(--accent); background: var(--accent-subtle); }
   .cdp-phase-done   { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
-  .cdp-phase-arrow  { color: var(--text-disabled); font-size: 11px; }
+  .cdp-phase-arrow  { color: var(--text-disabled); font-size: var(--font-size-xs); }
 
   /* ── Aggregate bar ───────────────────────────────────────────────────── */
   /* Stays visible even when collapsed so the chip itself doubles as a
@@ -398,7 +398,7 @@
 
   .cdp-merge-note {
     padding: 0 16px 12px;
-    font-size: 11px; color: var(--text-secondary);
+    font-size: var(--font-size-xs); color: var(--text-secondary);
     font-family: var(--font-code);
   }
 
@@ -416,7 +416,7 @@
     gap: 2px 6px;
     align-items: center;
     padding: 4px 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     border-bottom: 1px solid var(--border-subtle, transparent);
   }
   :global(.cdp-file-icon) { color: var(--text-muted); }
@@ -427,7 +427,7 @@
   .cdp-file-status {
     color: var(--text-muted);
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     display: inline-flex; align-items: center; gap: 4px;
     white-space: nowrap;
   }

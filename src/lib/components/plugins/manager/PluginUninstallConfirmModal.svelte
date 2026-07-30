@@ -86,7 +86,7 @@
     border-radius: var(--radius-sm);
     color: var(--accent);
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   .uc-list, .uc-deps {
@@ -117,7 +117,7 @@
   }
 
   .uc-hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-style: italic;
   }

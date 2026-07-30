@@ -24,16 +24,35 @@
   What it offers depends on where the caret is:
 </p>
 <ul>
+  <li>at the start of a statement — the words that can <i>open</i> one, and nothing else.
+    No statement in SQL begins with a table name, so no table is offered there;</li>
+  <li>where one word decides the next — after <code>INSERT</code>, after <code>GROUP</code>,
+    after <code>DROP</code> — only the words that can follow it;</li>
   <li>after a qualifier — <code>c.</code> — the columns of the table that alias stands for,
     <i>only</i> those; <code>FROM CLIENTI c JOIN ORDINI o</code> keeps the two apart;</li>
   <li>in <code>FROM</code> and <code>JOIN</code> — tables, views and the statement's own
-    <code>WITH</code> names;</li>
+    <code>WITH</code> names; once a table reference is complete, the clauses that may follow
+    it instead;</li>
   <li>inside <code>INSERT INTO t (…)</code> — that table's columns, minus the ones already
     listed;</li>
   <li>after <code>UPDATE t SET</code> — that table's columns;</li>
-  <li>anywhere else — the columns in scope first, then tables, views, sequences and the
-    dialect's keywords.</li>
+  <li>in <code>WHERE</code>, <code>ON</code> and <code>HAVING</code> — the columns in scope,
+    the comparison words, and the dialect's functions;</li>
+  <li>in <code>ORDER BY</code> — the columns, then <code>ASC</code> / <code>DESC</code>.</li>
 </ul>
+<p>
+  Two entries in the list are worked out rather than looked up, and both are still facts.
+  A column name carried by <b>more than one</b> table in scope is offered only in its
+  qualified forms — <code>c.ID</code> and <code>o.ID</code>, never a bare <code>ID</code>
+  the server would refuse as ambiguous. And in <code>FROM</code> / <code>JOIN</code>, a
+  table reachable by a <b>foreign key</b> from what the statement already names is ranked
+  above the rest and says which key put it there.
+</p>
+<p>
+  Functions are completed as <code>NAME()</code> with the caret landing between the
+  parentheses. A sequence completes to the form its engine accepts —
+  <code>SEQ.NEXTVAL</code> on Oracle, <code>nextval('seq')</code> on PostgreSQL.
+</p>
 <p>
   Keywords are per dialect, taken from the tab: a connection's engine for a query, the
   engine of the folder the file lives in for a script — inherited from wherever it was
@@ -171,8 +190,37 @@
     <tr><td><kbd>Alt</kbd>+<kbd>Click</kbd></td><td>Put a cursor where you click, keeping the others</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Open the structure of the object under the pointer</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Undo · redo</td></tr>
+    <tr><td><kbd>Right-click</kbd></td><td>Cut · copy · paste, and <b>Generate</b></td></tr>
   </tbody>
 </table>
+
+<h2>Generate</h2>
+<p>
+  Right-clicking offers a skeleton for each of the six things a script creates — a
+  table, a view, a sequence, a trigger, a function, a procedure — written at the caret
+  <i>in the dialect of the buffer you are in</i>. That is the part worth having: the two
+  engines disagree about nearly all of it. A PostgreSQL trigger cannot exist without a
+  <code>RETURNS trigger</code> function, so the skeleton writes both; Oracle carries the
+  body inline and ends with a <code>/</code>. A function returns with
+  <code>RETURN</code> in one and <code>RETURNS</code> in the other.
+</p>
+<p>
+  The names are deliberately obvious placeholders. A skeleton that came out with
+  plausible names would let one survive to review; <code>NOME_TABELLA</code> does not.
+</p>
+
+<h2>Saving a script</h2>
+<p>
+  <kbd>Ctrl</kbd>+<kbd>S</kbd>, or <b>Save</b> on the toolbar, writes the file back
+  <b>in its own encoding and line endings</b> — and then re-reads the repository and
+  re-runs the checks, because every rule Picus has is about what is in the scripts.
+</p>
+<p>
+  A character the file's declared encoding cannot represent <b>stops the save</b> and
+  says so. It is never written as <code>?</code>. Silently mangling a
+  <code>windows-1252</code> script is the failure this whole product exists to catch in
+  other people's editors, and it would be indefensible here.
+</p>
 <p>
   Duplicating with a selection puts the copy immediately after it <i>and selects the copy</i>,
   so pressing it again duplicates again and typing replaces what you just made — which is what

@@ -108,7 +108,7 @@
     padding: 0 12px;
     background: var(--bg-elevated);
     border-top: 1px solid var(--border-subtle);
-    font-size: 11px; color: var(--text-muted);
+    font-size: var(--font-size-xs); color: var(--text-muted);
     user-select: none;
   }
   .bf-item { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
@@ -117,7 +117,7 @@
   .bf-indexing :global(svg) { color: var(--accent); }
   .bf-muted { color: var(--text-disabled); }
   .bf-sub {
-    font-size: 10px; color: var(--text-disabled);
+    font-size: var(--font-size-2xs); color: var(--text-disabled);
     padding-left: 2px; max-width: 160px; overflow: hidden; text-overflow: ellipsis;
   }
   .bf-spacer { flex: 1; }

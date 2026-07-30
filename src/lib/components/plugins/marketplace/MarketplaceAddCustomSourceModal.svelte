@@ -157,11 +157,11 @@
     background: var(--bg-overlay);
     padding: 1px 5px;
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .form-row { display: flex; flex-direction: column; gap: 4px; }
   .form-row > span {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     text-transform: uppercase;
     letter-spacing: 0.4px;
     color: var(--text-muted);

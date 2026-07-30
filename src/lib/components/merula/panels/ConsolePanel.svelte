@@ -95,7 +95,7 @@
 
 <style>
   .con { display: flex; flex-direction: column; height: 100%; background: var(--bg-base); }
-  .con-meta { font-size: 10.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .con-meta { font-size: var(--font-size-2xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
   /* ── Toolbar: search + level chips ── */
   .con-toolbar {
@@ -112,7 +112,7 @@
   .con-search:focus-within { border-color: var(--border-focus); }
   .con-search input {
     flex: 1; min-width: 0; background: transparent; border: none; outline: none;
-    color: var(--text-primary); font-family: var(--font-ui-sans); font-size: 12px;
+    color: var(--text-primary); font-family: var(--font-ui-sans); font-size: var(--font-size-sm);
   }
   .con-search input::placeholder { color: var(--text-disabled); }
   .con-clear {
@@ -129,7 +129,7 @@
     display: flex; align-items: center; justify-content: center;
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
     background: var(--bg-input); cursor: pointer;
-    font-size: 10px; font-weight: 700; font-family: var(--font-code);
+    font-size: var(--font-size-2xs); font-weight: 700; font-family: var(--font-code);
     transition: opacity var(--transition-fast), background var(--transition-fast);
   }
   .lvl-chip.off { opacity: 0.32; }
@@ -144,11 +144,11 @@
   .con-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; font-family: var(--font-code); }
   .con-line {
     display: flex; align-items: baseline; gap: 8px;
-    padding: 1px 12px; font-size: 11.5px; line-height: 1.6; white-space: nowrap;
+    padding: 1px 12px; font-size: var(--font-size-xs); line-height: 1.6; white-space: nowrap;
   }
   .con-line.clickable { cursor: pointer; }
   .con-line.clickable:hover { background: var(--bg-hover); }
-  .con-level { width: 42px; flex-shrink: 0; font-weight: 600; text-transform: uppercase; font-size: 9.5px; }
+  .con-level { width: 42px; flex-shrink: 0; font-weight: 600; text-transform: uppercase; font-size: var(--font-size-3xs); }
   .con-text { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; }
 
   .con-level.lvl-trace { color: var(--text-disabled); }

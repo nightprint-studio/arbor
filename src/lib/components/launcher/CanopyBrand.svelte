@@ -16,5 +16,5 @@
 
 <style>
   .brand { display: flex; align-items: center; gap: 8px; flex: none; }
-  .brand-name { font-family: var(--canopy-display); font-weight: 600; font-size: 14px; color: #dfe5ee; }
+  .brand-name { font-family: var(--canopy-display); font-weight: 600; font-size: var(--font-size-lg); color: #dfe5ee; }
 </style>

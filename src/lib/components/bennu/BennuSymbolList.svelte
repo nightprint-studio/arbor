@@ -357,10 +357,10 @@
   .sl { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; }
   .sl-filter { padding: 6px 8px; }
   .sl-detail {
-    font-size: 10px; color: var(--text-disabled);
+    font-size: var(--font-size-2xs); color: var(--text-disabled);
     max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .sl-line { font-size: 10px; color: var(--text-disabled); font-family: var(--font-code); flex-shrink: 0; }
+  .sl-line { font-size: var(--font-size-2xs); color: var(--text-disabled); font-family: var(--font-code); flex-shrink: 0; }
 
   /* Visibility dot — a fixed-width slot so labels line up whether or not a node
      carries visibility (groups / markup elements render an empty slot). */
@@ -383,7 +383,7 @@
   .sl-acc-chip {
     display: inline-flex; align-items: center; justify-content: center;
     width: 12px; height: 12px; border-radius: 3px;
-    font-size: 8px; font-weight: 700; font-family: var(--font-code);
+    font-size: var(--font-size-3xs); font-weight: 700; font-family: var(--font-code);
     color: var(--text-disabled);
     background: var(--bg-overlay);
   }

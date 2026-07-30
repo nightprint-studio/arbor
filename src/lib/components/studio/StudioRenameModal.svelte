@@ -512,7 +512,7 @@
 </Modal>
 
 <style>
-  /* Header / chrome — matches the RonStudioModal mac-close-btn pattern. */
+  /* Header / chrome — matches the RonStudioModal close-btn pattern. */
   .rm-header {
     display: flex; align-items: center; justify-content: space-between;
     width: 100%;
@@ -524,7 +524,7 @@
     color: var(--text-primary);
   }
   .rm-format-tag {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     padding: 2px 6px;
@@ -559,7 +559,7 @@
   }
   .rm-row-label {
     width: 36px;
-    font-size: 11px; text-transform: uppercase;
+    font-size: var(--font-size-xs); text-transform: uppercase;
     color: var(--text-secondary);
     letter-spacing: 0.05em;
   }
@@ -570,20 +570,20 @@
     border: 1px solid var(--border-subtle);
     border-radius: 4px;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     word-break: break-all;
   }
 
   .rm-summary {
     display: flex; align-items: center; gap: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     padding: 4px 0 0;
   }
   .rm-summary code {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     padding: 1px 4px;
     border-radius: 3px;
     background: var(--bg-elevated);
@@ -599,7 +599,7 @@
     padding: 8px 10px;
     border-radius: 6px;
     border: 1px solid;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 1.45;
     flex-shrink: 0;
   }
@@ -621,7 +621,7 @@
     margin: 4px 0 0;
     padding: 0 0 0 18px;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .rm-blocker-list code, .rm-collision-list code {
     font-family: var(--font-mono);
@@ -630,13 +630,13 @@
   .rm-collision-details summary {
     cursor: pointer;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     margin-top: 4px;
   }
   .rm-collision-path {
     color: var(--text-secondary);
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     margin-left: 4px;
   }
 
@@ -650,7 +650,7 @@
     border-radius: 6px;
   }
   .rm-list :global(.tree-row) {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     align-items: center;
     gap: 6px;
   }
@@ -678,7 +678,7 @@
   .rm-file-name {
     color: var(--text-primary);
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -688,12 +688,12 @@
   .rm-file-count {
     margin-left: auto;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     flex-shrink: 0;
   }
 
   .rm-scope {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     padding: 1px 5px;
@@ -716,19 +716,19 @@
 
   .rm-site-key {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
     flex-shrink: 0;
   }
   .rm-site-path {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     flex-shrink: 0;
   }
   .rm-site-preview {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-disabled);
     margin-left: 6px;
     white-space: nowrap;
@@ -746,13 +746,13 @@
   }
   .rm-footer-hint {
     display: inline-flex; align-items: center; gap: 4px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     flex: 1; min-width: 0;
   }
   .rm-footer-hint kbd {
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 1px 4px;
     border: 1px solid var(--border-subtle);
     border-radius: 3px;

@@ -176,14 +176,14 @@
   .ff-none {
     margin: 0;
     padding: 2px 10px 4px 30px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-style: italic;
     color: var(--text-muted);
   }
   .ff-more {
     margin: 4px 0 0;
     padding: 2px 10px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-style: italic;
     color: var(--text-muted);
   }

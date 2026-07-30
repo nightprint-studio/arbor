@@ -154,7 +154,7 @@
   }
 
   .knob-label {
-    font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.3px;
+    font-size: var(--font-size-3xs); text-transform: uppercase; letter-spacing: 0.3px;
     color: var(--text-muted); user-select: none;
   }
 </style>

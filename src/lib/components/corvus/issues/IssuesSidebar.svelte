@@ -731,7 +731,7 @@
   /* ── Sort dropdown ──────────────────────────────────────────────────────── */
   .sort-drop-section {
     padding: 4px 8px 2px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -745,14 +745,14 @@
   /* ── Filter options error banner ────────────────────────────────────────── */
   .filter-opts-error {
     display: flex; align-items: center; gap: 5px; flex-shrink: 0;
-    padding: 4px 8px; font-size: 10px;
+    padding: 4px 8px; font-size: var(--font-size-2xs);
     background: rgba(248,113,113,0.08); border-bottom: 1px solid rgba(248,113,113,0.2);
     color: var(--error);
   }
   .filter-opts-error span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .filter-opts-error button {
     flex-shrink: 0; background: transparent; border: 1px solid currentColor;
-    color: inherit; font-size: 9px; padding: 1px 5px; border-radius: var(--radius-sm);
+    color: inherit; font-size: var(--font-size-3xs); padding: 1px 5px; border-radius: var(--radius-sm);
     cursor: pointer; font-family: var(--font-ui-sans);
   }
 
@@ -771,7 +771,7 @@
   :global(.is-search-icon) { color: var(--text-muted); flex-shrink: 0; }
   .is-search {
     flex: 1; border: none; background: transparent;
-    font-size: 11px; font-family: var(--font-ui-sans);
+    font-size: var(--font-size-xs); font-family: var(--font-ui-sans);
     color: var(--text-primary); padding: 5px 0; outline: none;
   }
   .is-search::placeholder { color: var(--text-muted); }
@@ -791,7 +791,7 @@
   .chip {
     display: inline-flex; align-items: center; gap: 3px;
     padding: 3px 7px;
-    font-size: 10px; font-weight: 500;
+    font-size: var(--font-size-2xs); font-weight: 500;
     font-family: var(--font-ui-sans);
     color: var(--text-muted);
     background: var(--bg-elevated);
@@ -810,13 +810,13 @@
   .chip-clear:hover { background: var(--bg-hover); border-color: var(--border-subtle); }
   .chip-drop-group {
     padding: 5px 8px 2px;
-    font-size: 9px; font-weight: 600; letter-spacing: 0.5px;
+    font-size: var(--font-size-3xs); font-weight: 600; letter-spacing: 0.5px;
     text-transform: uppercase; color: var(--text-muted);
   }
   .chip-drop-item {
     display: flex; align-items: center; gap: 6px;
     width: 100%; padding: 5px 8px; text-align: left;
-    font-size: 11px; font-family: var(--font-ui-sans);
+    font-size: var(--font-size-xs); font-family: var(--font-ui-sans);
     color: var(--text-primary); background: transparent; border: none;
     border-radius: var(--radius-sm); cursor: pointer;
     transition: background var(--transition-fast);
@@ -825,16 +825,16 @@
   .chip-drop-selected { color: var(--accent); }
   .chip-drop-empty {
     display: flex; align-items: center; gap: 6px; justify-content: center;
-    padding: 10px 8px; font-size: 11px; color: var(--text-muted); font-style: italic;
+    padding: 10px 8px; font-size: var(--font-size-xs); color: var(--text-muted); font-style: italic;
   }
   .chip-drop-error {
     display: flex; flex-direction: column; gap: 6px;
-    padding: 8px 10px; font-size: 10px;
+    padding: 8px 10px; font-size: var(--font-size-2xs);
     color: var(--error); font-family: var(--font-code);
     word-break: break-word;
   }
   .chip-drop-retry {
-    align-self: flex-start; font-size: 10px; font-weight: 500;
+    align-self: flex-start; font-size: var(--font-size-2xs); font-weight: 500;
     padding: 2px 8px; background: var(--bg-hover); border: 1px solid var(--border);
     border-radius: var(--radius-sm); color: var(--text-secondary);
     cursor: pointer; font-family: var(--font-ui-sans);
@@ -842,13 +842,13 @@
   .chip-drop-retry:hover { background: var(--bg-overlay); }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .team-key {
-    font-family: var(--font-code); font-size: 10px;
+    font-family: var(--font-code); font-size: var(--font-size-2xs);
     color: var(--text-muted); background: var(--bg-elevated);
     padding: 0 4px; border-radius: var(--radius-sm);
   }
-  .check { margin-left: auto; font-size: 11px; }
+  .check { margin-left: auto; font-size: var(--font-size-xs); }
   .ms-date-chip {
-    margin-left: auto; font-size: 10px;
+    margin-left: auto; font-size: var(--font-size-2xs);
     color: var(--text-muted); font-variant-numeric: tabular-nums;
   }
 
@@ -864,15 +864,15 @@
     justify-content: center; flex: 1; gap: 8px;
     padding: 32px 24px; text-align: center;
   }
-  .state-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin: 0; }
-  .state-hint { font-size: 12px; color: var(--text-muted); line-height: 1.5; max-width: 220px; margin: 0; }
-  .state-error-text { font-family: var(--font-code); font-size: 11px; color: var(--error); word-break: break-word; }
+  .state-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); margin: 0; }
+  .state-hint { font-size: var(--font-size-sm); color: var(--text-muted); line-height: 1.5; max-width: 220px; margin: 0; }
+  .state-error-text { font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--error); word-break: break-word; }
   :global(.state-icon)  { opacity: 0.5; }
   :global(.state-warn)  { opacity: 1; color: var(--status-warning, #fbbf24) !important; }
   :global(.state-muted) { color: var(--text-disabled) !important; }
   .retry-btn {
     display: inline-flex; align-items: center; gap: 5px;
-    padding: 5px 12px; font-size: 11px; font-weight: 500;
+    padding: 5px 12px; font-size: var(--font-size-xs); font-weight: 500;
     background: transparent; border: 1px solid var(--border);
     border-radius: var(--radius-md); color: var(--text-secondary);
     cursor: pointer; font-family: var(--font-ui-sans); margin-top: 4px;
@@ -886,9 +886,9 @@
     padding: 28px 20px; gap: 10px; text-align: center;
   }
   :global(.setup-icon) { color: var(--accent); opacity: 0.8; }
-  .setup-title { font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0; }
+  .setup-title { font-size: var(--font-size-lg); font-weight: 600; color: var(--text-primary); margin: 0; }
   .setup-hint {
-    font-size: 11px; color: var(--text-muted); line-height: 1.55;
+    font-size: var(--font-size-xs); color: var(--text-muted); line-height: 1.55;
     max-width: 220px; margin: 0;
   }
   /* Compact connection card host (no-token setup) — the generic
@@ -899,7 +899,7 @@
   }
 
   .setup-back-btn {
-    font-size: 10px; color: var(--text-muted);
+    font-size: var(--font-size-2xs); color: var(--text-muted);
     background: transparent; border: none; cursor: pointer;
     font-family: var(--font-ui-sans); padding: 2px 4px;
     margin-top: 4px;
@@ -913,7 +913,7 @@
     width: 200px; padding: 10px 14px;
     background: var(--bg-base); border: 1px solid var(--border);
     border-radius: var(--radius-md); cursor: pointer;
-    font-family: var(--font-ui-sans); font-size: 12px; font-weight: 500;
+    font-family: var(--font-ui-sans); font-size: var(--font-size-sm); font-weight: 500;
     color: var(--text-primary);
     transition: border-color var(--transition-fast), background var(--transition-fast);
   }
@@ -966,7 +966,7 @@
   }
   .is-time {
     flex-shrink: 0;
-    font-size: 9px; color: var(--text-muted); white-space: nowrap;
+    font-size: var(--font-size-3xs); color: var(--text-muted); white-space: nowrap;
   }
 
   /* Ticket code — stays in the bottom metadata row, but accent-coloured so
@@ -974,7 +974,7 @@
   .is-identifier {
     flex-shrink: 0;
     font-family: var(--font-code);
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     color: var(--accent);
     white-space: nowrap;
@@ -987,18 +987,18 @@
     display: flex; align-items: center; gap: 4px;
     overflow: hidden;
   }
-  .is-item-sep { font-size: 9px; color: var(--text-disabled); flex-shrink: 0; }
+  .is-item-sep { font-size: var(--font-size-3xs); color: var(--text-disabled); flex-shrink: 0; }
   .is-status-name {
-    font-size: 9px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0;
+    font-size: var(--font-size-3xs); color: var(--text-muted); white-space: nowrap; flex-shrink: 0;
     max-width: 70px; overflow: hidden; text-overflow: ellipsis;
   }
   .is-label {
-    font-size: 10px; font-weight: 500;
+    font-size: var(--font-size-2xs); font-weight: 500;
     padding: 1px 5px; border-radius: var(--radius-sm); white-space: nowrap; flex-shrink: 0;
     max-width: 80px; overflow: hidden; text-overflow: ellipsis;
   }
   .is-label-more {
-    font-size: 10px; color: var(--text-muted); flex-shrink: 0;
+    font-size: var(--font-size-2xs); color: var(--text-muted); flex-shrink: 0;
   }
   .is-assignee-slot {
     /* Pinned to the right edge of the flex row (.is-item) — not inside the
@@ -1013,7 +1013,7 @@
   .is-avatar-placeholder {
     width: 14px; height: 14px; border-radius: 50%;
     background: var(--accent-subtle); color: var(--accent);
-    font-size: 8px; font-weight: 700;
+    font-size: var(--font-size-3xs); font-weight: 700;
     display: flex; align-items: center; justify-content: center;
   }
 
@@ -1025,9 +1025,9 @@
     background: var(--bg-base);
     flex-shrink: 0;
   }
-  .is-footer-user { font-size: 10px; color: var(--text-muted); }
+  .is-footer-user { font-size: var(--font-size-2xs); color: var(--text-muted); }
   .is-footer-logout {
-    font-size: 10px; color: var(--text-muted);
+    font-size: var(--font-size-2xs); color: var(--text-muted);
     background: transparent; border: none; cursor: pointer;
     padding: 2px 6px; border-radius: var(--radius-sm);
     transition: background var(--transition-fast), color var(--transition-fast);

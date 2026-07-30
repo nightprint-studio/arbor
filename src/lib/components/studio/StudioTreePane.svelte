@@ -752,7 +752,7 @@
     display: flex; align-items: center; gap: 8px;
     padding: 20px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     justify-content: center;
   }
 </style>

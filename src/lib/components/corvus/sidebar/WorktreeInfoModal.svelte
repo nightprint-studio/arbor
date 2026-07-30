@@ -269,7 +269,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--text-secondary);
     width: 92px;
@@ -280,7 +280,7 @@
   .info-value {
     flex: 1;
     min-width: 0;
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     display: flex;
     align-items: center;
@@ -303,7 +303,7 @@
   }
   .info-path {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     cursor: default;
     overflow: hidden;
@@ -314,14 +314,14 @@
   }
   .mono {
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
 
   .project-type {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     padding: 2px 8px;
     background: var(--bg-overlay);
     border: 1px solid var(--border-subtle);
@@ -331,7 +331,7 @@
   }
 
   .project-icon {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     line-height: 1;
   }
   .project-label {

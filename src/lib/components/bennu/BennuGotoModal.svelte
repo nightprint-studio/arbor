@@ -236,12 +236,12 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
   .body { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .search { padding: 12px 14px 8px; flex-shrink: 0; }
   .search-wrap { display: contents; }
 
-  .state { display: flex; align-items: center; gap: 7px; padding: 14px 16px; font-size: 12px; color: var(--text-secondary); }
+  .state { display: flex; align-items: center; gap: 7px; padding: 14px 16px; font-size: var(--font-size-sm); color: var(--text-secondary); }
   .state.muted { color: var(--text-muted); }
 
   .list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 6px 8px; }
@@ -253,6 +253,6 @@
   }
   .row.active { background: var(--bg-selected); }
   .r-icon { display: flex; flex-shrink: 0; color: var(--text-muted); }
-  .r-primary { flex-shrink: 0; font-size: 12.5px; color: var(--text-primary); font-weight: 500; }
-  .r-secondary { flex: 1; min-width: 0; font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+  .r-primary { flex-shrink: 0; font-size: var(--font-size-sm); color: var(--text-primary); font-weight: 500; }
+  .r-secondary { flex: 1; min-width: 0; font-size: var(--font-size-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 </style>

@@ -101,8 +101,20 @@
 <p>
   Opening a table shows its rows, its structure — columns, primary key, foreign keys in
   <i>both</i> directions, indexes, triggers — and its DDL. Views carry their defining query
-  instead of constraints; sequences and triggers show their properties, because there is
-  nothing else true about them.
+  instead of constraints.
+</p>
+<p>
+  A <b>sequence</b> is its properties and nothing else, because there is nothing else true
+  about one. A <b>trigger</b> is its properties <i>and what it actually does</i>: the
+  <code>CREATE TRIGGER</code> the server writes itself, and below it the source of the
+  routine it fires. When it fires is the easy half of the question; the routine is the
+  half you opened it for, and finding it in the scripts means first working out which of
+  them installed this version. A routine written in C, or one this session may not read,
+  says so rather than showing an empty box.
+</p>
+<p>
+  Neither has a toolbar. Everything one would carry — sub-views, a new row, DML from the
+  columns, a CSV export — is about something these two do not have.
 </p>
 
 <h2>Queries</h2>
@@ -194,8 +206,9 @@
 </p>
 <p>
   As soon as the whole result is loaded — which for most queries is immediately, on the
-  first window — both come back and behave as they always have. A note above the rows says
-  how many of how many are loaded while that is not yet the case, and leaves when it is.
+  first window — both come back and behave as they always have. Until then the row counter
+  in the panel header reads <b>loaded of total</b> rather than just the total, and pointing
+  at it says why the two controls are standing down.
 </p>
 <p>
   To reach a specific distant row, query it with a <code>WHERE</code> on an indexed column

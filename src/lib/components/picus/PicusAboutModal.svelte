@@ -106,7 +106,7 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
 
   .ab {
     display: flex;
@@ -118,9 +118,9 @@
   }
 
   .ab-hero { display: flex; gap: 16px; align-items: flex-start; }
-  .ab-hero-text h1 { font-size: 20px; font-weight: 600; margin-bottom: 2px; }
-  .ab-tagline { font-size: 12px; color: var(--accent); margin-bottom: 6px; }
-  .ab-blurb { font-size: 12px; line-height: 1.55; color: var(--text-muted); max-width: 62ch; }
+  .ab-hero-text h1 { font-size: var(--font-size-2xl); font-weight: 600; margin-bottom: 2px; }
+  .ab-tagline { font-size: var(--font-size-sm); color: var(--accent); margin-bottom: 6px; }
+  .ab-blurb { font-size: var(--font-size-sm); line-height: 1.55; color: var(--text-muted); max-width: 62ch; }
 
   .ab-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
 
@@ -135,7 +135,7 @@
     align-items: center;
     gap: 6px;
     margin: 0 0 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -144,7 +144,7 @@
   .ab-card h2 :global(svg) { color: var(--text-disabled); }
 
   .ab-rows { margin: 0; display: flex; flex-direction: column; gap: 4px; }
-  .ab-row { display: flex; gap: 10px; font-size: 11.5px; }
+  .ab-row { display: flex; gap: 10px; font-size: var(--font-size-xs); }
   .ab-row dt { width: 88px; flex-shrink: 0; color: var(--text-muted); }
   .ab-row dd { margin: 0; color: var(--text-secondary); }
 
@@ -154,12 +154,12 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
 
   .ab-principles ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 7px; }
-  .ab-principles li { font-size: 11.5px; line-height: 1.55; color: var(--text-muted); }
+  .ab-principles li { font-size: var(--font-size-xs); line-height: 1.55; color: var(--text-muted); }
   .ab-principles b { color: var(--text-secondary); }
 
   .ab-foot {
@@ -167,7 +167,7 @@
     align-items: center;
     gap: 6px;
     padding-top: 4px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-disabled);
   }
 </style>

@@ -153,6 +153,6 @@
   .bsp-ico { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--text-muted); }
   .bsp-row.current .bsp-ico { color: var(--accent); }
   .bsp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, monospace); }
-  .bsp-cur { font-size: 10px; color: var(--accent); flex-shrink: 0; }
-  .bsp-empty { padding: 14px 10px; text-align: center; color: var(--text-muted); font-size: 12px; }
+  .bsp-cur { font-size: var(--font-size-2xs); color: var(--accent); flex-shrink: 0; }
+  .bsp-empty { padding: 14px 10px; text-align: center; color: var(--text-muted); font-size: var(--font-size-sm); }
 </style>

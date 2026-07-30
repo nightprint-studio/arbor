@@ -81,7 +81,7 @@
   .section { display: flex; flex-direction: column; gap: 10px; }
 
   .section-title {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -90,7 +90,7 @@
     margin: 0;
   }
   .section-note {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 400;
     text-transform: none;
     letter-spacing: 0;
@@ -107,7 +107,7 @@
   }
   .ext-label {
     width: 80px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-code);
     color: var(--text-secondary);
     text-align: right;
@@ -118,7 +118,7 @@
   }
   .ext-count {
     width: 44px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     color: var(--text-muted);
     text-align: right;
@@ -135,7 +135,7 @@
   }
   .file-path {
     width: 260px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-code);
     color: var(--text-secondary);
     white-space: nowrap;
@@ -150,7 +150,7 @@
 
   .file-count {
     width: 32px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     color: var(--text-muted);
     text-align: right;
@@ -178,7 +178,7 @@
   .file-bar:hover { opacity: 1; }
 
   .empty {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-muted);
     font-style: italic;
     font-family: var(--font-ui-sans);

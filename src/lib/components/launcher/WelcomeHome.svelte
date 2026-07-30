@@ -227,7 +227,7 @@
     overflow-y: auto;
     /* The page reads at a comfortable size rather than at panel density: this
        is a screen you look at between tasks, not one you work in all day. */
-    font-size: 13.5px;
+    font-size: var(--font-size-md);
   }
 
   /* Capped and centred — the page must not grow with the window. `min-height`
@@ -254,7 +254,7 @@
     letter-spacing: -0.01em;
     color: var(--text-primary);
   }
-  .hero p { margin: 3px 0 0; font-size: 13.5px; color: var(--text-muted); }
+  .hero p { margin: 3px 0 0; font-size: var(--font-size-md); color: var(--text-muted); }
   .hero-actions { margin-left: auto; display: flex; gap: 7px; flex: none; }
 
   /* ── sections ── */
@@ -262,7 +262,7 @@
   .sec-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
   .sec-title {
     margin: 0;
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     letter-spacing: 0.07em;
     text-transform: uppercase;
@@ -270,7 +270,7 @@
   }
   .chips { display: flex; align-items: center; gap: 6px; }
   .sec-search { margin-left: auto; width: 220px; }
-  .sec-empty { margin: 2px; font-size: 13px; color: var(--text-muted); }
+  .sec-empty { margin: 2px; font-size: var(--font-size-md); color: var(--text-muted); }
 
   /* Fixed columns, NOT auto-fill: the cards keep the size they're designed at
      and a wide window gets margin instead of a sixth column. */
@@ -304,7 +304,7 @@
   }
   .r-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .r-name {
-    font-size: 13.5px;
+    font-size: var(--font-size-md);
     font-weight: 500;
     color: var(--text-primary);
     white-space: nowrap;
@@ -314,7 +314,7 @@
   /* Tail-first: the deepest folders identify a project, the drive letter never does. */
   .r-path {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-disabled);
     white-space: nowrap;
     overflow: hidden;
@@ -322,7 +322,7 @@
     direction: rtl;
     text-align: left;
   }
-  .r-when { flex: none; font-size: 12px; color: var(--text-muted); }
+  .r-when { flex: none; font-size: var(--font-size-sm); color: var(--text-muted); }
 
   /* Sticky at the bottom of the panel: the shortcuts are a permanent reference,
      not the end of the document, so they shouldn't scroll away with the list.
@@ -337,7 +337,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 18px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-disabled);
   }
   .foot span { display: inline-flex; align-items: center; gap: 5px; }

@@ -140,12 +140,12 @@
   .size-md {
     padding: 4px 10px 4px 8px;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .size-sm {
     padding: 2px 8px 2px 6px;
     gap: 5px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     letter-spacing: 0.06em;
   }
 </style>

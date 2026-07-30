@@ -273,7 +273,7 @@
         <kbd class="cps-tab-hint">Tab</kbd>
       {/if}
       <button
-        class="mac-close-btn"
+        class="close-btn"
         onclick={onClose}
         use:tooltip={{ content: 'Close', shortcut: 'Esc' }}
         aria-label="Close"
@@ -456,7 +456,7 @@
   .cps-ghost-suffix { color: var(--text-disabled); }
 
   .cps-tab-hint {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 1px 5px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -477,7 +477,7 @@
     padding: 32px 20px;
     text-align: center;
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: var(--font-size-md);
   }
   .cps-loading {
     padding: 32px 20px;
@@ -485,12 +485,12 @@
     align-items: center;
     justify-content: center;
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: var(--font-size-md);
   }
 
   .cps-section {
     padding: 8px 16px 3px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -510,7 +510,7 @@
     cursor: pointer;
     text-align: left;
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-family: var(--font-ui-sans);
     transition: background 80ms;
     border-radius: var(--radius-sm);
@@ -544,14 +544,14 @@
   /* Identifiers (branch/tag) read better monospaced next to prose commands. */
   .cps-item.mono .cps-item-title {
     font-family: var(--font-code);
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
   }
   :global(.cps-item-title .cps-hl) {
     color: var(--accent);
     font-weight: 600;
   }
   .cps-item-sub {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -572,7 +572,7 @@
     align-items: center;
     justify-content: center;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     min-width: 18px;
     height: 17px;
     padding: 0 5px;
@@ -585,12 +585,12 @@
   }
   .cps-key-plus {
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     user-select: none;
   }
 
   .cps-enter {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-muted);
     flex-shrink: 0;
     opacity: 0.7;
@@ -616,12 +616,12 @@
     padding: 7px 14px;
     border-top: 1px solid var(--border);
     background: var(--bg-elevated);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-disabled);
     flex-shrink: 0;
   }
   .cps-footer kbd {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 1px 4px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);

@@ -109,7 +109,43 @@
       return seq ? `last ${seq.lastValue.toLocaleString()} · step ${seq.incrementBy}` : null;
     }
     const trg = schemaStore.trigger(name);
-    return trg ? `${trg.timing} ${trg.events.join('/')} on ${trg.table}${trg.enabled ? '' : ' · disabled'}` : null;
+    // What fires it is the group it is under — repeating it here is what left
+    // `AFTER INSERT/UPDATE/DELETE on astra` sitting on top of the name, so the
+    // names read `art88…`, `astra…` and the list stopped being usable.
+    return trg ? `on ${trg.table}${trg.enabled ? '' : ' · disabled'}` : null;
+  }
+
+  /**
+   * Triggers, split by what fires them.
+   *
+   * A schema's triggers are dozens of names that differ by two characters and are
+   * told apart by their timing and their events — which is exactly the wrong thing
+   * to carry on each row, because it is long, it is the same on every row of a run,
+   * and it wins the fight for the width against the one thing that is unique. As a
+   * heading it costs one line per kind, says the count, and gives the whole row
+   * back to the name.
+   */
+  interface TriggerBucket { key: string; label: string; names: string[] }
+
+  function triggerBuckets(names: string[]): TriggerBucket[] {
+    const map = new Map<string, string[]>();
+    for (const name of names) {
+      const trg = schemaStore.trigger(name);
+      const label = trg ? `${trg.timing} ${trg.events.join('/')}` : 'unknown';
+      const list = map.get(label) ?? [];
+      list.push(name);
+      map.set(label, list);
+    }
+    return [...map.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([label, list]) => ({ key: `triggers:${label}`, label, names: list }));
+  }
+
+  /** Unlike the four top groups, a bucket is **open** by default: you already
+   *  asked for the triggers by opening the group above it. */
+  function isBucketOpen(key: string, hits: number): boolean {
+    if (filtering) return hits > 0;
+    return expanded[key] ?? true;
   }
 
   /** A filter opens whatever it found; otherwise the stored (default closed) state. */
@@ -122,6 +158,26 @@
     expanded = { ...expanded, [group]: !open };
   }
 </script>
+
+<!-- One object, one line. Shared by the flat groups and by the trigger buckets so
+     that a row means the same thing at either depth — the indent is the only
+     difference, and passing it is cheaper than a second copy of the row. -->
+{#snippet objectRow(group: SchemaGroup, name: string, indent: number)}
+  <SidebarItem
+    {indent}
+    badgesOnHover
+    selected={picusTabsStore.active?.table === name}
+    onclick={() => picusTabsStore.openObject(name, objectKindOf(group), connection.id)}
+  >
+    <span class="cst-object">
+      {connection.dialect === 'postgres' ? name.toLowerCase() : name}
+    </span>
+    {#snippet badges()}
+      {@const detail = detailFor(group, name)}
+      {#if detail}<span class="cst-detail">{detail}</span>{/if}
+    {/snippet}
+  </SidebarItem>
+{/snippet}
 
 <div class="cst-meta" style:--conn-color={connectionColorVar(connection)}>
   {connection.schema}
@@ -164,22 +220,36 @@
     </SidebarItem>
 
     {#if open}
-      {#each names.slice(0, MAX_ROWS) as name (name)}
-        <SidebarItem
-          indent={40}
-          badgesOnHover
-          selected={picusTabsStore.active?.table === name}
-          onclick={() => picusTabsStore.openObject(name, objectKindOf(group), connection.id)}
-        >
-          <span class="cst-object">
-            {connection.dialect === 'postgres' ? name.toLowerCase() : name}
-          </span>
-          {#snippet badges()}
-            {@const detail = detailFor(group, name)}
-            {#if detail}<span class="cst-detail">{detail}</span>{/if}
-          {/snippet}
-        </SidebarItem>
-      {/each}
+      {@const shown = names.slice(0, MAX_ROWS)}
+      {#if group === 'triggers'}
+        <!-- Bucketed by what fires them; the ceiling is applied to the group as a
+             whole first, so the buckets divide what is drawn rather than each
+             getting a limit of its own. -->
+        {#each triggerBuckets(shown) as bucket (bucket.key)}
+          {@const bucketOpen = isBucketOpen(bucket.key, bucket.names.length)}
+          <SidebarItem
+            indent={40}
+            onclick={() => (expanded = { ...expanded, [bucket.key]: !bucketOpen })}
+          >
+            {#snippet icon()}
+              <span class="cst-twist" class:cst-open={bucketOpen}><ChevronRight size={11} /></span>
+            {/snippet}
+            <span class="cst-bucket">{bucket.label}</span>
+            {#snippet badges()}
+              <Badge variant="count" label={String(bucket.names.length)} />
+            {/snippet}
+          </SidebarItem>
+          {#if bucketOpen}
+            {#each bucket.names as name (name)}
+              {@render objectRow(group, name, 58)}
+            {/each}
+          {/if}
+        {/each}
+      {:else}
+        {#each shown as name (name)}
+          {@render objectRow(group, name, 40)}
+        {/each}
+      {/if}
 
       {#if names.length > MAX_ROWS}
         <p class="cst-more">
@@ -204,17 +274,30 @@
   .cst-twist.cst-open { transform: rotate(90deg); }
 
   .cst-group {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--text-secondary);
   }
 
+  /* What fires a run of triggers, as a heading rather than on every row. Not
+     upper-cased: `AFTER INSERT/UPDATE/DELETE` already is, and it is a fact from
+     the catalogue rather than a section label of ours. */
+  .cst-bucket {
+    font-size: var(--font-size-2xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   /* One line, code face, the name and nothing else at rest. */
   .cst-object {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -225,7 +308,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
   }
 
@@ -237,7 +320,7 @@
     padding: 3px 12px 5px 34px;
     margin-left: 10px;
     border-left: 2px solid var(--conn-color);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
   }
   .cst-stamp { color: var(--text-disabled); }
@@ -247,14 +330,14 @@
     align-items: center;
     gap: 6px;
     padding: 4px 12px 6px 34px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
   .cst-bad { color: var(--error); }
 
   .cst-none {
     padding: 4px 12px 4px 46px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-disabled);
     font-style: italic;
   }
@@ -265,7 +348,7 @@
     gap: 6px;
     flex-wrap: wrap;
     padding: 4px 12px 6px 46px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
   .cst-narrow {

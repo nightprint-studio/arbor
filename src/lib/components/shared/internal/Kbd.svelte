@@ -111,8 +111,8 @@
                 background var(--transition-fast);
   }
 
-  .sz-sm { font-size: 10px; padding: 0 5px; min-width: 18px; height: 17px; }
-  .sz-md { font-size: 11px; padding: 1px 7px; min-width: 20px; height: 19px; }
+  .sz-sm { font-size: var(--font-size-2xs); padding: 0 5px; min-width: 18px; height: 17px; }
+  .sz-md { font-size: var(--font-size-xs); padding: 1px 7px; min-width: 20px; height: 19px; }
 
   .tone-accent {
     background: var(--accent-subtle);
@@ -132,14 +132,14 @@
   }
   .kbd-plus {
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     user-select: none;
   }
 
   /* Inline (IntelliJ-menu) variant — plain monospace, right-aligned by parent. */
   .kbd-inline {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     white-space: nowrap;
     letter-spacing: 0.2px;

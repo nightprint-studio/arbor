@@ -78,7 +78,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
   .kp-label :global(svg) { color: var(--text-disabled); }
@@ -91,7 +91,7 @@
     border-radius: var(--radius-pill, 999px);
     color: var(--text-secondary);
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     cursor: pointer;
     transition: background var(--transition-fast), border-color var(--transition-fast);
   }
@@ -103,6 +103,6 @@
     font-weight: 600;
   }
 
-  .kp-note { font-size: 11px; color: var(--text-disabled); }
+  .kp-note { font-size: var(--font-size-xs); color: var(--text-disabled); }
   .kp-missing { color: var(--warning); }
 </style>

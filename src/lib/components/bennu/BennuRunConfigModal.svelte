@@ -424,9 +424,9 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
   .hdr-name {
-    font-size: 11px; color: var(--text-muted);
+    font-size: var(--font-size-xs); color: var(--text-muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
 
@@ -459,7 +459,7 @@
     flex-shrink: 0;
   }
   .list-title {
-    font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+    font-size: var(--font-size-xs); font-weight: 600; letter-spacing: 0.02em;
     color: var(--text-secondary); text-transform: uppercase;
   }
   .list-tools { display: flex; align-items: center; gap: 2px; }
@@ -495,7 +495,7 @@
     border: none;
     border-radius: var(--radius-sm);
     color: var(--text-primary);
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     text-align: left;
     cursor: pointer;
     transition: background var(--transition-fast);
@@ -510,7 +510,7 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .cfg-badge {
-    font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700;
+    font-size: var(--font-size-3xs); text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700;
     color: var(--success);
     background: color-mix(in srgb, var(--success) 16%, transparent);
     border-radius: var(--radius-sm); padding: 1px 5px; flex-shrink: 0;
@@ -532,7 +532,7 @@
     gap: 12px;
   }
 
-  .env-empty { font-size: 11px; color: var(--text-muted); padding: 2px 0; }
+  .env-empty { font-size: var(--font-size-xs); color: var(--text-muted); padding: 2px 0; }
   .env-rows { display: flex; flex-direction: column; gap: 6px; }
   .env-row {
     display: grid;
@@ -555,12 +555,12 @@
 
   .cmd-preview { margin: 2px 0 0; }
   .cmd {
-    font-family: var(--font-code); font-size: 11px; color: var(--text-muted);
+    font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-muted);
     background: var(--bg-elevated); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); padding: 6px 9px; display: block;
     overflow-x: auto; white-space: nowrap;
   }
 
-  .foot-hint { font-size: 11px; color: var(--text-muted); }
+  .foot-hint { font-size: var(--font-size-xs); color: var(--text-muted); }
   .footer-actions { display: flex; align-items: center; gap: 8px; }
 </style>

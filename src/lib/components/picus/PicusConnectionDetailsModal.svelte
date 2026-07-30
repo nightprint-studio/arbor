@@ -181,14 +181,14 @@
 </Modal>
 
 <style>
-  .cd-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .cd-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
 
   .cd { display: flex; flex-direction: column; gap: 16px; }
 
   .cd section { display: flex; flex-direction: column; gap: 8px; }
   .cd h2 {
     margin: 0;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -216,7 +216,7 @@
   }
   .cd code {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
 
@@ -235,7 +235,7 @@
 
   .cd-note {
     margin: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--text-muted);
   }

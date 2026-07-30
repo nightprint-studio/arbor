@@ -113,15 +113,20 @@
    * it, and rendering the empty string there tells the user their setting is
    * gone. It is not gone; it is just not in this list yet.
    */
-  const selectedLabel = $derived.by(() => {
-    const match = options.find(o => String(o.value) === String(value));
-    if (match) return match.label;
-    return String(value ?? '');
-  });
+  const matched = $derived(options.find(o => String(o.value) === String(value)) ?? null);
+  const selectedLabel = $derived(matched ? matched.label : String(value ?? ''));
 
-  /** True when there is genuinely nothing selected, as opposed to a value whose
-   *  label has not arrived. Only then is the placeholder shown. */
-  const isEmpty = $derived(String(value ?? '') === '');
+  /**
+   * True when there is genuinely nothing selected.
+   *
+   * That means **no option matches**, not "the value is the empty string": the
+   * empty string is a perfectly ordinary key, and it is the one every "all of
+   * them" entry in this codebase uses — `'' → Every folder`, `'' → Both`,
+   * `'' → Any`. Testing the value alone made those three render as blank boxes
+   * with a chevron, which reads as a control that failed to load rather than as
+   * one that is set to its default.
+   */
+  const isEmpty = $derived(!matched && String(value ?? '') === '');
 </script>
 
 <div class="select-wrap" class:narrow class:fill>

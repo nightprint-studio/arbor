@@ -583,7 +583,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-family: var(--font-code);
     white-space: nowrap;
@@ -624,7 +624,7 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -643,7 +643,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--text-primary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-family: var(--font-ui-sans);
     padding: 6px 10px;
     transition: border-color 120ms, box-shadow 120ms;
@@ -674,7 +674,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
 
@@ -699,7 +699,7 @@
     border: 1px solid var(--border);
     background: var(--bg-base);
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-family: var(--font-code);
     cursor: pointer;
     transition: background 120ms, border-color 120ms, color 120ms;
@@ -716,7 +716,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     cursor: pointer;
     user-select: none;
@@ -737,7 +737,7 @@
   }
 
   .preview-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-weight: 600;
     text-transform: uppercase;
@@ -756,7 +756,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     font-family: var(--font-code);
   }
@@ -764,7 +764,7 @@
   .file-entry.commit { font-family: var(--font-ui-sans); color: var(--accent); }
 
   .badge {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-ui-sans);
     font-weight: 500;
     color: var(--text-muted);
@@ -792,7 +792,7 @@
     color: var(--text-secondary);
     cursor: pointer;
     transition: background 120ms, border-color 120ms, color 120ms;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     text-align: center;
   }
@@ -804,7 +804,7 @@
   }
 
   .provider-sub {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 400;
     color: var(--text-muted);
   }
@@ -840,7 +840,7 @@
     border-radius: var(--radius-sm);
     background: var(--bg-base);
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
     transition: background 120ms, border-color 120ms, color 120ms;
   }
@@ -860,7 +860,7 @@
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--accent) 6%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     line-height: 1.5;
   }
@@ -873,7 +873,7 @@
 
   /* ── Footer bits ── */
   .footer-hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-disabled);
     display: flex;
     align-items: center;
@@ -893,7 +893,7 @@
     padding: 1px 4px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-code);
     color: var(--text-muted);
     background: var(--bg-overlay);
@@ -901,7 +901,7 @@
 
   code {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
   }
 </style>

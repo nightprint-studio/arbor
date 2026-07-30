@@ -85,7 +85,7 @@
   {:else if !stats}
     <div class="center-state">
       <BarChart2 size={26} style="opacity:0.3" />
-      <p style="margin:0;font-size:12px;">No statistics yet</p>
+      <p style="margin:0;font-size:var(--font-size-sm);">No statistics yet</p>
       <button class="text-btn" onclick={refresh}>Compute Stats</button>
     </div>
 
@@ -237,14 +237,14 @@
     flex: 1; display: flex; flex-direction: column;
     align-items: center; justify-content: center;
     gap: 10px; padding: 32px 16px;
-    color: var(--text-muted); font-family: var(--font-ui-sans); font-size: 12px;
+    color: var(--text-muted); font-family: var(--font-ui-sans); font-size: var(--font-size-sm);
   }
-  .err-msg { margin: 0; text-align: center; max-width: 180px; font-size: 11px; }
+  .err-msg { margin: 0; text-align: center; max-width: 180px; font-size: var(--font-size-xs); }
   .text-btn {
     padding: 4px 12px;
     border: 1px solid var(--border); border-radius: var(--radius-sm);
     background: transparent; color: var(--text-secondary);
-    font-size: 11px; font-family: var(--font-ui-sans); cursor: pointer;
+    font-size: var(--font-size-xs); font-family: var(--font-ui-sans); cursor: pointer;
   }
   .text-btn:hover { background: var(--bg-hover); }
 
@@ -289,7 +289,7 @@
   }
 
   .card-value {
-    font-size: 18px;
+    font-size: var(--font-size-xl);
     font-weight: 700;
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
@@ -300,7 +300,7 @@
   }
 
   .card-label {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     text-transform: uppercase;
     letter-spacing: 0.4px;
     color: var(--text-muted);
@@ -313,7 +313,7 @@
     align-items: baseline;
     gap: 6px;
     padding: 6px 14px 3px 12px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -321,7 +321,7 @@
     font-family: var(--font-ui-sans);
   }
   .sep-sub {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 400;
     text-transform: none;
     letter-spacing: 0;
@@ -342,7 +342,7 @@
     align-items: flex-end;
     height: 32px;
     flex-shrink: 0;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-family: var(--font-ui-sans);
     color: var(--text-disabled);
     line-height: 1;
@@ -352,7 +352,7 @@
     justify-content: space-between;
     padding: 2px 12px 8px;
     border-bottom: 1px solid var(--border-subtle);
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-family: var(--font-ui-sans);
     color: var(--text-disabled);
   }
@@ -368,12 +368,12 @@
     display: flex; align-items: baseline; justify-content: space-between;
   }
   .contrib-name {
-    font-size: 13px; font-weight: 600;
+    font-size: var(--font-size-md); font-weight: 600;
     color: var(--text-primary); font-family: var(--font-ui-sans);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px;
   }
   .contrib-pct {
-    font-size: 12px; font-weight: 600;
+    font-size: var(--font-size-sm); font-weight: 600;
     color: var(--accent); font-family: var(--font-ui-sans); flex-shrink: 0;
   }
   .bar-track {
@@ -420,7 +420,7 @@
     min-width: 0;
   }
   .hl-label {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     text-transform: uppercase;
     letter-spacing: 0.4px;
     color: var(--text-disabled);
@@ -428,7 +428,7 @@
     line-height: 1;
   }
   .hl-name {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
@@ -438,7 +438,7 @@
     line-height: 1.3;
   }
   .hl-value {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
@@ -459,7 +459,7 @@
     border-radius: var(--radius-md);
     background: var(--accent);
     color: var(--text-on-accent);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     font-family: var(--font-ui-sans);
     cursor: pointer;
@@ -472,7 +472,7 @@
   /* ── Refresh note ───────────────────────────────────────────────────────────── */
   .refresh-note {
     display: flex; align-items: center; justify-content: center;
-    gap: 5px; font-size: 10px; color: var(--text-muted);
+    gap: 5px; font-size: var(--font-size-2xs); color: var(--text-muted);
     font-family: var(--font-ui-sans); padding: 6px 0;
   }
 

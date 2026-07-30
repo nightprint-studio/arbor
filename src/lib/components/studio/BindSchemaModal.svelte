@@ -196,7 +196,7 @@
     <span class="bs-title">{targetKind === 'folder' ? 'Bind schema to folder' : 'Bind schema'}</span>
     <span class="bs-target" use:tooltip={relativePath}>{fileName}</span>
     <div class="bs-spacer"></div>
-    <button class="mac-close-btn" onclick={onClose} aria-label="Close"></button>
+    <button class="close-btn" onclick={onClose} aria-label="Close"></button>
   {/snippet}
 
   <div class="bs-body">
@@ -333,13 +333,13 @@
     flex-shrink: 0;
   }
   .bs-title {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-primary);
   }
   .bs-target {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     background: var(--bg-overlay);
     padding: 2px 8px;
@@ -356,13 +356,13 @@
   }
   .bs-help {
     margin: 0;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     line-height: 1.5;
   }
   .bs-help code {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     padding: 0 3px;
     background: var(--bg-overlay);
     border-radius: 3px;
@@ -373,7 +373,7 @@
     gap: 5px;
   }
   .bs-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -387,7 +387,7 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     padding: 6px 8px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-family: var(--font-code);
     outline: none;
     transition: border-color var(--transition-fast);
@@ -407,7 +407,7 @@
 
   .bs-hint {
     display: inline-flex; align-items: center; gap: 4px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
   .bs-hint code {
@@ -427,7 +427,7 @@
     letter-spacing: 0;
     color: var(--text-muted);
     font-weight: 400;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
   }
   .bs-chips {
     display: flex; flex-wrap: wrap;
@@ -448,7 +448,7 @@
     color: var(--accent);
     border-radius: 10px;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1;
   }
   .bs-chip-text { line-height: 1; }
@@ -470,7 +470,7 @@
     border: none;
     color: var(--text-primary);
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     outline: none;
     padding: 2px 4px;
   }
@@ -484,7 +484,7 @@
     border: none;
     color: var(--accent);
     padding: 2px 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     text-decoration: underline;
   }
@@ -500,7 +500,7 @@
     padding: 6px 14px;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);

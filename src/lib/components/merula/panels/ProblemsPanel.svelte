@@ -119,7 +119,7 @@
 
 <style>
   .prob { display: flex; flex-direction: column; height: 100%; background: var(--bg-base); }
-  .prob-meta { font-size: 10.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .prob-meta { font-size: var(--font-size-2xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
   .prob-toolbar {
     display: flex; align-items: center; gap: 8px;
@@ -135,7 +135,7 @@
   .prob-search:focus-within { border-color: var(--border-focus); }
   .prob-search input {
     flex: 1; min-width: 0; background: transparent; border: none; outline: none;
-    color: var(--text-primary); font-family: var(--font-ui-sans); font-size: 12px;
+    color: var(--text-primary); font-family: var(--font-ui-sans); font-size: var(--font-size-sm);
   }
   .prob-search input::placeholder { color: var(--text-disabled); }
   .prob-clear {
@@ -152,7 +152,7 @@
     height: 24px; padding: 0 7px;
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
     background: var(--bg-input); cursor: pointer;
-    font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+    font-size: var(--font-size-xs); font-weight: 600; font-variant-numeric: tabular-nums;
     transition: opacity var(--transition-fast);
   }
   .sev-chip.off { opacity: 0.35; }
@@ -162,13 +162,13 @@
   .prob-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; }
   .prob-clear-state {
     display: flex; align-items: center; gap: 6px;
-    padding: 14px 16px; color: var(--success); font-size: 12px;
+    padding: 14px 16px; color: var(--success); font-size: var(--font-size-sm);
   }
-  .prob-empty { padding: 14px 16px; font-size: 11.5px; color: var(--text-muted); font-style: italic; }
+  .prob-empty { padding: 14px 16px; font-size: var(--font-size-xs); color: var(--text-muted); font-style: italic; }
   .prob-line {
     display: flex; align-items: center; gap: 8px;
     width: 100%; text-align: left;
-    padding: 5px 12px; font-size: 12px; cursor: pointer;
+    padding: 5px 12px; font-size: var(--font-size-sm); cursor: pointer;
     background: transparent; border: none;
     font-family: var(--font-ui-sans);
     transition: background var(--transition-fast);
@@ -179,5 +179,5 @@
   .sev-error { color: var(--error); }
   .sev-warning { color: var(--warning); }
   .prob-msg { flex: 1; min-width: 0; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .prob-loc { font-family: var(--font-code); font-size: 10.5px; color: var(--text-muted); flex-shrink: 0; }
+  .prob-loc { font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted); flex-shrink: 0; }
 </style>

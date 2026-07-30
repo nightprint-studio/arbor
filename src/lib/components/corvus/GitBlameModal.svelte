@@ -304,7 +304,7 @@
 
   .header-path {
     font-family: var(--font-code);
-    font-size: 13px;
+    font-size: var(--font-size-md);
     color: var(--text-primary);
     font-weight: 500;
     flex-shrink: 0;
@@ -312,7 +312,7 @@
 
   .header-dir {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -340,7 +340,7 @@
     gap: 10px;
     height: 100%;
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-family: var(--font-ui-sans);
     flex-direction: column;
   }
@@ -355,17 +355,17 @@
   .loading-blame { gap: 8px; width: 320px; max-width: 80%; margin: 0 auto; }
   .loading-blame :global(.progress-track) { align-self: stretch; }
   .loading-title {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     color: var(--text-secondary);
     font-weight: 500;
   }
   .loading-meta {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-family: var(--font-code);
   }
   .loading-commit {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-disabled);
     font-family: var(--font-code);
     max-width: 100%;
@@ -377,7 +377,7 @@
   .blame-retry {
     margin-top: 2px;
     padding: 5px 14px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-family: var(--font-ui-sans);
     color: var(--text-secondary);
     background: transparent;
@@ -423,7 +423,7 @@
     width: 52px;
     padding: 0 10px 0 8px;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-disabled);
     flex-shrink: 0;
     user-select: none;
@@ -454,7 +454,7 @@
 
   .gutter-oid {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     background: transparent;
     border: none;
@@ -470,7 +470,7 @@
     display: flex;
     align-items: center;
     gap: 3px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
     flex-shrink: 1;
@@ -484,7 +484,7 @@
     display: flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
     flex-shrink: 0;
@@ -499,7 +499,7 @@
     flex: 1;
     padding: 1px 16px;
     font-family: var(--font-code);
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     white-space: pre;
     line-height: 1.6;

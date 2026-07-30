@@ -379,7 +379,7 @@
     background: transparent;
     border: none;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);
@@ -451,7 +451,7 @@
     padding: 8px 14px;
     border-top: 1px solid var(--border-subtle);
     background: var(--bg-elevated);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
   }
@@ -472,20 +472,20 @@
   }
   .state-title {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-primary);
   }
   .state-hint {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 1.5;
     max-width: 320px;
   }
   .err-msg {
     color: var(--error);
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     word-break: break-word;
   }
   :global(.state .state-icon-warn)  { color: var(--warning); }
@@ -499,7 +499,7 @@
     background: color-mix(in srgb, var(--severity-high) 14%, transparent);
     color: var(--severity-high);
     border: 1px solid color-mix(in srgb, var(--severity-high) 32%, transparent);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -515,7 +515,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);

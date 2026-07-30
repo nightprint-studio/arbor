@@ -3,6 +3,10 @@
    * Picus documentation — built on the shared `DocsShell`, the same searchable
    * panel the rest of the suite uses. Topics live in `./docs/`; this file only
    * wires the navigation.
+   *
+   * `product` and `fileBase` are the two facts the shell cannot infer: they name
+   * the exported README and its heading, so what leaves the window says Picus
+   * rather than the name of the suite it happens to ship in.
    */
   import { BookOpen, Rocket, Database, FolderTree, FormInput, Replace, TriangleAlert, Keyboard, Lightbulb, Zap } from 'lucide-svelte';
   import DocsShell, { type DocsNavItem, type DocsNavGroup } from '$lib/components/shared/DocsShell.svelte';
@@ -74,5 +78,7 @@
   {onClose}
   title="Picus Documentation"
   headerIcon={BookOpen}
+  product="Picus"
+  fileBase="picus-docs"
   {initialSection}
 />

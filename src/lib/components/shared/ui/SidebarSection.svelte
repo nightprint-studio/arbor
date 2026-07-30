@@ -107,7 +107,7 @@
     cursor: pointer;
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     text-align: left;
     position: relative;
@@ -157,7 +157,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
 
   /* Hover-revealed action buttons (cleanup, add, …) */
@@ -177,7 +177,7 @@
 
   /* Count badge */
   .badge {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     min-width: 18px;
     height: 16px;

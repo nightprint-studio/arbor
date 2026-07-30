@@ -584,7 +584,7 @@
 
   /* Inline pill — replaces the absolute badge for the stage button */
   .changes-pill {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     line-height: 1;
     background: var(--accent);
@@ -613,7 +613,7 @@
     top: 1px; right: 1px;
     min-width: 14px; height: 14px;
     border-radius: 999px;
-    font-size: 9px; font-weight: 600;
+    font-size: var(--font-size-3xs); font-weight: 600;
     display: flex; align-items: center; justify-content: center;
     padding: 0 2px; line-height: 1;
     pointer-events: none;
@@ -708,7 +708,7 @@
     background: var(--bg-elevated);
     color: var(--text-secondary);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     cursor: pointer;
     transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);

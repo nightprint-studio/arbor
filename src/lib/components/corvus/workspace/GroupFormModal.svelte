@@ -140,7 +140,7 @@
   }
   .field label,
   .field .label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-muted);

@@ -135,7 +135,7 @@
   .sr-card-title {
     flex: 1;
     margin: 0;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--text-primary);
   }
@@ -144,7 +144,7 @@
     padding: 1px 7px;
     background: var(--bg-overlay);
     border-radius: 999px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-variant-numeric: tabular-nums;
     color: var(--text-muted);
   }

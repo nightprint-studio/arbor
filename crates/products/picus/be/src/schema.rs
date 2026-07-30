@@ -10,7 +10,7 @@
 //! data are different questions about the same object, and only one of them scrolls.
 
 use picus_core::prelude::PicusState;
-use picus_db_api::prelude::{SchemaSnapshot, TableInfo};
+use picus_db_api::prelude::{SchemaSnapshot, TableInfo, TriggerDetail};
 
 use crate::connections::require_session;
 
@@ -55,4 +55,18 @@ async fn picus_table_detail(
     name: String,
 ) -> Result<TableInfo, String> {
     require_session(state, &id)?.table_detail(&name).await.map_err(|e| e.to_string())
+}
+
+/// What a trigger does: its `CREATE TRIGGER` and the source of the routine it fires.
+///
+/// Asked when a trigger's tab opens, never as part of the schema — see
+/// [`picus_db_api::prelude::DbSession::trigger_detail`] for why a routine body has
+/// no business in a snapshot that is cached and handed over on connect.
+#[arbor_rpc::handler]
+async fn picus_trigger_detail(
+    state: &PicusState,
+    id: String,
+    name: String,
+) -> Result<TriggerDetail, String> {
+    require_session(state, &id)?.trigger_detail(&name).await.map_err(|e| e.to_string())
 }

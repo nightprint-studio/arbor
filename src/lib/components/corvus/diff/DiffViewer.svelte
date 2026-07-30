@@ -426,7 +426,7 @@
         <button class="mode-btn" class:active={fsMode === 'unified'} onclick={() => fsMode = 'unified'}>Unified</button>
         <button class="mode-btn" class:active={fsMode === 'split'} onclick={() => fsMode = 'split'}>Split</button>
       </div>
-      <button class="mac-close-btn" onclick={closeFullscreen} use:tooltip={{ content: 'Close', shortcut: 'Esc' }} aria-label="Close"></button>
+      <button class="close-btn" onclick={closeFullscreen} use:tooltip={{ content: 'Close', shortcut: 'Esc' }} aria-label="Close"></button>
     {/snippet}
 
     <div class="fs-hunks" class:is-split={fsMode === 'split'} bind:this={fsHunksEl}>
@@ -498,7 +498,7 @@
   }
   .chunk-counter {
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     min-width: 28px;
     text-align: center;
@@ -514,7 +514,7 @@
     cursor: pointer;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     transition: all var(--transition-fast);
   }
   .mode-btn.active, .mode-btn:hover {

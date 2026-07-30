@@ -52,7 +52,7 @@
 
   .trigger {
     display: flex; align-items: center; gap: 7px; padding: 5px 9px; border-radius: 8px;
-    font-family: var(--canopy-sans); font-size: 12px; font-weight: 500; cursor: pointer;
+    font-family: var(--canopy-sans); font-size: var(--font-size-sm); font-weight: 500; cursor: pointer;
     white-space: nowrap; color: #cfd6e0; background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.1); transition: background 0.15s, border-color 0.15s;
   }
@@ -60,7 +60,7 @@
   .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; display: inline-block; }
   .label { color: #dfe5ee; }
   .count {
-    font-family: var(--canopy-mono); font-size: 10.5px; color: #9aa3b2;
+    font-family: var(--canopy-mono); font-size: var(--font-size-2xs); color: #9aa3b2;
     background: rgba(255, 255, 255, 0.07); border-radius: 9px; padding: 0 6px;
   }
   .chev { color: #7d8696; transition: transform 0.15s; flex: none; }

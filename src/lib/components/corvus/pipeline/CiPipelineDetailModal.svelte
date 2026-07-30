@@ -309,7 +309,7 @@
   }
 
   .modal-run-name {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-primary);
     white-space: nowrap;
@@ -328,7 +328,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     padding: 1px 6px;
     border-radius: var(--radius-sm);
     background: var(--bg-hover);
@@ -337,7 +337,7 @@
   }
 
   .branch-chip { color: var(--accent); background: var(--accent-subtle); }
-  .sha-chip    { font-family: var(--font-code); font-size: 10px; }
+  .sha-chip    { font-family: var(--font-code); font-size: var(--font-size-2xs); }
   .dur-chip    { color: var(--text-muted); }
   .time-chip   { color: var(--text-muted); }
 
@@ -348,7 +348,7 @@
     gap: 5px;
     padding: 3px 10px;
     border-radius: 20px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     white-space: nowrap;
     flex-shrink: 0;
@@ -366,7 +366,7 @@
     gap: 5px;
     padding: 4px 10px;
     border-radius: var(--radius-md);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-family: var(--font-ui-sans);
     font-weight: 500;
     cursor: pointer;
@@ -387,7 +387,7 @@
     padding: 40px 20px;
     color: var(--text-muted);
   }
-  .state-hint  { font-size: 13px; }
+  .state-hint  { font-size: var(--font-size-md); }
   :global(.state-icon)      { color: var(--text-muted); }
   :global(.state-icon.state-warn) { color: var(--error); }
 
@@ -435,7 +435,7 @@
   }
 
   .stage-name {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.3px;
     color: var(--text-secondary);
@@ -504,7 +504,7 @@
   .job-card .status-pending   { color: var(--text-disabled); }
 
   .job-name {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
     flex: 1;
     min-width: 0;
@@ -521,7 +521,7 @@
   }
 
   .job-duration {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-code);
     color: var(--text-muted);
     white-space: nowrap;
@@ -536,7 +536,7 @@
     border-radius: 50%;
     background: rgba(248,113,113,0.2);
     color: var(--error);
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
   }
 

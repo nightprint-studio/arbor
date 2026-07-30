@@ -399,7 +399,15 @@
     style:transform={`translateX(${-scrollLeft}px)`}
   >
     {#if showRowNumbers}
-      <div class="dg-th dg-gutter-th" aria-hidden="true"></div>
+      <!-- Pushed back by exactly what the header row was pulled by, so it holds
+           still over the body's own pinned gutter. Without it the header slid
+           away as one piece while the row numbers stayed: after any horizontal
+           scroll the label sitting above "1, 2, 3" was some other column's. -->
+      <div
+        class="dg-th dg-gutter-th"
+        aria-hidden="true"
+        style:transform={`translateX(${scrollLeft}px)`}
+      ></div>
     {/if}
     {#each columns as col (col.id)}
       <div class="dg-th" class:dg-num={col.type === 'number'}>
@@ -442,7 +450,14 @@
       style:grid-template-columns={gridTemplate}
       style:transform={`translateX(${-scrollLeft}px)`}
     >
-      {#if showRowNumbers}<div class="dg-filter-cell" aria-hidden="true"></div>{/if}
+      <!-- Held still over the pinned gutter, like the header cell above it. -->
+      {#if showRowNumbers}
+        <div
+          class="dg-filter-cell dg-gutter-filter"
+          aria-hidden="true"
+          style:transform={`translateX(${scrollLeft}px)`}
+        ></div>
+      {/if}
       {#each columns as col (col.id)}
         <div class="dg-filter-cell">
           <input
@@ -538,7 +553,7 @@
     flex: 1;
     overflow: hidden;
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
   }
 
   /* ── Header ─────────────────────────────────────────────────────────────── */
@@ -553,10 +568,16 @@
   /* `relative`, not `sticky`: the header is not inside the scrolling body (see
      `scrollLeft`), so there is nothing for it to stick to — it is moved by script
      instead. Saying `sticky` here only ever looked like it was doing the job. */
+  /* On `--bg-base`, not elevated.
+     The toolbar above the grid is already elevated, and so were the column
+     header and the filter row — three grey bands stacked one under the other
+     with the data starting below them, which is most of why a table read as
+     "all chrome". Grey belongs to the toolbar; the grid is content. The border
+     is what separates the header now, which is all it needed. */
   .dg-head {
     position: relative;
     z-index: 2;
-    background: var(--bg-elevated);
+    background: var(--bg-base);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
@@ -571,7 +592,7 @@
     height: 26px;
     border-right: 1px solid var(--border-subtle);
     font-family: var(--font-ui-sans);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
@@ -579,7 +600,14 @@
     white-space: nowrap;
   }
   .dg-th.dg-num { justify-content: flex-end; }
-  .dg-gutter-th { border-right-color: var(--border); }
+  /* Stacked above the scrolling labels, and opaque, so they pass underneath it
+     rather than through it while it holds its place. */
+  .dg-gutter-th {
+    position: relative;
+    z-index: 1;
+    background: var(--bg-elevated);
+    border-right-color: var(--border);
+  }
 
   .dg-sort {
     display: inline-flex;
@@ -600,10 +628,10 @@
      on hover and on focus. */
   .dg-sort:disabled { cursor: default; color: var(--text-disabled); }
   .dg-th-label { overflow: hidden; text-overflow: ellipsis; }
-  .dg-sort-mark { font-size: 8px; color: var(--accent); }
+  .dg-sort-mark { font-size: var(--font-size-3xs); color: var(--accent); }
   .dg-th-hint {
     font-family: var(--font-code);
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     font-weight: 400;
     letter-spacing: 0;
     text-transform: none;
@@ -626,9 +654,14 @@
   .dg-filters {
     position: relative;
     z-index: 2;
-    background: var(--bg-elevated);
+    background: var(--bg-base);
     border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
+  }
+  .dg-gutter-filter {
+    position: relative;
+    z-index: 1;
+    background: var(--bg-elevated);
   }
   .dg-filter-cell {
     display: flex;
@@ -647,7 +680,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     outline: none;
   }
   .dg-filter:focus { border-color: var(--border-focus); }
@@ -722,6 +755,6 @@
     min-height: 80px;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
 </style>

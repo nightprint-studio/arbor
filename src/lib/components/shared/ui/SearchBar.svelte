@@ -198,7 +198,7 @@
     cursor: pointer;
     color: var(--text-muted);
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     line-height: 1;
     flex-shrink: 0;
@@ -219,7 +219,7 @@
 
   .sb-counter {
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     flex-shrink: 0;
     min-width: 28px;
@@ -256,7 +256,7 @@
     border: none;
     cursor: pointer;
     color: var(--text-muted);
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     line-height: 1;
     padding: 0 1px;
     display: flex;

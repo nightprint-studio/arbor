@@ -236,12 +236,24 @@ pub async fn read_sequences(client: &Client, schema: &str) -> DbResult<Vec<Seque
             name: row.get(0),
             last_value: row.get(1),
             increment_by: row.get(2),
-            min_value: row.get(3),
-            max_value: row.get(4),
+            min_value: bounded(row.get(3), i64::MIN),
+            max_value: bounded(row.get(4), i64::MAX),
             cycle: row.get(5),
             cache_size: row.get(6),
         })
         .collect())
+}
+
+/// A bound the sequence never actually reaches is not a bound.
+///
+/// A bigint sequence that was never given a `MAXVALUE` reports `i64::MAX`, and
+/// printing 9,223,372,036,854,775,807 as a fact is wrong twice: it is the type's
+/// limit rather than this sequence's, and it does not survive the trip — JSON
+/// numbers are doubles, so the browser receives 9,223,372,036,854,776,000 and
+/// would show a number no one ever wrote. `None` reads as "no limit", which is
+/// both true and representable.
+fn bounded(value: i64, sentinel: i64) -> Option<i64> {
+    (value != sentinel).then_some(value)
 }
 
 /// User triggers (internal ones — the constraint machinery — are excluded).
@@ -275,6 +287,47 @@ pub async fn read_triggers(client: &Client, schema: &str) -> DbResult<Vec<Trigge
             }
         })
         .collect())
+}
+
+/// One trigger's `CREATE TRIGGER` and the source of the routine it fires.
+///
+/// `pg_get_functiondef` **raises** on a routine written in C or in `internal`, so it
+/// is reached only through a `CASE` that has already looked at the language —
+/// `CASE` evaluates only the branch it takes, which is the whole reason the check
+/// can live in the same round trip as the answer.
+///
+/// A trigger name is unique per table, not per schema, and the schema snapshot keys
+/// triggers by name alone; two tables carrying a trigger of the same name resolve to
+/// the first by table name, deterministically rather than arbitrarily.
+pub async fn read_trigger_detail(
+    client: &Client,
+    schema: &str,
+    name: &str,
+) -> DbResult<Option<TriggerDetail>> {
+    const SQL: &str = "
+        SELECT pg_get_triggerdef(t.oid),
+               COALESCE(p.proname, ''),
+               COALESCE(
+                 CASE WHEN l.lanname NOT IN ('c', 'internal')
+                      THEN pg_get_functiondef(t.tgfoid)
+                 END, '')
+          FROM pg_trigger t
+          JOIN pg_class c ON c.oid = t.tgrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          LEFT JOIN pg_proc p ON p.oid = t.tgfoid
+          LEFT JOIN pg_language l ON l.oid = p.prolang
+         WHERE n.nspname = $1
+           AND t.tgname = $2
+           AND NOT t.tgisinternal
+      ORDER BY c.relname
+         LIMIT 1";
+
+    let rows = client.query(SQL, &[&schema, &name]).await.map_err(map_pg)?;
+    Ok(rows.first().map(|row| TriggerDetail {
+        definition: row.get(0),
+        function_name: row.get(1),
+        function_body: row.get(2),
+    }))
 }
 
 /// A view's defining SELECT, pretty-printed by the server.

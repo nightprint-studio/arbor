@@ -433,7 +433,7 @@
     align-items: center;
     gap: 6px;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     min-width: 0;
     overflow: hidden;
   }
@@ -491,7 +491,7 @@
   /* ── Markdown body ─────────────────────────────────────────────────── */
   .markdown {
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: var(--font-size-md);
     line-height: 1.6;
     word-wrap: break-word;
     overflow-wrap: anywhere;
@@ -505,13 +505,13 @@
     font-weight: 600;
     color: var(--text-primary);
   }
-  .markdown :global(.md-h1) { font-size: 16px; }
+  .markdown :global(.md-h1) { font-size: var(--font-size-xl); }
   .markdown :global(.md-h2) {
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     padding-bottom: 4px;
     border-bottom: 1px solid var(--border-subtle);
   }
-  .markdown :global(.md-h3) { font-size: 13px; color: var(--text-secondary); }
+  .markdown :global(.md-h3) { font-size: var(--font-size-md); color: var(--text-secondary); }
   .markdown :global(.md-h1:first-child),
   .markdown :global(.md-h2:first-child),
   .markdown :global(.md-h3:first-child) { margin-top: 0; }
@@ -534,7 +534,7 @@
   }
   .markdown :global(.md-code) {
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 1.5;
     background: none;
     padding: 0;
@@ -616,13 +616,13 @@
     align-items: center;
     gap: 6px;
     margin-bottom: 6px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.6px;
     color: var(--success);
   }
-  .solution-body { font-size: 12.5px; }
+  .solution-body { font-size: var(--font-size-sm); }
   .solution-body :global(.md-inline-code) {
     color: var(--success);
     background: color-mix(in srgb, var(--success) 14%, transparent);
@@ -638,7 +638,7 @@
     color: var(--text-muted);
     text-align: center;
   }
-  .no-desc p { margin: 0; font-size: 12px; }
+  .no-desc p { margin: 0; font-size: var(--font-size-sm); }
 
   /* ── Sidebar: severity hero ────────────────────────────────────────── */
   .sev-hero {
@@ -662,14 +662,14 @@
     min-width: 0;
   }
   .sev-hero-label {
-    font-size: 14px;
+    font-size: var(--font-size-lg);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.6px;
   }
   .sev-hero-sub {
     margin-top: 2px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     color: var(--text-secondary);
     text-transform: lowercase;
@@ -687,14 +687,14 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
     color: var(--text-muted);
   }
   .meta-value {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
     display: flex;
     align-items: center;
@@ -703,7 +703,7 @@
   }
   .meta-value.mono {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .path-row { justify-content: space-between; }
   .path-text {
@@ -730,7 +730,7 @@
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     line-height: 1.5;
     cursor: default;
     transition: background var(--transition-fast), border-color var(--transition-fast),

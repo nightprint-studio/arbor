@@ -134,7 +134,7 @@
   }
 
   .opt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  .opt-name { font-size: 12.5px; color: var(--text-primary); font-weight: 500; }
-  .opt-hint { font-size: 10.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .opt-name { font-size: var(--font-size-sm); color: var(--text-primary); font-weight: 500; }
+  .opt-hint { font-size: var(--font-size-2xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .opt-hint.path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
 </style>

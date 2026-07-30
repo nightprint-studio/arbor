@@ -574,7 +574,7 @@
   }
   .step-header h2 {
     margin: 2px 0 4px;
-    font-size: 20px;
+    font-size: var(--font-size-2xl);
     font-weight: 600;
     letter-spacing: -0.2px;
   }

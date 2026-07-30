@@ -243,7 +243,7 @@
   .path-preview {
     margin-top: 4px;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

@@ -609,7 +609,7 @@
   .tree-empty {
     padding: 18px 12px;
     text-align: center;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     font-style: italic;
   }
@@ -635,7 +635,7 @@
     min-height: var(--tree-row-h, 22px);
     padding-right: 6px;
     color: var(--text-primary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     cursor: default;
     background: transparent;
     border: none;
@@ -721,7 +721,7 @@
   :global(.tree .tree-badge) {
     flex-shrink: 0;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     line-height: 1;
     padding: 2px 6px;
     border-radius: 999px;
@@ -796,7 +796,7 @@
      highlight. Apply via `rowClass={(ctx) => ctx.node.kind === 'section' ? 'tree-row-section' : ''}`. */
   :global(.tree .tree-row.tree-row-section) {
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.02em;
   }

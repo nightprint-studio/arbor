@@ -27,6 +27,7 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import DataGrid, { type DataGridColumn } from '$lib/components/shared/ui/DataGrid.svelte';
   import CodeEditor from '$lib/components/shared/ui/code-editor/CodeEditor.svelte';
   import { sqlLanguage } from '../picus-sql-language';
@@ -66,6 +67,24 @@
   const trigger = $derived(
     tab.table && objectKind === 'trigger' ? schemaStore.trigger(tab.table) : null,
   );
+
+  /**
+   * The open trigger's definition — `null` while it is being read.
+   *
+   * Read on open, like a relation's constraints, and held by the store so coming
+   * back to the tab is instant. `null` versus an empty definition are different
+   * answers and are drawn differently: one is "still asking", the other is "the
+   * server had nothing to say".
+   */
+  const triggerCode = $derived(
+    tab.table && objectKind === 'trigger'
+      ? schemaStore.triggerDefinition(tab.table)
+      : null,
+  );
+  $effect(() => {
+    const name = tab.table;
+    if (name && objectKind === 'trigger') void schemaStore.loadTriggerDefinition(name);
+  });
 
   // The schema snapshot carries columns but not constraints — reading every
   // constraint in the database up front would make opening a connection slow for
@@ -200,6 +219,23 @@
     return `CREATE TABLE ${ident(relation.name)} (\n${cols}${pkClause}\n);\n${fkClauses}${idxClauses}\n`;
   });
 
+  /**
+   * A sequence counter, printed only when it survived the trip.
+   *
+   * These are `bigint` on the server and JSON numbers on the wire, so anything
+   * past 2^53 arrives already rounded. Printing the rounded value with thousands
+   * separators is the worst of both worlds — it looks exact and is not — so past
+   * that point the number is marked as approximate instead.
+   */
+  function counter(value: number): string {
+    return Number.isSafeInteger(value) ? value.toLocaleString() : `≈ ${value.toExponential(3)}`;
+  }
+
+  /** A bound the backend dropped is a bound the sequence does not have. */
+  function bound(value: number | undefined): string {
+    return value === undefined ? 'no limit' : counter(value);
+  }
+
   function openRelated(name: string) {
     picusTabsStore.openObject(name, schemaStore.table(name) ? 'table' : 'view', conn?.id);
   }
@@ -216,17 +252,13 @@
         <Badge variant="tone" tone="neutral" size="sm" label="sequence" />
       </header>
       <dl class="ov-props">
-        <div><dt>Last value</dt><dd>{sequence.lastValue.toLocaleString()}</dd></div>
+        <div><dt>Last value</dt><dd>{counter(sequence.lastValue)}</dd></div>
         <div><dt>Increment</dt><dd>{sequence.incrementBy}</dd></div>
-        <div><dt>Minimum</dt><dd>{sequence.minValue?.toLocaleString() ?? '—'}</dd></div>
-        <div><dt>Maximum</dt><dd>{sequence.maxValue?.toLocaleString() ?? 'no limit'}</dd></div>
+        <div><dt>Minimum</dt><dd>{bound(sequence.minValue)}</dd></div>
+        <div><dt>Maximum</dt><dd>{bound(sequence.maxValue)}</dd></div>
         <div><dt>Cache</dt><dd>{sequence.cacheSize ?? '—'}</dd></div>
         <div><dt>Cycles</dt><dd>{sequence.cycle ? 'yes' : 'no'}</dd></div>
       </dl>
-      <p class="ov-note">
-        A sequence missing from one engine's scripts is the kind of gap that only shows up when an
-        insert runs — the inventory tracks it like any other object.
-      </p>
     </div>
   {/if}
 
@@ -259,7 +291,41 @@
           it enabled, the installed database and the repository disagree.
         </p>
       {/if}
-      <p class="ov-note">The trigger body comes from the server with the driver milestone.</p>
+
+      <!-- What it actually does. A trigger's four properties say when it fires and
+           never what it fires, which is the only question anybody opens one to
+           answer — and reading it out of the scripts means finding which of them
+           installed this version. The server writes both of these itself. -->
+      <section class="ov-code">
+        <h2>Definition</h2>
+        {#if triggerCode === null}
+          <StateBlock tone="loading">
+            {#snippet spinner()}<Spinner size={13} />{/snippet}
+            <span>Reading the definition…</span>
+          </StateBlock>
+        {:else if !triggerCode.definition}
+          <StateBlock
+            tone="info"
+            fill={false}
+            label="The server did not return a definition for this trigger."
+          />
+        {:else}
+          <div class="ov-code-box">
+            <CodeEditor value={triggerCode.definition} {language} readOnly />
+          </div>
+          {#if triggerCode.functionBody}
+            <h2>{triggerCode.functionName || 'Routine'}</h2>
+            <div class="ov-code-box ov-code-tall">
+              <CodeEditor value={triggerCode.functionBody} {language} readOnly />
+            </div>
+          {:else}
+            <p class="ov-warn">
+              The routine's source is not available — a trigger written in C, or one this
+              session may not read.
+            </p>
+          {/if}
+        {/if}
+      </section>
     </div>
   {/if}
 
@@ -445,7 +511,18 @@
 {/if}
 
 <style>
-  .tv { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+  /* The rows keep a few pixels off the panel's side walls rather than running
+     into its rounded corners — the same clearance the toolbar and the report's
+     group bars have. Horizontal only: a gap under the last row would leave the
+     scroll ending in dead space. */
+  .tv {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    padding: 0 6px;
+  }
 
   .tv-note {
     display: flex;
@@ -455,12 +532,12 @@
     padding: 6px 10px;
     background: var(--warning-subtle);
     border-bottom: 1px solid color-mix(in srgb, var(--warning) 28%, transparent);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
   }
   .tv-note code {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-primary);
   }
   /* "Still filling" is a state, not a problem — it must not wear the warning
@@ -478,7 +555,7 @@
     flex-shrink: 0;
     padding: 6px 10px;
     border-bottom: 1px solid var(--border-subtle);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
   .tv-spacer { flex: 1; }
@@ -500,7 +577,7 @@
     align-items: center;
     gap: 7px;
     margin: 0 0 7px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -533,20 +610,20 @@
     padding: 5px 9px;
     background: var(--bg-elevated);
     border-radius: var(--radius-sm);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
   }
   .st-name { font-family: var(--font-code); color: var(--text-primary); }
-  .st-rel { color: var(--text-muted); font-family: var(--font-code); font-size: 11px; }
-  .st-kind { color: var(--text-disabled); font-size: 10.5px; }
-  .st-line { font-size: 11.5px; color: var(--text-secondary); }
+  .st-rel { color: var(--text-muted); font-family: var(--font-code); font-size: var(--font-size-xs); }
+  .st-kind { color: var(--text-disabled); font-size: var(--font-size-2xs); }
+  .st-line { font-size: var(--font-size-xs); color: var(--text-secondary); }
   .st-line code { font-family: var(--font-code); }
-  .st-empty { font-size: 11.5px; color: var(--text-disabled); font-style: italic; }
+  .st-empty { font-size: var(--font-size-xs); color: var(--text-disabled); font-style: italic; }
 
   /* ── Sequence / trigger properties ───────────────────────────────────────── */
   .ov { display: flex; flex-direction: column; gap: 14px; padding: 16px 20px 40px; overflow-y: auto; }
   .ov > :global(*) { flex-shrink: 0; }
   .ov-head { display: flex; align-items: center; gap: 9px; }
-  .ov-head h1 { font-size: 16px; font-weight: 600; font-family: var(--font-code); }
+  .ov-head h1 { font-size: var(--font-size-xl); font-weight: 600; font-family: var(--font-code); }
   .ov-head :global(svg) { color: var(--text-muted); }
 
   .ov-props {
@@ -561,11 +638,11 @@
     background: var(--bg-elevated);
     border-radius: var(--radius-md);
   }
-  .ov-props dt { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+  .ov-props dt { font-size: var(--font-size-2xs); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
   .ov-props dd {
     margin: 3px 0 0;
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
   }
 
@@ -580,13 +657,35 @@
     text-decoration: underline;
     text-underline-offset: 2px;
   }
-  .ov-note { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); max-width: 80ch; }
+  /* The definition, in the same editor the rest of the product reads SQL in — so
+     it hovers, highlights and folds like everything else. Read-only: this is what
+     the server says is installed, not a place to change it. */
+  .ov-code { display: flex; flex-direction: column; gap: 8px; max-width: 980px; }
+  .ov-code h2 {
+    font-size: var(--font-size-2xs);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .ov-code-box {
+    display: flex;
+    height: 120px;
+    min-width: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  /* A routine body is a document; the CREATE TRIGGER above it is three lines. */
+  .ov-code-tall { height: 340px; }
+  .ov-code-box > :global(*) { flex: 1; min-width: 0; min-height: 0; }
+
   .ov-warn {
     padding: 8px 10px;
     background: var(--warning-subtle);
     border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
     border-radius: var(--radius-md);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--text-secondary);
     max-width: 80ch;

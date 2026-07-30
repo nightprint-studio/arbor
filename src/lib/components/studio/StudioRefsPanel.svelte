@@ -468,7 +468,7 @@
   }
 
   .srp-empty {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     line-height: 1.5;
     padding: 4px 4px 0;
@@ -476,7 +476,7 @@
   .srp-empty :global(strong) { color: var(--text-primary); font-weight: 600; }
   .srp-empty :global(code) {
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     background: var(--bg-overlay);
     padding: 0 4px;
     border-radius: 3px;
@@ -491,7 +491,7 @@
   }
   .srp-section-text {
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -499,7 +499,7 @@
   }
   .srp-section-count {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-overlay);
     padding: 0 5px;
@@ -551,7 +551,7 @@
 
   .srp-scope {
     display: flex; align-items: baseline; gap: 6px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     min-width: 0;
   }
   .srp-scope-glob {
@@ -566,7 +566,7 @@
   .srp-scope-tag {
     display: inline-flex; align-items: center;
     font-family: var(--font-code);
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -580,13 +580,13 @@
   }
   .srp-scope-hint {
     color: var(--text-disabled);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     flex-shrink: 0;
   }
 
   .srp-target {
     display: flex; align-items: baseline; gap: 4px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     padding-left: 2px;
     min-width: 0;
@@ -641,7 +641,7 @@
   }
   .srp-def-id {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--accent);
     overflow-wrap: anywhere;
@@ -649,14 +649,14 @@
   }
   .srp-def-meta {
     display: flex; align-items: baseline; gap: 5px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     min-width: 0;
   }
   .srp-def-field {
     display: inline-flex; align-items: center;
     font-family: var(--font-code);
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -679,7 +679,7 @@
   .srp-defs-empty {
     display: flex; align-items: center; gap: 6px;
     padding: 6px 8px 10px 22px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     font-style: italic;
   }
@@ -696,7 +696,7 @@
     display: flex; align-items: center; gap: 6px;
     margin-top: 14px;
     padding: 6px 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--success, #98c379);
     background: color-mix(in srgb, var(--success, #98c379) 10%, transparent);
     border-radius: var(--radius-sm);
@@ -707,7 +707,7 @@
   }
   .srp-section-aside {
     margin-left: auto;
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     font-style: italic;
     color: var(--text-disabled);
   }
@@ -726,7 +726,7 @@
   .srp-broken-hint {
     color: var(--text-muted);
     font-style: italic;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
   }
   .srp-def-broken {
     border-color: color-mix(in srgb, var(--warning, #e5c07b) 20%, var(--border-subtle));

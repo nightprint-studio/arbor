@@ -325,7 +325,7 @@
     align-items: center;
     gap: 6px;
     color: var(--text-secondary);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -346,7 +346,7 @@
   }
   .url-list code {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     padding: 1px 5px;
     background: var(--bg-overlay);
     border: 1px solid var(--border);
@@ -362,7 +362,7 @@
   }
   .card-note code {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     padding: 1px 5px;
     background: var(--bg-overlay);
     border: 1px solid var(--border);
@@ -381,7 +381,7 @@
     gap: 4px;
   }
   .url-preview-label {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -389,7 +389,7 @@
   }
   .url-preview code {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--text-primary);
     word-break: break-all;
   }

@@ -130,7 +130,7 @@
     z-index: 2;
   }
   .lb-counter {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     background: rgba(0, 0, 0, 0.4);
     padding: 4px 10px;
@@ -217,7 +217,7 @@
     transform: translateX(-50%);
     max-width: 80vw;
     text-align: center;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
     background: rgba(0, 0, 0, 0.45);
     padding: 6px 12px;

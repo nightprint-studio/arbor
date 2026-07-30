@@ -109,12 +109,12 @@
   }
   .model.installed { border-color: color-mix(in srgb, var(--success) 30%, var(--border-subtle)); }
   .model-head { display: flex; align-items: center; gap: 8px; }
-  .model-name { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
-  .model-desc { margin: 4px 0 8px; font-size: 11.5px; line-height: 1.4; color: var(--text-secondary); }
+  .model-name { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary); }
+  .model-desc { margin: 4px 0 8px; font-size: var(--font-size-xs); line-height: 1.4; color: var(--text-secondary); }
   .model-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .model-meta {
     display: inline-flex; align-items: center; gap: 5px;
-    font-size: 11px; color: var(--text-muted);
+    font-size: var(--font-size-xs); color: var(--text-muted);
   }
   .model-del {
     display: inline-flex; align-items: center; justify-content: center;
@@ -124,6 +124,6 @@
   .model-del:hover { background: var(--bg-hover); color: var(--danger); }
   .model-dl { display: flex; flex-direction: column; gap: 6px; }
   .model-dl-head { display: flex; align-items: center; justify-content: space-between; }
-  .model-phase { font-size: 11px; color: var(--text-secondary); }
-  .model-pct { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .model-phase { font-size: var(--font-size-xs); color: var(--text-secondary); }
+  .model-pct { font-size: var(--font-size-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 </style>

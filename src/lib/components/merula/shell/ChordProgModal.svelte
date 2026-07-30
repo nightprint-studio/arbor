@@ -146,21 +146,21 @@
 </Modal>
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
   .cp { display: flex; flex-direction: column; gap: 14px; padding: 16px 4px 4px; }
   .row { display: flex; gap: 16px; align-items: flex-end; }
   .col { flex: 1; min-width: 0; }
   .col.root { flex: 0 0 96px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip {
-    font-family: var(--font-code); font-size: 11px; color: var(--text-secondary);
+    font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-secondary);
     background: var(--bg-overlay); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); padding: 2px 8px;
   }
   .expr { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .expr code {
     flex: 1; min-width: 0;
-    font-family: var(--font-code); font-size: 12.5px; color: var(--text-primary);
+    font-family: var(--font-code); font-size: var(--font-size-sm); color: var(--text-primary);
     background: var(--bg-overlay); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); padding: 4px 8px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

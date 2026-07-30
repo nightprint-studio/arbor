@@ -152,7 +152,7 @@
     padding: 0 12px;
     background: var(--bg-elevated);
     border-top: 1px solid var(--border-subtle);
-    font-size: 11px; color: var(--text-muted);
+    font-size: var(--font-size-xs); color: var(--text-muted);
     user-select: none;
   }
   .gf-item { display: flex; align-items: center; gap: 4px; white-space: nowrap; }

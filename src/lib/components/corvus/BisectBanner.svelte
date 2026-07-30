@@ -192,7 +192,7 @@
     background: color-mix(in srgb, var(--accent) 8%, var(--bg-elevated));
     border-top: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
     border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     flex-shrink: 0;
     min-height: 34px;
   }
@@ -221,7 +221,7 @@
 
   .hash-chip {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
@@ -253,7 +253,7 @@
 
   .result-msg {
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -262,13 +262,13 @@
 
   .steps {
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     flex-shrink: 0;
   }
 
   .guide-text {
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-style: italic;
   }
 
@@ -293,7 +293,7 @@
     gap: 4px;
     padding: 3px 8px;
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     cursor: pointer;
     border: 1px solid transparent;

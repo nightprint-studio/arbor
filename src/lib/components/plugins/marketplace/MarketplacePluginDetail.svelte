@@ -302,7 +302,7 @@
     color: var(--text-primary);
   }
   .version {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     font-family: var(--font-mono);
   }
@@ -317,7 +317,7 @@
   }
   .version-arrow {
     color: var(--text-disabled);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
   }
   .meta {
     font-size: var(--font-size-xs);
@@ -378,14 +378,14 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     text-transform: uppercase;
     letter-spacing: 0.6px;
     color: var(--text-muted);
     font-weight: 600;
   }
   .muted { color: var(--text-muted); font-size: var(--font-size-xs); margin: 0; }
-  .muted.small { font-size: 11px; margin-top: 6px; }
+  .muted.small { font-size: var(--font-size-xs); margin-top: 6px; }
 
   /* Tags */
   .tag-list {
@@ -396,7 +396,7 @@
     margin-top: 2px;
   }
   .tag-mini {
-    font-size: 9.5px;
+    font-size: var(--font-size-3xs);
     background: color-mix(in srgb, var(--color-tag) 14%, transparent);
     border: 1px solid color-mix(in srgb, var(--color-tag) 32%, transparent);
     color: var(--color-tag);
@@ -415,7 +415,7 @@
     gap: 4px;
     padding: 3px 8px;
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-mono);
     border: 1px solid var(--border-subtle);
   }
@@ -443,7 +443,7 @@
   .src-key {
     color: var(--text-muted);
     text-transform: uppercase;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     letter-spacing: 0.5px;
   }
   .src-link {
@@ -462,7 +462,7 @@
     align-items: center;
     gap: 4px;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     background: var(--bg-overlay);
     padding: 1px 6px;
     border-radius: var(--radius-sm);
@@ -484,6 +484,6 @@
     gap: 4px;
     text-align: center;
   }
-  .shot-placeholder small { color: var(--text-disabled); font-size: 10.5px; }
+  .shot-placeholder small { color: var(--text-disabled); font-size: var(--font-size-2xs); }
 
 </style>

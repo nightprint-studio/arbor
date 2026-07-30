@@ -180,7 +180,7 @@
     cursor: pointer;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
   }
   .pf-diff-mode.active,

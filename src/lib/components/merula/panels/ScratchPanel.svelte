@@ -248,7 +248,7 @@
 
 <style>
   .scr { display: flex; flex-direction: column; height: 100%; background: var(--bg-base); }
-  .scr-meta { font-size: 10.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .scr-meta { font-size: var(--font-size-2xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
   /* ── Tabs ─────────────────────────────────────────────────────────────────── */
   .scr-tabs {
@@ -272,12 +272,12 @@
   }
   .scr-tab-label {
     background: transparent; border: none; cursor: pointer; color: inherit;
-    font-size: 11.5px; font-family: var(--font-ui-sans); white-space: nowrap; padding: 0;
+    font-size: var(--font-size-xs); font-family: var(--font-ui-sans); white-space: nowrap; padding: 0;
   }
   .scr-tab-input {
     width: 84px; background: var(--bg-base); color: var(--text-primary);
     border: 1px solid var(--border-focus); border-radius: var(--radius-sm);
-    font-size: 11.5px; font-family: var(--font-ui-sans); padding: 1px 4px; outline: none;
+    font-size: var(--font-size-xs); font-family: var(--font-ui-sans); padding: 1px 4px; outline: none;
   }
   .scr-tab-close, .scr-tab-add {
     display: flex; align-items: center; justify-content: center;
@@ -299,7 +299,7 @@
     height: 24px; padding: 0 9px;
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
     background: var(--bg-input); color: var(--text-secondary); cursor: pointer;
-    font-size: 11.5px; font-weight: 600; font-family: var(--font-ui-sans);
+    font-size: var(--font-size-xs); font-weight: 600; font-family: var(--font-ui-sans);
     transition: background var(--transition-fast), border-color var(--transition-fast);
   }
   .scr-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
@@ -318,17 +318,17 @@
   .scr-editor :global(.cm-editor) { height: 100%; }
   .scr-readout { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 4px 0; }
 
-  .scr-state { display: flex; align-items: center; gap: 7px; padding: 12px 14px; font-size: 12px; color: var(--text-muted); }
-  .scr-hint { padding: 12px 14px; font-size: 11.5px; color: var(--text-muted); font-style: italic; }
+  .scr-state { display: flex; align-items: center; gap: 7px; padding: 12px 14px; font-size: var(--font-size-sm); color: var(--text-muted); }
+  .scr-hint { padding: 12px 14px; font-size: var(--font-size-xs); color: var(--text-muted); font-style: italic; }
 
   .scr-diag {
     display: flex; align-items: flex-start; gap: 7px;
-    padding: 6px 12px; font-size: 11.5px; color: var(--warning);
+    padding: 6px 12px; font-size: var(--font-size-xs); color: var(--warning);
   }
   .scr-diag.err { color: var(--error); }
   .scr-diag-msg { color: var(--text-secondary); line-height: 1.35; }
 
-  .scr-rows { font-family: var(--font-code); font-size: 11px; }
+  .scr-rows { font-family: var(--font-code); font-size: var(--font-size-xs); }
   .scr-row {
     display: grid; grid-template-columns: 52px 30px 1fr 44px; gap: 6px; align-items: center;
     padding: 2px 12px; color: var(--text-secondary);
@@ -339,5 +339,5 @@
   .scr-track { color: var(--accent); }
   .scr-name { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .scr-gain { text-align: right; color: var(--text-muted); }
-  .scr-more { padding: 4px 12px; font-size: 10.5px; color: var(--text-muted); font-style: italic; }
+  .scr-more { padding: 4px 12px; font-size: var(--font-size-2xs); color: var(--text-muted); font-style: italic; }
 </style>

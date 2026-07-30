@@ -118,7 +118,7 @@
         <Copy size={13} /> <span>Copy</span>
       </button>
     {/if}
-    <button class="mac-close-btn" onclick={onClose} aria-label="Close" use:tooltip={'Close'}></button>
+    <button class="close-btn" onclick={onClose} aria-label="Close" use:tooltip={'Close'}></button>
   {/snippet}
 
   {#if busy}
@@ -144,13 +144,13 @@
 
 <style>
   .vs-title {
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-primary);
   }
   .vs-meta {
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     background: var(--bg-overlay);
     padding: 2px 8px;
@@ -172,7 +172,7 @@
     background: var(--bg-base);
     color: var(--text-secondary);
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);
   }
@@ -194,7 +194,7 @@
     padding: 6px 14px;
     background: color-mix(in srgb, var(--accent) 10%, var(--bg-base));
     border-bottom: 1px solid var(--border-subtle);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
     flex-shrink: 0;
   }
@@ -207,7 +207,7 @@
     background: var(--bg-base);
     color: var(--text-primary);
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 1.55;
     white-space: pre;
   }

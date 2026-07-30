@@ -139,7 +139,7 @@
   .chip {
     display: inline-flex; align-items: center; gap: 3px;
     padding: 3px 7px;
-    font-size: 10px; font-weight: 500;
+    font-size: var(--font-size-2xs); font-weight: 500;
     font-family: var(--font-ui-sans);
     color: var(--text-muted);
     background: var(--bg-elevated);
@@ -159,7 +159,7 @@
     color: var(--bg-base);
     border-radius: 99px;
     padding: 0 4px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
   }
 
   .chip-drop {
@@ -179,7 +179,7 @@
   }
   .chip-drop-search {
     width: 100%; box-sizing: border-box;
-    padding: 4px 8px; font-size: 11px;
+    padding: 4px 8px; font-size: var(--font-size-xs);
     font-family: var(--font-ui-sans);
     background: var(--bg-base); color: var(--text-primary);
     border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -190,6 +190,6 @@
 
   .chip-drop-empty {
     display: flex; align-items: center; gap: 6px; justify-content: center;
-    padding: 10px 8px; font-size: 11px; color: var(--text-muted); font-style: italic;
+    padding: 10px 8px; font-size: var(--font-size-xs); color: var(--text-muted); font-style: italic;
   }
 </style>

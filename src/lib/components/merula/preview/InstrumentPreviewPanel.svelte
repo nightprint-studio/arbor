@@ -178,18 +178,18 @@
   .ipp-top { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
 
   .ipp-id { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
-  .ipp-name { font-family: var(--font-code); font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .ipp-name { font-family: var(--font-code); font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
   .ipp-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .ipp-kind {
-    font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    font-size: var(--font-size-3xs); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
     color: var(--text-muted); background: var(--bg-overlay);
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 1px 6px;
   }
-  .ipp-pack { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-muted); }
+  .ipp-pack { display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-size-2xs); color: var(--text-muted); }
 
   .ipp-arts { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
   .ipp-chip {
-    font-family: var(--font-code); font-size: 10.5px;
+    font-family: var(--font-code); font-size: var(--font-size-2xs);
     padding: 2px 8px; border-radius: var(--radius-sm); cursor: pointer;
     color: var(--text-secondary); background: var(--bg-overlay); border: 1px solid var(--border-subtle);
     transition: background var(--transition-fast), color var(--transition-fast);
@@ -204,7 +204,7 @@
   .ipp-field.ipp-narrow { min-width: 90px; }
   .ipp-field.ipp-grow { flex: 1; min-width: 180px; }
   .ipp-flabel {
-    font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-disabled);
+    font-size: var(--font-size-3xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-disabled);
   }
 
   .ipp-play { display: flex; flex-direction: column; gap: 6px; }
@@ -217,18 +217,18 @@
   }
   .ipp-oct-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
   .ipp-range {
-    font-family: var(--font-code); font-size: 11px; color: var(--text-muted);
+    font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-muted);
     min-width: 78px; text-align: center;
   }
 
-  .ipp-hint { margin: 0; font-size: 11px; color: var(--text-muted); }
+  .ipp-hint { margin: 0; font-size: var(--font-size-xs); color: var(--text-muted); }
 
   .ipp-trigger {
     align-self: flex-start;
     display: inline-flex; align-items: center; gap: 8px;
     padding: 9px 22px; border-radius: var(--radius-md);
     background: var(--accent); color: var(--text-on-accent);
-    border: none; cursor: pointer; font-size: 13px; font-weight: 600;
+    border: none; cursor: pointer; font-size: var(--font-size-md); font-weight: 600;
   }
   .ipp-trigger:hover { filter: brightness(1.08); }
 </style>

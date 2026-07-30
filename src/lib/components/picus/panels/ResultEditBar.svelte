@@ -101,7 +101,7 @@
     border-bottom: 1px solid var(--border-subtle);
   }
   .reb-spacer { flex: 1; }
-  .reb-count { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+  .reb-count { font-size: var(--font-size-xs); font-weight: 600; color: var(--text-secondary); }
 
   .reb-notice { flex-shrink: 0; padding: 6px 8px 0; }
 
@@ -112,7 +112,7 @@
     max-height: 108px;
     overflow: auto;
     font-family: var(--font-code);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     line-height: 1.55;
     color: var(--text-muted);
     white-space: pre;

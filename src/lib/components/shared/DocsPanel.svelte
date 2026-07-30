@@ -969,7 +969,7 @@
 
   .export-ext {
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--accent);
     background: rgba(77,120,204,0.12);
     padding: 1px 5px;
@@ -1026,7 +1026,7 @@
     background: var(--accent-subtle);
     color: var(--accent);
     font-family: var(--font-ui-sans);
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     border-radius: var(--radius-sm);
     margin-right: 4px;
@@ -1144,7 +1144,7 @@
   .plugin-disabled-pill {
     margin-left: auto;
     padding: 1px 6px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -1184,7 +1184,7 @@
 
   /* Lead paragraph */
   .docs-content :global(.doc-lead) {
-    font-size: 13px !important;
+    font-size: var(--font-size-md) !important;
     color: var(--text-secondary) !important;
     border-left: 3px solid var(--accent);
     padding: 8px 0 8px 14px !important;
@@ -1221,7 +1221,7 @@
     font-weight: 600;
     color: var(--text-primary);
   }
-  .docs-content :global(.fc-title kbd) { font-size: 9px; padding: 0 3px; }
+  .docs-content :global(.fc-title kbd) { font-size: var(--font-size-3xs); padding: 0 3px; }
   .docs-content :global(.fc-desc) {
     font-size: var(--font-size-xs);
     color: var(--text-muted);
@@ -1262,7 +1262,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     margin-top: 1px;
   }
@@ -1300,7 +1300,7 @@
   .docs-content :global(.chip) {
     display: inline-block;
     font-family: var(--font-code);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 1px 6px;
     border-radius: var(--radius-sm);
     font-weight: 500;
@@ -1316,7 +1316,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.7px;
@@ -1332,7 +1332,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -1363,7 +1363,7 @@
   }
   .docs-content :global(dl.meta-grid > dt) {
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -1478,7 +1478,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     margin-top: 2px;
   }
 
@@ -1500,13 +1500,13 @@
     gap: 3px;
   }
   .docs-content :global(.stat-value) {
-    font-size: 15px;
+    font-size: var(--font-size-lg);
     font-weight: 700;
     color: var(--text-primary);
     font-family: var(--font-code);
   }
   .docs-content :global(.stat-label) {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -1519,7 +1519,7 @@
     padding-top: 10px;
   }
   .docs-content :global(.fc-eyebrow) {
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -1533,7 +1533,7 @@
     align-items: center;
     gap: 10px;
     margin: 18px 0 10px;
-    font-size: 9px;
+    font-size: var(--font-size-3xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.7px;

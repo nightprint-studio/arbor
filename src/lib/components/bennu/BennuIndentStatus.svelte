@@ -91,7 +91,7 @@
     margin: 0;
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);

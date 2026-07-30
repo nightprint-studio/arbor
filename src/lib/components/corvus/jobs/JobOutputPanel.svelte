@@ -170,14 +170,14 @@
 
   .jop-status {
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 500;
     white-space: nowrap;
   }
 
   .jop-plugin {
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     background: var(--bg-base);
     border-radius: var(--radius-sm);
@@ -224,7 +224,7 @@
     border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
     font-family: var(--font-code);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     overflow: hidden;
   }

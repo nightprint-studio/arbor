@@ -208,7 +208,7 @@
     border: none;
     border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
     cursor: pointer;
     text-align: left;
@@ -252,7 +252,7 @@
     text-align: left;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     cursor: pointer;
     border-radius: 0;
     transition: color var(--transition-fast);
@@ -264,7 +264,7 @@
     text-align: center;
     color: var(--text-muted);
     font-style: italic;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   .fb-reset {
@@ -274,7 +274,7 @@
     border-radius: 99px;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     cursor: pointer;
     transition: all var(--transition-fast);
   }

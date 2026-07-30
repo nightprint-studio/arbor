@@ -172,7 +172,7 @@
     cursor: pointer;
     color: var(--text-on-accent);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     white-space: nowrap;
     transition: background var(--transition-fast);
@@ -194,7 +194,7 @@
   }
   .chunk-counter {
     font-family: var(--font-ui-sans);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     min-width: 28px;
     text-align: center;
@@ -210,7 +210,7 @@
     cursor: pointer;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     transition: all var(--transition-fast);
   }
   .mode-btn.active, .mode-btn:hover {
@@ -249,7 +249,7 @@
     border-radius: 4px;
     cursor: pointer;
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     flex-shrink: 0;
   }
   .plugin-diff-toolbar-item:hover {

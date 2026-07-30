@@ -135,7 +135,7 @@
     min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-family: var(--font-code);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
   }
   .fr-action.muted { color: var(--text-muted); font-style: italic; font-family: var(--font-ui-sans); }
@@ -144,7 +144,7 @@
     flex-shrink: 0;
     max-width: 45%;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
   }
 
@@ -156,7 +156,7 @@
     border-radius: var(--radius-sm);
     color: var(--info, #61afef);
     background: color-mix(in srgb, var(--info, #61afef) 12%, transparent);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
   }
   .fr-host-name {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

@@ -158,7 +158,7 @@
 
   .pd-path {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -167,7 +167,7 @@
 
   .pd-diff {
     font-family: var(--font-code);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     line-height: 1.65;
     overflow-x: auto;
   }
@@ -195,7 +195,7 @@
     margin: 0;
     padding: 7px 12px 8px 30px;
     border-top: 1px solid var(--border-subtle);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     line-height: 1.55;
     color: var(--text-muted);
   }

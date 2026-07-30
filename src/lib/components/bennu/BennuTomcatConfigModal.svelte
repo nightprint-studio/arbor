@@ -226,18 +226,18 @@
 {/if}
 
 <style>
-  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
   .hdr-name {
-    font-size: 11px; color: var(--text-muted);
+    font-size: var(--font-size-xs); color: var(--text-muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .body { display: flex; flex-direction: column; gap: 18px; }
   .cfg-section { display: flex; flex-direction: column; gap: 10px; }
   .sec-head { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); }
-  .sec-head h3 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--text-primary); }
+  .sec-head h3 { margin: 0; font-size: var(--font-size-sm); font-weight: 600; letter-spacing: 0.02em; color: var(--text-primary); }
   .row { display: flex; align-items: center; gap: 8px; }
   .row :global(> :first-child) { flex: 1; min-width: 0; }
-  .status { font-size: 11.5px; }
+  .status { font-size: var(--font-size-xs); }
   .status .ok { display: inline-flex; align-items: center; gap: 5px; color: var(--success); }
   .status .warn { display: inline-flex; align-items: center; gap: 5px; color: var(--warning); }
   .status .muted { color: var(--text-muted); }
@@ -246,11 +246,11 @@
     border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 10px 12px;
   }
   .fact { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-  .fk { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .fk { font-size: var(--font-size-2xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
   .fv {
-    font-size: 12px; color: var(--text-primary); font-family: var(--font-code);
+    font-size: var(--font-size-sm); color: var(--text-primary); font-family: var(--font-code);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .note { margin: 0; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
+  .note { margin: 0; font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted); }
   .footer-actions { display: flex; align-items: center; gap: 8px; }
 </style>

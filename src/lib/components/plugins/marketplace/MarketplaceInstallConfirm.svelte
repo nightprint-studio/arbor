@@ -319,17 +319,17 @@
   }
   .mic-name {
     font-weight: 600;
-    font-size: 14px;
+    font-size: var(--font-size-lg);
   }
   .mic-ver {
     color: var(--text-secondary);
     font-family: var(--font-mono, monospace);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .mic-desc {
     margin: 0;
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     line-height: 1.45;
   }
 
@@ -344,7 +344,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -354,10 +354,10 @@
   .mic-muted {
     margin: 0;
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
   .mic-muted.small {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   .mic-list {
@@ -389,11 +389,11 @@
   }
   .mic-row-title {
     font-weight: 600;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
   }
   .mic-row-detail {
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     word-break: break-word;
   }
   .mic-tone-safe   { border-left-color: var(--success); }
@@ -409,7 +409,7 @@
     border-radius: 3px;
     padding: 1px 4px;
     font-family: var(--font-mono, monospace);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
   }
 
   /* Missing-dep list inside the error Alert (block-level layout, since the
@@ -426,14 +426,14 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
   }
 
   .mic-dep-ver {
     margin-left: 4px;
     font-family: var(--font-mono, monospace);
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     color: var(--text-secondary);
     font-weight: 400;
   }

@@ -60,18 +60,18 @@
 
 <style>
   :global(.ext-hdr-icon) { color: var(--accent); flex-shrink: 0; }
-  .ext-title { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+  .ext-title { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary); }
   .ext-body { display: flex; flex-direction: column; gap: 12px; }
-  .ext-lead { margin: 0; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
+  .ext-lead { margin: 0; font-size: var(--font-size-sm); color: var(--text-secondary); line-height: 1.5; }
   .ext-url {
-    font-family: var(--font-code); font-size: 12px; color: var(--text-primary);
+    font-family: var(--font-code); font-size: var(--font-size-sm); color: var(--text-primary);
     background: var(--bg-elevated); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); padding: 8px 10px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .ext-remember {
     display: flex; align-items: center; gap: 8px; cursor: pointer;
-    font-size: 12px; color: var(--text-secondary); user-select: none;
+    font-size: var(--font-size-sm); color: var(--text-secondary); user-select: none;
   }
   .ext-remember input { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; }
   .ext-remember strong { color: var(--text-primary); font-weight: 600; }

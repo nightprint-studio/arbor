@@ -191,21 +191,21 @@
 
   .build-status {
     display: flex; align-items: center; gap: 7px; flex-shrink: 0;
-    padding: 6px 12px; font-size: 11.5px; color: var(--text-secondary);
+    padding: 6px 12px; font-size: var(--font-size-xs); color: var(--text-secondary);
     border-bottom: 1px solid var(--border-subtle);
   }
   .st-text { font-weight: 500; }
   .st-ok { display: flex; color: var(--success); }
   .st-fail { display: flex; color: var(--error); }
-  .st-progress { font-family: var(--font-code); font-size: 10.5px; color: var(--text-muted); }
+  .st-progress { font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted); }
   .st-cancel {
-    font-size: 10.5px; color: var(--text-muted); background: none; border: none; cursor: pointer;
+    font-size: var(--font-size-2xs); color: var(--text-muted); background: none; border: none; cursor: pointer;
     padding: 1px 6px; border-radius: var(--radius-sm);
   }
   .st-cancel:hover { color: var(--error); background: var(--bg-hover); }
-  .st-counts { margin-left: auto; font-size: 10.5px; color: var(--text-muted); }
+  .st-counts { margin-left: auto; font-size: var(--font-size-2xs); color: var(--text-muted); }
   .st-speed {
-    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    font-size: var(--font-size-3xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
     padding: 1px 6px; border-radius: var(--radius-sm);
   }
   .st-speed.tone-ok { color: var(--success); background: var(--success-subtle); }
@@ -214,12 +214,12 @@
 
   .vproblems {
     flex-shrink: 0; display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
-    padding: 6px 12px; font-size: 11.5px; cursor: pointer; background: transparent; border: none;
+    padding: 6px 12px; font-size: var(--font-size-xs); cursor: pointer; background: transparent; border: none;
     border-bottom: 1px solid var(--border-subtle); color: var(--error);
     font-family: var(--font-ui-sans); transition: background var(--transition-fast);
   }
   .vproblems:hover { background: var(--bg-hover); }
-  .vproblems-go { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; color: var(--text-muted); font-size: 10.5px; }
+  .vproblems-go { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; color: var(--text-muted); font-size: var(--font-size-2xs); }
 
   /* Validation statistics grid + slowest-files table. */
   .vstats {
@@ -227,25 +227,25 @@
     gap: 1px; padding: 8px 12px; border-bottom: 1px solid var(--border-subtle);
   }
   .vstat { display: flex; flex-direction: column; gap: 2px; }
-  .vstat-k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
-  .vstat-v { font-size: 12.5px; font-weight: 600; color: var(--text-primary); font-family: var(--font-code); }
+  .vstat-k { font-size: var(--font-size-2xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .vstat-v { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary); font-family: var(--font-code); }
   .vslow { flex-shrink: 0; padding: 4px 0 6px; border-bottom: 1px solid var(--border-subtle); }
-  .vslow-head { padding: 2px 12px 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .vslow-head { padding: 2px 12px 4px; font-size: var(--font-size-2xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
   .vslow-row {
     display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
-    padding: 3px 12px; font-size: 11.5px; cursor: pointer; background: transparent; border: none;
+    padding: 3px 12px; font-size: var(--font-size-xs); cursor: pointer; background: transparent; border: none;
     font-family: var(--font-ui-sans); transition: background var(--transition-fast);
   }
   .vslow-row:hover { background: var(--bg-hover); }
   .vslow-name { flex: 1; min-width: 0; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .vslow-diags { font-size: 10px; color: var(--warning); flex-shrink: 0; }
-  .vslow-ms { font-family: var(--font-code); font-size: 10.5px; color: var(--text-muted); flex-shrink: 0; }
+  .vslow-diags { font-size: var(--font-size-2xs); color: var(--warning); flex-shrink: 0; }
+  .vslow-ms { font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted); flex-shrink: 0; }
 
   .diag-list { flex-shrink: 0; max-height: 45%; overflow-y: auto; padding: 3px 0; border-bottom: 1px solid var(--border-subtle); }
   .diag-row {
     display: flex; align-items: center; gap: 8px;
     width: 100%; text-align: left;
-    padding: 4px 12px; font-size: 12px; cursor: pointer;
+    padding: 4px 12px; font-size: var(--font-size-sm); cursor: pointer;
     background: transparent; border: none; font-family: var(--font-ui-sans);
     transition: background var(--transition-fast);
   }
@@ -256,9 +256,9 @@
   .sev-warning { color: var(--warning); }
   .sev-note, .sev-info { color: var(--info); }
   .diag-msg { flex: 1; min-width: 0; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .diag-loc { font-family: var(--font-code); font-size: 10.5px; color: var(--text-muted); flex-shrink: 0; }
+  .diag-loc { font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted); flex-shrink: 0; }
 
-  .log { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 12px; font-family: var(--font-code); font-size: 11.5px; line-height: 1.5; }
+  .log { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 12px; font-family: var(--font-code); font-size: var(--font-size-xs); line-height: 1.5; }
   .log-line { white-space: pre-wrap; word-break: break-word; color: var(--text-secondary); }
   .log-line.stream-err { color: var(--error); }
   .log-line.stream-meta { color: var(--text-muted); font-style: italic; }

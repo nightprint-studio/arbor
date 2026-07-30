@@ -195,17 +195,17 @@
 
   .adv-loading {
     display: flex; align-items: center; gap: 6px;
-    font-size: 11px; color: var(--text-muted);
+    font-size: var(--font-size-xs); color: var(--text-muted);
   }
 
   .adv-intro {
     display: flex; gap: 6px; align-items: flex-start;
-    font-size: 11px; color: var(--text-muted); line-height: 1.5;
+    font-size: var(--font-size-xs); color: var(--text-muted); line-height: 1.5;
   }
   .adv-intro :global(svg) { flex-shrink: 0; margin-top: 2px; }
   .adv-intro strong { color: var(--text-secondary); font-weight: 500; }
   .adv-intro code {
-    font-family: var(--font-code); font-size: 10px;
+    font-family: var(--font-code); font-size: var(--font-size-2xs);
     color: var(--accent);
     background: var(--bg-base); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); padding: 0 4px;
@@ -214,13 +214,13 @@
 
   .adv-field { display: flex; flex-direction: column; gap: 4px; }
   .adv-label {
-    font-size: 11px; font-weight: 500; color: var(--text-secondary);
+    font-size: var(--font-size-xs); font-weight: 500; color: var(--text-secondary);
   }
   .adv-input {
     padding: 5px 8px;
     background: var(--bg-input); color: var(--text-primary);
     border: 1px solid var(--border); border-radius: var(--radius-sm);
-    font-family: var(--font-code); font-size: 12px;
+    font-family: var(--font-code); font-size: var(--font-size-sm);
     outline: none; transition: border-color var(--transition-fast);
   }
   .adv-input:focus { border-color: var(--accent); }
@@ -228,16 +228,16 @@
     color: var(--text-disabled);
     font-family: var(--font-code);
   }
-  .adv-help { font-size: 10.5px; color: var(--text-muted); }
+  .adv-help { font-size: var(--font-size-2xs); color: var(--text-muted); }
   .adv-help code {
-    font-family: var(--font-code); font-size: 10px;
+    font-family: var(--font-code); font-size: var(--font-size-2xs);
     color: var(--accent);
     background: var(--bg-base); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); padding: 0 3px;
   }
 
   .adv-error {
-    font-size: 11px; color: var(--error);
+    font-size: var(--font-size-xs); color: var(--error);
     padding: 6px 8px;
     background: color-mix(in srgb, var(--error) 8%, transparent);
     border: 1px solid color-mix(in srgb, var(--error) 40%, transparent);
@@ -249,7 +249,7 @@
   .adv-btn-save, .adv-btn-reset {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 5px 12px;
-    font-family: var(--font-ui-sans); font-size: 11px; font-weight: 500;
+    font-family: var(--font-ui-sans); font-size: var(--font-size-xs); font-weight: 500;
     border-radius: var(--radius-sm); cursor: pointer;
     transition: all var(--transition-fast); white-space: nowrap;
   }

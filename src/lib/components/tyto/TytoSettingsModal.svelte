@@ -164,21 +164,21 @@
   .body { display: flex; flex-direction: column; gap: 20px; }
   section { display: flex; flex-direction: column; gap: 12px; }
   .sec-title {
-    margin: 0; font-size: 11px; font-weight: 600;
+    margin: 0; font-size: var(--font-size-xs); font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.7px; color: var(--text-muted);
   }
   .row { display: flex; align-items: center; }
 
   /* General settings row: label (+ optional hint/path) left, control right. */
   .gen { justify-content: space-between; gap: 16px; }
-  .gen-label { font-size: 12.5px; color: var(--text-primary); min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  .gen-hint { font-size: 10.5px; color: var(--text-muted); font-weight: 400; }
+  .gen-label { font-size: var(--font-size-sm); color: var(--text-primary); min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .gen-hint { font-size: var(--font-size-2xs); color: var(--text-muted); font-weight: 400; }
   .gen-hint.path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
 
   .accel { justify-content: space-between; gap: 12px; padding-left: 2px; }
-  .accel-left { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-primary); }
+  .accel-left { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-sm); color: var(--text-primary); }
   .accel-left :global(svg) { color: var(--text-muted); }
   .accel-right { display: flex; align-items: center; gap: 10px; }
-  .capturing { font-size: 12px; color: var(--accent); }
+  .capturing { font-size: var(--font-size-sm); color: var(--accent); }
   .capturing .dim { color: var(--text-muted); }
 </style>

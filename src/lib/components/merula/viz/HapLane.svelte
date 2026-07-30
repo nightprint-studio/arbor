@@ -394,7 +394,7 @@
   .hap-label {
     display: block;
     padding: 0 3px;
-    font-size: 8.5px;
+    font-size: var(--font-size-3xs);
     line-height: 1;
     font-family: var(--font-code);
     color: color-mix(in srgb, #000 72%, var(--c));

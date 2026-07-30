@@ -234,7 +234,7 @@
   .wkey.cnote .wlabel { color: var(--text-secondary); font-weight: 600; }
   .wkey.root { background: var(--bg-overlay); color: var(--text-muted); }
   .wkey.root.lit { background: var(--accent); color: var(--text-on-accent); }
-  .wlabel { font-size: 9px; font-family: var(--font-code); pointer-events: none; }
+  .wlabel { font-size: var(--font-size-3xs); font-family: var(--font-code); pointer-events: none; }
 
   .blacks { position: absolute; inset: 0; pointer-events: none; }
   .bkey {

@@ -109,10 +109,10 @@
 <style>
   .nf { display: flex; flex-direction: column; gap: 14px; padding: 4px 2px; }
   .nf-field { display: flex; flex-direction: column; gap: 6px; }
-  .nf-label { font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
-  .nf-dir { font-size: 11.5px; color: var(--text-muted); }
-  .nf-dir code { font-family: var(--font-code); color: var(--text-secondary); font-size: 11.5px; }
-  .nf-input { width: 100%; padding: 7px 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text-primary); font-family: var(--font-code); font-size: 13px; outline: none; }
+  .nf-label { font-size: var(--font-size-2xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+  .nf-dir { font-size: var(--font-size-xs); color: var(--text-muted); }
+  .nf-dir code { font-family: var(--font-code); color: var(--text-secondary); font-size: var(--font-size-xs); }
+  .nf-input { width: 100%; padding: 7px 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text-primary); font-family: var(--font-code); font-size: var(--font-size-md); outline: none; }
   .nf-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle); }
   .nf-input::placeholder { color: var(--text-disabled); }
 </style>

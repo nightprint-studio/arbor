@@ -150,12 +150,12 @@
     color: var(--text-primary);
   }
   .dep-version { flex-shrink: 0; color: var(--text-muted); }
-  .mono { font-family: var(--font-code); font-size: 11px; }
+  .mono { font-family: var(--font-code); font-size: var(--font-size-xs); }
 
   .dep-meta { display: flex; align-items: center; gap: 8px; }
   .dep-origin {
     display: inline-flex; align-items: center; gap: 3px;
-    font-size: 9.5px; color: var(--text-disabled);
+    font-size: var(--font-size-3xs); color: var(--text-disabled);
   }
   .dep-origin :global(svg) { color: var(--text-disabled); flex-shrink: 0; }
   .dep-origin-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
