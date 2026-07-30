@@ -101,6 +101,7 @@
    * shared/internal — generic props + snippets only.
    */
   import { untrack } from 'svelte';
+  import DataCellValue from './DataCellValue.svelte';
 
   interface Props {
     columns: DataGridColumn[];
@@ -257,6 +258,22 @@
   // ── Virtualisation ────────────────────────────────────────────────────────
   let scrollEl = $state<HTMLElement | null>(null);
   let scrollTop = $state(0);
+  /**
+   * How far the body has scrolled sideways — which the header has to be told.
+   *
+   * The header and the filter row are **siblings** of the scrolling body, not
+   * children of it, because the body is virtualised: its rows live in an
+   * absolutely-positioned window whose offset is computed from `scrollTop`, and a
+   * header inside that container would sit above the window and put every row
+   * index out by the height of itself.
+   *
+   * The consequence is that `position: sticky` cannot hold the header still —
+   * there is no shared scroll container for it to stick inside. So the body
+   * reports its horizontal position and the header is moved by the same amount.
+   * Without this the columns and their headings drift apart the moment a result is
+   * wider than the panel, which is most results.
+   */
+  let scrollLeft = $state(0);
   let viewH = $state(0);
 
   /** Rows the scrollbar spans: the result's length, not what is in memory. */
@@ -279,7 +296,9 @@
   const offsetY = $derived(start * rowHeight);
 
   function onScroll(e: Event) {
-    scrollTop = (e.currentTarget as HTMLElement).scrollTop;
+    const el = e.currentTarget as HTMLElement;
+    scrollTop = el.scrollTop;
+    scrollLeft = el.scrollLeft;
   }
 
   /**
@@ -374,7 +393,11 @@
        While a window is filling, the sort buttons stay in place and go inert:
        removing them would read as "this grid does not sort", which is a different
        and untrue statement. -->
-  <div class="dg-head" style:grid-template-columns={gridTemplate}>
+  <div
+    class="dg-head"
+    style:grid-template-columns={gridTemplate}
+    style:transform={`translateX(${-scrollLeft}px)`}
+  >
     {#if showRowNumbers}
       <div class="dg-th dg-gutter-th" aria-hidden="true"></div>
     {/if}
@@ -414,7 +437,11 @@
   </div>
 
   {#if filterable}
-    <div class="dg-filters" style:grid-template-columns={gridTemplate}>
+    <div
+      class="dg-filters"
+      style:grid-template-columns={gridTemplate}
+      style:transform={`translateX(${-scrollLeft}px)`}
+    >
       {#if showRowNumbers}<div class="dg-filter-cell" aria-hidden="true"></div>{/if}
       {#each columns as col (col.id)}
         <div class="dg-filter-cell">
@@ -476,7 +503,7 @@
                   <!-- A row on its way. A quiet bar, never `NULL`: a value that is
                        absent and a value that has not arrived are different facts. -->
                   <span class="dg-cell" class:dg-num={col.type === 'number'} role="gridcell">
-                    <span class="dg-loading"></span>
+                    <DataCellValue value={null} loading />
                   </span>
                 {:else}
                   {@const value = entry.row[ci]}
@@ -488,12 +515,8 @@
                   >
                     {#if cell}
                       {@render cell({ value, column: col, rowIndex: entry.index, columnIndex: ci })}
-                    {:else if value === null || value === undefined}
-                      <span class="dg-null">NULL</span>
-                    {:else if value === ''}
-                      <span class="dg-blank" title="empty string"></span>
                     {:else}
-                      {value}
+                      <DataCellValue {value} />
                     {/if}
                   </span>
                 {/if}
@@ -527,9 +550,11 @@
     min-width: max-content;
   }
 
+  /* `relative`, not `sticky`: the header is not inside the scrolling body (see
+     `scrollLeft`), so there is nothing for it to stick to — it is moved by script
+     instead. Saying `sticky` here only ever looked like it was doing the job. */
   .dg-head {
-    position: sticky;
-    top: 0;
+    position: relative;
     z-index: 2;
     background: var(--bg-elevated);
     border-bottom: 1px solid var(--border);
@@ -599,8 +624,7 @@
 
   /* ── Filter row ─────────────────────────────────────────────────────────── */
   .dg-filters {
-    position: sticky;
-    top: 26px;
+    position: relative;
     z-index: 2;
     background: var(--bg-elevated);
     border-bottom: 1px solid var(--border-subtle);
@@ -650,23 +674,30 @@
   .dg-row-pending { cursor: progress; }
   .dg-row-pending:hover { background: none; }
 
+  /* Vertical separators only.
+     A `border-bottom` on every cell as well draws the full 1990s spreadsheet grid:
+     a mesh of lines with the data trapped in it, where the loudest thing on screen
+     is the furniture. Rows are told apart by the hover and the selection — which is
+     how IntelliJ's own data grid does it, and the layout target for this window. */
   .dg-cell {
     display: flex;
     align-items: center;
     min-width: 0;
     padding: 0 8px;
     border-right: 1px solid var(--border-subtle);
-    border-bottom: 1px solid var(--border-subtle);
     color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  /* Numbers right-aligned with tabular figures so magnitudes line up. */
+  /* Numbers right-aligned with tabular figures so magnitudes line up.
+     Not coloured. They were `--warning`, so every id, count and price in every
+     result came up alarm-orange — which is the product's own rule broken in the
+     most visible place it has: the vivid accents mean **state**, never decoration.
+     Nothing is wrong with the number 42. */
   .dg-cell.dg-num {
     justify-content: flex-end;
     font-variant-numeric: tabular-nums;
-    color: var(--warning);
   }
   .dg-gutter {
     justify-content: flex-end;
@@ -679,26 +710,9 @@
     z-index: 1;
   }
 
-  /* NULL and the empty string must never look alike. */
-  .dg-null { color: var(--text-disabled); font-style: italic; }
-  .dg-blank {
-    width: 14px;
-    height: 9px;
-    border: 1px dashed var(--border);
-    border-radius: 2px;
-    opacity: 0.7;
-  }
-
-  /* A row still in flight. Static rather than animated: a screenful of pulsing
-     bars scrolling under the cursor is noise, and on WebView2 a permanently
-     animating layer keeps the compositor busy for nothing. */
-  .dg-loading {
-    width: 62%;
-    max-width: 90px;
-    height: 7px;
-    border-radius: 3px;
-    background: var(--bg-hover);
-  }
+  /* How a null, an empty string and a not-yet-arrived row look lives in
+     `DataCellValue` — one answer for this grid's default and for every consumer
+     that overrides the `cell` snippet. */
 
   .dg-empty {
     display: flex;

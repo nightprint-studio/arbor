@@ -187,7 +187,7 @@
             {:else}
               <div class="r-empty">
                 <EmptyState
-                  title={query ? 'No match' : 'Nothing opened yet'}
+                  message={query ? 'No match' : 'Nothing opened yet'}
                   description={query
                     ? 'No recent project matches this filter.'
                     : 'Projects you open — repositories, Java projects, pieces — show up here, whichever product opened them.'} />

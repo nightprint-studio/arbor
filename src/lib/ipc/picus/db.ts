@@ -170,6 +170,48 @@ export function disconnect(id: string): Promise<void> {
   return picus('picus_disconnect', { id });
 }
 
+/**
+ * Abandon a session that has stopped answering, and open a new one.
+ *
+ * Not the same as reconnecting. A session is one database connection, so a
+ * statement the server will not stop blocks *everything* on it — including the
+ * polite close that reconnecting begins with. This one drops the old connection
+ * without sending it anything, which is the only thing that works once it has
+ * proved it will not answer.
+ */
+export function resetConnection(id: string): Promise<ConnectionStatus> {
+  return picus('picus_reset_connection', { id });
+}
+
+/** Which relation a result's rows came from, and what the catalogue calls it. */
+export interface SourceRelation {
+  /** Unqualified, spelled as the catalogue spells it. Empty when there is not
+   *  exactly one source. */
+  relation: string;
+  /** The catalogue calls it a view — a source with no rows of its own. */
+  isView: boolean;
+  /** The catalogue has never heard of it: a CTE, a temporary table, an unread
+   *  schema. */
+  unknown: boolean;
+  /** Why there is no single relation, in the user's terms. Empty when there is one. */
+  reason: string;
+}
+
+/**
+ * Trace a statement back to the relation it reads.
+ *
+ * Answered by Picus's SQL parser rather than by looking at the text, which is what
+ * makes `EXTRACT(YEAR FROM x)` and a subquery in the select list stop counting as
+ * extra sources — and what lets it say "that is a view" at all, since nothing in
+ * the statement can know that.
+ *
+ * Pass the statement that **ran**, never the whole tab: a scratchpad holds several,
+ * and the buffer as a whole reads from all of them.
+ */
+export function sourceRelation(connectionId: string, sql: string): Promise<SourceRelation> {
+  return picus('picus_source_relation', { connectionId, sql });
+}
+
 /** Open, report, close. Deliberately does not touch the session pool. */
 export function testConnection(connection: ConnectionSpec): Promise<ConnectionStatus> {
   return picus('picus_test_connection', { connection });
@@ -245,6 +287,15 @@ export interface ExecuteResult {
   endOfResult: boolean;
   /** Rows a write touched. `null` for a read. */
   affected: number | null;
+  /**
+   * Columns whose value was **not fetched** — a large object, replaced in the
+   * projection by its size in bytes.
+   *
+   * Empty for any statement the user wrote: Picus only rewrites a projection it
+   * composed itself, which is the one a relation tab runs. A grid showing one of
+   * these is showing a number where a value belongs and has to say so.
+   */
+  maskedColumns?: string[];
 }
 
 /**
@@ -422,4 +473,90 @@ export function validateRows(model: DmlModel): Promise<ValueProblem[]> {
 /** Check a single value. `null` when it is writable as typed. */
 export function validateValue(value: string, column: Column): Promise<string | null> {
   return picus('picus_validate_value', { value, column });
+}
+
+/** One large object, read on demand. */
+export interface LobValue {
+  /** The whole value's size in bytes — may exceed what came back. */
+  bytes: number;
+  /** The value, when the column holds text. */
+  text?: string;
+  /** The value base64-encoded, when the column holds bytes. */
+  base64?: string;
+  /** Only the beginning arrived; the rest is still on the server. */
+  truncated: boolean;
+}
+
+/**
+ * Read the value a masked cell stands for.
+ *
+ * A relation tab does not fetch its large objects — it fetches their sizes, so
+ * opening a table of scanned documents does not pull every byte of every row across
+ * the connection to draw a grid that cannot show any of them. This is the other half:
+ * exactly the one value the user asked to see, addressed by its row's key, and
+ * capped so that clicking a cell can never be what fills the window's memory.
+ */
+export function readLob(
+  connectionId: string,
+  table: string,
+  keys: Record<string, string | null>,
+  column: string,
+): Promise<LobValue> {
+  return picus('picus_read_lob', { id: connectionId, table, keys, column });
+}
+
+/** One row's worth of change: what identifies it, and what to write. */
+export interface RowEdit {
+  /** Key columns, with the values the row had **before** the edit. */
+  keys: Record<string, string | null>;
+  /** Columns to write, with their new values. */
+  set: Record<string, string | null>;
+}
+
+/** What a batch of edits did. */
+export interface EditOutcome {
+  affected: number;
+  requested: number;
+  /** The SQL that ran, so it can be read — or pasted into a script. */
+  sql: string;
+  /** Set when the count and the request disagree, in the user's terms. */
+  warning?: string;
+}
+
+/**
+ * Write a grid's changed cells back to one table.
+ *
+ * The only call in Picus that issues DML the user has not read first, and it refuses
+ * more than it accepts: no key, a NULL key, a view, or a read-only connection all
+ * stop before anything is written. The `WHERE` is built from the values the row was
+ * **read** with, which is what lets a key column itself be edited.
+ */
+export function applyRowEdits(
+  connectionId: string,
+  table: string,
+  edits: RowEdit[],
+): Promise<EditOutcome> {
+  return picus('picus_apply_row_edits', { id: connectionId, table, edits });
+}
+
+/**
+ * Rows out of a result grid, as `INSERT` statements for this connection's engine.
+ *
+ * Through the backend rather than joined together here, because **quoting is a
+ * schema question**: whether `007` keeps its quotes and `15` loses them depends on
+ * the column's declared type, which only the connection knows. It is also what
+ * makes the answer differ correctly per engine — one statement per row on Oracle,
+ * one statement with a tuple per row on PostgreSQL.
+ *
+ * A `null` cell means SQL `NULL`; the empty string means the empty string, and on
+ * a text column those are different rows.
+ */
+export function rowsToInsert(
+  connectionId: string,
+  table: string,
+  columns: string[],
+  rows: (string | null)[][],
+  dialect: Dialect,
+): Promise<string> {
+  return picus('picus_rows_to_insert', { id: connectionId, table, columns, rows, dialect });
 }

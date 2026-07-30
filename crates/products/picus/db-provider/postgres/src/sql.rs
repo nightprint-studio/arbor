@@ -245,7 +245,7 @@ pub fn single_statement(sql: &str) -> Option<&str> {
 
 /// End index of the (possibly nested) block comment starting at `at`, or `None`
 /// when it is unterminated.
-fn block_comment_end(sql: &str, at: usize) -> Option<usize> {
+pub(crate) fn block_comment_end(sql: &str, at: usize) -> Option<usize> {
     let b = sql.as_bytes();
     let mut depth = 0usize;
     let mut i = at;

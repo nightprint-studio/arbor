@@ -8,9 +8,11 @@
 //! language model anywhere in the flow**. Same input, byte-identical output, every
 //! time — which is what makes a generated block reviewable in a diff.
 
-use picus_ast::prelude::{Column, DmlModel, Target};
+use picus_ast::prelude::{
+    Column, DialectScope, DmlModel, DmlOperation, DmlRow, EngineKind, Target,
+};
 use picus_core::prelude::PicusState;
-use picus_emit::prelude::{emit_for_target, validate_value};
+use picus_emit::prelude::{emit_for_target, insert_rows, validate_value};
 use serde::Serialize;
 
 /// One target's generated SQL, plus anything about the target's own rules that
@@ -104,4 +106,77 @@ fn picus_validate_value(
     column: Column,
 ) -> Result<Option<String>, String> {
     Ok(validate_value(&value, &column))
+}
+
+/// Rows out of a result grid, as `INSERT` statements for one connection's engine.
+///
+/// The point of doing this here rather than joining strings in the interface is
+/// **quoting**: whether `007` keeps its quotes and `15` loses them is decided by
+/// the column's declared type, and the declared type is something only the
+/// connection's schema knows. A frontend that guessed would produce SQL that is
+/// right until the first account code with a leading zero.
+///
+/// The column list is the grid's, and it may be a subset of the table's: a user
+/// exporting three columns of a twenty-column table gets an `INSERT` naming three.
+/// Columns the schema does not have are refused rather than guessed at — an
+/// `INSERT` into a column that does not exist is not a useful thing to hand back.
+#[arbor_rpc::handler]
+fn picus_rows_to_insert(
+    state: &PicusState,
+    id: String,
+    table: String,
+    columns: Vec<String>,
+    rows: Vec<Vec<Option<String>>>,
+    dialect: EngineKind,
+) -> Result<String, String> {
+    let schema = state
+        .schemas()
+        .get(&id)
+        .ok_or("the schema of this connection has not been read yet")?;
+    let info = schema
+        .tables
+        .iter()
+        .chain(schema.views.iter())
+        .find(|t| t.name.eq_ignore_ascii_case(&table))
+        .ok_or_else(|| format!("{table} is not a table on this connection"))?;
+
+    let described: Vec<Column> = columns
+        .iter()
+        .map(|name| {
+            info.columns
+                .iter()
+                .find(|c| c.name.eq_ignore_ascii_case(name))
+                .cloned()
+                .ok_or_else(|| format!("{table} has no column {name}"))
+        })
+        .collect::<Result<_, _>>()?;
+
+    let model = DmlModel {
+        table: info.name.clone(),
+        operation: DmlOperation::Insert,
+        columns: described.clone(),
+        key_columns: Vec::new(),
+        rows: Vec::new(),
+        where_clause: None,
+        lowercase_postgres: false,
+        version_table: Default::default(),
+    };
+
+    // A cell the grid reports as NULL is left out of the row, which is how the
+    // emitter is told "this one is NULL" — the alternative, the empty string, is a
+    // different value and on a text column a perfectly ordinary one.
+    let emitted: Vec<DmlRow> = rows
+        .iter()
+        .map(|row| {
+            described
+                .iter()
+                .zip(row.iter())
+                .filter_map(|(column, value)| {
+                    value.as_ref().map(|v| (column.name.clone(), v.clone()))
+                })
+                .collect()
+        })
+        .collect();
+
+    insert_rows(&model, &emitted, DialectScope::One(dialect)).map_err(str::to_string)
 }

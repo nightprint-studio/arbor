@@ -9,7 +9,9 @@
 //! prevent.
 
 use crate::span::{Slot, Span};
-use crate::syntax::{Block, ChainLink, ColItem, Parsed, PredItem, RawValue, SyntaxError};
+use crate::syntax::{
+    Block, ChainLink, ChangeItem, ChangeKind, ColItem, Parsed, PredItem, RawValue, SyntaxError,
+};
 
 /// Parse an abbreviation. Always succeeds; look at [`Parsed::error`].
 pub fn parse(input: &str) -> Parsed {
@@ -28,12 +30,27 @@ pub fn parse(input: &str) -> Parsed {
         if !sc.at_end() {
             error = Some(sc.unexpected("expected `#` after the verb"));
         }
-        return Parsed { verb, hash, table: Slot::empty(sc.pos), chain: Vec::new(), cols: None, preds: None, mult: None, error };
+        return Parsed {
+            verb,
+            hash,
+            table: Slot::empty(sc.pos),
+            chain: Vec::new(),
+            changes: Vec::new(),
+            cols: None,
+            preds: None,
+            mult: None,
+            template: None,
+            error,
+        };
     }
 
     sc.skip_ws();
     let table = sc.read_name();
     let chain = sc.read_chain();
+    // Before the brackets: `+`/`~` bind to the table, and reading them here is
+    // what keeps `~` unambiguous — inside `[...]` it is the LIKE operator, and the
+    // two never meet because this loop has already stopped by then.
+    let changes = sc.read_changes();
 
     sc.skip_ws();
     let cols = (sc.peek() == Some('(')).then(|| sc.read_block(')', &mut error, Scanner::read_col_item));
@@ -41,6 +58,9 @@ pub fn parse(input: &str) -> Parsed {
     let preds = (sc.peek() == Some('[')).then(|| sc.read_block(']', &mut error, Scanner::read_pred_item));
     sc.skip_ws();
     let mult = sc.eat('*').then(|| sc.read_digits());
+    sc.skip_ws();
+    let template = (sc.peek() == Some('{'))
+        .then(|| sc.read_block('}', &mut error, |s| s.read_value(&[',', '}'])));
 
     sc.skip_ws();
     if error.is_none() && !sc.at_end() {
@@ -52,11 +72,13 @@ pub fn parse(input: &str) -> Parsed {
         // is *also* unclosed — and "you left a string open" is the fact that
         // explains both.
         error = unterminated_string(&preds, &cols)
+            .or_else(|| unterminated_template_string(&template))
             .or_else(|| unterminated(&cols, '('))
-            .or_else(|| unterminated(&preds, '['));
+            .or_else(|| unterminated(&preds, '['))
+            .or_else(|| unterminated(&template, '{'));
     }
 
-    Parsed { verb, hash, table, chain, cols, preds, mult, error }
+    Parsed { verb, hash, table, chain, changes, cols, preds, mult, template, error }
 }
 
 fn unterminated<T>(block: &Option<Block<T>>, open: char) -> Option<SyntaxError> {
@@ -76,6 +98,19 @@ fn unterminated_string(preds: &Option<Block<PredItem>>, cols: &Option<Block<ColI
         .chain(from_cols)
         .find(|v| v.quoted && !v.terminated)
         .map(|v| SyntaxError { at: v.slot.span.start, message: "a quoted value is never closed".to_string() })
+}
+
+/// The same, for the row template — whose values are read by the same routine and
+/// can be left open the same way.
+fn unterminated_template_string(template: &Option<Block<RawValue>>) -> Option<SyntaxError> {
+    template
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .find(|v| v.quoted && !v.terminated)
+        .map(|v| SyntaxError {
+            at: v.slot.span.start,
+            message: "a quoted value is never closed".to_string(),
+        })
 }
 
 /// Characters that make up an identifier. Unicode-aware because these schemas are
@@ -176,6 +211,44 @@ impl<'a> Scanner<'a> {
             });
             links.push(ChainLink { arrow, table, column });
         }
+    }
+
+    /// `+name:type` and `~name:type`, as many as the user wrote.
+    ///
+    /// The type runs to the next `+`, the next `~`, or the end — **spaces and
+    /// all**, because `timestamp with time zone` and `double precision` are two
+    /// words and one type, and a reader that stopped at the first space would make
+    /// the language useless for exactly the columns it is most tedious to add by
+    /// hand.
+    fn read_changes(&mut self) -> Vec<ChangeItem> {
+        let mut out = Vec::new();
+        loop {
+            self.skip_ws();
+            let kind = match self.peek() {
+                Some('+') => ChangeKind::Add,
+                Some('~') => ChangeKind::Modify,
+                _ => return out,
+            };
+            let at = self.pos;
+            self.bump();
+            self.skip_ws();
+            let column = self.read_name();
+            self.skip_ws();
+            let data_type = self.eat(':').then(|| self.read_type());
+            out.push(ChangeItem { at, kind, column, data_type });
+        }
+    }
+
+    /// Everything up to the next change or the end of the input, trimmed.
+    fn read_type(&mut self) -> Slot {
+        self.skip_ws();
+        let start = self.pos;
+        while matches!(self.peek(), Some(c) if c != '+' && c != '~') {
+            self.bump();
+        }
+        let slot = self.slice(start);
+        let text = slot.text.trim_end();
+        Slot::new(text, Span::new(slot.span.start, slot.span.start + text.len()))
     }
 
     /// A value, stopping at whitespace or at whatever closes the list it is in.

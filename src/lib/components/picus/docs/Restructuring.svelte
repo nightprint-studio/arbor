@@ -137,3 +137,29 @@ replacement:  INSERT INTO CATALOGO_WIDGET_V2 (ETICHETTA, CHIAVE) VALUES ($vals.1
   A file that matched but could not be prepared is listed with its reason rather than dropped: a
   migration missing a file is worse than one that says which file it cannot do.
 </p>
+
+<h2>The same patterns, in the tab you have open</h2>
+<p>
+  <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> opens the same thing beside the editor, scoped
+  to the document in front of you. It is the half you reach for while writing the statement —
+  forty inserts pasted out of a ticket that all need one more column — rather than the one you
+  refine over an afternoon.
+</p>
+<ul>
+  <li><b>It finds as you type</b>, in the pattern and in the document alike. The count in the
+    header is always about the text on screen.</li>
+  <li><b>Replace all is one edit</b>, so <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes the whole thing
+    back. That is why it needs no preview and no confirmation: it is an ordinary edit in your
+    own buffer, and nothing is on disk until you save.</li>
+  <li><b>A row rewrites on its own</b>, for the pattern that is right for thirty-nine of forty.
+    Click a row to select it in the editor.</li>
+  <li><b>A match the template cannot be applied to is marked and left alone</b>, and the rest
+    are still rewritten — the failing rows are right there next to the button.</li>
+  <li><b>Nothing is applied to a buffer that moved.</b> If the document changed since the
+    matches were found, they are looked for again and nothing is replaced. The offsets would
+    otherwise splice into the wrong statements.</li>
+</ul>
+<p>
+  <kbd>Tab</kbd> moves between the two boxes, <kbd>Ctrl</kbd>+<kbd>Enter</kbd> replaces
+  everything and <kbd>Esc</kbd> leaves the panel — the whole flow without the mouse.
+</p>

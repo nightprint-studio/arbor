@@ -31,14 +31,16 @@
 //! moment a real value appears, the emitter takes over.
 
 use arbor_sql_abbrev::prelude::{
-    context_at, expand, parse, render, Case, ColumnMeta, CursorContext, ForeignKeyMeta,
-    InsertColumn, Operator, RenderStyle, SchemaView, Statement, TableMeta, Value, ValueKind,
+    context_at, expand, parse, render, Case, ColumnMeta, ColumnRef, CursorContext, ForeignKeyMeta,
+    InsertRow, Operator, RenderStyle, SchemaView, Statement, TableMeta, Value, ValueKind,
 };
 use picus_ast::prelude::{Column, DialectScope, DmlModel, DmlOperation, DmlRow, EngineKind};
 use picus_core::prelude::PicusState;
 use picus_db_api::prelude::{SchemaSnapshot, TableInfo};
-use picus_emit::prelude::statement_for;
+use picus_emit::prelude::{insert_rows, statement_for};
 use serde::Serialize;
+
+use crate::abbrev_render::{alter_sql, for_cursor_sql, merge_sql};
 
 /// What the editor gets back for the line it is on.
 #[derive(Debug, Serialize)]
@@ -202,18 +204,30 @@ fn kind_of(data_type: &str) -> ValueKind {
 
 // ── Rendering ────────────────────────────────────────────────────────────────
 
-/// The SQL for a statement, by whichever of the two routes applies.
+/// The SQL for a statement, by whichever route applies.
+///
+/// Three of them now, and the rule for choosing has not changed: **anything with
+/// literals in it goes through the emitter**, because that is where quoting and the
+/// two dialects are decided; anything that is a skeleton is rendered as text. What
+/// `m#`, `a#` and `fc#` add is a third case — skeletons that the two engines
+/// nonetheless *spell* differently — and those go through [`crate::abbrev_render`],
+/// which is the same seam under a different name.
 fn sql_for(
     statement: &Statement,
     schema: &SchemaSnapshot,
     scope: DialectScope,
 ) -> Result<String, String> {
     match statement {
-        Statement::Insert { table, columns, rows } if every_value_given(columns) => {
-            emit_insert(table, columns, *rows, schema, scope)
+        Statement::Insert { table, columns, rows } if every_value_given(rows) => {
+            emit_insert(table, columns, rows, schema, scope)
         }
         Statement::Update { table, assignments, predicates } => {
             emit_update(table, assignments, predicates, schema, scope)
+        }
+        Statement::Merge { table, columns, keys } => merge_sql(table, columns, keys, scope),
+        Statement::Alter { table, changes } => alter_sql(table, changes, scope),
+        Statement::ForCursor { variable, query } => {
+            for_cursor_sql(variable, query, &style(), scope)
         }
         other => Ok(render(other, &style())),
     }
@@ -230,27 +244,42 @@ fn style() -> RenderStyle {
     RenderStyle { keywords: Case::Upper, identifiers: Case::AsIs, ..RenderStyle::default() }
 }
 
-fn every_value_given(columns: &[InsertColumn]) -> bool {
-    !columns.is_empty() && columns.iter().all(|c| c.value.is_some())
+/// Is every cell of every row filled in?
+///
+/// The question that decides the route: a skeleton (`i#t(a,b)`) has nothing for
+/// the emitter to quote and goes out as text, and the first real value sends the
+/// whole thing through `picus-emit`.
+fn every_value_given(rows: &[InsertRow]) -> bool {
+    !rows.is_empty()
+        && rows.iter().all(|row| !row.is_empty() && row.iter().all(Option::is_some))
 }
 
 fn emit_insert(
     table: &str,
-    columns: &[InsertColumn],
-    rows: usize,
+    columns: &[ColumnRef],
+    rows: &[InsertRow],
     schema: &SchemaSnapshot,
     scope: DialectScope,
 ) -> Result<String, String> {
-    let named: Vec<(&str, &Value)> = columns
+    let names: Vec<&str> = columns.iter().map(|c| c.name.as_str()).collect();
+    // The model describes the shape, which every row shares; the rows carry the
+    // values. Built from the first row only because the column list is the same
+    // for all of them by construction.
+    let first: Vec<(&str, &Value)> = pairs(&names, &rows[0]);
+    let model = model_for(table, DmlOperation::Insert, &first, &[], schema)?;
+    let emitted: Vec<DmlRow> = rows.iter().map(|row| row_of(&pairs(&names, row))).collect();
+    // `insert_rows` owns the one dialect fact here — Oracle has no multi-row
+    // `VALUES`, so `*3` is one statement there and three here.
+    insert_rows(&model, &emitted, scope).map_err(str::to_string)
+}
+
+/// Column names paired with the row's values, skipping the cells with none.
+fn pairs<'a>(names: &[&'a str], row: &'a InsertRow) -> Vec<(&'a str, &'a Value)> {
+    names
         .iter()
-        .filter_map(|c| c.value.as_ref().map(|v| (c.column.name.as_str(), v)))
-        .collect();
-    let model = model_for(table, DmlOperation::Insert, &named, &[], schema)?;
-    let row = row_of(&named);
-    // Every row is a copy — see `Statement::Insert`. Emitted `rows` times so the
-    // user has the block to edit rather than one line to duplicate by hand.
-    let one = statement_for(&model, &row, scope, model.operation).map_err(str::to_string)?;
-    Ok(std::iter::repeat_n(one, rows.max(1)).collect::<Vec<_>>().join("\n"))
+        .zip(row.iter())
+        .filter_map(|(name, value)| value.as_ref().map(|v| (*name, v)))
+        .collect()
 }
 
 fn emit_update(
@@ -385,20 +414,16 @@ mod tests {
 
     #[test]
     fn an_insert_with_no_values_is_not_sent_through_the_generators_model() {
-        // `DmlModel` describes rows that exist — a column with no value is one it
+        // `DmlModel` describes rows that exist — a cell with no value is one it
         // leaves out — so a skeleton has to take the other route.
-        let with = vec![InsertColumn {
-            column: arbor_sql_abbrev::prelude::ColumnRef {
-                name: "A".into(),
-                table: "T".into(),
-                alias: None,
-                kind: ValueKind::Text,
-            },
-            value: Some(Value::Quoted("x".into())),
-        }];
-        let without = vec![InsertColumn { value: None, ..with[0].clone() }];
-        assert!(every_value_given(&with));
-        assert!(!every_value_given(&without));
-        assert!(!every_value_given(&[]), "no columns at all is not a complete row");
+        let filled: InsertRow = vec![Some(Value::Quoted("x".into()))];
+        let empty: InsertRow = vec![None];
+        assert!(every_value_given(&[filled.clone()]));
+        assert!(!every_value_given(&[empty.clone()]));
+        // One good row does not redeem a bad one: a `{…}` template with a gap in
+        // it would otherwise emit some rows through the emitter and lose the rest.
+        assert!(!every_value_given(&[filled, empty]));
+        assert!(!every_value_given(&[]), "no rows at all is not a complete row");
+        assert!(!every_value_given(&[vec![]]), "a row with no cells is not one either");
     }
 }

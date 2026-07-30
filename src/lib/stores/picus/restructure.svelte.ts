@@ -131,8 +131,11 @@ function createRestructureStore() {
     /** The matches actually shown — every one, or the group that is selected. */
     get visibleMatches(): FoundMatch[] {
       if (!groupBy || groupValue === null) return matches;
+      // Copied out of the closure variable: narrowing does not survive into a
+      // callback for something that is still assignable from elsewhere.
+      const name = groupBy;
       const wanted = normalise(groupValue);
-      return matches.filter((m) => normalise(m.captures[groupBy] ?? '') === wanted);
+      return matches.filter((m) => normalise(m.captures[name] ?? '') === wanted);
     },
 
     setGroupBy(name: string | null) {

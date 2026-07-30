@@ -12,4 +12,5 @@ mod fixture;
 mod parsing;
 mod refusal;
 mod rendering;
+mod shaping;
 mod wire;

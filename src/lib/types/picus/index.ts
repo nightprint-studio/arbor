@@ -120,6 +120,21 @@ export function isGenericEngine(engine: FolderEngine | null | undefined): boolea
   return engine === GENERIC_ENGINE;
 }
 
+/**
+ * Can Picus generate into this engine at all?
+ *
+ * One guard rather than `isDialect(e) || isGenericEngine(e)` spelled out at each
+ * call site: written that way the compiler cannot conclude anything from the
+ * *negative* form, so the early return that refuses an unusable engine leaves the
+ * value as wide as it was, and the code after it — which is the code that
+ * actually generates — has to assert what it already proved.
+ */
+export function isTargetScope(
+  engine: FolderEngine | null | undefined,
+): engine is TargetScope {
+  return isDialect(engine) || engine === GENERIC_ENGINE;
+}
+
 /** An engine Picus recognises and does not read. */
 export function isForeignEngine(
   engine: FolderEngine | null | undefined,
@@ -500,8 +515,7 @@ export function fileCovers(file: ScriptFile, dialect: Dialect): boolean {
  */
 export function fileAcceptsGeneration(file: ScriptFile): boolean {
   if (isExcluded(file)) return false;
-  const engine = fileEngine(file);
-  return isDialect(engine) || isGenericEngine(engine);
+  return isTargetScope(fileEngine(file));
 }
 
 /**

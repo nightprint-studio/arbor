@@ -81,7 +81,10 @@
   const railItems = $derived<ActivityRailItem[]>([
     {
       id: 'library',
-      tooltip: { content: 'Captures library', shortcut: 'Ctrl+Shift+B' },
+      // The rail models the two halves separately — a shortcut inlined into the
+      // tooltip text renders as prose where every other rail renders a key cap.
+      tooltip: 'Captures library',
+      shortcut: 'Ctrl+Shift+B',
       icon: Images,
       active: tytoUiStore.libraryOpen,
       onclick: () => tytoUiStore.toggleLibrary(),

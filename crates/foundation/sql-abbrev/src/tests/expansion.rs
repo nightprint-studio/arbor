@@ -100,12 +100,13 @@ fn a_quote_inside_a_value_cannot_end_the_literal() {
 
 #[test]
 fn a_multiplier_asks_for_rows_not_statements() {
-    // The seed-data case: the crate reports the count and the host decides how to
-    // spell three rows — one statement or three.
+    // The seed-data case: the crate reports the rows and the host decides how to
+    // spell three of them — one statement or three.
     let statement = expand("i#localstrings(keycode,value)*3", &schema()).expect("expands");
     let Statement::Insert { rows, columns, .. } = &statement else { panic!() };
-    assert_eq!(*rows, 3);
+    assert_eq!(rows.len(), 3);
     assert_eq!(columns.len(), 2);
+    assert!(rows.iter().all(|r| r.len() == 2), "every row lines up with the columns");
 }
 
 #[test]
@@ -113,11 +114,11 @@ fn an_insert_with_no_column_list_takes_the_whole_table() {
     let statement = expand("i#localstrings", &schema()).expect("expands");
     let Statement::Insert { columns, rows, .. } = &statement else { panic!() };
     assert_eq!(
-        columns.iter().map(|c| c.column.name.as_str()).collect::<Vec<_>>(),
+        columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
         vec!["KEYCODE", "VALUE"]
     );
-    assert!(columns.iter().all(|c| c.value.is_none()));
-    assert_eq!(*rows, 1);
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].iter().all(Option::is_none));
 }
 
 #[test]

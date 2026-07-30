@@ -17,20 +17,18 @@
    * that Ctrl+Enter means the same thing from the toolbar and from anywhere else
    * in the window.
    */
-  import { Play, Square, Lock, ListOrdered } from 'lucide-svelte';
-  import Button from '$lib/components/shared/ui/Button.svelte';
-  import Badge from '$lib/components/shared/ui/Badge.svelte';
   import CodeEditor from '$lib/components/shared/ui/code-editor/CodeEditor.svelte';
-  import AstBridge from '../AstBridge.svelte';
+  import DocumentBridge from '../DocumentBridge.svelte';
   import { astStore } from '$lib/stores/picus/ast.svelte';
-  import PicusDialectChip from '../PicusDialectChip.svelte';
   import { sqlLanguage } from '../picus-sql-language';
   import { sqlDiagnostics } from '../sql-intel';
-  import { tooltip } from '$lib/actions/tooltip';
-  import { connectionColorVar } from '$lib/stores/picus/connections.svelte';
+  import { abbreviationLines } from '../sql-intel/abbrev';
+  import { parseFaultStore } from '$lib/stores/picus/parse-faults.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import { queryStore } from '$lib/stores/picus/query.svelte';
+  import { picusEditorStore } from '$lib/stores/picus/editor.svelte';
+  import { openObjectNamed } from '../goto-object';
   import { picusResultsStore } from '$lib/stores/picus/result.svelte';
   import type { PicusTab } from '$lib/types/picus';
 
@@ -46,20 +44,55 @@
   // `read` is pure; materialising the record is a write, so it happens in an
   // effect (a write during `$derived` evaluation is a Svelte 5 hard error).
   $effect(() => { queryStore.ensure(tab.id); });
-  const state = $derived(queryStore.read(tab.id));
+  // Named `tabState` rather than `state`: a local called `state` makes `$state(…)`
+  // on the `editor` line above parse as a subscription to *it* instead of as the
+  // rune, which is a compile-time coin toss nobody should have to know about.
+  const tabState = $derived(queryStore.read(tab.id));
   // Bound to the connection, so completion, hover and the diagnostics all measure
   // this buffer against THIS database's catalogue and no other.
   const language = $derived(sqlLanguage(conn?.dialect, conn?.id));
-  // Re-runs on the text, the connection and the schema; the analysis is a linear
-  // scan and returns nothing at all while the catalogue is unread.
-  const diagnostics = $derived(
-    sqlDiagnostics(state.sql, conn?.dialect ?? 'postgres', conn?.id),
-  );
+  /**
+   * What is wrong with this buffer, from **both** the sources that can know.
+   *
+   * The semantic scan is synchronous and deliberately quiet when it does not know:
+   * unknown table, unknown column, a write on a read-only connection. The parse is
+   * a round trip and is never a matter of not knowing — it is the answer to "is
+   * this SQL at all", which the syntax-tree panel has always shown and the editor
+   * never did.
+   *
+   * The abbreviation lines are cut out of the parse for exactly the reason the
+   * semantic scan already cuts them out: `s#ordini(id)[stato='EV']` is a shorthand
+   * the backend expands, and read as SQL it is nonsense. A line of squiggles under
+   * something the tool understands perfectly well is the worst answer available.
+   */
+  const abbreviations = $derived(abbreviationLines(conn?.id, tabState.sql));
 
-  // Only for the Cancel button: the background row count keeps running after the
-  // statement itself has finished, and a Cancel that could not stop it would be a
-  // button for the cheap half of the work. The rows themselves are the dock's.
-  const result = $derived(picusResultsStore.forOwner(tab.id));
+  /**
+   * The abbreviation lines, marked as what they are.
+   *
+   * Without this an abbreviation is coloured as SQL, which it is not: `s#ordini(id)`
+   * comes out as a stray identifier, a comment marker and a broken paren, so the one
+   * line in the buffer the tool understands *best* is the one that looks most wrong.
+   * Marking it says "this is a shorthand, and it is a good one" — or, when the
+   * backend refused it, that it is not.
+   *
+   * The ranges are the backend's own verdict, never a shape test on this side: two
+   * opinions about which lines are abbreviations would eventually disagree, and the
+   * one drawn would be the wrong one.
+   */
+  const marks = $derived(
+    abbreviations.map((line) => ({
+      from: line.from,
+      to: line.to,
+      className: line.error ? 'picus-abbrev-bad' : 'picus-abbrev',
+    })),
+  );
+  const diagnostics = $derived([
+    ...sqlDiagnostics(tabState.sql, conn?.dialect ?? 'postgres', conn?.id),
+    ...parseFaultStore
+      .for(tabState.sql)
+      .filter((fault) => !abbreviations.some((a) => a.from < fault.to && fault.from < a.to)),
+  ]);
 
   /**
    * Let the query store ask this editor where the caret is.
@@ -76,6 +109,29 @@
       () => editor?.selectionRange() ?? { from: 0, to: 0, head: 0, empty: true },
     );
     return () => queryStore.bindEditor(id, null);
+  });
+
+  /**
+   * And let the *window* reach it, for the commands that are about the document
+   * rather than about the query: find and replace, go to a table's structure,
+   * replace one match. Same registration, same lifetime.
+   */
+  $effect(() => {
+    const id = tab.id;
+    if (!editor) return;
+    const held = editor;
+    picusEditorStore.bind(id, {
+      focus: () => held.focus(),
+      openSearch: () => held.openSearch(),
+      getValue: () => held.getValue(),
+      selectionRange: () => held.selectionRange(),
+      selectRange: (from, to) => held.selectRange(from, to),
+      selectByteRange: (a, b) => held.selectByteRange(a, b),
+      replaceByteRange: (a, b, text) => held.replaceByteRange(a, b, text),
+      replaceByteRanges: (edits) => held.replaceByteRanges(edits),
+      wordAtCaret: () => held.wordAtCaret(),
+    });
+    return () => picusEditorStore.bind(id, null);
   });
 
   /** Run, and reveal the answer — the dock is where every answer in this window is. */
@@ -104,68 +160,15 @@
 </script>
 
 <div class="qv">
-  <!-- Which database this tab talks to — always visible, never inferred. -->
-  <div class="qv-bar">
-    {#if conn}
-      <span class="qv-dot" style:background={connectionColorVar(conn)}></span>
-      <span class="qv-name">{conn.name}</span>
-      <span class="qv-host">{conn.schema}@{conn.host}</span>
-      <PicusDialectChip dialect={conn.dialect} />
-      <span class="qv-spacer"></span>
-      <Badge variant="tone" tone="neutral" size="sm" label={`db ${conn.dbVersion}`} />
-      {#if conn.readOnly}
-        <span class="qv-ro" use:tooltip={'The backend refuses write statements on this connection'}>
-          <Lock size={11} /> read-only
-        </span>
-      {/if}
-      <Button
-        variant="primary"
-        size="xs"
-        disabled={state.running}
-        tooltip={{
-          content: 'Run the selection, or the statement under the cursor',
-          shortcut: 'Ctrl+Enter',
-        }}
-        onclick={() => run('statement')}
-      >
-        {#snippet iconStart()}<Play size={12} />{/snippet}
-        Run
-      </Button>
-      <!-- The whole buffer is a *second* key, never the default. A scratchpad
-           holds yesterday's INSERTs above today's SELECT, and a Run that sent the
-           file would execute them again. -->
-      <Button
-        variant="secondary"
-        size="xs"
-        disabled={state.running}
-        ariaLabel="Run every statement in this tab"
-        tooltip={{
-          content: 'Run every statement in this tab, in order, stopping at the first failure',
-          shortcut: 'Ctrl+Shift+Enter',
-        }}
-        onclick={() => run('buffer')}
-      >
-        {#snippet iconStart()}<ListOrdered size={12} />{/snippet}
-        Run all
-      </Button>
-      {#if state.running || result?.counting}
-        <!-- Also while only the background count is running: that count is the
-             expensive part on a large table, and a Cancel that could not stop it
-             would be a button for the cheap half of the work. -->
-        <Button
-          variant="secondary"
-          size="xs"
-          tooltip={{ content: state.running ? 'Stop the statement' : 'Stop counting the exact number of rows', shortcut: 'Ctrl+Shift+C' }}
-          onclick={() => void queryStore.cancel(tab.id, conn.id)}
-        >
-          {#snippet iconStart()}<Square size={12} />{/snippet}
-          Cancel
-        </Button>
-      {/if}
-    {:else}
+  <!-- No bar of its own. Run, Run all, Cancel and the connection identity all live
+       on the window's contextual toolbar, one row up: this view had a second copy
+       of every one of them, so the same action was reachable from two controls
+       that then had to be kept in step. -->
+  {#if !conn}
+    <div class="qv-bar">
       <span class="qv-none">This tab is not bound to a connection.</span>
-    {/if}
-  </div>
+    </div>
+  {/if}
 
   <div class="qv-editor">
     <!-- Keyed on the descriptor: the editor builds its extensions once, at mount, so
@@ -174,28 +177,32 @@
     {#key language}
       <CodeEditor
         bind:this={editor}
-        value={state.sql}
+        value={tabState.sql}
         {language}
         {diagnostics}
         keyBindings={runKeys}
+        {marks}
         oninput={(v) => queryStore.setSql(tab.id, v)}
         oncaret={() => { if (editor) void astStore.revealAt(editor.caretByteOffset()); }}
+        onGoto={(word) => openObjectNamed(word, conn?.id)}
       />
     {/key}
-    <!-- Keeps the syntax-tree panel describing THIS buffer. Worth having on a
-         query as much as on a script: the panel is how you find out why the
-         statement under the cursor ends where it does. -->
-    <AstBridge {editor} text={state.sql} />
+    <!-- Keeps the right-hand tools describing THIS buffer. Worth having on a query
+         as much as on a script: the syntax tree is how you find out why the
+         statement under the cursor ends where it does, and the structural replace
+         is how you fix forty of them at once. -->
+    <DocumentBridge {editor} text={tabState.sql} dialect={conn?.dialect} />
   </div>
 </div>
 
 <style>
   .qv { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 
+  /* Only ever drawn for a tab with no connection — the one thing the toolbar
+     above cannot say, because it has no database to describe. */
   .qv-bar {
     display: flex;
     align-items: center;
-    gap: 8px;
     height: 30px;
     flex-shrink: 0;
     padding: 0 10px;
@@ -204,20 +211,30 @@
     font-size: 11.5px;
     white-space: nowrap;
   }
-  .qv-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
-  .qv-name { font-weight: 500; }
-  .qv-host { color: var(--text-muted); font-family: var(--font-code); font-size: 10.5px; }
   .qv-none { color: var(--text-disabled); font-style: italic; }
-  .qv-spacer { flex: 1; }
-  .qv-ro {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: var(--warning);
-    font-size: 11px;
-  }
 
   .qv-editor { flex: 1; min-height: 90px; display: flex; overflow: hidden; }
   .qv-editor > :global(*) { flex: 1; min-width: 0; min-height: 0; }
+
+  /* The abbreviation lines. `:global` because the class is handed to CodeMirror,
+     which owns the element it lands on — the one case the shared editor's `marks`
+     prop exists for, and the reason it takes a class name rather than a colour.
+
+     A tinted band rather than a coloured foreground: the point is to say "this line
+     is not SQL and is not being read as SQL", which is a statement about the whole
+     run of text, and recolouring the characters would just be a different wrong
+     syntax highlight. */
+  .qv-editor :global(.picus-abbrev) {
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  /* Refused by the backend — the same band, in the colour of a thing that will not
+     expand. The message itself is already on the line as a diagnostic. */
+  .qv-editor :global(.picus-abbrev-bad) {
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 30%, transparent);
+  }
 
 </style>

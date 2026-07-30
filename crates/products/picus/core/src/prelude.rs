@@ -18,4 +18,5 @@ pub use crate::connections::{
 pub use crate::digest::digest;
 
 pub use crate::schema::SchemaCache;
+pub use crate::scratch::{load_scratch, save_scratch, scratch_path, Scratch, ScratchTab};
 pub use crate::scripts::{cache_key, CachedSource, ScriptCache, ScriptSnapshot};

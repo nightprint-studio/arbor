@@ -2,6 +2,22 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { platform, sitta } from './rpc';
 
+/**
+ * Bytes → base64, in chunks.
+ *
+ * `String.fromCharCode(...bytes)` on a multi-megabyte array overflows the argument
+ * stack and throws — which is exactly the size at which somebody is saving a blob,
+ * so the naive form fails only in the case the feature exists for.
+ */
+function toBase64(bytes: Uint8Array): string {
+  const CHUNK = 0x8000;
+  let binary = '';
+  for (let at = 0; at < bytes.length; at += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(at, at + CHUNK));
+  }
+  return btoa(binary);
+}
+
 export interface FsEntry {
   name:     string;
   path:     string;
@@ -34,6 +50,9 @@ export const listWslDistros = () =>
 export const fsCreateDir      = (path: string)                      => platform<void>('fs_create_dir',        { path });
 export const fsCreateFile     = (path: string)                      => platform<void>('fs_create_file',       { path });
 export const fsWriteTextFile  = (path: string, content: string)     => platform<void>('fs_write_text_file',   { path, content });
+/** Write raw bytes. Base64 on the wire — the decoding happens at the moment of
+ *  writing, so the value never becomes text on the way to the file. */
+export const fsWriteBytes     = (path: string, bytes: Uint8Array)   => platform<void>('fs_write_bytes',       { path, base64: toBase64(bytes) });
 export const fsReadTextFile   = (path: string)                      => platform<string>('fs_read_text_file', { path });
 export const fsRename         = (oldPath: string, newPath: string)  => platform<void>('fs_rename',            { old_path: oldPath, new_path: newPath });
 export const fsDelete         = (path: string)                      => platform<void>('fs_delete',            { path });

@@ -8,13 +8,15 @@
 
 use crate::error::AbbrevError;
 use crate::join;
+use crate::numbering::number;
 use crate::parse::parse;
 use crate::resolve::Chain;
 use crate::schema::SchemaView;
 use crate::statement::{
-    Assignment, ColumnRef, InsertColumn, Join, JoinCondition, Operator, Predicate, Statement, Value,
+    Assignment, ColumnChange, ColumnRef, InsertRow, Join, JoinCondition, Operator, Predicate,
+    Statement, Value,
 };
-use crate::syntax::{Block, ColItem, Parsed, PredItem, RawValue, Verb};
+use crate::syntax::{Block, ChangeKind, ColItem, Parsed, PredItem, RawValue, Verb};
 
 /// The largest `*n` an abbreviation may ask for.
 ///
@@ -38,11 +40,19 @@ pub fn expand(input: &str, schema: &SchemaView) -> Result<Statement, AbbrevError
     check_chain_is_typed_out(&parsed)?;
 
     let chain = Chain::build(schema, &parsed.table_names())?;
+    // `+`/`~` shape a table, and only `a#` shapes tables. Checked once, here,
+    // rather than in six places that would each have to remember.
+    if verb != Verb::Alter && !parsed.changes.is_empty() {
+        return Err(AbbrevError::ChangesNotAllowed { verb });
+    }
     match verb {
         Verb::Select => select(&parsed, &chain),
         Verb::Insert => insert(&parsed, &chain),
         Verb::Update => update(&parsed, &chain),
         Verb::Delete => delete(&parsed, &chain),
+        Verb::Merge => merge(&parsed, &chain),
+        Verb::Alter => alter(&parsed, &chain),
+        Verb::ForCursor => for_cursor(&parsed, &chain),
     }
 }
 
@@ -85,13 +95,25 @@ fn check_chain_is_typed_out(parsed: &Parsed) -> Result<(), AbbrevError> {
 // ---------------------------------------------------------------- the verbs --
 
 fn select(parsed: &Parsed, chain: &Chain<'_>) -> Result<Statement, AbbrevError> {
-    reject_multiplier(parsed, Verb::Select)?;
+    select_as(parsed, chain, Verb::Select)
+}
+
+/// The `SELECT` body, told which verb is asking.
+///
+/// `fc#` is a `SELECT` with a loop round it and reuses every line of this — the
+/// joins, the column resolution, the predicates. The verb is a parameter only so
+/// that a refusal says `FOR loop` when that is what the user typed; a message that
+/// named `SELECT` for a line beginning `fc#` would send them looking for a
+/// statement they never wrote.
+fn select_as(parsed: &Parsed, chain: &Chain<'_>, verb: Verb) -> Result<Statement, AbbrevError> {
+    reject_multiplier(parsed, verb)?;
+    reject_template(parsed, verb)?;
 
     let mut columns = Vec::new();
     for item in live(&parsed.cols) {
         if item.eq.is_some() {
             return Err(AbbrevError::AssignmentNotAllowed {
-                verb: Verb::Select,
+                verb,
                 column: item.name.text.clone(),
             });
         }
@@ -133,6 +155,7 @@ fn insert(parsed: &Parsed, chain: &Chain<'_>) -> Result<Statement, AbbrevError> 
     // deliberately allowed: the two forms mean different things and a user who
     // knows one of the three values should not have to abandon the abbreviation.
     let mut columns = Vec::new();
+    let mut written = Vec::new();
     for item in live(&parsed.cols) {
         let value = match &item.value {
             None => None,
@@ -141,7 +164,8 @@ fn insert(parsed: &Parsed, chain: &Chain<'_>) -> Result<Statement, AbbrevError> 
             }
             Some(raw) => Some(value_of(raw)),
         };
-        columns.push(InsertColumn { column: chain.column(&item.name.text)?, value });
+        columns.push(chain.column(&item.name.text)?);
+        written.push(value);
     }
     // Naming no columns means all of them — the schema knows the table's shape,
     // which is exactly the work worth not doing by hand.
@@ -151,28 +175,203 @@ fn insert(parsed: &Parsed, chain: &Chain<'_>) -> Result<Statement, AbbrevError> 
             .meta
             .columns
             .iter()
-            .map(|c| InsertColumn {
-                column: ColumnRef {
-                    name: c.name.clone(),
-                    table: root.meta.name.clone(),
-                    alias: None,
-                    kind: c.kind,
-                },
-                value: None,
+            .map(|c| ColumnRef {
+                name: c.name.clone(),
+                table: root.meta.name.clone(),
+                alias: None,
+                kind: c.kind,
+            })
+            .collect();
+        written = vec![None; columns.len()];
+    }
+
+    let count = rows(parsed)?;
+    let rows = match &parsed.template {
+        Some(template) => numbered_rows(template, &columns, &written, count)?,
+        // Every row a copy — see `Statement::Insert`.
+        None => vec![written; count],
+    };
+
+    Ok(Statement::Insert { table: chain.root().meta.name.clone(), columns, rows })
+}
+
+/// The rows a `{…}` template produces: one per repetition, `$` replaced by its
+/// number.
+///
+/// Two refusals here, and both are the kind that would otherwise be found by
+/// reading the output:
+///
+/// * a template and an `=` in the same abbreviation say the same thing twice, and
+///   there is no reading of `i#t(a='x')*3{$}` where both are honoured;
+/// * a template with the wrong number of values silently shifts every column after
+///   the missing one, which produces valid SQL that puts the data in the wrong
+///   places — the single worst failure this whole language exists to avoid.
+fn numbered_rows(
+    template: &Block<RawValue>,
+    columns: &[ColumnRef],
+    written: &[Option<Value>],
+    count: usize,
+) -> Result<Vec<InsertRow>, AbbrevError> {
+    if let Some(index) = written.iter().position(Option::is_some) {
+        return Err(AbbrevError::TemplateAndAssignment {
+            column: columns[index].name.clone(),
+        });
+    }
+
+    let values: Vec<&RawValue> = template.items.iter().filter(|v| !v.is_blank()).collect();
+    if values.len() != columns.len() {
+        return Err(AbbrevError::TemplateArity {
+            values: values.len(),
+            columns: columns.iter().map(|c| c.name.clone()).collect(),
+        });
+    }
+
+    Ok((0..count)
+        .map(|index| {
+            values
+                .iter()
+                .map(|raw| {
+                    Some(match raw.quoted {
+                        true => Value::Quoted(number(&raw.inner(), index, count)),
+                        false => Value::Bare(number(raw.slot.text.trim(), index, count)),
+                    })
+                })
+                .collect()
+        })
+        .collect())
+}
+
+/// `m#table[key]` — the upsert skeleton.
+///
+/// The brackets are **not** a `WHERE` here, and that is the one thing about this
+/// verb worth knowing: they name the columns that decide whether the row is
+/// already there. Written with an operator (`m#t[id=1]`) they are refused rather
+/// than reinterpreted, because a merge keyed on a literal is not a thing.
+fn merge(parsed: &Parsed, chain: &Chain<'_>) -> Result<Statement, AbbrevError> {
+    reject_chain(parsed, Verb::Merge)?;
+    reject_multiplier(parsed, Verb::Merge)?;
+    reject_template(parsed, Verb::Merge)?;
+
+    let root = chain.root();
+    let mut columns = Vec::new();
+    for item in live(&parsed.cols) {
+        if item.eq.is_some() {
+            return Err(AbbrevError::AssignmentNotAllowed {
+                verb: Verb::Merge,
+                column: item.name.text.clone(),
+            });
+        }
+        columns.push(chain.column(&item.name.text)?);
+    }
+    if columns.is_empty() {
+        columns = root
+            .meta
+            .columns
+            .iter()
+            .map(|c| ColumnRef {
+                name: c.name.clone(),
+                table: root.meta.name.clone(),
+                alias: None,
+                kind: c.kind,
             })
             .collect();
     }
 
-    Ok(Statement::Insert {
-        table: chain.root().meta.name.clone(),
-        columns,
-        rows: rows(parsed)?,
-    })
+    let mut keys = Vec::new();
+    for item in live(&parsed.preds) {
+        if !item.op.is_blank() || !item.value.is_blank() {
+            return Err(AbbrevError::MergeKeyIsNotACondition { column: item.name.text.clone() });
+        }
+        let key = chain.column(&item.name.text)?;
+        if !columns.iter().any(|c| c.name == key.name) {
+            columns.push(key.clone());
+        }
+        keys.push(key);
+    }
+    if keys.is_empty() {
+        return Err(AbbrevError::MergeKeyRequired { table: root.meta.name.clone() });
+    }
+    if columns.iter().all(|c| keys.iter().any(|k| k.name == c.name)) {
+        return Err(AbbrevError::MergeUpdatesNothing { table: root.meta.name.clone() });
+    }
+
+    Ok(Statement::Merge { table: root.meta.name.clone(), columns, keys })
+}
+
+/// `a#table+col:type~col:type` — columns added, columns retyped.
+///
+/// The schema is consulted in **opposite directions** for the two, which is the
+/// whole value of doing this against a live connection rather than in a snippet:
+/// adding a column that is already there and retyping one that is not are both
+/// caught before the statement is ever run.
+fn alter(parsed: &Parsed, chain: &Chain<'_>) -> Result<Statement, AbbrevError> {
+    reject_chain(parsed, Verb::Alter)?;
+    reject_multiplier(parsed, Verb::Alter)?;
+    reject_template(parsed, Verb::Alter)?;
+    if parsed.cols.is_some() {
+        return Err(AbbrevError::ColumnsNotAllowed { verb: Verb::Alter });
+    }
+    if parsed.preds.is_some() {
+        return Err(AbbrevError::PredicatesNotAllowed { verb: Verb::Alter });
+    }
+    if parsed.changes.is_empty() {
+        return Err(AbbrevError::ChangesRequired { table: chain.root().meta.name.clone() });
+    }
+
+    let meta = chain.root().meta;
+    let mut changes = Vec::new();
+    for change in &parsed.changes {
+        if change.column.is_blank() {
+            return Err(AbbrevError::Syntax {
+                at: change.at,
+                message: format!("`{}` must be followed by a column name", change.kind.symbol()),
+            });
+        }
+        let Some(data_type) = change.data_type.as_ref().filter(|s| !s.is_blank()) else {
+            return Err(AbbrevError::MissingType { column: change.column.text.clone() });
+        };
+        let existing = meta.column(&change.column.text);
+        let column = match (change.kind, existing) {
+            (ChangeKind::Add, Some(found)) => {
+                return Err(AbbrevError::ColumnAlreadyExists {
+                    table: meta.name.clone(),
+                    column: found.name.clone(),
+                })
+            }
+            // The name is taken as typed: nothing in the schema can spell a column
+            // that does not exist yet.
+            (ChangeKind::Add, None) => change.column.text.clone(),
+            (ChangeKind::Modify, Some(found)) => found.name.clone(),
+            (ChangeKind::Modify, None) => {
+                return Err(AbbrevError::UnknownColumn {
+                    name: change.column.text.clone(),
+                    tables: vec![meta.name.clone()],
+                    suggestion: crate::resolve::suggest(&change.column.text, meta.column_names()),
+                })
+            }
+        };
+        changes.push(ColumnChange {
+            kind: change.kind,
+            column,
+            data_type: data_type.text.trim().to_string(),
+        });
+    }
+
+    Ok(Statement::Alter { table: meta.name.clone(), changes })
+}
+
+/// `fc#table[…]` — a cursor loop over a query.
+fn for_cursor(parsed: &Parsed, chain: &Chain<'_>) -> Result<Statement, AbbrevError> {
+    let query = select_as(parsed, chain, Verb::ForCursor)?;
+    // `r` — short, conventional in both PL/SQL and PL/pgSQL, and the body it is
+    // used in is a `TODO` the user is about to replace anyway.
+    Ok(Statement::ForCursor { variable: "r".to_string(), query: Box::new(query) })
 }
 
 fn update(parsed: &Parsed, chain: &Chain<'_>) -> Result<Statement, AbbrevError> {
     reject_chain(parsed, Verb::Update)?;
     reject_multiplier(parsed, Verb::Update)?;
+    reject_template(parsed, Verb::Update)?;
 
     let mut assignments = Vec::new();
     for item in live(&parsed.cols) {
@@ -201,6 +400,7 @@ fn update(parsed: &Parsed, chain: &Chain<'_>) -> Result<Statement, AbbrevError> 
 fn delete(parsed: &Parsed, chain: &Chain<'_>) -> Result<Statement, AbbrevError> {
     reject_chain(parsed, Verb::Delete)?;
     reject_multiplier(parsed, Verb::Delete)?;
+    reject_template(parsed, Verb::Delete)?;
     if parsed.cols.is_some() {
         return Err(AbbrevError::ColumnsNotAllowed { verb: Verb::Delete });
     }
@@ -233,6 +433,12 @@ impl Live for ColItem {
 impl Live for PredItem {
     fn is_untouched(&self) -> bool {
         self.name.is_blank() && self.op.is_blank() && self.value.is_blank()
+    }
+}
+
+impl Live for RawValue {
+    fn is_untouched(&self) -> bool {
+        self.is_blank()
     }
 }
 
@@ -306,4 +512,11 @@ fn reject_multiplier(parsed: &Parsed, verb: Verb) -> Result<(), AbbrevError> {
         return Ok(());
     }
     Err(AbbrevError::MultiplierNotAllowed { verb })
+}
+
+fn reject_template(parsed: &Parsed, verb: Verb) -> Result<(), AbbrevError> {
+    if parsed.template.is_none() {
+        return Ok(());
+    }
+    Err(AbbrevError::TemplateNotAllowed { verb })
 }

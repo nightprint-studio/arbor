@@ -13,9 +13,11 @@
    */
   import {
     Play, Square, Save, GitCompare, Download, Plus, FormInput, RefreshCw, Check, Search,
-    ListOrdered,
+    ListOrdered, Lock,
   } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import Badge from '$lib/components/shared/ui/Badge.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import PicusConnectionPill from '../PicusConnectionPill.svelte';
@@ -26,7 +28,7 @@
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
-  import { queryStore } from '$lib/stores/picus/query.svelte';
+  import { formatElapsed, queryStore } from '$lib/stores/picus/query.svelte';
   import { picusResultsStore } from '$lib/stores/picus/result.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { schemaStore } from '$lib/stores/picus/schema.svelte';
@@ -178,8 +180,27 @@
     </Button>
 
     <span class="ptb-spacer"></span>
-    {#if result}
-      <div class="ptb-info"><span>{result.elapsedMs} ms</span></div>
+    <!-- Which database this tab talks to — always visible, never inferred. This
+         used to be a second bar of its own under the editor, which meant two Run
+         buttons and two Cancels for one action; what was worth keeping from it was
+         the identity, so it moved here. -->
+    {#if conn}
+      <div class="ptb-info">
+        <span class="ptb-host">{conn.schema}@{conn.host}</span>
+        <PicusDialectChip engine={conn.dialect} />
+        {#if conn.dbVersion}
+          <Badge variant="tone" tone="neutral" size="sm" label={`db ${conn.dbVersion}`} />
+        {/if}
+        {#if conn.readOnly}
+          <span class="ptb-ro" use:tooltip={'The backend refuses write statements on this connection'}>
+            <Lock size={11} /> read-only
+          </span>
+        {/if}
+        {#if result}
+          <span class="ptb-dot">·</span>
+          <span>{formatElapsed(result.elapsedMs)}</span>
+        {/if}
+      </div>
     {/if}
     <Dropdown items={connectionMenu} position="fixed" direction="down" width="280px">
       {#snippet trigger({ open, toggle })}
@@ -304,7 +325,9 @@
     flex-shrink: 0;
     padding: 0 8px;
     border-bottom: 1px solid var(--border-subtle);
-    background: var(--bg-base);
+    /* Elevated, like the chrome above it: this strip is part of the window's
+       furniture, not part of the document. */
+    background: var(--bg-elevated);
   }
   .ptb-spacer { flex: 1; }
   .ptb-sep {
@@ -324,4 +347,11 @@
     white-space: nowrap;
   }
   .ptb-dot { color: var(--text-disabled); }
+  .ptb-host { font-family: var(--font-code); font-size: 10.5px; }
+  .ptb-ro {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--warning);
+  }
 </style>

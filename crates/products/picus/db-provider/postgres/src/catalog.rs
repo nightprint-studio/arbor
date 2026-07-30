@@ -8,6 +8,19 @@
 //! Every query is parameterised on the schema name. Nothing here interpolates a
 //! user string into SQL — object names go through
 //! [`quote_ident`](crate::sql::quote_ident) only where a parameter is impossible.
+//!
+//! ## Nothing here may return NULL into a non-nullable field
+//!
+//! `Row::get` **panics** when the value is NULL and the target type is not an
+//! `Option`. A panic in a handler used to mean the request was simply never
+//! answered — the studio sat on "reading schema…" forever with no error anywhere
+//! (`arbor_ipc::serve_stdio` now catches it, which makes such a fault legible
+//! rather than silent). The cheaper half of that lesson is here: where a catalogue
+//! function can return NULL, the SQL coalesces it, so the value the row carries is
+//! the value the type promises. `COALESCE` in the query rather than a default in
+//! Rust, because the invariant belongs where the data is produced.
+
+use std::collections::HashMap;
 
 use picus_db_api::prelude::*;
 use tokio_postgres::Client;
@@ -53,63 +66,151 @@ async fn read_relations_where(
         SELECT c.relname,
                c.relkind::text,
                a.attname,
-               format_type(a.atttypid, a.atttypmod),
+               a.attnum,
+               -- NULL when the type OID no longer resolves (a dropped extension
+               -- leaves columns behind). The column still exists and still has to
+               -- be listed; what it has lost is its type name.
+               COALESCE(format_type(a.atttypid, a.atttypmod), '?'),
                a.attnotnull,
                pg_get_expr(d.adbin, d.adrelid),
-               COALESCE(pk.indisprimary, false),
-               c.reltuples::bigint
+               -- A row on the `pk` side means this column is part of the key.
+               (pk.attnum IS NOT NULL),
+               COALESCE(c.reltuples, -1)::bigint
           FROM pg_class c
           JOIN pg_namespace n ON n.oid = c.relnamespace
           JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
      LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum
-     LEFT JOIN LATERAL (
-               SELECT i.indisprimary
+     -- The primary-key flag, as ONE pass over `pg_index` hash-joined to the
+     -- columns.
+     --
+     -- This was a `LEFT JOIN LATERAL … WHERE a.attnum = ANY (i.indkey) LIMIT 1`,
+     -- which is a correlated subquery evaluated **once per column of the schema**.
+     -- `indkey` is an `int2vector`, so `= ANY` cannot use an index and each one is
+     -- a scan of `pg_index`. On a small schema that is invisible; on a real one —
+     -- several hundred tables, tens of thousands of columns — it is tens of
+     -- thousands of scans, and reading the catalogue stops returning in any time
+     -- the user is willing to wait. The studio then sits on its reading-schema
+     -- spinner forever, which is indistinguishable from a hang and was one.
+     --
+     -- Unnesting first turns it into a single sequential scan of a small table:
+     -- one row per key column in the database, joined by `(relation, attnum)`.
+     LEFT JOIN (
+               SELECT i.indrelid, unnest(i.indkey) AS attnum
                  FROM pg_index i
-                WHERE i.indrelid = c.oid AND i.indisprimary AND a.attnum = ANY (i.indkey)
-                LIMIT 1
-          ) pk ON true
+                WHERE i.indisprimary
+          ) pk ON pk.indrelid = c.oid AND pk.attnum = a.attnum
          WHERE n.nspname = $1
            AND c.relkind IN ('r', 'p', 'v', 'm')
-           AND ($2::text IS NULL OR c.relname = $2)
-      ORDER BY c.relname, a.attnum";
+           -- Partitions are not objects anybody browses: the partitioned table is
+           -- the thing, and its thousand monthly children are an implementation
+           -- detail of it. Listing them multiplies this query's result by the
+           -- partition count — the same columns, over and over — which on a
+           -- partitioned schema is the difference between a catalogue read and a
+           -- read that does not come back.
+           AND NOT c.relispartition";
 
-    let rows = client.query(SQL, &[&schema, &only]).await.map_err(map_pg)?;
+    // The name filter is **appended**, not passed as a nullable parameter.
+    //
+    // `AND ($2::text IS NULL OR c.relname = $2)` reads well and plans badly: the
+    // statement is prepared, so the planner builds one plan for both shapes and
+    // cannot use the equality it might be given. Two statements, each with only the
+    // parameters it actually uses, each get the plan they deserve — and the
+    // whole-schema read stops depending on how a generic plan happens to come out.
+    // **No `ORDER BY`.** The ordering is done in Rust, below, and that is not a
+    // preference — it is the difference between a catalogue read that returns and
+    // one that does not.
+    //
+    // Measured on a real schema (15 224 column-rows): unsorted, the server streams
+    // the whole thing in 45 ms. With *any* `ORDER BY` — by name, by name with
+    // `COLLATE "C"`, or by `oid`, which has no collation at all — it does not come
+    // back at all. Sorting forces the result to be materialised before a single row
+    // is sent, and on this catalogue the plan the server picks to do that never
+    // finishes. Since the cost is the same for an integer key, it is not the
+    // comparison: it is the plan, and a tool cannot choose its user's planner.
+    //
+    // Fifteen thousand rows sorted in Rust are microseconds, so nothing is lost by
+    // taking the ordering back — and the query becomes something the server can
+    // stream instead of something it has to finish.
+    let mut sql = SQL.to_string();
+    if only.is_some() {
+        sql.push_str(" AND c.relname = $2");
+    }
 
-    let mut tables: Vec<TableInfo> = Vec::new();
-    let mut views: Vec<TableInfo> = Vec::new();
+    let began = std::time::Instant::now();
+    let rows = match only {
+        Some(name) => client.query(&sql, &[&schema, &name]).await,
+        None => client.query(&sql, &[&schema]).await,
+    }
+    .map_err(map_pg)?;
+    // Said for the whole-schema read, always.
+    //
+    // This is the one query in the product that has been slow enough to look like a
+    // hang, and the two possible reasons — a slow plan, or a catalogue with far more
+    // in it than anybody expected — are told apart by exactly these two numbers.
+    // Printing them costs nothing and has already saved one round of guessing.
+    if only.is_none() {
+        eprintln!(
+            "picus: catalogue of `{schema}` — {} column-rows in {}ms",
+            rows.len(),
+            began.elapsed().as_millis()
+        );
+    }
+
+    // Grouped by name rather than by adjacency, and ordered afterwards.
+    //
+    // The old loop assumed a relation's columns arrived together, which is what the
+    // `ORDER BY` was really buying — the ordering was load-bearing, not cosmetic.
+    // Collecting into a map makes the grouping true whatever order the server
+    // streams in, and carrying `attnum` alongside each column is what lets the
+    // declared column order be restored without asking the server to sort.
+    let mut collected: HashMap<String, (bool, i64, Vec<(i16, Column)>)> = HashMap::new();
 
     for row in rows {
         let rel_name: String = row.get(0);
         let relkind: String = row.get(1);
         let is_view = relkind == "v" || relkind == "m";
+        let attnum: i16 = row.get(3);
+        let estimated: i64 = row.get(8);
 
         let column = Column {
             name: row.get(2),
-            data_type: row.get(3),
-            not_null: row.get(4),
-            default_value: row.get(5),
-            primary_key: row.get(6),
+            data_type: row.get(4),
+            not_null: row.get(5),
+            default_value: row.get(6),
+            primary_key: row.get(7),
         };
-        let estimated: i64 = row.get(7);
 
-        let bucket = if is_view { &mut views } else { &mut tables };
-        match bucket.last_mut().filter(|t| t.name == rel_name) {
-            Some(existing) => existing.columns.push(column),
-            None => bucket.push(TableInfo {
-                name: rel_name,
-                kind: if is_view { RelationKind::View } else { RelationKind::Table },
-                columns: vec![column],
-                primary_key_name: None,
-                foreign_keys: None,
-                indexes: None,
-                definition: None,
-                // `reltuples` is -1 on a relation that has never been analysed.
-                // That is "unknown", and it must not render as "empty".
-                estimated_rows: (estimated >= 0).then_some(estimated),
-            }),
-        }
+        collected
+            .entry(rel_name)
+            .or_insert_with(|| (is_view, estimated, Vec::new()))
+            .2
+            .push((attnum, column));
     }
 
+    let mut tables: Vec<TableInfo> = Vec::new();
+    let mut views: Vec<TableInfo> = Vec::new();
+    for (name, (is_view, estimated, mut columns)) in collected {
+        // A table's columns have an order of their own — the one every `INSERT`
+        // written by hand assumes — and it is `attnum`, never the name.
+        columns.sort_by_key(|(attnum, _)| *attnum);
+        let info = TableInfo {
+            name,
+            kind: if is_view { RelationKind::View } else { RelationKind::Table },
+            columns: columns.into_iter().map(|(_, c)| c).collect(),
+            primary_key_name: None,
+            foreign_keys: None,
+            indexes: None,
+            definition: None,
+            // `reltuples` is -1 on a relation that has never been analysed. That is
+            // "unknown", and it must not render as "empty".
+            estimated_rows: (estimated >= 0).then_some(estimated),
+        };
+        if is_view { views.push(info) } else { tables.push(info) }
+    }
+
+    // By name, because that is the order the object tree lists them in.
+    tables.sort_by(|a, b| a.name.cmp(&b.name));
+    views.sort_by(|a, b| a.name.cmp(&b.name));
     Ok((tables, views))
 }
 
@@ -189,7 +290,9 @@ pub async fn read_view_definition(
          WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('v', 'm')";
 
     let rows = client.query(SQL, &[&schema, &name]).await.map_err(map_pg)?;
-    Ok(rows.first().map(|r| r.get(0)))
+    // `and_then`, not `map`: a row exists but its value may be NULL, and the two
+    // absences collapse to the same `None` the caller already handles.
+    Ok(rows.first().and_then(|r| r.get(0)))
 }
 
 /// Outgoing foreign keys of one relation, with the column order preserved.
@@ -207,14 +310,17 @@ pub async fn read_foreign_keys(
         SELECT con.conname,
                con.confdeltype::text,
                ref.relname,
-               (SELECT array_agg(att.attname ORDER BY k.ord)
+               -- `array_agg` over no rows is NULL, not an empty array. A key with
+               -- no readable columns is a key we cannot describe, not a reason to
+               -- fail the whole read.
+               COALESCE((SELECT array_agg(att.attname::text ORDER BY k.ord)
                   FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
                   JOIN pg_attribute att
-                    ON att.attrelid = con.conrelid AND att.attnum = k.attnum),
-               (SELECT array_agg(att.attname ORDER BY k.ord)
+                    ON att.attrelid = con.conrelid AND att.attnum = k.attnum), '{}'),
+               COALESCE((SELECT array_agg(att.attname::text ORDER BY k.ord)
                   FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
                   JOIN pg_attribute att
-                    ON att.attrelid = con.confrelid AND att.attnum = k.attnum)
+                    ON att.attrelid = con.confrelid AND att.attnum = k.attnum), '{}')
           FROM pg_constraint con
           JOIN pg_class c ON c.oid = con.conrelid
           JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -248,9 +354,20 @@ pub async fn read_indexes(client: &Client, schema: &str, table: &str) -> DbResul
         SELECT i.relname,
                ix.indisunique,
                ix.indisprimary,
-               am.amname,
-               ARRAY(SELECT pg_get_indexdef(ix.indexrelid, k, true)
-                       FROM generate_series(1, ix.indnatts) AS k)
+               am.amname::text,
+               -- `pg_get_indexdef` answers NULL for a column position it cannot
+               -- render, and a NULL *inside* the array is what would fail the
+               -- decode — the array itself being empty is fine.
+               --
+               -- `ORDER BY k` is not decoration: these are the index's columns in
+               -- the index's order, and an index reported as (b, a) when it is
+               -- (a, b) is a wrong answer to the question people open this panel
+               -- to ask.
+               ARRAY(SELECT s.d
+                       FROM generate_series(1, ix.indnatts) AS k,
+                            LATERAL (SELECT pg_get_indexdef(ix.indexrelid, k, true) AS d) s
+                      WHERE s.d IS NOT NULL
+                      ORDER BY k)
           FROM pg_index ix
           JOIN pg_class i ON i.oid = ix.indexrelid
           JOIN pg_class c ON c.oid = ix.indrelid
@@ -286,5 +403,5 @@ pub async fn read_primary_key_name(
          WHERE n.nspname = $1 AND c.relname = $2 AND con.contype = 'p'";
 
     let rows = client.query(SQL, &[&schema, &table]).await.map_err(map_pg)?;
-    Ok(rows.first().map(|r| r.get(0)))
+    Ok(rows.first().and_then(|r| r.get(0)))
 }

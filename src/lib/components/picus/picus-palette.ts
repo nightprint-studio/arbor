@@ -221,6 +221,16 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       when: tab?.kind === 'file' || tab?.kind === 'query',
       action: () => a.run(() => picusUiStore.showTool('ast')),
     },
+    {
+      id: 'reshape',
+      title: 'Structural replace in this document',
+      subtitle:
+        'The same $name$ patterns as the repository-wide one, applied to the open buffer — one edit, undone with Ctrl+Z',
+      icon: 'replace',
+      shortcut: 'Ctrl+Shift+M',
+      when: tab?.kind === 'file' || tab?.kind === 'query',
+      action: () => a.run(() => picusUiStore.showTool('restructure')),
+    },
     // `picusTabsStore.activeConnection`, NOT `connectionsStore.active`: the tab's
     // own binding, falling back to the sidebar only when it has none. They differ
     // the moment a tab is rebound to another database, and using the sidebar

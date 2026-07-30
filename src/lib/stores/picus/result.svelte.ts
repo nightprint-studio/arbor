@@ -65,8 +65,20 @@ export interface PicusResult {
   readonly loaded: number;
   /** Server-side time of the statement that opened this result. */
   readonly elapsedMs: number;
+  /**
+   * Columns whose value was not fetched — their cells hold a size, not a value.
+   *
+   * Carried on the result rather than worked out by the grid, because it is a fact
+   * about **this read**: the same column in a query the user wrote themselves is
+   * not masked, and a grid that decided by type would mask it anyway and then have
+   * nothing to reveal.
+   */
+  readonly maskedColumns: string[];
   /** The exact count is being computed in the background. */
   readonly counting: boolean;
+  /** Stop waiting on the exact count — the connection is wanted for something the
+   *  user is watching. The planner's estimate stands. */
+  abandonCount(): void;
   /** Last failure while fetching a window; empty when there was none. */
   readonly error: string;
   readonly chunk: number;
@@ -324,7 +336,26 @@ export function createResult(connectionId: string, res: ExecuteResult): PicusRes
     get complete() { return complete(); },
     get loaded() { return loaded; },
     elapsedMs: res.elapsedMs,
+    maskedColumns: res.maskedColumns ?? [],
     get counting() { return counting; },
+    /**
+     * Give up on the exact count, because something the user is waiting on needs
+     * the connection.
+     *
+     * A session is **one** database connection shared by every tab on it, so a
+     * background count is not free while it runs: the next statement queues behind
+     * it, and on a large table that is the difference between a query that starts
+     * and one that appears to hang. Running a new statement is a foreground act;
+     * the count is a nicety that replaces an estimate which is already on screen.
+     *
+     * The estimate simply stands, which is exactly what it is for. The `closed`
+     * flag makes the reply harmless if it lands anyway.
+     */
+    abandonCount() {
+      if (!counting) return;
+      counting = false;
+      exactTotal = null;
+    },
     get error() { return error; },
     get chunk() { return windowSize; },
     // Look a fifth of a window ahead of the viewport before asking. With the
@@ -390,6 +421,28 @@ function createResultsStore() {
     /** A tab closed. */
     release(owner: string) {
       drop(owner);
+    },
+
+    /**
+     * Something the user is waiting on is about to use this connection: stop any
+     * background count running on it, and say whether one was.
+     *
+     * A session is one database connection, shared by every tab bound to it. A
+     * count is issued automatically for every result that does not fit in its first
+     * window, and while it runs the next statement **queues behind it** — so
+     * running a query straight after another one looked like the studio had hung,
+     * and worked perfectly after a restart. It is a nicety over an estimate that is
+     * already on screen; a statement somebody just asked for is not.
+     */
+    yieldConnection(connectionId: string): boolean {
+      let yielded = false;
+      for (const result of Object.values(byOwner)) {
+        if (result.connectionId === connectionId && result.counting) {
+          result.abandonCount();
+          yielded = true;
+        }
+      }
+      return yielded;
     },
 
     /** A connection went down, or was deleted: its cursors went with it. */

@@ -50,9 +50,8 @@
     fileEngine,
     folderAcceptsGeneration,
     folderEngine,
-    isDialect,
     isExcluded,
-    isGenericEngine,
+    isTargetScope,
     type FolderEngine,
     type FolderRole,
   } from '$lib/types/picus';
@@ -93,7 +92,7 @@
    * whole payoff — one file instead of two for a plain INSERT.
    */
   function add(entry: FolderEntry, file: string, engine: FolderEngine | null) {
-    if (!isDialect(engine) && !isGenericEngine(engine)) {
+    if (!isTargetScope(engine)) {
       // Should be unreachable — the rows are disabled — but a destination with no
       // engine would silently emit nothing, so it is refused rather than trusted.
       toastStore.show(`${file} has no engine. Say which database it is for first.`, 'warning');

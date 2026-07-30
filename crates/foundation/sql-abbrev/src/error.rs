@@ -43,6 +43,26 @@ pub enum AbbrevError {
     PredicatesNotAllowed { verb: Verb },
     MultiplierNotAllowed { verb: Verb },
     BadMultiplier { text: String },
+    /// A `{…}` row template on a verb that has no rows.
+    TemplateNotAllowed { verb: Verb },
+    /// A `{…}` template and a `column=value` in the same abbreviation.
+    TemplateAndAssignment { column: String },
+    /// A `{…}` with a different number of values than the statement has columns.
+    TemplateArity { values: usize, columns: Vec<String> },
+    /// `+col:type` / `~col:type` on a verb that does not shape tables.
+    ChangesNotAllowed { verb: Verb },
+    /// `a#table` with nothing to change.
+    ChangesRequired { table: String },
+    /// A change with no `:type` after it.
+    MissingType { column: String },
+    /// `a#table+col:…` where `col` is already there.
+    ColumnAlreadyExists { table: String, column: String },
+    /// `m#table` with no `[...]`.
+    MergeKeyRequired { table: String },
+    /// `m#table[id=1]` — the merge's brackets name columns, not conditions.
+    MergeKeyIsNotACondition { column: String },
+    /// A merge whose key covers every column, leaving nothing to update.
+    MergeUpdatesNothing { table: String },
     /// An UPDATE with nothing to set.
     ColumnsRequired { verb: Verb },
     /// An UPDATE column written without its value.
@@ -62,27 +82,23 @@ impl fmt::Display for AbbrevError {
         match self {
             AbbrevError::Empty => write!(
                 f,
-                "nothing to expand — an abbreviation is a verb (`s`, `i`, `u`, `d`), then `#`, \
+                "nothing to expand — an abbreviation is a verb ({VERBS}), then `#`, \
                  then a table: `s#localstrings`"
             ),
             AbbrevError::MissingSeparator { verb } => {
                 write!(f, "`{verb}` is missing its `#` — write `{verb}#<table>`")
             }
-            AbbrevError::UnknownVerb { verb } if verb.is_empty() => write!(
-                f,
-                "there is no verb before the `#` — use `s` (select), `i` (insert), `u` (update) \
-                 or `d` (delete)"
-            ),
-            AbbrevError::UnknownVerb { verb } => write!(
-                f,
-                "`{verb}` is not a verb — use `s` (select), `i` (insert), `u` (update) or \
-                 `d` (delete)"
-            ),
+            AbbrevError::UnknownVerb { verb } if verb.is_empty() => {
+                write!(f, "there is no verb before the `#` — use {VERBS}")
+            }
+            AbbrevError::UnknownVerb { verb } => {
+                write!(f, "`{verb}` is not a verb — use {VERBS}")
+            }
             AbbrevError::MissingTable { verb } => write!(
                 f,
                 "`{}#` names no table — {} what?",
                 verb.marker(),
-                verb.keyword().to_lowercase()
+                verb.describe().to_lowercase()
             ),
             AbbrevError::UnknownTable { name, suggestion } => {
                 write!(f, "the schema has no table called `{name}`")?;
@@ -141,6 +157,56 @@ impl fmt::Display for AbbrevError {
             AbbrevError::BadMultiplier { text } => {
                 write!(f, "`*{text}` is not a row count — write `*3`")
             }
+            AbbrevError::TemplateNotAllowed { verb } => write!(
+                f,
+                "`{{…}}` fills in the rows of an INSERT, and {} has no rows",
+                article(*verb)
+            ),
+            AbbrevError::TemplateAndAssignment { column } => write!(
+                f,
+                "`{column}` is given a value twice — once with `=` and once in the `{{…}}`. \
+                 Keep the template and write `{column}` on its own, or drop the template"
+            ),
+            AbbrevError::TemplateArity { values, columns } => write!(
+                f,
+                "the `{{…}}` has {values} value(s) and the statement has {} column(s) ({}) — \
+                 they have to line up, or the values land in the wrong columns",
+                columns.len(),
+                columns.join(", ")
+            ),
+            AbbrevError::ChangesNotAllowed { verb } => write!(
+                f,
+                "`+` adds a column and `~` retypes one — that is `a#`, not {}",
+                article(*verb)
+            ),
+            AbbrevError::ChangesRequired { table } => write!(
+                f,
+                "`a#{table}` changes nothing — add a column with `+nome:varchar(200)`, or retype \
+                 one with `~importo:number(12,2)`"
+            ),
+            AbbrevError::MissingType { column } => write!(
+                f,
+                "`{column}` has no type — write `{column}:varchar(200)`"
+            ),
+            AbbrevError::ColumnAlreadyExists { table, column } => write!(
+                f,
+                "{table} already has a column `{column}` — `~{column}:…` changes its type"
+            ),
+            AbbrevError::MergeKeyRequired { table } => write!(
+                f,
+                "a merge needs to know what makes a row the same row — name the key columns, \
+                 `m#{table}[id]`"
+            ),
+            AbbrevError::MergeKeyIsNotACondition { column } => write!(
+                f,
+                "`[{column}=…]` is a condition, and a merge's brackets name its key columns — \
+                 write `[{column}]`"
+            ),
+            AbbrevError::MergeUpdatesNothing { table } => write!(
+                f,
+                "every column of {table} is part of the key, so a matched row would have nothing \
+                 to update — that is an INSERT, not a merge"
+            ),
             AbbrevError::ColumnsRequired { verb } => write!(
                 f,
                 "{} needs something to set — `(column=value)`",
@@ -179,6 +245,14 @@ impl fmt::Display for AbbrevError {
 
 impl std::error::Error for AbbrevError {}
 
+/// The verb list, written once.
+///
+/// It appears in three refusals, and three copies of it is three chances for the
+/// language to grow a verb that one of them forgets to mention — which is exactly
+/// how a feature ends up undiscoverable.
+const VERBS: &str = "`s` (select), `i` (insert), `u` (update), `d` (delete), `m` (merge), \
+    `a` (alter) or `fc` (for loop)";
+
 /// "…, did you mean `X`?" — appended only when there is one.
 fn suggest(f: &mut fmt::Formatter<'_>, suggestion: &Option<String>) -> fmt::Result {
     match suggestion {
@@ -198,9 +272,9 @@ fn list(names: &[String]) -> String {
 
 /// "an INSERT" / "a SELECT" — so the sentences above read like sentences.
 fn article(verb: Verb) -> String {
-    let keyword = verb.keyword();
-    let article = if keyword.starts_with(['A', 'E', 'I', 'O', 'U']) { "an" } else { "a" };
-    format!("{article} {keyword}")
+    let word = verb.describe();
+    let article = if word.starts_with(['A', 'E', 'I', 'O', 'U']) { "an" } else { "a" };
+    format!("{article} {word}")
 }
 
 #[cfg(test)]

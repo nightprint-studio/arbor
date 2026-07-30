@@ -101,9 +101,11 @@
   {:else}
     <div class="ap-head">
       <SearchBar
-        value={filter}
+        query={filter}
+        showRegex={false}
+        showCounter={false}
         placeholder="Filter by kind, field or text"
-        onInput={(v) => (filter = v)}
+        oninput={(v: string) => (filter = v)}
       />
       <div class="ap-stats">
         <Badge variant="tone" tone="neutral" size="sm" label={`${tree.nodeCount} nodes`} />

@@ -19,7 +19,14 @@
  */
 
 import type { Dialect, QueryLogEntry } from '$lib/types/picus';
-import { cancel as rpcCancel, execute, sqlStatements } from '$lib/ipc/picus/db';
+import {
+  cancel as rpcCancel,
+  execute,
+  resetConnection,
+  sourceRelation,
+  sqlStatements,
+  type SourceRelation,
+} from '$lib/ipc/picus/db';
 import { connectionsStore } from './connections.svelte';
 import { createResult, formatRowTotal, picusResultsStore } from './result.svelte';
 import { picusSettingsStore } from './settings.svelte';
@@ -48,6 +55,26 @@ interface QueryTabState {
   affected: number | null;
   /** A statement has run here. Distinguishes "nothing yet" from "a write". */
   hasRun: boolean;
+  /**
+   * The relation the rows on screen came from, as the parser and the catalogue
+   * agree it is. `null` until a read has been traced.
+   *
+   * Resolved from the statement that **ran**, and kept here rather than derived
+   * from the buffer whenever it is needed. That distinction is the whole reason
+   * this field exists: a query tab is a scratchpad holding several statements, and
+   * asking "which table is this?" of the *buffer* answers about all of them at
+   * once — which is why an ordinary single-table query was reported as a join, and
+   * its rows refused editing and refused to open their large objects.
+   */
+  source: SourceRelation | null;
+  /**
+   * How long the whole run took on the server, summed over its statements.
+   *
+   * Kept per tab rather than read off the result, because a *write* has no result
+   * to read it off and "how long did that take" is asked about an UPDATE at least
+   * as often as about a SELECT. `null` until something has run.
+   */
+  elapsedMs: number | null;
 }
 
 function emptyTab(): QueryTabState {
@@ -61,7 +88,24 @@ function emptyTab(): QueryTabState {
     error: null,
     affected: null,
     hasRun: false,
+    source: null,
+    elapsedMs: null,
   };
+}
+
+/**
+ * A duration, at the precision it is worth reading.
+ *
+ * Milliseconds up to a second, because that is the range where a difference of ten
+ * of them means something; seconds above it, because `18 342 ms` is a number nobody
+ * parses at a glance and `18.3 s` is the same fact.
+ */
+export function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return `${minutes} m ${seconds.toString().padStart(2, '0')} s`;
 }
 
 /**
@@ -88,6 +132,16 @@ export interface EditorSelection {
 }
 
 const NO_SELECTION: EditorSelection = { from: 0, to: 0, head: 0, empty: true };
+
+/**
+ * How long a cancel is given to be honoured before the connection is abandoned.
+ *
+ * Long enough that a statement which *is* stopping gets to stop — the server has to
+ * notice the request, unwind, and answer — and short enough that a user who has
+ * decided to stop waiting is not made to wait again. A cancel that works is normally
+ * acted on in well under a second.
+ */
+const CANCEL_GRACE_MS = 2500;
 
 /**
  * Which part of a buffer a run is about.
@@ -130,6 +184,31 @@ function createQueryStore() {
   let history = $state<HistoryEntry[]>([]);
   let historyFilter = $state('');
   let seq = 0;
+
+  /**
+   * Which run each tab is on. Outside `$state` — it is control flow, not something
+   * anything renders.
+   *
+   * The reason it exists is **zombie results**. Giving up on a statement does not
+   * un-send it: the reply may still arrive, minutes later, carrying a `resultId`
+   * for a cursor the server is holding. Adopting it then would file that cursor
+   * under a tab that has since run something else — closing the *current* result to
+   * make room for a stale one, and leaving whatever the newer run opened with
+   * nobody to close it. So every run carries its ordinal, and a reply that is no
+   * longer the tab's current run has its result closed on the spot instead.
+   */
+  const runs = new Map<string, number>();
+
+  function nextRun(tabId: string): number {
+    const n = (runs.get(tabId) ?? 0) + 1;
+    runs.set(tabId, n);
+    return n;
+  }
+
+  /** Is this run still the one the tab is waiting on? */
+  function current(tabId: string, mine: number): boolean {
+    return runs.get(tabId) === mine;
+  }
 
   function ensure(tabId: string): QueryTabState {
     if (!tabs[tabId]) tabs = { ...tabs, [tabId]: emptyTab() };
@@ -228,11 +307,34 @@ function createQueryStore() {
    * with the last one's rows on screen and four cursors closed rather than four
    * cursors nobody can reach.
    */
-  async function runInOrder(tabId: string, connectionId: string, targets: RunTarget[]) {
+  /**
+   * Ask the backend which relation a statement read, and file the answer on the tab.
+   *
+   * Silent on failure: a source that cannot be traced leaves the features that need
+   * one switched off, which is exactly what a `null` already means, and an error
+   * about it would be noise over rows that arrived perfectly well.
+   */
+  async function traceSource(tabId: string, connectionId: string, sql: string, mine: number) {
+    try {
+      const found = await sourceRelation(connectionId, sql);
+      if (!tabs[tabId] || !current(tabId, mine)) return;
+      tabs[tabId].source = found;
+    } catch {
+      /* untraceable is the same as untraced, for every caller of this */
+    }
+  }
+
+  async function runInOrder(
+    tabId: string,
+    connectionId: string,
+    targets: RunTarget[],
+    mine: number,
+  ) {
     const state = ensure(tabId);
     const conn = connectionsStore.byId(connectionId);
     const many = targets.length > 1;
     let affected: number | null = null;
+    let elapsed = 0;
 
     // Release the previous cursor BEFORE opening the next one. Running a second
     // statement in the same tab looks like nothing was discarded, which is
@@ -247,13 +349,30 @@ function createQueryStore() {
         // and the first window is a different size from every other.
         const res = await execute(connectionId, target.sql, picusSettingsStore.rowLimit);
         const result = createResult(connectionId, res);
-        // The tab can be closed while a statement runs. `forget` released what the
-        // tab held at the time, so adopting now would file a cursor under an owner
-        // nothing will ever release again — close it instead.
-        if (!tabs[tabId]) { void result?.close(); return; }
+        // Two ways this reply is no longer wanted, and both end the same way —
+        // **close the cursor rather than adopt it**. A held result nobody owns is a
+        // tuplestore on somebody's database that nothing will ever release.
+        //
+        //  • the tab was closed while the statement ran: `forget` released what it
+        //    held at the time, so adopting now would file a cursor under an owner
+        //    that no longer exists;
+        //  • the tab has since run something else — this is a reply to a question
+        //    that was abandoned, and adopting it would close the answer the user is
+        //    actually looking at.
+        if (!tabs[tabId] || !current(tabId, mine)) { void result?.close(); return; }
 
         picusResultsStore.adopt(tabId, result);
+        // Traced from **this statement**, not from the tab's text, and once per run
+        // rather than on every keystroke. `void`: the rows are already on screen and
+        // nothing waits on the answer — it decides whether the grid offers editing,
+        // which is a thing that can appear a moment later.
+        state.source = null;
+        if (result) void traceSource(tabId, connectionId, target.sql, mine);
         if (res.affected !== null) affected = (affected ?? 0) + res.affected;
+        // Summed across the run: `Run all` is one thing the user asked for, so its
+        // cost is one number. The per-statement times stay in the messages.
+        elapsed += res.elapsedMs;
+        state.elapsedMs = elapsed;
         state.hasRun = true;
 
         const summary = result
@@ -265,7 +384,7 @@ function createQueryStore() {
         state.messages = [
           {
             time: startedAt,
-            text: `${where}${summary} in ${res.elapsedMs} ms on ${conn?.name ?? connectionId}`,
+            text: `${where}${summary} in ${formatElapsed(res.elapsedMs)} on ${conn?.name ?? connectionId}`,
             level: 'info',
           },
           ...state.messages,
@@ -285,6 +404,10 @@ function createQueryStore() {
         state.messages = [{ time: startedAt, text: message, level: 'error' }, ...state.messages];
         state.pane = 'messages';
         state.affected = affected;
+        // What it cost before it failed is still worth knowing: a statement that
+        // took four minutes and then failed is a different problem from one that
+        // failed immediately.
+        state.elapsedMs = elapsed > 0 ? elapsed : null;
         remember({
           connectionId,
           sql: target.sql,
@@ -355,7 +478,22 @@ function createQueryStore() {
         state.pane = 'messages';
         return;
       }
-      if (state.running) return;
+      if (state.running) {
+        // Said rather than swallowed. A Run that does nothing and explains nothing
+        // is indistinguishable from a broken button, and this is exactly the state
+        // a user reaches when the previous statement will not stop.
+        state.messages = [
+          {
+            time: stamp(),
+            text: 'This tab is still waiting on the previous statement. Cancel it first '
+              + '(Ctrl+Shift+C) — if the server will not stop it, that reconnects.',
+            level: 'error',
+          },
+          ...state.messages,
+        ];
+        state.pane = 'messages';
+        return;
+      }
 
       const dialect = connectionsStore.byId(connectionId)?.dialect ?? 'postgres';
       const selection = editors.get(tabId)?.() ?? NO_SELECTION;
@@ -375,42 +513,102 @@ function createQueryStore() {
         return;
       }
 
+      // A session is ONE database connection. A background row count still running
+      // on it would make this statement queue behind it — which is why running a
+      // second query straight after a first one looked like the studio had hung,
+      // and why it worked after a restart. The cancel is what actually stops the
+      // server; abandoning the count is what stops us waiting for its answer.
+      if (picusResultsStore.yieldConnection(connectionId)) {
+        try {
+          await rpcCancel(connectionId);
+        } catch {
+          // Nothing to cancel is the ordinary case, and never worth a message.
+        }
+      }
+
+      const mine = nextRun(tabId);
       state.running = true;
       state.error = null;
       state.affected = null;
+      // Cleared, not carried over: the previous run's time beside this run's rows
+      // is the kind of stale number people quote at each other.
+      state.elapsedMs = null;
       try {
         const targets = await plan(tabId, text, region, dialect, scope);
-        await runInOrder(tabId, connectionId, targets);
+        if (!current(tabId, mine)) return;
+        await runInOrder(tabId, connectionId, targets, mine);
       } finally {
-        state.running = false;
+        // Only this run's own spinner. An abandoned run whose reply finally arrives
+        // must not clear the spinner of the one the user started afterwards.
+        if (current(tabId, mine)) state.running = false;
       }
     },
 
     /**
-     * Stop what is running on this connection.
+     * Stop what is running on this connection, and **do not come back without
+     * having stopped it**.
      *
      * Covers the background row count as well as the statement itself — both are
-     * work the server is doing for this session, and "cancel" that left a
-     * `count(*)` grinding on a hundred-million-row table would be a cancel in
-     * name only.
+     * work the server is doing for this session, and a cancel that left a
+     * `count(*)` grinding on a hundred-million-row table would be a cancel in name
+     * only.
      *
-     * Sends the cancel and stops there: the running flag is cleared by whichever
-     * outcome `run` receives, because the server decides whether the statement
-     * actually stopped. Clearing it here would show "done" over a query still
-     * executing.
+     * ## Asking is the first step, not the only one
+     *
+     * The old version sent the server's cancel key and stopped, on the reasoning
+     * that the server decides whether a statement stops. That reasoning is right
+     * about the *server* and wrong about the *product*: PostgreSQL ignores a cancel
+     * while a backend is inside an uninterruptible wait, and there are ordinary ways
+     * to end up in one. What the user then saw was a spinner that never went out, a
+     * Cancel that did nothing each time it was pressed, and a tab that would never
+     * run anything again — with nothing on screen admitting any of it.
+     *
+     * So a cancel that is not honoured escalates. After {@link CANCEL_GRACE_MS} the
+     * connection is **abandoned**: the session is dropped without being spoken to
+     * (which is the only thing that works once it has stopped answering), a new one
+     * is opened, and this tab stops waiting. The old statement may still be running
+     * on the server — that is said plainly rather than papered over — but the studio
+     * is usable again, which is the part Picus owes.
      */
     async cancel(tabId: string, connectionId: string) {
       const state = ensure(tabId);
       const result = picusResultsStore.forOwner(tabId);
       if ((!state.running && !result?.counting) || !connectionId) return;
-      state.messages = [
-        { time: stamp(), text: 'Cancellation requested…', level: 'info' },
-        ...state.messages,
-      ];
+
+      const say = (text: string, level: QueryLogEntry['level'] = 'info') => {
+        state.messages = [{ time: stamp(), text, level }, ...state.messages];
+      };
+      say('Cancellation requested…');
       try {
         await rpcCancel(connectionId);
       } catch (e) {
-        state.messages = [{ time: stamp(), text: String(e), level: 'error' }, ...state.messages];
+        say(String(e), 'error');
+      }
+      if (!state.running) return;
+
+      await new Promise((done) => setTimeout(done, CANCEL_GRACE_MS));
+      if (!state.running) return;
+
+      say(
+        'The server has not stopped it. Dropping this connection and opening a new one — '
+          + 'the statement may still be running there until the database ends it.',
+        'error',
+      );
+      // Invalidate the run FIRST. Its reply may still arrive, and by then this tab
+      // may be running something else; the ordinal is what stops it landing on top.
+      nextRun(tabId);
+      state.running = false;
+      state.pane = 'messages';
+      // Every result on this connection belonged to a socket that is about to go.
+      picusResultsStore.releaseConnection(connectionId);
+
+      try {
+        await resetConnection(connectionId);
+        say('Reconnected. This tab can run statements again.');
+        // The sidebar reads the pool; it is a different socket now.
+        void connectionsStore.load();
+      } catch (e) {
+        say(`The connection could not be reopened — ${e}`, 'error');
       }
     },
 

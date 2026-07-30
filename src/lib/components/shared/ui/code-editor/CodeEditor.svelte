@@ -13,8 +13,14 @@
    * are mapped onto CodeMirror's UTF-16 lint spans against the live buffer.
    */
   import { onDestroy } from 'svelte';
-  import { EditorState, Compartment, type Extension } from '@codemirror/state';
-  import { EditorView, placeholder as cmPlaceholder, type KeyBinding } from '@codemirror/view';
+  import { EditorState, Compartment, StateEffect, StateField, type Extension } from '@codemirror/state';
+  import {
+    Decoration,
+    EditorView,
+    placeholder as cmPlaceholder,
+    type DecorationSet,
+    type KeyBinding,
+  } from '@codemirror/view';
   import { indentUnit as cmIndentUnit } from '@codemirror/language';
   import { setDiagnostics as cmSetDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
   import { openSearchPanel } from '@codemirror/search';
@@ -40,6 +46,7 @@
     initialState,
     placeholder,
     keyBindings,
+    marks = [],
     oninput,
     oncaret,
     onViewState,
@@ -87,6 +94,20 @@
      * bind stable functions that read live state rather than swapping the array.
      */
     keyBindings?: readonly KeyBinding[];
+    /**
+     * Ranges to give a class to — a highlight the *host* decides, on top of
+     * whatever the language highlights.
+     *
+     * For text that is not the buffer's language and should not be read as though
+     * it were: Picus's SQL abbreviations are the case this exists for, since
+     * `s#ordini(id)[stato='EV']` is a shorthand the backend expands and colouring
+     * it as SQL makes correct input look like a mistake.
+     *
+     * Offsets are **UTF-16**, like everything else a host computes from the string
+     * it passed in; the byte-offset API is the `diagnostics` prop, which comes from
+     * a backend. Applied live, so a host can recompute them freely.
+     */
+    marks?: readonly { from: number; to: number; className: string }[];
     oninput?: (text: string) => void;
     /** Live caret position (1-based line/col) — drives a host footer Ln/Col. */
     oncaret?: (line: number, col: number) => void;
@@ -151,6 +172,39 @@
   // Re-push whenever the diagnostics prop changes.
   $effect(() => { void diagnostics; pushDiagnostics(); });
 
+  // ── Host-supplied marks ───────────────────────────────────────────────────────
+  //
+  // A `StateField` rather than a `ViewPlugin`, because the ranges come from outside
+  // CodeMirror: the host recomputes them from its own state, and the field's job is
+  // only to hold the last set handed in. `map`ping them through document changes is
+  // what keeps a highlight in place for the frame between a keystroke and the
+  // host's recomputation, instead of flickering off and back on.
+  const setMarks = StateEffect.define<DecorationSet>();
+  const markField = StateField.define<DecorationSet>({
+    create: () => Decoration.none,
+    update(current, tr) {
+      for (const effect of tr.effects) if (effect.is(setMarks)) return effect.value;
+      return current.map(tr.changes);
+    },
+    provide: (field) => EditorView.decorations.from(field),
+  });
+
+  function pushMarks() {
+    if (!view) return;
+    const len = view.state.doc.length;
+    const ranges = marks
+      .map((m) => ({
+        from: Math.max(0, Math.min(m.from, len)),
+        to: Math.max(0, Math.min(m.to, len)),
+        className: m.className,
+      }))
+      .filter((m) => m.to > m.from)
+      .sort((a, b) => a.from - b.from)
+      .map((m) => Decoration.mark({ class: m.className }).range(m.from, m.to));
+    view.dispatch({ effects: setMarks.of(Decoration.set(ranges, true)) });
+  }
+  $effect(() => { void marks; pushMarks(); });
+
   function mount(target: HTMLDivElement) {
     const { extensions } = createCodeEditorExtensions(language, {
       readOnly, onGoto, rulerColumn, emmet, indentGuides, stickyScroll, scrollbarOverview,
@@ -178,6 +232,7 @@
       doc: value,
       extensions: [
         extensions,
+        markField,
         indentCompartment.of(indentExtensions()),
         minimapCompartment.of(minimap ? minimapExtension() : []),
         placeholder ? cmPlaceholder(placeholder) : [],
@@ -186,6 +241,7 @@
     });
     view = new EditorView({ state, parent: target });
     pushDiagnostics();
+    pushMarks();
 
     // Restore the host-provided cursor + scroll (per-tab position). The scroll is set
     // after a frame so the layout the offset refers to exists.
@@ -311,6 +367,49 @@
       selection: { anchor: from + text.length },
     });
     view.focus();
+  }
+
+  /**
+   * Replace several byte ranges at once, as **one** edit.
+   *
+   * Not a loop over {@link replaceByteRange}, and the difference is the whole
+   * reason this exists: applied one at a time, each replacement shifts the offsets
+   * of the ones after it (so they would all have to be applied backwards to be
+   * correct at all), and each becomes its own undo step — so taking back a
+   * forty-match structural replace would mean forty presses of Ctrl+Z.
+   *
+   * CodeMirror reads an array of changes against the *starting* document, which is
+   * exactly how the ranges are expressed, so they are dispatched together and
+   * undone together. Ranges are sorted and any that overlap a previous one is
+   * dropped: a change set with overlapping edits throws, and a caller sending one
+   * should get the edit it could have, not an exception. Returns how many landed.
+   */
+  export function replaceByteRanges(
+    edits: readonly { startByte: number; endByte: number; text: string }[],
+  ): number {
+    if (!view || !edits.length) return 0;
+    const b2u = makeByteToU16(view.state.doc.toString());
+    const len = view.state.doc.length;
+
+    const mapped = edits
+      .map((e) => {
+        const from = Math.max(0, Math.min(b2u(e.startByte), len));
+        return { from, to: Math.max(from, Math.min(b2u(e.endByte), len)), insert: e.text };
+      })
+      .sort((a, b) => a.from - b.from);
+
+    const changes: typeof mapped = [];
+    let consumed = -1;
+    for (const change of mapped) {
+      if (change.from < consumed) continue;
+      changes.push(change);
+      consumed = change.to;
+    }
+    if (!changes.length) return 0;
+
+    view.dispatch({ changes });
+    view.focus();
+    return changes.length;
   }
 
   export function scrollToLineCol(line: number, col = 1) {

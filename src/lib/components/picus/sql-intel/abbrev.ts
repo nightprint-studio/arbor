@@ -276,12 +276,21 @@ const OPERATORS: Completion[] = [
   { label: '~', type: 'operator', detail: 'LIKE' },
 ];
 
-/** The four verbs, spelled the short way — the point of the whole language. */
+/**
+ * The verbs, spelled the short way — the point of the whole language.
+ *
+ * `info` rather than a bare letter list: `m`, `a` and `fc` are the three nobody
+ * would guess at, and a completion popup is the only place they are ever going to
+ * be discovered. The example is what makes the entry teach something.
+ */
 const VERBS: Completion[] = [
-  { label: 's', type: 'keyword', detail: 'SELECT' },
-  { label: 'i', type: 'keyword', detail: 'INSERT' },
-  { label: 'u', type: 'keyword', detail: 'UPDATE' },
-  { label: 'd', type: 'keyword', detail: 'DELETE' },
+  { label: 's', type: 'keyword', detail: 'SELECT', info: 's#ordini(codice)[id=7]' },
+  { label: 'i', type: 'keyword', detail: 'INSERT', info: "i#ordini(id,codice)*3{$, 'COD_$'}" },
+  { label: 'u', type: 'keyword', detail: 'UPDATE', info: 'u#ordini(evaso=true)[id=7]' },
+  { label: 'd', type: 'keyword', detail: 'DELETE', info: 'd#ordini[id=7]' },
+  { label: 'm', type: 'keyword', detail: 'MERGE (upsert)', info: 'm#ordini[id]' },
+  { label: 'a', type: 'keyword', detail: 'ALTER TABLE', info: 'a#ordini+nota:varchar(200)' },
+  { label: 'fc', type: 'keyword', detail: 'FOR loop over a cursor', info: "fc#ordini[stato='EV']" },
 ];
 
 function ci(a: string, b: string): boolean {

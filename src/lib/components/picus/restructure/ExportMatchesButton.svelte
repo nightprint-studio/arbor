@@ -8,16 +8,15 @@
    * migration. Its answer is a table, and a table you cannot get out of the tool
    * is a table you end up retyping.
    *
-   * Three formats, three destinations: CSV for a spreadsheet, JSON for a script,
-   * Markdown for a ticket. To the clipboard, or to a file — through Arbor's own
-   * picker, never a native dialog, and never without the user naming the file.
+   * What is left in this file is the part only Picus can supply: which columns a
+   * match has. The menu, the picker, the writing and the messages are
+   * {@link ExportButton}'s, shared with the result grid — six commands written
+   * twice is six chances for the two to drift.
    */
-  import { Download, Copy, FileJson, FileSpreadsheet, FileText } from 'lucide-svelte';
-  import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
-  import Button from '$lib/components/shared/ui/Button.svelte';
-  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
-  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
-  import { fsWriteTextFile } from '$lib/ipc/fs';
+  import { FileJson, FileSpreadsheet, FileText } from 'lucide-svelte';
+  import ExportButton, {
+    type Rendition,
+  } from '$lib/components/shared/internal/ExportButton.svelte';
   import {
     exportRows,
     EXPORT_EXTENSION,
@@ -34,9 +33,6 @@
   }
 
   let { matches, placeholders, showReplacement }: Props = $props();
-
-  /** Set while the save picker is up; carries which format was asked for. */
-  let saving = $state<ExportFormat | null>(null);
 
   /**
    * The columns, in the order the table shows them.
@@ -58,93 +54,33 @@
       : []),
   ]);
 
-  function text(format: ExportFormat): string {
-    return exportRows(matches, columns, format);
+  function rendition(
+    format: ExportFormat,
+    label: string,
+    subtitle: string,
+    icon: Rendition['icon'],
+  ): Rendition {
+    return {
+      id: format,
+      label,
+      subtitle,
+      icon,
+      extension: EXPORT_EXTENSION[format],
+      text: () => exportRows(matches, columns, format),
+    };
   }
 
-  async function copy(format: ExportFormat) {
-    try {
-      await navigator.clipboard.writeText(text(format));
-      toastStore.show(
-        `${matches.length} match${matches.length === 1 ? '' : 'es'} copied as ${format.toUpperCase()}.`,
-        'success',
-      );
-    } catch (e) {
-      toastStore.show(`Nothing was copied — ${e}`, 'error');
-    }
-  }
-
-  async function save(path: string) {
-    const format = saving;
-    saving = null;
-    if (!format) return;
-    try {
-      await fsWriteTextFile(path, text(format));
-      toastStore.show(`${matches.length} written to ${path.split(/[\\/]/).pop()}.`, 'success');
-    } catch (e) {
-      toastStore.show(`${path} could not be written — ${e}`, 'error');
-    }
-  }
-
-  const items = $derived<DropdownItem[]>([
-    { kind: 'separator', label: 'Copy' },
-    {
-      kind: 'item',
-      id: 'copy-csv',
-      label: 'As CSV',
-      subtitle: 'For a spreadsheet',
-      icon: FileSpreadsheet,
-      onclick: () => void copy('csv'),
-    },
-    {
-      kind: 'item',
-      id: 'copy-json',
-      label: 'As JSON',
-      subtitle: 'One object per match',
-      icon: FileJson,
-      onclick: () => void copy('json'),
-    },
-    {
-      kind: 'item',
-      id: 'copy-md',
-      label: 'As a Markdown table',
-      subtitle: 'For a ticket or a message',
-      icon: FileText,
-      onclick: () => void copy('markdown'),
-    },
-    { kind: 'separator', label: 'Save to a file' },
-    { kind: 'item', id: 'save-csv', label: 'CSV…', icon: FileSpreadsheet, onclick: () => (saving = 'csv') },
-    { kind: 'item', id: 'save-json', label: 'JSON…', icon: FileJson, onclick: () => (saving = 'json') },
-    { kind: 'item', id: 'save-md', label: 'Markdown…', icon: FileText, onclick: () => (saving = 'markdown') },
+  const renditions = $derived<Rendition[]>([
+    rendition('csv', 'As CSV', 'For a spreadsheet', FileSpreadsheet),
+    rendition('json', 'As JSON', 'One object per match', FileJson),
+    rendition('markdown', 'As a Markdown table', 'For a ticket or a message', FileText),
   ]);
 </script>
 
-<Dropdown {items} position="fixed" width="260px">
-  {#snippet trigger({ open, toggle })}
-    <Button
-      variant="secondary"
-      size="xs"
-      disabled={!matches.length}
-      ariaExpanded={open}
-      ariaLabel="Export the matches"
-      tooltip={matches.length
-        ? 'Take these matches out — a pattern is a query over the repository, and its answer is a table'
-        : { content: 'There is nothing to export yet' }}
-      onclick={toggle}
-    >
-      {#snippet iconStart()}<Download size={13} />{/snippet}
-      Export
-    </Button>
-  {/snippet}
-</Dropdown>
-
-{#if saving}
-  <FileExplorerModal
-    mode="save"
-    title={`Save the matches as ${saving.toUpperCase()}`}
-    initialFilename={`picus-matches.${EXPORT_EXTENSION[saving]}`}
-    extensions={[EXPORT_EXTENSION[saving]]}
-    onConfirm={(path) => void save(String(path))}
-    onClose={() => (saving = null)}
-  />
-{/if}
+<ExportButton
+  {renditions}
+  fileName="picus-matches"
+  subject={`${matches.length} match${matches.length === 1 ? '' : 'es'}`}
+  empty={!matches.length}
+  tooltip="Take these matches out — a pattern is a query over the repository, and its answer is a table"
+/>

@@ -78,6 +78,11 @@ mod columns;
 mod reconcile;
 // Named sets of destinations — "where a change like this always goes".
 mod destinations;
+// The three abbreviations the two engines spell differently — merge, alter, loop.
+mod abbrev_render;
+// Writing a result grid's changed cells back — the one place Picus issues DML the
+// user did not read first, which is why it refuses more than it accepts.
+mod edits;
 // The syntax tree of one script, for the AST panel — `arbor-syntax` pointed at
 // Picus's grammar and Picus's already-decoded text.
 mod ast;
@@ -86,6 +91,10 @@ mod ast;
 mod restructure;
 // Where one statement ends and the next begins, so Run can execute exactly one.
 mod statements;
+// Which relation a result's rows came from, and whether it is a view — the answer
+// the export, the cell editing and the large-object read all need, taken from the
+// parser rather than approximated from the text.
+mod source_relation;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, any

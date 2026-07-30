@@ -122,11 +122,11 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="body" onkeydown={onKeydown}>
       {#if loadError}
-        <Alert kind="error">{loadError}</Alert>
+        <Alert variant="error">{loadError}</Alert>
       {:else if loading}
         <div class="loading"><Spinner size={18} /> <span>Reading project…</span></div>
       {:else if plan.length === 0}
-        <EmptyState title="No scripts found" description="This project has no .merula files to export." />
+        <EmptyState message="No scripts found" description="This project has no .merula files to export." />
       {:else}
         <div class="listhead">
           <span class="count">{selected.length} of {plan.length} selected</span>

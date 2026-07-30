@@ -28,6 +28,14 @@ function createSchemaStore() {
   let loadedAt = $state<string | null>(null);
   let loading = $state(false);
   let error = $state('');
+  /**
+   * The connection whose catalogue is being read right now — '' when none is.
+   *
+   * Deliberately not `$state`: it guards against a *second* call, and a reactive
+   * read of it inside the effects that call `load` would be one more dependency
+   * able to re-trigger them.
+   */
+  let reading = '';
 
   /** Tables and views together — the things that have columns and rows. */
   const relations = $derived<TableInfo[]>([...snapshot.tables, ...snapshot.views]);
@@ -111,25 +119,58 @@ function createSchemaStore() {
       connectionId = '';
       loadedAt = null;
       error = '';
+      // Abandons a read still in flight: its answer describes a connection nobody
+      // is looking at any more, and the `reading !== id` checks drop it when it
+      // lands. The spinner goes with it.
+      reading = '';
+      loading = false;
     },
 
-    /** Read the catalogue of an open connection. */
+    /**
+     * Read the catalogue of an open connection.
+     *
+     * ## One read at a time, per connection
+     *
+     * The callers are an effect. `connectionId` is only set **after** the read
+     * returns, so for as long as one is in flight the condition that started it is
+     * still true — and every re-render of the connection list started another. On a
+     * small schema that is invisible; on a real one it is a dozen catalogue queries
+     * pipelined down one connection, each waiting for the ones before it, and the
+     * last of them takes long enough that the studio looks like it has stopped.
+     *
+     * That is the shape of the bug this guard exists for, and it is worth stating
+     * plainly: **the read was not slow, it was running several times.** A second ask
+     * for a connection already being read is the same question, so it is dropped
+     * rather than queued.
+     */
     async load(id: string) {
       if (!id) {
         this.clear();
         return;
       }
+      if (reading === id) return;
+      reading = id;
       loading = true;
       try {
-        snapshot = await readSchema(id);
+        const read = await readSchema(id);
+        // The active connection can change while a large schema is being read.
+        // Landing the answer anyway would file one database's catalogue under
+        // another's name, which is the kind of quiet wrongness that gets a DELETE
+        // written against the wrong server.
+        if (reading !== id) return;
+        snapshot = read;
         connectionId = id;
         loadedAt = new Date().toTimeString().slice(0, 5);
         error = '';
       } catch (e) {
+        if (reading !== id) return;
         snapshot = { ...EMPTY };
         error = String(e);
       } finally {
-        loading = false;
+        if (reading === id) {
+          reading = '';
+          loading = false;
+        }
       }
     },
 

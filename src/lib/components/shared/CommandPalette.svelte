@@ -143,7 +143,7 @@
   let pendingBranchName = $state('');
   // Resolved per-tab on mount. Drives the ticket-suggestions UX in step='name'
   // and gates branch creation through `assertBranchNameAllowed`.
-  let branchPolicy      = $state<BranchPolicy>({ requireTicket: false, tracker: null, ticketRegex: null });
+  let branchPolicy      = $state<BranchPolicy>({ requireTicket: false, tracker: null, ticketRegex: null, normalizeUnderscore: false });
 
   // Async data loaded on open
   let branches    = $state<BranchInfo[]>([]);

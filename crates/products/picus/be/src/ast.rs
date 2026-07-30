@@ -14,13 +14,112 @@
 //! repositories this product exists for.
 
 use picus_core::prelude::PicusState;
-use serde::Deserialize;
+use picus_parse::prelude::{parse, DialectScope, EngineKind, ParseErrorKind};
+use serde::{Deserialize, Serialize};
 
 use arbor_syntax::prelude::{
     node_path_at_with, outline_with, ByteRange, Injection, OutlineOptions, SyntaxTree,
 };
 
 use crate::scripts::snapshot_for;
+
+/// One thing the grammar could not read, placed where the editor can underline it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParseFault {
+    /// UTF-8 byte offsets, as everything the backend reports is.
+    pub start: usize,
+    pub end: usize,
+    /// Written for the person who has to fix it, not for the person who wrote the
+    /// grammar. It names what is wrong and, where the parser knows, what is
+    /// missing — never a node kind, which is an answer to a question nobody asked.
+    pub message: String,
+}
+
+/// What the parser could not read in this text.
+///
+/// ## Why the editor did not already know
+///
+/// The syntax-tree panel has always shown these — it marks the node red and says
+/// `invented` on a token the parser had to supply — while the editor beside it
+/// showed nothing at all. So a statement that will certainly fail to run looked
+/// perfectly fine until you ran it, and the one panel that knew better was the one
+/// nobody had open. The live diagnostics are a *semantic* scan (unknown table,
+/// unknown column, a write on a read-only connection) and had no way to say
+/// "this is not SQL"; that is a question only the grammar can answer.
+///
+/// ## A zero-width range is a real answer
+///
+/// A `Missing` error is a token the grammar required and the source did not have,
+/// so tree-sitter inserts it with no width. The range then marks the *position* it
+/// should have occupied rather than any text — which is exactly right for "a `)` is
+/// missing here", and which the editor widens to one character so the mark has
+/// somewhere to go.
+#[arbor_rpc::handler]
+fn picus_parse_faults(
+    _state: &PicusState,
+    text: String,
+    engine: Option<EngineKind>,
+) -> Result<Vec<ParseFault>, String> {
+    let scope = engine.map(DialectScope::One).unwrap_or(DialectScope::Portable);
+    Ok(parse(&text, scope)
+        .errors
+        .into_iter()
+        .map(|error| {
+            let message = match (error.kind, error.expected.as_deref()) {
+                (ParseErrorKind::Missing, Some(token)) => {
+                    format!("`{token}` is missing here.")
+                }
+                (ParseErrorKind::Missing, None) => {
+                    "Something the statement needs is missing here.".to_string()
+                }
+                (ParseErrorKind::Syntax, _) if error.text.is_empty() => {
+                    "The parser could not read this.".to_string()
+                }
+                (ParseErrorKind::Syntax, _) => {
+                    // The offending text, and where it sits. `parent` is a grammar
+                    // node kind, so it is only offered when it reads as English.
+                    format!("`{}` does not belong here.", error.text.trim())
+                }
+            };
+            ParseFault { start: error.range.start, end: error.range.end, message }
+        })
+        .collect())
+}
+
+#[cfg(test)]
+mod fault_tests {
+    use super::*;
+
+    fn faults(sql: &str) -> Vec<String> {
+        parse(sql, DialectScope::One(EngineKind::Postgres))
+            .errors
+            .iter()
+            .map(|e| format!("{:?}", e.kind))
+            .collect()
+    }
+
+    #[test]
+    fn a_statement_the_grammar_reads_has_nothing_to_report() {
+        assert!(faults("SELECT * FROM archivio WHERE stato = 'EV';").is_empty());
+        assert!(faults("-- una nota\nINSERT INTO archivio (protocollo) VALUES (1);").is_empty());
+    }
+
+    #[test]
+    fn a_loop_outside_a_routine_is_reported() {
+        // The case that started this: procedural code at the top level is not a
+        // statement PostgreSQL will accept, the syntax-tree panel said so, and the
+        // editor beside it showed nothing.
+        let sql = "FOR r IN SELECT * FROM localstrings LOOP\n  NULL;\nEND LOOP;";
+        assert!(!faults(sql).is_empty(), "the parser should refuse this");
+    }
+
+    #[test]
+    fn an_unclosed_construct_is_reported() {
+        assert!(!faults("SELECT * FROM (SELECT 1").is_empty());
+        assert!(!faults("INSERT INTO archivio (protocollo VALUES (1);").is_empty());
+    }
+}
 
 /// The one island in SQL: a routine's `$$ … $$` body.
 ///

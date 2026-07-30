@@ -104,6 +104,15 @@ pub struct ExecuteResult {
     /// Rows a write reported changing. `None` for a statement that returned a
     /// result set.
     pub affected: Option<u64>,
+    /// Columns whose value was **not fetched** — a large object, replaced in the
+    /// projection by its size in bytes.
+    ///
+    /// A grid showing one of these is showing a number where a value belongs, and it
+    /// has to say so: the cell renders as a placeholder and the real value is read
+    /// on demand. Empty for every statement the caller wrote itself, because Picus
+    /// only rewrites a projection it composed.
+    #[serde(default)]
+    pub masked_columns: Vec<String>,
 }
 
 /// One window over a held result.

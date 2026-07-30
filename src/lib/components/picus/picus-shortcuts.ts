@@ -47,6 +47,11 @@ export const PICUS_SHORTCUTS: PicusShortcutGroup[] = [
         keys: ['Ctrl', 'Shift', 'R'],
         description: 'Structural search and replace across the repository',
       },
+      {
+        keys: ['Ctrl', 'Shift', 'M'],
+        description:
+          'Structural replace in the open document — the same patterns, applied to the buffer and undone with Ctrl+Z',
+      },
       { keys: ['Ctrl', 'Tab'], description: 'Next tab' },
       { keys: ['Ctrl', 'Shift', 'Tab'], description: 'Previous tab' },
       { keys: ['Ctrl', 'W'], description: 'Close the current tab' },
@@ -56,6 +61,7 @@ export const PICUS_SHORTCUTS: PicusShortcutGroup[] = [
     label: 'Database',
     shortcuts: [
       { keys: ['Ctrl', 'Enter'], description: 'Run the selection, or the statement under the cursor' },
+      { keys: ['Ctrl', 'S'], description: 'Store the cells you changed in the result grid — the only keystroke in this window that writes to a database' },
       { keys: ['Ctrl', 'Shift', 'Enter'], description: 'Run every statement in the tab, in order, stopping at the first failure' },
       { keys: ['Ctrl', 'Shift', 'C'], description: 'Cancel the running query, or the exact row count running behind it' },
       { keys: ['Ctrl', 'T'], description: 'New query tab on the active connection' },
@@ -83,6 +89,13 @@ export const PICUS_SHORTCUTS: PicusShortcutGroup[] = [
       { keys: ['Esc'], description: 'Dismiss the completion or the greyed proposal' },
       { keys: ['Ctrl', '/'], description: 'Comment or uncomment the selected lines' },
       { keys: ['Ctrl', 'Y'], description: 'Delete the current line' },
+      { keys: ['Ctrl', 'D'], description: 'Duplicate the selection, or the current line' },
+      { keys: ['Ctrl', 'F'], description: 'Find and replace in this document — Ctrl+H opens the same panel' },
+      { keys: ['F3'], description: 'Next match · Shift+F3 the previous one' },
+      { keys: ['Alt', 'J'], description: 'Add the next occurrence of the selection as a second cursor' },
+      { keys: ['Alt', '↑'], description: 'Move the line up · Ctrl+Shift+↑ does the same' },
+      { keys: ['Alt', '↓'], description: 'Move the line down · Ctrl+Shift+↓ does the same' },
+      { keys: ['Ctrl', 'Click'], description: 'Open the structure of the table, view, sequence or trigger under the pointer' },
     ],
   },
   {

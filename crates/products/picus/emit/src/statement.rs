@@ -146,6 +146,106 @@ pub fn statement_for(
     })
 }
 
+/// Several rows as `INSERT`s — one statement on PostgreSQL, one per row on Oracle.
+///
+/// The asymmetry is not a style choice: **Oracle has no multi-row `VALUES`**. It
+/// is the reason a row count is not enough information to write an insert, and the
+/// reason this lives here rather than being assembled by whoever needed it — the
+/// caller should not have to know which engines can bundle.
+///
+/// Every row must supply the same columns; the first one decides the column list.
+/// Callers that build rows from one source (an abbreviation's template, a grid's
+/// selection) satisfy that by construction, and a row that quietly omitted a
+/// column would otherwise shift its neighbours' values one place along.
+pub fn insert_rows(model: &DmlModel, rows: &[DmlRow], scope: DialectScope) -> EmitResult {
+    let Some(first) = rows.first() else { return Ok(String::new()) };
+    if scope.dialect() != Some(EngineKind::Postgres) || rows.len() == 1 {
+        let each: Result<Vec<String>, &'static str> = rows
+            .iter()
+            .map(|row| statement_for(model, row, scope, DmlOperation::Insert))
+            .collect();
+        return Ok(each?.join("\n"));
+    }
+
+    let lc = model.lowercase_postgres;
+    let columns = model.supplied_columns(first);
+    let names = columns.iter().map(|c| ident(&c.name, scope, lc)).collect::<Vec<_>>().join(", ");
+    let tuples = rows
+        .iter()
+        .map(|row| {
+            let values = columns
+                .iter()
+                .map(|c| literal(row.get(&c.name).map(String::as_str), c, scope))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("       ({values})")
+        })
+        .collect::<Vec<_>>()
+        .join(",\n");
+    Ok(format!(
+        "INSERT INTO {} ({names})\nVALUES {};",
+        ident(&model.table, scope, lc),
+        tuples.trim_start()
+    ))
+}
+
+/// One `UPDATE`, with the columns to set and the columns to match given
+/// **separately**.
+///
+/// [`statement_for`] reads both out of one row and takes the key columns from the
+/// model, which makes one thing inexpressible: setting a column that is also part
+/// of the key. That is exactly what editing a primary key in a grid is, and it is
+/// legitimate — the `WHERE` has to carry the value the row had *before* the edit
+/// while the `SET` carries the new one, and a single map cannot hold both.
+///
+/// So the two arrive apart. `keys` is matched on, `set` is written, and a column may
+/// appear in both.
+///
+/// Refuses an empty `keys`, for the reason [`NO_FILTER`] exists: an `UPDATE` with
+/// nothing to match on rewrites every row of the table.
+pub fn update_row(
+    model: &DmlModel,
+    set: &DmlRow,
+    keys: &DmlRow,
+    scope: DialectScope,
+) -> EmitResult {
+    if keys.is_empty() {
+        return Err(NO_FILTER);
+    }
+    if set.is_empty() {
+        return Err(NOTHING_TO_SET);
+    }
+    let lc = model.lowercase_postgres;
+    let described = |name: &str| model.columns.iter().find(|c| c.name == name);
+
+    // A column the model does not describe cannot be quoted correctly, and quoting
+    // it as text would be a guess written into somebody's database.
+    let clause = |name: &String, value: &Option<&String>| -> Result<String, &'static str> {
+        let column = described(name).ok_or(UNKNOWN_COLUMN)?;
+        Ok(format!(
+            "{} = {}",
+            ident(name, scope, lc),
+            literal(value.map(|v| v.as_str()), column, scope)
+        ))
+    };
+
+    let assignments: Vec<String> = set
+        .iter()
+        .map(|(name, value)| clause(name, &Some(value)))
+        .collect::<Result<_, _>>()?;
+    let filter: Vec<String> = keys
+        .iter()
+        .map(|(name, value)| clause(name, &Some(value)))
+        .collect::<Result<_, _>>()?;
+
+    Ok(format!(
+        "UPDATE {} SET {}\n WHERE {};",
+        ident(&model.table, scope, lc),
+        assignments.join(", "),
+        filter.join(" AND ")
+    ))
+}
+
 /// Emit one row the way `target` would — the ordinary entry point.
 ///
 /// Goes through `Target::operation_for`, so a caller cannot accidentally emit a
@@ -156,8 +256,9 @@ pub fn plain_statement(model: &DmlModel, row: &DmlRow, target: &Target) -> EmitR
 
 /// Kept byte-identical to `Target::refuses`' wording: the user may meet this
 /// refusal from the preview or from the write, and two spellings of one rule
-/// read as two rules.
-const PORTABLE_UPSERT: &str = "an upsert has no portable spelling: Oracle writes \
+/// read as two rules. Public for the same reason — the abbreviation expander
+/// refuses `m#` into a portable folder and must say it in these exact words.
+pub const PORTABLE_UPSERT: &str = "an upsert has no portable spelling: Oracle writes \
     `MERGE … USING DUAL` and PostgreSQL `INSERT … ON CONFLICT`. Write it into the dialect \
     folders, or use a plain INSERT here";
 
@@ -247,6 +348,17 @@ pub fn predicate_sql(
         }
     }
 }
+
+/// An `UPDATE` whose `SET` list is empty. Not harmful, but not a statement either
+/// — and a caller asking for it has lost track of what it collected.
+const NOTHING_TO_SET: &str = "this update has nothing to set";
+
+/// A column the model does not describe. Refused rather than quoted as text: the
+/// declared type is what decides quoting, and guessing it writes a wrong value
+/// into a real table.
+const UNKNOWN_COLUMN: &str =
+    "one of the columns is not part of this table as the connection reported it — reload the \
+     schema and try again";
 
 const INCOMPLETE_CONDITION: &str =
     "the WHERE has a condition that is not finished — every condition needs a column, and as \

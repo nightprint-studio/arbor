@@ -21,7 +21,10 @@
   }
   let { tool, onlaunch, onstop }: Props = $props();
 
-  const versions = $derived(tool.verMenu.map(v => ({ value: v, label: v })));
+  // `verMenu` entries are `{ v, active }`, not bare strings — the version string
+  // is `v`, and mapping the whole record in gave the Select an object where it
+  // wanted a value.
+  const versions = $derived(tool.verMenu.map(({ v }) => ({ value: v, label: v })));
 </script>
 
 <article class="pc" class:running={tool.isRunning} style="--pc:{tool.accent}">
@@ -48,7 +51,7 @@
     {/if}
     <div class="pc-ver">
       {#if versions.length > 1}
-        <Select value={tool.versionLabel} options={versions} size="sm" />
+        <Select value={tool.versionLabel} options={versions} narrow />
       {:else}
         <span class="pc-ver-label">{tool.versionLabel}</span>
       {/if}

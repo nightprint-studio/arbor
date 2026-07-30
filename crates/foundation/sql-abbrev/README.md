@@ -38,9 +38,15 @@ dialects. If this crate returned a `String`, Picus could not use it for two of i
 the second-best version of the feature would be the only one available.
 
 `render(&Statement, &RenderStyle)` is provided for hosts that have no emitter — Picus uses it for
-`s#` and `d#` and ignores it for the other two. `RenderStyle` covers keyword case, identifier case,
+`s#` and `d#` and ignores it for the rest. `RenderStyle` covers keyword case, identifier case,
 the quote character, the `INSERT` placeholder and an optional terminator, and **nothing about
 dialect**: a host that needs `SYSDATE`-versus-`now()` has an emitter and is not reading this.
+
+`m#`, `a#` and `fc#` are the three verbs whose *skeletons* the engines still spell differently — an
+upsert is `ON CONFLICT` on PostgreSQL and `MERGE … USING dual` on Oracle, and PL/pgSQL rejects the
+parentheses PL/SQL puts round a cursor's query. `render` writes the standard form for all three; a
+host with an engine overrides them (Picus does, in `abbrev_render.rs`), which is the same split as
+`i#`/`u#` under a different name.
 
 ## Refuse rather than guess
 
@@ -67,29 +73,47 @@ to write it.
 ## The grammar
 
 ```
-<verb> '#' <table> <chain>* <cols>? <preds>? <mult>?
+<verb> '#' <table> <chain>* <changes>* <cols>? <preds>? <mult>? <template>?
 
-<chain> ::= '>' <table> (':' <column>)?
-<cols>  ::= '(' name ('=' value)? (',' ...)* ')'
-<preds> ::= '[' name op value (',' ...)* ']'
-<mult>  ::= '*' digits
+<chain>    ::= '>' <table> (':' <column>)?
+<changes>  ::= ('+' | '~') name ':' type
+<cols>     ::= '(' name ('=' value)? (',' ...)* ')'
+<preds>    ::= '[' name op value (',' ...)* ']'
+<mult>     ::= '*' digits
+<template> ::= '{' value (',' ...)* '}'
 ```
 
-| Verb | Means | `>` chain | `(...)` | `[...]` | `*n` |
-|---|---|---|---|---|---|
-| `s` | SELECT | yes | column names, no values; `*` if absent | optional, any operator | — |
-| `i` | INSERT | — | names, value optional per column; **all columns** if absent | — | rows, 1..=1000 |
-| `u` | UPDATE | — | `name=value`, **required** | **required**, any operator | — |
-| `d` | DELETE | — | — | **required**, any operator | — |
+| Verb | Means | `>` chain | `(...)` | `[...]` | `*n` / `{…}` | `+`/`~` |
+|---|---|---|---|---|---|---|
+| `s` | SELECT | yes | column names, no values; `*` if absent | optional, any operator | — | — |
+| `i` | INSERT | — | names, value optional per column; **all columns** if absent | — | rows, 1..=1000 | — |
+| `u` | UPDATE | — | `name=value`, **required** | **required**, any operator | — | — |
+| `d` | DELETE | — | — | **required**, any operator | — | — |
+| `m` | upsert | — | the columns to write; **all** if absent | the **key columns**, no operators, required | — | — |
+| `a` | ALTER TABLE | — | — | — | — | **required** |
+| `fc` | cursor loop | yes | as `s#` | as `s#` | — | — |
 
 Operators: `=`, `!=` / `<>`, `<`, `<=`, `>`, `>=`, and `~` for `LIKE`. `>` is only a chain arrow
 outside `[...]` and only an operator inside it, which is why the chain is parsed before the
-brackets are ever opened.
+brackets are ever opened. `~` is only ever the `LIKE` operator *inside* `[...]` and only ever a
+column change outside it, for the same reason and by the same means.
 
-`i#t(a='x',b)` mixes a value and a placeholder on purpose — `InsertColumn::value` is an `Option`, so
-"no value given" and "given, and empty" are different answers. With `*n`, **every row carries the
-same values**; that sounds like a bug and is not, it is what a seed-data user types before editing
-the rows apart.
+`m#`'s brackets are the one place `[...]` does not hold conditions. They name the columns that decide
+whether the row is already there, and writing an operator in them (`m#t[id=1]`) is refused rather
+than reinterpreted. The columns that are *not* in the key are what a matched row updates, so a merge
+whose key covers every column is refused too — that is an `INSERT` with extra words.
+
+`i#t(a='x',b)` mixes a value and a placeholder on purpose — a row's cell is an `Option`, so "no value
+given" and "given, and empty" are different answers. With `*n` and no template, **every row carries
+the same values**; that sounds like a bug and is not, it is what a seed-data user types before
+editing the rows apart.
+
+A `{…}` template is what makes them differ. `i#ordini(id,codice)*3{$, 'COD_$'}` writes three rows
+with `$` replaced by the row's number — Emmet's numbering, because that is where the `*3{…}` shape
+comes from: `$$$` pads to three digits, `$@5` starts at five, `$@-` counts down, `\$` is a literal
+dollar (which Oracle-era names and ordinary text both contain). A template whose length does not
+match the column list is **refused**, because the alternative is valid SQL with the values in the
+wrong columns.
 
 An `UPDATE`'s `[...]` takes **any** operator. "The `WHERE` must be a key equality" is a fact about
 one host's model — Picus's `DmlModel` — and belongs to that host, not to the language: it refuses
@@ -129,8 +153,12 @@ Limits worth meeting here rather than in an error message:
 - **No schema-qualified table names.** `SchemaView` is a flat list, so `public.localstrings` is a
   syntax error. Accepted as a limit — a host visible on several schemas folds the qualifier away
   before building the view, which is what Picus does everywhere else already.
-- **No dialect, anywhere.** No `SYSDATE`-versus-`now()`, no upsert, no engine-specific quoting.
-  Identifiers and values come out as the schema and the user spelled them.
+- **No dialect, anywhere.** No `SYSDATE`-versus-`now()`, no engine-specific quoting, and no opinion
+  about whether `number(12,2)` is spelled `NUMBER` or `numeric` — an `a#`'s type reaches the host
+  exactly as it was typed. Identifiers and values come out as the schema and the user spelled them.
+- **No `a#` beyond adding and retyping a column.** No drop, no rename, no constraint, no index. Those
+  are not abbreviations of anything: they are one line each, they are destructive or slow or both,
+  and a four-character way to write `DROP COLUMN` is a feature nobody asked for.
 - **The keyword list is closed**, so a function call that is not on it is *quoted* against a text
   column rather than passed through — `to_date(…)` into a `varchar` comes out as a string literal.
   It is the safe direction and it is visible in the preview; deciding whether something "looks like"
@@ -166,6 +194,7 @@ keystroke. That is the one performance note this crate has.
 | `parse` | the one parser — tolerant, never fails, spans everywhere |
 | `resolve` | names → schema entries, alias generation, the near-miss suggestion |
 | `join` | `>` → a foreign key, and the two refusals when it cannot be one |
+| `numbering` | `$` inside a `{…}` template — padding, offset, direction, escape |
 | `expand` | parsed + schema → `Statement` |
 | `statement` | the resolved intent, and `Value::needs_quotes` — the question the crate exists to answer |
 | `render` | the default renderer, for hosts without an emitter |

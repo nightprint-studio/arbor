@@ -26,8 +26,13 @@
 //! it is the only reason for it.
 #![allow(non_snake_case)]
 
+use picus_ast::prelude::DialectScope;
 use picus_core::prelude::PicusState;
-use picus_db_api::prelude::{ExecuteResult, ResultCount, ResultWindow, DEFAULT_WINDOW_ROWS};
+use picus_db_api::prelude::{
+    CellValue, ExecuteResult, ResultCount, ResultWindow, DEFAULT_WINDOW_ROWS,
+};
+use picus_emit::prelude::{ident, literal};
+use serde::Serialize;
 
 use crate::connections::require_session;
 
@@ -175,3 +180,135 @@ async fn picus_cancel(state: &PicusState, id: String) -> Result<(), String> {
     let Some(session) = state.sessions().get(&id) else { return Ok(()) };
     session.cancel().await.map_err(|e| e.to_string())
 }
+
+// ── Large objects, read one at a time ────────────────────────────────────────
+
+/// The largest value read into the interface at once.
+///
+/// A cap and not a preference: a 900 MB blob is a legitimate thing to have in a
+/// column and an illegitimate thing to put in a webview. Past this the value is
+/// truncated and **says so**, so the panel never claims to be showing all of it.
+const LOB_LIMIT: u64 = 4 * 1024 * 1024;
+
+/// One large object, read on demand.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LobValue {
+    /// The whole value's size in bytes, which may exceed what came back.
+    pub bytes: u64,
+    /// Set when the column holds text — the value itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Set when the column holds bytes — the value, base64-encoded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base64: Option<String>,
+    /// The value was longer than [`LOB_LIMIT`] and only its beginning is here.
+    pub truncated: bool,
+}
+
+/// Read one large object: the value a masked cell stands for.
+///
+/// The counterpart of the masking a relation read applies. Two things make it safe
+/// to do at all:
+///
+/// * **it is one value.** The row is addressed by its key, so exactly the cell the
+///   user clicked is fetched — not a column, and not a window;
+/// * **it is capped.** Past [`LOB_LIMIT`] the answer is truncated and marked, so
+///   clicking a cell can never be the thing that fills the window's memory.
+///
+/// Binary comes back base64-encoded rather than as hex or as raw bytes: it crosses a
+/// JSON seam, it has to survive being a string, and base64 is a third smaller than
+/// hex for a value that is measured in megabytes.
+#[arbor_rpc::handler]
+async fn picus_read_lob(
+    state: &PicusState,
+    id: String,
+    table: String,
+    keys: std::collections::BTreeMap<String, Option<String>>,
+    column: String,
+) -> Result<LobValue, String> {
+    if keys.is_empty() {
+        return Err(NO_KEY_FOR_LOB.to_string());
+    }
+    let spec = crate::connections::find_spec(&id)?;
+    let session = require_session(state, &id)?;
+    let schema =
+        state.schemas().get(&id).ok_or("the schema of this connection has not been read yet")?;
+    let info = schema
+        .tables
+        .iter()
+        .chain(schema.views.iter())
+        .find(|t| t.name.eq_ignore_ascii_case(&table))
+        .ok_or_else(|| format!("{table} is not a relation on this connection"))?;
+
+    let described = |name: &str| {
+        info.columns
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(name))
+            .cloned()
+            .ok_or_else(|| format!("{} has no column {name}", info.name))
+    };
+    let target = described(&column)?;
+    let textual = matches!(
+        target.data_type.trim().to_ascii_lowercase().as_str(),
+        "clob" | "nclob" | "text" | "xml"
+    );
+
+    let scope = DialectScope::One(spec.engine);
+    let id_of = |name: &str| ident(name, scope, false);
+    let filter = keys
+        .iter()
+        .map(|(name, value)| {
+            let col = described(name)?;
+            Ok(format!("{} = {}", id_of(name), literal(value.as_deref(), &col, scope)))
+        })
+        .collect::<Result<Vec<_>, String>>()?
+        .join(" AND ");
+
+    // `octet_length` on the value itself, and the *encoded* slice beside it: the
+    // size reported is the whole value's, so a truncated read still says how much
+    // there is rather than how much arrived.
+    let projection = if textual {
+        format!(
+            "octet_length({c}) AS \"n\", substr({c}, 1, {LOB_LIMIT}) AS \"v\"",
+            c = id_of(&column)
+        )
+    } else {
+        format!(
+            "octet_length({c}) AS \"n\", encode(substr({c}, 1, {LOB_LIMIT}), 'base64') AS \"v\"",
+            c = id_of(&column)
+        )
+    };
+    let sql = format!("SELECT {projection} FROM {} WHERE {filter}", id_of(&info.name));
+
+    let result = session.execute(&sql, 1).await.map_err(|e| e.to_string())?;
+    // A read goes down the cursor path like any other, so this one-row lookup left a
+    // held result behind — up to `LOB_LIMIT` of tuplestore on the server, per cell
+    // opened, until the idle sweep got to it. Nothing is going to scroll a single
+    // value, so it is released now.
+    if let Some(held) = &result.result_id {
+        let _ = session.close_result(held).await;
+    }
+    let row = result.rows.first().ok_or(LOB_ROW_GONE)?;
+    let cell = |at: usize| match row.get(at) {
+        Some(CellValue::Text(text)) => Some(text.clone()),
+        Some(CellValue::Int(n)) => Some(n.to_string()),
+        Some(CellValue::Float(n)) => Some(n.to_string()),
+        _ => None,
+    };
+    let bytes = cell(0).and_then(|n| n.parse::<u64>().ok()).unwrap_or(0);
+    let value = cell(1);
+
+    Ok(LobValue {
+        bytes,
+        truncated: bytes > LOB_LIMIT,
+        text: textual.then_some(value.clone()).flatten(),
+        base64: (!textual).then_some(value).flatten(),
+    })
+}
+
+const NO_KEY_FOR_LOB: &str = "there is no key to read this value by — a large object is fetched \
+    one row at a time, and that needs something that identifies the row";
+
+const LOB_ROW_GONE: &str = "that row is no longer there. Re-run the query to see the current \
+    state of the table.";

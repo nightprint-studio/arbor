@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::span::{Slot, Span};
 
-/// The four verbs.
+/// The verbs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Verb {
@@ -18,19 +18,41 @@ pub enum Verb {
     Insert,
     Update,
     Delete,
+    /// `m#` — one row, inserted or updated depending on whether the key is there.
+    Merge,
+    /// `a#` — a column added to or retyped on an existing table.
+    Alter,
+    /// `fc#` — a `SELECT` with a procedural loop wrapped around it.
+    ForCursor,
 }
 
 impl Verb {
     /// Every verb, in the order a completion list should offer them.
-    pub const ALL: &'static [Verb] = &[Verb::Select, Verb::Insert, Verb::Update, Verb::Delete];
+    ///
+    /// The four that write rows first, because they are what the language is for;
+    /// the three that shape or iterate follow.
+    pub const ALL: &'static [Verb] = &[
+        Verb::Select,
+        Verb::Insert,
+        Verb::Update,
+        Verb::Delete,
+        Verb::Merge,
+        Verb::Alter,
+        Verb::ForCursor,
+    ];
 
-    /// The one-letter form, which is the point of the whole language.
+    /// The short form, which is the point of the whole language.
     pub fn marker(self) -> &'static str {
         match self {
             Verb::Select => "s",
             Verb::Insert => "i",
             Verb::Update => "u",
             Verb::Delete => "d",
+            Verb::Merge => "m",
+            Verb::Alter => "a",
+            // Two letters, because `f` alone reads as nothing in particular and
+            // this is the only construct in the language that is a *block*.
+            Verb::ForCursor => "fc",
         }
     }
 
@@ -41,22 +63,49 @@ impl Verb {
             Verb::Insert => "INSERT",
             Verb::Update => "UPDATE",
             Verb::Delete => "DELETE",
+            Verb::Merge => "MERGE",
+            Verb::Alter => "ALTER",
+            Verb::ForCursor => "FOR",
         }
     }
 
-    /// The letter, or the whole word spelled out.
+    /// What the verb is called when a sentence needs to name it — the keyword for
+    /// most, something readable for the one whose keyword is a preposition.
+    pub fn describe(self) -> &'static str {
+        match self {
+            Verb::ForCursor => "FOR loop",
+            other => other.keyword(),
+        }
+    }
+
+    /// The marker, the whole word, or a familiar synonym.
     ///
     /// The word is accepted as well as the letter because a user who has just met
     /// the feature types `select#…` before they trust `s#…`, and refusing that
-    /// teaches them nothing. It is never *produced* — the letter is the language.
+    /// teaches them nothing. It is never *produced* — the marker is the language.
     pub fn from_word(word: &str) -> Option<Verb> {
         let lower = word.trim().to_ascii_lowercase();
+        if let Some((_, verb)) = SYNONYMS.iter().find(|(w, _)| *w == lower) {
+            return Some(*verb);
+        }
         Verb::ALL
             .iter()
             .copied()
             .find(|v| lower == v.marker() || lower == v.keyword().to_ascii_lowercase())
     }
 }
+
+/// Words that mean a verb without being its marker or its keyword.
+///
+/// `upsert` is here because it is what most people call the thing, and `for` /
+/// `loop` because `FOR` alone is not a statement anybody would search for.
+const SYNONYMS: &[(&str, Verb)] = &[
+    ("upsert", Verb::Merge),
+    ("alter", Verb::Alter),
+    ("for", Verb::ForCursor),
+    ("loop", Verb::ForCursor),
+    ("forcursor", Verb::ForCursor),
+];
 
 /// A comma-separated list between brackets, however far the user has got with it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,6 +174,37 @@ pub struct PredItem {
     pub value: RawValue,
 }
 
+/// Adding a column, or retyping one that is already there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ChangeKind {
+    /// `+name:type`
+    Add,
+    /// `~name:type`
+    Modify,
+}
+
+impl ChangeKind {
+    pub fn symbol(self) -> char {
+        match self {
+            ChangeKind::Add => '+',
+            ChangeKind::Modify => '~',
+        }
+    }
+}
+
+/// One `+name:type` or `~name:type` of an `a#`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeItem {
+    /// Offset of the `+` or `~`.
+    pub at: usize,
+    pub kind: ChangeKind,
+    pub column: Slot,
+    /// Everything after the `:`, as typed. `None` while the user has not typed the
+    /// `:` yet — which is most of the time they spend on this line.
+    pub data_type: Option<Slot>,
+}
+
 /// Where the input stopped making sense, and what was there.
 ///
 /// One per parse. The parser stops describing structure at the first thing it
@@ -145,10 +225,15 @@ pub struct Parsed {
     pub hash: Option<usize>,
     pub table: Slot,
     pub chain: Vec<ChainLink>,
+    /// The `+col:type` / `~col:type` list of an `a#`.
+    pub changes: Vec<ChangeItem>,
     pub cols: Option<Block<ColItem>>,
     pub preds: Option<Block<PredItem>>,
     /// The digits after `*`.
     pub mult: Option<Slot>,
+    /// The `{…}` row template: one value per column, with `$` standing for the
+    /// row number. What turns `*3` from three identical rows into three rows.
+    pub template: Option<Block<RawValue>>,
     pub error: Option<SyntaxError>,
 }
 

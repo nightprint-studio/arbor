@@ -64,7 +64,22 @@ function createTabsStore() {
     get active() { return active; },
     get activeKind(): TabKind | null { return active?.kind ?? null; },
 
-    /** The connection the active tab runs against, falling back to the window's. */
+    /**
+     * The connection a tab runs against — its own binding, falling back to the
+     * window's current one.
+     *
+     * **The one answer to that question**, and it has to be, because the fallback
+     * is the interesting half: a tab whose binding does not resolve still runs, and
+     * it runs against the window's connection. Anything that resolved
+     * `tab.connectionId` on its own would describe a different database than the
+     * statement was sent to — which is how a panel came to report "this connection
+     * is read-only" about a connection that was not being used.
+     */
+    connectionOf(tab: PicusTab | null | undefined) {
+      return connectionsStore.byId(tab?.connectionId) ?? connectionsStore.active;
+    },
+
+    /** The connection the active tab runs against. */
     get activeConnection() {
       return connectionsStore.byId(active?.connectionId) ?? connectionsStore.active;
     },
@@ -148,6 +163,41 @@ function createTabsStore() {
         title: `query_${querySeq}.sql`,
         connectionId: conn?.id,
         dialect: conn?.dialect,
+      });
+    },
+
+    /**
+     * Re-open a query tab from the saved scratchpad, keeping its id and title.
+     *
+     * Separate from {@link openQuery} because it must **not** number a new tab: the
+     * id is the key the buffer was saved under, and renaming `query_7.sql` to
+     * `query_1.sql` on every launch would make the titles meaningless. The sequence
+     * is advanced past whatever was restored so the next new tab does not collide.
+     */
+    /**
+     * Re-open a tab from the last session.
+     *
+     * The connection id is taken **as given**, and deliberately not looked up
+     * first. Restoring runs at window mount, alongside the read that fills the
+     * connection list rather than after it — so a lookup here answers "there is no
+     * such connection" for every tab, every time, and each one comes back bound to
+     * nothing. The tab then runs against whatever connection happens to be active
+     * while the panel beside it describes none, which is how a restored tab came
+     * back read-only.
+     *
+     * A binding is data. Resolving it to a live connection is a view's job, and
+     * {@link activeConnection} does it on every read — by which time the list has
+     * arrived. Nothing here needs to be ordered against anything.
+     */
+    reopenQuery(id: string, title: string, connectionId?: string) {
+      const numbered = /^query:(\d+)$/.exec(id);
+      if (numbered) querySeq = Math.max(querySeq, Number(numbered[1]));
+      open({
+        id,
+        kind: 'query',
+        title,
+        connectionId: connectionId || undefined,
+        dialect: connectionsStore.byId(connectionId)?.dialect,
       });
     },
 

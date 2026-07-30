@@ -17,7 +17,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::schema::ValueKind;
-use crate::syntax::Verb;
+use crate::syntax::{ChangeKind, Verb};
 
 /// One table in a `FROM`/`JOIN` list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -215,20 +215,31 @@ pub struct Assignment {
     pub value: Value,
 }
 
-/// One column of an `INSERT`, and the value for it if the user gave one.
-///
-/// A struct rather than two parallel `Vec`s, so "these two lists are the same
-/// length and line up" is not an invariant anybody can break.
+/// One row of an `INSERT`, aligned to the statement's column list.
 ///
 /// `None` is a real answer and is **not** the same as `Some(Value::Quoted(""))`:
 /// the first means the host should write its placeholder there, the second means
 /// the user asked for an empty string. `i#t(a='x',b)` produces one of each, in
 /// that order, and mixing them is allowed on purpose.
+///
+/// A `Vec` aligned to `columns` rather than a map: the two are written together,
+/// read together, and an `INSERT` whose values do not line up with its columns is
+/// not a thing that should be representable.
+pub type InsertRow = Vec<Option<Value>>;
+
+/// One column of an `ALTER TABLE`, and what it is to become.
+///
+/// The type is **as the user typed it** — this crate has no dialect, so it has no
+/// opinion about whether `number(12,2)` is spelled `NUMBER` or `numeric`. A host
+/// with an engine translates it; a host without one writes it through.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InsertColumn {
-    pub column: ColumnRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub value: Option<Value>,
+#[serde(rename_all = "camelCase")]
+pub struct ColumnChange {
+    pub kind: ChangeKind,
+    /// Canonical spelling for a `Modify` — the schema's own. As typed for an
+    /// `Add`, which by definition names something the schema has never heard of.
+    pub column: String,
+    pub data_type: String,
 }
 
 /// What the abbreviation meant.
@@ -243,17 +254,16 @@ pub enum Statement {
         columns: Vec<ColumnRef>,
         predicates: Vec<Predicate>,
     },
-    /// Columns, the values given for them, and how many rows of them.
+    /// Columns, and one entry per row of values for them.
     ///
-    /// A column with no value is the host's placeholder. `rows` is a count and
-    /// **every row is a copy of the same values** — which sounds like a bug and is
-    /// not: `i#t(tipo='X')*3` is what a seed-data user types before editing the
-    /// three rows apart, and the alternative (three rows of placeholders with one
-    /// column pre-filled) is the same thing with more typing.
+    /// A cell with no value is the host's placeholder. `*3` alone gives three
+    /// **identical** rows — which sounds like a bug and is not: `i#t(tipo='X')*3`
+    /// is what a seed-data user types before editing the three apart. A `{…}`
+    /// template is what makes them differ, by putting the row's number in them.
     Insert {
         table: String,
-        columns: Vec<InsertColumn>,
-        rows: usize,
+        columns: Vec<ColumnRef>,
+        rows: Vec<InsertRow>,
     },
     /// `predicates` may use **any** operator this crate supports, not only
     /// equality.
@@ -272,6 +282,34 @@ pub enum Statement {
         table: String,
         predicates: Vec<Predicate>,
     },
+    /// One row, inserted if the key is not there and updated if it is.
+    ///
+    /// No values: a merge written in nine characters is a **skeleton**, and the
+    /// host fills the parameters. `keys` is the conflict target and is guaranteed
+    /// to be a non-empty subset of `columns`; `columns` minus `keys` is what gets
+    /// updated, and is guaranteed non-empty too — a merge on every column has
+    /// nothing to update and is an insert with extra words.
+    Merge {
+        table: String,
+        columns: Vec<ColumnRef>,
+        keys: Vec<ColumnRef>,
+    },
+    /// Columns added to, or retyped on, a table that already exists.
+    Alter {
+        table: String,
+        changes: Vec<ColumnChange>,
+    },
+    /// A `SELECT` with a procedural loop wrapped round it.
+    ///
+    /// The query is a whole [`Statement::Select`] rather than a flattened copy of
+    /// its parts, so `fc#ordini>clienti[evaso=false]` gets the joins, the column
+    /// list and the `WHERE` from the one implementation that already resolves
+    /// them. A loop over a query is a query, wrapped.
+    ForCursor {
+        /// The loop variable. `r` unless the abbreviation named one.
+        variable: String,
+        query: Box<Statement>,
+    },
 }
 
 impl Statement {
@@ -281,6 +319,9 @@ impl Statement {
             Statement::Insert { .. } => Verb::Insert,
             Statement::Update { .. } => Verb::Update,
             Statement::Delete { .. } => Verb::Delete,
+            Statement::Merge { .. } => Verb::Merge,
+            Statement::Alter { .. } => Verb::Alter,
+            Statement::ForCursor { .. } => Verb::ForCursor,
         }
     }
 
@@ -292,7 +333,10 @@ impl Statement {
             }
             Statement::Insert { table, .. }
             | Statement::Update { table, .. }
-            | Statement::Delete { table, .. } => vec![table.as_str()],
+            | Statement::Delete { table, .. }
+            | Statement::Merge { table, .. }
+            | Statement::Alter { table, .. } => vec![table.as_str()],
+            Statement::ForCursor { query, .. } => query.tables(),
         }
     }
 }

@@ -109,6 +109,47 @@ async fn picus_connect(state: &PicusState, id: String) -> Result<ConnectionStatu
     Ok(status)
 }
 
+/// Abandon a session and open a new one — the way out of a connection that has
+/// stopped answering.
+///
+/// ## Why this is not just `picus_connect`
+///
+/// A session is one database connection. When a statement on it will not stop —
+/// PostgreSQL refuses a cancel while it is inside an uninterruptible wait, and a
+/// wedged index page is exactly that — then *everything* on that connection queues
+/// behind it: the next query, the `CLOSE` of the result the user is looking at, and
+/// the polite close that reconnecting would begin with. Which is to say the ordinary
+/// reconnect needs the connection to be working, and the moment you want it is the
+/// moment it is not.
+///
+/// So this one **drops** the old session rather than closing it. No SQL is sent to a
+/// connection that has already proved it will not answer; the reference is released,
+/// the socket goes with it, and a fresh connection is opened alongside.
+///
+/// What it cannot do is stated rather than implied: if the server is still executing
+/// the old statement, it goes on doing so until it finishes or the backend is ended
+/// from outside. Picus is usable again; the server's own housekeeping is the server's.
+#[arbor_rpc::handler]
+async fn picus_reset_connection(state: &PicusState, id: String) -> Result<ConnectionStatus, String> {
+    // Dropped, deliberately, without `close()` — see above.
+    drop(state.sessions().remove(&id));
+
+    let spec = find_spec(&id)?;
+    let provider = state.providers().require(spec.engine).map_err(|e| e.to_string())?;
+    let secret =
+        HostSecrets::new(state.host_caller()).secret(&spec.id).map_err(|e| e.to_string())?;
+
+    let session = provider.connect(&spec, secret).await.map_err(|e| e.to_string())?;
+    let session: Arc<dyn picus_db_api::prelude::DbSession> = Arc::from(session);
+    // Anything the pool picked up meanwhile is dropped the same way, for the same
+    // reason.
+    drop(state.sessions().insert(&spec.id, Arc::clone(&session)));
+
+    let status = session.status().await;
+    state.emit("picus://connection-changed", serde_json::json!({ "id": spec.id }));
+    Ok(status)
+}
+
 /// Close a session. Idempotent: disconnecting something already disconnected is a
 /// no-op, not an error.
 #[arbor_rpc::handler]

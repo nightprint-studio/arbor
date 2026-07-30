@@ -122,6 +122,98 @@ impl PgSession {
     }
 }
 
+/// The statement as it will be read, which of its columns were left out of it, and
+/// the types the reply should be mapped with.
+///
+/// ## Why this is driven by the server's description and not by the SQL
+///
+/// The columns come from the `prepare` that already happens to type them, so this
+/// knows a result carries a `bytea` whatever shape the statement had — a join, a
+/// union, a CTE, a column named explicitly. An earlier version recognised only
+/// `SELECT * FROM <one table>` and asked the catalogue about it, which meant
+/// `SELECT allegato FROM archivio` still dragged every byte across.
+///
+/// ## Nothing is masked that cannot be described
+///
+/// Two refusals, and both are about the wrapper being able to name a column: a
+/// result with a **duplicate** column name would make the reference ambiguous, and
+/// one with an empty name cannot be referenced at all. Either way the statement is
+/// left alone rather than rewritten into something that fails.
+fn mask_large_objects(
+    body: &str,
+    types: Option<Vec<(String, Type)>>,
+) -> (String, Vec<String>, Option<Vec<(String, Type)>>) {
+    let plain = || (body.to_string(), Vec::new(), types.clone());
+    let Some(described) = &types else { return plain() };
+
+    let heavy: Vec<String> = described
+        .iter()
+        .filter(|(_, ty)| cursor::is_large_object(ty.name()))
+        .map(|(name, _)| name.clone())
+        .collect();
+    if heavy.is_empty() {
+        return plain();
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    if described.iter().any(|(name, _)| name.is_empty() || !seen.insert(name.clone())) {
+        return plain();
+    }
+
+    let columns: Vec<(String, bool)> =
+        described.iter().map(|(name, _)| (name.clone(), heavy.contains(name))).collect();
+    // The masked columns come back as sizes, so the reply has to be mapped as
+    // numbers — otherwise the grid right-aligns everything else and leaves the one
+    // column that is now a number sitting on the left.
+    let retyped: Vec<(String, Type)> = described
+        .iter()
+        .map(|(name, ty)| {
+            let ty = if heavy.contains(name) { Type::INT4 } else { ty.clone() };
+            (name.clone(), ty)
+        })
+        .collect();
+
+    (cursor::masked_source(body, &columns), heavy, Some(retyped))
+}
+
+/// How long a session may spend releasing what it holds before it is closed anyway.
+///
+/// Short on purpose: this runs on the path out of trouble, and a user waiting to be
+/// let out of a wedged connection is not in the mood to wait for tidiness.
+const CLOSING_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// How long one catalogue query may take before the studio gives up on it.
+///
+/// Generous — a large catalogue on a loaded server is legitimately slow, and this
+/// must never fire on a schema that is merely big.
+const CATALOGUE_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// A catalogue read that cannot take forever.
+///
+/// **Only** the reads Picus issues on its own. A statement the user typed is never
+/// bounded — a report that takes ten minutes is a report, and a tool that killed it
+/// would be worse than one that waits — but the schema read is different in kind:
+/// it is fired automatically the instant a connection opens, the interface has
+/// nothing to show until it lands, and there is no button to cancel it. Left
+/// unbounded it is the one call in the product that can look exactly like the
+/// application having stopped, which is what it did.
+///
+/// The query keeps running on the server; what ends here is the waiting.
+async fn bounded<T>(
+    what: &'static str,
+    read: impl std::future::Future<Output = DbResult<T>>,
+) -> DbResult<T> {
+    match tokio::time::timeout(CATALOGUE_LIMIT, read).await {
+        Ok(result) => result,
+        Err(_) => Err(DbError::Internal(format!(
+            "reading the {what} of this schema took more than {}s, so Picus stopped waiting. \
+             The connection is open — a very large catalogue, or a server under load, can do \
+             this; the object tree will be empty until it is re-read.",
+            CATALOGUE_LIMIT.as_secs()
+        ))),
+    }
+}
+
 // ── Held results ───────────────────────────────────────────────────────────────
 
 impl PgSession {
@@ -134,8 +226,10 @@ impl PgSession {
     /// timer, because a background thread issuing SQL on a connection somebody else
     /// is using is a far worse hazard than a tuplestore living until disconnect.
     async fn sweep_idle(&self) {
-        for name in self.cursors.expired(Instant::now()) {
-            self.close_cursor(&name).await;
+        for handle in self.cursors.expired(Instant::now()) {
+            if handle.declared {
+                self.close_cursor(&handle.name).await;
+            }
         }
     }
 
@@ -160,7 +254,164 @@ impl PgSession {
         cursor::plan_row_estimate(&first_line)
     }
 
-    /// Declare a held cursor over `body` and return its first window.
+    /// Read the first window of a query, and register a result the rest of it can
+    /// be asked for through.
+    ///
+    /// ## Nothing is materialised to answer this
+    ///
+    /// The obvious implementation — declare the `WITH HOLD` cursor here — is the
+    /// one that made a table of scanned documents take minutes to show five
+    /// hundred rows, because `WITH HOLD` runs the query to completion and copies
+    /// **every** row into a tuplestore before it answers. The window the caller
+    /// asked for did not bound that in any way, which is the part that surprises
+    /// people: a row limit on the grid is not a row limit on the server.
+    ///
+    /// So the first window streams through a cursor without `HOLD`, and the
+    /// holdable one is declared only if somebody scrolls past it
+    /// ([`declared`](CursorHandle::declared)). Most results never do — and the ones
+    /// that do have a user watching rows on screen while it happens, rather than an
+    /// empty panel.
+    ///
+    /// ## The transaction must always be ended
+    ///
+    /// The streaming read is `BEGIN … COMMIT` in one string. If it fails part-way —
+    /// a statement the user got wrong, a projection the wrapper could not name —
+    /// PostgreSQL leaves the session **inside an aborted transaction block**, and
+    /// every later statement on that connection is refused until something ends it.
+    /// Nothing else on this connection would, so the failure path rolls back before
+    /// it does anything else. Without that, one bad query poisons the connection
+    /// until the user reconnects, which is indistinguishable from the application
+    /// having stopped working.
+    ///
+    /// ## What that costs, stated plainly
+    ///
+    /// The first window and the cursor are **two executions**. For a statement with
+    /// no `ORDER BY`, PostgreSQL is free to return rows in a different sequence the
+    /// second time, so a row shown in the first window may appear again — or not at
+    /// all — once scrolling crosses into the cursor's snapshot. Within the cursor
+    /// everything is stable, as before.
+    ///
+    /// That is a real weakening of the old guarantee and it is taken deliberately:
+    /// the guarantee only held for people who waited out the materialisation, and
+    /// on a large table nobody did.
+    async fn open_result(
+        &self,
+        body: &str,
+        window: u32,
+        seq: u64,
+        started: Instant,
+    ) -> DbResult<ExecuteResult> {
+        // The scrollbar's length, and the column types, before any rows. Both are
+        // planning-only round trips; a Cancel that landed during one has nothing to
+        // interrupt on the server, so it is honoured here.
+        let estimated_rows = self.estimated_rows(body).await;
+        let types = self.column_types(body).await;
+        self.check_cancelled(seq)?;
+
+        let window = window.max(1);
+        let probe = window.saturating_add(1);
+        // The statement as it will actually be read: the user's own, unless it
+        // carries large objects, in which case they stand for themselves.
+        // Ordering wins over masking. Masking means wrapping the statement in a
+        // subquery, and PostgreSQL does not have to hand a sub-select's rows on in
+        // the order it produced them — a parallel plan uses `Gather` rather than
+        // `Gather Merge` and interleaves them. A grid in the wrong order is a wrong
+        // answer; an ordered read that carries its large objects is a slow one, and
+        // the bound below is what keeps it merely slow.
+        let (source, masked_columns, types) = match cursor::orders_its_own_rows(body) {
+            true => (body.to_string(), Vec::new(), types),
+            false => mask_large_objects(body, types),
+        };
+
+        // The bound goes in the STATEMENT, not only in the `FETCH`. See
+        // `cursor::bounded_body`: without it an `ORDER BY` sorts the whole table to
+        // disk before returning a row, which is what made an ordered query look like
+        // it had hung while another client answered it in seconds.
+        //
+        // It bounds THIS read and nothing else. `source` — unbounded — is what the
+        // handle keeps, because the scrollable cursor and the exact count are about
+        // the whole result, and a `LIMIT 501` baked into either would quietly turn
+        // every result into five hundred rows.
+        let first_read = cursor::bounded_body(&source, probe).unwrap_or_else(|| source.clone());
+
+        // A generated name, never a fixed one: two of these can be in flight on one
+        // connection (a background count on one tab, a Run on another), and a
+        // `DECLARE` onto a name that already exists fails — which, before the
+        // rollback below, would then poison the connection.
+        let streaming = self.cursors.next_id();
+        let first = cursor::first_window_statements(&streaming, &first_read, probe);
+
+        let mut fetched = match self.run_simple(&first, types.as_deref(), probe).await {
+            Ok(fetched) => fetched,
+            Err(e) => {
+                // THE line that keeps one bad query from taking the connection with
+                // it. See the note above: without this the session sits in an
+                // aborted transaction block and refuses everything afterwards.
+                let _ = self.client.simple_query("ROLLBACK").await;
+                // On stderr rather than swallowed: this path is a fallback, so the
+                // user sees whatever the second attempt says, and the reason the
+                // first one was abandoned would otherwise be lost entirely.
+                eprintln!("picus: the streamed first window failed ({e}); using a held cursor");
+                // A statement the user got wrong lands here, and so does one the
+                // masking wrapper could not be applied to. The cursor path runs the
+                // body as they wrote it, so its error quotes their SQL rather than
+                // Picus's rewrite of it.
+                return self.open_cursor(body, window, seq, started).await;
+            }
+        };
+        self.check_cancelled(seq)?;
+
+        let end_of_result = fetched.rows.len() as u32 <= window;
+        fetched.rows.truncate(window as usize);
+
+        let id = self.cursors.next_id();
+        let handle = CursorHandle {
+            name: id.clone(),
+            types,
+            // The *effective* statement, not the one that was typed: a later window
+            // has to come back shaped the way the first one was, or the grid would
+            // suddenly start showing megabytes of hex in a column of sizes.
+            body: source,
+            declared: false,
+        };
+        for evicted in self.cursors.register(&id, handle, Instant::now()) {
+            if evicted.declared {
+                self.close_cursor(&evicted.name).await;
+            }
+        }
+
+        Ok(ExecuteResult {
+            result_id: Some(id),
+            columns: Some(fetched.columns),
+            row_count: fetched.rows.len(),
+            rows: fetched.rows,
+            estimated_rows,
+            // The exact figure is asked for separately: a `count` here would put a
+            // full walk of the result in front of the first row.
+            total_rows: None,
+            elapsed_ms: started.elapsed().as_millis() as u64,
+            end_of_result,
+            affected: None,
+            masked_columns,
+        })
+    }
+
+    /// Declare the `WITH HOLD` cursor over `body`, and return the handle to serve
+    /// windows with.
+    ///
+    /// THE expensive statement, and now the one that only runs when somebody has
+    /// asked for a row the first window did not contain.
+    async fn declare_now(&self, id: &str, handle: CursorHandle) -> DbResult<CursorHandle> {
+        self.client
+            .simple_query(&cursor::declare_cursor(&handle.name, &handle.body))
+            .await
+            .map_err(map_pg)?;
+        self.cursors.mark_declared(id);
+        Ok(CursorHandle { declared: true, ..handle })
+    }
+
+    /// Declare a held cursor over `body` and return its first window — the path for
+    /// a statement the wrapped `LIMIT` could not be applied to.
     async fn open_cursor(
         &self,
         body: &str,
@@ -170,21 +421,21 @@ impl PgSession {
     ) -> DbResult<ExecuteResult> {
         let estimated_rows = self.estimated_rows(body).await;
         let types = self.column_types(body).await;
-
-        // Those are round trips of their own; a Cancel that landed during one has
-        // nothing to interrupt on the server, so it is honoured here.
         self.check_cancelled(seq)?;
 
         let id = self.cursors.next_id();
-        // THE expensive statement. `WITH HOLD` means the server runs the query to
-        // completion and stores the whole result before this returns — see
-        // `crate::cursor` for why that price is the one worth paying. Everything
-        // after it is cheap, and everything after it must clean up if it fails.
         self.client.simple_query(&cursor::declare_cursor(&id, body)).await.map_err(map_pg)?;
 
-        let handle = CursorHandle { name: id.clone(), types: types.clone() };
+        let handle = CursorHandle {
+            name: id.clone(),
+            types: types.clone(),
+            body: body.to_string(),
+            declared: true,
+        };
         for evicted in self.cursors.register(&id, handle, Instant::now()) {
-            self.close_cursor(&evicted).await;
+            if evicted.declared {
+                self.close_cursor(&evicted.name).await;
+            }
         }
 
         // A cancel that arrived while the DECLARE was running is honoured here: the
@@ -203,12 +454,11 @@ impl PgSession {
                     row_count: fetched.rows.len(),
                     rows: fetched.rows,
                     estimated_rows,
-                    // The exact figure is asked for separately: a `count` here would
-                    // put a full walk of the result in front of the first row.
                     total_rows: None,
                     elapsed_ms: started.elapsed().as_millis() as u64,
                     end_of_result,
                     affected: None,
+                    masked_columns: Vec::new(),
                 })
             }
             Err(e) => {
@@ -216,8 +466,10 @@ impl PgSession {
                 // this whole module exists to prevent. Deregistered *before* the
                 // `CLOSE`, so a sweep running alongside cannot decide to close the
                 // same one twice.
-                if let Some(name) = self.cursors.remove(&id) {
-                    self.close_cursor(&name).await;
+                if let Some(gone) = self.cursors.remove(&id) {
+                    if gone.declared {
+                        self.close_cursor(&gone.name).await;
+                    }
                 }
                 Err(e)
             }
@@ -273,6 +525,7 @@ impl PgSession {
                 row_count: 0,
                 end_of_result: true,
                 affected: fetched.last_command_count,
+                masked_columns: Vec::new(),
             });
         }
 
@@ -293,6 +546,7 @@ impl PgSession {
             elapsed_ms,
             end_of_result,
             affected: None,
+            masked_columns: Vec::new(),
         })
     }
 }
@@ -315,12 +569,35 @@ impl DbSession for PgSession {
             message: String::new(),
         }
     }
-
     async fn read_schema(&self) -> DbResult<SchemaSnapshot> {
         let schema = self.schema();
-        let (tables, views) = catalog::read_relations(&self.client, schema).await?;
-        let sequences = catalog::read_sequences(&self.client, schema).await?;
-        let triggers = catalog::read_triggers(&self.client, schema).await?;
+        // Timed, per query, on stderr.
+        //
+        // Not for tuning: this is the one call in the product that can appear to
+        // hang, because it is issued automatically the moment a connection opens
+        // and the interface has nothing to show until it lands. When it is slow the
+        // only question worth answering is *which* of the three is slow, and having
+        // to add a print to find that out — on somebody else's database, which is
+        // the only place it happens — costs a round of "try this build".
+        let timed = |what: &'static str, began: Instant| {
+            let took = began.elapsed();
+            if took.as_millis() >= 500 {
+                eprintln!("picus: reading {what} of `{schema}` took {}ms", took.as_millis());
+            }
+        };
+
+        let at = Instant::now();
+        let (tables, views) = bounded("relations", catalog::read_relations(&self.client, schema)).await?;
+        timed("relations", at);
+
+        let at = Instant::now();
+        let sequences = bounded("sequences", catalog::read_sequences(&self.client, schema)).await?;
+        timed("sequences", at);
+
+        let at = Instant::now();
+        let triggers = bounded("triggers", catalog::read_triggers(&self.client, schema)).await?;
+        timed("triggers", at);
+
         Ok(SchemaSnapshot { tables, views, sequences, triggers })
     }
 
@@ -358,7 +635,7 @@ impl DbSession for PgSession {
         self.sweep_idle().await;
 
         match cursor::plan_execution(sql) {
-            ExecutionPlan::Cursor(body) => self.open_cursor(body, window, seq, started).await,
+            ExecutionPlan::Cursor(body) => self.open_result(body, window, seq, started).await,
             ExecutionPlan::Direct => self.run_direct(sql, window, seq, started).await,
         }
     }
@@ -368,9 +645,9 @@ impl DbSession for PgSession {
         // relation tab and a query tab must scroll identically, and the only thing
         // that differs is who wrote the SELECT. The quoting is the engine's, which
         // is the whole reason this is a method rather than a string the caller
-        // composes.
-        let sql = cursor::relation_query(self.schema(), relation);
-        self.execute(&sql, window).await
+        // composes — and, now that `execute` is where the masking lives, the only
+        // thing this method still contributes.
+        self.execute(&cursor::relation_query(self.schema(), relation), window).await
     }
 
     async fn result_window(
@@ -381,6 +658,12 @@ impl DbSession for PgSession {
     ) -> DbResult<ResultWindow> {
         self.sweep_idle().await;
         let handle = self.cursors.touch(result_id, Instant::now()).ok_or_else(unknown_result)?;
+        // The moment somebody asks for a row the first window did not hold is the
+        // moment the cursor is worth what it costs — and not one statement earlier.
+        let handle = match handle.declared {
+            true => handle,
+            false => self.declare_now(result_id, handle).await?,
+        };
         // Note the stored name, never `result_id`: nothing that arrived over the
         // wire is allowed to become an identifier in a statement.
         let (fetched, end_of_result) =
@@ -397,6 +680,33 @@ impl DbSession for PgSession {
         // records the ordinal, so a cancel landing between the rewind and the walk
         // is honoured rather than lost.
         let seq = self.begin_run();
+
+        // A result nobody has scrolled past is not a cursor yet, and counting it
+        // must not make it one: declaring would materialise every row — including
+        // every megabyte of every large object — to produce one number that does
+        // not need any of them. `count(*)` over the same statement reads no columns
+        // at all.
+        //
+        // It answers about a different execution than the rows on screen, which is
+        // exactly what makes it the wrong thing to do over a held cursor and the
+        // right thing here: there is no snapshot yet for it to disagree with, and
+        // the number it replaces is the planner's guess.
+        if !handle.declared {
+            let counted = self.run_simple(&cursor::count_query(&handle.body), None, 1).await?;
+            self.check_cancelled(seq)?;
+            let total = counted
+                .rows
+                .first()
+                .and_then(|row| row.first())
+                .and_then(|cell| match cell {
+                    CellValue::Int(n) => Some(*n),
+                    CellValue::Text(t) => t.parse().ok(),
+                    _ => None,
+                })
+                .unwrap_or(0);
+            return Ok(ResultCount { total });
+        }
+
         let fetched = self
             .run_simple(&cursor::count_statements(&handle.name), None, 0)
             .await?;
@@ -408,8 +718,12 @@ impl DbSession for PgSession {
     }
 
     async fn close_result(&self, result_id: &str) -> DbResult<()> {
-        if let Some(name) = self.cursors.remove(result_id) {
-            self.close_cursor(&name).await;
+        // Only a cursor that exists is closed: `CLOSE` on a name the server never
+        // heard of is an error, and most results never became one.
+        if let Some(gone) = self.cursors.remove(result_id) {
+            if gone.declared {
+                self.close_cursor(&gone.name).await;
+            }
         }
         // Closing something already gone is success: the caller wanted it gone.
         Ok(())
@@ -461,17 +775,43 @@ impl DbSession for PgSession {
         }
     }
 
+    /// Close the session, releasing what it holds — **and never taking longer than
+    /// [`CLOSING_LIMIT`] to do it**.
+    ///
+    /// The bound is the whole point. A `CLOSE` is SQL, and SQL on a connection that
+    /// is already stuck queues behind whatever is stuck on it. Without the bound,
+    /// closing a wedged connection hangs, and so does everything built on closing
+    /// one: disconnecting, reconnecting, and the reset that exists precisely to
+    /// rescue a user from this state. The cure would need the disease to be over.
+    ///
+    /// What is lost by giving up is a tuplestore the server reclaims when the socket
+    /// dies anyway. What is gained is that the user can always get out.
     async fn close(&self) -> DbResult<()> {
         // Flagged first so `status()` stops claiming health while the closes run —
         // and in its own scope, because a lock guard must never cross an `await`.
         {
             *self.closed.lock().unwrap_or_else(|p| p.into_inner()) = true;
         }
-        // The connection dying would release these anyway; doing it explicitly means
-        // the server reclaims the storage now rather than whenever this process's
-        // socket is finally noticed.
-        for name in self.cursors.drain() {
-            self.close_cursor(&name).await;
+        // Deregistered before anything is sent, so giving up below cannot leave a
+        // handle behind that a later sweep would try to close a second time.
+        let held: Vec<String> =
+            self.cursors.drain().into_iter().filter(|h| h.declared).map(|h| h.name).collect();
+        if held.is_empty() {
+            return Ok(());
+        }
+
+        let closing = async {
+            for name in &held {
+                self.close_cursor(name).await;
+            }
+        };
+        if tokio::time::timeout(CLOSING_LIMIT, closing).await.is_err() {
+            eprintln!(
+                "picus: this connection did not answer a CLOSE within {}s, so {} held \
+                 result(s) were abandoned — the server releases them when the socket goes",
+                CLOSING_LIMIT.as_secs(),
+                held.len(),
+            );
         }
         Ok(())
     }

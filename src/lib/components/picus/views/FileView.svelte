@@ -15,7 +15,7 @@
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import CodeEditor from '$lib/components/shared/ui/code-editor/CodeEditor.svelte';
-  import AstBridge from '../AstBridge.svelte';
+  import DocumentBridge from '../DocumentBridge.svelte';
   import { astStore } from '$lib/stores/picus/ast.svelte';
   import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
   import PicusDialectChip from '../PicusDialectChip.svelte';
@@ -25,6 +25,8 @@
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
+  import { picusEditorStore, type PicusEditorHandle } from '$lib/stores/picus/editor.svelte';
+  import { openObjectNamed } from '../goto-object';
   import { isDialect, type PicusTab } from '$lib/types/picus';
 
   interface Props {
@@ -102,18 +104,45 @@
    */
   // Structural, matching Bennu's `EditorController`: the shared editor's
   // imperative surface is what a host binds to, not the component's whole type.
-  let editor = $state<{
-    scrollToLineCol: (line: number, col?: number) => void;
-    selectByteRange: (startByte: number, endByte: number) => void;
-    caretByteOffset: () => number;
-    getValue: () => string;
-  } | null>(null);
+  let editor = $state<
+    | ({
+        scrollToLineCol: (line: number, col?: number) => void;
+        caretByteOffset: () => number;
+      } & PicusEditorHandle)
+    | null
+  >(null);
   $effect(() => {
     const line = tab.revealLine;
     const nonce = tab.revealNonce;
     void nonce;
     if (!line || !editor || !buffer) return;
     editor.scrollToLineCol(line);
+  });
+
+  /**
+   * Let the window's commands reach this editor — find and replace, go to a
+   * table's structure, replace one match.
+   *
+   * The same registration a query tab makes. Both are "the document in front", and
+   * a binding that worked in one and not the other would be a bug the user meets
+   * by switching tabs.
+   */
+  $effect(() => {
+    const id = tab.id;
+    const held = editor;
+    if (!held) return;
+    picusEditorStore.bind(id, {
+      focus: () => held.focus(),
+      openSearch: () => held.openSearch(),
+      getValue: () => held.getValue(),
+      selectionRange: () => held.selectionRange(),
+      selectRange: (from, to) => held.selectRange(from, to),
+      selectByteRange: (a, b) => held.selectByteRange(a, b),
+      replaceByteRange: (a, b, text) => held.replaceByteRange(a, b, text),
+      replaceByteRanges: (edits) => held.replaceByteRanges(edits),
+      wordAtCaret: () => held.wordAtCaret(),
+    });
+    return () => picusEditorStore.bind(id, null);
   });
 
   /** Which source decided this file's encoding — never leave the guess silent. */
@@ -184,11 +213,12 @@
           {diagnostics}
           oninput={(v) => { edited = v; picusTabsStore.markDirty(tab.id, true); }}
           oncaret={() => { if (editor) void astStore.revealAt(editor.caretByteOffset()); }}
+          onGoto={(word) => openObjectNamed(word, connectionsStore.activeId)}
         />
       {/key}
-      <!-- Keeps the syntax-tree panel describing THIS buffer, and turns a click in
-           it into a selection here. -->
-      <AstBridge {editor} text={edited ?? buffer ?? ''} />
+      <!-- Keeps the right-hand tools describing THIS buffer, and turns a click in
+           one of them into a selection here. -->
+      <DocumentBridge {editor} text={edited ?? buffer ?? ''} />
     </div>
   </div>
 {/if}

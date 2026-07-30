@@ -78,7 +78,7 @@
                  leads anyone to expect. Both are said. -->
             <th scope="col" class="im-slot-th">
               <span class="im-slot">
-                <PicusDialectChip dialect={bucket.dialect} terse />
+                <PicusDialectChip engine={bucket.dialect} terse />
                 <PicusRoleChip role={bucket.role} terse />
               </span>
               <span class="im-slot-label">{bucket.label}</span>

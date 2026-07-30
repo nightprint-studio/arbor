@@ -21,10 +21,15 @@ import {
   ViewPlugin, Decoration, type DecorationSet, type KeyBinding, type PluginValue, type ViewUpdate,
 } from '@codemirror/view';
 import { EditorState, StateField, StateEffect, Prec, type Extension, type Text } from '@codemirror/state';
-import { history, defaultKeymap, historyKeymap, indentWithTab, deleteLine } from '@codemirror/commands';
+import {
+  history, defaultKeymap, historyKeymap, indentWithTab, deleteLine,
+  moveLineUp, moveLineDown,
+} from '@codemirror/commands';
 import { bracketMatching, indentOnInput, foldKeymap, foldGutter, codeFolding } from '@codemirror/language';
 import { lintGutter, lintKeymap } from '@codemirror/lint';
-import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import {
+  search, searchKeymap, highlightSelectionMatches, selectNextOccurrence,
+} from '@codemirror/search';
 import {
   autocompletion, completionKeymap, startCompletion, acceptCompletion,
   closeBrackets, closeBracketsKeymap,
@@ -34,6 +39,7 @@ import type { LanguageDescriptor, Tree, Node } from './types';
 import { createHighlightPlugin } from './highlight';
 import { createFoldingExtension } from './folding';
 import { emmetKeymap } from './emmet';
+import { duplicateSelection } from './commands';
 import { rainbowBrackets } from './rainbow-brackets';
 import { indentGuides } from './indent-guides';
 import { stickyScroll } from './sticky-scroll';
@@ -285,6 +291,21 @@ export function createCodeEditorExtensions(
       // IntelliJ: Ctrl+Y deletes the current line. First in the list so it wins over
       // the Windows redo binding (Mod-y) that historyKeymap also maps to Ctrl-y.
       { key: 'Ctrl-y', run: deleteLine, preventDefault: true },
+      // The IDE verbs CodeMirror has no binding for. All three are keys an
+      // IntelliJ-trained hand presses without looking, and finding nothing there is
+      // what makes an editor feel like a text box.
+      //
+      // `Mod-d` duplicates: the most-used editing verb after copy and paste, and
+      // the one `defaultKeymap` has no command for at all.
+      { key: 'Mod-d', run: duplicateSelection, preventDefault: true },
+      // `Alt-j` adds the next occurrence of the selection as a second cursor —
+      // IntelliJ's own key for it. VS Code puts this on `Mod-d`; both cannot have
+      // it, and duplicating is asked for far more often than multi-select.
+      { key: 'Alt-j', run: selectNextOccurrence, preventDefault: true },
+      // Moving a line: `Alt+↑/↓` comes from `defaultKeymap`, and these are the
+      // IntelliJ spelling of the same thing. An alias, not a second feature.
+      { key: 'Mod-Shift-ArrowUp', run: moveLineUp, preventDefault: true },
+      { key: 'Mod-Shift-ArrowDown', run: moveLineDown, preventDefault: true },
       // Before the default keymap so Backspace deletes an empty auto-inserted pair.
       ...closeBracketsKeymap,
       ...defaultKeymap, ...historyKeymap, ...lintKeymap, ...foldKeymap,

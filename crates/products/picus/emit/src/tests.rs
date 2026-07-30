@@ -630,3 +630,60 @@ fn an_unfinished_condition_stops_the_statement_rather_than_guessing() {
     let refusal = emit_for_target(&m, &plain(EngineKind::Oracle)).expect_err("must refuse");
     assert!(refusal.contains("as many values as its operator takes"), "{refusal}");
 }
+
+// ── Several rows at once ─────────────────────────────────────────────────────
+
+#[test]
+fn postgres_bundles_the_rows_into_one_insert() {
+    let m = model(DmlOperation::Insert);
+    let sql = crate::statement::insert_rows(&m, &m.rows, DialectScope::One(EngineKind::Postgres))
+        .expect("emits");
+    assert_eq!(
+        sql,
+        "INSERT INTO PARAMETRI (COD_PARAMETRO, VALORE, DESCRIZIONE)\n\
+         VALUES ('SOGLIA_MAX', 1500, 'Soglia massima'),\n       \
+         ('GIORNI_RETE', 30, 'Giorni di rete');"
+    );
+}
+
+#[test]
+fn oracle_writes_one_insert_per_row_because_it_has_no_multi_row_values() {
+    // The dialect fact this function exists for. `VALUES (…), (…)` is a syntax
+    // error on Oracle, so the same request has to come out as two statements.
+    let m = model(DmlOperation::Insert);
+    let sql = crate::statement::insert_rows(&m, &m.rows, DialectScope::One(EngineKind::Oracle))
+        .expect("emits");
+    assert_eq!(sql.matches("INSERT INTO PARAMETRI").count(), 2, "{sql}");
+    assert!(!sql.contains("),\n"), "no tuple list — {sql}");
+}
+
+#[test]
+fn a_portable_scope_takes_the_form_both_engines_accept() {
+    // Not a refusal: an INSERT is portable, it is only the *bundling* that is not.
+    let m = model(DmlOperation::Insert);
+    let sql = crate::statement::insert_rows(&m, &m.rows, DialectScope::Portable).expect("emits");
+    assert_eq!(sql.matches("INSERT INTO PARAMETRI").count(), 2, "{sql}");
+}
+
+#[test]
+fn one_row_is_one_statement_on_either_engine() {
+    let m = model(DmlOperation::Insert);
+    let one = &m.rows[..1];
+    for scope in [DialectScope::One(EngineKind::Postgres), DialectScope::One(EngineKind::Oracle)] {
+        let sql = crate::statement::insert_rows(&m, one, scope).expect("emits");
+        assert_eq!(
+            sql,
+            "INSERT INTO PARAMETRI (COD_PARAMETRO, VALORE, DESCRIZIONE)\n\
+             VALUES ('SOGLIA_MAX', 1500, 'Soglia massima');"
+        );
+    }
+}
+
+#[test]
+fn no_rows_emit_nothing_rather_than_an_insert_with_no_values() {
+    let m = model(DmlOperation::Insert);
+    assert_eq!(
+        crate::statement::insert_rows(&m, &[], DialectScope::Portable).expect("emits"),
+        ""
+    );
+}

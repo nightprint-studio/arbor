@@ -22,7 +22,26 @@ use crate::connections::require_session;
 /// from a server, and re-reading — which is what this call is — replaces it.
 #[arbor_rpc::handler]
 async fn picus_read_schema(state: &PicusState, id: String) -> Result<SchemaSnapshot, String> {
-    let schema = require_session(state, &id)?.read_schema().await.map_err(|e| e.to_string())?;
+    // Counted, and said out loud when there is more than one.
+    //
+    // Reading a catalogue is one round trip per connection and should never overlap
+    // with itself. When it does — an interface effect re-firing while the first read
+    // is still out — the queries pipeline down the one connection and each waits for
+    // the ones before it, so the *last* caller sees a read that took as long as all
+    // of them together. That looks exactly like a slow database and is not one, and
+    // the difference is invisible unless somebody counts.
+    static IN_FLIGHT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let concurrent = IN_FLIGHT.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    if concurrent > 1 {
+        eprintln!(
+            "picus: {concurrent} schema reads of `{id}` are in flight at once — they queue on \
+             one connection, so this one will take as long as all of them"
+        );
+    }
+    let read = require_session(state, &id)?.read_schema().await;
+    IN_FLIGHT.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+
+    let schema = read.map_err(|e| e.to_string())?;
     state.schemas().put(&id, std::sync::Arc::new(schema.clone()));
     Ok(schema)
 }

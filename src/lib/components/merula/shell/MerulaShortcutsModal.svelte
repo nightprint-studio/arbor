@@ -12,6 +12,10 @@
   import { macKeyLabel } from '$lib/utils/keybindings';
   import { isMac } from '$lib/utils/platform';
 
+  // The template has always used `onClose`; it was never declared, so the
+  // component's prop type was empty and its one caller was passing into nothing.
+  let { onClose }: { onClose: () => void } = $props();
+
   /** Human key label for a single binding key (Space / letter / fn / punctuation). */
   function keyLabel(k: string): string {
     if (k === ' ') return 'Space';

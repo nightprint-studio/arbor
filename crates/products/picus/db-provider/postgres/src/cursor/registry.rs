@@ -43,18 +43,32 @@ pub const MAX_OPEN: usize = 16;
 /// that a forgotten result is not still pinning server storage tomorrow morning.
 pub const IDLE_TTL: Duration = Duration::from_secs(30 * 60);
 
-/// What the session needs to serve a window over a held result.
+/// What the session needs to serve a window over a result.
+///
+/// A result is not necessarily a cursor. Most are not: the first window is read
+/// with a wrapped `LIMIT`, which costs the rows it returns instead of the whole
+/// table, and the `WITH HOLD` cursor is declared only if the user scrolls past it
+/// — see [`declared`](Self::declared).
 #[derive(Debug, Clone)]
 pub struct CursorHandle {
-    /// The **server-side** cursor name. Generated here, never received: the id the
-    /// caller sends is only ever a key into this map, so no string from the wire
-    /// reaches a `DECLARE`.
+    /// The **server-side** cursor name, once there is one. Generated here, never
+    /// received: the id the caller sends is only ever a key into this map, so no
+    /// string from the wire reaches a `DECLARE`.
     pub name: String,
     /// Column names and types from the declaring `prepare`, kept so a later window
     /// maps its values the same way the first one did. `None` when the statement
     /// was not preparable — then the columns are simply untyped, as they were on
     /// the first window.
     pub types: Option<Vec<(String, Type)>>,
+    /// The statement itself, kept so the cursor can still be declared later — and
+    /// so an exact count can be asked for without declaring one at all.
+    pub body: String,
+    /// Whether the server actually holds a cursor under [`name`](Self::name).
+    ///
+    /// Load-bearing for the closing policy: a `CLOSE` on a name that was never
+    /// declared is an error on the server, and every one of the four things that
+    /// close a result would otherwise send one.
+    pub declared: bool,
 }
 
 struct Entry {
@@ -104,10 +118,10 @@ impl CursorRegistry {
 
     /// Record a cursor the server has just accepted.
     ///
-    /// Returns the names of any results evicted to stay inside the budget — the
-    /// caller must `CLOSE` them. Least recently used goes first, which is the one
-    /// the user is least likely to scroll next.
-    pub fn register(&self, id: &str, handle: CursorHandle, now: Instant) -> Vec<String> {
+    /// Returns any results evicted to stay inside the budget — the caller must
+    /// `CLOSE` the ones that were declared. Least recently used goes first, which
+    /// is the one the user is least likely to scroll next.
+    pub fn register(&self, id: &str, handle: CursorHandle, now: Instant) -> Vec<CursorHandle> {
         let mut open = self.lock();
         open.insert(id.to_string(), Entry { handle, last_used: now });
 
@@ -121,7 +135,7 @@ impl CursorRegistry {
                 break;
             };
             if let Some(entry) = open.remove(&oldest) {
-                evicted.push(entry.handle.name);
+                evicted.push(entry.handle);
             }
         }
         evicted
@@ -138,16 +152,27 @@ impl CursorRegistry {
         Some(entry.handle.clone())
     }
 
-    /// Forget a result, returning its cursor name so the caller can `CLOSE` it.
-    /// `None` on an id that is already gone — which is exactly what makes closing
-    /// idempotent.
-    pub fn remove(&self, id: &str) -> Option<String> {
-        self.lock().remove(id).map(|e| e.handle.name)
+    /// Record that the server now holds a cursor for this result.
+    ///
+    /// Separate from [`register`](Self::register) because the two happen at
+    /// different times and often minutes apart: a result exists from its first
+    /// window, and becomes a cursor only if somebody scrolls past it.
+    pub fn mark_declared(&self, id: &str) {
+        if let Some(entry) = self.lock().get_mut(id) {
+            entry.handle.declared = true;
+        }
     }
 
-    /// Forget everything untouched for longer than the TTL, returning their cursor
-    /// names to close.
-    pub fn expired(&self, now: Instant) -> Vec<String> {
+    /// Forget a result, returning its handle so the caller can `CLOSE` it — which
+    /// it must do **only** if the handle says it was declared. `None` on an id that
+    /// is already gone, which is exactly what makes closing idempotent.
+    pub fn remove(&self, id: &str) -> Option<CursorHandle> {
+        self.lock().remove(id).map(|e| e.handle)
+    }
+
+    /// Forget everything untouched for longer than the TTL, returning their
+    /// handles.
+    pub fn expired(&self, now: Instant) -> Vec<CursorHandle> {
         let ttl = self.idle_ttl;
         let mut open = self.lock();
         let stale: Vec<String> = open
@@ -155,12 +180,12 @@ impl CursorRegistry {
             .filter(|(_, e)| now.duration_since(e.last_used) >= ttl)
             .map(|(k, _)| k.clone())
             .collect();
-        stale.iter().filter_map(|k| open.remove(k)).map(|e| e.handle.name).collect()
+        stale.iter().filter_map(|k| open.remove(k)).map(|e| e.handle).collect()
     }
 
-    /// Forget everything, returning their cursor names. The session is closing.
-    pub fn drain(&self) -> Vec<String> {
-        self.lock().drain().map(|(_, e)| e.handle.name).collect()
+    /// Forget everything, returning their handles. The session is closing.
+    pub fn drain(&self) -> Vec<CursorHandle> {
+        self.lock().drain().map(|(_, e)| e.handle).collect()
     }
 
     pub fn len(&self) -> usize {
@@ -184,7 +209,12 @@ mod tests {
     use super::*;
 
     fn handle(name: &str) -> CursorHandle {
-        CursorHandle { name: name.to_string(), types: None }
+        CursorHandle {
+            name: name.to_string(),
+            types: None,
+            body: "SELECT 1".to_string(),
+            declared: true,
+        }
     }
 
     #[test]
@@ -206,9 +236,9 @@ mod tests {
         assert!(reg.register(&id, handle(&id), now).is_empty());
 
         assert_eq!(reg.touch(&id, now).map(|h| h.name), Some(id.clone()));
-        assert_eq!(reg.remove(&id).as_deref(), Some(id.as_str()));
+        assert_eq!(reg.remove(&id).map(|h| h.name).as_deref(), Some(id.as_str()));
         // The second close is the idempotent one: nothing to do, and not an error.
-        assert_eq!(reg.remove(&id), None);
+        assert!(reg.remove(&id).is_none());
         assert!(reg.touch(&id, now).is_none());
         assert!(reg.is_empty());
     }
@@ -238,7 +268,11 @@ mod tests {
         // `a` is the oldest — until it is read again.
         reg.touch("a", t0 + Duration::from_secs(2));
 
-        let evicted = reg.register("c", handle("c"), t0 + Duration::from_secs(3));
+        let evicted: Vec<String> = reg
+            .register("c", handle("c"), t0 + Duration::from_secs(3))
+            .into_iter()
+            .map(|h| h.name)
+            .collect();
         assert_eq!(evicted, vec!["b".to_string()], "the one nobody was scrolling");
         assert!(reg.touch("a", t0 + Duration::from_secs(4)).is_some());
         assert!(reg.touch("c", t0 + Duration::from_secs(4)).is_some());
@@ -259,7 +293,8 @@ mod tests {
 
         reg.touch("busy", later);
         let much_later = t0 + Duration::from_secs(61);
-        assert_eq!(reg.expired(much_later), vec!["idle".to_string()]);
+        let gone: Vec<String> = reg.expired(much_later).into_iter().map(|h| h.name).collect();
+        assert_eq!(gone, vec!["idle".to_string()]);
         assert!(reg.touch("busy", much_later).is_some(), "still being read");
     }
 
@@ -270,10 +305,33 @@ mod tests {
         reg.register("a", handle("a"), now);
         reg.register("b", handle("b"), now);
 
-        let mut names = reg.drain();
+        let mut names: Vec<String> = reg.drain().into_iter().map(|h| h.name).collect();
         names.sort();
         assert_eq!(names, vec!["a".to_string(), "b".to_string()]);
         assert!(reg.is_empty());
         assert!(reg.drain().is_empty(), "draining twice is not an error either");
+    }
+
+    #[test]
+    fn a_result_is_not_a_cursor_until_it_is_declared() {
+        // The distinction the closing policy rests on: a `CLOSE` on a name the
+        // server never heard of is an error, and every path that ends a result
+        // would otherwise send one.
+        let reg = CursorRegistry::new();
+        let now = Instant::now();
+        let pending = CursorHandle {
+            name: "picus_cur_1".to_string(),
+            types: None,
+            body: "SELECT 1".to_string(),
+            declared: false,
+        };
+        reg.register("picus_cur_1", pending, now);
+        assert_eq!(reg.touch("picus_cur_1", now).map(|h| h.declared), Some(false));
+
+        reg.mark_declared("picus_cur_1");
+        assert_eq!(reg.touch("picus_cur_1", now).map(|h| h.declared), Some(true));
+        // …and the body survives, because that is what a late `DECLARE` is built
+        // from.
+        assert_eq!(reg.touch("picus_cur_1", now).map(|h| h.body).as_deref(), Some("SELECT 1"));
     }
 }

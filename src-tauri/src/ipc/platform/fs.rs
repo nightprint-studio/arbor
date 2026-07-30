@@ -89,6 +89,22 @@ fn fs_read_text_file(_state: &AppState, path: String) -> Result<String, AppError
     Ok(read::read_text(&path)?)
 }
 
+/// Write raw bytes, given as base64.
+///
+/// Base64 rather than an array of numbers because that is how bytes survive a JSON
+/// seam without costing four characters per byte. The caller that needs this is
+/// saving a large object out of a result grid: the file that comes out has to be the
+/// file that went in, so the decoding happens here, at the moment of writing, and
+/// the value never becomes text on the way.
+#[platform::handler(program = "platform")]
+fn fs_write_bytes(_state: &AppState, path: String, base64: String) -> Result<(), AppError> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64.trim())
+        .map_err(|e| AppError::Other(format!("that value is not valid base64: {e}")))?;
+    Ok(mutate::write_bytes(&path, &bytes)?)
+}
+
 #[platform::handler(program = "platform")]
 fn fs_delete(_state: &AppState, path: String) -> Result<(), AppError> {
     Ok(mutate::delete(&path)?)

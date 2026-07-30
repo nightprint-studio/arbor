@@ -89,10 +89,20 @@ pub fn rename_many(pairs: &[RenamePair]) -> Result<Vec<String>> {
 /// Write a text file, creating it (or overwriting it) at the given path.
 /// Parent directories are created automatically if they don't exist.
 pub fn write_text(path: &str, content: &str) -> Result<()> {
+    write_bytes(path, content.as_bytes())
+}
+
+/// Write raw bytes, creating the parent directory if it is missing.
+///
+/// The primitive `write_text` is built on, and the one a caller reaches for directly
+/// when the content is not text: an image, a PDF, a large object out of a database
+/// column. Going through `write_text` for those would mean deciding an encoding for
+/// something that has none.
+pub fn write_bytes(path: &str, content: &[u8]) -> Result<()> {
     if let Some(parent) = Path::new(path).parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    std::fs::write(path, content.as_bytes()).map_err(|e| FsError::io("Cannot write file", e))
+    std::fs::write(path, content).map_err(|e| FsError::io("Cannot write file", e))
 }
 
 /// Delete a single file or directory (recursively for dirs).

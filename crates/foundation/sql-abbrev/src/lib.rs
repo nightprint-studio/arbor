@@ -5,6 +5,29 @@
 //! → SELECT KEYCODE, VALUE FROM LOCALSTRINGS WHERE KEYCODE = 'ita'
 //! ```
 //!
+//! ## The grammar, in one place
+//!
+//! ```text
+//! verb # table  chain?  changes?  ( columns )?  [ conditions ]?  *n?  { row template }?
+//! ```
+//!
+//! | Verb | Means | Example |
+//! |---|---|---|
+//! | `s`  | SELECT | `s#ordini>clienti(nome)[evaso=false]` |
+//! | `i`  | INSERT | `i#ordini(id,codice)*3{$, 'COD_$'}` |
+//! | `u`  | UPDATE | `u#ordini(evaso=true)[id=7]` |
+//! | `d`  | DELETE | `d#ordini[id=7]` |
+//! | `m`  | upsert | `m#ordini[id]` |
+//! | `a`  | ALTER  | `a#ordini+nota:varchar(200)~importo:number(12,2)` |
+//! | `fc` | cursor loop | `fc#ordini[evaso=false]` |
+//!
+//! * `>table` follows a **foreign key**; `>table:column` picks which one.
+//! * `(…)` are columns — with `=value` where the verb assigns.
+//! * `[…]` are conditions — except after `m#`, where they are the key columns.
+//! * `*n` repeats a row; `{…}` gives each repetition its own values, with `$`
+//!   standing for the row number (see [`numbering`]).
+//! * `+col:type` adds a column and `~col:type` retypes one.
+//!
 //! The point is not the keystrokes. A snippet engine can save keystrokes and
 //! needs no crate. The point is that the host **has the schema**, so the
 //! expansion knows things a snippet cannot:
@@ -68,6 +91,7 @@ pub mod context;
 pub mod error;
 pub mod expand;
 pub mod join;
+pub mod numbering;
 pub mod parse;
 pub mod prelude;
 pub mod render;

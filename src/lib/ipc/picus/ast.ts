@@ -64,6 +64,25 @@ export function syntaxTreeOf(text: string, request?: TreeRequest): Promise<Synta
   return picus('picus_syntax_tree_of', { text, request });
 }
 
+/** One thing the grammar could not read, in UTF-8 byte offsets. */
+export interface ParseFault {
+  start: number;
+  end: number;
+  message: string;
+}
+
+/**
+ * What the parser could not read in this text.
+ *
+ * The syntax-tree panel has always known these; the editor did not, so a statement
+ * that could not possibly run looked perfectly fine until it was run. This is the
+ * one question the semantic diagnostics cannot answer — "is this SQL at all" is a
+ * question only the grammar can be asked.
+ */
+export function parseFaults(text: string, engine?: string): Promise<ParseFault[]> {
+  return picus('picus_parse_faults', { text, engine });
+}
+
 /** Root-to-leaf ranges holding a byte offset — "reveal what the cursor is in". */
 export function syntaxPathAt(
   text: string,

@@ -47,9 +47,21 @@ fn a_join_carries_indices_into_the_table_list() {
 fn a_supplied_insert_value_and_a_missing_one_look_different_on_the_wire() {
     let json = json_of("i#localstrings(keycode='ita',value)*2");
     assert_eq!(json["verb"], "insert");
-    assert_eq!(json["rows"], 2);
-    assert_eq!(json["columns"][0]["value"], json!({ "form": "quoted", "text": "ita" }));
-    assert!(json["columns"][1].get("value").is_none(), "a placeholder carries no value at all");
+    // Rows, not a count: `*2` and a `{…}` template both land here, and a host
+    // that read a number would have nowhere to put the numbered values.
+    assert_eq!(json["rows"].as_array().map(Vec::len), Some(2));
+    assert_eq!(json["rows"][0][0], json!({ "form": "quoted", "text": "ita" }));
+    assert!(json["rows"][0][1].is_null(), "a placeholder carries no value at all");
+}
+
+#[test]
+fn a_numbered_template_reaches_the_wire_as_finished_values() {
+    // The `$` is resolved **here**, not by the host: a host that received the
+    // template would need this crate's numbering rules to use it, which is the
+    // opposite of what "the crate returns an intent" means.
+    let json = json_of("i#localstrings(keycode,value)*3{'k$$', 'v$'}");
+    assert_eq!(json["rows"][0][0], json!({ "form": "quoted", "text": "k01" }));
+    assert_eq!(json["rows"][2][1], json!({ "form": "quoted", "text": "v3" }));
 }
 
 #[test]

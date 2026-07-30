@@ -86,7 +86,30 @@
     the server would refuse to resolve.</li>
   <li><b>A write on a read-only connection</b> — reported at the statement, before you run
     it. The refusal itself is still the server's.</li>
+  <li><b>Something that is not SQL</b> — the grammar could not read it. Procedural code
+    outside a routine, an unclosed parenthesis, a missing keyword. This one comes from the
+    same parser the syntax tree is drawn from, so the editor and that panel can no longer
+    disagree about whether a statement is readable.</li>
 </ul>
+<p>
+  The first four are about <i>meaning</i> and go quiet whenever they are unsure. The last is
+  about <i>form</i>, where there is nothing to be unsure about: a statement the parser cannot
+  read is one the server will refuse.
+</p>
+
+<h2>Abbreviations are marked as abbreviations</h2>
+<p>
+  A line the backend recognises as a shorthand — <code>s#ordini(id)[stato='EV']</code> — is
+  given a tinted band rather than being coloured as SQL, because it is not SQL: read as
+  SQL it is a stray identifier, a comment marker and a broken parenthesis, so the one line
+  in the buffer the tool understands best would look the most wrong. A shorthand the backend
+  <i>refuses</i> gets the band in the warning colour, and the reason on the line.
+</p>
+<p>
+  Which lines those are is the backend's own answer, never a guess made here — so what is
+  highlighted and what will expand cannot drift apart. Nothing on such a line is measured as
+  SQL: no unknown-table warnings, no parse errors.
+</p>
 
 <h2>When it says nothing, and why</h2>
 <p>
@@ -115,6 +138,45 @@
   the dialects agree. An Oracle script is never checked against a PostgreSQL database. With
   no match the editor still completes keywords, closes blocks and reports nothing about
   objects, which is the right behaviour for a script opened with no database open.
+</p>
+
+<h2>Find and replace</h2>
+<p>
+  <kbd>Ctrl</kbd>+<kbd>F</kbd> opens the panel — <kbd>Ctrl</kbd>+<kbd>H</kbd> opens the same
+  one, because that is where the other half of the world's fingers go. It carries both fields:
+  find, replace, replace all, case sensitivity, whole word and a regular-expression toggle.
+  <kbd>F3</kbd> and <kbd>Shift</kbd>+<kbd>F3</kbd> walk the matches, <kbd>Enter</kbd> from the
+  find field does the same, and <kbd>Esc</kbd> closes it and gives the caret back.
+</p>
+<p>
+  It is the ordinary textual find. To match on the <i>shape</i> of a statement rather than on
+  its characters — every <code>INSERT</code> into a table, whatever its values —
+  <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> opens the structural search, which works
+  across the whole repository.
+</p>
+
+<h2>Editing keys</h2>
+<p>
+  The editor is aimed at hands trained on an IDE, so the verbs those hands reach for are
+  where they expect them:
+</p>
+<table>
+  <thead><tr><th>Key</th><th>Does</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>Duplicate the selection, or the whole line when there is none</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Delete the line</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>Comment or uncomment the selected lines</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd></td><td>Move the line — <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> does the same</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>J</kbd></td><td>Add the next occurrence of the selection as a second cursor</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>Click</kbd></td><td>Put a cursor where you click, keeping the others</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Open the structure of the object under the pointer</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Undo · redo</td></tr>
+  </tbody>
+</table>
+<p>
+  Duplicating with a selection puts the copy immediately after it <i>and selects the copy</i>,
+  so pressing it again duplicates again and typing replaces what you just made — which is what
+  makes it the fastest way to build a list of similar values.
 </p>
 
 <h2>The syntax tree</h2>

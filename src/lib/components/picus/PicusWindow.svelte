@@ -20,6 +20,9 @@
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import { picusResultsStore } from '$lib/stores/picus/result.svelte';
+  import { picusScratchStore } from '$lib/stores/picus/scratch.svelte';
+  import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
+  import { queryStore } from '$lib/stores/picus/query.svelte';
   import PicusShell from './PicusShell.svelte';
 
   onMount(() => {
@@ -39,10 +42,20 @@
       void connectionsStore.load();
     });
 
-    // The last path a cursor can escape through. Every tab open at this moment is
-    // holding one, and closing the window closes none of them by itself — the
-    // sessions outlive the webview.
-    const release = () => picusResultsStore.releaseAll();
+    // The unsaved query tabs, re-opened with their text. Before the `picus-be-up`
+    // listener above rather than inside it: the backend is usually already there
+    // (the window is opened after it is spawned), and a scratchpad that only
+    // appeared on a re-attach would look like it had been lost.
+    void picusScratchStore.restore();
+
+    // The last two paths out. Every tab open at this moment holds a cursor, and
+    // closing the window closes none of them by itself — the sessions outlive the
+    // webview. The scratchpad is flushed in the same breath, so the sentence typed
+    // immediately before Alt+F4 is the one that is saved.
+    const release = () => {
+      picusScratchStore.flush();
+      picusResultsStore.releaseAll();
+    };
     globalThis.addEventListener('beforeunload', release);
 
     return () => {
@@ -53,16 +66,39 @@
   });
 
   /**
+   * Save the scratchpad when a buffer or the tab list changes.
+   *
+   * Reads the text of every query tab so the effect depends on all of them; the
+   * store debounces, so a keystroke costs a timer rather than a file write.
+   */
+  $effect(() => {
+    for (const tab of picusTabsStore.tabs) {
+      if (tab.kind === 'query') void queryStore.read(tab.id).sql;
+    }
+    void picusTabsStore.activeId;
+    picusScratchStore.touch();
+  });
+
+  /**
    * Keep the schema tree pointed at the active connection.
    *
-   * Only for a connection that is actually open: a disconnected one has no
-   * catalogue to read, and showing the previous connection's tables under a new
-   * connection's name is the kind of quiet wrongness that gets a DELETE written
-   * against the wrong database.
+   * Only for a connection that is actually **open** — `connecting` is not open.
+   * The button sets that state the instant it is pressed and only clears it when
+   * the session has been established, so a condition of "not disconnected" fires
+   * this while the connect is still in flight: the read then goes out against a
+   * session that does not exist yet, or against the *previous* one that is about to
+   * be replaced and closed underneath it. Either way the answer describes something
+   * that is no longer true, and the second read — the one issued once the connection
+   * really is up — queues behind it on the same connection.
+   *
+   * A disconnected connection has no catalogue at all, and showing the previous
+   * connection's tables under a new connection's name is the kind of quiet
+   * wrongness that gets a DELETE written against the wrong database.
    */
   $effect(() => {
     const active = connectionsStore.active;
-    if (active && active.state !== 'disconnected' && schemaStore.connectionId !== active.id) {
+    const open = active?.state === 'connected' || active?.state === 'read-only';
+    if (active && open && schemaStore.connectionId !== active.id) {
       void schemaStore.load(active.id);
     } else if (!active || active.state === 'disconnected') {
       if (schemaStore.connectionId) schemaStore.clear();

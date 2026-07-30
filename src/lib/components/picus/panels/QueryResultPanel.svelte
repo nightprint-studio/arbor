@@ -20,20 +20,30 @@
    * is therefore marked `~` everywhere it appears, until the background count
    * replaces it with the real number.
    */
-  import { FormInput, Download } from 'lucide-svelte';
+  import { FormInput } from 'lucide-svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
-  import DataGrid, { type DataGridColumn } from '$lib/components/shared/ui/DataGrid.svelte';
+  import DataGrid, {
+    type DataGridColumn,
+    type DataGridValue,
+  } from '$lib/components/shared/ui/DataGrid.svelte';
+  import ResultExportButton from './ResultExportButton.svelte';
+  import ResultCell from './ResultCell.svelte';
+  import ResultEditBar from './ResultEditBar.svelte';
+  import LobViewerModal from './LobViewerModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
-  import { queryStore } from '$lib/stores/picus/query.svelte';
+  import { formatElapsed, queryStore } from '$lib/stores/picus/query.svelte';
   import { formatRowTotal, picusResultsStore } from '$lib/stores/picus/result.svelte';
+  import { editability, resultEditStore } from '$lib/stores/picus/result-edit.svelte';
+  import { schemaStore } from '$lib/stores/picus/schema.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
+  import type { CellValue } from '$lib/types/picus';
 
   /**
    * The query tab being looked at, if the active tab is one.
@@ -43,7 +53,9 @@
    * to is a grid nobody can tell the provenance of.
    */
   const tab = $derived(picusTabsStore.active?.kind === 'query' ? picusTabsStore.active : null);
-  const state = $derived(tab ? queryStore.read(tab.id) : null);
+  // `tabState`, never `state`: a local called `state` makes every later `$state(…)`
+  // in this file parse as a subscription to it rather than as the rune.
+  const tabState = $derived(tab ? queryStore.read(tab.id) : null);
   const result = $derived(tab ? picusResultsStore.forOwner(tab.id) : null);
 
   const paneTabs: TabItem[] = [
@@ -61,6 +73,112 @@
     })),
   );
 
+  /**
+   * The connection the rows came from — for the engine the `INSERT` export quotes
+   * for, and for whether they can be edited at all.
+   *
+   * Through the tabs store, never `connectionsStore.byId(tab.connectionId)` on its
+   * own: that misses the fallback every other reader applies, so a tab whose
+   * binding does not resolve ran its statement against the window's connection
+   * while this panel described nothing — and `editability` reads a missing
+   * connection as read-only, which is how a restored tab came back unwritable.
+   */
+  const conn = $derived(picusTabsStore.connectionOf(tab));
+
+  /**
+   * Which table these rows are from, when that is answerable.
+   *
+   * A relation tab knows. A query tab is told, by the backend's parser, from the
+   * statement that **ran** — never from the tab's text, which is a scratchpad
+   * holding several statements and therefore reads from all of them at once. That
+   * was the bug: an ordinary single-table query in a tab that also held an older
+   * one reported itself as a join, and its rows were refused editing and refused to
+   * open their large objects.
+   *
+   * Empty is a real answer, and {@link sourceReason} says which one.
+   */
+  const source = $derived(tabState?.source ?? null);
+  const sourceTable = $derived(tab?.table ?? (source && !source.isView ? source.relation : ''));
+  /** The backend's own sentence about why there is no editable source, if any. */
+  const sourceReason = $derived(source?.reason ?? '');
+
+  /**
+   * Can these rows be edited, and if not, why?
+   *
+   * Asked here and again inside the store before anything is written. One function,
+   * two callers, is what keeps the button and the write from disagreeing about
+   * whether a row is addressable.
+   */
+  const editable = $derived(
+    editability(
+      sourceTable,
+      sourceTable ? schemaStore.table(sourceTable)?.columns ?? null : null,
+      result?.columns ?? [],
+      conn?.readOnly ?? true,
+      sourceReason,
+    ),
+  );
+
+  /**
+   * Point the edit store at whatever result is on screen.
+   *
+   * Pending edits belong to the rows they were made on, and a re-run may return a
+   * different set entirely — so they are discarded when the result changes rather
+   * than reapplied to rows that only happen to be at the same index.
+   */
+  $effect(() => {
+    resultEditStore.bind(result?.resultId ?? '');
+  });
+
+  /** Columns whose value was not fetched — their cells hold a size. */
+  const masked = $derived(new Set(result?.maskedColumns ?? []));
+
+  /** The large object being read, when one is open. */
+  let opened = $state<{ column: string; keys: Record<string, string | null> } | null>(null);
+
+  /**
+   * Read one masked value.
+   *
+   * The row is addressed by the key it was **read** with, exactly as an edit is —
+   * and for the same reason the masking is only ever applied to a relation that has
+   * one. A row that has scrolled out of memory cannot be addressed and says so
+   * rather than fetching something arbitrary.
+   */
+  function reveal(rowIndex: number, column: string) {
+    if (!result) return;
+    // Without a key there is nothing to fetch the value *by*, and opening the
+    // viewer anyway would put a dialog on screen whose only job is to fail. The
+    // reason is the one `editability` already worked out, which names the actual
+    // obstacle — no key on the table, the key not selected, more than one source —
+    // instead of leaving a click that appears to do nothing at all.
+    if (!editable.keys.length) {
+      toastStore.show(`This value cannot be opened. ${editable.reason}`, 'warning');
+      return;
+    }
+    const row = result.rowAt(rowIndex);
+    if (!row) {
+      toastStore.show('That row is no longer loaded — scroll back to it and try again.', 'warning');
+      return;
+    }
+    const keys: Record<string, string | null> = {};
+    for (const name of editable.keys) {
+      const at = result.columns.findIndex((c) => c.name.toUpperCase() === name.toUpperCase());
+      const value = at < 0 ? null : row[at];
+      keys[name] = value === null || value === undefined ? null : String(value);
+    }
+    opened = { column, keys };
+  }
+
+  /**
+   * The grid's cell type is wider than a SQL cell's, and the gap is narrowed here
+   * rather than widened everywhere else: a row that is present has no `undefined`
+   * cells, and the driver reports booleans as text.
+   */
+  function asCell(value: DataGridValue): CellValue {
+    if (value === undefined) return null;
+    return typeof value === 'boolean' ? String(value) : value;
+  }
+
   /** Prefill the generator with this result's table and columns. */
   function toGenerator() {
     if (!result?.columns.length) return;
@@ -72,21 +190,21 @@
   }
 </script>
 
-{#if !tab || !state}
+{#if !tab || !tabState}
   <StateBlock tone="info" fill={false} label="Open a query tab to run a statement." />
 {:else}
   <div class="qr">
     <div class="qr-head">
       <Tabs
         items={paneTabs}
-        value={state.pane}
+        value={tabState.pane}
         variant="underline"
         size="sm"
         ariaLabel="Result pane"
         onSelect={(id) => queryStore.setPane(tab.id, id as 'results' | 'messages')}
       />
       <span class="qr-spacer"></span>
-      {#if state.running}
+      {#if tabState.running}
         <span class="qr-stats"><Spinner size={11} /> running…</span>
       {:else if result}
         <!-- The total is the server's ESTIMATE until the background count lands,
@@ -98,10 +216,35 @@
             ? `Estimated by the planner${result.counting ? ' — counting the exact number now' : ''}. ${result.loaded.toLocaleString()} row(s) loaded.`
             : `${result.loaded.toLocaleString()} of ${result.total.toLocaleString()} row(s) loaded.`}
         >
-          {formatRowTotal(result)} rows · {result.elapsedMs} ms
+          {formatRowTotal(result)} rows · {formatElapsed(tabState.elapsedMs ?? result.elapsedMs)}
         </span>
-      {:else if state.affected !== null}
-        <span class="qr-stats">{state.affected.toLocaleString()} rows affected</span>
+      {:else if tabState.affected !== null}
+        <!-- A write has no result to read a time off, which is why the tab keeps
+             one: "how long did that take" is asked about an UPDATE at least as
+             often as about a SELECT. -->
+        <span class="qr-stats">
+          {tabState.affected.toLocaleString()} rows affected{tabState.elapsedMs !== null
+            ? ` · ${formatElapsed(tabState.elapsedMs)}`
+            : ''}
+        </span>
+      {:else if tabState.elapsedMs !== null}
+        <span class="qr-stats">{formatElapsed(tabState.elapsedMs)}</span>
+      {/if}
+      {#if result}
+        <!-- Said before it is needed. "Can I change this?" is asked by
+             double-clicking a cell, and a grid that simply did nothing would read
+             as broken rather than as protecting a table with no key. -->
+        <span
+          class="qr-edit"
+          class:qr-edit-on={editable.ok}
+          use:tooltip={{
+            content: editable.ok
+              ? `Double-click a cell to change it. Keyed on ${editable.keys.join(', ')}. Nothing is written until you press Store.`
+              : editable.reason,
+          }}
+        >
+          {editable.ok ? 'editable' : 'read-only rows'}
+        </span>
       {/if}
       <Button
         variant="icon"
@@ -113,22 +256,17 @@
       >
         {#snippet iconStart()}<FormInput size={13} />{/snippet}
       </Button>
-      <Button
-        variant="icon"
-        size="xs"
-        title="Export CSV"
-        ariaLabel="Export CSV"
-        disabled={!result}
-        onclick={() => toastStore.show('CSV export arrives with the driver milestone.', 'info')}
-      >
-        {#snippet iconStart()}<Download size={13} />{/snippet}
-      </Button>
+      <ResultExportButton
+        {result}
+        dialect={conn?.dialect ?? 'postgres'}
+        table={sourceTable}
+      />
     </div>
 
     <div class="qr-body">
-      {#if state.pane === 'results'}
-        {#if state.error}
-          <StateBlock tone="error" label={state.error} />
+      {#if tabState.pane === 'results'}
+        {#if tabState.error}
+          <StateBlock tone="error" label={tabState.error} />
         {:else if result}
           <div class="qr-grid">
             {#if !result.complete}
@@ -145,28 +283,49 @@
                 </Alert>
               </div>
             {/if}
+            <ResultEditBar onStore={() => void resultEditStore.storeActive()} />
             <DataGrid
               columns={gridColumns}
               source={result ?? undefined}
               filterable
+              editable={editable.ok}
+              onEditCell={(rowIndex, columnIndex) => {
+                const column = result?.columns[columnIndex];
+                if (column) resultEditStore.begin(rowIndex, column.name);
+              }}
               ariaLabel="Query results"
-            />
+            >
+              {#snippet cell({ value, rowIndex, columnIndex })}
+                {@const name = result?.columns[columnIndex]?.name ?? ''}
+                {@const cellValue = asCell(value)}
+                <ResultCell
+                  value={cellValue}
+                  masked={masked.has(name)}
+                  onReveal={() => reveal(rowIndex, name)}
+                  edited={resultEditStore.edited(rowIndex, name)}
+                  editing={resultEditStore.editing?.rowIndex === rowIndex
+                    && resultEditStore.editing?.column === name}
+                  onCommit={(next) => resultEditStore.change(rowIndex, name, cellValue, next)}
+                  onCancel={() => resultEditStore.cancel()}
+                />
+              {/snippet}
+            </DataGrid>
           </div>
-        {:else if state.affected !== null}
+        {:else if tabState.affected !== null}
           <!-- A write has no rows to show, and an empty grid would suggest it
                returned none rather than that it returns none. -->
           <StateBlock
             tone="success"
-            label={`${state.affected.toLocaleString()} row(s) affected. This statement returns no rows.`}
+            label={`${tabState.affected.toLocaleString()} row(s) affected. This statement returns no rows.`}
           />
-        {:else if state.hasRun}
+        {:else if tabState.hasRun}
           <StateBlock tone="info" label="The statement completed and returned no rows." />
         {:else}
           <StateBlock tone="info" label="Run the query to see its rows." />
         {/if}
       {:else}
         <div class="qr-log">
-          {#each state.messages as msg, i (i)}
+          {#each tabState.messages as msg, i (i)}
             <div class="qr-log-line" class:qr-log-error={msg.level === 'error'}>
               <span class="qr-log-time">{msg.time}</span>
               <span>{msg.text}</span>
@@ -178,6 +337,16 @@
       {/if}
     </div>
   </div>
+{/if}
+
+{#if opened && conn}
+  <LobViewerModal
+    connectionId={conn.id}
+    table={sourceTable}
+    column={opened.column}
+    keys={opened.keys}
+    onClose={() => (opened = null)}
+  />
 {/if}
 
 <style>
@@ -199,6 +368,25 @@
   /* The "still filling" notice sits above the grid and does not scroll with it. */
   .qr-grid { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   .qr-cap { flex-shrink: 0; padding: 6px 8px 0; }
+
+  /* Quiet by default and accented when it is an affordance: "read-only rows" is a
+     fact, "editable" is an invitation, and they should not weigh the same. */
+  .qr-edit {
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-disabled);
+    cursor: help;
+    white-space: nowrap;
+  }
+  .qr-edit-on {
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    color: var(--accent);
+  }
 
   .qr-stats {
     display: inline-flex;

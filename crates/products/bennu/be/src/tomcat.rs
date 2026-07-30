@@ -455,8 +455,12 @@ mod tests {
 
     #[test]
     fn suggest_matches_by_name_then_falls_back_to_single() {
+        // The project directory has to be *named* `myapp` for the name match to
+        // mean anything — `tmp` prefixes its tag with the process id, so the
+        // candidate it produced was `bennu-tomcat-1234-myapp` and matched nothing.
+        let proj = tmp("suggest").join("myapp");
+        std::fs::create_dir_all(&proj).unwrap();
         // Two deployed apps → matches the project dir name.
-        let proj = tmp("myapp");
         assert_eq!(suggest_context(&["myapp".into(), "other".into()], proj.to_str().unwrap()), "myapp");
         // Ambiguous, no name match → empty (user must pick).
         assert_eq!(suggest_context(&["a".into(), "b".into()], proj.to_str().unwrap()), "");

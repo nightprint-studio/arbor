@@ -21,7 +21,7 @@ export type SidebarSection = 'connections' | 'scripts' | 'generate' | 'inventory
  * splits them the same way, and a panel about the open file competing for space
  * with the file tree is the arrangement that makes both useless.
  */
-export type ToolSection = 'ast';
+export type ToolSection = 'ast' | 'restructure';
 
 /** The bottom dock's tabs. Consistency is the default — it is the panel the
  *  product is judged on. */

@@ -16,7 +16,7 @@
    * Every action here is reachable from the keyboard; the canonical list lives
    * in `picus-shortcuts.ts` and this file's `onKeyDown` must stay in step with it.
    */
-  import { Braces, Database, FolderTree, FormInput, Layers, TriangleAlert } from 'lucide-svelte';
+  import { Braces, Database, FolderTree, FormInput, Layers, Replace, TriangleAlert } from 'lucide-svelte';
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
   import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
   import ActivityBar, { type ActivityRailItem } from '$lib/components/shared/ui/ActivityBar.svelte';
@@ -38,6 +38,7 @@
   import GeneratePanel from './panels/GeneratePanel.svelte';
   import InventoryPanel from './panels/InventoryPanel.svelte';
   import AstPanel from './panels/AstPanel.svelte';
+  import BufferRestructurePanel from './panels/BufferRestructurePanel.svelte';
   import PicusBottomDock from './panels/PicusBottomDock.svelte';
   import GenerateView from './views/GenerateView.svelte';
   import QueryView from './views/QueryView.svelte';
@@ -73,6 +74,8 @@
   import { destinationSetsStore } from '$lib/stores/picus/destination-sets.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import { queryStore } from '$lib/stores/picus/query.svelte';
+  import { picusEditorStore } from '$lib/stores/picus/editor.svelte';
+  import { resultEditStore } from '$lib/stores/picus/result-edit.svelte';
   import { picusSettingsStore } from '$lib/stores/picus/settings.svelte';
 
   let sidebarWidth = $state(280);
@@ -111,6 +114,14 @@
       shortcut: 'Ctrl+Shift+Y',
       active: picusUiStore.toolOpen && picusUiStore.toolSection === 'ast',
       onclick: () => picusUiStore.selectTool('ast'),
+    },
+    {
+      id: 'restructure',
+      icon: Replace as unknown as IconComponent,
+      tooltip: 'Structural replace — rewrite the statements in the open document',
+      shortcut: 'Ctrl+Shift+M',
+      active: picusUiStore.toolOpen && picusUiStore.toolSection === 'restructure',
+      onclick: () => picusUiStore.selectTool('restructure'),
     },
   ]);
 
@@ -420,9 +431,15 @@
     // "tree"/"AST" is taken here, and it is the one IntelliJ's PSI viewer plugin
     // uses for the same panel.
     if (mod && e.shiftKey && key === 'y') { picusUiStore.selectTool('ast'); e.preventDefault(); return; }
-    // Structural search and replace. `R` for replace; it is a tab rather than a
-    // dialog because a migration is refined over minutes, not typed once.
+    // Structural search and replace over the REPOSITORY. `R` for replace; it is a
+    // tab rather than a dialog because a migration is refined over minutes, not
+    // typed once.
     if (mod && e.shiftKey && key === 'r') { picusTabsStore.openRestructure(); e.preventDefault(); return; }
+    // …and the same pattern language over the open document only. `M` is what
+    // IntelliJ binds structural replace to, and this is the half that behaves like
+    // IntelliJ's: a panel beside the editor, applied to the buffer, undone with
+    // Ctrl+Z.
+    if (mod && e.shiftKey && key === 'm') { picusUiStore.selectTool('restructure'); e.preventDefault(); return; }
 
     // Sections — e.code so the digits survive non-US layouts.
     if (mod && !e.shiftKey && e.code === 'Digit1') { picusUiStore.selectSection('connections'); e.preventDefault(); return; }
@@ -431,6 +448,23 @@
     if (mod && !e.shiftKey && e.code === 'Digit4') { picusUiStore.selectSection('inventory'); e.preventDefault(); return; }
 
     // Tabs.
+    // Find and replace in the document in front. Routed to the editor rather than
+    // bound inside it, because CodeMirror's own `Mod-f` is deliberately removed
+    // from its keymap: the panel must open from the toolbar and the palette too,
+    // and one owner of the keystroke is what keeps those three in agreement.
+    //
+    // `Ctrl+H` is the same panel. CodeMirror's search panel already carries the
+    // replace row, so two keys for one panel is not two features — it is the two
+    // places different people's fingers go.
+    if (mod && !e.shiftKey && (key === 'f' || key === 'h')) {
+      const target = picusEditorStore.active;
+      if (target) {
+        target.openSearch();
+        e.preventDefault();
+        return;
+      }
+    }
+
     if (mod && key === 'tab') { picusTabsStore.cycle(e.shiftKey ? -1 : 1); e.preventDefault(); return; }
     if (mod && key === 'w' && !e.shiftKey) { if (tab) picusTabsStore.close(tab.id); e.preventDefault(); return; }
     if (mod && key === 't') { picusTabsStore.openQuery(); e.preventDefault(); return; }
@@ -502,6 +536,16 @@
         const next = (i + (e.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length;
         dmlStore.setPreviewTarget(list[next].id);
       }
+      e.preventDefault();
+      return;
+    }
+
+    // Write the result grid's pending cell edits. Only when there ARE any: `Ctrl+S`
+    // with nothing pending must not become a keystroke that quietly does something
+    // else, and it is the one binding in this window that writes to a database.
+    if (mod && !e.shiftKey && key === 's' && resultEditStore.dirty) {
+      picusUiStore.showBottom('results');
+      void resultEditStore.storeActive();
       e.preventDefault();
       return;
     }
@@ -597,7 +641,8 @@
             maxSize={520}
             onResize={(px) => (toolWidth = px)}
           >
-            <AstPanel />
+            {#if picusUiStore.toolSection === 'ast'}<AstPanel />
+            {:else}<BufferRestructurePanel />{/if}
           </PanelCard>
         {/if}
       {/snippet}

@@ -33,5 +33,6 @@ pub mod connections;
 pub mod digest;
 pub mod prelude;
 pub mod schema;
+pub mod scratch;
 pub mod scripts;
 pub mod state;

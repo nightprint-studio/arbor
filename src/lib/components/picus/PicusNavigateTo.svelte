@@ -93,7 +93,9 @@
           name: connection.name,
           detail: `${connection.schema}@${connection.host}`,
           icon: Database,
-          tag: engineLabel(connection.dialect),
+          // `engine` is what the backend row carries; `dialect` is the UI's name
+          // for it, and only the projected `Connection` has that field.
+          tag: engineLabel(connection.engine),
           onOpen: () => connectionsStore.setActive(connection.id),
         })),
     },

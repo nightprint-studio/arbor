@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -189,6 +190,16 @@ impl HostCaller for FrameHostCaller {
 /// in-process `LoopbackBroker`, which is already called concurrently).
 ///
 /// Returns when the peer closes `input` (the shell exited).
+///
+/// ## A panicking handler answers
+///
+/// Every request is answered, including one whose handler panicked — see
+/// [`dispatch_caught`]. A worker that unwinds past the write is a request that is
+/// never replied to, and the caller on the other side is blocked on a channel with
+/// no timeout: the window hangs on "reading schema…" forever, with no error in the
+/// frontend, none in the backend's reply, and only a line on stderr nobody is
+/// watching. Turning that into a legible message is the difference between a bug
+/// with a name and an application that stopped working for no reason.
 pub fn serve_stdio<R, F, I>(
     input: R,
     out: SharedWriter,
@@ -227,7 +238,7 @@ where
                 let out = Arc::clone(&out);
                 let dispatch = Arc::clone(&dispatch);
                 thread::spawn(move || {
-                    let result = dispatch(&method, params);
+                    let result = dispatch_caught(&*dispatch, &method, params);
                     if let Ok(mut w) = out.lock() {
                         let _ = write_frame(&mut *w, &Frame::Response { id, result });
                     }
@@ -251,6 +262,45 @@ where
     Ok(())
 }
 
+/// Run one dispatch, converting a panic into the error the caller gets back.
+///
+/// `AssertUnwindSafe` is the honest annotation rather than a shrug: the dispatch
+/// closure owns state that a panic may leave half-written, and this does not claim
+/// otherwise. What it claims is narrower and true — that answering is better than
+/// not answering. The alternative on this path is not a clean state, it is a caller
+/// blocked forever on a reply that will never come.
+///
+/// The panic's own message is forwarded. It is the only description of what went
+/// wrong that exists, it names the file and line, and the caller is the one person
+/// in a position to report it.
+fn dispatch_caught<F>(dispatch: &F, method: &str, params: Value) -> Result<Value, String>
+where
+    F: Fn(&str, Value) -> Result<Value, String> + ?Sized,
+{
+    let caught =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| dispatch(method, params)));
+    match caught {
+        Ok(result) => result,
+        Err(payload) => {
+            let what = panic_message(&payload);
+            // stderr, because stdout is the protocol channel.
+            eprintln!("arbor-ipc: handler `{method}` panicked: {what}");
+            Err(format!("`{method}` failed with an internal error: {what}"))
+        }
+    }
+}
+
+/// The text of a caught panic, for the two shapes `panic!` actually produces.
+fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        return (*s).to_string();
+    }
+    if let Some(s) = payload.downcast_ref::<String>() {
+        return s.clone();
+    }
+    "panic with no message".to_string()
+}
+
 // ── Shell side ──────────────────────────────────────────────────────────────
 
 /// A [`BrokerClient`] backed by a spawned child process, framed over its stdio.
@@ -272,6 +322,11 @@ struct ChildInner {
     writer: SharedWriter,
     pending: Pending,
     next_id: AtomicU64,
+    /// The executable's file name, purely so a failure can say which backend it
+    /// was. Every client used to report `corvus-be`, which on a Picus or a Merula
+    /// window is not a detail that is slightly off — it is the wrong answer to the
+    /// first question anybody debugging asks.
+    program: String,
     /// Kept so the child is killed on drop (closing the pipes alone leaves it).
     child: Mutex<Option<Child>>,
 }
@@ -295,6 +350,10 @@ impl ChildClient {
         D: Fn() + Send + 'static,
     {
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
+        let program = std::path::Path::new(cmd.get_program())
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "backend".to_string());
         let mut child = cmd.spawn()?;
         let stdin = child
             .stdin
@@ -311,6 +370,7 @@ impl ChildClient {
             writer: Arc::clone(&writer),
             pending: Arc::clone(&pending),
             next_id: AtomicU64::new(1),
+            program: program.clone(),
             child: Mutex::new(Some(child)),
         });
 
@@ -347,7 +407,26 @@ impl ChildClient {
                     }
                     Ok(Some(Frame::Event { topic, payload })) => on_event(topic, payload),
                     Ok(Some(Frame::HostRequest { id, method, params })) => {
-                        let result = host_dispatch(&method, params);
+                        // Caught for a harder reason than the backend's side: this
+                        // is the demux thread. A panic here does not lose one
+                        // reply, it loses every reply and every event from this
+                        // backend for the rest of the session.
+                        //
+                        // For the same reason a *slow* one is worth saying out
+                        // loud: while this call runs, nothing else from this
+                        // backend can be delivered, so a reverse-channel handler
+                        // that blocks looks exactly like a backend that has
+                        // stopped answering — which is the hardest failure in this
+                        // whole design to tell apart from a hang.
+                        let began = std::time::Instant::now();
+                        let result = dispatch_caught(&host_dispatch, &method, params);
+                        if began.elapsed() >= SLOW_CALL_NOTICE {
+                            eprintln!(
+                                "arbor-ipc: host method `{method}` held the reader thread for {}s \
+                                 — every reply from this backend waited on it",
+                                began.elapsed().as_secs()
+                            );
+                        }
                         if let Ok(mut w) = writer_for_reader.lock() {
                             let _ = write_frame(&mut *w, &Frame::HostResponse { id, result });
                         }
@@ -358,7 +437,7 @@ impl ChildClient {
             }
             // Fail any in-flight calls so they don't block forever.
             for (_, tx) in pending.lock().expect("pending poisoned").drain() {
-                let _ = tx.send(Err("corvus-be disconnected".to_string()));
+                let _ = tx.send(Err(format!("{program} disconnected")));
             }
             // Signal the shell that the backend is gone (fired once, after the
             // in-flight calls above are unwound).
@@ -395,13 +474,43 @@ impl BrokerClient for ChildClient {
                 .map_err(|e| IpcError::Transport(e.to_string()))?;
         }
 
-        match rx.recv() {
-            Ok(Ok(v)) => serde_json::to_vec(&v).map_err(|e| IpcError::Codec(e.to_string())),
-            Ok(Err(s)) => Err(IpcError::Backend(s)),
-            Err(_) => Err(IpcError::Transport("corvus-be disconnected".into())),
+        // Waited for in slices rather than in one `recv()`, purely so a call that
+        // never comes back **says which one it was**.
+        //
+        // There is no timeout here and there must not be: a ten-minute query is a
+        // legitimate thing to be waiting on, and a client that gave up on it would
+        // be a worse product than one that waits. What was missing was not a limit,
+        // it was a *voice* — a backend that stops answering used to be indis-
+        // tinguishable, from every side, from one that is simply busy.
+        let mut waited = Duration::ZERO;
+        loop {
+            match rx.recv_timeout(SLOW_CALL_NOTICE) {
+                Ok(Ok(v)) => {
+                    return serde_json::to_vec(&v).map_err(|e| IpcError::Codec(e.to_string()))
+                }
+                Ok(Err(s)) => return Err(IpcError::Backend(s)),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    waited += SLOW_CALL_NOTICE;
+                    eprintln!(
+                        "arbor-ipc: {} has not answered `{method}` (id {id}) after {}s",
+                        self.inner.program,
+                        waited.as_secs()
+                    );
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(IpcError::Transport(format!(
+                        "{} disconnected",
+                        self.inner.program
+                    )))
+                }
+            }
         }
     }
 }
+
+/// How long a call may be outstanding before it is mentioned, and then mentioned
+/// again. Long enough that an ordinary query never trips it.
+const SLOW_CALL_NOTICE: Duration = Duration::from_secs(15);
 
 impl Drop for ChildInner {
     fn drop(&mut self) {
@@ -549,6 +658,69 @@ mod tests {
         }
 
         sh2be.close(); // EOF → serve loop exits
+        serve.join().unwrap();
+    }
+
+    /// The other load-bearing one: a handler that **panics** must still produce a
+    /// `Response`.
+    ///
+    /// Without it the worker thread unwinds past the write, the frame is never
+    /// sent, and the caller — blocked on a channel with no timeout — waits
+    /// forever. That is not a crash anybody can act on: the window simply stops,
+    /// with no error in the frontend and none in the reply, because there is no
+    /// reply. It cost a night of "the database will not connect any more".
+    ///
+    /// The second request proves the loop survives the first: one bad handler must
+    /// not take the backend down with it.
+    #[test]
+    fn a_panicking_handler_still_answers() {
+        let be2sh = Pipe::new();
+        let sh2be = Pipe::new();
+
+        let out: SharedWriter = Arc::new(Mutex::new(be2sh.clone()));
+        let host = FrameHostCaller::new(Arc::clone(&out));
+
+        let dispatch = |method: &str, _params: Value| -> Result<Value, String> {
+            match method {
+                "boom" => panic!("index out of bounds: the len is 3 but the index is 7"),
+                "fine" => Ok(json!("still here")),
+                other => Err(format!("unknown: {other}")),
+            }
+        };
+
+        let serve_in = sh2be.clone();
+        let serve_out = Arc::clone(&out);
+        let serve_host = Arc::clone(&host);
+        let serve = thread::spawn(move || {
+            let _ = serve_stdio(serve_in, serve_out, vec!["boom".to_string()], serve_host, dispatch, || {});
+        });
+
+        let mut sh_in = be2sh.clone();
+        assert!(matches!(read_frame(&mut sh_in).unwrap(), Some(Frame::Hello { .. })));
+
+        write_frame(&mut sh2be.clone(), &Frame::Request { id: 1, method: "boom".into(), params: Value::Null }).unwrap();
+        match read_frame(&mut sh_in).unwrap() {
+            Some(Frame::Response { id, result }) => {
+                assert_eq!(id, 1);
+                let message = result.unwrap_err();
+                // The caller is told which method, and gets the panic's own text —
+                // the only description of the fault that exists anywhere.
+                assert!(message.contains("boom"), "{message}");
+                assert!(message.contains("index out of bounds"), "{message}");
+            }
+            other => panic!("expected Response, got {other:?}"),
+        }
+
+        write_frame(&mut sh2be.clone(), &Frame::Request { id: 2, method: "fine".into(), params: Value::Null }).unwrap();
+        match read_frame(&mut sh_in).unwrap() {
+            Some(Frame::Response { id, result }) => {
+                assert_eq!(id, 2);
+                assert_eq!(result, Ok(json!("still here")));
+            }
+            other => panic!("expected Response, got {other:?}"),
+        }
+
+        sh2be.close();
         serve.join().unwrap();
     }
 }

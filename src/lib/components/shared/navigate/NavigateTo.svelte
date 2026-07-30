@@ -34,7 +34,7 @@
    * refining a query after looking at the results is the normal case, not the
    * exception.
    */
-  import type { Component } from 'svelte';
+  import type { IconComponent } from '$lib/types/icon';
   import { Search, CornerDownLeft } from 'lucide-svelte';
   import Modal from '../Modal.svelte';
   import Tabs, { type TabItem } from '../ui/Tabs.svelte';
@@ -63,8 +63,9 @@
     detail?: string;
     /** Epoch milliseconds, for `sort:new`. Omit when the host has no timestamp. */
     modified?: number;
-    /** Leading icon. Any Svelte component taking a `size` prop. */
-    icon?: Component;
+    /** Leading icon. Any Svelte component taking a `size` prop — see
+     *  {@link IconComponent} for why lucide needs the legacy alias. */
+    icon?: IconComponent;
     /** A short word on the right — the object kind, the engine, the role. */
     tag?: string;
     onOpen: () => void;

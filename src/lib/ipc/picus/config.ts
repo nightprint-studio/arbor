@@ -64,3 +64,37 @@ export function getPicusConfig(): Promise<PicusConfig> {
 export function setPicusConfig(config: PicusConfig): Promise<void> {
   return picus('set_picus_config', { config });
 }
+
+// ── The scratchpad ───────────────────────────────────────────────────────────
+
+/** One unsaved query tab, as the file holds it. */
+export interface ScratchTab {
+  id: string;
+  title: string;
+  /** Empty when the tab is unbound, or when its connection has been deleted. */
+  connectionId: string;
+  sql: string;
+}
+
+/** Everything Picus remembers about its unsaved tabs. */
+export interface Scratch {
+  tabs: ScratchTab[];
+  /** Which of them was in front, by id. Empty when none was. */
+  active: string;
+}
+
+/**
+ * The unsaved query tabs, as they were left.
+ *
+ * `camelCase` on the wire here rather than the snake_case the rest of this file
+ * uses: the scratch types are serialised with `rename_all = "camelCase"` because
+ * they are the shape a frontend reads, not a file anybody hand-edits.
+ */
+export function loadScratch(): Promise<Scratch> {
+  return picus('picus_load_scratch', {});
+}
+
+/** Remember the unsaved query tabs. Whole-file, idempotent. */
+export function saveScratch(scratch: Scratch): Promise<void> {
+  return picus('picus_save_scratch', { scratch });
+}

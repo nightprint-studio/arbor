@@ -90,11 +90,16 @@ impl Scope {
     }
 }
 
-/// One place a pattern matched.
+/// One place a pattern matched, in whatever text it was matched against.
+///
+/// Split out from [`FoundMatch`] so that searching a repository and searching the
+/// buffer in front of the user produce the *same* row: same captures, same rendered
+/// replacement, same failure when a template cannot be applied here. Two builders
+/// for one row is how a feature ends up meaning two subtly different things
+/// depending on where it was invoked from.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FoundMatch {
-    pub path: String,
+pub struct Hit {
     pub range: ByteRange,
     /// 1-based, for the row the user clicks.
     pub line: usize,
@@ -109,6 +114,50 @@ pub struct FoundMatch {
     pub replacement: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub problem: Option<String>,
+}
+
+/// One place a pattern matched, and which script it was in.
+///
+/// Flattened on the wire, so a repository match is one flat object exactly as it
+/// always was — the split is an arrangement of this code, not a change of contract.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FoundMatch {
+    pub path: String,
+    #[serde(flatten)]
+    pub hit: Hit,
+}
+
+/// Every place `pattern` matches `text`, each carrying what it would become.
+///
+/// The one builder both search entry points go through.
+fn hits_in(compiled: &Pattern, text: &str, replacement: Option<&str>) -> Result<Vec<Hit>, String> {
+    let mut hits = Vec::new();
+    for found in compiled.find_all(&language(), text).map_err(|e| e.to_string())? {
+        let mut captures = BTreeMap::new();
+        for capture in &found.captures {
+            captures.insert(
+                capture.name.clone(),
+                capture.range.slice(text).unwrap_or("").to_string(),
+            );
+        }
+        let (rendered, problem) = match replacement {
+            None => (None, None),
+            Some(template) => match render_with(template, &found, text, true) {
+                Ok(text) => (Some(text), None),
+                Err(e) => (None, Some(e.to_string())),
+            },
+        };
+        hits.push(Hit {
+            line: line_of(text, found.range.start),
+            text: found.range.slice(text).unwrap_or("").to_string(),
+            range: found.range,
+            captures,
+            replacement: rendered,
+            problem,
+        });
+    }
+    Ok(hits)
 }
 
 /// What a search answers.
@@ -143,37 +192,56 @@ fn picus_structural_find(
     let mut scanned = 0usize;
     for (path, text) in scripts_in(&snapshot, &scope) {
         scanned += 1;
-        for found in compiled.find_all(&language(), text).map_err(|e| e.to_string())? {
-            let mut captures = BTreeMap::new();
-            for capture in &found.captures {
-                captures.insert(
-                    capture.name.clone(),
-                    capture.range.slice(text).unwrap_or("").to_string(),
-                );
-            }
-            let (rendered, problem) = match &replacement {
-                None => (None, None),
-                Some(template) => match render_with(template, &found, text, true) {
-                    Ok(text) => (Some(text), None),
-                    Err(e) => (None, Some(e.to_string())),
-                },
-            };
-            matches.push(FoundMatch {
-                path: path.to_string(),
-                line: line_of(text, found.range.start),
-                text: found.range.slice(text).unwrap_or("").to_string(),
-                range: found.range,
-                captures,
-                replacement: rendered,
-                problem,
-            });
-        }
+        matches.extend(
+            hits_in(&compiled, text, replacement.as_deref())?
+                .into_iter()
+                .map(|hit| FoundMatch { path: path.to_string(), hit }),
+        );
     }
 
     Ok(FindResult {
         placeholders: compiled.names().into_iter().map(str::to_string).collect(),
         matches,
         scanned,
+    })
+}
+
+/// What a scan of one piece of text answers.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanResult {
+    pub matches: Vec<Hit>,
+    /// The placeholder names the pattern declares, for the template editor.
+    pub placeholders: Vec<String>,
+}
+
+/// Find every place a pattern matches **one buffer** — the document in front of the
+/// user, not the repository.
+///
+/// ## Why this is a separate verb rather than a scope of the other one
+///
+/// The repository search is a *migration*: it reads scripts off disk, it is bounded
+/// by a scope, its results are grouped and exported, and writing them goes through
+/// a preview and a digest check because it rewrites files nobody has open. None of
+/// that applies to the tab in front of you, which has no path, may never have been
+/// saved, and whose edits belong to the editor's own undo history.
+///
+/// So this half does exactly one thing: it says where the pattern matches and what
+/// each match would become. **It writes nothing.** The frontend splices the ranges
+/// into the buffer as an ordinary edit, which is what makes Ctrl+Z work on it and
+/// what keeps a structural replace from being the one edit in the editor that
+/// cannot be undone.
+#[arbor_rpc::handler]
+fn picus_structural_scan(
+    _state: &PicusState,
+    text: String,
+    pattern: String,
+    replacement: Option<String>,
+) -> Result<ScanResult, String> {
+    let compiled = compile(&pattern)?;
+    Ok(ScanResult {
+        matches: hits_in(&compiled, &text, replacement.as_deref())?,
+        placeholders: compiled.names().into_iter().map(str::to_string).collect(),
     })
 }
 
@@ -524,5 +592,53 @@ mod tests {
     fn an_empty_pattern_says_what_to_type_instead_of_matching_everything() {
         let err = compile("   ").expect_err("refused");
         assert!(err.contains("$name$"), "{err}");
+    }
+
+    // ── Scanning one buffer ────────────────────────────────────────────────────
+
+    #[test]
+    fn a_buffer_scan_returns_the_ranges_the_editor_splices() {
+        // The frontend applies these itself, so the ranges have to address the text
+        // it sent — including with an accent above them, since every offset here is
+        // in UTF-8 bytes and the editor's are in UTF-16 units.
+        let sql = "-- perché no\nINSERT INTO CATALOGO_WIDGET (CHIAVE) VALUES ('A');\n\
+                   INSERT INTO CATALOGO_WIDGET (CHIAVE) VALUES ('B');\n";
+        let compiled =
+            compile("INSERT INTO CATALOGO_WIDGET ($cols...$) VALUES ($vals...$)").expect("compiles");
+        // `$cols$` in a *template* is the whole capture; the `...` belongs to the
+        // pattern, where it is what makes the capture a list in the first place.
+        let hits = hits_in(&compiled, sql, Some("INSERT INTO CATALOGO_V2 ($cols$) VALUES ($vals$)"))
+            .expect("scans");
+
+        assert_eq!(hits.len(), 2);
+        for hit in &hits {
+            assert_eq!(&sql[hit.range.start..hit.range.end], hit.text, "the range must be the text");
+            assert!(hit.replacement.as_deref().is_some_and(|r| r.contains("CATALOGO_V2")));
+            assert!(hit.problem.is_none());
+        }
+        assert!(hits[0].line < hits[1].line, "and they come back in document order");
+    }
+
+    #[test]
+    fn a_buffer_scan_reports_a_template_that_cannot_be_applied_on_the_row_it_fails() {
+        let sql = "INSERT INTO LOCALSTRINGS (CHIAVE, LINGUA) VALUES ('K', 'it');";
+        let compiled =
+            compile("INSERT INTO LOCALSTRINGS ($cols...$) VALUES ($vals...$)").expect("compiles");
+        let hits = hits_in(&compiled, sql, Some("$vals[cols=testo]$")).expect("scans");
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].replacement.is_none());
+        assert!(hits[0].problem.as_deref().is_some_and(|p| p.contains("does not hold testo")));
+    }
+
+    #[test]
+    fn a_buffer_scan_with_no_template_is_a_search() {
+        let sql = "INSERT INTO CATALOGO_WIDGET (CHIAVE) VALUES ('A');";
+        let compiled =
+            compile("INSERT INTO CATALOGO_WIDGET ($cols...$) VALUES ($vals...$)").expect("compiles");
+        let hits = hits_in(&compiled, sql, None).expect("scans");
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].replacement.is_none(), "nothing was asked to be rendered");
+        assert!(hits[0].problem.is_none(), "and nothing failed");
+        assert_eq!(hits[0].captures.get("cols").map(String::as_str), Some("CHIAVE"));
     }
 }

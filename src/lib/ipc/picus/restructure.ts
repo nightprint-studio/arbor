@@ -22,8 +22,9 @@ export interface RestructureScope {
   paths?: string[];
 }
 
-export interface FoundMatch {
-  path: string;
+/** One place a pattern matched, in whatever text it was matched against. */
+export interface Hit {
+  /** UTF-8 byte offsets — everything the backend reports is in bytes. */
   range: { start: number; end: number };
   /** 1-based. */
   line: number;
@@ -36,6 +37,11 @@ export interface FoundMatch {
   /** Why this one could not be rendered — a template naming a placeholder that
    *  matched nothing here, an index past the end of a list. */
   problem?: string;
+}
+
+/** A {@link Hit}, and which script it was in. Flat on the wire. */
+export interface FoundMatch extends Hit {
+  path: string;
 }
 
 export interface FindResult {
@@ -86,6 +92,28 @@ export function structuralPreview(
   scope?: RestructureScope,
 ): Promise<RestructurePreview> {
   return picus('picus_structural_preview', { root, pattern, replacement, scope });
+}
+
+export interface ScanResult {
+  matches: Hit[];
+  placeholders: string[];
+}
+
+/**
+ * Find every place the pattern matches **one buffer** — the document in front of
+ * the user rather than the repository.
+ *
+ * It writes nothing, and there is deliberately no `apply` beside it: the ranges
+ * come back and the editor splices them itself, which is what keeps a structural
+ * replace inside the buffer's own undo history instead of being the one edit that
+ * cannot be taken back.
+ */
+export function structuralScan(
+  text: string,
+  pattern: string,
+  replacement?: string,
+): Promise<ScanResult> {
+  return picus('picus_structural_scan', { text, pattern, replacement });
 }
 
 export function structuralApply(

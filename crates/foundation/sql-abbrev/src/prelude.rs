@@ -18,8 +18,9 @@ pub use crate::parse::parse;
 pub use crate::render::{render, Case, RenderStyle};
 pub use crate::schema::{ColumnMeta, ForeignKeyMeta, SchemaView, TableMeta, ValueKind};
 pub use crate::span::{Slot, Span};
+pub use crate::numbering::number;
 pub use crate::statement::{
-    Assignment, ColumnRef, InsertColumn, Join, JoinCondition, Operator, Predicate, Statement,
-    TableRef, Value,
+    Assignment, ColumnChange, ColumnRef, InsertRow, Join, JoinCondition, Operator, Predicate,
+    Statement, TableRef, Value,
 };
-pub use crate::syntax::{Parsed, Verb};
+pub use crate::syntax::{ChangeItem, ChangeKind, Parsed, Verb};
