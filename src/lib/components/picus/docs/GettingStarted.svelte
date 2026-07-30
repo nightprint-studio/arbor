@@ -43,11 +43,12 @@
   <li><b>Title bar</b> — project, and the connection every new tab binds to.</li>
   <li><b>Activity bar</b> — Connections, Scripts on disk, Generate DML, Inventory at the top.
     Below them, apart, the buttons that open a <i>bottom</i> panel rather than a sidebar:
-    <b>Output</b>, <b>Changes</b> and the consistency indicator.</li>
+    <b>Dependencies</b>, <b>Output</b>, <b>Changes</b> and the consistency indicator.</li>
   <li><b>Sidebar</b> — the active section's tree.</li>
   <li><b>Right rail</b> — the tools that describe the <i>document</i> rather than the project:
     the <b>Syntax tree</b> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Y</kbd>), the structural
-    replace, and <b>Results</b> — the rows the statement in this tab returned.</li>
+    replace, <b>Results</b> — the rows the statement in this tab returned — and
+    <b>Sessions</b>, what the server is running right now.</li>
   <li><b>Centre</b> — tabs: the generator, query editors, tables, script files, the inventory.</li>
   <li><b>Bottom panel</b> — <b>one</b> panel at a time, the one whose button you pressed.
     Every answer the window produces arrives down here, the rows a query returned included;

@@ -319,3 +319,107 @@
   chip reads smaller than the value is. Open the cell and the exact length is on the value
   itself.
 </p>
+
+<h2>Explicit transactions</h2>
+<p>
+  Statements normally commit as they run. <b>Begin</b> stops that: everything after it is
+  held until you decide. The toolbar says so while one is open — it changes the meaning of
+  every statement after it, so it is not something to have to remember — and
+  <b>Commit</b> and <b>Rollback</b> are beside it. Closing the connection or the window
+  with one open asks first, and says that the answer is a rollback.
+</p>
+<p>
+  A statement that fails inside a transaction leaves it in a state where the server accepts
+  nothing further. Picus shows that state as its own thing, and offers only the rollback,
+  because that is the only thing that can succeed.
+</p>
+<p>
+  <b>What a rollback undoes depends on the engine, and Picus says which.</b> PostgreSQL's
+  DDL is transactional: a rolled-back transaction really does undo a
+  <code>CREATE TABLE</code>. Oracle commits implicitly before and after every DDL statement,
+  so the first <code>ALTER</code> closes the transaction whatever the client asked for — no
+  driver can prevent that. The connection's engine declares which of the two it is, and the
+  controls state it rather than promising a rollback the server will not honour.
+</p>
+
+<h2>Bind variables</h2>
+<p>
+  A statement with placeholders — <code>:CODICE</code> on Oracle, <code>$1</code> on
+  PostgreSQL — asks for their values before it runs, one field each, and remembers them for
+  that tab. Every field has an explicit <b>NULL</b> toggle: NULL and the empty string are
+  different values, and confusing them is how a wrong <code>UPDATE</code> gets written.
+</p>
+<p>
+  The values are <b>bound</b>, never spliced into the text. That is the point: a value pasted
+  into SQL has to be quoted by whoever pastes it, which is how both injection and mangled
+  apostrophes happen. What is sent to the server is the statement and the values, separately,
+  and the server — which knows the column's type — does the conversion.
+</p>
+<p>
+  Placeholders are found by the same scanner that colours the buffer, so
+  <code>::</code> (a PostgreSQL cast), <code>:=</code> (a PL/SQL assignment),
+  <code>:NEW</code> inside a trigger body, and anything inside a string or a comment are not
+  mistaken for one. A bound read is not scrollable — the engine's cursors do not take
+  parameters — so it returns one window and says so.
+</p>
+
+<h2>The plan</h2>
+<p>
+  Beside the rows a statement returned, a <b>Plan</b> pane: what the server says it will do,
+  as an indented tree with the estimated cost and rows on each step, and the text of the plan
+  for pasting somewhere else.
+</p>
+<p>
+  <b>Analyze</b> is a separate action, and it is separate because it <i>runs the statement</i>.
+  On a <code>SELECT</code> that is only slow; on a <code>DELETE</code> it is the delete. It is
+  refused for anything that is not a read, refused on a read-only connection, and the pane
+  always says whether the numbers you are reading are an estimate or a measurement — which is
+  the most important distinction on that screen.
+</p>
+<p>
+  Worth knowing when reading a plan here: rows are streamed through a held cursor, and
+  PostgreSQL picks fast-start plans for cursors that it would not pick for the same statement
+  run whole. That is a real difference and not a display artefact — it is why the plan is
+  shown beside the rows rather than left to another tool.
+</p>
+
+<h2>Sessions</h2>
+<p>
+  <b>Sessions</b> — on the right-hand rail — is what the server is doing right now: every
+  connected backend, what it is running, how long it has been running it, and what it is
+  waiting on. Refreshed every few seconds while the panel is open and not at all while it is
+  closed, because a poll against a production server should cost nothing when nobody is
+  looking.
+</p>
+<p>
+  Blocking is shown as a chain rather than a flag. "This session is blocked" is not
+  actionable; "this is blocked by pid 4412, which is idle in a transaction" is — so the chain
+  is drawn to the session at the root of it, which is the only one worth doing anything about.
+  Picus's own session is labelled.
+</p>
+<p>
+  Two verbs, and they are genuinely different. <b>Cancel</b> asks the running statement to
+  stop and leaves the connection alive; it is almost always the right one. <b>Terminate</b>
+  drops the connection and rolls its transaction back, and is the answer only for a session
+  that is not running anything — the abandoned <code>idle in transaction</code> holding a
+  lock. Both confirm first, and the confirmation says what will happen rather than asking
+  whether you are sure.
+</p>
+
+<h2>Dependencies</h2>
+<p>
+  What needs what: foreign keys, the tables a view reads, the table a trigger is installed on
+  and the routine it fires, the sequence a column's default draws from.
+</p>
+<p>
+  Shown from the object you select, as two trees — <b>depends on</b> and <b>used by</b> — each
+  expandable, each edge saying <i>why</i> it is there. Not as a free-floating graph: on a
+  schema with several hundred tables that is a cloud nobody can read. Cycles are reported
+  rather than followed forever, and anything the catalogue could not resolve is listed rather
+  than quietly dropped — a graph that omits what it did not understand cannot be trusted to
+  order anything.
+</p>
+<p>
+  Which is the point of it beyond looking: <b>creation order</b> sorts the objects
+  topologically, and that is the order anything emitting them has to use.
+</p>

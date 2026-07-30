@@ -69,6 +69,29 @@ export interface EngineCapabilities {
   cancelQuery: boolean;
   estimatedRows: boolean;
   schemas: boolean;
+  /** The server can say what every session is doing — drives the session monitor. */
+  sessionActivity: boolean;
+  /** A statement's plan can be read without running it. */
+  explain: boolean;
+  /** Statements can carry bound values rather than interpolated ones. */
+  bindParameters: boolean;
+  /** The catalogue can be walked into a dependency graph. */
+  dependencyGraph: boolean;
+  transactions: TxCapability;
+}
+
+/**
+ * What an explicit transaction actually covers.
+ *
+ * `transactionalDdl` is the field that matters and the reason this is not a
+ * boolean: PostgreSQL undoes a `CREATE TABLE` on rollback and Oracle cannot, so
+ * "everything in one transaction" is a promise only one of the two engines can
+ * keep. The interface states that before a run rather than explaining it after.
+ */
+export interface TxCapability {
+  supported: boolean;
+  transactionalDdl: boolean;
+  savepoints: boolean;
 }
 
 /** The dialect differences the generator needs, as data. */

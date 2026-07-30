@@ -16,6 +16,7 @@
  * | `tokens.ts` | Scanning: where the text is code and where it is a string, a comment or a `$$` body. Statement splitting. |
  * | `analysis.ts` | One statement's meaning: table references, **alias resolution**, and what the caret is in the middle of. |
  * | `keywords.ts` | The per-dialect vocabularies — one for suggesting, a wider one for *excluding*. |
+ * | `builtins.ts` | The engines' own functions: signature, return type, one sentence, and the trap. The only facts here that do not come from a connection — a function's meaning belongs to the engine, not to the database. |
  * | `continuations.ts` | What the grammar allows at the caret, before anything is looked up. |
  * | `schema-view.ts` | The single gate between "does not exist" and "not read yet". |
  * | `completion.ts` | The `CompletionSource`. |
@@ -23,6 +24,7 @@
  * | `diagnostics.ts` | The four live rules, in UTF-8 byte offsets. |
  * | `ghost.ts` | The deterministic continuations. |
  * | `abbrev.ts` | The abbreviation shorthand — one backend verb for the expansion, the caret context and the refusal. |
+ * | `binds.ts` | The placeholders a statement wants values for, and the positional list they are sent as. Read off the scanner's tokens, so `::`, `:=`, `:NEW` and anything inside a string or a comment are not one. |
  *
  * They are separate files because they fail separately: the scanner's limits are
  * not the analysis's limits, and the diagnostics' conservatism is a policy that

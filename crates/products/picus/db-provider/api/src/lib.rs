@@ -31,15 +31,19 @@
 //! Workspace convention: call sites reach this crate through
 //! `picus_db_api::prelude::...`.
 
+pub mod activity;
 pub mod capability;
 pub mod connection;
+pub mod depends;
 pub mod descriptor;
 pub mod error;
+pub mod plan;
 pub mod prelude;
 pub mod provider;
 pub mod query;
 pub mod registry;
 pub mod secret;
+pub mod tx;
 
 // The engine kind and the schema shapes live in `picus-types`, the leaf both
 // halves of the product share — a column's type as the server reported it IS the

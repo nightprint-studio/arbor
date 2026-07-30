@@ -6080,6 +6080,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "picus-diff"
+version = "0.3.0"
+dependencies = [
+ "picus-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "picus-emit"
 version = "0.3.0"
 dependencies = [

@@ -28,7 +28,7 @@
 
 import type { Dialect } from '$lib/types/picus';
 import type { Clause, StatementInfo } from './analysis';
-import { constantsFor, functionsFor, keywordsFor } from './keywords';
+import { keywordsFor } from './keywords';
 
 /** Which family of names belongs at the caret. */
 export type NameKind =
@@ -273,5 +273,3 @@ export function expectationAt(facts: CaretFacts, dialect: Dialect): Expectation 
       };
   }
 }
-
-export { functionsFor, constantsFor };

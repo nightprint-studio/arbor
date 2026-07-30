@@ -50,8 +50,18 @@
 </p>
 <p>
   Functions are completed as <code>NAME()</code> with the caret landing between the
-  parentheses. A sequence completes to the form its engine accepts —
+  parentheses, and carry their <b>full signature</b> and a sentence saying what they do —
+  which for <code>NVL2</code> and <code>MONTHS_BETWEEN</code>, where the argument order is the
+  thing people get wrong, is the whole question. A value written without parentheses
+  (<code>SYSDATE</code>, <code>CURRENT_DATE</code>) is completed without them, because adding
+  them is a syntax error on Oracle. A sequence completes to the form its engine accepts —
   <code>SEQ.NEXTVAL</code> on Oracle, <code>nextval('seq')</code> on PostgreSQL.
+</p>
+<p>
+  The function vocabulary is per engine, and deliberately not merged: <code>SUBSTR</code>
+  takes a negative start on one engine and not the other, <code>greatest</code> skips NULLs on
+  PostgreSQL and propagates them on Oracle, and <code>TO_CHAR</code> shares a name and not a
+  format vocabulary. A merged list would need an exception on most rows.
 </p>
 <p>
   Keywords are per dialect, taken from the tab: a connection's engine for a query, the
@@ -94,6 +104,21 @@
   type, whether it accepts <code>NULL</code>, its default and the foreign key it points at; a
   table's kind, column count and row estimate; a sequence's last value and increment. An
   identifier that resolves to nothing known shows nothing.
+</p>
+<p>
+  Resting it on one of the <b>engine's own functions</b> shows its signature, what it returns,
+  a sentence, sometimes an example — and the trap, where there is one. That
+  <code>MONTHS_BETWEEN</code> wants the later date first and returns a negative number
+  silently otherwise; that Oracle's <code>ROWNUM</code> is assigned before the sort, which is
+  why <code>ROWNUM &lt;= 10</code> with an <code>ORDER BY</code> does not give you the top ten;
+  that PostgreSQL's <code>regexp_replace</code> replaces only the first match without the
+  <code>'g'</code> flag, the opposite of what <code>replace()</code> does.
+</p>
+<p>
+  This is the one card that does not need a connection — a function's meaning belongs to the
+  engine, not to the database — so it works in a script file with nothing open. It is skipped
+  for a qualified name: <code>t.COUNT</code> is a column called <code>COUNT</code>, not the
+  aggregate.
 </p>
 
 <h2>What gets flagged while you type</h2>

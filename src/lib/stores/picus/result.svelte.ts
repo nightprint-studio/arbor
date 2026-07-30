@@ -105,10 +105,28 @@ export function formatRowTotal(result: Pick<PicusResult, 'total' | 'approximate'
  * Returns `null` for a statement that returned no rows — a write reports what it
  * touched and holds no cursor, and inventing an empty result for it would put a
  * grid where an outcome belongs.
+ *
+ * ## A result set without a cursor behind it
+ *
+ * Some reads produce rows and hold nothing: a statement carrying **bound values**
+ * (a cursor is a utility statement and takes no parameters), and the reads the
+ * backend cannot cursor at all (`EXPLAIN`, `SHOW`, a multi-statement paste). Their
+ * reply has `columns` and `rows` but no `resultId`, and they used to render as
+ * nothing at all — the rows arrived and the grid stayed empty.
+ *
+ * They become a **static** result: every row it will ever have is already here, so
+ * it is born complete and closed, asks for no window and releases nothing. When the
+ * backend had to cut it short (`endOfResult: false`) that fact cannot be recovered
+ * by scrolling — there is no cursor to scroll — so the caller says so in the
+ * messages rather than the grid pretending there is more to fetch and failing to
+ * fetch it.
  */
 export function createResult(connectionId: string, res: ExecuteResult): PicusResult | null {
-  if (!res.resultId) return null;
-  const resultId = res.resultId;
+  const held = !!res.resultId;
+  // A result SET is what makes a grid, and the backend says so with `columns`. A
+  // write leaves it null and belongs in the outcome line instead.
+  if (!held && !(Array.isArray(res.columns) && res.columns.length > 0)) return null;
+  const resultId = res.resultId ?? '';
   const first = res.rows ?? [];
 
   // Ranges are held raw: they are replaced wholesale on every arrival and never
@@ -119,7 +137,10 @@ export function createResult(connectionId: string, res: ExecuteResult): PicusRes
   let exactTotal = $state<number | null>(res.totalRows ?? null);
   const estimate = res.estimatedRows ?? 0;
   /** Index one past the last row, once a window has run out. Exact when set. */
-  let endIndex = $state<number | null>(res.endOfResult ? first.length : null);
+  // A static result ends where its rows end, whatever the flag said: with no
+  // cursor there is nothing that could answer for a later row, and leaving the end
+  // unknown would have the grid ask for one on every scroll and fail every time.
+  let endIndex = $state<number | null>(res.endOfResult || !held ? first.length : null);
   /**
    * A length we have PROOF of: a window that came back without reaching the end
    * proves there is at least one row after it.
@@ -130,11 +151,14 @@ export function createResult(connectionId: string, res: ExecuteResult): PicusRes
    * never asks for another window. This floor is what makes the tail reachable
    * even when the planner is badly out and the exact count never arrives.
    */
-  let knownFloor = $state(res.endOfResult ? 0 : first.length + 1);
+  let knownFloor = $state(res.endOfResult || !held ? 0 : first.length + 1);
   let counting = $state(false);
   let error = $state('');
 
-  let closed = false;
+  // A static result is born closed: there is no cursor to fetch from and none to
+  // release, and the flag is what makes both `request` and `close` no-ops without
+  // a second branch in either.
+  let closed = !held;
   /** Offsets with a window in flight — the single dedup point for the grid's
    *  deliberately repeated asks. */
   const pending = new Set<number>();

@@ -20,11 +20,12 @@
    * is therefore marked `~` everywhere it appears, until the background count
    * replaces it with the real number.
    */
-  import { FormInput } from 'lucide-svelte';
+  import { FormInput, Gauge, Network } from 'lucide-svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
+  import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import DataGrid, {
     type DataGridColumn,
@@ -34,11 +35,14 @@
   import ResultCell from './ResultCell.svelte';
   import ResultEditBar from './ResultEditBar.svelte';
   import LobViewerModal from './LobViewerModal.svelte';
+  import QueryPlanView from './QueryPlanView.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
-  import { formatElapsed, queryStore } from '$lib/stores/picus/query.svelte';
+  import { formatElapsed, queryStore, type ResultPane } from '$lib/stores/picus/query.svelte';
+  import { picusPlanStore } from '$lib/stores/picus/plan.svelte';
+  import { picusProvidersStore } from '$lib/stores/picus/providers.svelte';
   import { formatRowTotal, picusResultsStore } from '$lib/stores/picus/result.svelte';
   import { editability, resultEditStore } from '$lib/stores/picus/result-edit.svelte';
   import { schemaStore } from '$lib/stores/picus/schema.svelte';
@@ -59,7 +63,7 @@
   const result = $derived(tab ? picusResultsStore.forOwner(tab.id) : null);
 
   /**
-   * The two panes.
+   * The panes.
    *
    * Called **Rows**, not "Results": the dock tab above this row is already called
    * Results, so the word appeared twice, one line under the other, naming two
@@ -68,13 +72,47 @@
    * Messages carries the number of errors in it, because a failed statement's
    * reason lands there while the eye is on an empty grid — and a pane that has
    * something to say should say so from the outside.
+   *
+   * Plan is here rather than in a panel of its own because it answers a question
+   * asked *about the rows on screen* — "why was that slow" — and a separate panel
+   * would put the answer somewhere the question is not.
    */
   const errorCount = $derived(
     (tabState?.messages ?? []).filter((m) => m.level === 'error').length,
   );
+  /**
+   * The connection the rows came from — for the engine the `INSERT` export quotes
+   * for, and for whether they can be edited at all.
+   *
+   * Through the tabs store, never `connectionsStore.byId(tab.connectionId)` on its
+   * own: that misses the fallback every other reader applies, so a tab whose
+   * binding does not resolve ran its statement against the window's connection
+   * while this panel described nothing — and `editability` reads a missing
+   * connection as read-only, which is how a restored tab came back unwritable.
+   */
+  const conn = $derived(picusTabsStore.connectionOf(tab));
+
+  /**
+   * Does this engine answer for plans at all?
+   *
+   * Read off the descriptor rather than branched on the engine's name — that is the
+   * whole point of the capability matrix. False while the descriptors are still
+   * loading, so the pane appears a moment late rather than appearing and refusing.
+   *
+   * Declared **above** `paneTabs` and not beside the rest of the plan code: the
+   * argument to `$derived(...)` is an ordinary expression evaluated where it is
+   * written, so a `const` referenced from it and declared further down is a
+   * use-before-declaration error, not a stylistic quibble.
+   */
+  const canExplain = $derived(picusProvidersStore.capabilities(conn?.dialect)?.explain ?? false);
+  $effect(() => void picusProvidersStore.load());
+
   const paneTabs = $derived<TabItem[]>([
     { id: 'results', label: 'Rows' },
     { id: 'messages', label: 'Messages', badge: errorCount || undefined },
+    // Only where the engine has plans at all: a capability the engine lacks must be
+    // absent, not present and failing.
+    ...(canExplain ? [{ id: 'plan', label: 'Plan' } satisfies TabItem] : []),
   ]);
 
   const gridColumns = $derived<DataGridColumn[]>(
@@ -87,17 +125,42 @@
     })),
   );
 
+  // ── The plan of the statement, beside the rows it would produce ──────────────
+  //
+  // `canExplain` and `conn` are declared above, next to the tab strip that reads
+  // them.
+
   /**
-   * The connection the rows came from — for the engine the `INSERT` export quotes
-   * for, and for whether they can be edited at all.
+   * The plan of the statement this tab is pointing at.
    *
-   * Through the tabs store, never `connectionsStore.byId(tab.connectionId)` on its
-   * own: that misses the fallback every other reader applies, so a tab whose
-   * binding does not resolve ran its statement against the window's connection
-   * while this panel described nothing — and `editability` reads a missing
-   * connection as read-only, which is how a restored tab came back unwritable.
+   * Its own store, keyed by the same tab: a plan is about a *statement*, so it
+   * survives the result being closed and exists for a statement that has never been
+   * run. Nothing here reaches into the grid's state and nothing there reaches into
+   * this.
    */
-  const conn = $derived(picusTabsStore.connectionOf(tab));
+  const planState = $derived(tab ? picusPlanStore.read(tab.id) : null);
+
+  /** Ask the server what it *would* do. Nothing is executed. */
+  function explain() {
+    if (!tab || !conn) return;
+    queryStore.setPane(tab.id, 'plan');
+    void picusPlanStore.explain(tab.id, conn.id, conn.dialect);
+  }
+
+  /**
+   * Ask the server what it *did* — which means running the statement.
+   *
+   * Confirmed rather than fired, and the confirmation names the consequence. The
+   * backend refuses to measure anything that is not a read, so this can never be a
+   * write; it can still be the four-minute report the user was only curious about.
+   */
+  let confirmMeasure = $state(false);
+  function measure() {
+    confirmMeasure = false;
+    if (!tab || !conn) return;
+    queryStore.setPane(tab.id, 'plan');
+    void picusPlanStore.measure(tab.id, conn.id, conn.dialect);
+  }
 
   /**
    * Which table these rows are from, when that is answerable.
@@ -246,7 +309,7 @@
         variant="underline"
         size="sm"
         ariaLabel="Result pane"
-        onSelect={(id) => queryStore.setPane(tab.id, id as 'results' | 'messages')}
+        onSelect={(id) => queryStore.setPane(tab.id, id as ResultPane)}
       />
       {#snippet actions()}
       {#if tabState.running}
@@ -296,6 +359,31 @@
         >
           {editable.ok ? 'editable' : 'read-only rows'}
         </span>
+      {/if}
+      {#if canExplain}
+        <!-- Two buttons, never one with a modifier: the first asks the server what
+             it would do, the second makes it do it. That difference is the whole
+             feature, and a flag on a single control would hide it. -->
+        <Button
+          variant="icon"
+          size="xs"
+          tooltip={'Explain — ask the server how it would run this statement. Nothing is executed.'}
+          ariaLabel="Explain the statement"
+          disabled={planState?.running ?? false}
+          onclick={explain}
+        >
+          {#snippet iconStart()}<Network size={13} />{/snippet}
+        </Button>
+        <Button
+          variant="icon"
+          size="xs"
+          tooltip={'Analyze — RUNS the statement and reports the real times and row counts.'}
+          ariaLabel="Analyze the statement (runs it)"
+          disabled={planState?.running ?? false}
+          onclick={() => (confirmMeasure = true)}
+        >
+          {#snippet iconStart()}<Gauge size={13} />{/snippet}
+        </Button>
       {/if}
       <Button
         variant="icon"
@@ -361,6 +449,26 @@
         {:else}
           <StateBlock tone="info" label="Run the query to see its rows." />
         {/if}
+      {:else if tabState.pane === 'plan'}
+        {#if planState?.running}
+          <StateBlock tone="loading">
+            {#snippet spinner()}<Spinner size={14} />{/snippet}
+            <span>
+              {planState.measuring
+                ? 'Running the statement to measure it…'
+                : 'Asking the server for the plan…'}
+            </span>
+          </StateBlock>
+        {:else if planState?.error}
+          <StateBlock tone="error" label={planState.error} />
+        {:else if planState?.plan}
+          <QueryPlanView plan={planState.plan} sql={planState.sql} />
+        {:else}
+          <StateBlock
+            tone="info"
+            label="Explain shows how the server would run the statement the caret is in. Analyze runs it and reports what actually happened."
+          />
+        {/if}
       {:else}
         <div class="qr-log">
           {#each tabState.messages as msg, i (i)}
@@ -375,6 +483,21 @@
       {/if}
     </div>
   </div>
+{/if}
+
+{#if confirmMeasure}
+  <!-- The consequence, before it happens. Analyze is not a display option of
+       Explain: it executes the statement, and on a report that takes minutes the
+       difference is the user's afternoon. -->
+  <ConfirmModal
+    title="Analyze runs the statement"
+    message="Measuring a plan means executing the statement and reporting what really happened."
+    detail="Only a read can be measured — anything else is refused. A slow statement will take as long as it takes; Cancel on this connection stops it."
+    variant="warning"
+    confirmLabel="Run and measure"
+    onConfirm={measure}
+    onCancel={() => (confirmMeasure = false)}
+  />
 {/if}
 
 {#if opened && conn}

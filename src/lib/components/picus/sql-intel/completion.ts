@@ -40,7 +40,8 @@ import {
   analyzeStatement, caretContext, resolveQualifier,
   type RelationRef, type StatementInfo,
 } from './analysis';
-import { constantsFor, expectationAt, functionsFor, type Expectation, type NameKind } from './continuations';
+import { builtinsFor, type BuiltinFunction } from './builtins';
+import { expectationAt, type Expectation, type NameKind } from './continuations';
 import { RESERVED } from './keywords';
 import { ensureRelationDetail, schemaViewFor, type SchemaView } from './schema-view';
 import { inLiteral, scanSql, statementAt, type SqlStatement, type SqlToken } from './tokens';
@@ -99,17 +100,35 @@ function keywordCompletion(word: string, boost: number): Completion {
   return { label: word, type: 'keyword', boost };
 }
 
-/** A function, applied as `NAME()` with the caret **between** the parentheses —
- *  which is the only reason offering one is better than typing it. */
-function functionCompletion(name: string): Completion {
-  return {
-    label: `${name}()`,
-    type: 'function',
+/**
+ * One of the engine's own functions.
+ *
+ * A callable is applied as `NAME()` with the caret **between** the parentheses,
+ * which is the only reason offering one beats typing it. A bare value — `SYSDATE`,
+ * `CURRENT_DATE` — is applied as itself: parentheses there are a syntax error on
+ * Oracle, so the distinction is data on the entry rather than a guess from the name.
+ *
+ * `detail` carries the full signature and `info` the sentence, so the popup answers
+ * "what are its arguments, and in what order" without a trip to the documentation —
+ * which for `NVL2` and `MONTHS_BETWEEN` is the whole question.
+ */
+function builtinCompletion(fn: BuiltinFunction): Completion {
+  const shared = {
+    type: fn.bare ? 'constant' : 'function',
+    detail: fn.signature,
+    info: fn.note ? `${fn.summary} — ${fn.note}` : fn.summary,
     boost: BOOST.fn,
+  } as const;
+
+  if (fn.bare) return { label: fn.name, ...shared };
+
+  return {
+    label: `${fn.name}()`,
+    ...shared,
     apply: (view: EditorView, _c: Completion, from: number, to: number) => {
       view.dispatch({
-        changes: { from, to, insert: `${name}()` },
-        selection: { anchor: from + name.length + 1 },
+        changes: { from, to, insert: `${fn.name}()` },
+        selection: { anchor: from + fn.name.length + 1 },
       });
     },
   };
@@ -431,8 +450,7 @@ export function createSqlCompletion(dialect: Dialect, connectionId?: string): Co
     }
 
     if (expectation.functions) {
-      for (const fn of functionsFor(dialect)) options.push(functionCompletion(fn));
-      for (const c of constantsFor(dialect)) options.push(keywordCompletion(c, BOOST.fn));
+      for (const fn of builtinsFor(dialect)) options.push(builtinCompletion(fn));
     }
 
     const names = namesFor(expectation.names, {

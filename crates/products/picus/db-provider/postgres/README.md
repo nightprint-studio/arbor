@@ -5,7 +5,7 @@ pure Rust (no `libpq` to ship) and the only driver that gives a real server-side
 cancellation key — which is what makes the query editor's **Cancel** stop a running
 statement rather than abandon it.
 
-## Eight decisions worth knowing before reading the code
+## Nine decisions worth knowing before reading the code
 
 **Values come back as the server's own text.** Execution uses the *simple query
 protocol*, so a `timestamptz`, a wide `numeric` and a domain type arrive looking
@@ -100,6 +100,20 @@ when the cell is opened. It is deliberately *not* conditional on the row being
 addressable: a grid of sizes you cannot open is a smaller problem than a read nobody
 can wait out, and selecting the key column fixes it.
 
+**A bound value is never spliced into the statement, and a bound read never
+scrolls.** `execute_bound` sends the values beside the SQL, in text format, so the
+server parses each one with the input function of the type *it* inferred for that
+placeholder — no quoting on this side, and a bad value comes back in the server's own
+words. The cost is stated rather than hidden: `DECLARE … CURSOR` is a utility
+statement and takes no parameters, so there is nothing to hold the result over. A
+parameterised read returns up to `window` rows with `result_id: None` and an honest
+`end_of_result`, and the interface says so. Parameters also force the extended
+protocol, where the driver asks for binary results — so the projection is cast to
+`text` through a wrapper (a bounded subquery for a query, a CTE for a
+`RETURNING` write) rather than PostgreSQL's output functions being re-implemented
+here. The bound goes **inside** that wrapper: a subquery carrying no `LIMIT` is
+pulled up and loses its `ORDER BY`.
+
 **Cancellation is remembered, not just sent.** The server's cancel key only
 interrupts what is running at the instant it arrives, and `execute` is more than one
 round trip — a Cancel landing in a gap between them would hit nothing and be lost,
@@ -126,7 +140,10 @@ closed or the backend exits.
 | `session` | the live connection: schema, execute, windows, counting, cancel |
 | `cursor` | held results — the `DECLARE` / `MOVE` / `FETCH` / `CLOSE` construction (`cursor::sql`, pure) and the per-session registry that decides when one dies (`cursor::registry`). Read its module docs before changing anything about `WITH HOLD` |
 | `rows` | the reply → columns + cells mapping: server text in, `CellValue` out |
+| `bind` | statements whose values travel beside them: the text-format parameter encoding, and the wrapper that reads the reply back as the server's own text. Its module docs state the limit — a bound read holds no cursor — and why the `LIMIT` has to sit inside the wrapper |
 | `catalog` | the `pg_catalog` queries — faster than `information_schema`, and the only place trigger bitmasks and expression-index columns exist. Note the single-relation entry point (`read_relation`): opening one tab must not read a whole catalogue. A sequence bound equal to the type's own extreme is sent as `None`: it is not this sequence's limit, and `i64::MAX` does not survive a JSON number anyway. `read_trigger_detail` is lazy for the same reason as `read_relation`, and reaches `pg_get_functiondef` only through a `CASE` that has already checked the language — it *raises* on a C or `internal` routine |
+| `activity` | the session monitor: `pg_stat_activity`, `pg_blocking_pids()` and the lock being waited for in **one** statement — read separately, the blocking graph describes a moment the session list has already left. Every age is computed by the server in milliseconds (`clock_timestamp()`, never `now()`): subtracting the server's timestamps from the browser's clock is wrong by however far the two machines disagree, and wrong invisibly. `stop_session` carries the server's own boolean and the server's own refusal — a silent no-op reads as "Terminate does nothing" |
+| `tx` | explicit transactions — and **no flag of its own**: every call reads the state from the server, because a statement that fails inside a block aborts the transaction without anyone asking, and a client-side boolean would still be saying "active" while the connection accepted nothing. `tokio-postgres` does not expose the protocol's transaction-status byte, so the state is deduced from `transaction_timestamp() <> statement_timestamp()` plus the `25P02` an aborted block answers with. `commit` **refuses** a failed transaction rather than forwarding it: PostgreSQL's own `COMMIT` there performs a rollback and reports success |
 | `sql` | pure helpers: quoting, statement classification, statement scanning, trigger-bit decoding. Fully unit-tested without a database |
 | `tls` | rustls + the OS trust store, so an internal corporate CA works with no bundle shipped |
 | `error` | driver error → `DbError`, keeping the SQL position so the editor can place a squiggle |

@@ -32,6 +32,7 @@ reverse channel, at the moment of use.
 | `connections` | the configured list, open / close / test, `picus_read_db_version` |
 | `schema` | `picus_read_schema` / `picus_table_detail` |
 | `query` | `picus_execute` / `picus_open_relation` / `picus_result_window` / `picus_count_result` / `picus_close_result` / `picus_cancel` |
+| `tx` | `picus_tx_begin` / `picus_tx_commit` / `picus_tx_rollback` / `picus_tx_state` — explicit transactions. The state is always the **engine's**, never remembered here: a statement that fails inside a block aborts the transaction without anyone asking for it, which is why the interface re-asks after every statement |
 | `emit` | `picus_emit` / `picus_validate_rows` / `picus_validate_value` |
 | `project` | `picus_open_project` / `picus_confirm_project` / `picus_set_folder_alias` / `picus_folders_named` / `picus_is_project` / `picus_propose_update_file` |
 | `scripts` | `picus_open_scripts` / `picus_refresh_scripts` / `picus_analyze_scripts` / `picus_script_text` |

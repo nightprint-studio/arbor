@@ -72,6 +72,13 @@ fn capabilities() -> EngineCapabilities {
         cancel_query: true,
         estimated_rows: true,
         schemas: true,
+        session_activity: true,
+        explain: true,
+        bind_parameters: true,
+        dependency_graph: true,
+        // The one that matters on this engine: PostgreSQL's DDL is transactional,
+        // so a failed install really can be undone. Oracle's is not, and says so.
+        transactions: TxCapability { supported: true, transactional_ddl: true, savepoints: true },
     }
 }
 

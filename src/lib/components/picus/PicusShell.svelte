@@ -17,8 +17,8 @@
    * in `picus-shortcuts.ts` and this file's `onKeyDown` must stay in step with it.
    */
   import {
-    Braces, Database, FolderTree, FormInput, GitCompare, Layers, Replace, TableProperties,
-    Terminal, TriangleAlert,
+    Activity, Braces, Database, FolderTree, FormInput, GitCompare, Layers, Replace,
+    TableProperties, Terminal, TriangleAlert, Waypoints,
   } from 'lucide-svelte';
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
   import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
@@ -79,6 +79,8 @@
   import { destinationSetsStore } from '$lib/stores/picus/destination-sets.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import { queryStore } from '$lib/stores/picus/query.svelte';
+  import { activityStore } from '$lib/stores/picus/activity.svelte';
+  import { dependsStore } from '$lib/stores/picus/depends.svelte';
   import { picusEditorStore } from '$lib/stores/picus/editor.svelte';
   import { resultEditStore } from '$lib/stores/picus/result-edit.svelte';
   import { picusSettingsStore } from '$lib/stores/picus/settings.svelte';
@@ -172,6 +174,23 @@
       dot: queryStore.read(picusTabsStore.active?.id ?? '').running ? 'accent' : false,
       onclick: () => picusUiStore.showBottom('results'),
     },
+    // The monitor is about the *server* rather than the document, so by this
+    // window's own rule it belongs on the left. It is here because that is where
+    // it was asked for — and there is a case for it: it is the thing you reach for
+    // while watching a statement that will not finish, which is the other panel on
+    // this rail. Absent entirely on an engine that cannot answer it.
+    ...(activityStore.supported
+      ? [{
+          id: 'activity',
+          icon: Activity as unknown as IconComponent,
+          tooltip: 'Sessions — what this server is running, and what is blocked',
+          active: picusUiStore.bottomOpen && picusUiStore.bottomTab === 'activity',
+          // Something is waiting on something else. Worth a mark on a closed panel:
+          // it is the one state where looking is urgent.
+          dot: activityStore.blockedCount ? 'warning' : false,
+          onclick: () => picusUiStore.showBottom('activity'),
+        } satisfies ActivityRailItem]
+      : []),
   ]);
 
   /**
@@ -185,12 +204,20 @@
    * document in front of you: the syntax tree, the structural replace, and now the
    * rows the statement in it returned.
    *
-   * They do not replace the dock's own tab strip. That strip says which panel is
-   * open and switches between them once it is; these say "open it", from anywhere,
-   * without first having to open something else. Same relationship IntelliJ has
-   * between a tool-window button and the tool window.
+   * There is no tab strip inside the dock any more: a button opens *its* panel and
+   * the panel owns its header, which is the arrangement Corvus has always had and
+   * a whole row of chrome cheaper.
    */
   const railBottom = $derived<ActivityRailItem[]>([
+    ...(dependsStore.supported
+      ? [{
+          id: 'depends',
+          icon: Waypoints as unknown as IconComponent,
+          tooltip: 'Dependencies — what needs what, and in which order to create it',
+          active: picusUiStore.bottomOpen && picusUiStore.bottomTab === 'depends',
+          onclick: () => picusUiStore.showBottom('depends'),
+        } satisfies ActivityRailItem]
+      : []),
     {
       id: 'output',
       icon: Terminal as unknown as IconComponent,

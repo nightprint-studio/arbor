@@ -119,7 +119,7 @@ fn column_type(types: Option<&[(String, Type)]>, index: usize) -> Option<&Type> 
 /// figures; everything else stays the server's text. A `numeric` too wide for an
 /// `f64` deliberately stays text rather than being silently rounded — losing
 /// precision in a tool that writes SQL is worse than losing the alignment.
-fn cell(value: Option<&str>, numeric: bool) -> CellValue {
+pub(crate) fn cell(value: Option<&str>, numeric: bool) -> CellValue {
     let Some(text) = value else { return CellValue::Null };
     if !numeric {
         return CellValue::Text(text.to_string());
@@ -136,7 +136,11 @@ fn cell(value: Option<&str>, numeric: bool) -> CellValue {
 }
 
 /// Is this a type the grid should treat as a number?
-fn is_numeric(ty: &Type) -> bool {
+///
+/// Shared with [`crate::bind`], which reads a bound statement through a text cast
+/// and still has to decide which columns the grid right-aligns — the same question,
+/// and it must not have two answers.
+pub(crate) fn is_numeric(ty: &Type) -> bool {
     matches!(
         *ty,
         Type::INT2 | Type::INT4 | Type::INT8 | Type::FLOAT4 | Type::FLOAT8 | Type::NUMERIC | Type::OID

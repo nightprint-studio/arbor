@@ -1,9 +1,41 @@
 <script module lang="ts">
   import type { Component } from 'svelte';
   import type { IconComponent } from '$lib/types/icon';
+  import type { TooltipArg } from '$lib/actions/tooltip';
 
   export interface DocsNavItem { id: string; label: string; icon?: IconComponent; }
   export interface DocsNavGroup { id: string; label: string; icon?: IconComponent; items: DocsNavItem[]; }
+
+  /**
+   * A topic whose body is a raw HTML string instead of a topic component —
+   * documentation that only exists at runtime and therefore cannot be imported:
+   * a plugin's `doc.html`, a manual fetched from a marketplace, a generated
+   * reference. Ids must not collide with the keys of `sections`.
+   */
+  export interface DocsHtmlItem {
+    id: string;
+    label: string;
+    /** Rendered with `{@html}` inside the same typography block topics get. */
+    html: string;
+    /** Dimmed and struck through in the nav — the entry is still readable. */
+    muted?: boolean;
+    /** Left out of the exported document (Markdown and HTML alike). */
+    excludeFromExport?: boolean;
+    /** Small uppercase pill after the label, e.g. `disabled`. */
+    pill?: string;
+    /** Tooltip for the nav entry — the only place a runtime topic can explain itself. */
+    tooltip?: TooltipArg;
+    /** Heading this entry gets in the export. Defaults to `label`. */
+    exportName?: string;
+  }
+
+  /** A nav group whose items arrive at runtime. Rendered after `navGroups`. */
+  export interface DocsHtmlGroup {
+    id: string;
+    label: string;
+    icon?: IconComponent;
+    items: DocsHtmlItem[];
+  }
 </script>
 
 <script lang="ts">
@@ -14,6 +46,11 @@
    * passes a flat `topItems` list, collapsible `navGroups`, and a `sections`
    * map (id → topic component). Each topic component writes plain semantic HTML;
    * the shared `PluginDocBlock` supplies the typography baseline.
+   *
+   * Topics that only exist at runtime (a plugin's `doc.html`) come in through
+   * `htmlGroups` instead: same nav, same search, same export, but the body is an
+   * HTML string rather than a component. Nothing else distinguishes them, which
+   * is the point — the shell never learns which product it is serving.
    *
    * Search filters the nav (label + full-text via an offscreen index) and
    * highlights matches in the active section (F3 / Shift+F3 to cycle).
@@ -36,12 +73,13 @@
   import SearchBar from './ui/SearchBar.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import PluginDocBlock from '$lib/components/shared/internal/PluginDocBlock.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
   import { animStore } from '$lib/stores/animations.svelte';
   import { fsWriteTextFile } from '$lib/ipc/fs';
   import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import {
     buildReadme, buildHtmlExport,
-    type SectionEntry, type HtmlSectionEntry,
+    type SectionEntry, type HtmlSectionEntry, type PluginDocEntry,
   } from '$lib/utils/docs-export';
   import {
     compileQuery, highlightLabel, textMatches, injectHighlights, clearHighlights,
@@ -50,29 +88,42 @@
   let {
     topItems = [],
     navGroups = [],
+    htmlGroups = [],
     sections,
     onClose,
     title = 'Documentation',
     headerIcon,
     initialSection,
+    initialOpenGroup,
     width = '1040px',
     height = '700px',
     product,
     fileBase,
+    prebuildSearchIndex = false,
   }: {
     topItems?: DocsNavItem[];
     navGroups?: DocsNavGroup[];
+    /** Runtime topics, rendered as `{@html}`. Pass a `$derived` value: the shell
+     *  re-indexes and re-renders whenever the list changes underneath it. */
+    htmlGroups?: DocsHtmlGroup[];
     sections: Record<string, Component>;
     onClose: () => void;
     title?: string;
     headerIcon?: IconComponent;
     initialSection?: string;
+    /** Nav group expanded on open. Defaults to the first one; pass `null` for a
+     *  fully collapsed nav, which is what a long topic list wants. */
+    initialOpenGroup?: string | null;
     width?: string;
     height?: string;
     /** Product name in the exported heading. Defaults to the panel's title. */
     product?: string;
     /** Base file name the save dialog proposes. Defaults to a slug of `product`. */
     fileBase?: string;
+    /** Build the full-text index shortly after opening instead of on the first
+     *  query. Worth it for large doc sets, where extraction is long enough to be
+     *  felt as a stutter on the first keystroke. */
+    prebuildSearchIndex?: boolean;
   } = $props();
 
   const productName = $derived(
@@ -80,21 +131,46 @@
   );
   const exportBase = $derived(fileBase ?? `${productName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-docs`);
 
+  /** One row of the nav. Runtime topics carry a little more chrome than static
+   *  ones (a pill, a tooltip, a dimmed state) — everything else is identical, so
+   *  both kinds of group render through the same markup below. */
+  type NavRow = DocsNavItem & { pill?: string; tooltip?: TooltipArg; muted?: boolean };
+  interface RenderGroup { id: string; label: string; icon?: IconComponent; items: NavRow[]; }
+
+  const htmlItems = $derived(htmlGroups.flatMap((g) => g.items));
+  const renderGroups = $derived<RenderGroup[]>([
+    ...navGroups,
+    ...htmlGroups.map((g) => ({
+      id: g.id,
+      label: g.label,
+      icon: g.icon,
+      items: g.items.map((i) => ({
+        id: i.id, label: i.label, pill: i.pill, tooltip: i.tooltip, muted: i.muted,
+      })),
+    })),
+  ]);
+
   let activeSection = $state(
     untrack(() => initialSection ?? topItems[0]?.id ?? navGroups[0]?.items[0]?.id ?? ''),
   );
   let groupOpen = $state<Record<string, boolean>>(
-    untrack(() => Object.fromEntries(navGroups.map((g, i) => [g.id, i === 0]))),
+    untrack(() => {
+      const open = initialOpenGroup === undefined ? navGroups[0]?.id : initialOpenGroup;
+      return Object.fromEntries(navGroups.map((g) => [g.id, g.id === open]));
+    }),
   );
 
   const orderedSections = $derived([
     ...topItems.map((i) => ({ id: i.id, label: i.label })),
     ...navGroups.flatMap((g) => g.items.map((i) => ({ id: i.id, label: i.label }))),
+    ...htmlItems.map((i) => ({ id: i.id, label: i.label })),
   ]);
+
+  const activeHtml = $derived(htmlItems.find((i) => i.id === activeSection));
 
   function selectSection(id: string) {
     activeSection = id;
-    for (const g of navGroups) {
+    for (const g of renderGroups) {
       if (g.items.some((it) => it.id === id)) { groupOpen[g.id] = true; break; }
     }
   }
@@ -173,7 +249,7 @@
       if (labelHit || textMatches(textCache.get(s.id) ?? '', re)) matches.add(s.id);
     }
     matchingIds = matches; labelMatchIds = labels;
-    for (const g of navGroups) if (g.items.some((i) => matches.has(i.id))) groupOpen[g.id] = true;
+    for (const g of renderGroups) if (g.items.some((i) => matches.has(i.id))) groupOpen[g.id] = true;
     if (!matches.has(activeSection)) {
       const first = orderedSections.find((s) => matches.has(s.id));
       if (first) activeSection = first.id;
@@ -191,6 +267,31 @@
     searchQuery = ''; matchingIds = new Set(); labelMatchIds = new Set();
     if (contentEl) { clearHighlights(contentEl, 'docs-match'); contentMarks = []; currentMarkIdx = 0; }
   }
+
+  // Runtime topics can appear, vanish or be rewritten while the panel is open
+  // (a plugin reload). The signature covers the bodies, not just the count:
+  // swapping one entry for another of the same size is exactly the case a
+  // length check would miss, and a stale index answers queries with topics that
+  // are no longer there. Rebuilding is lazy — the next query pays for it.
+  let _htmlSignature = '';
+  $effect(() => {
+    const sig = htmlItems.map((i) => `${i.id}:${i.html.length}`).join('\u0000');
+    if (sig === _htmlSignature) return;
+    _htmlSignature = sig;
+    untrack(() => {
+      if (textCache.size > 0) { textCache.clear(); _cacheBuilding = null; }
+      if (searchActive) doSearch();
+    });
+  });
+
+  // Opt-in warm-up: deferred a beat so the modal paints first.
+  let _prebuildStarted = false;
+  $effect(() => {
+    if (!prebuildSearchIndex || _prebuildStarted) return;
+    _prebuildStarted = true;
+    const t = setTimeout(() => { void ensureCache(); }, 80);
+    return () => clearTimeout(t);
+  });
 
   async function applyContentHighlights() {
     await tick(); await tick();
@@ -255,6 +356,14 @@
     ),
   ]);
 
+  /** Runtime topics travel as the converter's appendix — it takes them as HTML
+   *  strings, which is what they already are, so they need no offscreen pass. */
+  const exportAppendix = $derived<PluginDocEntry[]>(
+    htmlItems
+      .filter((i) => !i.excludeFromExport)
+      .map((i) => ({ name: i.exportName ?? i.label, doc: i.html })),
+  );
+
   async function exportAs(format: 'md' | 'html') {
     if (exporting) return;
     exporting = true;
@@ -274,7 +383,7 @@
           id: s.id, label: s.label, el: found.get(s.id)!,
         }));
         pendingExport = {
-          content: buildReadme(entries, [], productName),
+          content: buildReadme(entries, exportAppendix, productName),
           defaultName: `${exportBase}.md`,
         };
       } else {
@@ -282,7 +391,7 @@
           id: s.id, label: s.label, groupLabel: s.groupLabel, html: found.get(s.id)!.innerHTML,
         }));
         pendingExport = {
-          content: buildHtmlExport(entries, [], productName),
+          content: buildHtmlExport(entries, exportAppendix, productName),
           defaultName: `${exportBase}.html`,
         };
       }
@@ -318,6 +427,11 @@
         {@const Comp = sections[s.id]}
         <div data-section={s.id}><Comp /></div>
       {/if}
+    {/each}
+    <!-- Runtime topics: indexed like any other section, so a search finds them
+         even before their nav group has ever been opened. -->
+    {#each htmlItems as item (item.id)}
+      <div data-section={item.id}>{@html item.html}</div>
     {/each}
   </div>
 {/if}
@@ -376,12 +490,12 @@
         {/if}
       {/each}
 
-      {#each navGroups as group (group.id)}
+      {#each renderGroups as group (group.id)}
         {@const GroupIcon = group.icon}
         {@const groupHits = group.items.filter((i) => matchingIds.has(i.id))}
         {@const groupVisible = !searchActive || groupHits.length > 0}
-        {@const expanded = searchActive ? groupHits.length > 0 : groupOpen[group.id]}
-        {#if groupVisible}
+        {@const expanded = searchActive ? groupHits.length > 0 : groupOpen[group.id] === true}
+        {#if groupVisible && group.items.length > 0}
           <button class="nav-group-header" onclick={() => { if (!searchActive) groupOpen[group.id] = !groupOpen[group.id]; }}>
             {#if GroupIcon}<GroupIcon size={13} />{/if}
             <span>{group.label}</span>
@@ -393,11 +507,18 @@
               {#each group.items as item (item.id)}
                 {@const Icon = item.icon}
                 {#if !searchActive || matchingIds.has(item.id)}
-                  <button class="nav-item nav-item-child" class:active={activeSection === item.id} onclick={() => selectSection(item.id)}>
+                  <button
+                    class="nav-item nav-item-child"
+                    class:active={activeSection === item.id}
+                    class:muted={item.muted}
+                    use:tooltip={item.tooltip}
+                    onclick={() => selectSection(item.id)}
+                  >
                     {#if Icon}<Icon size={12} />{/if}
                     {#if searchActive && labelMatchIds.has(item.id)}
                       <span class="nav-label">{@html highlightLabel(item.label, compiledQuery)}</span>
                     {:else}<span class="nav-label">{item.label}</span>{/if}
+                    {#if item.pill}<span class="nav-pill">{item.pill}</span>{/if}
                   </button>
                 {/if}
               {/each}
@@ -414,6 +535,12 @@
             {#if sections[activeSection]}
               {@const Active = sections[activeSection]}
               <Active />
+            {:else if activeHtml}
+              {@html activeHtml.html}
+            {:else if activeSection}
+              <!-- Reachable when a runtime topic disappears under the reader —
+                   a plugin unloaded while its page was open. -->
+              <p class="topic-gone">This topic is not available.</p>
             {/if}
           {/snippet}
         </PluginDocBlock>
@@ -480,6 +607,28 @@
   .nav-item-child { padding-left: 28px; font-size: var(--font-size-xs); }
   .nav-item-child.active { background: rgba(77,120,204,0.10); }
 
+  /* A muted runtime topic stays readable — it is still documentation, it just
+     won't be in the exported file, and the strike-through is what says so. */
+  .nav-item.muted .nav-label {
+    color: var(--text-disabled);
+    font-style: italic;
+    text-decoration: line-through;
+    text-decoration-color: var(--text-disabled);
+    opacity: 0.85;
+  }
+  .nav-pill {
+    margin-left: auto;
+    padding: 1px 6px;
+    font-size: var(--font-size-3xs);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text-muted);
+    background: var(--bg-hover);
+    border: 1px solid var(--border-subtle);
+    border-radius: 3px;
+  }
+
   .docs-content {
     /* `min-width: 0` is essential: as a flex child it would otherwise grow to its
        widest content (a long table cell / unbreakable code token), pushing the
@@ -491,6 +640,8 @@
   .docs-content::-webkit-scrollbar { width: 5px; }
   .docs-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--radius-sm); }
 
+  .topic-gone { color: var(--text-muted); font-style: italic; margin-top: 24px; }
+
   :global(.nav-label mark) { background: color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 2px; padding: 0 1px; }
   :global(mark.docs-match) {
     background: color-mix(in srgb, var(--warning, #e8a33d) 40%, transparent); border-radius: 2px; padding: 0 1px;
@@ -498,38 +649,9 @@
   }
   :global(mark.docs-match.current) { background: var(--warning, #e8a33d); color: var(--bg-base); }
 
-  /* ── Doc authoring utilities (lead paragraph + callout) ─────────────── */
-  .docs-content :global(.doc-lead) {
-    font-size: var(--font-size-md); color: var(--text-secondary);
-    border-left: 3px solid var(--accent); padding: 8px 0 8px 14px;
-    margin-bottom: 18px; line-height: 1.75;
-  }
-  .docs-content :global(.callout) {
-    display: flex; gap: 8px; background: var(--bg-overlay);
-    border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
-    padding: 10px 14px; margin: 12px 0; color: var(--text-secondary);
-    font-size: var(--font-size-sm); line-height: 1.6;
-  }
-  .docs-content :global(.callout.accent) { border-left: 3px solid var(--accent); }
-
-  /* Numbered visual steps */
-  .docs-content :global(ol.step-list) {
-    padding-left: 0; list-style: none; counter-reset: step;
-    display: flex; flex-direction: column; gap: 6px; margin: 12px 0;
-  }
-  .docs-content :global(ol.step-list > li) {
-    counter-increment: step;
-    display: flex; align-items: flex-start; gap: 12px;
-    padding: 9px 14px 9px 12px;
-    background: var(--bg-elevated); border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    font-size: var(--font-size-sm); color: var(--text-secondary); line-height: 1.6;
-  }
-  .docs-content :global(ol.step-list > li::before) {
-    content: counter(step); flex-shrink: 0;
-    width: 20px; height: 20px; margin-top: 1px;
-    background: var(--accent); color: #fff; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: var(--font-size-2xs); font-weight: 700;
-  }
+  /* The doc authoring vocabulary (`.doc-lead`, `.callout`, `.step-list`,
+     `.feature-grid`, `.badge`, `.hint`, …) lives in `PluginDocBlock` together
+     with the typography it belongs to: every surface that renders authored doc
+     HTML — this panel and the Marketplace detail pane — goes through that
+     widget, so the classes are defined exactly once. */
 </style>

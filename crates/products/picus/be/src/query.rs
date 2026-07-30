@@ -68,7 +68,7 @@ async fn picus_execute(
 ///
 /// Clamped rather than trusted — a hand-edited `0` would ask the server for an
 /// empty window and read as a result with no rows at all.
-fn window_size(requested: Option<u32>) -> u32 {
+pub(crate) fn window_size(requested: Option<u32>) -> u32 {
     requested.filter(|n| *n > 0).unwrap_or(DEFAULT_WINDOW_ROWS)
 }
 

@@ -17,6 +17,8 @@
   import ConsistencyPanel from './ConsistencyPanel.svelte';
   import OutputPanel from './OutputPanel.svelte';
   import ChangesPanel from './ChangesPanel.svelte';
+  import ActivityPanel from './ActivityPanel.svelte';
+  import DependsPanel from './DependsPanel.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
 </script>
 
@@ -26,6 +28,10 @@
   <ConsistencyPanel />
 {:else if picusUiStore.bottomTab === 'output'}
   <OutputPanel />
+{:else if picusUiStore.bottomTab === 'activity'}
+  <ActivityPanel />
+{:else if picusUiStore.bottomTab === 'depends'}
+  <DependsPanel />
 {:else}
   <ChangesPanel />
 {/if}

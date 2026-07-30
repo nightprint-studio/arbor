@@ -11,13 +11,17 @@
 
 use async_trait::async_trait;
 
+use crate::activity::{ActivitySnapshot, StopKind};
 use crate::connection::{ConnectionSpec, ConnectionStatus};
+use crate::depends::DependencyGraph;
 use crate::descriptor::DbProviderDescriptor;
-use crate::error::DbResult;
+use crate::error::{DbError, DbResult};
 use crate::kind::EngineKind;
-use crate::query::{ExecuteResult, ResultCount, ResultWindow};
+use crate::plan::{PlanRequest, QueryPlan};
+use crate::query::{BindValue, ExecuteResult, ResultCount, ResultWindow};
 use crate::schema::{SchemaSnapshot, TableInfo, TriggerDetail};
 use crate::secret::Secret;
+use crate::tx::{TxOutcome, TxState};
 
 /// One database engine.
 #[async_trait]
@@ -154,4 +158,79 @@ pub trait DbSession: Send + Sync {
 
     /// Close the session, and with it every result it still holds. Idempotent.
     async fn close(&self) -> DbResult<()>;
+
+    // ── Optional capabilities ────────────────────────────────────────────────
+    //
+    // Everything below has a default that refuses. That is not laziness: it is how
+    // a second engine can be added — or an existing one grown — without every
+    // other implementation having to gain a method it has no concept for on the
+    // same day. Each one is paired with a flag on `EngineCapabilities`, and the
+    // interface reads the flag rather than calling and catching, so a feature the
+    // engine lacks is *absent* rather than present and failing.
+
+    /// Bind values to a statement's placeholders and run it.
+    ///
+    /// Same contract as [`execute`](Self::execute) in every other respect — held
+    /// result, read-only refusal, cancellation. The values are sent beside the SQL
+    /// and never spliced into it.
+    async fn execute_bound(
+        &self,
+        _sql: &str,
+        _binds: &[BindValue],
+        _window: u32,
+    ) -> DbResult<ExecuteResult> {
+        Err(DbError::unsupported("this engine", "bound parameters"))
+    }
+
+    /// The plan for a statement.
+    ///
+    /// With [`PlanRequest::analyze`] the statement is **executed**, so an
+    /// implementation must refuse that form for anything that is not a read, and
+    /// on a read-only connection must refuse it as a write.
+    async fn explain(&self, _sql: &str, _request: PlanRequest) -> DbResult<QueryPlan> {
+        Err(DbError::unsupported("this engine", "query plans"))
+    }
+
+    /// What every session on this server is doing, and who is blocked behind whom.
+    async fn activity(&self) -> DbResult<ActivitySnapshot> {
+        Err(DbError::unsupported("this engine", "session activity"))
+    }
+
+    /// Ask another session to stop.
+    ///
+    /// Destructive by definition — [`StopKind::Terminate`] rolls somebody's
+    /// transaction back — so the caller confirms first. The engine still refuses
+    /// what the server refuses; a user without the privilege gets the server's own
+    /// words rather than a silent no-op.
+    async fn stop_session(&self, _pid: i32, _kind: StopKind) -> DbResult<bool> {
+        Err(DbError::unsupported("this engine", "stopping another session"))
+    }
+
+    /// The dependency graph of the schema this session is pinned to.
+    async fn dependencies(&self) -> DbResult<DependencyGraph> {
+        Err(DbError::unsupported("this engine", "dependency graphs"))
+    }
+
+    /// Open an explicit transaction. Fails when one is already open.
+    async fn begin(&self) -> DbResult<TxOutcome> {
+        Err(DbError::unsupported("this engine", "explicit transactions"))
+    }
+
+    /// Commit the open transaction.
+    async fn commit(&self) -> DbResult<TxOutcome> {
+        Err(DbError::unsupported("this engine", "explicit transactions"))
+    }
+
+    /// Roll the open transaction back. Succeeds on a failed transaction — that is
+    /// the one state where it is the only thing that can succeed.
+    async fn rollback(&self) -> DbResult<TxOutcome> {
+        Err(DbError::unsupported("this engine", "explicit transactions"))
+    }
+
+    /// Where the transaction stands. Cheap: the interface asks after every
+    /// statement, because a transaction that silently failed is one the user needs
+    /// to be told about before they write the next statement, not after.
+    async fn tx_state(&self) -> DbResult<TxState> {
+        Ok(TxState::None)
+    }
 }

@@ -39,6 +39,7 @@ import {
 } from '$lib/ipc/picus/db';
 import { picusResultsStore } from './result.svelte';
 import { picusSettingsStore } from './settings.svelte';
+import { txStore } from './tx.svelte';
 
 /** Resolve a connection's palette slot to the CSS variable holding its colour. */
 export function connectionColorVar(conn: Pick<Connection, 'colorIdx'> | null | undefined): string {
@@ -208,10 +209,17 @@ function createConnectionsStore() {
      * open across a disconnect. Releasing them here rather than leaving them to
      * fail on the next window is what keeps "disconnect" an orderly end instead
      * of an abandonment.
+     *
+     * An **open transaction** is the other thing a disconnect ends, and the one
+     * worth asking about: the server rolls it back when the socket goes, so the
+     * only question is whether the user learns that before or after. `PicusTxGuard`
+     * renders the confirmation; declining leaves the session exactly as it was.
      */
     async disconnect(id: string) {
+      if (!(await txStore.confirmRelease([id], 'connection'))) return;
       picusResultsStore.releaseConnection(id);
       await rpcDisconnect(id);
+      txStore.forget(id);
       const row = rows.find((r) => r.id === id);
       if (row) {
         row.state = 'disconnected';
@@ -236,6 +244,7 @@ function createConnectionsStore() {
 
     async remove(id: string) {
       picusResultsStore.releaseConnection(id);
+      txStore.forget(id);
       await deleteConnection(id);
       rows = rows.filter((c) => c.id !== id);
       if (activeId === id) activeId = rows[0]?.id ?? '';

@@ -1,0 +1,27 @@
+[package]
+name         = "picus-diff"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "picus — the comparison engine: two schemas, two sets of counts or two sets of rows in, one report out. Pure, so the same engine answers 'database vs database', 'database vs the scripts that install it' and 'this query vs that query'."
+
+# Pure by construction: no connection, no driver, no async, no filesystem. It is
+# handed structures that have already been read and it compares them — which is
+# what lets the same code compare a live database against a script repository,
+# and what lets every rule here be tested without a database.
+[dependencies]
+# `SchemaSnapshot` and everything under it. The leaf crate, deliberately: taking
+# the shapes from `picus-db-api` instead would drag the driver contract (and its
+# async trait) into a crate that must stay comparable-without-a-connection.
+picus-types = { path = "../types" }
+serde       = { workspace = true }
+thiserror   = { workspace = true }
+
+[dev-dependencies]
+# The wire shapes are asserted against the keys the frontend reads.
+serde_json  = { workspace = true }
+
+[lints.rust]
+missing_debug_implementations = "warn"

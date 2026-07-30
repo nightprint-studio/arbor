@@ -18,7 +18,9 @@
  * first one's cursor" a single line rather than a thing to remember.
  */
 
+import { findBindSlots, toBindList } from '$lib/components/picus/sql-intel/binds';
 import type { Dialect, QueryLogEntry } from '$lib/types/picus';
+import { executeBound } from '$lib/ipc/picus/binds';
 import {
   cancel as rpcCancel,
   execute,
@@ -27,7 +29,9 @@ import {
   sqlStatements,
   type SourceRelation,
 } from '$lib/ipc/picus/db';
+import { picusBindsStore } from './binds.svelte';
 import { connectionsStore } from './connections.svelte';
+import { picusProvidersStore } from './providers.svelte';
 import { createResult, formatRowTotal, picusResultsStore } from './result.svelte';
 import { picusSettingsStore } from './settings.svelte';
 
@@ -43,13 +47,22 @@ export interface HistoryEntry {
   ok: boolean;
 }
 
+/**
+ * Which pane of the result panel a tab is showing.
+ *
+ * `plan` is not a third kind of result: it is what the server says about the
+ * statement, and it lives here because the panel it appears in is this panel. Its
+ * contents belong to `picusPlanStore`, keyed by the same tab.
+ */
+export type ResultPane = 'results' | 'messages' | 'plan';
+
 /** Everything one query tab owns. */
 interface QueryTabState {
   sql: string;
   messages: QueryLogEntry[];
   running: boolean;
-  /** Result grid vs the server messages/plan. */
-  pane: 'results' | 'messages';
+  /** Result grid vs the server messages vs the statement's plan. */
+  pane: ResultPane;
   error: string | null;
   /** Rows a write touched — a write's outcome, where a read has a grid. */
   affected: number | null;
@@ -324,11 +337,32 @@ function createQueryStore() {
     }
   }
 
+  /**
+   * Send one statement, binding its placeholders when the engine has that concept.
+   *
+   * Decided per statement rather than per run: a buffer holds a parameterised
+   * `SELECT` and a plain `COMMIT` side by side, and sending the second one down the
+   * bound path would hand the server a value list it never asked for. Each
+   * statement's own list is built from the values the tab supplied, addressed by
+   * placeholder — which is what makes two statements sharing `:CODICE` share the
+   * value, and `$1` in each of them mean each one's own first parameter.
+   */
+  function send(tabId: string, connectionId: string, sql: string, binding: Dialect | null) {
+    const slots = binding ? findBindSlots(sql, binding) : [];
+    // The user's own "rows per window" governs the FIRST window too, not only the
+    // ones fetched while scrolling — otherwise the setting is half-honoured and the
+    // first window is a different size from every other.
+    if (!slots.length) return execute(connectionId, sql, picusSettingsStore.rowLimit);
+    const list = toBindList(slots, (label) => picusBindsStore.valueOf(tabId, label));
+    return executeBound(connectionId, sql, list, picusSettingsStore.rowLimit);
+  }
+
   async function runInOrder(
     tabId: string,
     connectionId: string,
     targets: RunTarget[],
     mine: number,
+    binding: Dialect | null,
   ) {
     const state = ensure(tabId);
     const conn = connectionsStore.byId(connectionId);
@@ -344,10 +378,7 @@ function createQueryStore() {
     for (const [index, target] of targets.entries()) {
       const startedAt = stamp();
       try {
-        // The user's own "rows per window" governs the FIRST window too, not only
-        // the ones fetched while scrolling — otherwise the setting is half-honoured
-        // and the first window is a different size from every other.
-        const res = await execute(connectionId, target.sql, picusSettingsStore.rowLimit);
+        const res = await send(tabId, connectionId, target.sql, binding);
         const result = createResult(connectionId, res);
         // Two ways this reply is no longer wanted, and both end the same way —
         // **close the cursor rather than adopt it**. A held result nobody owns is a
@@ -389,6 +420,21 @@ function createQueryStore() {
           },
           ...state.messages,
         ];
+        // A read that holds no cursor cannot be scrolled into, so a window that
+        // came back full is the end of what the user can reach. Said once, plainly,
+        // rather than left to be discovered by a scrollbar that stops.
+        if (result && !res.resultId && !res.endOfResult) {
+          state.messages = [
+            {
+              time: startedAt,
+              text: `Only the first ${res.rowCount.toLocaleString()} row(s) are here — a statement `
+                + 'that carries values cannot be scrolled, because a cursor takes no parameters. '
+                + 'Add your own LIMIT/OFFSET, or run it without placeholders.',
+              level: 'info',
+            },
+            ...state.messages,
+          ];
+        }
         remember({
           connectionId,
           sql: target.sql,
@@ -441,7 +487,31 @@ function createQueryStore() {
     ensure(tabId: string) { ensure(tabId); },
 
     setSql(tabId: string, sql: string) { ensure(tabId).sql = sql; },
-    setPane(tabId: string, pane: 'results' | 'messages') { ensure(tabId).pane = pane; },
+    setPane(tabId: string, pane: ResultPane) { ensure(tabId).pane = pane; },
+
+    /**
+     * The SQL a run with the default scope **would** send — the selection if there
+     * is one, otherwise the statement the caret is in.
+     *
+     * For the features that act on "the statement you are pointing at" without
+     * running it; the plan is the only one today. It goes through the same
+     * resolution a run does rather than repeating it, so "explain this" and "run
+     * this" can never disagree about which statement *this* is.
+     *
+     * Empty when there is nothing to point at, and also when the pointing resolves
+     * to **more than one** statement: a plan is about one statement, and explaining
+     * the first of several silently would answer a question nobody asked. The
+     * caller says which of the two it was.
+     */
+    async statementToExplain(tabId: string, dialect: Dialect): Promise<string> {
+      const state = ensure(tabId);
+      const selection = editors.get(tabId)?.() ?? NO_SELECTION;
+      const region = selection.empty ? null : { from: selection.from, to: selection.to };
+      const text = region ? state.sql.slice(region.from, region.to) : state.sql;
+      if (!text.trim()) return '';
+      const targets = await plan(tabId, text, region, dialect, 'statement');
+      return targets.length === 1 ? targets[0].sql : '';
+    },
 
     /** History for one connection, most recent first. */
     historyFor(connectionId: string): HistoryEntry[] {
@@ -470,8 +540,24 @@ function createQueryStore() {
      * in a read-only transaction mode, so the rejection holds for anything that
      * reaches it. Nothing is pre-screened here — a client-side guess about what
      * counts as a write would only ever be a second, weaker opinion.
+     *
+     * ## Placeholders stop the run and ask
+     *
+     * When the text carries placeholders and the engine binds them, nothing is sent:
+     * the run files a prompt (`picusBindsStore`) and returns, and the modal restarts
+     * it with `bindsResolved` once the values are in. Asking every time is the point
+     * — the boxes come back filled in, but the values are what a Run is *about*, so
+     * they are never reused behind the user's back.
+     *
+     * An engine without the capability runs exactly as it does today: the text goes
+     * as written, and whatever the placeholder means to that server is what happens.
      */
-    async run(tabId: string, connectionId: string, scope: RunScope = 'statement') {
+    async run(
+      tabId: string,
+      connectionId: string,
+      scope: RunScope = 'statement',
+      opts: { bindsResolved?: boolean } = {},
+    ) {
       const state = ensure(tabId);
       if (!connectionId) {
         state.error = 'This tab is not bound to a connection.';
@@ -513,6 +599,18 @@ function createQueryStore() {
         return;
       }
 
+      // Bound values, when the engine has them. Read from the descriptor rather
+      // than from the engine's name: a capability that is false must make the flow
+      // ABSENT, not present and refused.
+      const binding = picusProvidersStore.capabilities(dialect)?.bindParameters ? dialect : null;
+      if (binding && !opts.bindsResolved) {
+        const slots = findBindSlots(text, binding);
+        if (slots.length) {
+          picusBindsStore.ask({ tabId, connectionId, scope, slots });
+          return;
+        }
+      }
+
       // A session is ONE database connection. A background row count still running
       // on it would make this statement queue behind it — which is why running a
       // second query straight after a first one looked like the studio had hung,
@@ -536,7 +634,7 @@ function createQueryStore() {
       try {
         const targets = await plan(tabId, text, region, dialect, scope);
         if (!current(tabId, mine)) return;
-        await runInOrder(tabId, connectionId, targets, mine);
+        await runInOrder(tabId, connectionId, targets, mine, binding);
       } finally {
         // Only this run's own spinner. An abandoned run whose reply finally arrives
         // must not clear the spinner of the one the user started afterwards.
@@ -618,6 +716,9 @@ function createQueryStore() {
     forget(tabId: string) {
       editors.delete(tabId);
       picusResultsStore.release(tabId);
+      // Its bound values go with it. They are somebody's customer numbers as often
+      // as not, and a closed tab has no business keeping them in memory.
+      picusBindsStore.forget(tabId);
       if (!tabs[tabId]) return;
       const { [tabId]: _gone, ...rest } = tabs;
       tabs = rest;

@@ -11,15 +11,19 @@ pub use picus_types::prelude::{
     TableInfo, TriggerDetail, TriggerInfo,
 };
 
+pub use crate::activity::{ActivitySnapshot, BlockEdge, SessionActivity, StopKind};
 pub use crate::capability::{EngineCapabilities, SchemaGroup};
+pub use crate::depends::{DependencyEdge, DependencyGraph, DependencyKind, DependencyNode};
 pub use crate::connection::{ConnectionSpec, ConnectionState, ConnectionStatus};
 pub use crate::descriptor::{
     ConnectionField, DbProviderDescriptor, EmissionTraits, FieldKind, IdentifierCase, SelectOption,
 };
 pub use crate::error::{DbError, DbResult};
+pub use crate::plan::{PlanNode, PlanRequest, QueryPlan};
 pub use crate::provider::{DbProvider, DbSession};
 pub use crate::query::{
-    CellValue, ExecuteResult, ResultCount, ResultWindow, DEFAULT_WINDOW_ROWS,
+    BindSlot, BindValue, CellValue, ExecuteResult, ResultCount, ResultWindow, DEFAULT_WINDOW_ROWS,
 };
+pub use crate::tx::{TxCapability, TxOutcome, TxState};
 pub use crate::registry::DbProviderRegistry;
 pub use crate::secret::{NoSecrets, Secret, SecretResolver};

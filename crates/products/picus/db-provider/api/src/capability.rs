@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::tx::TxCapability;
+
 /// Which schema groups an engine's browser offers, in display order. Mirrors the
 /// frontend's `SchemaGroup`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,6 +49,18 @@ pub struct EngineCapabilities {
     /// rather than treating the user as the schema (Oracle). Drives whether the
     /// connection form asks for a schema separately from the database.
     pub schemas: bool,
+    /// The server can be asked what every connected session is doing, and which of
+    /// them are blocked behind which. Drives whether the monitor exists at all.
+    pub session_activity: bool,
+    /// A statement's plan can be asked for without running it.
+    pub explain: bool,
+    /// Statements can carry bound parameters rather than interpolated values.
+    pub bind_parameters: bool,
+    /// The catalogue can be walked into a dependency graph.
+    pub dependency_graph: bool,
+    /// What an explicit transaction covers here — including whether DDL is inside
+    /// it, which is the one that decides whether a failed install can be undone.
+    pub transactions: TxCapability,
 }
 
 impl EngineCapabilities {
@@ -63,6 +77,11 @@ impl EngineCapabilities {
             cancel_query: false,
             estimated_rows: false,
             schemas: false,
+            session_activity: false,
+            explain: false,
+            bind_parameters: false,
+            dependency_graph: false,
+            transactions: TxCapability::none(),
         }
     }
 }

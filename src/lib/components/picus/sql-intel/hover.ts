@@ -15,6 +15,7 @@
 import type { EditorView, Tooltip } from '@codemirror/view';
 import type { Column, Dialect, TableInfo } from '$lib/types/picus';
 import { analyzeStatement, identOf, resolveQualifier, type StatementInfo } from './analysis';
+import { builtinMeta, builtinNamed } from './builtins';
 import { ensureRelationDetail, schemaViewFor, type SchemaView } from './schema-view';
 import { scanSql, statementAt, type SqlToken } from './tokens';
 
@@ -135,9 +136,6 @@ function uniqueScopedColumn(
  */
 export function createSqlHover(dialect: Dialect, connectionId?: string) {
   return async function sqlHover(view: EditorView, pos: number): Promise<Tooltip | null> {
-    const schema = schemaViewFor(connectionId);
-    if (!schema.known) return null;
-
     const src = view.state.doc.toString();
     const { scan, statements } = scanSql(src, dialect);
     const hit = identifierAt(scan.tokens, pos);
@@ -145,14 +143,40 @@ export function createSqlHover(dialect: Dialect, connectionId?: string) {
 
     const { token } = hit;
     const name = identOf(token);
+
+    // ── The engine's own functions ────────────────────────────────────────────
+    //
+    // Answered **before** the catalogue gate, and it is the one card in this file
+    // that does not need a connection: `MONTHS_BETWEEN` means what it means whether
+    // or not a database is open, and a script file being edited with nothing
+    // connected is the normal case rather than the exception.
+    //
+    // Skipped when the name is qualified: `t.COUNT` is a column called COUNT, and
+    // explaining the aggregate there would be answering a question nobody asked.
+    const before = scan.tokens[hit.index - 1];
+    const qualified = !!before && before.kind === 'punct' && before.text === '.';
+    if (!qualified) {
+      const fn = builtinNamed(dialect, name);
+      if (fn) {
+        return card({
+          title: fn.signature,
+          meta: builtinMeta(fn),
+          doc: [fn.summary, fn.example ? `e.g. ${fn.example}` : '', fn.note ?? ''].filter(Boolean),
+          from: token.from,
+          to: token.to,
+        });
+      }
+    }
+
+    const schema = schemaViewFor(connectionId);
+    if (!schema.known) return null;
+
     const stmt = statementAt(statements, pos);
     const info = stmt ? analyzeStatement(stmt, dialect) : null;
 
-    // Is this identifier qualified — `c.NOME`, `CLIENTI.NOME`?
-    const dotBefore = scan.tokens[hit.index - 1];
-    const qualifierToken = dotBefore && dotBefore.kind === 'punct' && dotBefore.text === '.'
-      ? scan.tokens[hit.index - 2]
-      : undefined;
+    // Is this identifier qualified — `c.NOME`, `CLIENTI.NOME`? Worked out above,
+    // where the built-in card needs the same answer.
+    const qualifierToken = qualified ? scan.tokens[hit.index - 2] : undefined;
     const qualifier = identOf(qualifierToken);
 
     if (qualifier) {

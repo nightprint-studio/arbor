@@ -16,6 +16,7 @@
 
 import type { FolderEngine, PicusTab, TabKind } from '$lib/types/picus';
 import { connectionsStore } from './connections.svelte';
+import { picusPlanStore } from './plan.svelte';
 import { queryStore } from './query.svelte';
 
 /** The generator is a singleton tab: there is one generation in flight. */
@@ -54,7 +55,14 @@ function createTabsStore() {
    * instead of four copies, one of which would eventually not be updated.
    */
   function keep(predicate: (tab: PicusTab, index: number) => boolean) {
-    for (const [i, t] of tabs.entries()) if (!predicate(t, i)) queryStore.forget(t.id);
+    for (const [i, t] of tabs.entries()) {
+      if (predicate(t, i)) continue;
+      queryStore.forget(t.id);
+      // The plan holds no server-side resource, but it is about a statement in a
+      // buffer that no longer exists — and it is keyed by the same id a future tab
+      // could be given.
+      picusPlanStore.forget(t.id);
+    }
     tabs = tabs.filter(predicate);
   }
 

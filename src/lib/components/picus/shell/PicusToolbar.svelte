@@ -22,6 +22,7 @@
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import PicusConnectionPill from '../PicusConnectionPill.svelte';
+  import PicusTxControls from './PicusTxControls.svelte';
   import PicusDialectChip from '../PicusDialectChip.svelte';
   import PicusRoleChip from '../PicusRoleChip.svelte';
   import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
@@ -203,6 +204,14 @@
     <Button variant="icon" size="sm" title="Save script" ariaLabel="Save script" onclick={() => notYet('Saving a query')}>
       {#snippet iconStart()}<Save size={14} />{/snippet}
     </Button>
+    <!-- Beside Run, not tucked in with the right-hand facts. An open transaction is
+         not a property of the tab you glance at afterwards — it changes what the
+         button to its left is about to do, so it sits where the hand already is. -->
+    <PicusTxControls
+      connectionId={conn?.id ?? ''}
+      dialect={conn?.dialect}
+      busy={!!queryState?.running}
+    />
 
     <span class="ptb-spacer"></span>
     <!-- Which database this tab talks to — always visible, never inferred. This
@@ -285,6 +294,9 @@
     <Button variant="icon" size="sm" title="Refresh the schema cache" ariaLabel="Refresh the schema cache" onclick={() => void schemaStore.refresh()}>
       {#snippet iconStart()}<RefreshCw size={14} />{/snippet}
     </Button>
+    <!-- A table tab writes too — inline cell edits are DML — so it gets the same
+         indicator and the same two decisions. -->
+    <PicusTxControls connectionId={conn?.id ?? ''} dialect={conn?.dialect} />
 
     <span class="ptb-spacer"></span>
     <Dropdown items={connectionMenu} position="fixed" direction="down" width="280px">

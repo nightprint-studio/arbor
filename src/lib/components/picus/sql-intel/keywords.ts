@@ -18,6 +18,7 @@
  */
 
 import type { Dialect } from '$lib/types/picus';
+import { builtinsFor } from './builtins';
 
 /** Statement openers, clause keywords and operators — common to both dialects. */
 const CORE = [
@@ -56,65 +57,28 @@ export function keywordsFor(dialect: Dialect): string[] {
   return [...new Set([...CORE, ...extra])].sort();
 }
 
-// ── Functions ─────────────────────────────────────────────────────────────────
-//
-// Kept apart from the keywords because they are completed differently: a function
-// is offered as `NAME()` with the caret landing **between** the parentheses, which
-// is the whole reason it is worth offering at all. They are part of the vocabulary
-// for the exclusion filter too — `COALESCE` is not a column, whatever the schema
-// says.
-
-/** Functions that take arguments. Offered as `NAME()`, caret inside. */
-const CORE_FUNCTIONS = [
-  'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COALESCE', 'CAST', 'UPPER', 'LOWER', 'TRIM',
-  'LTRIM', 'RTRIM', 'LPAD', 'RPAD', 'REPLACE', 'ROUND', 'FLOOR', 'ABS', 'MOD',
-  'GREATEST', 'LEAST', 'EXTRACT', 'ROW_NUMBER', 'RANK', 'DENSE_RANK', 'LAG', 'LEAD',
-  'NULLIF',
-];
-
-const ORACLE_FUNCTIONS = [
-  'NVL', 'NVL2', 'DECODE', 'TO_CHAR', 'TO_DATE', 'TO_NUMBER', 'TRUNC', 'SUBSTR',
-  'INSTR', 'LENGTH', 'CEIL', 'ADD_MONTHS', 'MONTHS_BETWEEN', 'LAST_DAY', 'NEXT_DAY',
-  'LISTAGG', 'REGEXP_LIKE', 'REGEXP_REPLACE', 'REGEXP_SUBSTR', 'INITCAP',
-];
-
-const POSTGRES_FUNCTIONS = [
-  'NOW', 'DATE_TRUNC', 'TO_CHAR', 'TO_DATE', 'TO_NUMBER', 'TO_TIMESTAMP', 'AGE',
-  'SUBSTRING', 'POSITION', 'LENGTH', 'CEIL', 'SPLIT_PART', 'STRING_AGG', 'ARRAY_AGG',
-  'JSONB_BUILD_OBJECT', 'JSON_AGG', 'GENERATE_SERIES', 'NEXTVAL', 'CURRVAL', 'SETVAL',
-  'REGEXP_REPLACE', 'REGEXP_MATCHES', 'INITCAP', 'CONCAT_WS',
-];
-
-/** Values written without parentheses — `SYSDATE`, not `SYSDATE()`. Getting this
- *  wrong is a syntax error on Oracle, which is why the two lists are separate. */
-const CONSTANTS: Record<Dialect, string[]> = {
-  oracle: ['SYSDATE', 'SYSTIMESTAMP', 'USER', 'NULL', 'ROWNUM'],
-  postgres: ['CURRENT_DATE', 'CURRENT_TIMESTAMP', 'CURRENT_USER', 'LOCALTIMESTAMP', 'NULL'],
-};
-
-/** The callable functions for a dialect, sorted. */
-export function functionsFor(dialect: Dialect): string[] {
-  const extra = dialect === 'oracle' ? ORACLE_FUNCTIONS : POSTGRES_FUNCTIONS;
-  return [...new Set([...CORE_FUNCTIONS, ...extra])].sort();
-}
-
-/** The parenthesis-free values for a dialect. */
-export function constantsFor(dialect: Dialect): string[] {
-  return CONSTANTS[dialect];
-}
-
 /**
  * Every single word that can appear in SQL without being a column reference.
  *
  * Derived from the completion lists (split on spaces, so `GROUP BY` contributes
- * both halves) plus the function names and noise words that never make it into a
- * popup. Used as an exclusion filter, never as a suggestion source.
+ * both halves), from **both** engines' built-in catalogues, and from the noise
+ * words that never make it into a popup. Used as an exclusion filter, never as a
+ * suggestion source.
+ *
+ * Both engines on purpose. This set answers "could this word be a column?", and a
+ * word that is a function on the other engine is still not a column here — while a
+ * missing entry produces a false diagnostic, which is the failure that gets the
+ * feature switched off.
+ *
+ * The function names come from `builtins.ts` rather than from a list of their own:
+ * there was briefly a second copy here, which is one more place for the two to
+ * drift and no more information.
  */
 export const RESERVED: ReadonlySet<string> = new Set(
   [
     ...CORE, ...ORACLE_ONLY, ...POSTGRES_ONLY,
-    ...CORE_FUNCTIONS, ...ORACLE_FUNCTIONS, ...POSTGRES_FUNCTIONS,
-    ...CONSTANTS.oracle, ...CONSTANTS.postgres,
+    ...builtinsFor('oracle').map((f) => f.name),
+    ...builtinsFor('postgres').map((f) => f.name),
   ]
     .flatMap((k) => k.split(/[\s(*)$]+/))
     .filter(Boolean)

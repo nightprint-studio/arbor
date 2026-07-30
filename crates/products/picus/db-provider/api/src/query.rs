@@ -64,6 +64,40 @@ impl CellValue {
     }
 }
 
+/// One value bound to a placeholder.
+///
+/// Bound, never interpolated. That is the entire point: a value spliced into the
+/// SQL text has to be quoted by whoever splices it, and "whoever splices it" is
+/// how every injection and every mangled apostrophe in a description field has
+/// ever happened. The driver sends these beside the statement, and the server —
+/// which knows the column's type — does the conversion.
+///
+/// The variants are deliberately few. A bind is what the user typed into a box;
+/// carrying a date type here would mean parsing their text into one, in a product
+/// that has two engines with different date syntaxes. `Text` and the server's own
+/// coercion is the honest answer, and `Null` is a real NULL rather than an empty
+/// string for the same reason [`CellValue::Null`] is.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BindValue {
+    /// Must stay first: untagged deserialisation tries the variants in order.
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Text(String),
+}
+
+/// A placeholder found in a statement, in the order the engine will bind it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BindSlot {
+    /// What the user sees: `:CODICE` on Oracle, `$1` on PostgreSQL.
+    pub label: String,
+    /// 1-based position in the bind list.
+    pub index: u32,
+}
+
 /// The outcome of running one statement — **every** statement.
 ///
 /// One shape for reads and writes alike, so the caller never has to classify SQL

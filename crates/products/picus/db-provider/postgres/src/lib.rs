@@ -25,13 +25,18 @@
 //!
 //! ## Public API: use the [`prelude`]
 
+pub mod activity;
+pub mod bind;
 pub mod catalog;
 pub mod cursor;
+pub mod depends;
 pub mod descriptor;
 pub mod error;
+pub mod plan;
 pub mod prelude;
 pub mod provider;
 pub mod rows;
 pub mod session;
 pub mod sql;
 pub mod tls;
+pub mod tx;

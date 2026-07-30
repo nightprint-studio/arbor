@@ -21,8 +21,7 @@ tokio-postgres = "0.7"
 tokio-postgres-rustls = "0.13"
 rustls = "0.23"
 rustls-native-certs = "0.8"
-
-[dev-dependencies]
-# The descriptor test asserts the exact JSON the frontend reads. Test-only: the
-# crate itself never serialises anything.
+# `EXPLAIN (FORMAT JSON)` is the only structured answer PostgreSQL gives about a
+# plan — the text form is for reading, not for parsing — so the plan reader needs a
+# JSON parser. Nothing else in the crate serialises anything.
 serde_json = { workspace = true }

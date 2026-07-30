@@ -25,7 +25,13 @@ export type ToolSection = 'ast' | 'restructure';
 
 /** The bottom dock's tabs. Consistency is the default — it is the panel the
  *  product is judged on. */
-export type BottomTab = 'results' | 'consistency' | 'output' | 'changes';
+export type BottomTab =
+  | 'results'
+  | 'consistency'
+  | 'output'
+  | 'changes'
+  | 'activity'
+  | 'depends';
 
 /** Sub-view of a table tab: its rows, its columns, or its DDL. */
 export type TableSubview = 'data' | 'structure' | 'ddl';

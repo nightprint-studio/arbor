@@ -828,6 +828,61 @@ impl DbSession for PgSession {
         }
         Ok(())
     }
+
+    // ── Optional capabilities ────────────────────────────────────────────────
+    //
+    // Delegation, deliberately, and not just to keep this file under control —
+    // although it was already the longest in the crate before any of these
+    // existed. Each capability is a self-contained conversation with the server
+    // that needs nothing from a session beyond its client: the activity monitor
+    // reads two system views, the dependency walk reads the catalogue, the planner
+    // wraps one statement. Written inline they would have buried the part that
+    // genuinely needs this struct — the cursor lifecycle and the cancellation
+    // bookkeeping — under five domains that merely happen to share a socket.
+    //
+    // What stays here is what only a session knows: its schema, and whether the
+    // user marked the connection read-only.
+
+    async fn execute_bound(
+        &self,
+        sql: &str,
+        binds: &[BindValue],
+        window: u32,
+    ) -> DbResult<ExecuteResult> {
+        crate::bind::execute_bound(&self.client, sql, binds, window, self.spec.read_only).await
+    }
+
+    async fn explain(&self, sql: &str, request: PlanRequest) -> DbResult<QueryPlan> {
+        crate::plan::explain(&self.client, sql, request, self.spec.read_only).await
+    }
+
+    async fn activity(&self) -> DbResult<ActivitySnapshot> {
+        crate::activity::read_activity(&self.client).await
+    }
+
+    async fn stop_session(&self, pid: i32, kind: StopKind) -> DbResult<bool> {
+        crate::activity::stop_session(&self.client, pid, kind).await
+    }
+
+    async fn dependencies(&self) -> DbResult<DependencyGraph> {
+        crate::depends::read_dependencies(&self.client, self.schema()).await
+    }
+
+    async fn begin(&self) -> DbResult<TxOutcome> {
+        crate::tx::begin(&self.client).await
+    }
+
+    async fn commit(&self) -> DbResult<TxOutcome> {
+        crate::tx::commit(&self.client).await
+    }
+
+    async fn rollback(&self) -> DbResult<TxOutcome> {
+        crate::tx::rollback(&self.client).await
+    }
+
+    async fn tx_state(&self) -> DbResult<TxState> {
+        crate::tx::state(&self.client).await
+    }
 }
 
 /// The error for a window or a count asked of a result that is no longer held.

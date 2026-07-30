@@ -95,6 +95,16 @@ mod statements;
 // the export, the cell editing and the large-object read all need, taken from the
 // parser rather than approximated from the text.
 mod source_relation;
+// What every session on the server is doing, and who is blocked behind whom.
+mod activity;
+// Values bound to a statement's placeholders rather than spliced into its text.
+mod binds;
+// What depends on what — foreign keys, view bodies, triggers, sequence defaults.
+mod depends;
+// The plan for a statement: what the server says it will do, or what it just did.
+mod plan;
+// Explicit transactions — open one, look at what you did, then decide.
+mod tx;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, any
