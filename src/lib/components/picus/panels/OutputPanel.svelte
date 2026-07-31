@@ -12,6 +12,7 @@
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import { queryStore } from '$lib/stores/picus/query.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   const history = $derived(
     connectionsStore.activeId ? queryStore.historyFor(connectionsStore.activeId) : [],
@@ -35,13 +36,24 @@
     {:else}
       {#each history as entry (entry.id)}
         <div class="op-log">
-          <span class="op-time">{entry.at}</span>
-          <span class="op-sql">{entry.sql.replace(/\s+/g, ' ').slice(0, 140)}</span>
-          <!-- `~` where the number was the planner's estimate at the time: a history
-               line is read long after the count could have settled it. -->
-          <span class="op-meta">
-            {entry.approximate ? '~' : ''}{entry.rowCount.toLocaleString()} rows · {entry.elapsedMs} ms
-          </span>
+          <div class="op-line">
+            <span class="op-time">{entry.at}</span>
+            <span class="op-sql">{entry.sql.replace(/\s+/g, ' ').slice(0, 140)}</span>
+            <!-- `~` where the number was the planner's estimate at the time: a history
+                 line is read long after the count could have settled it. -->
+            <span class="op-meta">
+              {entry.approximate ? '~' : ''}{entry.rowCount.toLocaleString()} rows · {entry.elapsedMs} ms
+            </span>
+          </div>
+          <!-- What Picus actually ran, when it rewrote the statement (a row key
+               spliced in, large objects wrapped into sizes). Shown only when it
+               differs, so "you asked X, Y ran" is never a surprise. -->
+          {#if entry.effectiveSql && entry.effectiveSql !== entry.sql}
+            <div class="op-ran" use:tooltip={'Picus rewrote your statement before running it'}>
+              <span class="op-ran-label">ran</span>
+              <span class="op-sql">{entry.effectiveSql.replace(/\s+/g, ' ').slice(0, 140)}</span>
+            </div>
+          {/if}
         </div>
       {/each}
     {/if}
@@ -53,16 +65,31 @@
   .op-body { flex: 1; min-height: 0; overflow: auto; }
 
   .op-log {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
     padding: 3px 12px;
     font-family: var(--font-code);
     font-size: var(--font-size-xs);
     line-height: 1.6;
   }
   .op-log:hover { background: var(--bg-hover); }
+  .op-line { display: flex; align-items: baseline; gap: 10px; }
   .op-time { color: var(--text-disabled); flex-shrink: 0; }
   .op-sql { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .op-meta { color: var(--text-muted); flex-shrink: 0; }
+
+  /* The rewritten statement, one step quieter and indented under the requested one. */
+  .op-ran {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    /* Line the SQL up under the requested statement above (time column + gap). */
+    padding-left: calc(var(--time-col, 4.5em));
+    color: var(--text-muted);
+  }
+  .op-ran-label {
+    flex-shrink: 0;
+    color: var(--text-disabled);
+    text-transform: uppercase;
+    font-size: 0.85em;
+    letter-spacing: 0.03em;
+  }
 </style>

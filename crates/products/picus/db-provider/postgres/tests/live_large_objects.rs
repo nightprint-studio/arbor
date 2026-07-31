@@ -161,7 +161,7 @@ async fn probe() -> DbResult<Findings> {
         // into the data. Printed per statement because the setup is where a wedged
         // server shows itself, and "it hung" is not a useful thing to find out.
         let head: String = statement.split_whitespace().take(6).collect::<Vec<_>>().join(" ");
-        admin.execute(&statement, 1).await?;
+        admin.execute(&statement, 1, LobMasking::Auto).await?;
         println!("  {head:<52} {:>6} ms", began.elapsed().as_millis());
     }
     let _ = admin.close().await;
@@ -180,7 +180,7 @@ async fn probe() -> DbResult<Findings> {
                 &*session,
                 "typed SELECT *",
                 2,
-                session.execute("SELECT * FROM bacheca ORDER BY matricola", 25),
+                session.execute("SELECT * FROM bacheca ORDER BY matricola", 25, LobMasking::Auto),
             )
             .await?,
             // Asked for by name: this one must arrive in full.
@@ -188,7 +188,7 @@ async fn probe() -> DbResult<Findings> {
                 &*session,
                 "the column asked for by name",
                 0,
-                session.execute("SELECT allegato FROM bacheca ORDER BY matricola", 25),
+                session.execute("SELECT allegato FROM bacheca ORDER BY matricola", 25, LobMasking::Auto),
             )
             .await?,
             // No key, so nothing to read a value back by.
@@ -212,7 +212,7 @@ async fn probe() -> DbResult<Findings> {
 async fn cleanup() {
     let Some((admin_spec, secret)) = spec("public") else { return };
     let Ok(admin) = PostgresProvider::default().connect(&admin_spec, secret).await else { return };
-    let _ = admin.execute(&format!("DROP SCHEMA IF EXISTS {PROBE_SCHEMA} CASCADE"), 1).await;
+    let _ = admin.execute(&format!("DROP SCHEMA IF EXISTS {PROBE_SCHEMA} CASCADE"), 1, LobMasking::Auto).await;
     let _ = admin.close().await;
 }
 

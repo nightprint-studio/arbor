@@ -125,7 +125,7 @@ async fn timed(spec: &ConnectionSpec, label: &str, sql: &str, window: u32) {
     };
     let session = &*session;
     let began = Instant::now();
-    match tokio::time::timeout(PATIENCE, session.execute(sql, window)).await {
+    match tokio::time::timeout(PATIENCE, session.execute(sql, window, LobMasking::Auto)).await {
         Ok(Ok(result)) => {
             let took = began.elapsed().as_millis();
             if let Some(held) = &result.result_id {
@@ -168,7 +168,7 @@ async fn list_databases(spec: &ConnectionSpec) {
     // not itself become the thing that hangs.
     if let Ok(Ok(result)) = tokio::time::timeout(
         PATIENCE,
-        session.execute("SELECT datname FROM pg_database WHERE NOT datistemplate", 200),
+        session.execute("SELECT datname FROM pg_database WHERE NOT datistemplate", 200, LobMasking::Auto),
     )
     .await
     {
@@ -299,7 +299,7 @@ async fn explain(spec: &ConnectionSpec, sql: &str) {
     else {
         return;
     };
-    match tokio::time::timeout(PATIENCE, session.execute(&format!("EXPLAIN {sql}"), 40)).await {
+    match tokio::time::timeout(PATIENCE, session.execute(&format!("EXPLAIN {sql}"), 40, LobMasking::Auto)).await {
         Ok(Ok(result)) => {
             println!("\n  the plan for the ordered read:");
             for row in &result.rows {

@@ -98,6 +98,25 @@ pub struct BindSlot {
     pub index: u32,
 }
 
+/// Whether a read may replace large-object columns with their size.
+///
+/// The engine masks large objects by returning their byte length in place of the
+/// value, fetching the real bytes only when a cell is opened — which needs the row
+/// to be *addressable* (see [`ExecuteResult::row_key`]). The caller resolves that and
+/// tells the engine which way to go: masking a cell nobody can ever open would show a
+/// size that is a dead end, so a caller that finds no key asks for the value instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum LobMasking {
+    /// Mask large objects — the rows are addressable, so a masked cell can be read
+    /// on demand later.
+    #[default]
+    Auto,
+    /// Do not mask — there is no key to fetch a masked cell by, so the value is read
+    /// whole rather than shown as a size that could never be expanded.
+    Off,
+}
+
 /// The outcome of running one statement — **every** statement.
 ///
 /// One shape for reads and writes alike, so the caller never has to classify SQL
@@ -147,6 +166,30 @@ pub struct ExecuteResult {
     /// only rewrites a projection it composed.
     #[serde(default)]
     pub masked_columns: Vec<String>,
+    /// Columns present in every row but **hidden from the grid** — the row key Picus
+    /// injected so a masked cell can be addressed when the query did not select it.
+    ///
+    /// They sit at the end of `columns`/`rows`, so hiding them is a matter of not
+    /// rendering the trailing cells; everything that reads a row by index still sees
+    /// them. Empty unless a key was injected — the engine never fills this, the
+    /// caller that did the injection does.
+    #[serde(default)]
+    pub hidden_columns: Vec<String>,
+    /// The columns that identify one row, for reading a masked large object back
+    /// (`WHERE key = …`). Either the table's primary key (visible or injected) or an
+    /// engine row address such as `ctid` (always injected, always hidden). Empty when
+    /// the rows are not addressable — in which case nothing was masked either.
+    #[serde(default)]
+    pub row_key: Vec<String>,
+    /// The statement that actually ran against the data, when it differs from the one
+    /// the caller sent — because a key was injected into its projection, or its large
+    /// objects were wrapped into sizes. `None` when what ran is what was asked for.
+    ///
+    /// This is the *logical* effective statement (the rewritten/wrapped SELECT), not
+    /// the cursor plumbing around it — it exists so the history can show "you asked X,
+    /// Y ran".
+    #[serde(default)]
+    pub effective_sql: Option<String>,
 }
 
 /// One window over a held result.
@@ -209,9 +252,10 @@ mod tests {
     #[test]
     fn the_wire_names_are_the_ones_the_grid_reads() {
         let json = serde_json::to_value(ExecuteResult::default()).unwrap();
-        for key in
-            ["resultId", "columns", "rows", "estimatedRows", "totalRows", "elapsedMs", "rowCount", "endOfResult", "affected"]
-        {
+        for key in [
+            "resultId", "columns", "rows", "estimatedRows", "totalRows", "elapsedMs", "rowCount",
+            "endOfResult", "affected", "maskedColumns", "hiddenColumns", "rowKey", "effectiveSql",
+        ] {
             assert!(json.get(key).is_some(), "missing `{key}`");
         }
 

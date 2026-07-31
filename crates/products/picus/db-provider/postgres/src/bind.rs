@@ -142,6 +142,9 @@ pub async fn execute_bound(
         end_of_result,
         affected: None,
         masked_columns,
+        hidden_columns: Vec::new(),
+        row_key: Vec::new(),
+        effective_sql: None,
     })
 }
 
@@ -158,6 +161,9 @@ fn write_result(affected: u64, started: Instant) -> ExecuteResult {
         end_of_result: true,
         affected: Some(affected),
         masked_columns: Vec::new(),
+        hidden_columns: Vec::new(),
+        row_key: Vec::new(),
+        effective_sql: None,
     }
 }
 

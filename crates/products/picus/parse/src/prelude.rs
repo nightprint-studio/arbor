@@ -10,6 +10,7 @@ pub use crate::literal::{decode as decode_literal, LiteralValue};
 pub use crate::object::{ObjectKind, ObjectRef};
 pub use crate::parser::{language, parse, SqlParser};
 pub use crate::range::{line_col, ByteRange};
+pub use crate::select::SelectShape;
 pub use crate::statement::{ParsedFile, Segment, Statement, StatementKind};
 
 // `EngineKind` and `DialectScope` are re-exported because every entry point takes

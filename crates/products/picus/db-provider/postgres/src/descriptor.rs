@@ -74,6 +74,7 @@ fn capabilities() -> EngineCapabilities {
         schemas: true,
         session_activity: true,
         explain: true,
+        validate: true,
         bind_parameters: true,
         dependency_graph: true,
         // The one that matters on this engine: PostgreSQL's DDL is transactional,

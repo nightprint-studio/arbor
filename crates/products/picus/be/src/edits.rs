@@ -31,6 +31,7 @@ use std::collections::BTreeMap;
 
 use picus_ast::prelude::{Column, DialectScope, DmlModel, DmlOperation, DmlRow, EngineKind};
 use picus_core::prelude::PicusState;
+use picus_db_api::prelude::LobMasking;
 use picus_emit::prelude::update_row;
 use serde::{Deserialize, Serialize};
 
@@ -85,7 +86,8 @@ async fn picus_apply_row_edits(
 
     let sql = statements_for(state, &id, &table, &edits, spec.engine)?;
     // `window` of 0: an UPDATE returns no rows, so there is no window to fetch.
-    let result = session.execute(&sql, 0).await.map_err(|e| e.to_string())?;
+    // `Auto` is the no-op here (a write masks nothing) but the argument is required.
+    let result = session.execute(&sql, 0, LobMasking::Auto).await.map_err(|e| e.to_string())?;
     let affected = result.affected.unwrap_or(0) as u64;
 
     let warning = (affected as usize != edits.len()).then(|| {

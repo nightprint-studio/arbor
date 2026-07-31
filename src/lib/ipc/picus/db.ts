@@ -73,6 +73,9 @@ export interface EngineCapabilities {
   sessionActivity: boolean;
   /** A statement's plan can be read without running it. */
   explain: boolean;
+  /** A statement can be prepared without running it — drives the editor's live
+   *  validation against the server. */
+  validate: boolean;
   /** Statements can carry bound values rather than interpolated ones. */
   bindParameters: boolean;
   /** The catalogue can be walked into a dependency graph. */
@@ -331,6 +334,26 @@ export interface ExecuteResult {
    * these is showing a number where a value belongs and has to say so.
    */
   maskedColumns?: string[];
+  /**
+   * Columns present in every row but **hidden from the grid** — the row key Picus
+   * spliced in so a masked cell could be addressed when the query did not select it.
+   * They are the trailing columns, so hiding them is dropping the tail; `rowAt` and
+   * the reveal still see them.
+   */
+  hiddenColumns?: string[];
+  /**
+   * The columns that identify one row, for reading a masked large object back —
+   * the table's primary key (visible or hidden) or the engine's `ctid`. Empty when
+   * the rows are not addressable.
+   */
+  rowKey?: string[];
+  /**
+   * The statement that actually ran, when it differs from the one sent — a key was
+   * spliced into its projection, or its large objects were wrapped into sizes.
+   * `undefined`/absent when what ran is what was asked for. Shown in the history so
+   * "you asked X, Y ran" is never a surprise.
+   */
+  effectiveSql?: string;
 }
 
 /**
@@ -347,6 +370,32 @@ export function execute(
   window?: number,
 ): Promise<ExecuteResult> {
   return picus('picus_execute', { connectionId, sql, window });
+}
+
+/**
+ * One statement the server rejected, placed in the buffer.
+ *
+ * `start`/`end` are absolute UTF-8 byte offsets — the same coordinate the parse
+ * faults use, so they feed the editor's lint layer without conversion.
+ */
+export interface ValidationFinding {
+  start: number;
+  end: number;
+  message: string;
+  code?: string;
+}
+
+/**
+ * Validate a buffer against the connected database, without running it.
+ *
+ * Each preparable statement is prepared (parsed + described) on the server; whatever
+ * it rejects comes back as a finding at the server's own position. Returns an empty
+ * list when there is nothing to validate against (no session, an engine without the
+ * capability); rejects only when the connection itself failed mid-check, so the
+ * caller can tell "clean" from "could not ask".
+ */
+export function validateSql(connectionId: string, sql: string): Promise<ValidationFinding[]> {
+  return picus('picus_validate', { id: connectionId, sql });
 }
 
 /** One statement in a buffer, addressed the way the editor addresses text. */

@@ -86,7 +86,7 @@ impl ObjectRef {
 }
 
 /// `"Mixed Case"` → `Mixed Case`; `parametri` → `PARAMETRI`.
-fn fold(written: &str) -> String {
+pub(crate) fn fold(written: &str) -> String {
     if written.len() >= 2 && written.starts_with('"') && written.ends_with('"') {
         // Quoted: contents verbatim, with `""` collapsed back to one quote.
         written[1..written.len() - 1].replace("\"\"", "\"")

@@ -299,10 +299,13 @@
   statement that drags the bytes across by accident.
 </p>
 <p>
-  Opening a cell is a separate matter: that needs something that identifies the row, so a
-  result with no key column in it shows the sizes but cannot fetch any of them. Select the key
-  column too and they open. Sizes you cannot open are a smaller problem than a read you cannot
-  wait out, which is why the masking happens either way.
+  Opening a cell needs something that identifies the row — and Picus arranges that for you.
+  When the statement reads from one table but did not select its key, the key is added to the
+  read <b>invisibly</b>: the primary key spliced in as a hidden column, or, for a table that
+  has no primary key, the engine's own internal row address. The grid never shows it; the
+  cell just opens. Only a result with no single row behind it — a join, a view, a computed
+  result — cannot be addressed at all, and there the value is shown in full instead of a size
+  you could never expand.
 </p>
 <p>
   <b>One exception, and it is deliberate.</b> A statement with its own <code>ORDER BY</code> is

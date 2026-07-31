@@ -300,6 +300,7 @@ impl PgSession {
         window: u32,
         seq: u64,
         started: Instant,
+        masking: LobMasking,
     ) -> DbResult<ExecuteResult> {
         // The scrollbar's length, and the column types, before any rows. Both are
         // planning-only round trips; a Cancel that landed during one has nothing to
@@ -318,10 +319,19 @@ impl PgSession {
         // `Gather Merge` and interleaves them. A grid in the wrong order is a wrong
         // answer; an ordered read that carries its large objects is a slow one, and
         // the bound below is what keeps it merely slow.
-        let (source, masked_columns, types) = match cursor::orders_its_own_rows(body) {
-            true => (body.to_string(), Vec::new(), types),
-            false => mask_large_objects(body, types),
+        let (source, masked_columns, types) = match masking {
+            // The caller found no key to fetch a masked cell by, so a size would be a
+            // dead end: read the value whole instead.
+            LobMasking::Off => (body.to_string(), Vec::new(), types),
+            LobMasking::Auto => match cursor::orders_its_own_rows(body) {
+                true => (body.to_string(), Vec::new(), types),
+                false => mask_large_objects(body, types),
+            },
         };
+        // What actually ran, when the wrapper rewrote it — for the history's
+        // "you asked X, Y ran". The bound/cursor plumbing is not part of this: it is
+        // the logical statement, which is `source`.
+        let effective_sql = (source != body).then(|| source.clone());
 
         // The bound goes in the STATEMENT, not only in the `FETCH`. See
         // `cursor::bounded_body`: without it an `ORDER BY` sorts the whole table to
@@ -400,6 +410,10 @@ impl PgSession {
             end_of_result,
             affected: None,
             masked_columns,
+            // The engine never injects a key; `be` fills these in when it did.
+            hidden_columns: Vec::new(),
+            row_key: Vec::new(),
+            effective_sql,
         })
     }
 
@@ -466,6 +480,9 @@ impl PgSession {
                     end_of_result,
                     affected: None,
                     masked_columns: Vec::new(),
+                    hidden_columns: Vec::new(),
+                    row_key: Vec::new(),
+                    effective_sql: None,
                 })
             }
             Err(e) => {
@@ -533,6 +550,9 @@ impl PgSession {
                 end_of_result: true,
                 affected: fetched.last_command_count,
                 masked_columns: Vec::new(),
+                hidden_columns: Vec::new(),
+                row_key: Vec::new(),
+                effective_sql: None,
             });
         }
 
@@ -554,6 +574,9 @@ impl PgSession {
             end_of_result,
             affected: None,
             masked_columns: Vec::new(),
+            hidden_columns: Vec::new(),
+            row_key: Vec::new(),
+            effective_sql: None,
         })
     }
 }
@@ -637,7 +660,7 @@ impl DbSession for PgSession {
             .ok_or_else(|| DbError::NotFound(format!("trigger {name}")))
     }
 
-    async fn execute(&self, sql: &str, window: u32) -> DbResult<ExecuteResult> {
+    async fn execute(&self, sql: &str, window: u32, masking: LobMasking) -> DbResult<ExecuteResult> {
         // Courtesy check first — a clear product message without a round-trip. The
         // server is still the authority: the session runs in a read-only
         // transaction mode, so anything this misses is refused there.
@@ -648,7 +671,9 @@ impl DbSession for PgSession {
         self.sweep_idle().await;
 
         match cursor::plan_execution(sql) {
-            ExecutionPlan::Cursor(body) => self.open_result(body, window, seq, started).await,
+            ExecutionPlan::Cursor(body) => {
+                self.open_result(body, window, seq, started, masking).await
+            }
             ExecutionPlan::Direct => self.run_direct(sql, window, seq, started).await,
         }
     }
@@ -660,7 +685,11 @@ impl DbSession for PgSession {
         // is the whole reason this is a method rather than a string the caller
         // composes — and, now that `execute` is where the masking lives, the only
         // thing this method still contributes.
-        self.execute(&cursor::relation_query(self.schema(), relation), window).await
+        //
+        // Always `Auto`: a relation tab is `SELECT *`, so every column — the primary
+        // key included — is projected, and a masked cell is always addressable.
+        self.execute(&cursor::relation_query(self.schema(), relation), window, LobMasking::Auto)
+            .await
     }
 
     async fn result_window(
@@ -854,6 +883,35 @@ impl DbSession for PgSession {
 
     async fn explain(&self, sql: &str, request: PlanRequest) -> DbResult<QueryPlan> {
         crate::plan::explain(&self.client, sql, request, self.spec.read_only).await
+    }
+
+    async fn validate(&self, sql: &str) -> DbResult<()> {
+        // Parse + describe, never execute — `prepare` is exactly that. This is the
+        // same call `column_types` makes; the difference is only that there the
+        // error is swallowed and here it IS the answer.
+        //
+        // Deliberately NOT through `map_pg`: that collapses `42P01`/`42703` (unknown
+        // table / column) into a position-less `NotFound`, and the whole point of
+        // validation is to put the squiggle where the server says the problem is.
+        match self.client.prepare(sql).await {
+            Ok(_) => Ok(()),
+            Err(e) => match e.as_db_error() {
+                Some(db) => Err(DbError::Sql {
+                    message: db.message().to_string(),
+                    code: Some(db.code().code().to_string()),
+                    // Only an `Original` position points into the SQL the user wrote;
+                    // an `Internal` one is inside a function body they never typed.
+                    position: match db.position() {
+                        Some(tokio_postgres::error::ErrorPosition::Original(p)) => Some(*p),
+                        _ => None,
+                    },
+                }),
+                // No structured error means the failure was the connection itself,
+                // not the statement — surface it as such so validation reports
+                // "unavailable" rather than squiggling valid SQL.
+                None => Err(DbError::Disconnected(e.to_string())),
+            },
+        }
     }
 
     async fn activity(&self) -> DbResult<ActivitySnapshot> {

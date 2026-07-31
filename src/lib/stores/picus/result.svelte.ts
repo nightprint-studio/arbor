@@ -74,6 +74,19 @@ export interface PicusResult {
    * nothing to reveal.
    */
   readonly maskedColumns: string[];
+  /**
+   * Columns present in every row but hidden from the grid — the row key Picus spliced
+   * in so a masked cell could be addressed when the query did not select it. They are
+   * the trailing columns of `columns`; the grid drops them but `rowAt` keeps them, so
+   * a reveal can still read the key out of the row.
+   */
+  readonly hiddenColumns: string[];
+  /**
+   * The columns that identify one row, for reading a masked large object back — the
+   * table's primary key or the engine's `ctid`. Empty when the rows are not
+   * addressable. Preferred over the client-side key derivation when present.
+   */
+  readonly rowKey: string[];
   /** The exact count is being computed in the background. */
   readonly counting: boolean;
   /** Stop waiting on the exact count — the connection is wanted for something the
@@ -361,6 +374,8 @@ export function createResult(connectionId: string, res: ExecuteResult): PicusRes
     get loaded() { return loaded; },
     elapsedMs: res.elapsedMs,
     maskedColumns: res.maskedColumns ?? [],
+    hiddenColumns: res.hiddenColumns ?? [],
+    rowKey: res.rowKey ?? [],
     get counting() { return counting; },
     /**
      * Give up on the exact count, because something the user is waiting on needs

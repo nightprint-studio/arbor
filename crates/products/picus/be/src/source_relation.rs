@@ -33,10 +33,31 @@
 
 use picus_core::prelude::PicusState;
 use picus_db_api::prelude::RelationKind;
-use picus_parse::prelude::{parse, DialectScope, EngineKind, ObjectKind, StatementKind};
+use picus_parse::prelude::{parse, DialectScope, EngineKind, ObjectKind, Statement, StatementKind};
 use serde::Serialize;
 
 use crate::connections::find_spec;
+
+/// The relations a statement reads from — its `FROM` targets, folded and deduped.
+///
+/// Shared so the two features that need "which table did these rows come from" —
+/// tracing a source ([`picus_source_relation`]) and deciding a large object's key
+/// ([`crate::lob_masking`]) — extract it the one way. `references` is every object
+/// the statement names; a `FROM` target is one of them, and columns and the rest are
+/// filtered out. The kinds are taken together because the parser reads a *name*, not
+/// a catalogue — what it calls a table may well turn out to be a view.
+pub(crate) fn source_names(statement: &Statement) -> Vec<String> {
+    let mut names: Vec<String> = statement
+        .references
+        .iter()
+        .filter(|r| {
+            matches!(r.kind, ObjectKind::Table | ObjectKind::View | ObjectKind::MaterializedView)
+        })
+        .map(|r| r.folded_name())
+        .collect();
+    names.dedup();
+    names
+}
 
 /// What one result's rows can be traced back to.
 #[derive(Debug, Default, Serialize)]
@@ -89,19 +110,7 @@ fn picus_source_relation(
         return Ok(refused("These rows did not come from a SELECT."));
     }
 
-    // `references` is every object the statement names; a `FROM` target is one of
-    // them. Columns and the rest are filtered out, and the relation kinds are taken
-    // together because the parser reads a name, not a catalogue — what it calls a
-    // table may well be a view.
-    let mut sources: Vec<String> = statement
-        .references
-        .iter()
-        .filter(|r| {
-            matches!(r.kind, ObjectKind::Table | ObjectKind::View | ObjectKind::MaterializedView)
-        })
-        .map(|r| r.folded_name())
-        .collect();
-    sources.dedup();
+    let sources = source_names(statement);
 
     let [relation] = sources.as_slice() else {
         return Ok(refused(if sources.is_empty() {
@@ -159,16 +168,7 @@ mod tests {
     fn sources_of(sql: &str) -> Vec<String> {
         let parsed = parse(sql, DialectScope::One(EngineKind::Postgres));
         let Some(statement) = parsed.statements.first() else { return vec![] };
-        let mut out: Vec<String> = statement
-            .references
-            .iter()
-            .filter(|r| {
-                matches!(r.kind, ObjectKind::Table | ObjectKind::View | ObjectKind::MaterializedView)
-            })
-            .map(|r| r.folded_name())
-            .collect();
-        out.dedup();
-        out
+        source_names(statement)
     }
 
     #[test]

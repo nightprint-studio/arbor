@@ -123,22 +123,25 @@
 
 <h2>What gets flagged while you type</h2>
 <ul>
-  <li><b>Unknown table or view</b> — the name is not in this connection's schema.</li>
-  <li><b>Unknown column</b> — a qualified reference such as <code>c.NOEM</code> where the
-    table has no such column.</li>
-  <li><b>Ambiguous column</b> — a bare name that exists in two of the joined tables, which
-    the server would refuse to resolve.</li>
+  <li><b>Whatever the database rejects</b> — an unknown table or view, an unknown column, an
+    ambiguous one. A moment after you stop typing, each statement is <i>prepared</i> against
+    the connected server — parsed and described, never run — and whatever it refuses is
+    underlined where the server says the problem is. It is the server's own verdict, so it is
+    exact and never out of date, and a mark on the toolbar says whether the last check passed,
+    is running, or could not be made.</li>
   <li><b>A write on a read-only connection</b> — reported at the statement, before you run
-    it. The refusal itself is still the server's.</li>
+    it. This one needs no round trip: the refusal is the server's, but the connection being
+    read-only is already known here.</li>
   <li><b>Something that is not SQL</b> — the grammar could not read it. Procedural code
-    outside a routine, an unclosed parenthesis, a missing keyword. This one comes from the
-    same parser the syntax tree is drawn from, so the editor and that panel can no longer
-    disagree about whether a statement is readable.</li>
+    outside a routine, an unclosed parenthesis, a missing keyword. This comes from the same
+    parser the syntax tree is drawn from, so the editor and that panel can no longer disagree
+    about whether a statement is readable.</li>
 </ul>
 <p>
-  The first four are about <i>meaning</i> and go quiet whenever they are unsure. The last is
-  about <i>form</i>, where there is nothing to be unsure about: a statement the parser cannot
-  read is one the server will refuse.
+  The first is the database's own answer about <i>meaning</i>; the last is about <i>form</i>,
+  which the parser here settles without asking anyone. Between them, the editor no longer
+  reimplements the catalogue — what a table has and what a column means is the server's to
+  say, and it is asked directly.
 </p>
 
 <h2>Abbreviations are marked as abbreviations</h2>
@@ -155,23 +158,19 @@
   SQL: no unknown-table warnings, no parse errors.
 </p>
 
-<h2>When it says nothing, and why</h2>
+<h2>When the database check says nothing, and why</h2>
 <p>
-  A warning that is wrong costs more than ten that are right, so the analysis stands down
-  wherever it cannot be sure:
+  A warning that is wrong costs more than ten that are right, so the check against the server
+  stands down — and says so on the toolbar — wherever it cannot ask:
 </p>
 <ul>
-  <li><b>Before the schema has been read</b>, nothing about objects is reported at all. An
-    unread catalogue is not an empty one.</li>
-  <li><b>A different schema</b> — <code>ALTRO.CLIENTI</code> when the session is pinned
-    elsewhere — is skipped: there is no catalogue for it.</li>
-  <li><b>DDL is never measured against the live schema</b>, and anything the file creates
-    earlier counts as existing. A script whose job is to create a table must not be told the
+  <li><b>With no connection open</b>, or on an engine that cannot prepare a statement, there
+    is nothing to ask: the toolbar shows the check as unavailable, and the parser and the
+    read-only warning are all that remain.</li>
+  <li><b>DDL, anonymous blocks, <code>SET</code> and transaction control are not prepared</b>
+    — a server cannot prepare them — so they are left to the syntax parser rather than
+    checked against the schema. A script whose job is to create a table is never told the
     table does not exist.</li>
-  <li><b>Inside a procedural block</b>, and inside a derived table or a <code>WITH</code>
-    body, columns are not checked — their shape needs a full parse.</li>
-  <li><b>Bare names are never called unknown</b>, only ambiguous: a lone word can be an
-    output alias, a function or a variable.</li>
   <li><b>A line written as an abbreviation is not measured as SQL.</b> It is a shorthand the
     tool understands; what it reports there is the shorthand's own refusal, when it has one.</li>
 </ul>

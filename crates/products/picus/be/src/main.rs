@@ -95,6 +95,13 @@ mod statements;
 // the export, the cell editing and the large-object read all need, taken from the
 // parser rather than approximated from the text.
 mod source_relation;
+// Deciding, before a read runs, how its large objects are handled: mask and key by
+// the PK, splice in a hidden PK or `ctid`, or show the value when nothing addresses
+// the row.
+mod lob_masking;
+// Live SQL validation: prepare each statement against the server and squiggle what it
+// rejects, with the server's own position.
+mod validate;
 // What every session on the server is doing, and who is blocked behind whom.
 mod activity;
 // Values bound to a statement's placeholders rather than spliced into its text.

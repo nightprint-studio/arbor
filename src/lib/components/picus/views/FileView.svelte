@@ -25,6 +25,8 @@
   import { astStore } from '$lib/stores/picus/ast.svelte';
   import { sqlLanguage } from '../picus-sql-language';
   import { sqlDiagnostics } from '../sql-intel';
+  import { validationStore } from '$lib/stores/picus/validation.svelte';
+  import { picusProvidersStore } from '$lib/stores/picus/providers.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { connectionsStore } from '$lib/stores/picus/connections.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
@@ -116,7 +118,19 @@
   let edited = $state<string | null>(null);
   $effect(() => { void tab.file; edited = null; });
   const buffer = $derived(edited ?? text);
-  const diagnostics = $derived(sqlDiagnostics(buffer, dialect ?? 'oracle', catalogue));
+  /** Whether the borrowed connection's engine can validate. */
+  const canValidate = $derived(picusProvidersStore.capabilities(dialect)?.validate ?? false);
+  const diagnostics = $derived([
+    ...sqlDiagnostics(buffer, dialect ?? 'oracle', catalogue),
+    ...validationStore.for(buffer),
+  ]);
+
+  // Validate against the borrowed catalogue when there is one; a file with no
+  // matching connection simply reads as "unavailable".
+  $effect(() => {
+    validationStore.follow(buffer, catalogue, canValidate);
+  });
+  $effect(() => () => validationStore.clear());
 
   /**
    * Reveal the line a finding pointed at.

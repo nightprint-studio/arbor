@@ -24,6 +24,8 @@
   import { sqlDiagnostics } from '../sql-intel';
   import { abbreviationLines } from '../sql-intel/abbrev';
   import { parseFaultStore } from '$lib/stores/picus/parse-faults.svelte';
+  import { validationStore } from '$lib/stores/picus/validation.svelte';
+  import { picusProvidersStore } from '$lib/stores/picus/providers.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import { queryStore } from '$lib/stores/picus/query.svelte';
@@ -88,12 +90,27 @@
       className: line.error ? 'picus-abbrev-bad' : 'picus-abbrev',
     })),
   );
+  /** Whether this connection's engine can validate at all — gates the round trip. */
+  const canValidate = $derived(picusProvidersStore.capabilities(conn?.dialect)?.validate ?? false);
+
   const diagnostics = $derived([
     ...sqlDiagnostics(tabState.sql, conn?.dialect ?? 'postgres', conn?.id),
     ...parseFaultStore
       .for(tabState.sql)
       .filter((fault) => !abbreviations.some((a) => a.from < fault.to && fault.from < a.to)),
+    // The server's own verdict on each statement, filtered off the abbreviation
+    // lines like the parse faults are.
+    ...validationStore
+      .for(tabState.sql)
+      .filter((f) => !abbreviations.some((a) => a.from < f.to && f.from < a.to)),
   ]);
+
+  // Follow the buffer: validate on idle when the connection can, and forget it on
+  // unmount so a closed tab's editor is never asked.
+  $effect(() => {
+    validationStore.follow(tabState.sql, conn?.id, canValidate);
+  });
+  $effect(() => () => validationStore.clear());
 
   /**
    * Let the query store ask this editor where the caret is.

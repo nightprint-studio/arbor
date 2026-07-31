@@ -54,6 +54,10 @@ pub struct EngineCapabilities {
     pub session_activity: bool,
     /// A statement's plan can be asked for without running it.
     pub explain: bool,
+    /// A statement can be prepared (parsed + described) without running it, so the
+    /// server's own rejection — message and position — stands in for hand-rolled
+    /// semantic checks. Drives the editor's live validation.
+    pub validate: bool,
     /// Statements can carry bound parameters rather than interpolated values.
     pub bind_parameters: bool,
     /// The catalogue can be walked into a dependency graph.
@@ -79,6 +83,7 @@ impl EngineCapabilities {
             schemas: false,
             session_activity: false,
             explain: false,
+            validate: false,
             bind_parameters: false,
             dependency_graph: false,
             transactions: TxCapability::none(),

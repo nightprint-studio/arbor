@@ -39,6 +39,13 @@ export interface HistoryEntry {
   id: string;
   connectionId: string;
   sql: string;
+  /**
+   * The statement Picus actually ran, when it rewrote the one above — a row key
+   * spliced in, or large objects wrapped into sizes. Absent when what ran is what
+   * was asked for, so the history shows a second line only when it has something to
+   * say.
+   */
+  effectiveSql?: string;
   at: string;
   rowCount: number;
   /** `rowCount` was the planner's estimate — the entry must be marked `~`. */
@@ -438,6 +445,7 @@ function createQueryStore() {
         remember({
           connectionId,
           sql: target.sql,
+          effectiveSql: res.effectiveSql,
           at: startedAt,
           rowCount: result ? result.total : (res.affected ?? 0),
           approximate: !!result && result.approximate,

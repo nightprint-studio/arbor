@@ -8,6 +8,7 @@
 
 mod dml;
 mod names;
+mod select;
 
 use picus_types::prelude::DialectScope;
 use tree_sitter::Node;
@@ -65,6 +66,10 @@ fn statement_of(
     let body = if node.kind() == "statement" { node.named_child(0) } else { Some(node) };
     let node_kind = body.map(|b| b.kind().to_string()).unwrap_or_else(|| node.kind().to_string());
 
+    // Only a top-level SELECT carries a projection shape; `shape_of` returns `None`
+    // for everything else.
+    let select = body.and_then(|b| select::shape_of(b, source));
+
     let mut collector = Collector::new(source, scope, depth);
     collector.visit(node, None);
 
@@ -81,6 +86,7 @@ fn statement_of(
         references: collector.references,
         dml: collector.dml,
         foreign: collector.foreign,
+        select,
         has_error,
     }
 }
@@ -150,6 +156,9 @@ fn shift_statement(statement: &mut Statement, delta: usize) {
         r.end += delta;
     };
     shift(&mut statement.range);
+    if let Some(select) = statement.select.as_mut() {
+        select.select_list_end += delta;
+    }
     for object in statement.defines.iter_mut().chain(statement.references.iter_mut()) {
         shift(&mut object.range);
     }

@@ -74,6 +74,7 @@ pub mod object;
 pub mod parser;
 pub mod prelude;
 pub mod range;
+pub mod select;
 pub mod statement;
 
 mod walk;

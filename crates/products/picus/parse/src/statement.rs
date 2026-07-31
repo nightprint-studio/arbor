@@ -85,6 +85,11 @@ pub struct Statement {
     /// Constructs inside this statement that do not belong to the file's
     /// declared dialect.
     pub foreign: Vec<ForeignConstruct>,
+    /// The projection shape, when this statement is a top-level `SELECT` — enough to
+    /// splice a hidden row key into it. `None` for everything else. See
+    /// [`SelectShape`](crate::select::SelectShape).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub select: Option<crate::select::SelectShape>,
     /// True when the statement contains an error node.
     pub has_error: bool,
 }

@@ -29,7 +29,7 @@
 use picus_ast::prelude::DialectScope;
 use picus_core::prelude::PicusState;
 use picus_db_api::prelude::{
-    CellValue, ExecuteResult, ResultCount, ResultWindow, DEFAULT_WINDOW_ROWS,
+    CellValue, ExecuteResult, LobMasking, ResultCount, ResultWindow, DEFAULT_WINDOW_ROWS,
 };
 use picus_emit::prelude::{ident, literal};
 use serde::Serialize;
@@ -53,10 +53,26 @@ async fn picus_execute(
     sql: String,
     window: Option<u32>,
 ) -> Result<ExecuteResult, String> {
-    require_session(state, &connectionId)?
-        .execute(&sql, window_size(window))
+    // Decide, before running, whether large objects can be masked and whether a row
+    // key has to be injected to make them addressable. A read from a single keyed
+    // table may come back rewritten (the key spliced in, hidden); anything else runs
+    // as written. See `crate::lob_masking`.
+    let plan = crate::lob_masking::plan_lob_read(&sql, &connectionId, state);
+
+    let mut result = require_session(state, &connectionId)?
+        .execute(&plan.sql, window_size(window), plan.masking)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    // The engine stamps `effective_sql` only when IT rewrote the statement (the
+    // masking wrapper). If `be` rewrote it (a key injected) without the engine
+    // wrapping, say so too — "you asked X, Y ran" must reflect both layers.
+    if result.effective_sql.is_none() && plan.sql != sql {
+        result.effective_sql = Some(plan.sql);
+    }
+    result.hidden_columns = plan.hidden;
+    result.row_key = plan.row_key;
+    Ok(result)
 }
 
 /// How many rows the **first** window holds.
@@ -259,6 +275,13 @@ async fn picus_read_lob(
     let filter = keys
         .iter()
         .map(|(name, value)| {
+            // `ctid` is the engine's internal row address, injected as the key when a
+            // table has no primary key. It is not a catalogue column, so it has no
+            // descriptor to type its literal — it is matched as the `tid` it is.
+            if name.eq_ignore_ascii_case("ctid") {
+                let v = value.as_deref().unwrap_or_default().replace('\'', "''");
+                return Ok(format!("ctid = '{v}'::tid"));
+            }
             let col = described(name)?;
             Ok(format!("{} = {}", id_of(name), literal(value.as_deref(), &col, scope)))
         })
@@ -281,7 +304,9 @@ async fn picus_read_lob(
     };
     let sql = format!("SELECT {projection} FROM {} WHERE {filter}", id_of(&info.name));
 
-    let result = session.execute(&sql, 1).await.map_err(|e| e.to_string())?;
+    // `Off`: the projection is `octet_length`/`substr`, not the large object itself,
+    // so there is nothing here to mask — and no key to mask it by.
+    let result = session.execute(&sql, 1, LobMasking::Off).await.map_err(|e| e.to_string())?;
     // A read goes down the cursor path like any other, so this one-row lookup left a
     // held result behind — up to `LOB_LIMIT` of tuplestore on the server, per cell
     // opened, until the idle sweep got to it. Nothing is going to scroll a single

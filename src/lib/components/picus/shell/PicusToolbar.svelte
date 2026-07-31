@@ -22,6 +22,7 @@
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import PicusConnectionPill from '../PicusConnectionPill.svelte';
+  import ValidationStatus from '../panels/ValidationStatus.svelte';
   import PicusTxControls from './PicusTxControls.svelte';
   import PicusDialectChip from '../PicusDialectChip.svelte';
   import PicusRoleChip from '../PicusRoleChip.svelte';
@@ -204,6 +205,10 @@
     <Button variant="icon" size="sm" title="Save script" ariaLabel="Save script" onclick={() => notYet('Saving a query')}>
       {#snippet iconStart()}<Save size={14} />{/snippet}
     </Button>
+    <!-- The database's own verdict on what is in the editor. Beside the actions,
+         because it is about the statement Run is about to send, not about the
+         connection. -->
+    <ValidationStatus />
     <!-- Beside Run, not tucked in with the right-hand facts. An open transaction is
          not a property of the tab you glance at afterwards — it changes what the
          button to its left is about to do, so it sits where the hand already is. -->

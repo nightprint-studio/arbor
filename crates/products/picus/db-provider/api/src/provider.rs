@@ -18,7 +18,7 @@ use crate::descriptor::DbProviderDescriptor;
 use crate::error::{DbError, DbResult};
 use crate::kind::EngineKind;
 use crate::plan::{PlanRequest, QueryPlan};
-use crate::query::{BindValue, ExecuteResult, ResultCount, ResultWindow};
+use crate::query::{BindValue, ExecuteResult, LobMasking, ResultCount, ResultWindow};
 use crate::schema::{SchemaSnapshot, TableInfo, TriggerDetail};
 use crate::secret::Secret;
 use crate::tx::{TxOutcome, TxState};
@@ -112,7 +112,19 @@ pub trait DbSession: Send + Sync {
     /// On a read-only connection a non-read statement must be refused with
     /// [`DbError::ReadOnly`](crate::error::DbError::ReadOnly) — and the refusal has
     /// to be real, not a hidden button.
-    async fn execute(&self, sql: &str, window: u32) -> DbResult<ExecuteResult>;
+    ///
+    /// `masking` says whether large-object columns may be replaced by their size
+    /// ([`LobMasking::Auto`]) or must be read whole ([`LobMasking::Off`]). The caller
+    /// chooses `Off` when it has determined the result's rows are **not addressable**
+    /// — no primary key and no internal row key to fetch a masked cell by later — so a
+    /// size the user could never expand would be worse than the value itself. The
+    /// engine still masks nothing it cannot describe.
+    async fn execute(
+        &self,
+        sql: &str,
+        window: u32,
+        masking: LobMasking,
+    ) -> DbResult<ExecuteResult>;
 
     /// Open a relation's data, as [`execute`](Self::execute) opens a read.
     ///
@@ -189,6 +201,23 @@ pub trait DbSession: Send + Sync {
     /// on a read-only connection must refuse it as a write.
     async fn explain(&self, _sql: &str, _request: PlanRequest) -> DbResult<QueryPlan> {
         Err(DbError::unsupported("this engine", "query plans"))
+    }
+
+    /// Prepare a single statement — parse and describe it — **without executing it**,
+    /// so the server itself says whether it is valid and, when it is not, where.
+    ///
+    /// `Ok(())` means the server accepted the statement. An error is the server's own
+    /// rejection: [`DbError::Sql`](crate::error::DbError::Sql) carrying the message,
+    /// the SQLSTATE, and a 1-based **character** position into `sql` when the server
+    /// reports one. This is what lets the editor stop reimplementing the catalogue —
+    /// unknown table, unknown column, ambiguous column all come back as the server's
+    /// verdict rather than a guess. Paired with
+    /// [`EngineCapabilities::validate`](crate::capability::EngineCapabilities::validate).
+    ///
+    /// The caller passes **one** statement: `prepare` describes a single command, and
+    /// splitting a buffer into statements is the caller's job (it has the parser).
+    async fn validate(&self, _sql: &str) -> DbResult<()> {
+        Err(DbError::unsupported("this engine", "statement validation"))
     }
 
     /// What every session on this server is doing, and who is blocked behind whom.

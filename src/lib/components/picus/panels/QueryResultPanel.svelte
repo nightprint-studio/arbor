@@ -115,14 +115,25 @@
     ...(canExplain ? [{ id: 'plan', label: 'Plan' } satisfies TabItem] : []),
   ]);
 
+  /**
+   * Columns hidden from the grid — the row key Picus spliced in to make a masked
+   * cell addressable. They are the trailing columns, so dropping them from
+   * `gridColumns` leaves every visible column at the same index it has in
+   * `result.columns`: the cell snippet and the edit callback index the full list by
+   * the grid's `columnIndex` and need no remapping.
+   */
+  const hidden = $derived(new Set(result?.hiddenColumns ?? []));
+
   const gridColumns = $derived<DataGridColumn[]>(
-    (result?.columns ?? []).map((c) => ({
-      id: c.name,
-      label: c.name,
-      hint: c.type,
-      type: /NUMBER|INT|NUMERIC|DECIMAL/i.test(c.type) ? 'number' : 'text',
-      width: 180,
-    })),
+    (result?.columns ?? [])
+      .filter((c) => !hidden.has(c.name))
+      .map((c) => ({
+        id: c.name,
+        label: c.name,
+        hint: c.type,
+        type: /NUMBER|INT|NUMERIC|DECIMAL/i.test(c.type) ? 'number' : 'text',
+        width: 180,
+      })),
   );
 
   // ── The plan of the statement, beside the rows it would produce ──────────────
@@ -248,12 +259,13 @@
    */
   function reveal(rowIndex: number, column: string) {
     if (!result) return;
-    // Without a key there is nothing to fetch the value *by*, and opening the
-    // viewer anyway would put a dialog on screen whose only job is to fail. The
-    // reason is the one `editability` already worked out, which names the actual
-    // obstacle — no key on the table, the key not selected, more than one source —
-    // instead of leaving a click that appears to do nothing at all.
-    if (!editable.keys.length) {
+    // The key the backend addressed this read by, when it gave one — the primary key,
+    // or the `ctid` it spliced in for a table that has none. It falls back to the
+    // key `editability` derives for older results that carry none. Either way, no key
+    // means nothing to fetch the value *by*: opening the viewer would put a dialog on
+    // screen whose only job is to fail, so we say why instead.
+    const keyColumns = result.rowKey.length ? result.rowKey : editable.keys;
+    if (!keyColumns.length) {
       toastStore.show(`This value cannot be opened. ${editable.reason}`, 'warning');
       return;
     }
@@ -263,7 +275,7 @@
       return;
     }
     const keys: Record<string, string | null> = {};
-    for (const name of editable.keys) {
+    for (const name of keyColumns) {
       const at = result.columns.findIndex((c) => c.name.toUpperCase() === name.toUpperCase());
       const value = at < 0 ? null : row[at];
       keys[name] = value === null || value === undefined ? null : String(value);
