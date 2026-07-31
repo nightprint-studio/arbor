@@ -84,6 +84,24 @@ pub fn referenced_speech(tracks: &Tracks<ControlMap>) -> Vec<SpeechSpec> {
     specs
 }
 
+/// Everything an arrangement needs the registry to resolve: every referenced
+/// `sound`/`inst` name plus each `speech(...)` request (whose content-addressed
+/// key joins the name set, since the registry resolves it like any other voice).
+///
+/// **One derivation, two consumers**: the live staging path (which diffs it
+/// against what's already decoded) and the offline render/export path (which
+/// feeds it straight to [`merula_core::audio_thread::build_registry`]). Keeping
+/// it here is what stops a bounce from disagreeing with playback about what a
+/// file needs.
+pub fn referenced_registry_names(
+    tracks: &Tracks<ControlMap>,
+) -> (HashSet<String>, Vec<SpeechSpec>) {
+    let speech = referenced_speech(tracks);
+    let mut names = referenced_instruments(tracks);
+    names.extend(speech.iter().map(|s| s.registry_key()));
+    (names, speech)
+}
+
 /// Speech-only transform names. They refine a `speech(...)` source and silently
 /// no-op on anything else, so chaining one onto a plain sound/note/sample is
 /// almost always a mistake worth flagging.

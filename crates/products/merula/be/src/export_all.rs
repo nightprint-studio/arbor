@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use merula::prelude::{
-    render_offline_with_progress, ControlMap, Item, MetaValue, Program, RenderOutcome,
+    render_offline_with_registry, ControlMap, Item, MetaValue, Program, RenderOutcome,
     RenderProgress, Tracks,
 };
 use merula_core::config as config_cmds;
@@ -270,6 +270,9 @@ fn merula_export_all(
         category::RENDERS,
     )?;
     let job_id = job.id.clone();
+    // Cloned for the render thread: each file builds its own registry there (the
+    // decode is slow, and every file references a different set of instruments).
+    let registry_cfg = config_cmds::load();
 
     // Plain OS thread: rendering is blocking CPU/IO work, never the dispatcher worker.
     let spawn = std::thread::Builder::new()
@@ -305,9 +308,11 @@ fn merula_export_all(
                 let cancel_job = job.clone_handle();
                 let should_cancel = move || cancel_job.is_cancelled();
 
+                // Per-file registry: the same voices live playback would resolve.
+                let registry = crate::render::render_registry(&registry_cfg, &tracks);
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    render_offline_with_progress(
-                        &tracks, cps, 0, cycles, &render_cfg, &out_path, on_progress,
+                    render_offline_with_registry(
+                        &tracks, cps, 0, cycles, &render_cfg, &out_path, registry, on_progress,
                         should_cancel,
                     )
                 }));

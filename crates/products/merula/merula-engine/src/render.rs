@@ -12,8 +12,8 @@
 use std::path::Path;
 
 use merula_audio::prelude::{
-    synthesize_speech_spec, AudioCommand, DelayConfig, Frame, Renderer, SourceKind, TrackConfig,
-    VoiceSource, DEFAULT_BLOCK_FRAMES, DEFAULT_SAMPLE_RATE,
+    synthesize_speech_spec, AudioCommand, DelayConfig, Frame, Registry, Renderer, SourceKind,
+    TrackConfig, VoiceSource, DEFAULT_BLOCK_FRAMES, DEFAULT_SAMPLE_RATE,
 };
 use merula_pattern::prelude::{ControlMap, Time, TimeSpan, Tracks};
 use std::collections::HashMap;
@@ -146,6 +146,12 @@ pub fn render_offline(
 /// finalized, and [`RenderOutcome::Cancelled`] is returned. Both callbacks run on
 /// the render thread — keep them cheap (the shell throttles progress + forwards it
 /// as an event, and checks a job flag for cancellation).
+///
+/// **Sample packs**: this shortcut renders with a registry that only knows the
+/// built-in `synth.*` presets, so any `.inst("mallets.hand_chimes")` falls back
+/// to the synth (loudly — see [`warn_unresolved_named_sources`]). A caller that
+/// wants the packs must build the registry and use
+/// [`render_offline_with_registry`].
 pub fn render_offline_with_progress(
     tracks: &Tracks<ControlMap>,
     cps: f64,
@@ -153,6 +159,39 @@ pub fn render_offline_with_progress(
     cycles: u32,
     cfg: &RenderConfig,
     out_path: &Path,
+    on_progress: impl FnMut(RenderProgress),
+    should_cancel: impl Fn() -> bool,
+) -> Result<RenderOutcome> {
+    // Built-in `synth.*` presets only — the historical behaviour of this entry
+    // point, kept so existing callers stay valid.
+    let mut registry = Registry::new();
+    registry.install_builtin_synths();
+    render_offline_with_registry(
+        tracks, cps, start_cycle, cycles, cfg, out_path, registry, on_progress, should_cancel,
+    )
+}
+
+/// Like [`render_offline_with_progress`], but renders against a **caller-built
+/// [`Registry`]** instead of one that only has the built-in synths.
+///
+/// This is the entry point the shell uses: it hands over the *same* registry the
+/// live audio thread plays through (built once, in `merula_core`), so a bounce
+/// sounds like what the user heard. Without it a `.merula` declaring a sampled
+/// instrument renders on the fallback synth and the exported file contradicts its
+/// own source — silently, which is why
+/// [`warn_unresolved_named_sources`] runs on every bounce.
+///
+/// The registry is taken as given: install the built-in synths into it first if
+/// the arrangement uses `synth.*` (`Registry::install_builtin_synths`).
+#[allow(clippy::too_many_arguments)]
+pub fn render_offline_with_registry(
+    tracks: &Tracks<ControlMap>,
+    cps: f64,
+    start_cycle: u32,
+    cycles: u32,
+    cfg: &RenderConfig,
+    out_path: &Path,
+    registry: Registry,
     mut on_progress: impl FnMut(RenderProgress),
     should_cancel: impl Fn() -> bool,
 ) -> Result<RenderOutcome> {
@@ -172,9 +211,9 @@ pub fn render_offline_with_progress(
         })
         .collect();
     let mut renderer = Renderer::new(sr, &track_configs);
-    // Built-in `synth.*` presets, same as live playback, so `.inst("synth.lead")`
-    // and friends render as intended instead of the default fallback voice.
-    renderer.registry_mut().install_builtin_synths();
+    // The caller's registry (built-in synths, sample packs, aliases) — the voices
+    // this bounce can actually resolve.
+    *renderer.registry_mut() = registry;
 
     // Preload every file source up front. The real-time path can't decode in the
     // callback; offline we have no such constraint, but the `Renderer` still only
@@ -185,6 +224,17 @@ pub fn render_offline_with_progress(
     // fallback rather than aborting the bounce.
     preload_file_sources(&mut renderer, tracks, start_cycle, cycles);
     preload_speech_sources(&mut renderer, tracks, start_cycle, cycles);
+
+    // Speech keys are registered above, so this sees the final registry: every
+    // named source that will silently become the fallback synth is reported now,
+    // once per name, naming the output file.
+    warn_unresolved_named_sources(
+        tracks,
+        renderer.registry_mut(),
+        start_cycle,
+        cycles,
+        Some(out_path),
+    );
 
     // Total length: the requested cycles + a tail for releases / reverb.
     let arrangement_frames = (cycles as f64 * fpc).round() as u64;
@@ -545,6 +595,72 @@ fn preload_file_sources(
             }
         }
     }
+}
+
+/// Report every **named** source in the window that the registry can't resolve —
+/// the ones the renderer will silently play on the fallback synth.
+///
+/// The silence is the bug this guards: a `.merula` that declares
+/// `.inst("mallets.hand_chimes")` used to bounce to a triangle wave with nothing
+/// said, producing a file that contradicts its own source. Warnings go to
+/// **stderr** (stdout is the BE's protocol channel) **once per distinct name**,
+/// not per onset — a 4-bar pattern is thousands of onsets.
+///
+/// Returns the reported names, sorted, so callers (and tests) can assert on the
+/// decision rather than on the log. `out_path` names the file under render when
+/// there is one.
+///
+/// Only *named* sources are checked: `sample`/`audio` file sources go through
+/// `preload_file_sources` and `speech(...)` through `preload_speech_sources`.
+pub fn warn_unresolved_named_sources(
+    tracks: &Tracks<ControlMap>,
+    registry: &Registry,
+    start_cycle: u32,
+    cycles: u32,
+    out_path: Option<&Path>,
+) -> Vec<String> {
+    if cycles == 0 {
+        return Vec::new();
+    }
+    let span = TimeSpan::new(
+        Time::int(start_cycle as i64),
+        Time::int((start_cycle + cycles) as i64),
+    );
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut unresolved: Vec<String> = Vec::new();
+    for t in &tracks.tracks {
+        for hap in t.pattern.query(span) {
+            let v = &hap.value;
+            // Same precedence as `schedule::resolve_source`: speech wins, then a
+            // file marker, then the named source (inst over sound).
+            if v.speech.is_some() || v.source_file.is_some() {
+                continue;
+            }
+            let Some(name) = v.inst.as_deref().or(v.sound.as_deref()) else {
+                continue;
+            };
+            if !seen.insert(name.to_string()) || registry.resolves(name) {
+                continue;
+            }
+            unresolved.push(name.to_string());
+        }
+    }
+    unresolved.sort();
+
+    for name in &unresolved {
+        match out_path {
+            Some(p) => eprintln!(
+                "merula: instrument \"{name}\" is not in the render registry — \
+                 rendering it on the fallback synth (output: {})",
+                p.display()
+            ),
+            None => eprintln!(
+                "merula: instrument \"{name}\" is not in the render registry — \
+                 rendering it on the fallback synth"
+            ),
+        }
+    }
+    unresolved
 }
 
 /// Synthesize every distinct `speech(...)` source over the window and register it

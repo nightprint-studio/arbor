@@ -18,8 +18,9 @@ pub use crate::transport::{Transport, LOOKAHEAD_MS};
 // ── Offline render ───────────────────────────────────────────────────────────
 pub use crate::encode::{Format, RenderSink};
 pub use crate::render::{
-    render_offline, render_offline_with_progress, BitDepth, RenderConfig, RenderOutcome,
-    RenderProgress, DEFAULT_BIT_DEPTH, DEFAULT_TAIL_MAX_SECS,
+    render_offline, render_offline_with_progress, render_offline_with_registry,
+    warn_unresolved_named_sources, BitDepth, RenderConfig, RenderOutcome, RenderProgress,
+    DEFAULT_BIT_DEPTH, DEFAULT_TAIL_MAX_SECS,
 };
 
 // ── Offline level analysis (clip detection without playback) ─────────────────

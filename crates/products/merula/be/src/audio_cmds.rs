@@ -97,9 +97,7 @@ async fn build_prepared(
     tracks: &Tracks<ControlMap>,
     loaded: &Arc<Mutex<HashSet<String>>>,
 ) -> Option<control::Prepared> {
-    let speech_specs = validate::referenced_speech(tracks);
-    let mut referenced = validate::referenced_instruments(tracks);
-    referenced.extend(speech_specs.iter().map(|s| s.registry_key()));
+    let (referenced, speech_specs) = validate::referenced_registry_names(tracks);
     let target: Option<HashSet<String>> = {
         let have = loaded.lock().unwrap_or_else(|e| e.into_inner());
         if referenced.is_subset(&have) {

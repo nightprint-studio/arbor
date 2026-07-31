@@ -373,6 +373,19 @@ impl Registry {
         self.aliases.get(name).map(String::as_str)
     }
 
+    /// Whether `name` resolves to a real entry (after the one alias hop
+    /// [`resolve`](Registry::resolve) applies) — i.e. whether it would sound as
+    /// written instead of silently falling back to the default synth.
+    ///
+    /// This is the **guard** against the fallback being invisible: a caller that
+    /// is about to render can ask first and report the unresolved name rather
+    /// than shipping audio that contradicts its own source. Non-RT (the
+    /// real-time path resolves and falls back without asking).
+    pub fn resolves(&self, name: &str) -> bool {
+        let target = self.aliases.get(name).map(String::as_str).unwrap_or(name);
+        self.entries.contains_key(target)
+    }
+
     /// Install merula's always-available built-in voices, with **no manifest and
     /// no VSCO**, so a patch that asks for one sounds as intended instead of
     /// falling back to the default voice:
@@ -879,6 +892,27 @@ fn unquote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolves_reports_what_would_fall_back_to_the_synth() {
+        let mut reg = Registry::new();
+        assert!(!reg.resolves("synth.lead"), "empty registry resolves nothing");
+
+        reg.install_builtin_synths();
+        assert!(reg.resolves("synth.lead"));
+        assert!(
+            !reg.resolves("mallets.hand_chimes"),
+            "a pack instrument is unresolved until its pack is loaded — \
+             this is what the render guard reports"
+        );
+
+        // The alias hop must be applied, and a dangling alias is NOT resolved:
+        // it would fall back to the synth just like an unknown name.
+        reg.add_alias("kick", "RolandTR808_bd");
+        assert!(!reg.resolves("kick"), "an alias to a missing target is unresolved");
+        reg.insert_synth("RolandTR808_bd", SynthPreset::default());
+        assert!(reg.resolves("kick"), "an alias to a present target is resolved");
+    }
 
     #[test]
     fn parses_flat_manifest() {

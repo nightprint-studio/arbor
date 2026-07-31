@@ -58,9 +58,10 @@ pub use merula_audio::prelude::{
 // render driver. `Result` omitted; `EngineError` kept by name.
 pub use merula_engine::prelude::{
     analyze_levels, delay_config_for, export_midi, render_offline, render_offline_with_progress,
-    schedule_span, voice_event_from_hap, BitDepth, ClipWindow, Epoch, EngineError, Format,
-    LevelAnalysis, MidiExportSummary, RenderConfig, RenderOutcome, RenderProgress, RenderSink,
-    Transport, DEFAULT_BIT_DEPTH, DEFAULT_TAIL_MAX_SECS, LOOKAHEAD_MS,
+    render_offline_with_registry, schedule_span, voice_event_from_hap,
+    warn_unresolved_named_sources, BitDepth, ClipWindow, Epoch, EngineError, Format, LevelAnalysis,
+    MidiExportSummary, RenderConfig, RenderOutcome, RenderProgress, RenderSink, Transport,
+    DEFAULT_BIT_DEPTH, DEFAULT_TAIL_MAX_SECS, LOOKAHEAD_MS,
 };
 
 // ── merula-import — deterministic MIDI → .merula (the "faithful" path) ────

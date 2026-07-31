@@ -17,7 +17,7 @@
 use std::path::PathBuf;
 
 use merula::prelude::{
-    analyze_levels, export_midi, render_offline_with_progress, BitDepth, ControlMap, Format,
+    analyze_levels, export_midi, render_offline_with_registry, BitDepth, ControlMap, Format,
     RenderConfig, RenderOutcome, RenderProgress, Tracks,
 };
 use serde::Deserialize;
@@ -133,6 +133,24 @@ pub(crate) fn render_cps(output: &merula::prelude::EvalOutput, cfg: &MerulaConfi
         .map(|p| p.1)
         .or(output.cps)
         .unwrap_or(cfg.default_cps)
+}
+
+/// Build the registry an **offline bounce** of `tracks` must render through.
+///
+/// Deliberately the *same two calls* the live audio thread makes — the name set
+/// from `validate::referenced_registry_names`, then
+/// `merula_core::audio_thread::build_registry` — so an export can never resolve a
+/// different set of voices than playback. A second copy of the pack-loading logic
+/// here is exactly how the export silently regressed to the fallback synth.
+///
+/// Decoding is slow (a large pack is gigabytes on disk), so call this **on the
+/// render thread**, never on a dispatcher worker.
+pub(crate) fn render_registry(
+    cfg: &MerulaConfig,
+    tracks: &Tracks<ControlMap>,
+) -> merula::prelude::Registry {
+    let (names, speech) = crate::eval::validate::referenced_registry_names(tracks);
+    merula_core::audio_thread::build_registry(cfg, &names, &speech)
 }
 
 /// Sanitize a track name into a safe filename stem. Keeps alphanumerics / dash /
@@ -326,12 +344,18 @@ fn spawn_render(
     let command = format!("render {cycles} cycles @ {cps} cps from cycle {start_cycle}");
     let job = JobHandle::register(host, ctx.event_sink(), &name, &command, category::RENDERS)?;
     let job_id = job.id.clone();
+    // Cloned for the render thread, which builds the sample registry there (the
+    // decode is slow and must not sit on a dispatcher worker).
+    let registry_cfg = config_cmds::load();
 
     // Plain OS thread: render_offline is blocking CPU/IO, not async. Never the audio
     // RT thread, never the dispatcher worker (a long bounce would block a request).
     let spawn = std::thread::Builder::new()
         .name(format!("merula-render-{job_id}"))
         .spawn(move || {
+            // The same voices live playback resolves — without this the bounce
+            // renders sampled instruments on the fallback synth.
+            let registry = render_registry(&registry_cfg, &tracks);
             // Forward render progress to the FE (throttled to whole-percent steps so
             // a long bounce emits ~100 events, not one per block).
             let progress_job = job.clone_handle();
@@ -353,8 +377,8 @@ fn spawn_render(
             // unfinalized, unplayable file with no explanation.
             let outcome: Result<RenderOutcome, String> = match std::panic::catch_unwind(
                 std::panic::AssertUnwindSafe(|| {
-                    render_offline_with_progress(
-                        &tracks, cps, start_cycle, cycles, &cfg, &out_path, on_progress,
+                    render_offline_with_registry(
+                        &tracks, cps, start_cycle, cycles, &cfg, &out_path, registry, on_progress,
                         should_cancel,
                     )
                 }),
@@ -411,10 +435,15 @@ fn spawn_render_stems(
     let job = JobHandle::register(host, ctx.event_sink(), &name, &command, category::RENDERS)?;
     let job_id = job.id.clone();
     let ext = cfg.format.extension();
+    let registry_cfg = config_cmds::load();
 
     let spawn = std::thread::Builder::new()
         .name(format!("merula-stems-{job_id}"))
         .spawn(move || {
+            // Built once from the *whole* arrangement, then shared by every stem:
+            // a `Registry` clone shares its decoded sample data, so this costs one
+            // decode pass rather than one per track.
+            let registry = render_registry(&registry_cfg, &tracks);
             let total = count.max(1);
             // Best-effort: a real write error surfaces from the first stem render.
             let _ = std::fs::create_dir_all(&out_dir);
@@ -447,9 +476,11 @@ fn spawn_render_stems(
                 let cancel_job = job.clone_handle();
                 let should_cancel = move || cancel_job.is_cancelled();
 
+                let stem_registry = registry.clone();
                 let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    render_offline_with_progress(
-                        &stem, cps, start_cycle, cycles, &cfg, &file, on_progress, should_cancel,
+                    render_offline_with_registry(
+                        &stem, cps, start_cycle, cycles, &cfg, &file, stem_registry, on_progress,
+                        should_cancel,
                     )
                 }));
                 match res {
