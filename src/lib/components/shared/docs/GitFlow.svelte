@@ -111,28 +111,28 @@ hotfix_pr_default     = false  # default button for hotfix finish`, 'toml')}</pr
 <h2>Plugin hooks</h2>
 <p>Plugins can react to every Git Flow operation. Declare the hooks in <code>[hooks]</code> and register handlers with <code>arbor.events.on()</code>:</p>
 <table class="shortcuts-table">
-  <thead><tr><th>Hook constant</th><th>TOML key</th><th>Context fields</th></tr></thead>
+  <thead><tr><th>Hook</th><th>Context fields</th></tr></thead>
   <tbody>
-    <tr><td><code>FLOW_INIT</code></td><td><code>on_flow_init</code></td><td>repo</td></tr>
-    <tr><td><code>FLOW_FEATURE_START</code></td><td><code>on_flow_feature_start</code></td><td>repo, name, branch, base_branch</td></tr>
-    <tr><td><code>FLOW_FEATURE_FINISH</code></td><td><code>on_flow_feature_finish</code></td><td>repo, name, branch</td></tr>
-    <tr><td><code>FLOW_RELEASE_START</code></td><td><code>on_flow_release_start</code></td><td>repo, version, branch, base_branch</td></tr>
-    <tr><td><code>FLOW_RELEASE_FINISH</code></td><td><code>on_flow_release_finish</code></td><td>repo, version, branch</td></tr>
-    <tr><td><code>FLOW_HOTFIX_START</code></td><td><code>on_flow_hotfix_start</code></td><td>repo, name, branch, base_branch</td></tr>
-    <tr><td><code>FLOW_HOTFIX_FINISH</code></td><td><code>on_flow_hotfix_finish</code></td><td>repo, name, branch</td></tr>
+    <tr><td><code>corvus:flow_init</code></td><td>repo</td></tr>
+    <tr><td><code>corvus:flow_feature_start</code></td><td>repo, name, branch, base_branch</td></tr>
+    <tr><td><code>corvus:flow_feature_finish</code></td><td>repo, name, branch</td></tr>
+    <tr><td><code>corvus:flow_release_start</code></td><td>repo, version, branch, base_branch</td></tr>
+    <tr><td><code>corvus:flow_release_finish</code></td><td>repo, version, branch</td></tr>
+    <tr><td><code>corvus:flow_hotfix_start</code></td><td>repo, name, branch, base_branch</td></tr>
+    <tr><td><code>corvus:flow_hotfix_finish</code></td><td>repo, name, branch</td></tr>
   </tbody>
 </table>
 <pre class="language-lua">{@html highlight(`-- plugin.toml [hooks] section
--- on_flow_feature_start = true
--- on_flow_feature_finish = true
+-- "corvus:flow_feature_start"  = true
+-- "corvus:flow_feature_finish" = true
 
-arbor.events.on("on_flow_feature_start", function(ctx)
+arbor.events.on("corvus:flow_feature_start", function(ctx)
   -- ctx.repo   = "/path/to/repo"
   -- ctx.name   = "my-feature"    (name part only, without prefix)
   -- ctx.branch = "feature/my-feature"  (full branch name)
   arbor.log.info("Feature started: " .. ctx.branch)
 end)
 
-arbor.events.on("on_flow_feature_finish", function(ctx)
+arbor.events.on("corvus:flow_feature_finish", function(ctx)
   arbor.notify{ title = "Feature merged", message = ctx.branch .. " merged into develop", level = "success" }
 end)`, '.lua')}</pre>

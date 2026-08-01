@@ -31,6 +31,9 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
+
+use arbor_plugin_types::prelude::hook_names;
+
 use crate::process_ext::NoWindowExt;
 
 /// Type alias for the per-run variable context shared between every step
@@ -798,7 +801,7 @@ fn orchestrate(
     if let Some(snap) = snapshot(&rt.engine.registry, &run_id) {
         emit(&rt, &snap);
         persist_run(&snap);
-        fire_hook(&rt, "on_pipeline_started", &serde_json::json!({
+        fire_hook(&rt, hook_names::pipeline::STARTED, &serde_json::json!({
             "run_id":      &run_id,
             "pipeline_id": &snap.pipeline_id,
             "plugin":      &snap.plugin,
@@ -965,7 +968,7 @@ fn orchestrate(
     if let Some(snap) = snapshot(&rt.engine.registry, &run_id) {
         emit(&rt, &snap);
         persist_run(&snap);
-        fire_hook(&rt, "on_pipeline_done", &serde_json::json!({
+        fire_hook(&rt, hook_names::pipeline::DONE, &serde_json::json!({
             "run_id":      &run_id,
             "pipeline_id": &snap.pipeline_id,
             "plugin":      &snap.plugin,
@@ -1179,7 +1182,7 @@ fn emit_step_done(
     if let Some(snap) = snapshot(&rt.engine.registry, run_id) {
         emit(rt, &snap);
         persist_run(&snap);
-        fire_hook(rt, "on_pipeline_step_done", &serde_json::json!({
+        fire_hook(rt, hook_names::pipeline::STEP_DONE, &serde_json::json!({
             "run_id":    run_id,
             "plugin":    &snap.plugin,
             "stage_id":  &stage_def.id,

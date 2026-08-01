@@ -8,8 +8,8 @@
 //! crate, so behavior — and error strings — are identical to in-process
 //! (`GitError`'s `Display` is the same text the shell maps to `AppError`).
 //!
-//! **Hooks fire here, in-process to this backend.** `on_stash_push` /
-//! `on_stash_pop` go through [`CorvusState::fire_hook`] to the plugin host
+//! **Hooks fire here, in-process to this backend.** `corvus:stash_push` /
+//! `corvus:stash_pop` go through [`CorvusState::fire_hook`] to the plugin host
 //! co-located in `corvus-be` (plugin-relocation Wave 0), after the repo handle
 //! is dropped — same lock-then-fire discipline and payload as the shell's
 //! in-process copy, so plugins see identical events whether stash runs in- or
@@ -20,7 +20,7 @@
 //! none was pushed — so an OOP force-apply / abort honours the user's configured
 //! size / extension / retention limits, same as in-process (W0b).
 
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{hooks, CorvusState};
 use corvus_git::prelude::{
     RecoveryKind, StashApplyResult, StashBlockingContent, StashEntry, StashRef,
 };
@@ -58,7 +58,7 @@ fn stash_save(
     // Repo handle dropped above; fire inline so a Lua git op in the hook can't
     // deadlock. Payload mirrors the shell's in-process `stash_save`.
     state.fire_hook(
-        "on_stash_push",
+        hooks::STASH_PUSH,
         serde_json::json!({
             "tab_id": tab_id,
             "index": entry.index,
@@ -78,7 +78,7 @@ fn stash_apply(state: &CorvusState, tab_id: String, index: usize) -> Result<Stas
     // Repo dropped; fire inline (drop:false, only when clean) — same as in-process.
     if !result.has_conflicts {
         state.fire_hook(
-            "on_stash_pop",
+            hooks::STASH_POP,
             serde_json::json!({ "tab_id": tab_id, "index": index, "drop": false }),
         );
     }
@@ -94,7 +94,7 @@ fn stash_pop(state: &CorvusState, tab_id: String, index: usize) -> Result<StashA
     // Repo dropped; fire inline (drop:true, only when clean) — same as in-process.
     if !result.has_conflicts {
         state.fire_hook(
-            "on_stash_pop",
+            hooks::STASH_POP,
             serde_json::json!({ "tab_id": tab_id, "index": index, "drop": true }),
         );
     }

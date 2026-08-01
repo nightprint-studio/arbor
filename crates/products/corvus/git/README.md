@@ -40,11 +40,11 @@ stay out of the crate, passed in by the caller instead:
   keeping `stash` independent of `recovery`.
 
 Likewise **hooks** are not here: these domains fire no hooks themselves — the
-shell handler fires `on_stash_push` / `on_stash_pop` (and, for reset,
-`on_tag_create` / `on_tag_delete`) around the call.
+shell handler fires `corvus:stash_push` / `corvus:stash_pop` (and, for reset,
+`corvus:tag_create` / `corvus:tag_delete`) around the call.
 
 The shell keeps the hard-reset recovery snapshot (config-loading) and the OID
-validation around `reset::run_reset`, and fires `on_tag_create` / `on_tag_delete`
+validation around `reset::run_reset`, and fires `corvus:tag_create` / `corvus:tag_delete`
 around the tag calls — none of which belong in the crate.
 
 ## Public API: use the prelude

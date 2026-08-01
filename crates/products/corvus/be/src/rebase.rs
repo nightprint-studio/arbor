@@ -9,7 +9,7 @@
 //!
 //! **Hooks fire here, in-process to this backend.** Two handlers fire
 //! fire-and-forget hooks around the git call (`start_rebase` →
-//! `on_rebase_start`, `rebase_abort` → `on_rebase_abort`). They fire inline via
+//! `corvus:rebase_start`, `rebase_abort` → `corvus:rebase_abort`). They fire inline via
 //! [`CorvusState::fire_hook`] to the co-located plugin host, **after** the
 //! repo-path scope is dropped — Lua hooks call git ops, so firing under a held
 //! handle would risk deadlock; same lock-then-fire discipline and payload
@@ -18,7 +18,7 @@
 //! No recovery snapshots are taken in this domain (the in-process copy takes
 //! none either), so the shared `SnapshotPolicy::default()` gap does not apply.
 
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{hooks, CorvusState};
 use corvus_git::prelude::{RebaseState, RebaseTodoEntry};
 use serde_json::json;
 
@@ -49,9 +49,9 @@ fn start_rebase(
         corvus_git::rebase::start_interactive_rebase(&git(state), &path, &base, &todo)
             .map_err(|e| e.to_string())?;
     }
-    // Fire `on_rebase_start` inline with first-hand data (action_count = todo.len()).
+    // Fire `corvus:rebase_start` inline with first-hand data (action_count = todo.len()).
     state.fire_hook(
-        "on_rebase_start",
+        hooks::REBASE_START,
         json!({ "tab_id": tab_id, "base": base, "action_count": todo.len() }),
     );
     Ok(())
@@ -71,8 +71,8 @@ fn rebase_abort(state: &CorvusState, tab_id: String) -> Result<(), String> {
         let path = repo_path(state, &tab_id)?;
         corvus_git::rebase::rebase_abort(&git(state), &path).map_err(|e| e.to_string())?;
     }
-    // Fire `on_rebase_abort` inline with first-hand data.
-    state.fire_hook("on_rebase_abort", json!({ "tab_id": tab_id }));
+    // Fire `corvus:rebase_abort` inline with first-hand data.
+    state.fire_hook(hooks::REBASE_ABORT, json!({ "tab_id": tab_id }));
     Ok(())
 }
 

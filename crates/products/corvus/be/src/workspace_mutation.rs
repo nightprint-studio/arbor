@@ -12,7 +12,7 @@
 //! workspace hooks the shell moved into its `post_hooks` table fire **inline**
 //! again here, right after the mutation.
 
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{hooks, CorvusState};
 use serde_json::json;
 
 use crate::workspace::{
@@ -37,7 +37,7 @@ fn create_workspace(
         let ws = store.create(name, color_idx, repo_ids, group_id);
         Ok(ws)
     })?;
-    state.fire_hook("on_workspace_created", crate::workspace::workspace_payload(&ws));
+    state.fire_hook(hooks::WORKSPACE_CREATED, crate::workspace::workspace_payload(&ws));
     crate::workspace::emit_registry_changed(state);
     Ok(ws)
 }
@@ -74,7 +74,7 @@ fn update_workspace(
             .cloned()
             .ok_or_else(|| format!("workspace not found: {workspace_id}"))
     })?;
-    state.fire_hook("on_workspace_updated", crate::workspace::workspace_payload(&ws));
+    state.fire_hook(hooks::WORKSPACE_UPDATED, crate::workspace::workspace_payload(&ws));
     crate::workspace::emit_registry_changed(state);
     Ok(ws)
 }
@@ -100,7 +100,7 @@ fn add_repo_to_workspace(
         Ok(())
     })?;
     state.fire_hook(
-        "on_workspace_repo_added",
+        hooks::WORKSPACE_REPO_ADDED,
         json!({ "workspace_id": &workspace_id, "repo_id": &repo_id }),
     );
     crate::workspace::emit_registry_changed(state);
@@ -120,11 +120,11 @@ fn move_repo_between_workspaces(
         Ok(())
     })?;
     state.fire_hook(
-        "on_workspace_repo_removed",
+        hooks::WORKSPACE_REPO_REMOVED,
         json!({ "workspace_id": &from_workspace_id, "repo_id": &repo_id }),
     );
     state.fire_hook(
-        "on_workspace_repo_added",
+        hooks::WORKSPACE_REPO_ADDED,
         json!({ "workspace_id": &to_workspace_id, "repo_id": &repo_id }),
     );
     crate::workspace::emit_registry_changed(state);
@@ -242,7 +242,7 @@ fn delete_registry_repo(state: &CorvusState, repo_id: String) -> Result<(), Stri
     if let Some((path, name)) = path_name {
         crate::workspace::forget_recent_repo(state, &path);
         state.fire_hook(
-            "on_repo_deregistered",
+            hooks::REPO_DEREGISTERED,
             json!({
                 "repo_id": repo_id,
                 "path":    path,
@@ -354,7 +354,7 @@ fn delete_workspace(state: &CorvusState, workspace_id: String) -> Result<(), Str
     // Best-effort: delete the snapshot file too.
     let _ = snapshot::delete(state, &workspace_id);
     if let Some(payload) = deleted_payload {
-        state.fire_hook("on_workspace_deleted", payload);
+        state.fire_hook(hooks::WORKSPACE_DELETED, payload);
     }
     // Forget every member that's no longer referenced by another workspace, so
     // Arbor stops proposing it as "use existing" on a later import.
@@ -383,7 +383,7 @@ fn set_active_workspace(state: &CorvusState, workspace_id: String) -> Result<Wor
         }
     }
     state.emit("arbor://workspace-switched", payload.clone());
-    state.fire_hook("on_workspace_switched", payload);
+    state.fire_hook(hooks::WORKSPACE_SWITCHED, payload);
     Ok(ws)
 }
 
@@ -398,7 +398,7 @@ fn remove_repo_from_workspace(
         Ok(())
     })?;
     state.fire_hook(
-        "on_workspace_repo_removed",
+        hooks::WORKSPACE_REPO_REMOVED,
         json!({
             "workspace_id": workspace_id,
             "repo_id":      repo_id,
@@ -438,7 +438,7 @@ fn import_workspace_commit(
         Ok(result)
     })?;
     state.fire_hook(
-        if merged { "on_workspace_updated" } else { "on_workspace_created" },
+        if merged { hooks::WORKSPACE_UPDATED } else { hooks::WORKSPACE_CREATED },
         crate::workspace::workspace_payload(&ws),
     );
     Ok(ws)
@@ -484,7 +484,7 @@ fn import_workspace_group_commit(
     })?;
     for (ws, merged) in &touched {
         state.fire_hook(
-            if *merged { "on_workspace_updated" } else { "on_workspace_created" },
+            if *merged { hooks::WORKSPACE_UPDATED } else { hooks::WORKSPACE_CREATED },
             crate::workspace::workspace_payload(ws),
         );
     }
@@ -621,7 +621,7 @@ fn import_bundle_commit(
     })?;
     for (ws, merged) in &touched {
         state.fire_hook(
-            if *merged { "on_workspace_updated" } else { "on_workspace_created" },
+            if *merged { hooks::WORKSPACE_UPDATED } else { hooks::WORKSPACE_CREATED },
             crate::workspace::workspace_payload(ws),
         );
     }

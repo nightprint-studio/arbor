@@ -1,0 +1,45 @@
+[package]
+name         = "garrulus-core"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Garrulus backend core — the canonical headless state (`GarrulusState`) the `garrulus-be` note-vault process owns: the open vault, the link/search index and the sync remote. Tauri-free by construction; the vault domain handlers live in garrulus-be and drive against this state."
+
+[dependencies]
+arbor-ipc  = { path = "../../../foundation/ipc" }
+# Hook firing: `GarrulusState` holds the runtime `HookDispatcher` so a handler
+# fires its vault hooks (`garrulus:note_saved`, `garrulus:sync_done`, …) where it runs. Only
+# the Tauri-free api crate — no mlua, no host, here.
+arbor-plugin-api = { path = "../../../platform/plugin/api" }
+# The canonical hook-name registry, which `crate::hooks` re-exports. Named
+# directly because the api crate deliberately does not re-export it — and because
+# the fire sites and `hook_catalog.rs` have to read the same constants or they
+# drift, which is how `repo_open` became a dead hook once already.
+arbor-plugin-types = { path = "../../../platform/plugin/types" }
+# Resolves garrulus's own per-profile config dir for the typed `GarrulusConfig`
+# and the vault registry — exactly as sitta-core uses `sitta_config_path`.
+# NOTE: arbor-core has no `garrulus_config_path` yet, so this crate resolves the
+# bucket through the generic `product_path("garrulus", …)`; see `config.rs`.
+arbor-core = { path = "../../../foundation/core" }
+# The vault model (discovery, note types, templates, naming) — the `Vault` the
+# state owns, re-exported through this crate's prelude for garrulus-be.
+garrulus-vault = { path = "../vault" }
+# The in-memory link graph + search index. A cache: rebuilt at vault open,
+# upserted per note on save.
+garrulus-index = { path = "../index" }
+# The sync seam (`SyncRemote` + `GitRemote` / `FolderRemote`). The state holds the
+# configured remote; nothing here ever writes without a handler asking.
+garrulus-sync  = { path = "../sync" }
+# `GitCli` — the git binary a `GitRemote` shells out to. `build_remote` is the one
+# place that constructs one, and this is the only reason the edge exists;
+# `garrulus-sync` already depends on the same crate for the engine itself
+# (docs/garrulus-design.md §11.4: the product-to-product edge is accepted and
+# documented).
+corvus-git = { path = "../../corvus/git" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# The typed product config (`config.toml`) is round-tripped through `toml`; the
+# vault registry (`vaults.json`) through serde_json.
+toml       = "0.8"

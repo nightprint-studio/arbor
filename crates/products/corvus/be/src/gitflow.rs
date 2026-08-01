@@ -15,10 +15,10 @@
 //! and returns `CreatePr` for the frontend to open the MR form — no provider
 //! call here.
 //!
-//! The `on_flow_*` hooks fire inline at the co-located plugin host (W0a) after
+//! The `corvus:flow_*` hooks fire inline at the co-located plugin host (W0a) after
 //! the repo handle is dropped, with payloads identical to the in-process copy.
 
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{hooks, CorvusState};
 use corvus_git::prelude::{FlowFinishResult, FlowStartResult, GitFlowConfig, GitFlowStatus};
 use git2::Repository;
 use serde::Deserialize;
@@ -71,7 +71,7 @@ fn gitflow_init(state: &CorvusState, tab_id: String) -> Result<(), String> {
         let config = effective_config(state, &repo);
         corvus_git::gitflow::gitflow_init(&git(state), &repo, &config).map_err(|e| e.to_string())?;
     }
-    state.fire_hook("on_flow_init", json!({ "tab_id": tab_id }));
+    state.fire_hook(hooks::FLOW_INIT, json!({ "tab_id": tab_id }));
     Ok(())
 }
 
@@ -87,7 +87,7 @@ fn gitflow_init_create_main(
         corvus_git::gitflow::gitflow_init_create_main(&git(state), &repo, &config, from_initial)
             .map_err(|e| e.to_string())?;
     }
-    state.fire_hook("on_flow_init", json!({ "tab_id": tab_id }));
+    state.fire_hook(hooks::FLOW_INIT, json!({ "tab_id": tab_id }));
     Ok(())
 }
 
@@ -106,7 +106,7 @@ fn gitflow_feature_start(
             .map_err(|e| e.to_string())?
     };
     state.fire_hook(
-        "on_flow_feature_start",
+        hooks::FLOW_FEATURE_START,
         json!({ "tab_id": tab_id, "name": name, "base_branch": result.base_branch }),
     );
     Ok(result)
@@ -125,7 +125,7 @@ fn gitflow_feature_finish(
         corvus_git::gitflow::feature_finish_or_pr(&git(state), &repo, &config, &name, force_pr)
             .map_err(|e| e.to_string())?
     };
-    state.fire_hook("on_flow_feature_finish", json!({ "tab_id": tab_id, "name": name }));
+    state.fire_hook(hooks::FLOW_FEATURE_FINISH, json!({ "tab_id": tab_id, "name": name }));
     Ok(result)
 }
 
@@ -144,7 +144,7 @@ fn gitflow_release_start(
             .map_err(|e| e.to_string())?
     };
     state.fire_hook(
-        "on_flow_release_start",
+        hooks::FLOW_RELEASE_START,
         json!({ "tab_id": tab_id, "version": version, "base_branch": result.base_branch }),
     );
     Ok(result)
@@ -172,7 +172,7 @@ fn gitflow_release_finish(
         .map_err(|e| e.to_string())?
     };
     state.fire_hook(
-        "on_flow_release_finish",
+        hooks::FLOW_RELEASE_FINISH,
         json!({ "tab_id": tab_id, "version": version }),
     );
     Ok(result)
@@ -193,7 +193,7 @@ fn gitflow_hotfix_start(
             .map_err(|e| e.to_string())?
     };
     state.fire_hook(
-        "on_flow_hotfix_start",
+        hooks::FLOW_HOTFIX_START,
         json!({ "tab_id": tab_id, "name": name, "base_branch": result.base_branch }),
     );
     Ok(result)
@@ -220,6 +220,6 @@ fn gitflow_hotfix_finish(
         )
         .map_err(|e| e.to_string())?
     };
-    state.fire_hook("on_flow_hotfix_finish", json!({ "tab_id": tab_id, "name": name }));
+    state.fire_hook(hooks::FLOW_HOTFIX_FINISH, json!({ "tab_id": tab_id, "name": name }));
     Ok(result)
 }

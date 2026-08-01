@@ -25,14 +25,11 @@ arbor-core = { path = "../../../foundation/core" }
 # domain `#[arbor_rpc::handler]`s stay here in tyto-be and drive against
 # `tyto_core::prelude::*`. Tauri-free by construction.
 tyto-core = { path = "../core" }
-# Host-pure plugin host: the hook dispatcher + the base `arbor.*` installer wired
-# in `src/plugin.rs`. tyto-be loads host-pure Lua plugins (no product namespaces).
-# mlua is workspace-pinned (see root) so the installer's `&Lua` is the very same
-# type as arbor-plugin-core's — one shared mlua artifact.
-arbor-plugin-api   = { path = "../../../platform/plugin/api" }
+# Host-pure plugin host, taken ready-made from the prelude:
+# `host_pure_hook_dispatcher` + `host_pure_api_installer`. tyto-be publishes no
+# product namespace and fires no vetoable hook, so it names no `mlua` type and
+# needs neither an `mlua` pin nor the api/types crates directly.
 arbor-plugin-core  = { path = "../../../platform/plugin/core" }
-arbor-plugin-types = { path = "../../../platform/plugin/types" }
-mlua = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 # Drives the serve loop / async domain handlers as the recording engine lands.

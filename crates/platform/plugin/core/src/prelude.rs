@@ -49,7 +49,13 @@ pub use crate::hook_router::{
     fire, fire_broadcast, fire_collecting, fire_on, fire_vetoable, matches_pattern,
     LuaHookListener,
 };
-pub use crate::dispatcher::build_hook_dispatcher;
+pub use crate::dispatcher::{
+    build_hook_dispatcher, build_hook_dispatcher_for_ns, build_hook_dispatcher_with,
+    host_pure_hook_dispatcher,
+};
+
+// ── Ready-made wiring for host-pure product backends ────────────────────────
+pub use crate::host_pure::{host_pure_api_installer, HostPureApiInstaller};
 
 // ── Lua API surface (Step 5) ────────────────────────────────────────────────
 pub use crate::lua_api::{

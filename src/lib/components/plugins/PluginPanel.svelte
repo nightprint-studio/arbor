@@ -11,6 +11,7 @@
   import PluginExportTemplateModal     from './manager/PluginExportTemplateModal.svelte';
   import PluginInfoModal               from './manager/PluginInfoModal.svelte';
   import type { PluginInfo } from '$lib/types/plugin';
+  import { activeHooks, fsClass, fsLabel, fsScopeIsUnrestricted } from './manifest-summary';
   import {
     reloadPlugins, listPluginInfo, pluginDependents, deletePlugin,
     pluginEnablePreview, pluginDisablePreview,
@@ -317,33 +318,6 @@
     selected = selected === name ? null : name;
   }
 
-  /** Return the active hooks for a plugin (now simple booleans). */
-  function activeHooks(p: PluginInfo): string[] {
-    const h = p.hooks;
-    const out: string[] = [];
-    if (h.on_repo_open)   out.push('on_repo_open');
-    if (h.on_repo_close)  out.push('on_repo_close');
-    if (h.on_plugin_load) out.push('on_plugin_load');
-    if (h.on_commit)      out.push('on_commit');
-    if (h.on_push)        out.push('on_push');
-    if (h.on_checkout)    out.push('on_checkout');
-    if (h.on_fetch)       out.push('on_fetch');
-    if (h.on_tab_switch)  out.push('on_tab_switch');
-    return out;
-  }
-
-  function fsClass(fs: string, unrestricted: boolean): string {
-    if (fs === 'none') return 'safe';
-    if (unrestricted)  return 'danger';
-    return 'warn';
-  }
-  function fsScopeIsUnrestricted(scope: string[] | undefined): boolean {
-    return Array.isArray(scope) && scope.some(s => s === '*');
-  }
-  function fsLabel(fs: string, scope: string[] | undefined): string {
-    if (fs === 'none') return 'no fs';
-    return fsScopeIsUnrestricted(scope) ? `fs:${fs} (unrestricted)` : `fs:${fs}`;
-  }
 </script>
 
 <Modal {onClose} width="780px" height="560px" padBody={false} ariaLabel="Plugin Manager">

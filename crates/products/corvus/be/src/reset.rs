@@ -6,15 +6,15 @@
 //! `corvus-git-cli` (self-detected). The pure git work is the shared [`corvus_git`]
 //! crate, so behavior + error strings are identical to in-process.
 //!
-//! **Hooks fire here** (plugin-relocation Wave 0): `on_tag_create` /
-//! `on_tag_delete` go to the co-located host after the repo handle is dropped —
+//! **Hooks fire here** (plugin-relocation Wave 0): `corvus:tag_create` /
+//! `corvus:tag_delete` go to the co-located host after the repo handle is dropped —
 //! same payload as in-process, no longer dropped on the OOP path.
 //!
 //! The hard-reset safety snapshot uses the shell-pushed recovery policy
 //! (`crate::repo::snapshot_policy`), falling back to the built-in default when
 //! none was pushed — same configured limits as in-process (W0b).
 
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{hooks, CorvusState};
 use corvus_git::prelude::{RecoveryKind, ResetMode};
 use serde_json::json;
 
@@ -75,7 +75,7 @@ fn create_tag(
     // Repo handle dropped; fire inline so a Lua git op in the hook can't deadlock.
     // Payload mirrors the shell's in-process `create_tag`.
     state.fire_hook(
-        "on_tag_create",
+        hooks::TAG_CREATE,
         json!({ "tab_id": &tab_id, "name": &name, "oid": &oid, "annotated": annotated }),
     );
     Ok(())
@@ -87,6 +87,6 @@ fn delete_tag(state: &CorvusState, tab_id: String, name: String) -> Result<(), S
         let repo = open(state, &tab_id)?;
         corvus_git::reset::delete_tag(&repo, &name).map_err(|e| e.to_string())?;
     }
-    state.fire_hook("on_tag_delete", json!({ "tab_id": &tab_id, "name": &name }));
+    state.fire_hook(hooks::TAG_DELETE, json!({ "tab_id": &tab_id, "name": &name }));
     Ok(())
 }

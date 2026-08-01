@@ -8,7 +8,7 @@
 //!  2. `corvus_git::init::init` (git init + .gitignore/LICENSE/README + initial
 //!     commit + optional push), with the credential-coupled push bound to a
 //!     reverse-channel resolver;
-//!  3. open the result + fire `on_repo_init`.
+//!  3. open the result + fire `corvus:repo_init`.
 //!
 //! Two couplings the shell owned in-process are marshalled over the reverse
 //! channel here, exactly like the `remote` / `repo_ops` domains:
@@ -31,14 +31,14 @@
 //! + derives the metadata; `close_repo` deregisters it + runs the orphan GC
 //! ([`crate::workspace::forget_repo_if_orphaned`]).
 //!
-//! Hooks: `on_repo_init` / `on_repo_open` / `on_repo_close` (and the GC's
-//! `on_repo_deregistered`) fire here through the backend hook broker — onto the
+//! Hooks: `corvus:repo_init` / `corvus:repo_open` / `corvus:repo_close` (and the GC's
+//! `corvus:repo_deregistered`) fire here through the backend hook broker — onto the
 //! product's OWN plugin host, not the launcher's, with the identical payload shape.
 
 use std::path::Path;
 use std::sync::Arc;
 
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{arbor_hooks, hooks, CorvusState};
 use corvus_git::prelude::{InitOutcome, InitRepoOptions, RepoInfo};
 use corvus_git_provider_api::prelude::{RepoCreateRequest, RepoVisibility};
 use serde::{Deserialize, Serialize};
@@ -59,7 +59,7 @@ pub struct InitRepoResult {
 /// Initialise a new git repository, create optional files (.gitignore, LICENSE,
 /// README), optionally create a remote repo via the provider API, and make an
 /// initial commit. Opens the result under `tab_id` (in both registries) and fires
-/// the `on_repo_init` plugin hook.
+/// the `corvus:repo_init` plugin hook.
 ///
 /// Async because remote creation + the optional initial push both `.await`; runs
 /// on a serve-loop worker, so the dispatch loop stays responsive.
@@ -109,10 +109,10 @@ async fn init_repo(
     info.tab_id = tab_id.clone();
     state.register_repo(tab_id.clone(), info.path.clone());
 
-    // Step 3 — fire on_repo_init through the backend hook broker (same broker the
+    // Step 3 — fire corvus:repo_init through the backend hook broker (same broker the
     // OOP RPC handlers fire onto). Payload shape is identical to the shell's.
     state.fire_hook(
-        "on_repo_init",
+        hooks::REPO_INIT,
         json!({
             "path":           &info.path,
             "name":           &info.name,
@@ -135,7 +135,7 @@ async fn init_repo(
 }
 
 /// Open the repository at `path` under `tab_id`: register the tab in corvus-be's
-/// own registry, derive the git metadata, and fire `on_repo_open` on the backend
+/// own registry, derive the git metadata, and fire `corvus:repo_open` on the backend
 /// plugin host. Returns the `RepoInfo` the FE renders.
 ///
 /// Ported from the shell's `ipc::corvus::repo::open_repo`; the launcher no longer
@@ -147,15 +147,15 @@ fn open_repo(state: &CorvusState, path: String, tab_id: String) -> Result<RepoIn
     let mut info = RepoInfo::for_path(&path).map_err(|e| e.to_string())?;
     info.tab_id = tab_id;
     state.fire_hook(
-        "on_repo_open",
+        arbor_hooks::REPO_OPEN,
         json!({ "tab_id": &info.tab_id, "path": &info.path, "name": &info.name }),
     );
     Ok(info)
 }
 
-/// Close the tab `tab_id`: fire `on_repo_close`, deregister the tab, then run the
+/// Close the tab `tab_id`: fire `corvus:repo_close`, deregister the tab, then run the
 /// orphan GC — a repo with no open tab AND no workspace membership is forgotten
-/// (registry entry + recent-repos pointer dropped, `on_repo_deregistered` fired),
+/// (registry entry + recent-repos pointer dropped, `corvus:repo_deregistered` fired),
 /// and `arbor://registry-changed` is emitted so the Projects view refreshes.
 ///
 /// Ported from the shell's `ipc::corvus::repo::close_repo`; the GC helper re-checks
@@ -170,7 +170,7 @@ fn close_repo(state: &CorvusState, tab_id: String) -> Result<(), String> {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
     state.fire_hook(
-        "on_repo_close",
+        arbor_hooks::REPO_CLOSE,
         json!({ "tab_id": &tab_id, "path": &path, "name": &name }),
     );
     state.deregister_repo(&tab_id);

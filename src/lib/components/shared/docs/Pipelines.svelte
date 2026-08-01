@@ -42,7 +42,7 @@ max_concurrent_runs = 4`, 'toml')}</code></pre>
 </ul>
 
 <h2>Defining pipelines from a plugin</h2>
-<p>Call <code>arbor.pipeline.define(config)</code> in your plugin's <code>on_plugin_load</code> handler (or at module level):</p>
+<p>Call <code>arbor.pipeline.define(config)</code> in your plugin's <code>arbor:plugin_load</code> handler (or at module level):</p>
 <pre class="language-lua"><code>{@html highlight(`arbor.pipeline.define({
   id          = "build",
   name        = "Build & Test",
@@ -124,32 +124,32 @@ should mark their pipelines silent to avoid duplicated cards.</p>
 <h2>Pipeline hooks</h2>
 <p>Declare hooks in <code>[hooks]</code> in your <code>plugin.toml</code> and register handlers with <code>arbor.events.on()</code>:</p>
 <table class="shortcuts-table">
-  <thead><tr><th>Constant</th><th>TOML key</th><th>Context fields</th></tr></thead>
+  <thead><tr><th>Hook</th><th>Context fields</th></tr></thead>
   <tbody>
-    <tr><td><code>"on_pipeline_started"</code></td><td><code>on_pipeline_started</code></td><td><code>run_id, pipeline_id, plugin</code></td></tr>
-    <tr><td><code>"on_pipeline_step_done"</code></td><td><code>on_pipeline_step_done</code></td><td><code>run_id, pipeline_id, plugin, stage_id, step_id, step_name, status, exit_code</code></td></tr>
-    <tr><td><code>"on_pipeline_done"</code></td><td><code>on_pipeline_done</code></td><td><code>run_id, pipeline_id, plugin, status</code></td></tr>
+    <tr><td><code>corvus:pipeline_started</code></td><td><code>run_id, pipeline_id, plugin</code></td></tr>
+    <tr><td><code>corvus:pipeline_step_done</code></td><td><code>run_id, pipeline_id, plugin, stage_id, step_id, step_name, status, exit_code</code></td></tr>
+    <tr><td><code>corvus:pipeline_done</code></td><td><code>run_id, pipeline_id, plugin, status</code></td></tr>
   </tbody>
 </table>
 
 <pre class="language-toml"><code>{@html highlight(`-- plugin.toml
 [hooks]
-on_pipeline_started   = true
-on_pipeline_step_done = true
-on_pipeline_done      = true`, 'toml')}</code></pre>
+"corvus:pipeline_started"   = true
+"corvus:pipeline_step_done" = true
+"corvus:pipeline_done"      = true`, 'toml')}</code></pre>
 
 <pre class="language-lua"><code>{@html highlight(`-- main.lua
-arbor.events.on("on_pipeline_started", function(ctx)
+arbor.events.on("corvus:pipeline_started", function(ctx)
   arbor.log.info("Pipeline started: " .. ctx.pipeline_id)
 end)
 
-arbor.events.on("on_pipeline_step_done", function(ctx)
+arbor.events.on("corvus:pipeline_step_done", function(ctx)
   if ctx.status == "failed" then
     arbor.notify{ title = "Step failed", message = ctx.step_name .. " exited " .. tostring(ctx.exit_code), level = "error" }
   end
 end)
 
-arbor.events.on("on_pipeline_done", function(ctx)
+arbor.events.on("corvus:pipeline_done", function(ctx)
   if ctx.status == "success" then
     arbor.notify{ title = "Pipeline done", message = ctx.pipeline_id .. " succeeded", level = "success" }
   else

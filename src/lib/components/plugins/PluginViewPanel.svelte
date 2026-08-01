@@ -3,7 +3,7 @@
 
   A view is a body surface (it occupies the area where the commit graph lives)
   rather than a side rail. The plugin registers it via `arbor.ui.add_view({id,
-  …})` and responds to the `on_view_open` hook by pushing content through
+  …})` and responds to the `arbor:view_open` hook by pushing content through
   `arbor.ui.set_panel_content(id, {title, nodes, actions?})` — the SAME channel
   sidebar panels use, so a view shares the form-DSL content model.
 
@@ -15,8 +15,8 @@
   applies them in place. `set_panel_content` is a full (re)build: we re-key the
   renderer when its serialized content changes so a rebuild reseeds cleanly.
 
-  Opening is strictly non-blocking: we fire `on_view_open` and derive UI state
-  from the store cache. `on_view_close` fires on unmount (toggle off, switch to
+  Opening is strictly non-blocking: we fire `arbor:view_open` and derive UI state
+  from the store cache. `arbor:view_close` fires on unmount (toggle off, switch to
   another view, plugin reload).
 -->
 <script lang="ts">
@@ -70,24 +70,24 @@
 
   let renderer: ReturnType<typeof FormNodeRenderer> | null = $state(null);
 
-  function fireViewHook(hook: 'on_view_open' | 'on_view_close') {
+  function fireViewHook(hook: 'arbor:view_open' | 'arbor:view_close') {
     firePluginAction(pluginName, hook, JSON.stringify({ view_id: viewId, label })).catch(() => {});
   }
 
   // Lifecycle is NON-reactive on purpose: a reactive $effect would re-fire
-  // whenever a dependency churns, and `on_view_open` calls `set_panel_content`
+  // whenever a dependency churns, and `arbor:view_open` calls `set_panel_content`
   // → `contributions-changed` → AppShell's `activeView` re-derives → an
   // open/close loop. onMount/onDestroy fire exactly once per real mount; AppShell
   // keys this component on the view id, so switching views remounts (close→open).
   onMount(() => {
-    fireViewHook('on_view_open');
+    fireViewHook('arbor:view_open');
     // A plugin reload wipes the runtime; re-fire so the view re-populates.
     const teardown = setupTauriListeners([
-      { event: 'arbor://plugins-reloaded', handler: () => fireViewHook('on_view_open') },
+      { event: 'arbor://plugins-reloaded', handler: () => fireViewHook('arbor:view_open') },
     ]);
     return () => {
       teardown?.();
-      fireViewHook('on_view_close');
+      fireViewHook('arbor:view_close');
     };
   });
 

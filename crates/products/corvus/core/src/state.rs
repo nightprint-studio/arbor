@@ -95,17 +95,21 @@ impl CorvusState {
     /// Thin bridge over the dispatcher (`serde_json::Value` → `PluginValue`),
     /// mirroring the shell's `AppState::fire_hook` so handlers read the same.
     /// A no-op when no listener is wired (the default empty dispatcher).
+    ///
+    /// `hook` is a constant from [`crate::hooks`], never a literal: an unknown
+    /// name is not an error here, it is silence — the dispatcher looks it up,
+    /// misses, and returns.
     pub fn fire_hook(&self, hook: &str, ctx: Value) {
         self.hooks.fire_blocking(hook, PluginValue::from_json(ctx));
     }
 
-    /// Fire the vetoable `on_pre_commit` hook; `Some(reason)` aborts the commit
+    /// Fire the vetoable [`PRE_COMMIT`](crate::hooks::PRE_COMMIT) hook; `Some(reason)` aborts the commit
     /// (the reason is surfaced to the user). Runs entirely inside this process's
     /// host — no cross-process round-trip — so a co-located commit handler keeps
     /// the veto's pre-mutation timing.
     pub fn fire_pre_commit_veto(&self, ctx: Value) -> Option<String> {
         self.hooks
-            .fire_vetoable_blocking("on_pre_commit", PluginValue::from_json(ctx))
+            .fire_vetoable_blocking(crate::hooks::PRE_COMMIT, PluginValue::from_json(ctx))
     }
 
     /// Call back into the shell (credential resolution, plugin-UI round-trips),
@@ -273,15 +277,18 @@ mod tests {
         let rec = Arc::new(RecordingListener::default());
         let state = CorvusState::new(Arc::new(RecordingSink::default()))
             .with_hooks(dispatcher_with(rec.clone()));
-        state.fire_hook("on_stash_push", json!({ "index": 0 }));
-        assert_eq!(rec.fired.lock().unwrap().as_slice(), &["on_stash_push".to_string()]);
+        state.fire_hook(crate::hooks::STASH_PUSH, json!({ "index": 0 }));
+        assert_eq!(
+            rec.fired.lock().unwrap().as_slice(),
+            &[crate::hooks::STASH_PUSH.to_string()]
+        );
     }
 
     #[test]
     fn fire_hook_is_a_noop_without_a_listener() {
         // Default dispatcher (no listener) → the fire must not panic.
         let state = CorvusState::new(Arc::new(RecordingSink::default()));
-        state.fire_hook("on_stash_push", json!({}));
+        state.fire_hook(crate::hooks::STASH_PUSH, json!({}));
     }
 
     #[test]

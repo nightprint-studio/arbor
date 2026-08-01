@@ -90,6 +90,16 @@ members = [
     "crates/products/picus/db-provider/postgres",
     "crates/products/picus/diff",
     "crates/products/picus/be",
+    # Garrulus (notes): the same layering as Picus — a leaf model, a parser over
+    # it, then the domain crates. Order matters only for readability; Cargo
+    # resolves the path deps itself.
+    "crates/products/garrulus/ast",
+    "crates/products/garrulus/parse",
+    "crates/products/garrulus/vault",
+    "crates/products/garrulus/index",
+    "crates/products/garrulus/sync",
+    "crates/products/garrulus/core",
+    "crates/products/garrulus/be",
 ]
 
 # ── Shared package metadata ─────────────────────────────────────────────────

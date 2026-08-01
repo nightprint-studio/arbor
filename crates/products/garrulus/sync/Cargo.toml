@@ -1,0 +1,27 @@
+[package]
+name         = "garrulus-sync"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "garrulus — the sync seam: one `SyncRemote` trait spoken in the vocabulary of \"reconcile two versions of a folder of notes\", with a git implementation over `corvus-git` and a plain-directory mirror. Conflicts become side files next to the note; a merge marker never reaches a `.md`."
+
+# `corvus-git` is the git engine (docs/garrulus-design.md §11.4: the
+# product-to-product edge is accepted and documented, not paid for with a move).
+# `garrulus-vault` is declared because the sync seam is defined over a vault;
+# see the crate docs for why nothing is referenced from it yet.
+#
+# What this crate deliberately does NOT depend on: anything Tauri, `arbor-be`,
+# `arbor-rpc`. The engine has to be drivable from a unit test with a temp
+# directory and no process around it.
+[dependencies]
+garrulus-vault = { path = "../vault" }
+corvus-git     = { path = "../../corvus/git" }
+serde          = { workspace = true }
+thiserror      = { workspace = true }
+async-trait    = { workspace = true }
+tokio          = { workspace = true }
+
+[lints.rust]
+missing_debug_implementations = "warn"

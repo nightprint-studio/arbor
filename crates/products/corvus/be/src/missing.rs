@@ -11,16 +11,16 @@
 //! recents share — deliberately NOT corvus's to own), reached over the reverse
 //! channel via the `__recent_repos_*` / `__forget_recent_repo` host methods.
 //!
-//! Hooks: `report_repo_missing` fires `on_project_missing` inline (the plugin
+//! Hooks: `report_repo_missing` fires `corvus:project_missing` inline (the plugin
 //! host is co-located here — Wave 0), and `relocate_repo` fires
-//! `on_project_relocated` inline, gated on an actual move (`old_path != new_path`)
+//! `corvus:project_relocated` inline, gated on an actual move (`old_path != new_path`)
 //! and a resolved registry entry — mirroring the shell's inline gates. Both
 //! return the resolved `name` (+ `remote_url` for relocate) on their result for
 //! FE parity, exactly as the shell handlers did.
 
 use std::path::{Path, PathBuf};
 
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{hooks, CorvusState};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -56,7 +56,7 @@ pub struct RelocateResult {
     pub new_path: String,
     pub validation: RepoPathValidation,
     /// Registry display name of the relocated repo. Populated only when the
-    /// relocation actually moved the path (so the `on_project_relocated` hook
+    /// relocation actually moved the path (so the `corvus:project_relocated` hook
     /// can build its payload); `None` on the same-folder no-op.
     pub name: Option<String>,
     /// Registry remote URL of the relocated repo. Same population rule as `name`.
@@ -180,7 +180,7 @@ fn validate_repo_paths(_state: &CorvusState, paths: Vec<String>) -> Result<Vec<R
 /// (e.g. cancel an in-flight job waiting on the path) and so we have a single
 /// place to decay caches.
 ///
-/// Fires `on_project_missing` inline (the plugin host is co-located here —
+/// Fires `corvus:project_missing` inline (the plugin host is co-located here —
 /// Wave 0), with the resolved display `name` from the registry, then returns
 /// that `name` for FE parity. `None` when the repo isn't in the registry.
 #[arbor_rpc::handler]
@@ -196,7 +196,7 @@ fn report_repo_missing(
         .get(&repo_id)
         .map(|e| e.display_name.clone());
 
-    state.fire_hook("on_project_missing", json!({
+    state.fire_hook(hooks::PROJECT_MISSING, json!({
         "repo_id": repo_id,
         "path":    path,
         "name":    &name,
@@ -211,7 +211,7 @@ fn report_repo_missing(
 /// could vanish between picker and confirm) and only persist if the destination
 /// is a valid git repo.
 ///
-/// Fires `on_project_relocated` inline, gated on an actual move
+/// Fires `corvus:project_relocated` inline, gated on an actual move
 /// (`old_path != new_path`) and a resolved registry entry — mirroring the
 /// shell's inline gates. Surfaces the entry's `name`/`remote_url` on the result
 /// (populated only on a real move) for the FE.
@@ -273,11 +273,11 @@ fn relocate_repo(
         }));
     }
 
-    // Fire `on_project_relocated` inline, gated on an actual move (`name` is
+    // Fire `corvus:project_relocated` inline, gated on an actual move (`name` is
     // Some only when the registry entry resolved after `old_path != new_path` —
     // the same-folder no-op returned early above).
     if name.is_some() {
-        state.fire_hook("on_project_relocated", json!({
+        state.fire_hook(hooks::PROJECT_RELOCATED, json!({
             "repo_id":    &repo_id,
             "old_path":   &old_path,
             "new_path":   &new_path,

@@ -17,8 +17,8 @@
 //! resolver from there, which blocks on the reverse-channel reply — the
 //! reentrancy the channel is built for.
 //!
-//! **Hooks fire here** (plugin-relocation Wave 0): `on_fetch`, `on_push`, and —
-//! only on a clean pull — `on_pull`, with payloads identical to in-process.
+//! **Hooks fire here** (plugin-relocation Wave 0): `corvus:fetch`, `corvus:push`, and —
+//! only on a clean pull — `corvus:pull`, with payloads identical to in-process.
 //!
 //! `pull_branch` carries the same safe-pull orchestration as in-process
 //! (recovery snapshot → pre-pull stash → fetch/merge → re-apply stash) and
@@ -30,7 +30,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arbor_ipc::prelude::{EventSink, HostCaller};
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{hooks, CorvusState};
 use corvus_git::prelude::{
     CredentialResolver, FetchResult, GitCli, RecoveryKind, RemoteInfo, SnapshotPolicy, StashEntry,
 };
@@ -95,7 +95,7 @@ async fn fetch_remote(
     .await
     .map_err(|e| format!("fetch task panicked: {e}"))??;
 
-    state.fire_hook("on_fetch", json!({ "tab_id": &tab_id, "remote": &remote }));
+    state.fire_hook(hooks::FETCH, json!({ "tab_id": &tab_id, "remote": &remote }));
     Ok(result)
 }
 
@@ -126,7 +126,7 @@ async fn push_branch(
     .map_err(|e| format!("push task panicked: {e}"))??;
 
     state.fire_hook(
-        "on_push",
+        hooks::PUSH,
         json!({ "tab_id": &tab_id, "remote": &remote, "refspec": &refspec, "force": force }),
     );
     Ok(())
@@ -235,10 +235,10 @@ async fn pull_branch(
 
     let pr = result?;
 
-    // Fire on_pull only on clean success (no stash apply error, no pull error,
+    // Fire corvus:pull only on clean success (no stash apply error, no pull error,
     // no conflicts).
     if pr.pull_error.is_none() && pr.stash_apply_error.is_none() && pr.stash_conflicts.is_empty() {
-        state.fire_hook("on_pull", json!({ "tab_id": &tab_id, "remote": &remote }));
+        state.fire_hook(hooks::PULL, json!({ "tab_id": &tab_id, "remote": &remote }));
     }
 
     // If the pull failed AND there's no stash context to communicate, surface it

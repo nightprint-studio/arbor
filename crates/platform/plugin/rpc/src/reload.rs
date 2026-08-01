@@ -13,6 +13,7 @@
 //! own VMs). `plugin_states.json` is untouched (per-plugin state is owned by
 //! enable/disable); `reload()`/`unload_all()` only read/clear memory.
 
+use arbor_plugin_types::prelude::hook_names;
 use serde_json::{json, Value};
 
 use crate::context::{with_host_mut, PluginRpcContext};
@@ -28,12 +29,12 @@ pub fn reload_runtime<C: PluginRpcContext>(ctx: &C) -> Result<(), String> {
         Ok(())
     })?;
 
-    // Re-fire `on_repo_open` for every open tab so plugins that derive
+    // Re-fire `arbor:repo_open` for every open tab so plugins that derive
     // `current_repo` from the last lifecycle event re-acquire it on the freshly
     // rebuilt VMs (the broadcast path also refreshes `__arbor_current_repo__`).
     for r in ctx.open_repos() {
         ctx.fire_hook(
-            "on_repo_open",
+            hook_names::arbor::REPO_OPEN,
             json!({ "tab_id": r.tab_id, "path": r.path, "name": r.name }),
         );
     }

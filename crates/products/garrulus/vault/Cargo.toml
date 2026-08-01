@@ -1,0 +1,27 @@
+[package]
+name         = "garrulus-vault"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "What a Garrulus vault IS: discovery of the .arbor/garrulus marker, the vault-scoped settings, the note types with their fields and templates, the filename patterns, and the recoverable trash. Pure model plus a thin filesystem scan; the vault on disk stays ordinary markdown an Obsidian client can open."
+
+[dependencies]
+# The format-agnostic document model. The vault talks about headings, links,
+# tasks and callouts — never about how markdown spells them.
+garrulus-ast   = { path = "../ast" }
+# The markdown Reader/Writer pair. The only reason this crate parses at all is
+# that a `#tag` inside a fenced block is text, not a tag.
+garrulus-parse = { path = "../parse" }
+# File I/O, and — the reason it matters here — move-to-trash. Deleting a note is
+# scary in a way deleting a file is not.
+arbor-fs       = { path = "../../../foundation/fs" }
+serde          = { workspace = true }
+thiserror      = { workspace = true }
+# `.arbor/garrulus/vault.toml` and one `.toml` per note type. The types live
+# inside the vault so they travel with it to the second machine.
+toml           = "0.8"
+
+[lints.rust]
+missing_debug_implementations = "warn"

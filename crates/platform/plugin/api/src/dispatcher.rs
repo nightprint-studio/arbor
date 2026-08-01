@@ -8,7 +8,7 @@
 //! - a vector of [`HookListener`]s — one per runtime adapter (one `LuaHookListener`
 //!   today, one `WasmHookListener` tomorrow).
 //!
-//! When a domain crate fires `dispatcher.fire("on_mr_created", payload).await`
+//! When a domain crate fires `dispatcher.fire(corvus::MR_OPENED, payload).await`
 //! the dispatcher walks the listeners and lets each one decide how to fan out
 //! to its plugins. Adding a new runtime = registering a new listener, no
 //! changes here.

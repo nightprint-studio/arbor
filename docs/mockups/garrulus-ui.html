@@ -1,0 +1,1611 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Garrulus — UI stub</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════════
+   Garrulus — UI stub
+   Single self-contained file. No external libraries: icons are inline SVG
+   paths injected by JS, the graph is a tiny hand-rolled spring layout.
+
+   Layout target is IntelliJ IDEA New UI, as the rest of Arbor:
+   titlebar + activity bars + statusbar all sit on --bg-elevated; the body is
+   filled with panels on --bg-base, separated by 6px gaps that let the
+   elevated background show through — that gap IS the border and the rounding.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Surfaces */
+  --bg-elevated:  #131417;
+  --bg-base:      #1b1c20;
+  --bg-raised:    #212328;
+  --bg-hover:     #26282e;
+  --bg-active:    #2f323a;
+  --border:       #2a2c33;
+  --border-soft:  #212329;
+
+  /* Text */
+  --text:         #ced1d7;
+  --text-muted:   #838792;
+  --text-dim:     #585c66;
+
+  /* Product accents (canopy roster) */
+  --garrulus:     #3fb6d9;
+  --corvus:       #7c9cf5;
+  --picus:        #4fbfa8;
+  --merula:       #e8a857;
+
+  /* Semantic */
+  --green:        #8fce6a;
+  --blue:         #7c9cf5;
+  --purple:       #b58cf0;
+  --amber:        #e8a857;
+  --red:          #f28b82;
+  --cyan:         #45c4b0;
+
+  /* Note-type accents */
+  --t-bug:        #f28b82;
+  --t-improve:    #8fce6a;
+  --t-design:     #b58cf0;
+  --t-daily:      #e8a857;
+  --t-decision:   #7c9cf5;
+
+  --radius-lg:    8px;
+  --radius:       6px;
+  --radius-sm:    4px;
+
+  --fs-xs:        10.5px;
+  --fs-sm:        11.5px;
+  --fs:           12.5px;
+  --fs-md:        13.5px;
+
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+
+  --activity-w:   40px;
+  --titlebar-h:   44px;
+  --status-h:     26px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+svg { display: block; }
+.ic { width: 16px; height: 16px; stroke: currentColor; fill: none;
+      stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ic-sm { width: 13px; height: 13px; stroke-width: 1.8; }
+.ic-lg { width: 18px; height: 18px; }
+
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+input  { font: inherit; color: inherit; background: none; border: none; outline: none; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #33363d; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #43464f; background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ── Shell ──────────────────────────────────────────────────────────────── */
+.app { display: flex; flex-direction: column; height: 100vh; }
+.body { flex: 1; display: flex; min-height: 0; }
+.workarea { flex: 1; display: flex; min-width: 0; padding: 0 6px 6px 6px; gap: 6px; }
+
+/* ── Titlebar ───────────────────────────────────────────────────────────── */
+.titlebar {
+  height: var(--titlebar-h); flex: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 10px 0 12px;
+}
+.traffic { display: flex; gap: 8px; margin-right: 4px; }
+.traffic i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.traffic i:nth-child(1) { background: #ff5f57; }
+.traffic i:nth-child(2) { background: #febc2e; }
+.traffic i:nth-child(3) { background: #28c840; }
+
+.logo {
+  width: 24px; height: 24px; border-radius: 7px;
+  background: linear-gradient(150deg, #6fbf4a, #3f9e5e);
+  display: grid; place-items: center; color: #0d1a0d; font-weight: 800; font-size: 13px;
+  box-shadow: 0 0 0 1px #ffffff14 inset;
+}
+
+.vault-chip {
+  display: flex; align-items: center; gap: 7px;
+  height: 26px; padding: 0 8px 0 6px;
+  border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--bg-base); color: var(--text); font-size: var(--fs);
+}
+.vault-chip:hover { background: var(--bg-hover); }
+.vault-chip .sq { width: 16px; height: 16px; border-radius: 4px; background: var(--garrulus);
+  display: grid; place-items: center; color: #06222c; font-weight: 800; font-size: 10px; }
+.vault-chip .dim { color: var(--text-dim); }
+
+.win-tabs { display: flex; align-items: center; gap: 2px; margin: 0 auto; }
+.win-tab {
+  display: flex; align-items: center; gap: 7px;
+  height: 28px; padding: 0 8px 0 10px; border-radius: var(--radius);
+  color: var(--text-muted); font-size: var(--fs);
+}
+.win-tab:hover { background: var(--bg-base); color: var(--text); }
+.win-tab.on { background: var(--bg-base); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+.win-tab .x { opacity: 0; border-radius: 3px; padding: 1px; }
+.win-tab:hover .x { opacity: .55; }
+.win-tab .x:hover { opacity: 1; background: var(--bg-active); }
+
+.tb-right { display: flex; align-items: center; gap: 4px; }
+.icon-btn {
+  width: 28px; height: 28px; border-radius: var(--radius);
+  display: grid; place-items: center; color: var(--text-muted);
+}
+.icon-btn:hover { background: var(--bg-base); color: var(--text); }
+.icon-btn.on { background: var(--bg-active); color: var(--text); }
+
+/* ── The sync split-button — the whole sync UI (§4.3) ───────────────────── */
+.sync {
+  display: flex; align-items: stretch; height: 28px;
+  border-radius: var(--radius); overflow: hidden;
+  border: 1px solid var(--border); background: var(--bg-base);
+  margin-right: 6px;
+}
+.sync:hover { border-color: #3a3d46; }
+.sync .main { display: flex; align-items: center; gap: 7px; padding: 0 9px; color: var(--text-muted); }
+.sync .main:hover { background: var(--bg-hover); }
+.sync .caret { display: grid; place-items: center; width: 20px; color: var(--text-dim);
+  border-left: 1px solid var(--border); }
+.sync .caret:hover { background: var(--bg-hover); color: var(--text); }
+.sync .label { font-size: var(--fs-sm); white-space: nowrap; }
+.sync .count {
+  min-width: 16px; height: 15px; padding: 0 4px; border-radius: 8px;
+  font-size: var(--fs-xs); font-weight: 700; display: grid; place-items: center;
+  background: currentColor; color: var(--bg-elevated);
+}
+.sync[data-state="synced"]      .main { color: var(--text-muted); }
+.sync[data-state="has-changes"] .main { color: var(--garrulus); }
+.sync[data-state="behind"]      .main { color: var(--blue); }
+.sync[data-state="diverged"]    .main { color: var(--amber); }
+.sync[data-state="conflict"]    .main { color: var(--red); }
+.sync[data-state="syncing"]     .main { color: var(--garrulus); }
+.sync[data-state="offline"]     .main { color: var(--text-dim); }
+.sync[data-state="syncing"] .ic { animation: spin 1.1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Activity bars ──────────────────────────────────────────────────────── */
+.activity {
+  width: var(--activity-w); flex: none;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 4px 0 6px;
+}
+.activity .spacer { flex: 1; }
+.act {
+  width: 30px; height: 30px; border-radius: var(--radius);
+  display: grid; place-items: center; color: var(--text-dim); position: relative;
+}
+.act:hover { background: var(--bg-base); color: var(--text-muted); }
+.act.on { background: var(--bg-active); color: var(--text); }
+.act.on::before {
+  content: ''; position: absolute; left: -5px; top: 6px; bottom: 6px;
+  width: 2px; border-radius: 2px; background: var(--garrulus);
+}
+.act .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--red); box-shadow: 0 0 0 2px var(--bg-elevated); }
+
+/* ── Panels ─────────────────────────────────────────────────────────────── */
+.panel {
+  background: var(--bg-base); border-radius: var(--radius-lg);
+  display: flex; flex-direction: column; overflow: hidden; min-height: 0;
+}
+.sidebar  { width: 268px; flex: none; }
+.rightbar { width: 300px; flex: none; }
+.center   { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+
+.panel-head {
+  height: 32px; flex: none; display: flex; align-items: center; gap: 8px;
+  padding: 0 6px 0 10px; color: var(--text-muted);
+}
+.panel-head .title {
+  font-size: var(--fs-xs); font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.panel-head .grow { flex: 1; }
+.hbtn { width: 22px; height: 22px; border-radius: var(--radius-sm); display: grid;
+  place-items: center; color: var(--text-dim); }
+.hbtn:hover { background: var(--bg-hover); color: var(--text); }
+.hbtn.on { background: var(--bg-active); color: var(--garrulus); }
+.panel-body { flex: 1; overflow: auto; min-height: 0; }
+
+/* ── Sidebar content ────────────────────────────────────────────────────── */
+.searchbar {
+  margin: 2px 8px 8px; height: 26px; display: flex; align-items: center; gap: 6px;
+  padding: 0 8px; border-radius: var(--radius); background: var(--bg-elevated);
+  border: 1px solid var(--border-soft); color: var(--text-dim);
+}
+.searchbar input { flex: 1; font-size: var(--fs); }
+.searchbar input::placeholder { color: var(--text-dim); }
+
+.sec { padding: 2px 0 6px; }
+.sec-head {
+  display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px 0 8px;
+  color: var(--text-muted); font-size: var(--fs-sm); font-weight: 600;
+}
+.sec-head:hover { background: var(--bg-hover); }
+.sec-head .chev { transition: transform .12s; color: var(--text-dim); }
+.sec-head.collapsed .chev { transform: rotate(-90deg); }
+.sec-head .grow { flex: 1; }
+.pill {
+  min-width: 17px; height: 16px; padding: 0 5px; border-radius: 8px;
+  background: var(--bg-raised); color: var(--text-dim);
+  font-size: var(--fs-xs); font-weight: 700; display: grid; place-items: center;
+}
+
+.row {
+  display: flex; align-items: center; gap: 7px; height: 25px;
+  padding: 0 10px 0 22px; color: var(--text-muted); font-size: var(--fs);
+  white-space: nowrap; overflow: hidden;
+}
+.row:hover { background: var(--bg-hover); color: var(--text); }
+.row.on { background: var(--bg-active); color: var(--text); }
+.row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.row .meta { color: var(--text-dim); font-size: var(--fs-xs); }
+.row .tdot { width: 6px; height: 6px; border-radius: 2px; flex: none; }
+.row.folder { padding-left: 14px; font-weight: 500; color: var(--text); }
+
+/* Type + tag chips */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; height: 17px; padding: 0 6px;
+  border-radius: var(--radius-sm); font-size: var(--fs-xs); font-weight: 600;
+  white-space: nowrap;
+}
+.chip.type { color: #0d0f12; }
+.chip.tag  { background: #ffffff0e; color: var(--text-muted); font-weight: 500; }
+.chip.tag:hover { background: #ffffff1a; color: var(--text); }
+.chip.tag.on { background: color-mix(in srgb, var(--garrulus) 26%, transparent); color: var(--garrulus); }
+.chip.ghost { border: 1px solid var(--border); color: var(--text-muted); }
+
+/* ── Center: tab bar + toolbar ──────────────────────────────────────────── */
+.tabbar {
+  height: 34px; flex: none; display: flex; align-items: stretch; gap: 2px;
+  padding: 4px 6px 0; background: var(--bg-base);
+  border-bottom: 1px solid var(--border-soft);
+}
+.tab {
+  display: flex; align-items: center; gap: 7px; padding: 0 8px 0 10px;
+  border-radius: var(--radius) var(--radius) 0 0; color: var(--text-dim); font-size: var(--fs);
+  max-width: 210px;
+}
+.tab:hover { background: var(--bg-hover); color: var(--text-muted); }
+.tab.on { background: var(--bg-raised); color: var(--text); }
+.tab .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab .dirty { width: 6px; height: 6px; border-radius: 50%; background: var(--garrulus); flex: none; }
+.tab .x { opacity: 0; }
+.tab:hover .x, .tab.on .x { opacity: .5; }
+.tab .x:hover { opacity: 1; }
+
+.toolbar {
+  height: 34px; flex: none; display: flex; align-items: center; gap: 3px;
+  padding: 0 8px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted);
+}
+.tsep { width: 1px; height: 16px; background: var(--border); margin: 0 5px; flex: none; }
+.tbtn {
+  height: 24px; min-width: 24px; padding: 0 5px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: var(--fs-sm);
+}
+.tbtn:hover { background: var(--bg-hover); color: var(--text); }
+.tbtn.on { background: var(--bg-active); color: var(--garrulus); }
+.tbtn .kbd { color: var(--text-dim); font-size: var(--fs-xs); font-family: var(--mono); }
+
+kbd {
+  font-family: var(--mono); font-size: var(--fs-xs);
+  padding: 1px 5px; border-radius: var(--radius-sm);
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  color: var(--text-muted); box-shadow: 0 1px 0 #0006;
+}
+
+/* ── Views ──────────────────────────────────────────────────────────────── */
+.view { display: none; flex: 1; min-height: 0; overflow: auto; }
+.view.on { display: block; }
+.center > .panel { flex: 1; min-height: 0; }
+
+/* ── Editor: the live-preview surface ───────────────────────────────────── */
+.doc {
+  max-width: 780px; margin: 0 auto; padding: 22px 34px 120px;
+  font-size: var(--fs-md); line-height: 1.72; color: #c3c7cf;
+  user-select: text;
+}
+
+/* Frontmatter as a form card, not raw YAML (§7.2) */
+.fm {
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--bg-raised); margin-bottom: 26px; overflow: hidden;
+}
+.fm-head {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.fm-head .grow { flex: 1; }
+.fm-grid {
+  display: grid; grid-template-columns: max-content 1fr max-content 1fr;
+  gap: 1px; background: var(--border-soft);
+}
+.fm-grid > * { background: var(--bg-raised); padding: 6px 10px; font-size: var(--fs); }
+.fm-k { color: var(--text-dim); display: flex; align-items: center; }
+.fm-v { display: flex; align-items: center; gap: 6px; color: var(--text); }
+.fm-v .sel {
+  display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 6px;
+  border-radius: var(--radius-sm); background: var(--bg-hover); font-size: var(--fs-sm);
+}
+.fm-v .sel:hover { background: var(--bg-active); }
+.fm-tags { grid-column: 1 / -1; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+
+.doc h1 { font-size: 27px; line-height: 1.25; font-weight: 700; color: #e6e9ee; margin: 0 0 14px; letter-spacing: -.01em; }
+.doc h2 { font-size: 20px; font-weight: 650; color: #dde1e8; margin: 26px 0 8px; }
+.doc h3 { font-size: 16px; font-weight: 650; color: #d5d9e0; margin: 20px 0 6px; }
+.doc p  { margin: 0 0 12px; }
+.mk { color: #4a4e57; font-weight: 400; }            /* concealed markdown, shown on the cursor line */
+.cursorline { background: #ffffff07; border-radius: var(--radius-sm); box-shadow: 0 0 0 6px #ffffff07; }
+.caret { display: inline-block; width: 1.6px; height: 1.1em; background: var(--garrulus);
+  vertical-align: -.18em; animation: blink 1.15s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+.doc strong { color: #e6e9ee; font-weight: 680; }
+.doc em { color: #d0d4db; }
+.doc code {
+  font-family: var(--mono); font-size: .88em; padding: 1.5px 5px; border-radius: var(--radius-sm);
+  background: #ffffff0d; color: #d9b98f;
+}
+.doc a.wl {
+  color: var(--garrulus); text-decoration: none;
+  border-bottom: 1px dashed color-mix(in srgb, var(--garrulus) 45%, transparent);
+  cursor: pointer;
+}
+.doc a.wl:hover { background: color-mix(in srgb, var(--garrulus) 14%, transparent); border-bottom-style: solid; }
+.doc a.wl.broken { color: var(--red); border-bottom-color: color-mix(in srgb, var(--red) 45%, transparent); }
+.doc .tagref {
+  color: var(--purple); background: color-mix(in srgb, var(--purple) 13%, transparent);
+  padding: 1px 6px; border-radius: 9px; font-size: .87em; cursor: pointer;
+}
+
+/* Commit-pinned code link — the feature Obsidian structurally cannot have */
+.codelink {
+  display: inline-flex; align-items: center; gap: 5px; vertical-align: -3px;
+  height: 20px; padding: 0 7px 0 5px; border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--corvus) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--corvus) 32%, transparent);
+  color: var(--corvus); font-family: var(--mono); font-size: 11px; cursor: pointer;
+}
+.codelink:hover { background: color-mix(in srgb, var(--corvus) 26%, transparent); }
+.codelink .pin { color: color-mix(in srgb, var(--corvus) 65%, var(--text-dim)); }
+
+/* Callouts (§ decided M1) */
+.callout {
+  border-radius: var(--radius); border: 1px solid; border-left-width: 3px;
+  padding: 9px 13px; margin: 0 0 14px; font-size: var(--fs-md);
+}
+.callout .ch { display: flex; align-items: center; gap: 7px; font-weight: 650; margin-bottom: 4px; }
+.callout .ch .grow { flex: 1; }
+.callout p:last-child { margin: 0; }
+.callout.note    { border-color: color-mix(in srgb, var(--blue) 38%, transparent);   background: color-mix(in srgb, var(--blue) 8%, transparent); }
+.callout.note    .ch { color: var(--blue); }
+.callout.warning { border-color: color-mix(in srgb, var(--amber) 40%, transparent);  background: color-mix(in srgb, var(--amber) 8%, transparent); }
+.callout.warning .ch { color: var(--amber); }
+.callout.danger  { border-color: color-mix(in srgb, var(--red) 40%, transparent);    background: color-mix(in srgb, var(--red) 8%, transparent); }
+.callout.danger  .ch { color: var(--red); }
+.callout.tip     { border-color: color-mix(in srgb, var(--green) 38%, transparent);  background: color-mix(in srgb, var(--green) 8%, transparent); }
+.callout.tip     .ch { color: var(--green); }
+.callout.folded p { display: none; }
+
+/* Tasks */
+.tasks { list-style: none; margin: 0 0 14px; }
+.tasks li { display: flex; align-items: flex-start; gap: 9px; padding: 2px 0; }
+.cb { width: 15px; height: 15px; border-radius: var(--radius-sm); border: 1.5px solid #4b4f59;
+      flex: none; margin-top: 4px; display: grid; place-items: center; cursor: pointer; }
+.cb:hover { border-color: var(--garrulus); }
+.cb.done { background: var(--garrulus); border-color: var(--garrulus); color: #06222c; }
+.tasks li.done span { color: var(--text-dim); text-decoration: line-through; }
+.due { font-size: var(--fs-xs); color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent);
+       padding: 1px 6px; border-radius: 9px; margin-left: 6px; }
+
+/* Fenced code with a suite action (§ actionable code blocks) */
+.fence { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin: 0 0 14px; }
+.fence-head {
+  display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 6px 0 10px;
+  background: var(--bg-raised); border-bottom: 1px solid var(--border-soft);
+  font-size: var(--fs-sm); color: var(--text-dim);
+}
+.fence-head .grow { flex: 1; }
+.act-btn {
+  display: flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px;
+  border-radius: var(--radius-sm); font-size: var(--fs-sm); color: var(--picus);
+  background: color-mix(in srgb, var(--picus) 14%, transparent);
+}
+.act-btn:hover { background: color-mix(in srgb, var(--picus) 26%, transparent); }
+.fence pre { margin: 0; padding: 10px 12px; overflow-x: auto; background: #16171b; }
+.fence code { background: none; padding: 0; font-size: 12px; line-height: 1.6; color: #c9cdd5; }
+.k { color: #cd8ee0; } .s { color: #a8cc8c; } .n { color: #e3a15d; } .c { color: #5c616b; font-style: italic; }
+
+.doc table { border-collapse: collapse; width: 100%; margin: 0 0 14px; font-size: var(--fs); }
+.doc th, .doc td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; }
+.doc th { background: var(--bg-raised); color: var(--text-muted); font-weight: 650; }
+
+/* Spell-check squiggle (recycled bennu-intel) */
+.sp { text-decoration: underline wavy color-mix(in srgb, var(--amber) 70%, transparent); text-underline-offset: 3px; }
+
+/* ── Bottom dock ────────────────────────────────────────────────────────── */
+.dock { height: 220px; flex: none; }
+.dock.hidden { display: none; }
+.dock-tabs { display: flex; align-items: center; gap: 2px; }
+.dtab {
+  height: 22px; padding: 0 9px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--fs-sm); color: var(--text-dim);
+}
+.dtab:hover { background: var(--bg-hover); color: var(--text-muted); }
+.dtab.on { background: var(--bg-active); color: var(--text); }
+.dtab .n { font-size: var(--fs-xs); color: var(--text-dim); }
+.dock-view { display: none; padding: 4px 0 8px; }
+.dock-view.on { display: block; }
+
+.lrow {
+  display: flex; align-items: center; gap: 9px; height: 26px; padding: 0 12px;
+  font-size: var(--fs); color: var(--text-muted); cursor: pointer;
+}
+.lrow:hover { background: var(--bg-hover); }
+.lrow .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lrow .where { color: var(--text-dim); font-size: var(--fs-sm); }
+.sev { width: 5px; height: 5px; border-radius: 50%; flex: none; }
+
+/* ── Right panel ────────────────────────────────────────────────────────── */
+.side-view { display: none; } .side-view.on { display: block; }
+
+.rtabs { display: flex; gap: 2px; padding: 0 6px 6px; }
+.rtab { height: 22px; padding: 0 8px; border-radius: var(--radius-sm); font-size: var(--fs-sm);
+        color: var(--text-dim); display: flex; align-items: center; gap: 5px; }
+.rtab:hover { background: var(--bg-hover); color: var(--text-muted); }
+.rtab.on { background: var(--bg-active); color: var(--text); }
+.rview { display: none; } .rview.on { display: block; }
+
+.bl { padding: 7px 10px; border-bottom: 1px solid var(--border-soft); cursor: pointer; }
+.bl:hover { background: var(--bg-hover); }
+.bl .t { display: flex; align-items: center; gap: 6px; font-size: var(--fs); color: var(--text); margin-bottom: 3px; }
+.bl .q { font-size: var(--fs-sm); color: var(--text-dim); line-height: 1.5;
+         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bl .q b { color: var(--garrulus); font-weight: 600; }
+
+.outline a { display: flex; align-items: center; gap: 7px; height: 24px; padding: 0 10px;
+             color: var(--text-muted); font-size: var(--fs); text-decoration: none; }
+.outline a:hover { background: var(--bg-hover); color: var(--text); }
+.outline a.h3 { padding-left: 24px; color: var(--text-dim); }
+.outline .lvl { font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-dim); width: 14px; }
+
+.subhead { padding: 10px 10px 5px; font-size: var(--fs-xs); font-weight: 700;
+           letter-spacing: .07em; text-transform: uppercase; color: var(--text-dim); }
+
+/* ── Search view (the find-in-vault done properly) ──────────────────────── */
+.srch-top { padding: 12px 14px 10px; border-bottom: 1px solid var(--border-soft); }
+.qbox {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  min-height: 34px; padding: 5px 8px; border-radius: var(--radius);
+  background: var(--bg-elevated); border: 1px solid var(--border);
+}
+.qbox:focus-within { border-color: color-mix(in srgb, var(--garrulus) 60%, transparent); }
+.qtok {
+  display: inline-flex; align-items: center; gap: 5px; height: 21px; padding: 0 4px 0 7px;
+  border-radius: var(--radius-sm); font-size: var(--fs-sm); font-family: var(--mono);
+  background: color-mix(in srgb, var(--garrulus) 16%, transparent);
+  color: var(--garrulus); border: 1px solid color-mix(in srgb, var(--garrulus) 30%, transparent);
+}
+.qtok .k { color: color-mix(in srgb, var(--garrulus) 70%, var(--text-muted)); }
+.qtok .x { opacity: .6; } .qtok .x:hover { opacity: 1; }
+.qbox input { flex: 1; min-width: 120px; height: 22px; font-size: var(--fs-md); }
+.qbox input::placeholder { color: var(--text-dim); }
+.srch-opts { display: flex; align-items: center; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+.opt { display: flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px;
+       border-radius: var(--radius-sm); font-size: var(--fs-sm); color: var(--text-dim);
+       border: 1px solid var(--border); }
+.opt:hover { background: var(--bg-hover); color: var(--text-muted); }
+.opt.on { background: color-mix(in srgb, var(--garrulus) 16%, transparent);
+          border-color: color-mix(in srgb, var(--garrulus) 34%, transparent); color: var(--garrulus); }
+
+.srch-body { display: flex; min-height: 0; height: calc(100% - 118px); }
+.hits { flex: 1; overflow: auto; border-right: 1px solid var(--border-soft); min-width: 0; }
+.hit-group { border-bottom: 1px solid var(--border-soft); }
+.hit-head { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px;
+            background: var(--bg-raised); position: sticky; top: 0; z-index: 1; cursor: pointer; }
+.hit-head .name { font-size: var(--fs); color: var(--text); font-weight: 600; }
+.hit-head .path { font-size: var(--fs-sm); color: var(--text-dim); }
+.hit-head .grow { flex: 1; }
+.hit { display: flex; gap: 10px; padding: 4px 10px 4px 26px; font-family: var(--mono);
+       font-size: 11.5px; line-height: 1.6; cursor: pointer; color: var(--text-muted); }
+.hit:hover { background: var(--bg-hover); }
+.hit.on { background: color-mix(in srgb, var(--garrulus) 14%, transparent); }
+.hit .ln { color: var(--text-dim); width: 26px; text-align: right; flex: none; }
+.hit mark { background: color-mix(in srgb, var(--amber) 34%, transparent); color: #ffd9a0;
+            border-radius: 2px; padding: 0 1px; }
+.preview { width: 42%; min-width: 280px; overflow: auto; }
+
+/* ── Home ───────────────────────────────────────────────────────────────── */
+.home { padding: 22px 26px 40px; max-width: 1080px; margin: 0 auto; }
+.home h2 { font-size: 21px; font-weight: 660; color: #e6e9ee; margin-bottom: 3px; }
+.home .sub { color: var(--text-dim); font-size: var(--fs); margin-bottom: 22px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-raised);
+        overflow: hidden; display: flex; flex-direction: column; }
+.card-head { display: flex; align-items: center; gap: 7px; padding: 9px 11px;
+             border-bottom: 1px solid var(--border-soft); }
+.card-head .t { font-size: var(--fs); font-weight: 650; color: var(--text); flex: 1; }
+.card-head .q { font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-dim); }
+.card-body { padding: 3px 0 5px; }
+.crow { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 11px;
+        font-size: var(--fs); color: var(--text-muted); cursor: pointer; }
+.crow:hover { background: var(--bg-hover); color: var(--text); }
+.crow .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat { display: flex; align-items: baseline; gap: 8px; padding: 12px 11px 14px; }
+.stat .big { font-size: 27px; font-weight: 700; color: var(--text); line-height: 1; }
+.stat .lbl { font-size: var(--fs-sm); color: var(--text-dim); }
+
+/* ── Table view (a type as a grid) ──────────────────────────────────────── */
+.grid-wrap { overflow: auto; height: 100%; }
+table.grid { border-collapse: collapse; width: 100%; font-size: var(--fs); }
+table.grid th {
+  position: sticky; top: 0; background: var(--bg-raised); z-index: 1;
+  text-align: left; font-weight: 650; color: var(--text-muted);
+  font-size: var(--fs-sm); padding: 7px 10px; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+table.grid th .sortc { color: var(--garrulus); }
+table.grid td { padding: 6px 10px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted); }
+table.grid tr:hover td { background: var(--bg-hover); }
+table.grid td.title { color: var(--text); }
+.sevpill { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-sm); }
+
+/* ── Graph ──────────────────────────────────────────────────────────────── */
+.graph-wrap { position: relative; height: 100%; }
+.graph-ctl { position: absolute; top: 10px; left: 12px; display: flex; gap: 6px; flex-wrap: wrap; z-index: 2; }
+.graph-legend { position: absolute; bottom: 12px; left: 12px; display: flex; flex-direction: column; gap: 5px;
+                background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+                border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; }
+.lg { display: flex; align-items: center; gap: 7px; font-size: var(--fs-sm); color: var(--text-muted); }
+.lg i { width: 8px; height: 8px; border-radius: 50%; display: block; }
+#graph { width: 100%; height: 100%; display: block; cursor: grab; }
+#graph text { font-family: var(--font); font-size: 9.5px; fill: var(--text-muted); pointer-events: none; }
+#graph .edge { stroke: #34373f; stroke-width: 1; }
+#graph .node { cursor: pointer; }
+#graph .node:hover circle { stroke: #fff; stroke-width: 1.5; }
+
+/* ── Status bar ─────────────────────────────────────────────────────────── */
+.statusbar {
+  height: var(--status-h); flex: none; display: flex; align-items: center; gap: 4px;
+  padding: 0 8px; font-size: var(--fs-sm); color: var(--text-dim);
+}
+.sb { display: flex; align-items: center; gap: 5px; height: 19px; padding: 0 7px;
+      border-radius: var(--radius-sm); }
+.sb:hover { background: var(--bg-base); color: var(--text-muted); }
+.sb.grow { flex: 1; background: none; cursor: default; }
+.sb .g { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+
+/* ── Command palette overlay ────────────────────────────────────────────── */
+.overlay { position: fixed; inset: 0; background: #00000066; display: none;
+           align-items: flex-start; justify-content: center; padding-top: 12vh; z-index: 50; }
+.overlay.on { display: flex; }
+.palette { width: 620px; max-width: 92vw; border-radius: var(--radius-lg);
+           background: var(--bg-base); border: 1px solid #383b44;
+           box-shadow: 0 24px 70px #000000a8; overflow: hidden; }
+.palette .pin { display: flex; align-items: center; gap: 9px; padding: 12px 14px;
+                border-bottom: 1px solid var(--border-soft); }
+.palette input { flex: 1; font-size: 15px; }
+.palette input::placeholder { color: var(--text-dim); }
+.palette .plist { max-height: 380px; overflow: auto; padding: 5px 0; }
+.pitem { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 14px;
+         color: var(--text-muted); font-size: var(--fs-md); cursor: pointer; }
+.pitem .grow { flex: 1; }
+.pitem .grp { font-size: var(--fs-sm); color: var(--text-dim); }
+.pitem:hover, .pitem.on { background: var(--bg-active); color: var(--text); }
+
+/* ── Toast ──────────────────────────────────────────────────────────────── */
+.toast { position: fixed; right: 16px; bottom: 38px; z-index: 60;
+         display: flex; align-items: center; gap: 9px; padding: 10px 13px;
+         border-radius: var(--radius); background: var(--bg-raised);
+         border: 1px solid var(--border); box-shadow: 0 10px 30px #0009;
+         font-size: var(--fs); opacity: 0; transform: translateY(8px);
+         transition: opacity .16s, transform .16s; pointer-events: none; }
+.toast.on { opacity: 1; transform: none; }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ═══ TITLEBAR ═══════════════════════════════════════════════════════ -->
+  <header class="titlebar">
+    <div class="traffic"><i></i><i></i><i></i></div>
+    <div class="logo">A</div>
+
+    <button class="vault-chip">
+      <span class="sq">G</span>
+      <span>Appunti</span>
+      <span class="dim">vault</span>
+      <i data-ic="chevron-down" class="ic-sm"></i>
+    </button>
+
+    <nav class="win-tabs">
+      <button class="win-tab"><i data-ic="git-branch" class="ic-sm"></i>Corvus<i data-ic="x" class="ic-sm x"></i></button>
+      <button class="win-tab"><i data-ic="database" class="ic-sm"></i>Picus<i data-ic="x" class="ic-sm x"></i></button>
+      <button class="win-tab on"><i data-ic="notebook" class="ic-sm"></i>Garrulus<i data-ic="x" class="ic-sm x"></i></button>
+      <button class="icon-btn"><i data-ic="plus" class="ic-sm"></i></button>
+    </nav>
+
+    <div class="tb-right">
+      <!-- The sync split-button: the ENTIRE sync UI. Click to cycle demo states. -->
+      <div class="sync" id="sync" data-state="has-changes">
+        <button class="main" id="syncMain" title="Sincronizza — Ctrl+Shift+S">
+          <i data-ic="refresh-cw" class="ic-sm"></i>
+          <span class="label">3 note da inviare</span>
+        </button>
+        <button class="caret"><i data-ic="chevron-down" class="ic-sm"></i></button>
+      </div>
+      <button class="icon-btn" title="Documentazione — F1"><i data-ic="book" class="ic"></i></button>
+      <button class="icon-btn" id="openPalette" title="Command palette — Ctrl+K"><i data-ic="command" class="ic"></i></button>
+      <button class="icon-btn" title="Impostazioni — Ctrl+,"><i data-ic="settings" class="ic"></i></button>
+    </div>
+  </header>
+
+  <div class="body">
+
+    <!-- ═══ LEFT ACTIVITY BAR ═════════════════════════════════════════════ -->
+    <nav class="activity">
+      <button class="act on"   data-side="files"    title="Note — Ctrl+1"><i data-ic="folder" class="ic"></i></button>
+      <button class="act"      data-view="search"   title="Cerca nel vault — Ctrl+Shift+F"><i data-ic="search" class="ic"></i></button>
+      <button class="act"      data-side="tags"     title="Metadati e tag — Ctrl+3"><i data-ic="hash" class="ic"></i></button>
+      <button class="act"      data-side="types"    title="Tipi di nota — Ctrl+4"><i data-ic="layers" class="ic"></i></button>
+      <button class="act"      data-view="table"    title="Vista tabella"><i data-ic="table" class="ic"></i></button>
+      <button class="act"      data-view="graph"    title="Grafo dei collegamenti"><i data-ic="share" class="ic"></i></button>
+      <span class="spacer"></span>
+      <button class="act" data-view="home" title="Home del vault"><i data-ic="home" class="ic"></i></button>
+      <button class="act" title="Conflitti"><i data-ic="alert" class="ic"></i><span class="dot"></span></button>
+      <button class="act" title="Cronologia della nota"><i data-ic="history" class="ic"></i></button>
+    </nav>
+
+    <div class="workarea">
+
+      <!-- ═══ SIDEBAR ═════════════════════════════════════════════════════ -->
+      <aside class="panel sidebar">
+        <div class="panel-head">
+          <span class="title" id="sideTitle">Note</span>
+          <span class="grow"></span>
+          <button class="hbtn" title="Nuova nota — Ctrl+N"><i data-ic="plus" class="ic-sm"></i></button>
+          <button class="hbtn" title="Nuova cartella"><i data-ic="folder-plus" class="ic-sm"></i></button>
+          <button class="hbtn" title="Filtra"><i data-ic="filter" class="ic-sm"></i></button>
+        </div>
+        <div class="panel-body">
+
+          <!-- Files -->
+          <div class="side-view on" data-side-view="files">
+            <div class="searchbar">
+              <i data-ic="search" class="ic-sm"></i>
+              <input placeholder="Filtra le note…">
+              <kbd>Ctrl O</kbd>
+            </div>
+
+            <div class="sec">
+              <div class="sec-head"><i data-ic="chevron-down" class="ic-sm chev"></i><span class="grow">Fissate</span><span class="pill">2</span></div>
+              <div class="row"><i data-ic="pin" class="ic-sm"></i><span class="tdot" style="background:var(--t-daily)"></span><span class="name">Home del vault</span></div>
+              <div class="row"><i data-ic="pin" class="ic-sm"></i><span class="tdot" style="background:var(--t-design)"></span><span class="name">Geode — pillar di design</span></div>
+            </div>
+
+            <div class="sec">
+              <div class="sec-head"><i data-ic="chevron-down" class="ic-sm chev"></i><span class="grow">Recenti</span><span class="pill">3</span></div>
+              <div class="row on"><span class="tdot" style="background:var(--t-bug)"></span><span class="name">Crash all'avvio con profilo vuoto</span><span class="meta">ora</span></div>
+              <div class="row"><span class="tdot" style="background:var(--t-improve)"></span><span class="name">Sync a pulsante invece che a tempo</span><span class="meta">2h</span></div>
+              <div class="row"><span class="tdot" style="background:var(--t-daily)"></span><span class="name">2026-07-31</span><span class="meta">3h</span></div>
+            </div>
+
+            <div class="sec">
+              <div class="sec-head"><i data-ic="chevron-down" class="ic-sm chev"></i><span class="grow">Vault</span></div>
+              <div class="row folder"><i data-ic="chevron-down" class="ic-sm"></i><i data-ic="folder" class="ic-sm"></i><span class="name">bugs</span><span class="pill">12</span></div>
+              <div class="row" style="padding-left:34px"><span class="tdot" style="background:var(--t-bug)"></span><span class="name">Crash all'avvio con profilo vuoto</span></div>
+              <div class="row" style="padding-left:34px"><span class="tdot" style="background:var(--t-bug)"></span><span class="name">Picus — find in file inusabile</span></div>
+              <div class="row" style="padding-left:34px"><span class="tdot" style="background:var(--t-bug)"></span><span class="name">Merula — click sul loop</span></div>
+              <div class="row folder"><i data-ic="chevron-right" class="ic-sm"></i><i data-ic="folder" class="ic-sm"></i><span class="name">migliorie</span><span class="pill">21</span></div>
+              <div class="row folder"><i data-ic="chevron-down" class="ic-sm"></i><i data-ic="folder" class="ic-sm"></i><span class="name">gamedesign</span><span class="pill">8</span></div>
+              <div class="row" style="padding-left:34px"><span class="tdot" style="background:var(--t-design)"></span><span class="name">Geode — pillar di design</span></div>
+              <div class="row" style="padding-left:34px"><span class="tdot" style="background:var(--t-design)"></span><span class="name">Geode — economia dello scavo</span></div>
+              <div class="row folder"><i data-ic="chevron-right" class="ic-sm"></i><i data-ic="folder" class="ic-sm"></i><span class="name">diario</span><span class="pill">143</span></div>
+              <div class="row folder"><i data-ic="chevron-right" class="ic-sm"></i><i data-ic="folder" class="ic-sm"></i><span class="name">decisioni</span><span class="pill">9</span></div>
+              <div class="row folder" style="color:var(--text-dim)"><i data-ic="chevron-right" class="ic-sm"></i><i data-ic="paperclip" class="ic-sm"></i><span class="name">allegati</span><span class="pill">64</span></div>
+            </div>
+          </div>
+
+          <!-- Tags / metadata -->
+          <div class="side-view" data-side-view="tags">
+            <div class="searchbar"><i data-ic="search" class="ic-sm"></i><input placeholder="Filtra tag e metadati…"></div>
+            <div class="subhead">Tag</div>
+            <div style="display:flex;flex-wrap:wrap;gap:5px;padding:0 10px 10px">
+              <span class="chip tag on">#arbor <b style="opacity:.6">86</b></span>
+              <span class="chip tag">#geode <b style="opacity:.6">41</b></span>
+              <span class="chip tag">#urgente <b style="opacity:.6">7</b></span>
+              <span class="chip tag">#idea <b style="opacity:.6">33</b></span>
+              <span class="chip tag">#da-verificare <b style="opacity:.6">12</b></span>
+              <span class="chip tag">#audio <b style="opacity:.6">19</b></span>
+              <span class="chip tag">#ui <b style="opacity:.6">28</b></span>
+              <span class="chip tag">#rust <b style="opacity:.6">52</b></span>
+            </div>
+            <div class="subhead">Metadati — filtra per campo</div>
+            <div class="sec">
+              <div class="sec-head"><i data-ic="chevron-down" class="ic-sm chev"></i><span class="grow">stato</span></div>
+              <div class="row"><span class="tdot" style="background:var(--red)"></span><span class="name">aperto</span><span class="pill">14</span></div>
+              <div class="row"><span class="tdot" style="background:var(--amber)"></span><span class="name">in corso</span><span class="pill">5</span></div>
+              <div class="row"><span class="tdot" style="background:var(--green)"></span><span class="name">risolto</span><span class="pill">61</span></div>
+            </div>
+            <div class="sec">
+              <div class="sec-head"><i data-ic="chevron-down" class="ic-sm chev"></i><span class="grow">gravità</span></div>
+              <div class="row"><span class="tdot" style="background:var(--red)"></span><span class="name">blocker</span><span class="pill">2</span></div>
+              <div class="row"><span class="tdot" style="background:var(--amber)"></span><span class="name">major</span><span class="pill">9</span></div>
+              <div class="row"><span class="tdot" style="background:var(--text-dim)"></span><span class="name">minor</span><span class="pill">23</span></div>
+            </div>
+            <div class="sec">
+              <div class="sec-head"><i data-ic="chevron-down" class="ic-sm chev"></i><span class="grow">applicazione</span></div>
+              <div class="row"><span class="name">arbor</span><span class="pill">44</span></div>
+              <div class="row"><span class="name">geode</span><span class="pill">18</span></div>
+              <div class="row"><span class="name">weblogviewer</span><span class="pill">6</span></div>
+            </div>
+          </div>
+
+          <!-- Types -->
+          <div class="side-view" data-side-view="types">
+            <div class="subhead">Tipi di nota</div>
+            <div class="row" style="padding-left:12px"><span class="tdot" style="background:var(--t-bug)"></span><span class="name">Bug</span><span class="pill">12</span></div>
+            <div class="row" style="padding-left:12px"><span class="tdot" style="background:var(--t-improve)"></span><span class="name">Miglioria</span><span class="pill">21</span></div>
+            <div class="row" style="padding-left:12px"><span class="tdot" style="background:var(--t-design)"></span><span class="name">Game design</span><span class="pill">8</span></div>
+            <div class="row" style="padding-left:12px"><span class="tdot" style="background:var(--t-daily)"></span><span class="name">Diario</span><span class="pill">143</span></div>
+            <div class="row" style="padding-left:12px"><span class="tdot" style="background:var(--t-decision)"></span><span class="name">Decisione (ADR)</span><span class="pill">9</span></div>
+            <div class="row" style="padding-left:12px;color:var(--text-dim)"><span class="tdot" style="background:var(--text-dim)"></span><span class="name">Senza tipo</span><span class="pill">31</span></div>
+            <div class="subhead">Viste salvate</div>
+            <div class="row" style="padding-left:12px"><i data-ic="bookmark" class="ic-sm"></i><span class="name">Bug aperti su arbor</span></div>
+            <div class="row" style="padding-left:12px"><i data-ic="bookmark" class="ic-sm"></i><span class="name">Da verificare questa settimana</span></div>
+            <div class="row" style="padding-left:12px"><i data-ic="bookmark" class="ic-sm"></i><span class="name">Note orfane</span></div>
+          </div>
+
+        </div>
+      </aside>
+
+      <!-- ═══ CENTER ═══════════════════════════════════════════════════════ -->
+      <div class="center">
+        <div class="panel" style="flex:1">
+
+          <!-- Note tabs -->
+          <div class="tabbar">
+            <button class="tab on"><span class="tdot" style="width:6px;height:6px;border-radius:2px;background:var(--t-bug)"></span><span class="name">Crash all'avvio…</span><span class="dirty"></span></button>
+            <button class="tab"><span class="tdot" style="width:6px;height:6px;border-radius:2px;background:var(--t-design)"></span><span class="name">Geode — pillar</span><i data-ic="x" class="ic-sm x"></i></button>
+            <button class="tab"><span class="tdot" style="width:6px;height:6px;border-radius:2px;background:var(--t-daily)"></span><span class="name">2026-07-31</span><i data-ic="x" class="ic-sm x"></i></button>
+            <button class="icon-btn" style="height:26px;width:26px"><i data-ic="plus" class="ic-sm"></i></button>
+          </div>
+
+          <!-- Formatting toolbar — the explicit gap in the brief -->
+          <div class="toolbar" id="editorToolbar">
+            <button class="tbtn"><i data-ic="heading" class="ic-sm"></i><span>Paragrafo</span><i data-ic="chevron-down" class="ic-sm"></i></button>
+            <span class="tsep"></span>
+            <button class="tbtn" title="Grassetto — Alt+B"><i data-ic="bold" class="ic-sm"></i></button>
+            <button class="tbtn" title="Corsivo — Alt+I"><i data-ic="italic" class="ic-sm"></i></button>
+            <button class="tbtn" title="Barrato — Alt+S"><i data-ic="strike" class="ic-sm"></i></button>
+            <button class="tbtn" title="Codice — Alt+C"><i data-ic="code" class="ic-sm"></i></button>
+            <button class="tbtn" title="Evidenzia — Alt+H"><i data-ic="highlighter" class="ic-sm"></i></button>
+            <span class="tsep"></span>
+            <button class="tbtn" title="Collegamento — Alt+L"><i data-ic="link" class="ic-sm"></i></button>
+            <button class="tbtn" title="Elenco"><i data-ic="list" class="ic-sm"></i></button>
+            <button class="tbtn" title="Attività — Alt+T"><i data-ic="check-square" class="ic-sm"></i></button>
+            <button class="tbtn" title="Tabella — Ctrl+Shift+T"><i data-ic="table" class="ic-sm"></i></button>
+            <button class="tbtn" title="Riquadro — Alt+Q"><i data-ic="quote" class="ic-sm"></i></button>
+            <button class="tbtn" title="Immagine · Cattura con Tyto"><i data-ic="image" class="ic-sm"></i></button>
+            <span class="grow" style="flex:1"></span>
+            <span style="font-size:var(--fs-sm);color:var(--text-dim)">412 parole · 2 min</span>
+            <span class="tsep"></span>
+            <button class="tbtn on" title="Anteprima ↔ sorgente — Ctrl+E"><i data-ic="eye" class="ic-sm"></i></button>
+          </div>
+
+          <!-- ── VIEW: editor ─────────────────────────────────────────── -->
+          <div class="view on" data-view="editor">
+            <article class="doc">
+
+              <!-- Frontmatter rendered as a typed form card -->
+              <div class="fm">
+                <div class="fm-head">
+                  <span class="chip type" style="background:var(--t-bug)"><i data-ic="bug" class="ic-sm"></i>Bug</span>
+                  <span class="grow"></span>
+                  <button class="hbtn" title="Mostra il sorgente YAML"><i data-ic="code" class="ic-sm"></i></button>
+                  <button class="hbtn" title="Cambia tipo — Alt+Invio"><i data-ic="more" class="ic-sm"></i></button>
+                </div>
+                <div class="fm-grid">
+                  <div class="fm-k">applicazione</div>
+                  <div class="fm-v"><button class="sel">arbor<i data-ic="chevron-down" class="ic-sm"></i></button></div>
+                  <div class="fm-k">versione</div>
+                  <div class="fm-v">0.9.4-dev</div>
+
+                  <div class="fm-k">gravità</div>
+                  <div class="fm-v"><button class="sel"><span class="tdot" style="width:6px;height:6px;border-radius:50%;background:var(--red)"></span>blocker<i data-ic="chevron-down" class="ic-sm"></i></button></div>
+                  <div class="fm-k">stato</div>
+                  <div class="fm-v"><button class="sel"><span class="tdot" style="width:6px;height:6px;border-radius:50%;background:var(--amber)"></span>in corso<i data-ic="chevron-down" class="ic-sm"></i></button></div>
+
+                  <div class="fm-k">commit</div>
+                  <div class="fm-v"><span class="codelink"><i data-ic="git-commit" class="ic-sm"></i>a4babdc<span class="pin">·develop</span></span></div>
+                  <div class="fm-k">creata</div>
+                  <div class="fm-v">31/07/2026 · casa</div>
+
+                  <div class="fm-tags">
+                    <span class="chip tag">#arbor</span>
+                    <span class="chip tag">#urgente</span>
+                    <span class="chip tag">#da-verificare</span>
+                    <button class="chip ghost"><i data-ic="plus" class="ic-sm"></i>tag</button>
+                  </div>
+                </div>
+              </div>
+
+              <h1>Crash all'avvio con profilo vuoto</h1>
+
+              <p>Alla prima apertura su una macchina nuova, se <code>active-profile</code> punta a un
+              profilo che non esiste ancora, la finestra resta bianca e il BE muore in silenzio.
+              Vedi <a class="wl">[[Profili e configurazione per prodotto]]</a> per come il puntatore
+              viene risolto, e <a class="wl broken">[[Bring-up su macchina pulita]]</a> che ancora non esiste.
+              <span class="tagref">#arbor</span></p>
+
+              <div class="callout danger">
+                <div class="ch"><i data-ic="alert" class="ic-sm"></i><span class="grow">Blocca il primo avvio</span><i data-ic="chevron-down" class="ic-sm" style="opacity:.5"></i></div>
+                <p>Chi installa da zero non vede nessun messaggio: solo una finestra bianca.
+                Il log su stderr c'è, ma nessuno apre stderr al primo avvio.</p>
+              </div>
+
+              <!-- The cursor line reveals its raw markdown; every other line stays rendered -->
+              <h2 class="cursorline"><span class="mk">## </span>Passi per riprodurre<span class="caret"></span></h2>
+
+              <ol style="margin:0 0 14px 20px">
+                <li>Cancella <code>~/Library/Application Support/arbor/profiles/</code></li>
+                <li>Lascia il file <code>active-profile</code> con dentro <code>default</code></li>
+                <li>Avvia — la finestra si apre bianca e non si riprende</li>
+              </ol>
+
+              <h2>Dove guardare</h2>
+
+              <p>Il punto esatto è nel resolver del profilo, che assume che la cartella esista:</p>
+
+              <p><span class="codelink"><i data-ic="file-code" class="ic-sm"></i>foundation/core/src/profile.rs:88<span class="pin">@a4babdc</span></span>
+              &nbsp;<span style="font-size:var(--fs-sm);color:var(--text-dim)">— pinnato al commit, punta ancora alla riga giusta</span></p>
+
+              <div class="fence">
+                <div class="fence-head">
+                  <i data-ic="terminal" class="ic-sm"></i><span>sql</span><span class="grow"></span>
+                  <button class="act-btn"><i data-ic="play" class="ic-sm"></i>apri in Picus</button>
+                </div>
+<pre><code><span class="c">-- quante installazioni hanno il profilo mancante</span>
+<span class="k">SELECT</span> device, profile_dir
+<span class="k">FROM</span>   telemetry_boot
+<span class="k">WHERE</span>  outcome = <span class="s">'white-window'</span>
+<span class="k">ORDER BY</span> ts <span class="k">DESC</span>;</code></pre>
+              </div>
+
+              <div class="callout warning">
+                <div class="ch"><i data-ic="alert" class="ic-sm"></i><span class="grow">Attenzione</span></div>
+                <p>Il fix non deve creare la cartella dentro <code>ensure_*_be</code>: quello gira su
+                un worker del runtime e un'operazione su filesystem lì dentro è la landmine numero 1.</p>
+              </div>
+
+              <div class="callout note">
+                <div class="ch"><i data-ic="info" class="ic-sm"></i><span class="grow">Nota</span></div>
+                <p>Su Windows il sintomo è diverso: la finestra non si apre affatto, perché il
+                <span class="sp">detatched</span> spawn fallisce prima.</p>
+              </div>
+
+              <h2>Da fare</h2>
+              <ul class="tasks">
+                <li><span class="cb done"><i data-ic="check" class="ic-sm"></i></span><span>Riprodurre su macchina pulita</span></li>
+                <li><span class="cb"></span><span>Creare il profilo di default se manca, prima di risolvere il puntatore</span><span class="due">entro 02/08</span></li>
+                <li><span class="cb"></span><span>Messaggio d'errore visibile invece della finestra bianca</span></li>
+                <li><span class="cb"></span><span>Test di bring-up in CI</span><span class="due">follow-up 2w</span></li>
+              </ul>
+
+              <h2>Occorrenze</h2>
+              <table>
+                <thead><tr><th>Data</th><th>Macchina</th><th>Esito</th></tr></thead>
+                <tbody>
+                  <tr><td>29/07/2026</td><td>casa</td><td>finestra bianca</td></tr>
+                  <tr><td>31/07/2026</td><td>ufficio</td><td>finestra bianca</td></tr>
+                </tbody>
+              </table>
+            </article>
+          </div>
+
+          <!-- ── VIEW: search ─────────────────────────────────────────── -->
+          <div class="view" data-view="search">
+            <div class="srch-top">
+              <div class="qbox">
+                <span class="qtok"><span class="k">type:</span>bug<i data-ic="x" class="ic-sm x"></i></span>
+                <span class="qtok"><span class="k">stato:</span>aperto<i data-ic="x" class="ic-sm x"></i></span>
+                <span class="qtok"><span class="k">app:</span>arbor<i data-ic="x" class="ic-sm x"></i></span>
+                <input placeholder="profilo   ·   scrivi campo: per filtrare, Invio per cercare">
+              </div>
+              <div class="srch-opts">
+                <button class="opt on"><i data-ic="check" class="ic-sm"></i>Tutto il vault</button>
+                <button class="opt">Solo <b>bugs/</b></button>
+                <span class="tsep"></span>
+                <button class="opt">Aa</button>
+                <button class="opt">Parola intera</button>
+                <button class="opt on">.*</button>
+                <button class="opt"><i data-ic="paperclip" class="ic-sm"></i>anche gli allegati</button>
+                <span style="flex:1"></span>
+                <span style="font-size:var(--fs-sm);color:var(--text-dim)">38 occorrenze in 9 note · 41&nbsp;ms</span>
+                <button class="opt"><i data-ic="bookmark" class="ic-sm"></i>Salva come vista</button>
+              </div>
+            </div>
+
+            <div class="srch-body">
+              <div class="hits">
+                <div class="hit-group">
+                  <div class="hit-head">
+                    <i data-ic="chevron-down" class="ic-sm"></i>
+                    <span class="tdot" style="width:7px;height:7px;border-radius:2px;background:var(--t-bug)"></span>
+                    <span class="name">Crash all'avvio con profilo vuoto</span>
+                    <span class="path">bugs/</span><span class="grow"></span>
+                    <span class="pill">6</span>
+                  </div>
+                  <div class="hit on"><span class="ln">12</span><span>se <mark>active-profile</mark> punta a un <mark>profilo</mark> che non esiste ancora</span></div>
+                  <div class="hit"><span class="ln">28</span><span>Cancella <mark>profiles</mark>/ e lascia il file <mark>active-profile</mark></span></div>
+                  <div class="hit"><span class="ln">41</span><span>il resolver del <mark>profilo</mark> assume che la cartella esista</span></div>
+                  <div class="hit"><span class="ln">57</span><span>Creare il <mark>profilo</mark> di default se manca</span></div>
+                </div>
+                <div class="hit-group">
+                  <div class="hit-head">
+                    <i data-ic="chevron-down" class="ic-sm"></i>
+                    <span class="tdot" style="width:7px;height:7px;border-radius:2px;background:var(--t-decision)"></span>
+                    <span class="name">Profili e configurazione per prodotto</span>
+                    <span class="path">decisioni/</span><span class="grow"></span>
+                    <span class="pill">14</span>
+                  </div>
+                  <div class="hit"><span class="ln">4</span><span>il <mark>profilo</mark> attivo è selezionato da un file puntatore</span></div>
+                  <div class="hit"><span class="ln">19</span><span>ogni prodotto scrive sotto <mark>profiles</mark>/&lt;p&gt;/&lt;prodotto&gt;/</span></div>
+                  <div class="hit"><span class="ln">33</span><span>cambiare <mark>profilo</mark> a caldo richiede il riavvio dei BE</span></div>
+                </div>
+                <div class="hit-group">
+                  <div class="hit-head">
+                    <i data-ic="chevron-right" class="ic-sm"></i>
+                    <span class="tdot" style="width:7px;height:7px;border-radius:2px;background:var(--t-bug)"></span>
+                    <span class="name">Picus — find in file inusabile</span>
+                    <span class="path">bugs/</span><span class="grow"></span>
+                    <span class="pill">2</span>
+                  </div>
+                </div>
+                <div class="hit-group">
+                  <div class="hit-head">
+                    <i data-ic="chevron-right" class="ic-sm"></i>
+                    <span class="tdot" style="width:7px;height:7px;border-radius:2px;background:var(--t-daily)"></span>
+                    <span class="name">2026-07-29</span>
+                    <span class="path">diario/</span><span class="grow"></span>
+                    <span class="pill">3</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="preview">
+                <div class="panel-head"><span class="title">Anteprima</span><span class="grow"></span>
+                  <button class="hbtn" title="Apri la nota"><i data-ic="external" class="ic-sm"></i></button></div>
+                <div style="padding:0 16px 20px;font-size:var(--fs-md);line-height:1.7;color:#b9bdc5;user-select:text">
+                  <div style="display:flex;align-items:center;gap:7px;margin-bottom:12px">
+                    <span class="chip type" style="background:var(--t-bug)">Bug</span>
+                    <span class="chip tag">#urgente</span>
+                  </div>
+                  <p style="color:var(--text-dim);margin-bottom:10px">…</p>
+                  <p style="margin-bottom:10px">Alla prima apertura su una macchina nuova,
+                    se <mark>active-profile</mark> punta a un <mark>profilo</mark> che non esiste ancora,
+                    la finestra resta bianca e il BE muore in silenzio.</p>
+                  <p style="color:var(--text-dim)">Vedi <span style="color:var(--garrulus)">[[Profili e configurazione per prodotto]]</span>
+                    per come il puntatore viene risolto…</p>
+                  <div style="margin-top:16px;display:flex;gap:6px">
+                    <button class="opt"><kbd>↵</kbd> apri</button>
+                    <button class="opt"><kbd>Alt ↵</kbd> apri a fianco</button>
+                    <button class="opt"><kbd>F2</kbd> sostituisci</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── VIEW: home ───────────────────────────────────────────── -->
+          <div class="view" data-view="home">
+            <div class="home">
+              <h2>Buongiorno, Christian</h2>
+              <div class="sub">Vault <b>Appunti</b> · 218 note · allineato con <b>casa</b> 3 minuti fa
+                · <span style="color:var(--garrulus)">2 note aggiornate dall'altro PC</span></div>
+
+              <div class="cards">
+                <div class="card">
+                  <div class="card-head"><span class="tdot" style="width:7px;height:7px;border-radius:2px;background:var(--t-bug)"></span>
+                    <span class="t">Bug aperti</span><span class="q">type:bug stato:aperto</span></div>
+                  <div class="card-body">
+                    <div class="crow"><span class="sev" style="background:var(--red)"></span><span class="grow">Crash all'avvio con profilo vuoto</span><span style="color:var(--text-dim)">blocker</span></div>
+                    <div class="crow"><span class="sev" style="background:var(--red)"></span><span class="grow">Picus — find in file inusabile</span><span style="color:var(--text-dim)">major</span></div>
+                    <div class="crow"><span class="sev" style="background:var(--amber)"></span><span class="grow">Merula — click sul loop</span><span style="color:var(--text-dim)">major</span></div>
+                    <div class="crow"><span class="sev" style="background:var(--text-dim)"></span><span class="grow">Sitta — icona sbagliata sui symlink</span><span style="color:var(--text-dim)">minor</span></div>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <div class="card-head"><i data-ic="check-square" class="ic-sm" style="color:var(--amber)"></i>
+                    <span class="t">Attività in scadenza</span><span class="q">task due&lt;7d</span></div>
+                  <div class="card-body">
+                    <div class="crow"><span class="cb" style="width:13px;height:13px;margin:0"></span><span class="grow">Creare il profilo di default se manca</span><span class="due">02/08</span></div>
+                    <div class="crow"><span class="cb" style="width:13px;height:13px;margin:0"></span><span class="grow">Rivedere l'economia dello scavo</span><span class="due">04/08</span></div>
+                    <div class="crow"><span class="cb" style="width:13px;height:13px;margin:0"></span><span class="grow">Registrare la demo audio</span><span class="due">05/08</span></div>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <div class="card-head"><i data-ic="refresh-cw" class="ic-sm" style="color:var(--garrulus)"></i>
+                    <span class="t">Novità da <b>casa</b></span><span class="q">dal 29/07</span></div>
+                  <div class="card-body">
+                    <div class="crow"><span class="tdot" style="width:6px;height:6px;border-radius:2px;background:var(--t-design)"></span><span class="grow">Geode — economia dello scavo</span><span style="color:var(--text-dim)">+42 −6</span></div>
+                    <div class="crow"><span class="tdot" style="width:6px;height:6px;border-radius:2px;background:var(--t-daily)"></span><span class="grow">2026-07-30</span><span style="color:var(--text-dim)">+18</span></div>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <div class="card-head"><i data-ic="alert" class="ic-sm" style="color:var(--amber)"></i>
+                    <span class="t">Salute del vault</span></div>
+                  <div class="card-body">
+                    <div class="crow"><span class="grow">Collegamenti rotti</span><span class="pill" style="background:color-mix(in srgb,var(--red) 22%,transparent);color:var(--red)">3</span></div>
+                    <div class="crow"><span class="grow">Note orfane</span><span class="pill">11</span></div>
+                    <div class="crow"><span class="grow">Allegati non referenziati</span><span class="pill">7</span></div>
+                    <div class="crow"><span class="grow">Note senza tipo</span><span class="pill">31</span></div>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <div class="card-head"><i data-ic="pen" class="ic-sm" style="color:var(--green)"></i><span class="t">Questo mese</span></div>
+                  <div class="stat"><span class="big">14.2k</span><span class="lbl">parole scritte · 47 note toccate</span></div>
+                </div>
+
+                <div class="card">
+                  <div class="card-head"><i data-ic="zap" class="ic-sm" style="color:var(--purple)"></i><span class="t">Cattura rapida</span></div>
+                  <div class="card-body" style="padding:11px">
+                    <div style="display:flex;gap:6px;flex-wrap:wrap">
+                      <button class="opt"><kbd>Ctrl ⇧ Space</kbd> Inbox</button>
+                      <button class="opt"><kbd>Ctrl D</kbd> Diario di oggi</button>
+                      <button class="opt"><kbd>Ctrl ⇧ N</kbd> Nuovo bug</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── VIEW: table ──────────────────────────────────────────── -->
+          <div class="view" data-view="table">
+            <div class="srch-top" style="padding:9px 14px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span class="chip type" style="background:var(--t-bug)"><i data-ic="bug" class="ic-sm"></i>Bug</span>
+                <span class="qtok"><span class="k">stato:</span>aperto<i data-ic="x" class="ic-sm x"></i></span>
+                <span style="flex:1"></span>
+                <button class="opt"><i data-ic="columns" class="ic-sm"></i>Colonne</button>
+                <button class="opt"><i data-ic="layers" class="ic-sm"></i>Raggruppa per gravità</button>
+                <button class="opt"><i data-ic="table" class="ic-sm"></i>Tabella</button>
+                <button class="opt"><i data-ic="kanban" class="ic-sm"></i>Board</button>
+              </div>
+            </div>
+            <div class="grid-wrap">
+              <table class="grid">
+                <thead><tr>
+                  <th style="width:34px"></th>
+                  <th>Titolo</th><th>Applicazione</th><th>Versione</th>
+                  <th>Gravità <span class="sortc">▾</span></th><th>Stato</th><th>Commit</th><th>Modificata</th>
+                </tr></thead>
+                <tbody>
+                  <tr><td><span class="tdot" style="width:7px;height:7px;border-radius:2px;background:var(--t-bug);display:block"></span></td>
+                    <td class="title">Crash all'avvio con profilo vuoto</td><td>arbor</td><td>0.9.4-dev</td>
+                    <td><span class="sevpill"><span class="sev" style="background:var(--red)"></span>blocker</span></td>
+                    <td><span class="sevpill"><span class="sev" style="background:var(--amber)"></span>in corso</span></td>
+                    <td><span class="codelink" style="height:18px">a4babdc</span></td><td>ora</td></tr>
+                  <tr><td><span class="tdot" style="width:7px;height:7px;border-radius:2px;background:var(--t-bug);display:block"></span></td>
+                    <td class="title">Picus — find in file inusabile</td><td>arbor</td><td>0.9.4-dev</td>
+                    <td><span class="sevpill"><span class="sev" style="background:var(--red)"></span>major</span></td>
+                    <td><span class="sevpill"><span class="sev" style="background:var(--red)"></span>aperto</span></td>
+                    <td></td><td>2h</td></tr>
+                  <tr><td><span class="tdot" style="width:7px;height:7px;border-radius:2px;background:var(--t-bug);display:block"></span></td>
+                    <td class="title">Merula — click sul loop point</td><td>arbor</td><td>0.9.3</td>
+                    <td><span class="sevpill"><span class="sev" style="background:var(--amber)"></span>major</span></td>
+                    <td><span class="sevpill"><span class="sev" style="background:var(--red)"></span>aperto</span></td>
+                    <td><span class="codelink" style="height:18px">1d3d74b</span></td><td>ieri</td></tr>
+                  <tr><td><span class="tdot" style="width:7px;height:7px;border-radius:2px;background:var(--t-bug);display:block"></span></td>
+                    <td class="title">Sitta — icona sbagliata sui symlink</td><td>arbor</td><td>0.9.3</td>
+                    <td><span class="sevpill"><span class="sev" style="background:var(--text-dim)"></span>minor</span></td>
+                    <td><span class="sevpill"><span class="sev" style="background:var(--red)"></span>aperto</span></td>
+                    <td></td><td>3 g</td></tr>
+                  <tr><td><span class="tdot" style="width:7px;height:7px;border-radius:2px;background:var(--t-bug);display:block"></span></td>
+                    <td class="title">Geode — audio del play troppo simile allo stop</td><td>geode</td><td>—</td>
+                    <td><span class="sevpill"><span class="sev" style="background:var(--text-dim)"></span>minor</span></td>
+                    <td><span class="sevpill"><span class="sev" style="background:var(--green)"></span>risolto</span></td>
+                    <td></td><td>4 g</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- ── VIEW: graph ──────────────────────────────────────────── -->
+          <div class="view" data-view="graph">
+            <div class="graph-wrap">
+              <div class="graph-ctl">
+                <button class="opt on">Tutti</button>
+                <button class="opt">Bug</button>
+                <button class="opt">Game design</button>
+                <button class="opt">Decisioni</button>
+                <span class="tsep"></span>
+                <button class="opt on"><i data-ic="link" class="ic-sm"></i>collegamenti</button>
+                <button class="opt"><i data-ic="hash" class="ic-sm"></i>tag come nodi</button>
+                <button class="opt">profondità 2</button>
+              </div>
+              <svg id="graph"></svg>
+              <div class="graph-legend">
+                <div class="lg"><i style="background:var(--t-bug)"></i>Bug</div>
+                <div class="lg"><i style="background:var(--t-improve)"></i>Miglioria</div>
+                <div class="lg"><i style="background:var(--t-design)"></i>Game design</div>
+                <div class="lg"><i style="background:var(--t-decision)"></i>Decisione</div>
+                <div class="lg"><i style="background:var(--t-daily)"></i>Diario</div>
+                <div class="lg"><i style="background:#4a4e57"></i>Non ancora creata</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ── BOTTOM DOCK ────────────────────────────────────────────── -->
+        <div class="panel dock" id="dock">
+          <div class="panel-head">
+            <div class="dock-tabs">
+              <button class="dtab on" data-dock="tasks">Attività <span class="n">7</span></button>
+              <button class="dtab" data-dock="problems">Problemi <span class="n">21</span></button>
+              <button class="dtab" data-dock="conflicts">Conflitti <span class="n" style="color:var(--red)">1</span></button>
+              <button class="dtab" data-dock="history">Cronologia</button>
+            </div>
+            <span class="grow"></span>
+            <button class="hbtn" title="Filtra"><i data-ic="filter" class="ic-sm"></i></button>
+            <button class="hbtn" id="hideDock" title="Nascondi — Ctrl+J"><i data-ic="x" class="ic-sm"></i></button>
+          </div>
+          <div class="panel-body">
+            <div class="dock-view on" data-dock-view="tasks">
+              <div class="lrow"><span class="cb" style="width:13px;height:13px;margin:0"></span><span class="grow">Creare il profilo di default se manca, prima di risolvere il puntatore</span><span class="due">02/08</span><span class="where">Crash all'avvio…</span></div>
+              <div class="lrow"><span class="cb" style="width:13px;height:13px;margin:0"></span><span class="grow">Messaggio d'errore visibile invece della finestra bianca</span><span class="where">Crash all'avvio…</span></div>
+              <div class="lrow"><span class="cb" style="width:13px;height:13px;margin:0"></span><span class="grow">Test di bring-up in CI</span><span class="due">follow-up 2w</span><span class="where">Crash all'avvio…</span></div>
+              <div class="lrow"><span class="cb" style="width:13px;height:13px;margin:0"></span><span class="grow">Rivedere l'economia dello scavo dopo il playtest</span><span class="due">04/08</span><span class="where">Geode — economia…</span></div>
+              <div class="lrow"><span class="cb" style="width:13px;height:13px;margin:0"></span><span class="grow">Registrare la demo audio</span><span class="due">05/08</span><span class="where">2026-07-30</span></div>
+            </div>
+            <div class="dock-view" data-dock-view="problems">
+              <div class="lrow"><span class="sev" style="background:var(--red)"></span><span class="grow">Collegamento rotto: <b>[[Bring-up su macchina pulita]]</b></span><span class="where">Crash all'avvio… · riga 14</span></div>
+              <div class="lrow"><span class="sev" style="background:var(--red)"></span><span class="grow">Collegamento rotto: <b>[[Merula — DSL reference]]</b></span><span class="where">2026-07-28 · riga 9</span></div>
+              <div class="lrow"><span class="sev" style="background:var(--amber)"></span><span class="grow">Allegato non referenziato: <b>allegati/schermata-3.png</b></span><span class="where">allegati/</span></div>
+              <div class="lrow"><span class="sev" style="background:var(--amber)"></span><span class="grow">Nota orfana — nessuno la collega</span><span class="where">migliorie/Idee sparse.md</span></div>
+              <div class="lrow"><span class="sev" style="background:var(--text-dim)"></span><span class="grow">Nota senza tipo</span><span class="where">Idee sparse.md</span></div>
+              <div class="lrow"><span class="sev" style="background:var(--text-dim)"></span><span class="grow">Ortografia: «detatched» → detached</span><span class="where">Crash all'avvio… · riga 71</span></div>
+            </div>
+            <div class="dock-view" data-dock-view="conflicts">
+              <div style="padding:14px 16px">
+                <div style="display:flex;align-items:center;gap:9px;margin-bottom:9px">
+                  <i data-ic="alert" class="ic" style="color:var(--red)"></i>
+                  <b>2026-07-30</b>
+                  <span style="color:var(--text-dim)">modificata su <b>casa</b> e su <b>ufficio</b> — 1 blocco non fondibile</span>
+                  <span style="flex:1"></span>
+                  <button class="opt on">Tieni la mia</button>
+                  <button class="opt">Prendi quella di casa</button>
+                  <button class="opt">Unisci a mano</button>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-family:var(--mono);font-size:11.5px;line-height:1.7">
+                  <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+                    <div style="padding:5px 9px;background:var(--bg-raised);color:var(--text-dim);font-family:var(--font);font-size:var(--fs-sm)">questo PC — ufficio</div>
+                    <div style="padding:7px 9px;background:color-mix(in srgb,var(--green) 7%,transparent)">- [ ] Registrare la demo audio<br>- [x] Sistemare sfx_ui_play</div>
+                  </div>
+                  <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+                    <div style="padding:5px 9px;background:var(--bg-raised);color:var(--text-dim);font-family:var(--font);font-size:var(--fs-sm)">casa — 3 min fa</div>
+                    <div style="padding:7px 9px;background:color-mix(in srgb,var(--red) 7%,transparent)">- [ ] Registrare la demo audio (con Tyto)<br>- [x] Sistemare sfx_ui_play</div>
+                  </div>
+                </div>
+                <div style="margin-top:9px;color:var(--text-dim);font-size:var(--fs-sm)">
+                  Niente marcatori nel file: la versione remota è salvata come
+                  <b>2026-07-30 (conflitto — casa, 31-07 14:22).md</b> finché non scegli.
+                </div>
+              </div>
+            </div>
+            <div class="dock-view" data-dock-view="history">
+              <div class="lrow"><span class="where" style="width:120px">31/07 14:22 · casa</span><span class="grow">Aggiornate 3 note</span><span class="where">+42 −6</span><button class="opt">confronta</button><button class="opt">ripristina</button></div>
+              <div class="lrow"><span class="where" style="width:120px">31/07 09:05 · ufficio</span><span class="grow">Nuova nota: Crash all'avvio con profilo vuoto</span><span class="where">+61</span><button class="opt">confronta</button><button class="opt">ripristina</button></div>
+              <div class="lrow"><span class="where" style="width:120px">30/07 21:40 · casa</span><span class="grow">Aggiornate 2 note</span><span class="where">+18 −2</span><button class="opt">confronta</button><button class="opt">ripristina</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ RIGHT PANEL ═══════════════════════════════════════════════ -->
+      <aside class="panel rightbar">
+        <div class="panel-head">
+          <span class="title">Contesto</span><span class="grow"></span>
+          <button class="hbtn"><i data-ic="more" class="ic-sm"></i></button>
+        </div>
+        <div class="rtabs">
+          <button class="rtab on" data-rtab="backlinks">Collegamenti <span class="n" style="color:var(--text-dim)">7</span></button>
+          <button class="rtab" data-rtab="outline">Struttura</button>
+          <button class="rtab" data-rtab="meta">Metadati</button>
+        </div>
+        <div class="panel-body">
+
+          <div class="rview on" data-rview="backlinks">
+            <div class="subhead">Collegate a questa nota — 4</div>
+            <div class="bl"><div class="t"><span class="tdot" style="width:6px;height:6px;border-radius:2px;background:var(--t-decision)"></span>Profili e configurazione per prodotto</div>
+              <div class="q">…il caso patologico è descritto in <b>[[Crash all'avvio con profilo vuoto]]</b>, che va risolto prima di…</div></div>
+            <div class="bl"><div class="t"><span class="tdot" style="width:6px;height:6px;border-radius:2px;background:var(--t-daily)"></span>2026-07-31</div>
+              <div class="q">Mattinata persa dietro a <b>[[Crash all'avvio con profilo vuoto]]</b>. È il puntatore del profilo.</div></div>
+            <div class="bl"><div class="t"><span class="tdot" style="width:6px;height:6px;border-radius:2px;background:var(--t-improve)"></span>Bring-up più gentile al primo avvio</div>
+              <div class="q">Nasce da <b>[[Crash all'avvio con profilo vuoto]]</b> ma vale in generale…</div></div>
+            <div class="bl"><div class="t"><span class="tdot" style="width:6px;height:6px;border-radius:2px;background:var(--t-daily)"></span>2026-07-29</div>
+              <div class="q">Anche oggi finestra bianca — vedi <b>[[Crash all'avvio con profilo vuoto]]</b>.</div></div>
+
+            <div class="subhead">Menzioni non collegate — 3</div>
+            <div class="bl"><div class="t"><span class="tdot" style="width:6px;height:6px;border-radius:2px;background:var(--t-design)"></span>Note di installazione
+              <span style="flex:1"></span><button class="opt" style="height:19px">collega</button></div>
+              <div class="q">…su una macchina nuova capita il <b>crash all'avvio con profilo vuoto</b>, ricordarsi di…</div></div>
+            <div class="bl"><div class="t"><span class="tdot" style="width:6px;height:6px;border-radius:2px;background:var(--t-daily)"></span>2026-07-25
+              <span style="flex:1"></span><button class="opt" style="height:19px">collega</button></div>
+              <div class="q">…mi pare di aver già visto questo <b>crash all'avvio</b> mesi fa.</div></div>
+          </div>
+
+          <div class="rview outline" data-rview="outline">
+            <div class="subhead">Struttura</div>
+            <a><span class="lvl">H1</span>Crash all'avvio con profilo vuoto</a>
+            <a><span class="lvl">H2</span>Passi per riprodurre</a>
+            <a><span class="lvl">H2</span>Dove guardare</a>
+            <a class="h3"><span class="lvl">H3</span>Su Windows</a>
+            <a><span class="lvl">H2</span>Da fare</a>
+            <a><span class="lvl">H2</span>Occorrenze</a>
+            <div class="subhead">Allegati — 2</div>
+            <div class="row"><i data-ic="image" class="ic-sm"></i><span class="name">schermata-bianca.png</span><span class="meta">184 KB</span></div>
+            <div class="row"><i data-ic="image" class="ic-sm"></i><span class="name">stack-windows.png</span><span class="meta">97 KB</span></div>
+          </div>
+
+          <div class="rview" data-rview="meta">
+            <div class="subhead">Campi del tipo «Bug»</div>
+            <div class="fm-grid" style="grid-template-columns:max-content 1fr;margin:0 8px;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border)">
+              <div class="fm-k">applicazione</div><div class="fm-v"><button class="sel">arbor<i data-ic="chevron-down" class="ic-sm"></i></button></div>
+              <div class="fm-k">versione</div><div class="fm-v">0.9.4-dev</div>
+              <div class="fm-k">gravità</div><div class="fm-v"><button class="sel"><span class="sev" style="background:var(--red)"></span>blocker<i data-ic="chevron-down" class="ic-sm"></i></button></div>
+              <div class="fm-k">stato</div><div class="fm-v"><button class="sel"><span class="sev" style="background:var(--amber)"></span>in corso<i data-ic="chevron-down" class="ic-sm"></i></button></div>
+              <div class="fm-k">commit</div><div class="fm-v"><span class="codelink">a4babdc</span></div>
+              <div class="fm-k">creata</div><div class="fm-v">31/07/2026</div>
+            </div>
+            <div class="subhead">Tag</div>
+            <div style="display:flex;flex-wrap:wrap;gap:5px;padding:0 10px 12px">
+              <span class="chip tag">#arbor</span><span class="chip tag">#urgente</span>
+              <span class="chip tag">#da-verificare</span>
+              <button class="chip ghost"><i data-ic="plus" class="ic-sm"></i></button>
+            </div>
+            <div class="subhead">Sincronizzazione</div>
+            <div class="row" style="padding-left:12px"><span class="name">Ultima modifica</span><span class="meta">ora · ufficio</span></div>
+            <div class="row" style="padding-left:12px"><span class="name">Ultima sincronizzazione</span><span class="meta">14:22 · casa</span></div>
+            <div class="row" style="padding-left:12px"><span class="name">Revisioni</span><span class="meta">9</span></div>
+          </div>
+
+        </div>
+      </aside>
+    </div>
+
+    <!-- ═══ RIGHT ACTIVITY BAR ═══════════════════════════════════════════ -->
+    <nav class="activity">
+      <button class="act on" title="Collegamenti"><i data-ic="link" class="ic"></i></button>
+      <button class="act" title="Struttura"><i data-ic="list" class="ic"></i></button>
+      <button class="act" title="Metadati"><i data-ic="tag" class="ic"></i></button>
+      <span class="spacer"></span>
+      <button class="act" title="Plugin"><i data-ic="plug" class="ic"></i></button>
+    </nav>
+  </div>
+
+  <!-- ═══ STATUS BAR ═══════════════════════════════════════════════════ -->
+  <footer class="statusbar">
+    <button class="sb"><span class="g"></span>Appunti</button>
+    <button class="sb"><i data-ic="notebook" class="ic-sm"></i>218 note</button>
+    <button class="sb"><i data-ic="refresh-cw" class="ic-sm"></i>allineato · casa, 3 min fa</button>
+    <button class="sb"><i data-ic="check-square" class="ic-sm"></i>7 attività</button>
+    <span class="sb grow" style="color:var(--text-dim)">bugs/Crash all'avvio con profilo vuoto.md</span>
+    <button class="sb">riga 24 · col 12</button>
+    <button class="sb">markdown</button>
+    <button class="sb">UTF-8</button>
+    <button class="sb"><i data-ic="bell" class="ic-sm"></i>4</button>
+  </footer>
+</div>
+
+<!-- ═══ COMMAND PALETTE ═════════════════════════════════════════════════ -->
+<div class="overlay" id="overlay">
+  <div class="palette">
+    <div class="pin"><i data-ic="command" class="ic"></i><input placeholder="Cerca un comando…" id="paletteInput"><kbd>Esc</kbd></div>
+    <div class="plist">
+      <div class="pitem on"><i data-ic="plus" class="ic-sm"></i><span class="grow">Nuova nota di tipo…</span><span class="grp">Note</span><kbd>Ctrl ⇧ N</kbd></div>
+      <div class="pitem"><i data-ic="search" class="ic-sm"></i><span class="grow">Cerca nel vault</span><span class="grp">Cerca</span><kbd>Ctrl ⇧ F</kbd></div>
+      <div class="pitem"><i data-ic="refresh-cw" class="ic-sm"></i><span class="grow">Sincronizza adesso</span><span class="grp">Sync</span><kbd>Ctrl ⇧ S</kbd></div>
+      <div class="pitem"><i data-ic="alert" class="ic-sm"></i><span class="grow">Risolvi i conflitti</span><span class="grp">Sync</span></div>
+      <div class="pitem"><i data-ic="pen" class="ic-sm"></i><span class="grow">Rinomina la nota e aggiorna tutti i collegamenti</span><span class="grp">Rifattorizza</span><kbd>F2</kbd></div>
+      <div class="pitem"><i data-ic="zap" class="ic-sm"></i><span class="grow">Estrai la selezione in una nuova nota</span><span class="grp">Rifattorizza</span><kbd>Alt ↵</kbd></div>
+      <div class="pitem"><i data-ic="external" class="ic-sm"></i><span class="grow">Esporta in HTML…</span><span class="grp">Esporta</span><kbd>Alt ⇧ E</kbd></div>
+      <div class="pitem"><i data-ic="external" class="ic-sm"></i><span class="grow">Esporta in PDF…</span><span class="grp">Esporta</span></div>
+      <div class="pitem"><i data-ic="share" class="ic-sm"></i><span class="grow">Mostra il grafo dei collegamenti</span><span class="grp">Vista</span></div>
+      <div class="pitem"><i data-ic="history" class="ic-sm"></i><span class="grow">Cronologia di questa nota</span><span class="grp">Storia</span></div>
+      <div class="pitem"><i data-ic="image" class="ic-sm"></i><span class="grow">Cattura schermo e allega (Tyto)</span><span class="grp">Allegati</span></div>
+      <div class="pitem"><i data-ic="database" class="ic-sm"></i><span class="grow">Apri il blocco SQL in Picus</span><span class="grp">Suite</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"><i data-ic="check" class="ic-sm" style="color:var(--green)"></i><span id="toastMsg"></span></div>
+
+<script>
+/* ═════════════════════════════════════════════════════════════════════════
+   Icons — a tiny lucide-shaped sprite. `<i data-ic="name">` is replaced by an
+   inline <svg>, so the markup above stays readable.
+   ═════════════════════════════════════════════════════════════════════════ */
+const P = {
+  'chevron-down':'<path d="m6 9 6 6 6-6"/>',
+  'chevron-right':'<path d="m9 18 6-6-6-6"/>',
+  'x':'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  'plus':'<path d="M5 12h14"/><path d="M12 5v14"/>',
+  'check':'<path d="M20 6 9 17l-5-5"/>',
+  'search':'<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  'folder':'<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  'folder-plus':'<path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  'hash':'<path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="M16 3l-2 18"/>',
+  'tag':'<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2c0 .5.2 1 .6 1.4l8.8 8.8a2 2 0 0 0 2.8 0l7.2-7.2a2 2 0 0 0 0-2.8Z"/><circle cx="7.5" cy="7.5" r="1.2"/>',
+  'link':'<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  'list':'<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>',
+  'check-square':'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/>',
+  'table':'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M12 3v18"/>',
+  'columns':'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/>',
+  'kanban':'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 7v8"/><path d="M12 7v5"/><path d="M16 7v10"/>',
+  'share':'<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/>',
+  'layers':'<path d="m12.8 2.6 8.2 4a.6.6 0 0 1 0 1l-8.2 4a2 2 0 0 1-1.6 0l-8.2-4a.6.6 0 0 1 0-1l8.2-4a2 2 0 0 1 1.6 0Z"/><path d="m3 12.5 8.2 4a2 2 0 0 0 1.6 0l8.2-4"/><path d="m3 17.5 8.2 4a2 2 0 0 0 1.6 0l8.2-4"/>',
+  'refresh-cw':'<path d="M3 12a9 9 0 0 1 9-9 9.8 9.8 0 0 1 6.7 2.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.8 9.8 0 0 1-6.7-2.7L3 16"/><path d="M8 16H3v5"/>',
+  'history':'<path d="M3 12a9 9 0 1 0 9-9 9.8 9.8 0 0 0-6.7 2.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+  'settings':'<path d="M12.2 2h-.4a2 2 0 0 0-2 2v.2a2 2 0 0 1-1 1.7l-.4.3a2 2 0 0 1-2 0l-.2-.1a2 2 0 0 0-2.7.7l-.2.4a2 2 0 0 0 .7 2.7l.2.1a2 2 0 0 1 1 1.7v.5a2 2 0 0 1-1 1.7l-.2.1a2 2 0 0 0-.7 2.7l.2.4a2 2 0 0 0 2.7.7l.2-.1a2 2 0 0 1 2 0l.4.3a2 2 0 0 1 1 1.7V20a2 2 0 0 0 2 2h.4a2 2 0 0 0 2-2v-.2a2 2 0 0 1 1-1.7l.4-.3a2 2 0 0 1 2 0l.2.1a2 2 0 0 0 2.7-.7l.2-.4a2 2 0 0 0-.7-2.7l-.2-.1a2 2 0 0 1-1-1.7v-.5a2 2 0 0 1 1-1.7l.2-.1a2 2 0 0 0 .7-2.7l-.2-.4a2 2 0 0 0-2.7-.7l-.2.1a2 2 0 0 1-2 0l-.4-.3a2 2 0 0 1-1-1.7V4a2 2 0 0 0-2-2Z"/><circle cx="12" cy="12" r="3"/>',
+  'command':'<path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/>',
+  'book':'<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3Z"/>',
+  'notebook':'<path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M16 2v20"/>',
+  'git-branch':'<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+  'git-commit':'<circle cx="12" cy="12" r="3"/><path d="M3 12h6"/><path d="M15 12h6"/>',
+  'database':'<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>',
+  'alert':'<path d="m21.7 18-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  'info':'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  'bug':'<path d="m8 2 1.9 1.9"/><path d="m14.1 3.9 1.9-1.9"/><path d="M8 7.5A4 4 0 0 1 12 5a4 4 0 0 1 4 2.5"/><path d="M6 12a6 6 0 0 0 12 0v-1a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2Z"/><path d="M3 10h3"/><path d="M18 10h3"/><path d="M3 17h3"/><path d="M18 17h3"/>',
+  'bold':'<path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"/>',
+  'italic':'<path d="M19 4h-9"/><path d="M14 20H5"/><path d="M15 4 9 20"/>',
+  'strike':'<path d="M16 4H9a3 3 0 0 0-2.8 4"/><path d="M14 12a4 4 0 0 1 0 8H6"/><path d="M4 12h16"/>',
+  'code':'<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>',
+  'file-code':'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m10 13-2 2 2 2"/><path d="m14 13 2 2-2 2"/>',
+  'highlighter':'<path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4Z"/>',
+  'quote':'<path d="M17 6H3"/><path d="M21 12H8"/><path d="M21 18H8"/><path d="M3 12v6"/>',
+  'heading':'<path d="M6 12h12"/><path d="M6 20V4"/><path d="M18 20V4"/>',
+  'image':'<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
+  'eye':'<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7"/><circle cx="12" cy="12" r="3"/>',
+  'pin':'<path d="M12 17v5"/><path d="M9 10.8V4h6v6.8a2 2 0 0 0 .6 1.4l1.9 1.9a1 1 0 0 1-.7 1.7H7.2a1 1 0 0 1-.7-1.7l1.9-1.9a2 2 0 0 0 .6-1.4Z"/>',
+  'filter':'<path d="M22 3H2l8 9.5V19l4 2v-8.5Z"/>',
+  'more':'<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  'paperclip':'<path d="m21 8-9.6 9.6a5 5 0 0 1-7-7l9.6-9.6a3.5 3.5 0 0 1 5 5L9.4 15.5a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
+  'bookmark':'<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/>',
+  'external':'<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  'terminal':'<path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>',
+  'play':'<path d="M6 3v18l15-9Z"/>',
+  'home':'<path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/>',
+  'zap':'<path d="M13 2 3 14h9l-1 8 10-12h-9Z"/>',
+  'pen':'<path d="M17 3a2.8 2.8 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
+  'bell':'<path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/><path d="M4 17h16a2 2 0 0 1-1.5-2V11a6.5 6.5 0 1 0-13 0v4A2 2 0 0 1 4 17"/>',
+  'plug':'<path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8h12v5a6 6 0 0 1-12 0Z"/>',
+};
+document.querySelectorAll('[data-ic]').forEach(el => {
+  const d = P[el.dataset.ic]; if (!d) return;
+  const cls = el.className || 'ic';
+  el.outerHTML = `<svg class="${cls.includes('ic') ? cls : 'ic ' + cls}" viewBox="0 0 24 24">${d}</svg>`;
+});
+// The class list above sometimes reads "ic-sm" alone; normalise so stroke rules apply.
+document.querySelectorAll('svg').forEach(s => { if (!s.classList.contains('ic')) s.classList.add('ic'); });
+
+/* ═════════════════════════════════════════════════════════════════════════
+   Interactions — enough to explore the layout, nothing more.
+   ═════════════════════════════════════════════════════════════════════════ */
+const $  = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+
+function toast(msg) {
+  $('#toastMsg').textContent = msg;
+  $('#toast').classList.add('on');
+  clearTimeout(window.__t); window.__t = setTimeout(() => $('#toast').classList.remove('on'), 1900);
+}
+
+// Left activity bar → view or sidebar section
+const SIDE_TITLES = { files: 'Note', tags: 'Metadati e tag', types: 'Tipi e viste' };
+$$('.activity .act').forEach(btn => btn.addEventListener('click', () => {
+  const view = btn.dataset.view, side = btn.dataset.side;
+  if (!view && !side) return;
+  $$('.activity .act').forEach(b => b.classList.toggle('on', b === btn));
+  if (side) {
+    $$('.side-view').forEach(v => v.classList.toggle('on', v.dataset.sideView === side));
+    $('#sideTitle').textContent = SIDE_TITLES[side] || side;
+    setView('editor');
+  } else {
+    setView(view);
+  }
+}));
+
+function setView(name) {
+  $$('.view').forEach(v => v.classList.toggle('on', v.dataset.view === name));
+  // The formatting toolbar belongs to the editor only.
+  $('#editorToolbar').style.display = name === 'editor' ? 'flex' : 'none';
+  if (name === 'graph') layoutGraph();
+}
+
+// Right panel tabs
+$$('.rtab').forEach(t => t.addEventListener('click', () => {
+  $$('.rtab').forEach(x => x.classList.toggle('on', x === t));
+  $$('.rview').forEach(v => v.classList.toggle('on', v.dataset.rview === t.dataset.rtab));
+}));
+
+// Bottom dock
+$$('.dtab').forEach(t => t.addEventListener('click', () => {
+  $$('.dtab').forEach(x => x.classList.toggle('on', x === t));
+  $$('.dock-view').forEach(v => v.classList.toggle('on', v.dataset.dockView === t.dataset.dock));
+}));
+$('#hideDock').addEventListener('click', () => $('#dock').classList.toggle('hidden'));
+
+// Collapsible sidebar sections
+$$('.sec-head').forEach(h => h.addEventListener('click', () => {
+  h.classList.toggle('collapsed');
+  let n = h.nextElementSibling;
+  while (n && n.classList.contains('row')) { n.style.display = h.classList.contains('collapsed') ? 'none' : ''; n = n.nextElementSibling; }
+}));
+
+// Rows / tabs / chips — plain selection feedback
+$$('.row').forEach(r => r.addEventListener('click', () => {
+  $$('.row').forEach(x => x.classList.remove('on')); r.classList.add('on');
+}));
+$$('.tab').forEach(t => t.addEventListener('click', () => {
+  $$('.tab').forEach(x => x.classList.remove('on')); t.classList.add('on');
+}));
+$$('.hit').forEach(h => h.addEventListener('click', () => {
+  $$('.hit').forEach(x => x.classList.remove('on')); h.classList.add('on');
+}));
+$$('.chip.tag').forEach(c => c.addEventListener('click', () => c.classList.toggle('on')));
+$$('.opt').forEach(o => o.addEventListener('click', () => o.classList.toggle('on')));
+$$('.tbtn').forEach(b => b.addEventListener('click', () => b.classList.toggle('on')));
+$$('.cb').forEach(c => c.addEventListener('click', () => {
+  c.classList.toggle('done');
+  c.innerHTML = c.classList.contains('done') ? `<svg class="ic ic-sm" viewBox="0 0 24 24">${P.check}</svg>` : '';
+  c.closest('li')?.classList.toggle('done', c.classList.contains('done'));
+}));
+
+// Callout folding
+$$('.callout .ch').forEach(h => h.addEventListener('click', () => h.parentElement.classList.toggle('folded')));
+
+// The sync button — cycles through its real states so the whole machine is visible
+const SYNC_STATES = [
+  { s:'has-changes', icon:'refresh-cw', label:'3 note da inviare' },
+  { s:'syncing',     icon:'refresh-cw', label:'Sincronizzo…' },
+  { s:'synced',      icon:'check',      label:'Allineato · casa, ora' },
+  { s:'behind',      icon:'refresh-cw', label:'2 note in arrivo da casa' },
+  { s:'diverged',    icon:'refresh-cw', label:'3 da inviare · 2 in arrivo' },
+  { s:'conflict',    icon:'alert',      label:'1 conflitto da risolvere' },
+  { s:'offline',     icon:'alert',      label:'Non raggiungibile · riprovo' },
+];
+let syncI = 0;
+$('#syncMain').addEventListener('click', () => {
+  syncI = (syncI + 1) % SYNC_STATES.length;
+  const st = SYNC_STATES[syncI];
+  const el = $('#sync'); el.dataset.state = st.s;
+  el.querySelector('.label').textContent = st.label;
+  el.querySelector('svg').outerHTML = `<svg class="ic ic-sm" viewBox="0 0 24 24">${P[st.icon]}</svg>`;
+  if (st.s === 'conflict') { $$('.dtab').forEach(x => x.classList.toggle('on', x.dataset.dock === 'conflicts'));
+    $$('.dock-view').forEach(v => v.classList.toggle('on', v.dataset.dockView === 'conflicts'));
+    $('#dock').classList.remove('hidden'); }
+  toast('Stato sync: ' + st.s);
+});
+
+// Command palette
+const ov = $('#overlay');
+$('#openPalette').addEventListener('click', () => { ov.classList.add('on'); $('#paletteInput').focus(); });
+ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('on'); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') ov.classList.remove('on');
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); ov.classList.add('on'); $('#paletteInput').focus(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') { e.preventDefault(); $('#dock').classList.toggle('hidden'); }
+});
+$$('.pitem').forEach(p => p.addEventListener('click', () => { ov.classList.remove('on'); toast(p.querySelector('.grow').textContent); }));
+
+// Wikilinks
+$$('.doc a.wl').forEach(a => a.addEventListener('click', () =>
+  toast(a.classList.contains('broken') ? 'La nota non esiste — Invio la crea' : 'Apro ' + a.textContent)));
+$$('.codelink').forEach(a => a.addEventListener('click', () => toast('Apro in Corvus alla revisione pinnata')));
+$$('.act-btn').forEach(a => a.addEventListener('click', () => toast('Apro il blocco in Picus')));
+
+/* ═════════════════════════════════════════════════════════════════════════
+   Graph — a small spring layout, ~40 lines, no library.
+   ═════════════════════════════════════════════════════════════════════════ */
+const TYPE_COLOR = { bug:'#f28b82', improve:'#8fce6a', design:'#b58cf0', decision:'#7c9cf5', daily:'#e8a857', missing:'#4a4e57' };
+const NODES = [
+  { id:'crash',   t:'bug',      n:'Crash all\'avvio',           w:9 },
+  { id:'profili', t:'decision', n:'Profili e config',           w:12 },
+  { id:'bringup', t:'missing',  n:'Bring-up macchina pulita',   w:4 },
+  { id:'d31',     t:'daily',    n:'2026-07-31',                 w:6 },
+  { id:'d30',     t:'daily',    n:'2026-07-30',                 w:6 },
+  { id:'d29',     t:'daily',    n:'2026-07-29',                 w:5 },
+  { id:'gentle',  t:'improve',  n:'Bring-up più gentile',       w:7 },
+  { id:'sync',    t:'improve',  n:'Sync a pulsante',            w:8 },
+  { id:'pillar',  t:'design',   n:'Geode — pillar',             w:11 },
+  { id:'econ',    t:'design',   n:'Geode — economia',           w:9 },
+  { id:'audio',   t:'design',   n:'Geode — audio',              w:7 },
+  { id:'findfile',t:'bug',      n:'Picus find in file',         w:6 },
+  { id:'adr-be',  t:'decision', n:'ADR — Model D',              w:10 },
+  { id:'merula',  t:'bug',      n:'Merula click sul loop',      w:5 },
+];
+const EDGES = [
+  ['crash','profili'],['crash','bringup'],['crash','gentle'],['d31','crash'],['d29','crash'],
+  ['gentle','profili'],['profili','adr-be'],['sync','adr-be'],['d30','econ'],['econ','pillar'],
+  ['audio','pillar'],['d30','audio'],['findfile','sync'],['merula','audio'],['d31','sync'],['econ','audio'],
+];
+let laidOut = false;
+function layoutGraph() {
+  const svg = $('#graph'); if (!svg) return;
+  const W = svg.clientWidth || 900, H = svg.clientHeight || 500;
+  if (laidOut) return;
+  laidOut = true;
+
+  const idx = Object.fromEntries(NODES.map((n, i) => [n.id, i]));
+  // Deterministic start positions on a circle — no Math.random, so it looks the same every run.
+  NODES.forEach((n, i) => {
+    const a = (i / NODES.length) * Math.PI * 2;
+    n.x = W / 2 + Math.cos(a) * Math.min(W, H) * 0.3;
+    n.y = H / 2 + Math.sin(a) * Math.min(W, H) * 0.3;
+    n.vx = n.vy = 0;
+  });
+
+  for (let step = 0; step < 420; step++) {
+    // repulsion
+    for (let i = 0; i < NODES.length; i++) for (let j = i + 1; j < NODES.length; j++) {
+      const a = NODES[i], b = NODES[j];
+      let dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy || 0.01;
+      const f = 26000 / d2, d = Math.sqrt(d2);
+      const fx = (dx / d) * f, fy = (dy / d) * f;
+      a.vx -= fx; a.vy -= fy; b.vx += fx; b.vy += fy;
+    }
+    // springs
+    for (const [s, t] of EDGES) {
+      const a = NODES[idx[s]], b = NODES[idx[t]];
+      const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 0.01;
+      const f = (d - 135) * 0.035;
+      const fx = (dx / d) * f, fy = (dy / d) * f;
+      a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+    }
+    // centring + damping
+    for (const n of NODES) {
+      n.vx += (W / 2 - n.x) * 0.004; n.vy += (H / 2 - n.y) * 0.004;
+      n.vx *= 0.82; n.vy *= 0.82;
+      n.x += n.vx; n.y += n.vy;
+      n.x = Math.max(60, Math.min(W - 60, n.x));
+      n.y = Math.max(40, Math.min(H - 40, n.y));
+    }
+  }
+
+  svg.innerHTML =
+    EDGES.map(([s, t]) => {
+      const a = NODES[idx[s]], b = NODES[idx[t]];
+      return `<line class="edge" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`;
+    }).join('') +
+    NODES.map(n => `<g class="node"><circle cx="${n.x}" cy="${n.y}" r="${n.w}" fill="${TYPE_COLOR[n.t]}" ${
+      n.t === 'missing' ? 'stroke="#6a6f7a" stroke-dasharray="3 2" fill="none"' : 'fill-opacity=".85"'
+    }/><text x="${n.x}" y="${n.y + n.w + 12}" text-anchor="middle">${n.n}</text></g>`).join('');
+}
+new ResizeObserver(() => { laidOut = false; if ($('.view[data-view="graph"]').classList.contains('on')) layoutGraph(); })
+  .observe($('#graph'));
+</script>
+</body>
+</html>

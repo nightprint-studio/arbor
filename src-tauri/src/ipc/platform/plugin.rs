@@ -17,7 +17,7 @@
 
 use serde::Serialize;
 
-use arbor_plugin_types::prelude::Manifest;
+use arbor_plugin_types::prelude::{hook_names, Manifest};
 
 use arbor_plugin_core::prelude::ToolchainEntry;
 use crate::error::AppError;
@@ -395,7 +395,7 @@ fn get_container(
 // ===========================================================================
 
 /// Shared reload: cancel plugin jobs, reload the host + restart its schedulers,
-/// re-fire `on_repo_open` for every open tab (plus `on_tab_switch` for the
+/// re-fire `arbor:repo_open` for every open tab (plus `arbor:tab_switch` for the
 /// active one so plugins that derive `current_repo` from the last lifecycle
 /// event land on the right tab), then broadcast `arbor://plugins-reloaded`.
 /// Used by `reload_plugins` and the "enable" branch of `set_plugins_enabled`,
@@ -416,16 +416,16 @@ pub(crate) fn reload_runtime(state: &AppState) -> Result<(), AppError> {
     let opens: Vec<(String, String, String)> = crate::ipc::open_repo_tabs(state);
     if !opens.is_empty() {
         for (tab_id, path, name) in &opens {
-            state.fire_hook("on_repo_open", serde_json::json!({
+            state.fire_hook(hook_names::arbor::REPO_OPEN, serde_json::json!({
                 "tab_id": tab_id, "path": path, "name": name,
             }));
         }
-        // `list_open()` order is non-deterministic; fire one final `on_tab_switch`
+        // `list_open()` order is non-deterministic; fire one final `arbor:tab_switch`
         // for the active tab so plugins keyed on the last event land correctly.
         let active_tab = state.active_tab_id.lock().ok().and_then(|g| g.clone());
         if let Some(tid) = active_tab {
             if let Some((tab_id, path, name)) = opens.iter().find(|(t, _, _)| t == &tid) {
-                state.fire_hook("on_tab_switch", serde_json::json!({
+                state.fire_hook(hook_names::arbor::TAB_SWITCH, serde_json::json!({
                     "tab_id": tab_id, "path": path, "name": name,
                 }));
             }

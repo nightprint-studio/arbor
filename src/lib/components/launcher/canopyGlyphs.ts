@@ -49,6 +49,17 @@ export const GLYPHS: Record<string, GlyphPart[]> = {
     f('circle', { cx: 15, cy: 12, r: 1.15 }),
     f('circle', { cx: 15, cy: 16.5, r: 1.15 }),
   ],
+  // jay holding an acorn, over the two it already cached
+  garrulus: [
+    f('ellipse', { cx: 10, cy: 12.5, rx: 4.4, ry: 3.1 }),
+    f('circle', { cx: 7.4, cy: 8.8, r: 2.1 }),
+    s('path', { d: 'M5.6 7.2 l-.6 -2.6' }),          // the jay's crest
+    f('path', { d: 'M5.6 8.4 l-2.4 .6 2.2 1 z' }),   // beak
+    s('path', { d: 'M13.4 14.6 l4.6 4.4' }),         // tail
+    f('circle', { cx: 16.6, cy: 6.4, r: 1.5 }),      // the acorn in the beak
+    f('circle', { cx: 19, cy: 12, r: 1.1 }),         // …and the cached ones
+    f('circle', { cx: 19, cy: 16, r: 1.1 }),
+  ],
   // nuthatch head-down on trunk
   sitta: [
     s('line', { x1: 8, y1: 4, x2: 8, y2: 20 }),

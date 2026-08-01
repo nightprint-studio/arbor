@@ -169,6 +169,8 @@ A handler is a plain function annotated `#[arbor_rpc::handler]` that **self-regi
 (`crates/products/corvus/be/src/stash.rs`):
 
 ```rust
+use corvus_core::prelude::hooks;
+
 #[arbor_rpc::handler]
 fn stash_save(
     state: &CorvusState,
@@ -179,7 +181,7 @@ fn stash_save(
     let workdir = { let repo = open(state, &tab_id)?; repo.workdir()... };
     let entry = corvus_git::stash::stash_save(&git(state), &workdir, ...)
         .map_err(|e| e.to_string())?;
-    state.fire_hook("on_stash_push", serde_json::json!({
+    state.fire_hook(hooks::STASH_PUSH, serde_json::json!({
         "tab_id": tab_id, "index": entry.index, ...
     }));
     Ok(entry)
@@ -199,6 +201,17 @@ Conventions (do all of these):
   the FE matches on. Keep the OOP string **byte-identical** to the in-process path
   (`.map_err(|e| e.to_string())` matching the shell's mapping).
 - **Hooks** fire inline *after* the repo handle drops, via `state.fire_hook(name, ctx)`.
+- **Hook names are always constants, never literals.** Every name lives once in
+  `arbor_plugin_types::hook_names`, re-exported by the product's `hooks.rs`
+  (`corvus_core::prelude::hooks`, `garrulus_core::prelude::hooks`) — the same constant the
+  entry in `HOOK_CATALOG` is built from. A literal compiles, fires, and reaches nobody: it
+  is absent from the catalog, so it bypasses the manifest opt-in *and* no subscription can
+  ever resolve to it. If a name you need is missing, add it to `hook_names` and give it a
+  catalog entry in the same pass — the completeness tests require both halves.
+- **Names are `<namespace>:<event>`.** The namespace is the product that owns the *concept*
+  (`corvus:commit`), `arbor:` for anything the host runtime owns (plugin lifecycle, views,
+  theme, which project is open), or a subsystem's own (`pipeline:started`). The event half
+  never repeats the namespace: `garrulus:note_saved`, not `garrulus:vault_note_saved`.
 - **Async handlers** (`async fn`, e.g. network/provider calls) register as `Kind::Async`
   and are served by `block_on` on the runtime **handle** on a serve-loop worker thread —
   never on the runtime itself.
@@ -225,10 +238,27 @@ the product BE** (not the shell).
 - The host handle is published module-statically via `host_handle::install`/`host()`, kept
   **out** of `*State` so the core crate stays mlua-free.
 
-A **host-pure** BE (no product namespaces, no vetoable hooks) is tiny — see
-`sitta/be/src/plugin.rs`: register the shared `HOOK_CATALOG`, bind one `LuaHookListener`,
-install only the base `arbor.*` namespaces with an empty `extra` list. If a third product
-needs this, promote it to a shared `arbor-plugin-be` crate.
+A **host-pure** BE (no product namespaces, no vetoable hooks) writes no plugin module at
+all — `arbor-plugin-core`'s prelude ships the pair ready-made, so the whole wiring is two
+lines in `main`:
+
+```rust
+app.plugin_host("sitta", arbor_plugin_core::prelude::host_pure_hook_dispatcher);
+app.api_installer(arbor_plugin_core::prelude::host_pure_api_installer());
+```
+
+`host_pure_hook_dispatcher` registers the shared `HOOK_CATALOG` with nothing vetoable and
+binds one `LuaHookListener`; `host_pure_api_installer` publishes only the base `arbor.*`
+namespaces (empty `extra` list). `sitta-be`, `tyto-be` and `garrulus-be` all use it.
+`build_hook_dispatcher` is the same builder with `corvus:pre_commit` marked vetoable (the shell
+and `corvus-be`); `build_hook_dispatcher_with(host, &[…])` is the parametrised form behind
+both. A product that grows its own namespaces graduates to a real `LuaApiInstaller` passing
+them as `extra`, the way corvus does — it does not fork the host-pure one.
+
+**If the BE also overrides `on_ready`, it must spawn the plugin reload itself.** The
+override *replaces* `App`'s default, and that default's entire body is the reload — omit it
+and the host loads zero plugins while every hook fire silently reaches nobody. See
+`garrulus/be/src/main.rs`, the only BE that combines the two.
 
 ---
 

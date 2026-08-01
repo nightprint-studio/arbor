@@ -14,6 +14,8 @@
 //! The CI-provider REST handlers (GitHub Actions / GitLab CI) live in
 //! [`crate::ipc::corvus::ci`]; this is the local plugin-defined engine.
 
+use arbor_plugin_types::prelude::hook_names;
+
 use crate::error::{AppError, Result};
 use crate::ipc::corvus;
 use crate::pipeline::{PipelineDef, PipelineRun};
@@ -146,7 +148,7 @@ fn run_pipeline(
 ///
 /// A def with empty `stages` is a *stub* the plugin registered upfront so
 /// the panel has something to show. Stubs cannot be replayed verbatim — we
-/// delegate to the plugin's `on_pipeline_run_request` hook so it can
+/// delegate to the plugin's `pipeline:run_request` hook so it can
 /// materialise stages (typically by re-compiling a profile or run config)
 /// and call `arbor.pipeline.run` itself. If the plugin has no such hook,
 /// we surface a clear error rather than spawning a 0-step ghost run.
@@ -176,16 +178,24 @@ fn request_pipeline_run(
         // Def found, but stages are empty → must route through the plugin.
         Some(true) => {
             let host = state.lock_plugin_host()?;
-            if host.plugin_has_handler(&plugin, "on_pipeline_run_request") {
+            // The probe and the fire MUST use the same constant: a mismatch
+            // tells the plugin "you did not subscribe" no matter what it did.
+            if host.plugin_has_handler(&plugin, hook_names::pipeline::RUN_REQUEST) {
                 let ctx = serde_json::json!({
                     "pipeline_id": pipeline_id,
                     "tab_id":      tab_id,
                 }).to_string();
-                arbor_plugin_core::prelude::fire_on(&host, &plugin, "on_pipeline_run_request", &ctx);
+                arbor_plugin_core::prelude::fire_on(
+                    &host,
+                    &plugin,
+                    hook_names::pipeline::RUN_REQUEST,
+                    &ctx,
+                );
                 Ok(None)
             } else {
                 Err(AppError::Other(format!(
-                    "pipeline '{pipeline_id}' is a placeholder — its owning plugin '{plugin}' has no `on_pipeline_run_request` hook to compile it. Launch it from the plugin's own UI first."
+                    "pipeline '{pipeline_id}' is a placeholder — its owning plugin '{plugin}' has no `{}` hook to compile it. Launch it from the plugin's own UI first.",
+                    hook_names::pipeline::RUN_REQUEST
                 )))
             }
         }

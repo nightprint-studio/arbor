@@ -315,7 +315,7 @@ impl RepoManager {
     }
 
     /// Returns `(tab_id, path, name)` for every open (non-suspended) tab.
-    /// Used by plugin-reload to re-fire `on_repo_open` for all active tabs
+    /// Used by plugin-reload to re-fire `corvus:repo_open` for all active tabs
     /// without accidentally forcing a suspended repo back into memory.
     pub fn list_open(&self) -> Vec<(String, String, String)> {
         self.repos

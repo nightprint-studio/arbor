@@ -51,7 +51,7 @@
     <tr><td>⚙️ <strong>Settings</strong></td><td>Open the plugin's settings panel</td><td>Visible only when the plugin registered a settings container via <code>arbor.ui.settings.panel(...)</code>. Disabled while the plugin is off.</td></tr>
     <tr><td>ℹ️ <strong>Info</strong></td><td>Open the <em>Plugin Info</em> modal</td><td>Detailed read-out of identity, permissions, hooks, schedulers + maintenance actions (see below).</td></tr>
     <tr><td>🗑 <strong>Uninstall</strong></td><td>Permanently remove the plugin</td><td>Deletes the <code>plugins/&lt;name&gt;/</code> folder, the global <code>plugin_data/&lt;name&gt;/</code> store, every per-repo <code>.arbor/plugins/&lt;name&gt;/</code>, and the persisted enable-state. Shows a cascade-warning modal if other enabled plugins still depend on it.</td></tr>
-    <tr><td>⏻ <strong>Power</strong></td><td>Enable / Disable</td><td>Persisted across restarts. Disabling stops every scheduler, fires <code>on_plugin_unload</code>, and closes any sidebar / panel that the plugin owned. Re-enabling reloads the plugin and re-fires <code>on_plugin_load</code>.</td></tr>
+    <tr><td>⏻ <strong>Power</strong></td><td>Enable / Disable</td><td>Persisted across restarts. Disabling stops every scheduler, fires <code>arbor:plugin_unload</code>, and closes any sidebar / panel that the plugin owned. Re-enabling reloads the plugin and re-fires <code>arbor:plugin_load</code>.</td></tr>
   </tbody>
 </table>
 
@@ -120,27 +120,30 @@ env_read             = ["PATH", "JAVA_HOME"]
 # settings_read_others = false    # arbor.settings.read other plugins' globals
 # command_invoke       = false    # arbor.command.fire — invoke registered commands
 
+# Hook names are "<product>:<event>"; quote them, a colon is not a legal
+# bare TOML key. "arbor:" hooks fire under every product; "corvus:" ones only
+# where a git repo is open. The prefix is optional when you subscribe from Lua.
 [hooks]
-on_plugin_load   = true   # fires once after main.lua executes (init/constructor)
-on_plugin_unload = true   # fires when Arbor shuts down (cleanup)
-on_repo_open     = true   # fires when a repo tab becomes active
-on_repo_close  = true   # fires when a repo tab is closed
-on_repo_init   = true   # fires when a new repo is initialized from a non-git folder
-on_tab_switch  = true   # fires on every tab switch
-on_commit        = true
-on_push          = true
-on_pull          = true
-on_checkout      = true
-on_fetch         = true
-on_branch_create = true
-on_branch_delete = true
-on_branch_rename = true
-on_tag_create    = true
-on_tag_delete    = true
-on_stash_push    = true
-on_stash_pop     = true
-on_rebase_start  = true
-on_rebase_abort  = true
+"arbor:plugin_load"    = true  # fires once after main.lua executes (init/constructor)
+"arbor:plugin_unload"  = true  # fires when Arbor shuts down (cleanup)
+"arbor:repo_open"      = true  # fires when a repo tab becomes active
+"arbor:repo_close"     = true  # fires when a repo tab is closed
+"arbor:tab_switch"     = true  # fires on every tab switch
+"corvus:repo_init"     = true  # fires when a new repo is initialized from a non-git folder
+"corvus:commit"        = true
+"corvus:push"          = true
+"corvus:pull"          = true
+"corvus:checkout"      = true
+"corvus:fetch"         = true
+"corvus:branch_create" = true
+"corvus:branch_delete" = true
+"corvus:branch_rename" = true
+"corvus:tag_create"    = true
+"corvus:tag_delete"    = true
+"corvus:stash_push"    = true
+"corvus:stash_pop"     = true
+"corvus:rebase_start"  = true
+"corvus:rebase_abort"  = true
 
 # Background scheduler — opt-in only. Schedule data (action, trigger,
 # focus gating, …) is declared from main.lua via arbor.scheduler.register.
@@ -195,24 +198,24 @@ enabled = true
 local state = require("state")        -- sub-module inside this plugin dir
 
 -- ── Lifecycle ──────────────────────────────────────────────────────────────────
--- on_plugin_load fires once AFTER main.lua finishes executing.
+-- arbor:plugin_load fires once AFTER main.lua finishes executing.
 -- Ideal for one-time initialisation (load settings, register combos, etc.)
-arbor.events.on("on_plugin_load", function(ctx)
+arbor.events.on("arbor:plugin_load", function(ctx)
   arbor.log.info("loaded — api_version=" .. ctx.api_version)
   state.init()
 end)
 
 -- ── Hooks ──────────────────────────────────────────────────────────────────────
-arbor.events.on("on_repo_open", function(ctx)
+arbor.events.on("arbor:repo_open", function(ctx)
   state.set_repo(ctx.repo)
   arbor.log.debug("repo_open: " .. ctx.repo)
 end)
 
-arbor.events.on("on_commit", function(ctx)
+arbor.events.on("corvus:commit", function(ctx)
   arbor.notify{ message = "Committed: " .. ctx.message, level = "success" }
 end)
 
-arbor.events.on("on_branch_rename", function(ctx)
+arbor.events.on("corvus:branch_rename", function(ctx)
   -- ctx.tab_id   : string  — the repository tab
   -- ctx.old_name : string  — previous branch name
   -- ctx.new_name : string  — new branch name
@@ -247,7 +250,7 @@ local state     = require("state")
 local combo     = require("ui.combo")
 local run_combo = require("ui.run_combo")
 
-arbor.events.on("on_plugin_load", function(ctx)
+arbor.events.on("arbor:plugin_load", function(ctx)
   combo.register()      -- 🔨 Build combo (right)
   run_combo.register()  -- ▶  Run combo (left)
 
@@ -255,7 +258,7 @@ arbor.events.on("on_plugin_load", function(ctx)
   arbor.keybinding.register({ key = "F5", action = "run:run",     description = "Run selected"   })
 end)
 
-arbor.events.on("on_repo_open", function(ctx)
+arbor.events.on("arbor:repo_open", function(ctx)
   state.set_repo(ctx.path)
   combo.refresh()
   run_combo.refresh()

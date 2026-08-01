@@ -9,7 +9,7 @@
 //! `AppError`'s).
 //!
 //! **Hooks fire here** (plugin-relocation Wave 0): `save_commit_note` →
-//! `on_note_saved`, `delete_commit_note` → `on_note_deleted`, fired inline after
+//! `corvus:note_saved`, `delete_commit_note` → `corvus:note_deleted`, fired inline after
 //! the write, same payload as in-process.
 //!
 //! `push_note_namespace` pushes `refs/notes/<ns>` to origin — its git smart-HTTP
@@ -18,7 +18,7 @@
 //! dispatch worker thread; the credential callback blocks on the shell's reply,
 //! delivered by the serve loop's reader thread (the reverse-channel reentrancy).
 
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{hooks, CorvusState};
 use corvus_git::prelude::{CommitNote, NoteRemoteStatus};
 use serde_json::json;
 
@@ -60,7 +60,7 @@ fn save_commit_note(
             .map_err(|e| e.to_string())?;
     }
     state.fire_hook(
-        "on_note_saved",
+        hooks::NOTE_SAVED,
         json!({ "tab_id": &tab_id, "commit_oid": &commit_oid, "namespace": &namespace }),
     );
     Ok(())
@@ -91,7 +91,7 @@ fn delete_commit_note(
             .map_err(|e| e.to_string())?;
     }
     state.fire_hook(
-        "on_note_deleted",
+        hooks::NOTE_DELETED,
         json!({ "tab_id": &tab_id, "commit_oid": &commit_oid, "namespace": &namespace }),
     );
     Ok(())

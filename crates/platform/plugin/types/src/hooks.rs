@@ -1,141 +1,197 @@
-//! `[hooks]` section of `plugin.toml`: per-hook opt-in flags the host uses to
-//! decide whether to route a lifecycle event to this plugin.
+//! `[hooks]` section of `plugin.toml`: the per-hook opt-in the host consults
+//! before routing a broadcast to a plugin.
 //!
-//! The canonical catalog of hook names + ctx schemas lives in
-//! [`crate::hook_catalog`].
+//! ```toml
+//! [hooks]
+//! "arbor:plugin_load"  = true
+//! "corvus:commit"      = true
+//! "garrulus:*"         = true   # every vault hook
+//! ```
+//!
+//! ## Why this is a map and not a struct of `bool` fields
+//!
+//! It used to be 58 named fields plus a `match` with 58 arms, and it had
+//! already drifted: eight catalog hooks had no field at all and reached every
+//! plugin through the match's `_ => true` fallback, whether or not the plugin
+//! asked for them. Adding a hook meant editing three lists in lockstep and
+//! nothing failed when you edited two.
+//!
+//! Keying on the name instead makes [`crate::hook_catalog`] the single
+//! authority: a name the catalog knows requires an explicit opt-in, and a name
+//! it does not know is routed unconditionally, because that is precisely the
+//! set of names the manifest cannot enumerate ahead of time — plugin-defined
+//! events, command / timer / job callbacks, scheduler-fired actions.
+//!
+//! Note this is only the *broadcast* gate. Targeted delivery (`fire_on`: view
+//! hooks, job results, per-plugin pipeline requests) never passes through here
+//! — the payload is already addressed to one plugin.
+
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+use crate::hook_catalog;
+
+/// The declared hook subscriptions of one plugin.
+///
+/// Keys are fully-qualified hook names (`"corvus:commit"`), or a namespace
+/// wildcard (`"corvus:*"`). Values are `bool` so a wildcard can be narrowed by
+/// an explicit `false` on a single hook.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct Hooks {
-    #[serde(default)] pub on_repo_open:   bool,
-    #[serde(default)] pub on_repo_close:  bool,
-    #[serde(default)] pub on_repo_init:   bool,
-    /// Fired when a repo is permanently removed from Arbor:
-    ///   · `delete_registry_repo` — full deregistration, OR
-    ///   · `remove_repo_from_workspace` — when the repo was in its last
-    ///     workspace AND is not currently open in any tab.
-    /// Use this to drop per-repo caches stored outside the repo (e.g.
-    /// deps-explorer's tree-cache keyed by absolute paths).
-    #[serde(default)] pub on_repo_deregistered: bool,
-    #[serde(default)] pub on_plugin_load: bool,
-    #[serde(default)] pub on_tab_switch:  bool,
-    #[serde(default)] pub on_commit:      bool,
-    #[serde(default)] pub on_push:        bool,
-    #[serde(default)] pub on_checkout:    bool,
-    #[serde(default)] pub on_fetch:       bool,
-    // Git Flow lifecycle hooks
-    #[serde(default)] pub on_flow_init:           bool,
-    #[serde(default)] pub on_flow_feature_start:  bool,
-    #[serde(default)] pub on_flow_feature_finish: bool,
-    #[serde(default)] pub on_flow_release_start:  bool,
-    #[serde(default)] pub on_flow_release_finish: bool,
-    #[serde(default)] pub on_flow_hotfix_start:   bool,
-    #[serde(default)] pub on_flow_hotfix_finish:  bool,
-    // Pipeline lifecycle hooks
-    #[serde(default)] pub on_pipeline_started:   bool,
-    #[serde(default)] pub on_pipeline_step_done: bool,
-    #[serde(default)] pub on_pipeline_done:      bool,
-    // Merge Request / Pull Request hooks
-    #[serde(default)] pub on_mr_opened:  bool,
-    #[serde(default)] pub on_mr_merged:  bool,
-    #[serde(default)] pub on_mr_updated: bool,
-    // Remote hooks
-    #[serde(default)] pub on_pull:           bool,
-    // Branch / tag hooks
-    #[serde(default)] pub on_branch_create:  bool,
-    #[serde(default)] pub on_branch_delete:  bool,
-    #[serde(default)] pub on_branch_rename:  bool,
-    #[serde(default)] pub on_tag_create:     bool,
-    #[serde(default)] pub on_tag_delete:     bool,
-    // Stash hooks
-    #[serde(default)] pub on_stash_push:     bool,
-    #[serde(default)] pub on_stash_pop:      bool,
-    // Rebase hooks
-    #[serde(default)] pub on_rebase_start:   bool,
-    #[serde(default)] pub on_rebase_abort:   bool,
-    // Issues (Linear / Jira) hooks
-    #[serde(default)] pub on_issue_linked:       bool,
-    #[serde(default)] pub on_issue_transitioned: bool,
-    // Git Notes hooks
-    #[serde(default)] pub on_note_saved:   bool,
-    #[serde(default)] pub on_note_deleted: bool,
-
-    // Workspace hooks
-    #[serde(default)] pub on_workspace_created:      bool,
-    #[serde(default)] pub on_workspace_updated:      bool,
-    #[serde(default)] pub on_workspace_deleted:      bool,
-    #[serde(default)] pub on_workspace_switched:     bool,
-    #[serde(default)] pub on_workspace_repo_added:   bool,
-    #[serde(default)] pub on_workspace_repo_removed: bool,
-
-    // Linked Worktrees (cross-project sync) hooks
-    #[serde(default)] pub on_worktree_link_sync_started:    bool,
-    #[serde(default)] pub on_worktree_link_sync_done:       bool,
-    #[serde(default)] pub on_worktree_link_member_added:    bool,
-    #[serde(default)] pub on_worktree_link_member_removed:  bool,
-
-    // Theme / branding hooks
-    #[serde(default)] pub on_theme_changed: bool,
+    declared: BTreeMap<String, bool>,
 }
 
 impl Hooks {
-    /// Returns true if this plugin has declared the named lifecycle hook.
-    /// For action hooks (containing ':') and unknown names, always returns true
-    /// so they are always routed.
-    pub fn subscribes_to(&self, hook: &str) -> bool {
-        match hook {
-            "on_repo_open"        => self.on_repo_open,
-            "on_repo_close"       => self.on_repo_close,
-            "on_repo_init"        => self.on_repo_init,
-            "on_repo_deregistered"=> self.on_repo_deregistered,
-            "on_plugin_load"  => self.on_plugin_load,
-            "on_tab_switch"   => self.on_tab_switch,
-            "on_commit"       => self.on_commit,
-            "on_push"         => self.on_push,
-            "on_checkout"     => self.on_checkout,
-            "on_fetch"        => self.on_fetch,
-            "on_flow_init"           => self.on_flow_init,
-            "on_flow_feature_start"  => self.on_flow_feature_start,
-            "on_flow_feature_finish" => self.on_flow_feature_finish,
-            "on_flow_release_start"  => self.on_flow_release_start,
-            "on_flow_release_finish" => self.on_flow_release_finish,
-            "on_flow_hotfix_start"   => self.on_flow_hotfix_start,
-            "on_flow_hotfix_finish"  => self.on_flow_hotfix_finish,
-            "on_pipeline_started"    => self.on_pipeline_started,
-            "on_pipeline_step_done"  => self.on_pipeline_step_done,
-            "on_pipeline_done"       => self.on_pipeline_done,
-            "on_mr_opened"           => self.on_mr_opened,
-            "on_mr_merged"           => self.on_mr_merged,
-            "on_mr_updated"          => self.on_mr_updated,
-            "on_pull"                => self.on_pull,
-            "on_branch_create"       => self.on_branch_create,
-            "on_branch_delete"       => self.on_branch_delete,
-            "on_branch_rename"       => self.on_branch_rename,
-            "on_tag_create"          => self.on_tag_create,
-            "on_tag_delete"          => self.on_tag_delete,
-            "on_stash_push"          => self.on_stash_push,
-            "on_stash_pop"           => self.on_stash_pop,
-            "on_rebase_start"        => self.on_rebase_start,
-            "on_rebase_abort"        => self.on_rebase_abort,
-            "on_issue_linked"        => self.on_issue_linked,
-            "on_issue_transitioned"  => self.on_issue_transitioned,
-            "on_note_saved"          => self.on_note_saved,
-            "on_note_deleted"        => self.on_note_deleted,
-            "on_workspace_created"      => self.on_workspace_created,
-            "on_workspace_updated"      => self.on_workspace_updated,
-            "on_workspace_deleted"      => self.on_workspace_deleted,
-            "on_workspace_switched"     => self.on_workspace_switched,
-            "on_workspace_repo_added"   => self.on_workspace_repo_added,
-            "on_workspace_repo_removed" => self.on_workspace_repo_removed,
-            "on_worktree_link_sync_started"     => self.on_worktree_link_sync_started,
-            "on_worktree_link_sync_done"        => self.on_worktree_link_sync_done,
-            "on_worktree_link_member_added"     => self.on_worktree_link_member_added,
-            "on_worktree_link_member_removed"   => self.on_worktree_link_member_removed,
-            "on_theme_changed"                  => self.on_theme_changed,
-            // on_plugin_unload, scheduler-fired action hooks, timer hooks, and
-            // generic action hooks are always routed.
-            _ => true,
+    /// Build from an explicit list — for tests and for the manifest scaffolder.
+    pub fn from_declared<I, S>(entries: I) -> Self
+    where
+        I: IntoIterator<Item = (S, bool)>,
+        S: Into<String>,
+    {
+        Self {
+            declared: entries.into_iter().map(|(name, on)| (name.into(), on)).collect(),
         }
+    }
+
+    /// True when this plugin should receive a broadcast of `hook`.
+    ///
+    /// Resolution order, most specific first:
+    ///
+    /// 1. an exact key — an explicit `false` here beats any wildcard;
+    /// 2. the longest matching trailing-`*` key;
+    /// 3. otherwise: routed only if the name is *not* a built-in, i.e. it is a
+    ///    plugin event or a callback the manifest could never have listed.
+    ///
+    /// The default in (3) is deliberately the opposite for the two cases. A
+    /// built-in the plugin never asked for is noise it has to filter itself; a
+    /// callback it did ask for by registering it at runtime must not be
+    /// silently dropped for want of a manifest line.
+    pub fn subscribes_to(&self, hook: &str) -> bool {
+        if let Some(&declared) = self.declared.get(hook) {
+            return declared;
+        }
+        if let Some(declared) = self.wildcard_match(hook) {
+            return declared;
+        }
+        hook_catalog::find(hook).is_none()
+    }
+
+    /// The value of the most specific trailing-`*` key covering `hook`.
+    ///
+    /// Longest prefix wins so `"corvus:workspace_*" = false` can carve a hole
+    /// out of `"corvus:*" = true`. Only a trailing `*` is honoured — the
+    /// manifest is a subscription list, not a pattern language, and the full
+    /// glob matcher belongs to the runtime's dispatch path.
+    fn wildcard_match(&self, hook: &str) -> Option<bool> {
+        self.declared
+            .iter()
+            .filter_map(|(key, &on)| {
+                let prefix = key.strip_suffix('*')?;
+                hook.starts_with(prefix).then_some((prefix.len(), on))
+            })
+            .max_by_key(|(len, _)| *len)
+            .map(|(_, on)| on)
+    }
+
+    /// Every declared entry, in name order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, bool)> + '_ {
+        self.declared.iter().map(|(name, &on)| (name.as_str(), on))
+    }
+
+    /// The names this plugin opted into, in name order. What the Plugin Manager
+    /// shows as the plugin's hook badges.
+    pub fn enabled_names(&self) -> impl Iterator<Item = &str> + '_ {
+        self.iter().filter(|(_, on)| *on).map(|(name, _)| name)
+    }
+
+    /// True when the manifest declared no `[hooks]` section at all.
+    pub fn is_empty(&self) -> bool {
+        self.declared.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hook_names::{arbor, corvus, garrulus};
+
+    fn hooks(entries: &[(&str, bool)]) -> Hooks {
+        Hooks::from_declared(entries.iter().map(|(n, on)| (*n, *on)))
+    }
+
+    #[test]
+    fn an_undeclared_builtin_is_not_routed() {
+        let h = hooks(&[(corvus::COMMIT, true)]);
+        assert!(h.subscribes_to(corvus::COMMIT));
+        assert!(!h.subscribes_to(corvus::PUSH));
+    }
+
+    /// The half of the old `_ => true` fallback that was load-bearing: names the
+    /// manifest cannot know about must still arrive.
+    #[test]
+    fn a_name_outside_the_catalog_is_always_routed() {
+        let h = Hooks::default();
+        assert!(h.subscribes_to("my-plugin:build_done"));
+        assert!(h.subscribes_to("__timer_7"));
+    }
+
+    #[test]
+    fn an_empty_section_routes_no_builtin() {
+        let h = Hooks::default();
+        assert!(h.is_empty());
+        assert!(!h.subscribes_to(arbor::PLUGIN_LOAD));
+    }
+
+    #[test]
+    fn a_namespace_wildcard_covers_the_whole_namespace() {
+        let h = hooks(&[("garrulus:*", true)]);
+        assert!(h.subscribes_to(garrulus::NOTE_SAVED));
+        assert!(h.subscribes_to(garrulus::SYNC_DONE));
+        assert!(!h.subscribes_to(corvus::COMMIT));
+    }
+
+    #[test]
+    fn an_exact_false_beats_a_wildcard_true() {
+        let h = hooks(&[("garrulus:*", true), (garrulus::SYNC_CONFLICT, false)]);
+        assert!(h.subscribes_to(garrulus::NOTE_SAVED));
+        assert!(!h.subscribes_to(garrulus::SYNC_CONFLICT));
+    }
+
+    #[test]
+    fn the_longest_wildcard_wins() {
+        let h = hooks(&[("corvus:*", true), ("corvus:workspace_*", false)]);
+        assert!(h.subscribes_to(corvus::COMMIT));
+        assert!(!h.subscribes_to(corvus::WORKSPACE_CREATED));
+    }
+
+    #[test]
+    fn a_bare_star_covers_everything_declared_true() {
+        let h = hooks(&[("*", true)]);
+        assert!(h.subscribes_to(corvus::COMMIT));
+        assert!(h.subscribes_to(garrulus::NOTE_SAVED));
+    }
+
+    #[test]
+    fn enabled_names_skips_the_disabled_entries() {
+        let h = hooks(&[(corvus::COMMIT, true), (corvus::PUSH, false)]);
+        let names: Vec<&str> = h.enabled_names().collect();
+        assert_eq!(names, vec![corvus::COMMIT]);
+    }
+
+    #[test]
+    fn round_trips_through_toml() {
+        let parsed: Hooks = toml::from_str(
+            r#"
+            "arbor:plugin_load" = true
+            "corvus:commit"     = true
+            "corvus:*"          = false
+            "#,
+        )
+        .expect("hooks section parses");
+        assert!(parsed.subscribes_to(arbor::PLUGIN_LOAD));
+        assert!(parsed.subscribes_to(corvus::COMMIT));
+        assert!(!parsed.subscribes_to(corvus::PUSH));
     }
 }

@@ -2,7 +2,8 @@
 //!
 //! The sitta twin of `corvus-be` / `merula-be`: it serves the sitta domains over
 //! framed-stdio IPC, loads **host-pure** Lua plugins (no product `arbor.*`
-//! namespaces, no vetoable hooks — see [`plugin`]), and has **no `NsHost`, no
+//! namespaces, no vetoable hooks — the wiring is `arbor-plugin-core`'s ready-made
+//! host-pure pair), and has **no `NsHost`, no
 //! credentials/OAuth, and no pushed config** — it resolves its own `sitta_*`
 //! config / data dirs once `init_active_profile()` has run.
 //!
@@ -37,9 +38,6 @@ mod config_cmds;
 // `list_registry_repos`), parsing the same JSON directly so the Projects sidebar
 // lists projects without spawning the git client.
 mod workspace;
-// Host-pure plugin-host wiring (hook dispatcher + `arbor.*` base installer).
-mod plugin;
-
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, the plugin dir and
     // any `sitta_config_dir()` / `sitta_data_dir()` would silently resolve the
@@ -52,8 +50,8 @@ fn main() {
     // publishes the host-pure `arbor.*` namespaces (no product namespaces). Plugins
     // under sitta's installed/ pool load on boot via the `App`'s post-`Hello` hook.
     let mut app = arbor_be::App::new(arbor_be::BackendIo::new());
-    app.plugin_host("sitta", plugin::sitta_hook_dispatcher);
-    app.api_installer(plugin::sitta_be_api_installer());
+    app.plugin_host("sitta", arbor_plugin_core::prelude::host_pure_hook_dispatcher);
+    app.api_installer(arbor_plugin_core::prelude::host_pure_api_installer());
 
     // The state every handler gets: event egress + the reverse channel (for the
     // git-awareness wave that calls back into the shell). `Arc`-shared across the

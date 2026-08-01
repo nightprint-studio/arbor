@@ -113,14 +113,19 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
                     // (otherwise the launcher shows it down while the process lingers).
                     // Picus included for the same reason — and because a lingering
                     // `picus-be` would hold live database sessions open with no window
-                    // to close them from.
+                    // to close them from. Garrulus likewise: `garrulus-be` holds a
+                    // filesystem watcher over the vault, which has no business running
+                    // once there is nothing on screen to react to it.
                     //
                     // Safe to call inline on the UI thread: `detach` removes the
                     // routing entry under a brief lock and offloads the blocking
                     // child `kill()`+`wait()` to its own thread (it used to run that
                     // teardown under the routing lock on this very thread, freezing
                     // the launcher and every other product's IPC mid-close).
-                    if matches!(id, "corvus" | "merula" | "sitta" | "tyto" | "bennu" | "picus") {
+                    if matches!(
+                        id,
+                        "corvus" | "merula" | "sitta" | "tyto" | "bennu" | "picus" | "garrulus"
+                    ) {
                         crate::ipc::split_broker::detach(id, "window-closed");
                     }
                 }

@@ -195,7 +195,7 @@ end`, 'lua')}</code></pre>
 <h2>Hooks</h2>
 <p>Two hooks contribute to the <code>security</code> category:</p>
 <dl class="meta-grid">
-  <dt><code>on_security_summary_loaded</code></dt>
+  <dt><code>corvus:security_summary_loaded</code></dt>
   <dd>
     Fired by the host after every successful summary fetch. Payload:
     <code>&lbrace; tab_id, provider, counts, total, risk_label?, web_url? &rbrace;</code>.
@@ -203,7 +203,7 @@ end`, 'lua')}</code></pre>
     notifications when posture worsens, or to mirror counts to an external
     dashboard.
   </dd>
-  <dt><code>on_security_finding_state_changed</code></dt>
+  <dt><code>corvus:security_finding_state_changed</code></dt>
   <dd>
     A plugin-cooperation channel: when a plugin observes a finding moving
     between active and closed states (e.g. a periodic rescan), it can
@@ -217,7 +217,7 @@ end`, 'lua')}</code></pre>
 <pre class="language-lua"><code>{@html highlight(`-- plugins/security-watch/main.lua
 local last_critical = {}   -- repo_id → previous critical count
 
-arbor.events.on("on_security_summary_loaded", function(ctx)
+arbor.events.on("corvus:security_summary_loaded", function(ctx)
   local prev = last_critical[ctx.tab_id] or 0
   local now  = (ctx.counts and ctx.counts.critical) or 0
   if now > prev then

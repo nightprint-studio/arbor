@@ -264,7 +264,7 @@
 {/if}
 
 <h2>Plugin API — <code>arbor.command</code></h2>
-<p>Plugins can register and remove command palette entries at runtime using <code>arbor.command.register()</code> and <code>arbor.command.unregister()</code>. Call <code>register</code> during <code>on_plugin_load</code> so the commands are available as soon as the plugin loads.</p>
+<p>Plugins can register and remove command palette entries at runtime using <code>arbor.command.register()</code> and <code>arbor.command.unregister()</code>. Call <code>register</code> during <code>arbor:plugin_load</code> so the commands are available as soon as the plugin loads.</p>
 <pre class="language-lua">{@html highlight(`-- Register a command palette entry
 -- Fields: id (required), title (required), description?, icon?, group?
 arbor.command.register({
@@ -301,7 +301,7 @@ arbor.command.unregister("run-tests")`, '.lua')}</pre>
 <h3>Full example</h3>
 <pre class="language-lua">{@html highlight(`-- plugins/my-plugin/main.lua
 
-arbor.events.on("on_plugin_load", function(_ctx)
+arbor.events.on("arbor:plugin_load", function(_ctx)
   arbor.command.register({
     id    = "open-dashboard",
     title = "Open Dashboard",

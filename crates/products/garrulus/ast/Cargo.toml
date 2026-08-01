@@ -1,0 +1,24 @@
+[package]
+name         = "garrulus-ast"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "garrulus — the format-agnostic document model of a note: frontmatter, blocks and inlines described by what they ARE, never by how markdown spells them, plus the Reader/Writer seam every input and export format plugs into."
+
+# A leaf on purpose. The model is what `garrulus-parse` fills in, what
+# `garrulus-index` walks, and what every exporter (HTML, PDF, static site)
+# renders from — so it must be buildable and testable with no grammar, no
+# filesystem, no runtime. serde for the RPC wire, thiserror for the two error
+# types the traits return. Nothing else belongs here.
+[dependencies]
+serde     = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# Round-trip assertions on the wire shapes. Test-only.
+serde_json = { workspace = true }
+
+[lints.rust]
+missing_debug_implementations = "warn"

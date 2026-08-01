@@ -212,7 +212,7 @@ fn install_add_view(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     // add_view — register a main-area workspace view. Unlike a sidebar (a side
     // rail), a view occupies the body of the window where the commit graph
     // lives. The plugin provides an `id` (unique within the plugin); the host
-    // fires the `on_view_open` hook (and `on_view_close` on teardown) on the
+    // fires the `arbor:view_open` hook (and `arbor:view_close` on teardown) on the
     // owning plugin, which responds with `arbor.ui.set_panel_content(id, …)`.
     //
     //   config = {

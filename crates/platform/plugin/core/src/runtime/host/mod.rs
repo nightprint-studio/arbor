@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, Weak};
 use arbor_core::prelude::AppCtx;
 use arbor_scheduler::prelude::Scheduler;
 
-use arbor_plugin_types::prelude::LoadFailure;
+use arbor_plugin_types::prelude::{hook_names, LoadFailure};
 
 use super::loaded::{DormantPlugin, LoadedPlugin};
 use crate::contribution::ContributionRegistry;
@@ -162,7 +162,7 @@ impl PluginHost {
         for plugin in &self.plugins {
             if plugin.is_enabled() {
                 let _ = crate::hook_router::fire(
-                    &plugin.lua, "on_plugin_unload", "{}",
+                    &plugin.lua, hook_names::arbor::PLUGIN_UNLOAD, "{}",
                 );
             }
             // Cancel all Lua timers.

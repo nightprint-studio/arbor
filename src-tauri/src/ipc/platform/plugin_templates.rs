@@ -41,6 +41,8 @@ use serde::{Deserialize, Serialize};
 use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
 
+use arbor_plugin_types::prelude::hook_names;
+
 use crate::error::AppError;
 use crate::ipc::platform;
 use crate::AppState;
@@ -243,22 +245,28 @@ fn build_manifest(opts: &ExportPluginTemplateOpts, slug: &str) -> String {
     if any_hook {
         out.push('\n');
         out.push_str("[hooks]\n");
+        // Namespaced hook names contain `:`, which is not a legal character in
+        // a TOML *bare* key — the key must be quoted or the generated manifest
+        // fails to parse on first load.
         let mut h = |flag: bool, key: &str| {
-            if flag { out.push_str(&format!("{key:18} = true\n")); }
+            if flag {
+                let quoted = format!("\"{key}\"");
+                out.push_str(&format!("{quoted:24} = true\n"));
+            }
         };
-        h(opts.hook_on_plugin_load,   "on_plugin_load");
-        h(opts.hook_on_repo_open,     "on_repo_open");
-        h(opts.hook_on_repo_close,    "on_repo_close");
-        h(opts.hook_on_tab_switch,    "on_tab_switch");
-        h(opts.hook_on_commit,        "on_commit");
-        h(opts.hook_on_push,          "on_push");
-        h(opts.hook_on_pull,          "on_pull");
-        h(opts.hook_on_fetch,         "on_fetch");
-        h(opts.hook_on_checkout,      "on_checkout");
-        h(opts.hook_on_branch_create, "on_branch_create");
-        h(opts.hook_on_branch_delete, "on_branch_delete");
-        h(opts.hook_on_mr_opened,     "on_mr_opened");
-        h(opts.hook_on_mr_merged,     "on_mr_merged");
+        h(opts.hook_on_plugin_load,   hook_names::arbor::PLUGIN_LOAD);
+        h(opts.hook_on_repo_open,     hook_names::arbor::REPO_OPEN);
+        h(opts.hook_on_repo_close,    hook_names::arbor::REPO_CLOSE);
+        h(opts.hook_on_tab_switch,    hook_names::arbor::TAB_SWITCH);
+        h(opts.hook_on_commit,        hook_names::corvus::COMMIT);
+        h(opts.hook_on_push,          hook_names::corvus::PUSH);
+        h(opts.hook_on_pull,          hook_names::corvus::PULL);
+        h(opts.hook_on_fetch,         hook_names::corvus::FETCH);
+        h(opts.hook_on_checkout,      hook_names::corvus::CHECKOUT);
+        h(opts.hook_on_branch_create, hook_names::corvus::BRANCH_CREATE);
+        h(opts.hook_on_branch_delete, hook_names::corvus::BRANCH_DELETE);
+        h(opts.hook_on_mr_opened,     hook_names::corvus::MR_OPENED);
+        h(opts.hook_on_mr_merged,     hook_names::corvus::MR_MERGED);
     }
 
     if opts.include_scheduler {
@@ -286,18 +294,18 @@ fn build_main_lua(opts: &ExportPluginTemplateOpts, slug: &str) -> String {
     // Other hook stubs — generated from a plain table so adding a hook is
     // one edit, not three.
     let hook_stubs: &[(bool, &str, &str)] = &[
-        (opts.hook_on_repo_open,     "on_repo_open",     "  -- Repository tab activated. ctx: { tab_id, path, name }"),
-        (opts.hook_on_repo_close,    "on_repo_close",    "  -- Repository tab closed."),
-        (opts.hook_on_tab_switch,    "on_tab_switch",    "  -- User switched tabs."),
-        (opts.hook_on_commit,        "on_commit",        "  -- A commit was created on this repo."),
-        (opts.hook_on_push,          "on_push",          "  -- A push completed."),
-        (opts.hook_on_pull,          "on_pull",          "  -- A pull completed."),
-        (opts.hook_on_fetch,         "on_fetch",         "  -- A fetch completed."),
-        (opts.hook_on_checkout,      "on_checkout",      "  -- A branch / commit checkout happened."),
-        (opts.hook_on_branch_create, "on_branch_create", "  -- A branch was created."),
-        (opts.hook_on_branch_delete, "on_branch_delete", "  -- A branch was deleted."),
-        (opts.hook_on_mr_opened,     "on_mr_opened",     "  -- A merge / pull request was opened."),
-        (opts.hook_on_mr_merged,     "on_mr_merged",     "  -- A merge / pull request was merged."),
+        (opts.hook_on_repo_open,     hook_names::arbor::REPO_OPEN,      "  -- Repository tab activated. ctx: { tab_id, path, name }"),
+        (opts.hook_on_repo_close,    hook_names::arbor::REPO_CLOSE,     "  -- Repository tab closed."),
+        (opts.hook_on_tab_switch,    hook_names::arbor::TAB_SWITCH,     "  -- User switched tabs."),
+        (opts.hook_on_commit,        hook_names::corvus::COMMIT,        "  -- A commit was created on this repo."),
+        (opts.hook_on_push,          hook_names::corvus::PUSH,          "  -- A push completed."),
+        (opts.hook_on_pull,          hook_names::corvus::PULL,          "  -- A pull completed."),
+        (opts.hook_on_fetch,         hook_names::corvus::FETCH,         "  -- A fetch completed."),
+        (opts.hook_on_checkout,      hook_names::corvus::CHECKOUT,      "  -- A branch / commit checkout happened."),
+        (opts.hook_on_branch_create, hook_names::corvus::BRANCH_CREATE, "  -- A branch was created."),
+        (opts.hook_on_branch_delete, hook_names::corvus::BRANCH_DELETE, "  -- A branch was deleted."),
+        (opts.hook_on_mr_opened,     hook_names::corvus::MR_OPENED,     "  -- A merge / pull request was opened."),
+        (opts.hook_on_mr_merged,     hook_names::corvus::MR_MERGED,     "  -- A merge / pull request was merged."),
     ];
     for (flag, name, body) in hook_stubs.iter() {
         if !*flag { continue; }

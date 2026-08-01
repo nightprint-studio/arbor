@@ -27,7 +27,7 @@
 //!   · `repo(repo_id)`       → repo-entry table, or `nil`.
 //!
 //! Only `switch(ws_id)` returns the bool tuple `(true, nil) | (false, err)`; on
-//! success the host fires `on_workspace_switched` and emits
+//! success the host fires `corvus:workspace_switched` and emits
 //! `arbor://workspace-switched`, exactly as the shell did inline.
 //!
 //! ## Lua table shapes (preserved exactly)
@@ -188,7 +188,7 @@ fn install_switch(
     ws_table: &Table,
 ) -> PluginCoreResult<()> {
     // switch(ws_id) → (true, nil) | (false, err)
-    //   Host marks the workspace active (persists), fires `on_workspace_switched`,
+    //   Host marks the workspace active (persists), fires `corvus:workspace_switched`,
     //   and emits `arbor://workspace-switched` — same effects the shell produced.
     let pname = ctx.plugin_name.clone();
     let fn_ = lua

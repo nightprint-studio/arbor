@@ -13,6 +13,17 @@ arbor-ipc        = { path = "../../../foundation/ipc" }
 # plugin hooks where they run (in-process the shell shares its dispatcher; OOP
 # corvus-be owns one). Only the Tauri-free api crate — no mlua/host here.
 arbor-plugin-api = { path = "../../../platform/plugin/api" }
+# The canonical hook-name registry. Named directly (rather than through the api
+# crate, which deliberately does not re-export it) so `crate::hooks` can build its
+# names with `concat_ns!` AND the prelude can hand out the cross-product `arbor:`
+# names — the two must come from one registry or they drift, which is exactly how
+# `repo_open` became a dead hook.
+arbor-plugin-types = { path = "../../../platform/plugin/types" }
+# One constant: `PRODUCT_CORVUS`, the product id `hooks::NS` is defined as. The
+# hook namespace and the id `App::plugin_host` is given must be the same string
+# (a Lua subscriber's implicit prefix is the host product's id), so it is taken
+# from the one place that owns it rather than re-spelled here.
+arbor-core       = { path = "../../../foundation/core" }
 serde_json       = { workspace = true }
 
 [dev-dependencies]

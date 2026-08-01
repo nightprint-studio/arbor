@@ -154,13 +154,17 @@
     return shortcut ? { content, shortcut } : content;
   }
 
-  // ── Tab change → fire on_repo_open on all plugins ────────────────────────
+  // ── Tab change → fire arbor:repo_open on all plugins ─────────────────────
   $effect(() => {
     const tab = tabsStore.activeTab;
     if (!tab) return;
-    // Fire on_repo_open so plugins refresh their state for the new repo.
-    // The Rust fire_hook handler also sets __arbor_current_repo__ for this hook name.
-    execHook('on_repo_open', JSON.stringify({ path: tab.path })).catch(() => {});
+    // Fire arbor:repo_open so plugins refresh their state for the new repo.
+    // The Rust hook router also refreshes __arbor_current_repo__ for this exact
+    // name — a stale flat literal here silently skips that side effect, which is
+    // the only reason this fire exists.
+    // Source of truth for the name: `arbor_plugin_types::hook_names::arbor`
+    // (catalog: `arbor_plugin_types::hook_catalog`). No TS constant exists.
+    execHook('arbor:repo_open', JSON.stringify({ path: tab.path })).catch(() => {});
   });
 
 

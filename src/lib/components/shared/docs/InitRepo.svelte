@@ -58,13 +58,13 @@
   If the provider API call fails, the local repository is still initialized. Arbor shows an error toast but the repo opens normally.
 </Callout>
 
-<h2>Plugin hook: <code>on_repo_init</code></h2>
+<h2>Plugin hook: <code>corvus:repo_init</code></h2>
 <p>Fires after a repository is successfully initialized and opened. Declare in <code>plugin.toml</code>:</p>
 <pre class="language-toml">{@html highlight(`[hooks]
-on_repo_init = true`, 'toml')}</pre>
+"corvus:repo_init" = true`, 'toml')}</pre>
 
 <p>Register a handler in Lua:</p>
-<pre class="language-lua">{@html highlight(`arbor.events.on("on_repo_init", function(ctx)
+<pre class="language-lua">{@html highlight(`arbor.events.on("corvus:repo_init", function(ctx)
   -- ctx.path           -- absolute path to the repo
   -- ctx.name           -- folder name
   -- ctx.default_branch -- e.g. "main"

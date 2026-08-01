@@ -109,6 +109,8 @@ macro_rules! invoke_handlers {
             $crate::window::bennu::open_bennu_window,
             // Dedicated Picus (SQL studio) window
             $crate::window::picus::open_picus_window,
+            // Dedicated Garrulus (notes / vault) window
+            $crate::window::garrulus::open_garrulus_window,
             // Picus connection passwords. Shell-side on purpose: the secret goes
             // from the form straight to Arbor's keychain and never enters the
             // backend process — `picus-be` asks for it over the reverse channel at

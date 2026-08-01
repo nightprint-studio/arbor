@@ -64,6 +64,62 @@ chat — la motivazione è riassunta una riga sotto ogni decisione.
 | D6 | `PluginFn::call` = **async via `async_trait`** | Le fn di dominio (HTTP, GraphQL, libgit2) sono naturalmente async; mlua ha feature `async` |
 | D7 | Hook vetoable = **flag su `HookDef` + due API separate** | `fire(name, ctx)` vs `fire_vetoable(name, ctx) -> Option<String>` — type-safe al call site |
 | D8 | `HookDispatcher` = **metadata router + broker di `HookListener`** | Il dispatcher non conosce mlua; ogni runtime registra un listener al boot |
+| D9 | Nomi hook = **`<prodotto>:<evento>`, con prefisso facoltativo alla sottoscrizione** | Estende la regola che `arbor.events.emit` già applica ai plugin (`<plugin>:<evento>`); rende la collisione strutturalmente impossibile invece che evitata a mano |
+| D10 | Ogni nome hook = **una costante Rust**, mai una stringa scritta a mano al call site | Oggi un nome sbagliato in `fire_hook` compila ed è un no-op silenzioso per sempre; con le costanti diventa un errore di compilazione |
+
+### D9/D10 — namespacing degli hook
+
+**Il problema.** I *metodi* Lua sono già namespaced (`arbor.repo.*`, `arbor.notes.*`,
+`arbor.job.*` — è la ragione per cui esiste `corvus-plugin-ns`). Gli *hook* no: vivono in un
+unico spazio piatto, e l'arrivo di Garrulus l'ha dimostrato — `on_note_saved` significava già
+"git note salvata" in Corvus e ha significato "nota del vault salvata" per un giro. Gli hook
+sono l'unica parte della superficie Lua che non segue la regola già in vigore.
+
+**Il precedente da estendere, non da inventare.** `arbor.events.emit`
+(`plugin/core/src/lua_api/ns/events.rs`) risolve già così un evento non qualificato:
+
+```rust
+let full_event = match event.find(':') {
+    None => format!("{}:{}", pname, event),   // il prefisso è FACOLTATIVO
+    Some(_) => /* già qualificato: si usa com'è */,
+};
+```
+
+Stesso separatore, stessa regola, stessa opzionalità. Per gli hook il prefisso implicito non è
+il nome del plugin ma **l'id del prodotto ospite** (`PRODUCT_GARRULUS`, `PRODUCT_CORVUS`, …),
+e la risoluzione è priva di ambiguità perché il dispatcher è già per-prodotto
+(`App::plugin_host(product_id, …)`): dentro `garrulus-be`, `arbor.events.on("note_saved", fn)` non
+può voler dire altro che `garrulus:note_saved`.
+
+Ne cade fuori gratis anche `arbor.events.on("garrulus:*", fn)` — `install_on` gestisce già il
+wildcard.
+
+**Le costanti.** Il prodotto compare **una volta sola**, e ogni nome è una costante:
+
+```rust
+// crates/products/garrulus/core/src/hooks.rs
+pub const NS: &str = PRODUCT_GARRULUS;          // l'unico posto dove si scrive "garrulus"
+pub const NOTE_SAVED:   &str = concat_ns!(NS, "note_saved");
+pub const SYNC_DONE:    &str = concat_ns!(NS, "sync_done");
+```
+
+Le stesse costanti alimentano il catalogo, così catalogo e call-site non possono divergere.
+Il motivo vero non è l'estetica: oggi `fire_hook("on_note_savd", …)` compila, non spara niente
+e nessuno se ne accorge mai — in entrambe le direzioni, perché anche una voce di catalogo
+scritta male non fallisce. Le costanti trasformano metà di quel buco in un errore di
+compilazione.
+
+**L'altra metà del buco resta lato Lua**, dove non c'è compilazione: `arbor.events.on("note_savd", fn)`
+si risolve in `garrulus:note_savd` e non spara mai. Namespacing e costanti non lo chiudono. Lo
+chiude **validare il nome risolto contro il catalogo al momento della sottoscrizione** e
+avvisare — il catalogo dinamico per-dominio esiste già (`plugin/api/src/hook.rs`), quindi è
+poco lavoro. Vale la pena farlo nella stessa passata: è il difetto più costoso dei tre, perché
+si manifesta come "il plugin non fa niente" senza un solo messaggio.
+
+**Portata.** Sweep completa, non solo i prodotti nuovi: ~50 voci di catalogo, ogni `fire_hook`,
+l'SDK (`sdk.d.lua`, repo `arbor-extensions`) e le docs. Mezza migrazione su una API costa più
+della migrazione intera, e CLAUDE.md ammette esplicitamente i breaking change qui perché
+l'unico consumatore dei plugin è l'utente.
 
 ## Architettura
 

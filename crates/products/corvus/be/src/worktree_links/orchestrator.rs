@@ -10,7 +10,7 @@
 //! the git program + recovery policy) and moves it into a background thread. The
 //! thread iterates the other members, checks each out stash-safe, persists
 //! `last_sync_target`, and emits the aggregated `arbor://worktree-link-sync-*`
-//! events + `on_worktree_link_sync_*` hooks — byte-identical topics/payloads.
+//! events + `corvus:worktree_link_sync_*` hooks — byte-identical topics/payloads.
 //!
 //! The recursion guard is process-local module state ([`SYNC_IN_PROGRESS`]) — the
 //! OOP twin of the shell's `AppState::link_sync_in_progress`.
@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use arbor_ipc::prelude::EventSink;
-use corvus_core::prelude::{CorvusState, HookDispatcher, PluginValue};
+use corvus_core::prelude::{hooks, CorvusState, HookDispatcher, PluginValue};
 use corvus_git::prelude::{GitCli, SnapshotPolicy};
 use serde_json::{json, Value};
 
@@ -51,6 +51,8 @@ impl SyncCtx {
     fn emit(&self, event: &str, payload: Value) {
         self.sink.emit(event, payload);
     }
+    /// `name` is a `hooks::WORKTREE_LINK_*` constant — see the note on
+    /// `CorvusState::fire_hook`: an unknown name is silence, not an error.
     fn fire_hook(&self, name: &str, ctx: &Value) {
         self.hooks.fire_blocking(name, PluginValue::from_json(ctx.clone()));
     }
@@ -152,7 +154,7 @@ fn run_orchestrator(
         "target_branch": &initiator_branch,
     });
     ctx.emit("arbor://worktree-link-sync-started", start_payload.clone());
-    ctx.fire_hook("on_worktree_link_sync_started", &start_payload);
+    ctx.fire_hook(hooks::WORKTREE_LINK_SYNC_STARTED, &start_payload);
 
     let mut results: Vec<MemberResult> = Vec::new();
     let other_members: Vec<_> = link
@@ -240,7 +242,7 @@ fn run_orchestrator(
     let summary_json = serde_json::to_value(&summary).unwrap_or(json!({}));
     ctx.emit("arbor://worktree-link-sync-done", summary_json.clone());
     ctx.emit("arbor://worktree-links-changed", json!({}));
-    ctx.fire_hook("on_worktree_link_sync_done", &summary_json);
+    ctx.fire_hook(hooks::WORKTREE_LINK_SYNC_DONE, &summary_json);
 
     // `arbor://graph-refresh` for each tab whose repo got a successful checkout.
     for r in summary

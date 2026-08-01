@@ -19,7 +19,7 @@ use std::io::{self, Write};
 use std::sync::Arc;
 
 use arbor_feedback::prelude::{JobSpec, JobStatus};
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{hooks, CorvusState};
 use corvus_git::prelude::{http_auth_args_for_credentials, CloneOptions};
 use corvus_git_provider_api::prelude::{
     CiFilter, FindingState, MrFilter, ProviderError, SecurityFilters, Severity,
@@ -258,7 +258,7 @@ impl NsHost for CorvusNsHost {
         // `tab_id` is absent on the Lua path (the active repo is path-resolved), so
         // the payload carries `plugin` instead — same shape the shell emitted.
         self.state.fire_hook(
-            "on_note_saved",
+            hooks::NOTE_SAVED,
             serde_json::json!({
                 "commit_oid": commit_oid,
                 "namespace": namespace,
@@ -281,7 +281,7 @@ impl NsHost for CorvusNsHost {
                 .map_err(|e| format!("{e}"))?;
         }
         self.state.fire_hook(
-            "on_note_deleted",
+            hooks::NOTE_DELETED,
             serde_json::json!({
                 "commit_oid": commit_oid,
                 "namespace": namespace,
@@ -730,7 +730,7 @@ impl NsHost for CorvusNsHost {
         }
         // Same egress + broker the shell used (no `plugin` key in the payload).
         self.state.emit("arbor://workspace-switched", payload.clone());
-        self.state.fire_hook("on_workspace_switched", payload);
+        self.state.fire_hook(hooks::WORKSPACE_SWITCHED, payload);
         Ok(())
     }
 
@@ -1608,7 +1608,11 @@ fn main() {
     arbor_core::prelude::init_active_profile();
 
     let mut app = arbor_be::App::new(arbor_be::BackendIo::new());
-    app.plugin_host("corvus", build_hook_dispatcher);
+    // `hooks::NS` and not the literal "corvus": the product id given here is the
+    // implicit prefix a Lua subscriber gets (`arbor.events.on("commit", …)`
+    // resolves to `corvus:commit`), so it must be the same string the hook
+    // constants are built from — not a second copy that can drift.
+    app.plugin_host(hooks::NS, build_hook_dispatcher);
     // After the Flip (plugin-relocation Phase 2) this backend is the sole loader of
     // the Corvus product's plugins, so it must scan the marketplace install dir
     // just like the launcher host does (`setup/scheduler.rs`'s

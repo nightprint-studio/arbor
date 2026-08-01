@@ -11,8 +11,8 @@
 //! `corvus-git-provider-{api,github,gitlab}` crates, so results and
 //! `ProviderError` wire strings are identical to in-process.
 //!
-//! **Hooks fire here** (plugin-relocation Wave 0): `on_mr_opened` (on create) and
-//! `on_mr_updated` (on close/reopen/mark-ready) go to the co-located host with a
+//! **Hooks fire here** (plugin-relocation Wave 0): `corvus:mr_opened` (on create) and
+//! `corvus:mr_updated` (on close/reopen/mark-ready) go to the co-located host with a
 //! byte-identical payload, fired in the same position as in-process (after the
 //! provider call's result is in hand, no provider handle held across the fire).
 //! Auto-merge progress notifications still ride `state.emit("plugin:notification",
@@ -41,7 +41,7 @@
 use std::sync::Arc;
 
 use arbor_ipc::prelude::{EventSink, HostCaller, Stream};
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{hooks, CorvusState};
 use corvus_git_provider_api::prelude::{
     AutoMergeOpts, CreateMrParams, MergeOpts, MergeRequest, MergedMrHint, MrCapabilities, MrCommit,
     MrDetail, MrFeatureStatus, MrFile, MrFilter,
@@ -131,7 +131,7 @@ async fn create_mr(
         }
     }
 
-    fire_mr_hook(state, "on_mr_opened", &mr);
+    fire_mr_hook(state, hooks::MR_OPENED, &mr);
     Ok(mr)
 }
 
@@ -237,7 +237,7 @@ async fn close_mr(
     maybe_refresh(&resolved.info.provider);
     let id = mr_id_from(&resolved, number);
     resolved.provider.close_mr(&id).await.map_err(pe)?;
-    fire_mr_hook_by_number(state, "on_mr_updated", number, &resolved.info.provider);
+    fire_mr_hook_by_number(state, hooks::MR_UPDATED, number, &resolved.info.provider);
     Ok(())
 }
 
@@ -251,7 +251,7 @@ async fn reopen_mr(
     maybe_refresh(&resolved.info.provider);
     let id = mr_id_from(&resolved, number);
     resolved.provider.reopen_mr(&id).await.map_err(pe)?;
-    fire_mr_hook_by_number(state, "on_mr_updated", number, &resolved.info.provider);
+    fire_mr_hook_by_number(state, hooks::MR_UPDATED, number, &resolved.info.provider);
     Ok(())
 }
 
@@ -269,7 +269,7 @@ async fn mark_mr_ready(
     maybe_refresh(&resolved.info.provider);
     let id = mr_id_from(&resolved, number);
     resolved.provider.mark_mr_ready(&id).await.map_err(pe)?;
-    fire_mr_hook_by_number(state, "on_mr_updated", number, &resolved.info.provider);
+    fire_mr_hook_by_number(state, hooks::MR_UPDATED, number, &resolved.info.provider);
     Ok(())
 }
 
@@ -386,7 +386,7 @@ async fn get_merged_mr_hints(
 
 /// Merge a pull/merge request, then (GitHub + delete requested) delete the
 /// source branch on the remote via `git push :refs/heads/<branch>`, and fire
-/// `on_mr_merged`. Byte-identical to the in-process copy.
+/// `corvus:mr_merged`. Byte-identical to the in-process copy.
 #[arbor_rpc::handler]
 async fn merge_mr(
     state:         &CorvusState,
@@ -430,7 +430,7 @@ async fn merge_mr(
         }
     }
 
-    fire_mr_hook_by_number(state, "on_mr_merged", number, &resolved.info.provider);
+    fire_mr_hook_by_number(state, hooks::MR_MERGED, number, &resolved.info.provider);
     Ok(())
 }
 
@@ -493,6 +493,10 @@ fn emit_remote_delete_warning(state: &CorvusState, number: u64, branch: &str, er
 
 // ---------------------------------------------------------------------------
 // Hook firing helpers
+//
+// `hook` is a `hooks::MR_*` constant, not a literal: these two helpers are the
+// one place in this file where the name is a runtime value, so a typo here would
+// be a silent no-op the compiler cannot see.
 // ---------------------------------------------------------------------------
 
 fn fire_mr_hook(

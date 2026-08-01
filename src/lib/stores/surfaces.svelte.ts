@@ -17,7 +17,7 @@
 import { workspaceTabOpened, workspaceTabClosed } from '$lib/ipc/window';
 
 /** A product that can live in a container tab. */
-export type SurfaceId = 'home' | 'corvus' | 'bennu' | 'merula' | 'picus';
+export type SurfaceId = 'home' | 'corvus' | 'bennu' | 'merula' | 'picus' | 'garrulus';
 
 export interface SurfaceDef {
   id:    SurfaceId;
@@ -32,6 +32,7 @@ export const SURFACES: SurfaceDef[] = [
   { id: 'bennu',  label: 'Bennu'  },
   { id: 'merula', label: 'merula' },
   { id: 'picus',  label: 'Picus'  },
+  { id: 'garrulus', label: 'Garrulus' },
 ];
 
 export function surfaceDef(id: SurfaceId): SurfaceDef {

@@ -13,6 +13,8 @@ use std::sync::atomic::Ordering;
 
 use tauri::State;
 
+use arbor_plugin_types::prelude::hook_names;
+
 use crate::AppState;
 
 // ---------------------------------------------------------------------------
@@ -71,7 +73,7 @@ pub fn set_app_focus(state: State<'_, AppState>, focused: bool) {
 
 /// Inform the backend which tab is currently active in the frontend.
 /// Used by `arbor.repo.fetch_active_tab()` to know which repo to operate on.
-/// Also fires the `on_tab_switch` plugin hook when a real tab is activated.
+/// Also fires the `arbor:tab_switch` plugin hook when a real tab is activated.
 #[tauri::command]
 pub fn set_active_tab(state: State<'_, AppState>, tab_id: Option<String>) {
     if let Ok(mut id) = state.active_tab_id.lock() {
@@ -95,7 +97,7 @@ pub fn set_active_tab(state: State<'_, AppState>, tab_id: Option<String>) {
         if let Ok(mut p) = state.active_repo_path.lock() {
             *p = repo_info.as_ref().map(|(path, _)| path.clone());
         }
-        state.fire_hook("on_tab_switch", serde_json::json!({
+        state.fire_hook(hook_names::arbor::TAB_SWITCH, serde_json::json!({
             "tab_id": tid,
             "path":   repo_info.as_ref().map(|(p, _)| p.as_str()).unwrap_or(""),
             "name":   repo_info.as_ref().map(|(_, n)| n.as_str()).unwrap_or(""),

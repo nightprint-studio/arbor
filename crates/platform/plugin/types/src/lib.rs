@@ -18,6 +18,8 @@
 
 pub mod dependency;
 pub mod hook_catalog;
+pub mod hook_names;
+pub mod hook_ns;
 pub mod hooks;
 pub mod manifest;
 pub mod permissions;

@@ -47,7 +47,7 @@
   A def with empty <code>stages</code> is a <em>stub</em> the plugin
   registered upfront so the panel has something to show on first open.
   Stubs cannot be replayed verbatim — Play asks the owning plugin to
-  materialise stages via the <code>on_pipeline_run_request</code> hook
+  materialise stages via the <code>corvus:pipeline_run_request</code> hook
   (typically by compiling a profile or resolving a build configuration)
   and the plugin then calls <code>arbor.pipeline.run</code> itself. If a
   plugin registers stubs but doesn't implement the hook, Play surfaces a
@@ -159,7 +159,7 @@
 </p>
 
 <h3>Table config</h3>
-<p>Equivalent to the builder above; call from your plugin's <code>on_plugin_load</code> handler (or at module level):</p>
+<p>Equivalent to the builder above; call from your plugin's <code>arbor:plugin_load</code> handler (or at module level):</p>
 <pre class="language-lua"><code>{@html highlight(`arbor.pipeline.define({
   id          = "build",
   name        = "Build & Test",
@@ -264,18 +264,18 @@ arbor.contribute("arbor:pipelines:toolbar", {
 <h2>Pipeline hooks</h2>
 <p>Declare hooks in <code>[hooks]</code> in your <code>plugin.toml</code> and register handlers with <code>arbor.events.on()</code>:</p>
 <table class="shortcuts-table">
-  <thead><tr><th>Constant</th><th>TOML key</th><th>Context fields</th></tr></thead>
+  <thead><tr><th>Hook</th><th>Context fields</th></tr></thead>
   <tbody>
-    <tr><td><code>"on_pipeline_run_request"</code></td><td><code>on_pipeline_run_request</code></td><td><code>pipeline_id, tab_id?</code> — fired on the def's owning plugin when the user presses Play on a <em>stub</em> def (empty <code>stages</code>). Defs with non-empty stages are replayed directly without invoking this hook. The handler must compile stages and call <code>arbor.pipeline.run</code> itself.</td></tr>
-    <tr><td><code>"on_pipeline_started"</code></td><td><code>on_pipeline_started</code></td><td><code>run_id, pipeline_id, plugin</code></td></tr>
-    <tr><td><code>"on_pipeline_step_done"</code></td><td><code>on_pipeline_step_done</code></td><td><code>run_id, pipeline_id, plugin, stage_id, step_id, step_name, status, exit_code</code></td></tr>
-    <tr><td><code>"on_pipeline_done"</code></td><td><code>on_pipeline_done</code></td><td><code>run_id, pipeline_id, plugin, status</code></td></tr>
+    <tr><td><code>corvus:pipeline_run_request</code></td><td><code>pipeline_id, tab_id?</code> — fired on the def's owning plugin when the user presses Play on a <em>stub</em> def (empty <code>stages</code>). Defs with non-empty stages are replayed directly without invoking this hook. The handler must compile stages and call <code>arbor.pipeline.run</code> itself.</td></tr>
+    <tr><td><code>corvus:pipeline_started</code></td><td><code>run_id, pipeline_id, plugin</code></td></tr>
+    <tr><td><code>corvus:pipeline_step_done</code></td><td><code>run_id, pipeline_id, plugin, stage_id, step_id, step_name, status, exit_code</code></td></tr>
+    <tr><td><code>corvus:pipeline_done</code></td><td><code>run_id, pipeline_id, plugin, status</code></td></tr>
   </tbody>
 </table>
 <pre class="language-lua"><code>{@html highlight(`-- Map the panel's Play click back into the plugin's own launch flow.
 -- The id we registered (e.g. "profile:abc") encodes whatever lookup key
 -- the plugin needs.
-arbor.events.on("on_pipeline_run_request", function(ctx)
+arbor.events.on("corvus:pipeline_run_request", function(ctx)
   local def_id = ctx.pipeline_id or ""
   if def_id:sub(1, 8) ~= "profile:" then return end
   local profile = pcfg.find(def_id:sub(9))
@@ -284,10 +284,10 @@ arbor.events.on("on_pipeline_run_request", function(ctx)
 end)`, '.lua')}</code></pre>
 <pre class="language-toml"><code>{@html highlight(`-- plugin.toml
 [hooks]
-on_pipeline_started   = true
-on_pipeline_step_done = true
-on_pipeline_done      = true`, 'toml')}</code></pre>
-<pre class="language-lua"><code>{@html highlight(`arbor.events.on("on_pipeline_done", function(ctx)
+"corvus:pipeline_started"   = true
+"corvus:pipeline_step_done" = true
+"corvus:pipeline_done"      = true`, 'toml')}</code></pre>
+<pre class="language-lua"><code>{@html highlight(`arbor.events.on("corvus:pipeline_done", function(ctx)
   if ctx.status == "success" then
     arbor.notify{ title = "Pipeline done", message = ctx.pipeline_id .. " succeeded", level = "success" }
   else
@@ -523,7 +523,7 @@ end)`, '.lua')}</code></pre>
   shell round-trip for performance / portability.
 </p>
 <p>Register a handler, then reference it from a step:</p>
-<pre class="language-lua"><code>{@html highlight(`-- Register once (typical: in on_plugin_load)
+<pre class="language-lua"><code>{@html highlight(`-- Register once (typical: in arbor:plugin_load)
 arbor.pipeline.register_op("bump-config", function(params, ctx)
   -- params is the table from the step; ctx.cwd is the step's working dir.
   arbor.fs.json_set{ path = params.path, jpath = "$.version", value = params.version }
@@ -584,7 +584,7 @@ arbor.pipeline.define({
 <p>Two usage patterns — pick whichever fits:</p>
 <pre class="language-lua"><code>{@html highlight(`-- Pattern 1: register every op in the module so pipeline
 -- StepDefs can refer to them by bare name.
-arbor.events.on("on_plugin_load", function()
+arbor.events.on("arbor:plugin_load", function()
   require("arbor.core.assert").register()
 end)
 

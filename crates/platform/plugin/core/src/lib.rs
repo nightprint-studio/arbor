@@ -31,6 +31,7 @@ pub mod contribution;
 pub mod dispatcher;
 pub mod error;
 pub mod hook_router;
+pub mod host_pure;
 pub mod lua_api;
 pub mod lua_ctx;
 pub mod prelude;

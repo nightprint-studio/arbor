@@ -48,7 +48,7 @@ pub async fn dispatch(app: &AppHandle, id: &str, ctx_json: &str) -> Result<(), A
             let message = req_str(&ctx, "message", id)?;
             let amend = get_bool(&ctx, "amend").unwrap_or(false);
             // Migrated to the corvus broker: route through the generic rpc path.
-            // The handler fires `on_pre_commit` (vetoable) + `on_commit` inline,
+            // The handler fires `corvus:pre_commit` (vetoable) + `corvus:commit` inline,
             // so a plugin veto surfaces here as an Err exactly as before.
             corvus_rpc(state.inner(), "commit",
                 serde_json::json!({ "tab_id": tab_id, "message": message, "amend": amend }))?;
@@ -77,14 +77,14 @@ pub async fn dispatch(app: &AppHandle, id: &str, ctx_json: &str) -> Result<(), A
             let name = req_str(&ctx, "name", id)?;
             let from_oid = get_str(&ctx, "from_oid").unwrap_or_else(|| "HEAD".to_string());
             // Migrated to the corvus broker: route through the generic rpc path
-            // so `on_branch_create` fires exactly as for a user invocation.
+            // so `corvus:branch_create` fires exactly as for a user invocation.
             corvus_rpc(state.inner(), "create_branch",
                 serde_json::json!({ "tab_id": tab_id, "name": name, "from_oid": from_oid }))?;
         }
         "arbor:git.checkout" => {
             let name = req_str(&ctx, "name", id)?;
             // Migrated to the corvus broker: route through the generic rpc path
-            // so `on_checkout` + worktree-link sync fire as for a user invocation.
+            // so `corvus:checkout` + worktree-link sync fire as for a user invocation.
             corvus_rpc(state.inner(), "checkout_branch",
                 serde_json::json!({ "tab_id": tab_id, "name": name }))?;
         }

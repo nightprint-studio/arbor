@@ -105,7 +105,7 @@ fn marketplace_remove_custom_source(state: &AppState, args: RemoveCustomSourceAr
 /// Reload the plugin host after a marketplace install/uninstall so the new /
 /// removed folder is picked up, and broadcast `arbor://plugins-reloaded`.
 /// Unlike the Plugin Manager's reload it does NOT re-fire repo lifecycle hooks
-/// (an install shouldn't replay `on_repo_open` for every tab).
+/// (an install shouldn't replay `arbor:repo_open` for every tab).
 fn reload_host(state: &AppState) -> Result<()> {
     // Cancel any background job tied to a plugin that's about to be reloaded.
     if let Ok(mut jobs) = state.jobs.lock() {

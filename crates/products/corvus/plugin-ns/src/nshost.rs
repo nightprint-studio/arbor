@@ -75,7 +75,7 @@ pub trait NsHost: Send + Sync {
     ) -> Result<Option<String>, String>;
 
     /// `arbor.notes.set{commit_oid, namespace, content}` — create/overwrite the
-    /// note. On success the host fires `on_note_saved` with `plugin` set to
+    /// note. On success the host fires `corvus:note_saved` with `plugin` set to
     /// `plugin_name` (the host owns hook firing, identically to the shell).
     fn notes_set(
         &self,
@@ -87,7 +87,7 @@ pub trait NsHost: Send + Sync {
     ) -> Result<(), String>;
 
     /// `arbor.notes.delete(commit_oid, namespace)` — remove the note. On success
-    /// the host fires `on_note_deleted` with `plugin` set to `plugin_name`.
+    /// the host fires `corvus:note_deleted` with `plugin` set to `plugin_name`.
     fn notes_delete(
         &self,
         repo_path: &str,
@@ -165,7 +165,7 @@ pub trait NsHost: Send + Sync {
     //
     // Reads the corvus-be `workspace::{store,registry}` (reload-on-access). The
     // read ops swallow lock/missing into an empty value installer-side; only
-    // `switch` returns a real error and fires `on_workspace_switched` /
+    // `switch` returns a real error and fires `corvus:workspace_switched` /
     // `arbor://workspace-switched`. Workspace tables carry `{ id, name, color_idx,
     // group_id, repo_ids, repo_count }`; repo-entry tables `{ id, path,
     // display_name, remote_url }` — hand-built so the Lua shape stays identical to
@@ -190,7 +190,7 @@ pub trait NsHost: Send + Sync {
     fn workspace_repo(&self, repo_id: &str) -> Result<Option<serde_json::Value>, String>;
 
     /// `arbor.workspace.switch(ws_id)` — mark `ws_id` active (persist), emit
-    /// `arbor://workspace-switched` and fire `on_workspace_switched`. Error strings
+    /// `arbor://workspace-switched` and fire `corvus:workspace_switched`. Error strings
     /// match the shell: `workspace '{ws_id}' not found` /
     /// `workspace '{ws_id}' vanished mid-switch`.
     fn workspace_switch(&self, ws_id: &str, plugin_name: &str) -> Result<(), String>;

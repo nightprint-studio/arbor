@@ -26,7 +26,7 @@ pub use registry::RepoRegistryEntry;
 pub use snapshot::{CrossWsTabRef, TabMeta, TabSnapshot};
 pub use store::{WorkspaceDef, WorkspaceGroup, SCRATCH_ID};
 
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{hooks, CorvusState};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -320,7 +320,7 @@ pub(crate) fn forget_recent_repo(state: &CorvusState, path: &str) {
 }
 
 /// "Forget" a repo once it's no longer a member of any workspace: drop the
-/// registry entry + its recent-repos pointer, and fire `on_repo_deregistered`.
+/// registry entry + its recent-repos pointer, and fire `corvus:repo_deregistered`.
 /// Verbatim port of the shell's `forget_repo_if_orphaned`, with the open-tab
 /// guard reading the shell-pushed open set ([`CorvusState::open_tabs`]) instead
 /// of the shell's `RepoManager`. Returns `true` when the entry was removed.
@@ -346,7 +346,7 @@ pub(crate) fn forget_repo_if_orphaned(
     registry::mutate(state, |reg| { reg.remove(repo_id); Ok(()) })?;
     // Drop the recent-repos pointer too.
     forget_recent_repo(state, &path);
-    state.fire_hook("on_repo_deregistered", json!({
+    state.fire_hook(hooks::REPO_DEREGISTERED, json!({
         "repo_id": repo_id,
         "path":    path,
         "name":    name,

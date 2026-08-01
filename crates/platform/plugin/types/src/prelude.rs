@@ -6,7 +6,22 @@
 //! for rustdoc navigation, but call sites should go through here.
 
 pub use crate::dependency::{Dependency, LoadFailure};
-pub use crate::hook_catalog::{FieldType, HookDef, HookField, HOOK_CATALOG, find};
+pub use crate::hook_catalog::{
+    self, FieldType, HookDef, HookField, HOOK_CATALOG, find, hooks_in_ns, is_known_namespace,
+    resolve_subscription,
+};
+// Re-exported as modules, not flattened: a hook name is always read as
+// `hook_names::corvus::COMMIT`, which is what makes the namespace visible at
+// the call site. Flattening them would hide exactly the thing D9 added.
+pub use crate::hook_names;
+pub use crate::hook_ns;
+pub use crate::hook_ns::{
+    HOOK_NS_SEP, PRODUCT_ARBOR, PRODUCT_CORVUS, PRODUCT_GARRULUS, PRODUCT_LAUNCHER, PRODUCT_MERULA,
+    PRODUCT_SITTA, PRODUCT_TYTO,
+};
+// The compile-time name builders. Exported here too so a product crate that
+// declares its own namespace does not have to reach past the prelude.
+pub use crate::{declare_hook_names, hook_name};
 pub use crate::hooks::Hooks;
 pub use crate::manifest::{Manifest, ManifestParseError, ManifestParseFailure};
 pub use crate::permissions::{

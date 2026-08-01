@@ -13,5 +13,6 @@
 //!
 //! ## Public API: use the [`prelude`]
 
+pub mod hooks;
 pub mod prelude;
 pub mod state;

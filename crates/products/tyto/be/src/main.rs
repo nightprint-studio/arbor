@@ -2,7 +2,8 @@
 //!
 //! The tyto twin of `sitta-be` / `merula-be`: it serves the tyto domains over
 //! framed-stdio IPC, loads **host-pure** Lua plugins (no product `arbor.*`
-//! namespaces, no vetoable hooks — see [`plugin`]), and has **no `NsHost`, no
+//! namespaces, no vetoable hooks — the wiring is `arbor-plugin-core`'s ready-made
+//! host-pure pair), and has **no `NsHost`, no
 //! credentials/OAuth, and no pushed config** — it resolves its own `tyto_*`
 //! config / data dirs once `init_active_profile()` has run.
 //!
@@ -40,8 +41,6 @@ mod region;
 // The saved-captures library (list / rename / remove / clear / reveal / open) —
 // replaces the frontend mock's in-memory list.
 mod library;
-// Host-pure plugin-host wiring (hook dispatcher + `arbor.*` base installer).
-mod plugin;
 // The capture engine (scap capture, windows-capture enumeration, ffmpeg encode,
 // cpal mic) that the domains above drive. Native deps live here, never in the shell.
 mod capture;
@@ -68,8 +67,8 @@ fn main() {
     // `arbor.*` namespaces (no product namespaces). Plugins under tyto's installed/
     // pool load on boot via the `App`'s post-`Hello` hook.
     let mut app = arbor_be::App::new(arbor_be::BackendIo::new());
-    app.plugin_host("tyto", plugin::tyto_hook_dispatcher);
-    app.api_installer(plugin::tyto_be_api_installer());
+    app.plugin_host("tyto", arbor_plugin_core::prelude::host_pure_hook_dispatcher);
+    app.api_installer(arbor_plugin_core::prelude::host_pure_api_installer());
 
     // The state every handler gets: event egress + the reverse channel (reveal /
     // open a saved capture). `Arc`-shared across the dispatcher + the recording

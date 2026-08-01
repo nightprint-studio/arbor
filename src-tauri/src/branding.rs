@@ -9,7 +9,7 @@
 //!
 //! Branding is *RAM only*: nothing is persisted. A reload restores the
 //! default Arbor identity unless the same plugin re-applies the override
-//! during its `on_plugin_load` handler.
+//! during its `arbor:plugin_load` handler.
 
 use std::sync::Mutex;
 
@@ -58,7 +58,7 @@ impl BrandingState {
 
     /// Clear the override unconditionally, or only when `owner` matches the
     /// recorded owner. The latter prevents a plugin from accidentally
-    /// dropping another plugin's branding when both apply on_plugin_load.
+    /// dropping another plugin's branding when both apply arbor:plugin_load.
     /// Returns the previous state when something was actually cleared so
     /// the caller can decide whether to repaint.
     pub fn clear(&self, owner: Option<&str>) -> Option<Branding> {

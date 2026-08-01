@@ -184,12 +184,12 @@ local branch = arbor.issues.branch_name(issue)
   <tbody>
     <tr>
       <td><code>hooks.ISSUE_LINKED</code></td>
-      <td><code>on_issue_linked</code></td>
+      <td><code>corvus:issue_linked</code></td>
       <td><code>issue_id</code>, <code>identifier</code>, <code>sha</code>, <code>branch</code></td>
     </tr>
     <tr>
       <td><code>hooks.ISSUE_TRANSITIONED</code></td>
-      <td><code>on_issue_transitioned</code></td>
+      <td><code>corvus:issue_transitioned</code></td>
       <td><code>issue_id</code>, <code>identifier</code>, <code>from_status</code>, <code>to_status</code></td>
     </tr>
   </tbody>

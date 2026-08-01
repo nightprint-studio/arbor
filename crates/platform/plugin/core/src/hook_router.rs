@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use mlua::{Lua, LuaSerdeExt, Table};
 
 use arbor_plugin_api::prelude::{HookListener, PluginValue};
+use arbor_plugin_types::prelude::hook_names;
 
 use crate::error::{PluginCoreError, Result};
 use crate::runtime::host::PluginHost;
@@ -131,7 +132,7 @@ pub fn fire(lua: &Lua, hook: &str, context_json: &str) -> Result<()> {
 /// Fire a hook the same way as [`fire`], but capture every handler's return
 /// value into the supplied collector.
 ///
-/// Used by the vetoable path (e.g. `on_pre_commit`) where the host needs to
+/// Used by the vetoable path (e.g. `corvus:pre_commit`) where the host needs to
 /// know whether any handler asked to abort. Handler errors are logged like in
 /// [`fire`] and treated as a non-veto (refuse to block on a buggy plugin).
 pub fn fire_collecting(
@@ -161,13 +162,13 @@ pub fn fire_collecting(
 
 /// Broadcast a hook to every enabled plugin that subscribes to it.
 ///
-/// `on_repo_open` / `on_tab_switch` additionally refresh the shared
+/// `arbor:repo_open` / `arbor:tab_switch` additionally refresh the shared
 /// `__arbor_current_repo__` global on EVERY loaded plugin (not just the
 /// subscribers) so a plugin that never subscribed to repo lifecycle still
 /// sees an up-to-date active repo when one of its commands later runs.
 pub fn fire_broadcast(host: &PluginHost, hook: &str, context_json: &str) {
     let new_repo_path: Option<String> =
-        if hook == "on_repo_open" || hook == "on_tab_switch" {
+        if hook == hook_names::arbor::REPO_OPEN || hook == hook_names::arbor::TAB_SWITCH {
             serde_json::from_str::<serde_json::Value>(context_json).ok()
                 .and_then(|v| v.get("path").and_then(|p| p.as_str()).map(|s| s.to_string()))
                 .filter(|s| !s.is_empty())
@@ -208,7 +209,7 @@ pub fn fire_on(host: &PluginHost, plugin_name: &str, hook: &str, context_json: &
     }
 }
 
-/// Fire a vetoable hook (e.g. `on_pre_commit`) on every subscribing plugin in
+/// Fire a vetoable hook (e.g. `corvus:pre_commit`) on every subscribing plugin in
 /// order, short-circuiting at the first plugin that asks to abort.
 ///
 /// Veto convention:

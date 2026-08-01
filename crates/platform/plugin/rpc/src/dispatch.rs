@@ -7,6 +7,7 @@
 //! whole point of co-locating dispatch with the host.
 
 use arbor_plugin_core::prelude::fire_on;
+use arbor_plugin_types::prelude::hook_names;
 
 use crate::context::{with_host, PluginRpcContext};
 
@@ -141,7 +142,7 @@ pub fn set_active_tab<C: PluginRpcContext>(
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
         ctx.fire_hook(
-            "on_tab_switch",
+            hook_names::arbor::TAB_SWITCH,
             serde_json::json!({
                 "tab_id": tid,
                 "path":   path,

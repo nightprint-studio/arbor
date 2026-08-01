@@ -396,20 +396,24 @@
             stubbed in <code>main.lua</code> with a TODO body.
           </p>
 
+          <!-- Labels are the fully-qualified hook names the generated manifest
+               and main.lua actually emit, so the checkbox matches the artifact.
+               Source of truth: `arbor_plugin_types::hook_names` (catalog:
+               `arbor_plugin_types::hook_catalog`) — TS has no constant to import. -->
           <div class="ept-toggle-grid">
-            <Toggle bind:checked={opts.hook_on_plugin_load}   label="on_plugin_load"   description="Plugin constructor — fired once on load" />
-            <Toggle bind:checked={opts.hook_on_repo_open}     label="on_repo_open"     description="A repo tab is opened" />
-            <Toggle bind:checked={opts.hook_on_repo_close}    label="on_repo_close"    description="A repo tab is closed" />
-            <Toggle bind:checked={opts.hook_on_tab_switch}    label="on_tab_switch"    description="User switched the active tab" />
-            <Toggle bind:checked={opts.hook_on_commit}        label="on_commit"        description="A commit was created" />
-            <Toggle bind:checked={opts.hook_on_push}          label="on_push"          description="A push completed" />
-            <Toggle bind:checked={opts.hook_on_pull}          label="on_pull"          description="A pull completed" />
-            <Toggle bind:checked={opts.hook_on_fetch}         label="on_fetch"         description="A fetch completed" />
-            <Toggle bind:checked={opts.hook_on_checkout}      label="on_checkout"      description="A checkout happened" />
-            <Toggle bind:checked={opts.hook_on_branch_create} label="on_branch_create" description="A branch was created" />
-            <Toggle bind:checked={opts.hook_on_branch_delete} label="on_branch_delete" description="A branch was deleted" />
-            <Toggle bind:checked={opts.hook_on_mr_opened}     label="on_mr_opened"     description="A PR / MR was opened" />
-            <Toggle bind:checked={opts.hook_on_mr_merged}     label="on_mr_merged"     description="A PR / MR was merged" />
+            <Toggle bind:checked={opts.hook_on_plugin_load}   label="arbor:plugin_load"    description="Plugin constructor — fired once on load" />
+            <Toggle bind:checked={opts.hook_on_repo_open}     label="arbor:repo_open"      description="A repo tab is opened" />
+            <Toggle bind:checked={opts.hook_on_repo_close}    label="arbor:repo_close"     description="A repo tab is closed" />
+            <Toggle bind:checked={opts.hook_on_tab_switch}    label="arbor:tab_switch"     description="User switched the active tab" />
+            <Toggle bind:checked={opts.hook_on_commit}        label="corvus:commit"        description="A commit was created" />
+            <Toggle bind:checked={opts.hook_on_push}          label="corvus:push"          description="A push completed" />
+            <Toggle bind:checked={opts.hook_on_pull}          label="corvus:pull"          description="A pull completed" />
+            <Toggle bind:checked={opts.hook_on_fetch}         label="corvus:fetch"         description="A fetch completed" />
+            <Toggle bind:checked={opts.hook_on_checkout}      label="corvus:checkout"      description="A checkout happened" />
+            <Toggle bind:checked={opts.hook_on_branch_create} label="corvus:branch_create" description="A branch was created" />
+            <Toggle bind:checked={opts.hook_on_branch_delete} label="corvus:branch_delete" description="A branch was deleted" />
+            <Toggle bind:checked={opts.hook_on_mr_opened}     label="corvus:mr_opened"     description="A PR / MR was opened" />
+            <Toggle bind:checked={opts.hook_on_mr_merged}     label="corvus:mr_merged"     description="A PR / MR was merged" />
           </div>
 
           <h4 class="ept-h4 mt"><Clock size={11}/> Scheduler</h4>

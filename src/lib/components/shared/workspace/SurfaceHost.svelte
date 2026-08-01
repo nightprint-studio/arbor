@@ -29,6 +29,7 @@
     bennu:  () => import('$lib/components/bennu/BennuWindow.svelte'),
     merula: () => import('$lib/components/merula/MerulaWindow.svelte'),
     picus:  () => import('$lib/components/picus/PicusWindow.svelte'),
+    garrulus: () => import('$lib/components/garrulus/GarrulusWindow.svelte'),
   };
 
   let Shell = $state<Component | null>(null);

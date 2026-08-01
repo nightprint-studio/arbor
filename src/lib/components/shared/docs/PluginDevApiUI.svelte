@@ -16,8 +16,8 @@
     <tr><td><code>arbor.ui.confirm&#123; message, confirm_label?, confirm_variant?, state? &#125;</code></td><td>Confirmation dialog. Returns a Promise that resolves with <code>true</code> on confirm and <code>false</code> on cancel. <code>confirm_variant</code>: <code>"primary" | "danger" | "ghost"</code>.</td></tr>
     <tr><td><code>arbor.ui.pick_file(opts)</code></td><td>Native file/folder picker. Fires <code>opts.action</code> with <code>&#123; path, ...opts.extra &#125;</code> on confirm; empty <code>path</code> on cancel. <code>opts.mode</code>: <code>"file"</code> (default), <code>"folder"</code>, <code>"save"</code>. Optional: <code>title</code>, <code>extensions</code>, <code>initial_path</code>.</td></tr>
     <tr><td><code>arbor.ui.add_sidebar(opts)</code></td><td>Register a plugin panel attached to an ActivityBar icon. Accepts <code>side: "left"|"right"</code> (default "right"), <code>position: "top"|"bottom"</code> (default "top"), and <code>kind: "form"|"tree"</code> (default "form"). Form panels respond to <code>panel:open:&lt;id&gt;</code> with <code>set_panel_content</code>; tree panels push nodes via <code>tree.set</code> and accept cross-plugin contributions — see the <em>Tree sidebars</em> section below.</td></tr>
-    <tr><td><code>arbor.ui.add_view(opts)</code></td><td>Register a main-area <em>view</em> — a body surface (where the commit graph lives) rendering form-DSL through the <strong>full</strong> renderer. <code>opts = &#123;id, label?, icon?, placement?, tooltip?&#125;</code>; <code>placement: "graph"</code> (default, keeps tab bar + bottom panel) or <code>"main"</code> (whole body). Respond to <code>on_view_open</code> with <code>set_panel_content</code>. Surfaces in the activity bar, the Command Palette, and the <code>Alt+Shift+V</code> toggle. See the <em>Main-area views</em> section below.</td></tr>
-    <tr><td><code>arbor.ui.set_panel_content(id, body)</code></td><td>Push form-DSL content (<code>&#123;title, nodes, actions?&#125;</code>) into a registered panel <em>or view</em>. Call from the <code>panel:open:&lt;id&gt;</code> / <code>on_view_open</code> handler, or any time underlying state changes.</td></tr>
+    <tr><td><code>arbor.ui.add_view(opts)</code></td><td>Register a main-area <em>view</em> — a body surface (where the commit graph lives) rendering form-DSL through the <strong>full</strong> renderer. <code>opts = &#123;id, label?, icon?, placement?, tooltip?&#125;</code>; <code>placement: "graph"</code> (default, keeps tab bar + bottom panel) or <code>"main"</code> (whole body). Respond to <code>arbor:view_open</code> with <code>set_panel_content</code>. Surfaces in the activity bar, the Command Palette, and the <code>Alt+Shift+V</code> toggle. See the <em>Main-area views</em> section below.</td></tr>
+    <tr><td><code>arbor.ui.set_panel_content(id, body)</code></td><td>Push form-DSL content (<code>&#123;title, nodes, actions?&#125;</code>) into a registered panel <em>or view</em>. Call from the <code>panel:open:&lt;id&gt;</code> / <code>arbor:view_open</code> handler, or any time underlying state changes.</td></tr>
     <tr><td><code>arbor.ui.tree.set(sidebar_id, body)</code></td><td>Push a tree snapshot into a <code>kind="tree"</code> sidebar. <code>body</code> is <code>&#123;title?, breadcrumb?, nodes&#125;</code> or a bare nodes array. <code>breadcrumb</code> is an optional list of segments <code>&#123;label, icon?, action?, data?, badge?, tooltip?&#125;</code> rendered as a clickable trail above the tree — segments with empty <code>action</code> are non-interactive (the current location). Triggers a re-render on the frontend. <br><br><strong>Multi-selection:</strong> tree sidebars now support Ctrl/Cmd+click toggle and Shift+click range. Context-menu items can scope themselves via <code>when.multi</code>: <code>true</code> = only in multi-select, <code>false</code> = single-row only, omitted = both. Action handlers receive <code>ctx.node_ids[]</code> and <code>ctx.nodes[]</code> (single-row contexts get a 1-element array; <code>ctx.node_id</code> and <code>ctx.data</code> stay populated for backward compat).</td></tr>
     <tr><td><code>arbor.ui.tree.get(sidebar_id)</code></td><td>Read the snapshot you most recently set, or <code>nil</code>. Useful when merging incremental updates without keeping a parallel cache.</td></tr>
     <tr><td><code>arbor.ui.contribute(point, item)</code></td><td>Push an item into a contribution point owned by another plugin. <code>item = &#123;id, payload, priority?, when?, disabled?, group?&#125;</code>. Re-contributing with the same id replaces the previous payload (idempotent). <code>when</code> / <code>disabled</code> / <code>group</code> live at the top level — placing them inside <code>payload</code> still works but logs a deprecation warn.</td></tr>
@@ -31,7 +31,7 @@
     <tr><td><code>arbor.ui.settings.close()</code></td><td>Close the currently open settings panel.</td></tr>
     <tr><td><code>arbor.ui.icon.register(config)</code></td><td>Register a custom SVG icon, namespaced as <code>plugin:&lt;your_plugin&gt;:&lt;id&gt;</code>. Reference it from any <code>icon</code> field. Wiped on plugin reload / disable.</td></tr>
     <tr><td><code>arbor.ui.add_graph_combo(opts)</code></td><td>Register a split button (run + dropdown). <code>target</code>: "activity_bar" (default) or "repo_actions"</td></tr>
-    <tr><td><code>arbor.ui.set_combo_options&#123; id, options, selected? &#125;</code></td><td>Dynamically update a combo's option list (call from <code>on_repo_open</code> to refresh per-repo). Optional <code>selected</code> adopts a pick if it appears in <code>options</code>. Thin sugar over <code>contribute_patch("arbor:activitybar", id, &#123;options=…&#125;)</code>.</td></tr>
+    <tr><td><code>arbor.ui.set_combo_options&#123; id, options, selected? &#125;</code></td><td>Dynamically update a combo's option list (call from <code>arbor:repo_open</code> to refresh per-repo). Optional <code>selected</code> adopts a pick if it appears in <code>options</code>. Thin sugar over <code>contribute_patch("arbor:activitybar", id, &#123;options=…&#125;)</code>.</td></tr>
     <tr><td><code>arbor.ui.set_autocomplete_options(id, opts)</code></td><td>Reply with fresh suggestions for an autocomplete field using <code>source_action</code>. Call inside the handler registered for that action.</td></tr>
     <tr><td><code>arbor.ui.form.set_options(name, opts)</code> &nbsp;<em>or</em>&nbsp; <code>set_options&#123; id|name, options &#125;</code></td><td>Swap the option list of a select / radio / autocomplete field. Cfg form with <code>id</code> is recommended when the caller already tracks the node id — same key as <code>patch</code>; host resolves id → field name.</td></tr>
     <tr><td><code>arbor.ui.form.set_disabled(name, bool)</code> &nbsp;<em>or</em>&nbsp; <code>set_disabled&#123; id|name, disabled &#125;</code></td><td>Disable or re-enable a field. Same id-vs-name targeting as <code>set_options</code>.</td></tr>
@@ -200,7 +200,7 @@ arbor.ui.add_toolbar_action({
   active theme to deliver an enterprise-branded experience. Both surfaces are
   <strong>RAM-only</strong>: nothing is persisted, so reloading Arbor restores
   the bundled identity unless the same plugin re-applies the overrides during
-  its <code>on_plugin_load</code> handler.
+  its <code>arbor:plugin_load</code> handler.
 </p>
 <h3>Replace the logo</h3>
 <p>
@@ -273,8 +273,8 @@ arbor.ui.set_theme_tokens{
 
 -- Listen to theme changes so we can re-tint custom widgets that don't
 -- read CSS vars (e.g. a canvas-rendered chart). Declare the subscription
--- in plugin.toml: [hooks] on_theme_changed = true
-arbor.events.on("on_theme_changed", function(ctx)
+-- in plugin.toml: [hooks] "arbor:theme_changed" = true
+arbor.events.on("arbor:theme_changed", function(ctx)
   -- ctx.source: "user" | "plugin" | "init"
   -- ctx.vars:   merged effective stylesheet (active theme + every overlay)
   arbor.log.info("theme is now " .. ctx.theme_name)
@@ -421,8 +421,8 @@ end`, '.lua')}</pre>
 
 <h2>arbor.keybinding — plugin keyboard shortcuts</h2>
 <p>Register keyboard shortcuts that fire a Lua action when triggered anywhere in the app. Plugin shortcuts are visible under the <strong>Plugins</strong> group in the <strong>Keyboard Shortcuts</strong> panel (read-only).</p>
-<pre class="language-lua">{@html highlight(`-- Call once during on_plugin_load.
-arbor.events.on("on_plugin_load", function(_ctx)
+<pre class="language-lua">{@html highlight(`-- Call once during arbor:plugin_load.
+arbor.events.on("arbor:plugin_load", function(_ctx)
   arbor.keybinding.register({
     key         = "F5",
     action      = "compile:run",   -- fired as a plugin hook
@@ -456,7 +456,7 @@ end)`, '.lua')}</pre>
   You can register <strong>multiple combos</strong> from the same plugin; they appear in
   registration order within the target area.
 </p>
-<pre class="language-lua">{@html highlight(`-- Register once (e.g. in on_plugin_load).
+<pre class="language-lua">{@html highlight(`-- Register once (e.g. in arbor:plugin_load).
 arbor.ui.add_graph_combo({
   id         = "my_plugin:run",
   run_icon   = "Play",           -- Lucide icon name
@@ -467,7 +467,7 @@ arbor.ui.add_graph_combo({
 })
 
 -- Refresh options when repo changes
-arbor.events.on("on_repo_open", function(ctx)
+arbor.events.on("arbor:repo_open", function(ctx)
   arbor.ui.set_combo_options{
     id = "my_plugin:run",
     options = {
@@ -576,7 +576,7 @@ end)`, '.lua')}</pre>
   section. You don't render this chrome yourself — only the body content.
 </p>
 <pre class="language-lua">{@html highlight(`-- Register the panels once at plugin load.
-arbor.events.on("on_plugin_load", function()
+arbor.events.on("arbor:plugin_load", function()
   arbor.ui.add_sidebar({
     id       = "overview",
     icon     = "🧩",
@@ -674,7 +674,7 @@ arbor.ui.set_panel_content("my_panel", {
 </p>
 <p>
   Register it with <code>arbor.ui.add_view</code>, then fill the body from the
-  <code>on_view_open</code> hook with <code>set_panel_content</code> — the
+  <code>arbor:view_open</code> hook with <code>set_panel_content</code> — the
   <em>same</em> channel sidebar panels use (view ids must be distinct from your
   sidebar ids). <code>placement = "graph"</code> (default) replaces the graph
   but keeps the tab bar + bottom panel; <code>placement = "main"</code> takes
@@ -687,7 +687,7 @@ arbor.ui.set_panel_content("my_panel", {
   placement = "graph",            -- or "main" for the whole body
 })
 
-arbor.on("on_view_open", function(ctx)
+arbor.events.on("arbor:view_open", function(ctx)
   if ctx.view_id ~= "dashboard" then return end
   arbor.ui.set_panel_content("dashboard", {
     title = "Build Dashboard",
@@ -701,7 +701,7 @@ arbor.on("on_view_open", function(ctx)
   })
 end)
 
-arbor.on("on_view_close", function(ctx)
+arbor.events.on("arbor:view_close", function(ctx)
   if ctx.view_id == "dashboard" then --[[ stop polling, drop caches ]] end
 end)`, '.lua')}</pre>
 <p>
@@ -739,7 +739,7 @@ end)`, '.lua')}</pre>
 <h3>2. Push the tree</h3>
 <p>
   Call <code>arbor.ui.tree.set(sidebar_id, body)</code> on every state change
-  (typically from <code>on_repo_open</code> / <code>on_tab_switch</code>).
+  (typically from <code>arbor:repo_open</code> / <code>arbor:tab_switch</code>).
   Each node is shaped like:
 </p>
 <pre class="language-lua">{@html highlight(`{

@@ -1,0 +1,24 @@
+[package]
+name         = "garrulus-index"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "garrulus — the in-memory vault index: the link graph and its reversed edges (backlinks), unresolved links as a first-class concept, tag buckets, an inverted word index with snippet extraction, a subsequence scorer for the quick switcher, the `type:bug stato:aperto testo libero` query language, and the vault-problems report."
+
+# A CACHE, never the record: everything here is rebuildable from the notes on
+# disk, so nothing in this crate touches the filesystem, the clock or the
+# network. `garrulus-vault` is here only for `Note` / `NoteId` / `TypeId` and
+# `garrulus-ast` only for `FrontValue` — both are confined to `note_view.rs`,
+# which is the single place the index knows what a vault note looks like.
+#
+# No fuzzy-matching dependency on purpose: the scorer in `fuzzy.rs` is 150 lines
+# and lets the ranking be tuned against the vault's own titles.
+[dependencies]
+garrulus-ast   = { path = "../ast" }
+garrulus-vault = { path = "../vault" }
+serde          = { workspace = true }
+
+[lints.rust]
+missing_debug_implementations = "warn"

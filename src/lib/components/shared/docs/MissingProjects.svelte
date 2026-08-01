@@ -86,13 +86,13 @@ You can also bulk-clean every dead recent in <strong>Settings → Git → Missin
 <p>Two hooks bracket the tombstone lifecycle. Both fire with a single context table.</p>
 
 <ul class="prop-list">
-  <li><code>on_project_missing</code>Fired when a registered repo's path fails validation at open time. Plugins should drop transient state tied to that project (cancel jobs, hide pinned views) but should NOT delete persistent caches — the user might recover the path.</li>
-  <li><code>on_project_relocated</code>Fired after the user picks a new location via the Locate flow. Plugins keyed off the absolute path (deps caches, IDE history, …) should rebase their bookkeeping from <code>old_path</code> to <code>new_path</code>.</li>
+  <li><code>corvus:project_missing</code>Fired when a registered repo's path fails validation at open time. Plugins should drop transient state tied to that project (cancel jobs, hide pinned views) but should NOT delete persistent caches — the user might recover the path.</li>
+  <li><code>corvus:project_relocated</code>Fired after the user picks a new location via the Locate flow. Plugins keyed off the absolute path (deps caches, IDE history, …) should rebase their bookkeeping from <code>old_path</code> to <code>new_path</code>.</li>
 </ul>
 
 <h3>Context tables</h3>
 
-<pre><code>{`-- on_project_missing
+<pre><code>{`-- corvus:project_missing
 {
   repo_id = "uuid…",
   path    = "/old/path",
@@ -100,7 +100,7 @@ You can also bulk-clean every dead recent in <strong>Settings → Git → Missin
   reason  = "missing" | "unreachable" | "not_a_repo",
 }
 
--- on_project_relocated
+-- corvus:project_relocated
 {
   repo_id    = "uuid…",
   old_path   = "/old/path",
@@ -111,7 +111,7 @@ You can also bulk-clean every dead recent in <strong>Settings → Git → Missin
 
 <h3>Example handler</h3>
 
-<pre><code>{`arbor.events.on("on_project_relocated", function(ctx)
+<pre><code>{`arbor.events.on("corvus:project_relocated", function(ctx)
   -- Rewrite our path-keyed cache
   local cache = arbor.settings.global.get("path_cache") or {}
   if cache[ctx.old_path] then
@@ -121,13 +121,13 @@ You can also bulk-clean every dead recent in <strong>Settings → Git → Missin
   end
 end)
 
-arbor.events.on("on_project_missing", function(ctx)
+arbor.events.on("corvus:project_missing", function(ctx)
   arbor.log.warn("project missing: " .. ctx.path .. " (" .. ctx.reason .. ")")
 end)`}</code></pre>
 
 <div class="hint">
   Both hooks fire from the backend with the same dispatch pipeline as
-  <code>on_repo_open</code> / <code>on_repo_close</code>, so anything you can do from those handlers
+  <code>corvus:repo_open</code> / <code>corvus:repo_close</code>, so anything you can do from those handlers
   works here.
 </div>
 

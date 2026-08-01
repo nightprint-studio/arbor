@@ -22,7 +22,7 @@
 //! the checkout-sync orchestrator now live in `corvus-be`
 //! ([`crate::worktree_links`]). `create_branch` refuses names reserved by an
 //! alias group; `delete`/`rename` clean up / smart-rename alias entries; the
-//! checkout handlers fire `on_checkout` (the `_safe` variants only on a clean
+//! checkout handlers fire `corvus:checkout` (the `_safe` variants only on a clean
 //! result) and trigger `orchestrator::maybe_trigger_checkout_sync`. The
 //! stash-safe core ([`safe_checkout_with_stash`]) opens the repo by the pushed
 //! path, stashes the dirty workdir over the shared `corvus-git` stash, runs the
@@ -30,7 +30,7 @@
 //! tab to its RepoRegistry UUID via the pushed `repo_registry` (path-matched the
 //! same way the shell's `find_by_path` does).
 
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{hooks, CorvusState};
 use corvus_git::branch::{BranchInfo, RemoteRenameResult, TagInfo};
 use corvus_git::recovery::RecoveryKind;
 use corvus_git::stash::StashEntry;
@@ -101,7 +101,7 @@ fn delete_branches(
         corvus_git::branch::delete_branches(&repo, &names)
     };
     if !deleted.is_empty() {
-        state.fire_hook("on_branch_delete", json!({ "tab_id": tab_id, "names": deleted }));
+        state.fire_hook(hooks::BRANCH_DELETE, json!({ "tab_id": tab_id, "names": deleted }));
     }
     Ok(deleted)
 }
@@ -127,7 +127,7 @@ fn delete_remote_branches(
         names.iter().filter(|n| !failed.contains(n)).cloned().collect()
     };
     if !deleted_names.is_empty() {
-        state.fire_hook("on_branch_delete", json!({ "tab_id": tab_id, "names": deleted_names }));
+        state.fire_hook(hooks::BRANCH_DELETE, json!({ "tab_id": tab_id, "names": deleted_names }));
     }
     let failed: Vec<String> =
         names.into_iter().filter(|n| !deleted_names.contains(n)).collect();
@@ -161,7 +161,7 @@ fn rename_remote_branch(
         .map_err(|e| e.to_string())?
     };
     state.fire_hook(
-        "on_branch_rename",
+        hooks::BRANCH_RENAME,
         json!({
             "tab_id": tab_id,
             "old_name": old_full_name,
@@ -195,7 +195,7 @@ fn checkout_commit(state: &CorvusState, tab_id: String, oid: String) -> Result<(
         corvus_git::branch::checkout_commit_detached(&repo, &oid, &snapshot)
             .map_err(|e| e.to_string())?;
     }
-    state.fire_hook("on_checkout", json!({ "tab_id": tab_id, "oid": oid }));
+    state.fire_hook(hooks::CHECKOUT, json!({ "tab_id": tab_id, "oid": oid }));
     Ok(())
 }
 
@@ -368,7 +368,7 @@ fn create_branch(state: &CorvusState, tab_id: String, name: String, from_oid: St
         let repo = open(state, &tab_id)?;
         corvus_git::branch::create_branch(&repo, &name, &from_oid).map_err(|e| e.to_string())?
     };
-    state.fire_hook("on_branch_create", json!({ "tab_id": tab_id, "name": name, "from_oid": from_oid }));
+    state.fire_hook(hooks::BRANCH_CREATE, json!({ "tab_id": tab_id, "name": name, "from_oid": from_oid }));
     Ok(info)
 }
 
@@ -378,7 +378,7 @@ fn delete_branch(state: &CorvusState, tab_id: String, name: String) -> Result<()
         let repo = open(state, &tab_id)?;
         corvus_git::branch::delete_branch(&repo, &name).map_err(|e| e.to_string())?;
     }
-    state.fire_hook("on_branch_delete", json!({ "tab_id": &tab_id, "name": &name }));
+    state.fire_hook(hooks::BRANCH_DELETE, json!({ "tab_id": &tab_id, "name": &name }));
     // Remove alias entries that referenced this (repo_id, branch).
     if let Some(repo_id) = repo_id_for_tab(state, &tab_id) {
         let removed = worktree_links::mutate(state, |reg| {
@@ -403,7 +403,7 @@ fn rename_branch(state: &CorvusState, tab_id: String, old_name: String, new_name
         corvus_git::branch::rename_branch(&repo, &old_name, &new_name).map_err(|e| e.to_string())?
     };
     state.fire_hook(
-        "on_branch_rename",
+        hooks::BRANCH_RENAME,
         json!({ "tab_id": &tab_id, "old_name": &old_name, "new_name": &new_name }),
     );
     // Smart-update alias entries: rename in-place; collapse trivial groups.
@@ -430,7 +430,7 @@ fn checkout_branch(state: &CorvusState, tab_id: String, name: String) -> Result<
         with_checkout_snapshot(state, |snap| corvus_git::branch::checkout_branch(&repo, &name, snap))
             .map_err(|e| e.to_string())?;
     }
-    state.fire_hook("on_checkout", json!({ "tab_id": &tab_id, "branch": &name }));
+    state.fire_hook(hooks::CHECKOUT, json!({ "tab_id": &tab_id, "branch": &name }));
     if let Some(repo_id) = repo_id_for_tab(state, &tab_id) {
         orchestrator::maybe_trigger_checkout_sync(state, &tab_id, &repo_id, &name);
     }
@@ -446,7 +446,7 @@ fn checkout_branch_safe(state: &CorvusState, tab_id: String, name: String) -> Re
         Ok(None)
     })?;
     if checkout_is_clean(&result) {
-        state.fire_hook("on_checkout", json!({ "tab_id": &tab_id, "branch": &name }));
+        state.fire_hook(hooks::CHECKOUT, json!({ "tab_id": &tab_id, "branch": &name }));
         if let Some(repo_id) = repo_id_for_tab(state, &tab_id) {
             orchestrator::maybe_trigger_checkout_sync(state, &tab_id, &repo_id, &name);
         }
@@ -461,7 +461,7 @@ fn checkout_remote_as_local(state: &CorvusState, tab_id: String, remote_name: St
         with_checkout_snapshot(state, |snap| corvus_git::branch::checkout_remote_as_local(&repo, &remote_name, snap))
             .map_err(|e| e.to_string())?
     };
-    state.fire_hook("on_checkout", json!({ "tab_id": &tab_id, "branch": &local_name }));
+    state.fire_hook(hooks::CHECKOUT, json!({ "tab_id": &tab_id, "branch": &local_name }));
     if let Some(repo_id) = repo_id_for_tab(state, &tab_id) {
         orchestrator::maybe_trigger_checkout_sync(state, &tab_id, &repo_id, &local_name);
     }
@@ -479,7 +479,7 @@ fn checkout_remote_as_local_safe(state: &CorvusState, tab_id: String, remote_nam
     })?;
     if checkout_is_clean(&result) {
         if let Some(ref local_name) = result.resolved_local_name {
-            state.fire_hook("on_checkout", json!({ "tab_id": &tab_id, "branch": local_name }));
+            state.fire_hook(hooks::CHECKOUT, json!({ "tab_id": &tab_id, "branch": local_name }));
             if let Some(repo_id) = repo_id_for_tab(state, &tab_id) {
                 orchestrator::maybe_trigger_checkout_sync(state, &tab_id, &repo_id, local_name);
             }
@@ -497,7 +497,7 @@ fn checkout_commit_safe(state: &CorvusState, tab_id: String, oid: String) -> Res
         Ok(None)
     })?;
     if checkout_is_clean(&result) {
-        state.fire_hook("on_checkout", json!({ "tab_id": tab_id, "oid": oid }));
+        state.fire_hook(hooks::CHECKOUT, json!({ "tab_id": tab_id, "oid": oid }));
     }
     Ok(result)
 }

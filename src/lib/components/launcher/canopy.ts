@@ -58,6 +58,10 @@ export const BASE: Product[] = [
   // and Merula's amber on the canopy.
   { id: 'picus',  name: 'Picus',  bird: 'woodpecker',  role: 'SQL studio',          accent: '#4fbfa8',
     blurb: 'Oracle and PostgreSQL client, and maintainer of the SQL scripts they install from: it keeps the two dialect branches in step and generates the changes that keep them there.' },
+  // The jay caches acorns in a thousand places and remembers every one — the
+  // bird the product is named for, and the behaviour it is for.
+  { id: 'garrulus', name: 'Garrulus', bird: 'jay',     role: 'Note e appunti',      accent: '#3fb6d9',
+    blurb: 'A vault of plain markdown notes — links, tags, tasks and templates per note kind — that keeps itself in step across your machines. The files stay yours: any other markdown editor opens the same folder.' },
 ];
 
 // ── Colour helpers ───────────────────────────────────────────────────────────

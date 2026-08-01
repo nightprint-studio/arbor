@@ -1,0 +1,33 @@
+[package]
+name         = "garrulus-parse"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "garrulus — the markdown half of the Reader/Writer seam: a Tree-sitter block parse plus pure scanners for YAML frontmatter, wikilinks, #tags and ==highlights==."
+
+# `garrulus-ast` is the model this crate reads into and writes out of; it is the
+# only Garrulus crate below us. `tree-sitter` is pinned to the workspace-wide
+# 0.25 that `picus-parse` and `bennu` already build, so Cargo produces ONE
+# runtime artefact — a second major would mean two incompatible `Language`
+# types in the same binary.
+#
+# `tree-sitter-md` is the markdown grammar (block + inline). It is reached from
+# exactly one file, `src/grammar.rs`, precisely because this pin is the least
+# certain thing in the crate: if it drags in its own `tree-sitter` major, the
+# fix is to vendor `parser.c` + `scanner.c` and compile them in a `build.rs`
+# with `cc`, the way `picus-parse` does — and that edit stays inside
+# `grammar.rs` + `build.rs`.
+#
+# `serde` is deliberately absent: this crate produces and consumes
+# `garrulus-ast` types and defines no wire type of its own, so declaring it
+# would be an unused dependency. Add it back the day something here needs to
+# cross the RPC seam on its own.
+[dependencies]
+garrulus-ast   = { path = "../ast" }
+tree-sitter    = "0.25"
+tree-sitter-md = "0.3"
+
+[lints.rust]
+missing_debug_implementations = "warn"

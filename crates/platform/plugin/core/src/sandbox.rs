@@ -72,6 +72,12 @@ pub struct ApiInstallParams {
     pub plugin_name:        String,
     pub plugin_dir:         PathBuf,
     pub arbor_api:          u32,
+    /// Id of the product whose host is loading this plugin (`"corvus"`,
+    /// `"garrulus"`, `"launcher"`, …) — the namespace an unqualified
+    /// `arbor.events.on("commit", …)` resolves against (**D9**). `None` in
+    /// headless / test runs whose host never called `set_product`, in which
+    /// case subscriptions are taken exactly as written.
+    pub product:            Option<String>,
     pub app_ctx:            Option<Arc<dyn AppCtx>>,
     /// Weak self-reference of the owning [`PluginHost`]. Captured by the
     /// `arbor.*` namespaces that need to fire hooks / invoke services back
@@ -112,6 +118,8 @@ impl LuaApiInstaller for NoopApiInstaller {
 #[allow(clippy::too_many_arguments)]
 pub fn create_sandbox(
     manifest:      &Manifest,
+    // Product id of the loading host — see `ApiInstallParams::product`.
+    product:       Option<String>,
     app_ctx:       Option<Arc<dyn AppCtx>>,
     host_weak:     Option<Weak<Mutex<PluginHost>>>,
     api_installer: &dyn LuaApiInstaller,
@@ -143,6 +151,7 @@ pub fn create_sandbox(
         plugin_name:        manifest.name.clone(),
         plugin_dir:         manifest.dir.clone(),
         arbor_api:          manifest.arbor_api,
+        product,
         app_ctx,
         host_weak,
         timer_cancels,

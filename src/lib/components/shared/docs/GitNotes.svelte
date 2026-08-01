@@ -50,18 +50,18 @@
       </tr>
       <tr>
         <td><code>arbor.notes.set&#123; commit_oid, namespace, content &#125;</code></td>
-        <td>Create or overwrite a note. Returns <code>(true, nil)</code> on success, <code>(false, err)</code> on git failure. Fires <code>on_note_saved</code> hook.</td>
+        <td>Create or overwrite a note. Returns <code>(true, nil)</code> on success, <code>(false, err)</code> on git failure. Fires <code>corvus:note_saved</code> hook.</td>
       </tr>
       <tr>
         <td><code>arbor.notes.delete(commit_oid, namespace)</code></td>
-        <td>Delete a note. Fires <code>on_note_deleted</code> hook.</td>
+        <td>Delete a note. Fires <code>corvus:note_deleted</code> hook.</td>
       </tr>
     </tbody>
   </table>
 
   <h4>Example</h4>
   <pre><code>-- Auto-annotate commits that reference a Jira ticket
-arbor.events.on("on_commit", function(ctx)
+arbor.events.on("corvus:commit", function(ctx)
   local msg = ctx.summary or ""
   local ticket = msg:match("[A-Z]+%-%d+")
   if ticket then
@@ -74,11 +74,11 @@ end)</code></pre>
     <thead><tr><th>Hook</th><th>Context fields</th></tr></thead>
     <tbody>
       <tr>
-        <td><code>on_note_saved</code></td>
+        <td><code>corvus:note_saved</code></td>
         <td><code>tab_id</code>, <code>commit_oid</code>, <code>namespace</code></td>
       </tr>
       <tr>
-        <td><code>on_note_deleted</code></td>
+        <td><code>corvus:note_deleted</code></td>
         <td><code>tab_id</code>, <code>commit_oid</code>, <code>namespace</code></td>
       </tr>
     </tbody>
@@ -86,8 +86,8 @@ end)</code></pre>
 
   <h3>Plugin Manifest</h3>
   <pre><code>[hooks]
-on_note_saved   = true
-on_note_deleted = true
+"corvus:note_saved"   = true
+"corvus:note_deleted" = true
 
 [permissions]
 git = "write"</code></pre>

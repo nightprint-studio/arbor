@@ -108,10 +108,10 @@
 <table class="shortcuts-table">
   <thead><tr><th>Hook</th><th>Context</th><th>Fires when</th></tr></thead>
   <tbody>
-    <tr><td><code>"on_worktree_link_sync_started"</code></td><td><code>&#123;link_id, link_name, initiator_repo_id, target_branch&#125;</code></td><td>Just before propagation begins.</td></tr>
-    <tr><td><code>"on_worktree_link_sync_done"</code></td><td><code>&#123;link_id, link_name, target_branch, results: [...]&#125;</code></td><td>After every member has been processed.  Each result has <code>repo_id</code> and a <code>status</code> table tagged by <code>kind</code>.</td></tr>
-    <tr><td><code>"on_worktree_link_member_added"</code></td><td><code>&#123;link_id, repo_id&#125;</code></td><td>User added a worktree to a link.</td></tr>
-    <tr><td><code>"on_worktree_link_member_removed"</code></td><td><code>&#123;link_id, repo_id&#125;</code></td><td>User removed a worktree from a link.</td></tr>
+    <tr><td><code>"corvus:worktree_link_sync_started"</code></td><td><code>&#123;link_id, link_name, initiator_repo_id, target_branch&#125;</code></td><td>Just before propagation begins.</td></tr>
+    <tr><td><code>"corvus:worktree_link_sync_done"</code></td><td><code>&#123;link_id, link_name, target_branch, results: [...]&#125;</code></td><td>After every member has been processed.  Each result has <code>repo_id</code> and a <code>status</code> table tagged by <code>kind</code>.</td></tr>
+    <tr><td><code>"corvus:worktree_link_member_added"</code></td><td><code>&#123;link_id, repo_id&#125;</code></td><td>User added a worktree to a link.</td></tr>
+    <tr><td><code>"corvus:worktree_link_member_removed"</code></td><td><code>&#123;link_id, repo_id&#125;</code></td><td>User removed a worktree from a link.</td></tr>
   </tbody>
 </table>
 

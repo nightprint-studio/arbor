@@ -193,7 +193,7 @@ local paths = arbor.repo.untracked()           -- ["target/foo.bin", ".env", ...
 -- List staged files — exactly what \`git diff --cached --name-only\` would
 -- list. Each entry is { path, status } where status is one of
 -- "added" | "modified" | "deleted" | "renamed" | "typechange". The
--- canonical caller is an on_pre_commit hook checking the files about
+-- canonical caller is an corvus:pre_commit hook checking the files about
 -- to enter the next commit.
 local staged, err = arbor.repo.staged_files()
 for _, file in ipairs(staged or {}) do
@@ -235,7 +235,7 @@ end`, '.lua')}</pre>
   Read-only APIs for inspecting the user's workspaces and the central repo
   registry. No special permissions required. The mutating <code>switch()</code>
   call emits <code>arbor://workspace-switched</code> and fires the
-  <code>on_workspace_switched</code> hook so other plugins can react.
+  <code>corvus:workspace_switched</code> hook so other plugins can react.
 </p>
 <pre class="language-lua">{@html highlight(`local list   = arbor.workspace.list()          -- [{id, name, color_idx, group_id, repo_ids, repo_count}]
 local active = arbor.workspace.active()         -- active workspace or nil

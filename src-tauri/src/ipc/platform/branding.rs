@@ -8,7 +8,7 @@
 //! `arbor://*` emitters stay inline in the command module (they take an
 //! `AppHandle`).
 //!
-//! `notify_theme_changed` fired the `on_theme_changed` plugin hook inline as a
+//! `notify_theme_changed` fired the `arbor:theme_changed` plugin hook inline as a
 //! Tauri command. Migrated here it returns the change descriptor only; the
 //! fire-and-forget hook now belongs in the shell's generic `rpc` post-hooks
 //! path so it runs exactly once regardless of in-process vs out-of-process
@@ -51,7 +51,7 @@ fn get_branding(state: &AppState) -> Result<BrandingDto, AppError> {
 /// Tell the backend that the active theme just changed (or that a plugin
 /// applied / removed an in-memory token overlay).
 ///
-/// The `on_theme_changed` fan-out to every plugin's handler is fired by the
+/// The `arbor:theme_changed` fan-out to every plugin's handler is fired by the
 /// shell's `rpc` post-hooks path (see `postHooksArms`), not inline here, so it
 /// runs exactly once whether the method is served in-process or out-of-process.
 ///

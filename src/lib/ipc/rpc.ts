@@ -14,7 +14,8 @@ import { invoke } from '@tauri-apps/api/core';
  * to a nested JSON payload).
  */
 /** The backend product labels the router dispatches to. */
-export type Program = 'corvus' | 'platform' | 'studio' | 'merula' | 'sitta' | 'tyto' | 'bennu' | 'picus';
+export type Program =
+  | 'corvus' | 'platform' | 'studio' | 'merula' | 'sitta' | 'tyto' | 'bennu' | 'picus' | 'garrulus';
 
 export function rpc<R>(program: Program, method: string, params: Record<string, unknown> = {}): Promise<R> {
   return invoke<R>('rpc', { program, method, params });
@@ -71,3 +72,13 @@ export const bennu = <R>(method: string, params: Record<string, unknown> = {}): 
  *  isn't up — callers fall back rather than surfacing the error. */
 export const picus = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
   rpc<R>('picus', method, params);
+
+/** Bound helper for the Garrulus (notes) backend — served out-of-process by
+ *  `garrulus-be`, spawned lazily when the Garrulus window opens. It owns the whole
+ *  vault: discovery and note I/O, note types and templates, the link/search index,
+ *  the sync remotes and the filesystem watcher. `BackendNotRunning` when
+ *  `garrulus-be` isn't up — the window then has no vault at all, so callers surface
+ *  that state rather than falling back to something invented. The typed wrappers
+ *  live in `ipc/garrulus.ts`; prefer those over calling this directly. */
+export const garrulus = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
+  rpc<R>('garrulus', method, params);

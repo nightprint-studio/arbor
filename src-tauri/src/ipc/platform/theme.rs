@@ -11,7 +11,7 @@
 //! touched `AppState`, but the handler macro requires a context first arg, so
 //! they take `_state: &AppState` and ignore it.
 //!
-//! `notify_theme_changed` is **not** here: it broadcasts the `on_theme_changed`
+//! `notify_theme_changed` is **not** here: it broadcasts the `arbor:theme_changed`
 //! hook to every loaded plugin and lives in `branding_commands.rs`, so it stays
 //! inline for the later emit/hook seam pass. No hooks fire in this domain.
 

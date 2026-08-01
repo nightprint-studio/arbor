@@ -1,0 +1,54 @@
+[package]
+name         = "garrulus-be"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Garrulus backend — the headless note-vault process for Model D. Serves the garrulus domains (vault, note, types, search, sync, watch) over framed-stdio IPC; drives the garrulus leaf crates, hosts host-pure Lua plugins (no product namespace of its own) and has no credentials, and resolves its config/data dirs once init_active_profile() has run."
+
+[[bin]]
+name = "garrulus-be"
+path = "src/main.rs"
+
+[dependencies]
+arbor-ipc  = { path = "../../../foundation/ipc" }
+arbor-rpc  = { path = "../../../foundation/rpc" }
+# The Model-D backend runtime scaffold: `BackendIo` (framed-stdio plumbing +
+# runtime) + the `App` builder (plugin host, pre-serve inits, serve loop).
+arbor-be   = { path = "../../../foundation/be" }
+# The host-pure plugin-host wiring, taken ready-made: `host_pure_hook_dispatcher`
+# (the whole hook catalog, nothing vetoable, one `LuaHookListener` bound to the
+# host) + `host_pure_api_installer` (the platform `arbor.*` namespaces, no product
+# ones). Both come from the prelude, so garrulus-be names no `mlua` type and needs
+# neither `arbor-plugin-api` nor an `mlua` pin of its own.
+arbor-plugin-core = { path = "../../../platform/plugin/core" }
+# The profile-aware config/data-path resolver: `init_active_profile()` seeds the
+# active profile FIRST in `main`, so the garrulus config / vault registry resolve
+# under the launcher's profile.
+arbor-core = { path = "../../../foundation/core" }
+# The shared trigger engine, for exactly one job: the read-only background sync
+# probe (`probe.rs`). A hand-rolled thread + sleep loop would have to re-invent
+# the cadence, the per-tick gate and the cancel-on-reconfigure this crate already
+# has — and every other Arbor background loop already goes through it.
+arbor-scheduler = { path = "../../../platform/scheduler" }
+# The canonical garrulus state: `GarrulusState` (event egress + reverse channel +
+# the open vault / index / sync remote) + the typed product config. It also
+# re-exports the vault / index / sync vocabulary, so the handlers here name those
+# types without depending on the leaf crates directly. Tauri-free by construction.
+garrulus-core = { path = "../core" }
+# No `corvus-git` edge here on purpose: the one type this crate names (`GitCli`,
+# for the `git init` + `git remote add origin <url>` that points a freshly created
+# provider repository at the vault) comes through `garrulus-core`'s prelude, which
+# re-exports it for exactly this call site. Building a `GitRemote` is not this
+# crate's job either — that is `garrulus_core::build_remote`, the single factory.
+# The vault watcher (`watch.rs`): notes change under the app — a sync pull, the
+# other PC, or Obsidian open on the same folder. Approved as a garrulus-be
+# dependency in the design doc (§11.5 / decision 11); the alternative was polling
+# on the sync tick, which is worse and not free either.
+notify = "6"
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# Drives the serve loop; the sync handlers block on the async `SyncRemote` futures
+# through the runtime handle, so a multi-thread runtime is required.
+tokio      = { workspace = true }

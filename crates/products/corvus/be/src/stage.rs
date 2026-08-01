@@ -14,9 +14,9 @@
 //! as `"Commit not found: {oid}"`, and `AppError::Other(s)` as the bare string.
 //!
 //! **Hooks fire here, in-process to this backend** (plugin-relocation Wave 0).
-//! `commit` fires the vetoable `on_pre_commit` *before* opening/mutating the
+//! `commit` fires the vetoable `corvus:pre_commit` *before* opening/mutating the
 //! repo (a non-empty plugin return aborts with `"Commit blocked by
-//! plugin:\n{reason}"`) and the fire-and-forget `on_commit` *after* the repo
+//! plugin:\n{reason}"`) and the fire-and-forget `corvus:commit` *after* the repo
 //! handle is dropped — same lock-then-fire discipline and payload keys as the
 //! shell's in-process copy.
 //!
@@ -24,20 +24,20 @@
 //! (`crate::repo::snapshot_policy`), falling back to the built-in default when
 //! none was pushed — same configured limits as in-process (W0b).
 
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{hooks, CorvusState};
 use git2::{IndexAddOption, Status};
 use serde_json::json;
 
 use crate::repo::{git, open, snapshot_policy};
 
 // ---------------------------------------------------------------------------
-// Commit — fires the vetoable `on_pre_commit` + `on_commit` hooks inline.
+// Commit — fires the vetoable `corvus:pre_commit` + `corvus:commit` hooks inline.
 // ---------------------------------------------------------------------------
 
 #[arbor_rpc::handler]
 fn commit(state: &CorvusState, tab_id: String, message: String, amend: bool) -> Result<String, String> {
     // ── Pre-commit veto ────────────────────────────────────────────────
-    // Plugins subscribed to `on_pre_commit` may reject the commit by
+    // Plugins subscribed to `corvus:pre_commit` may reject the commit by
     // returning a non-empty string from their handler. The dispatcher
     // short-circuits at the first plugin that vetoes and hands back a
     // `"<plugin>: <reason>"` string, which we surface to the user.
@@ -87,7 +87,7 @@ fn commit(state: &CorvusState, tab_id: String, message: String, amend: bool) -> 
     }; // repo handle dropped here
 
     state.fire_hook(
-        "on_commit",
+        hooks::COMMIT,
         json!({
             "tab_id":  &tab_id,
             "oid":     &oid,

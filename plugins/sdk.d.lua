@@ -7,6 +7,18 @@
 -- It provides autocomplete and type checking for the `arbor` global API
 -- injected into every Arbor plugin sandbox.
 --
+-- Hook naming:
+--   Every built-in hook is `<product>:<event>` — `corvus:commit`,
+--   `garrulus:note_saved`, `arbor:plugin_load`. Subscribe with
+--   `arbor.events.on(name, fn)`; there is no `arbor.on`. The `<product>:`
+--   prefix is optional and resolves against the product hosting the plugin,
+--   so `on("commit", fn)` inside a Corvus plugin means `corvus:commit`;
+--   names the host runtime owns fall back to `arbor:`, so `on("plugin_load",
+--   fn)` is `arbor:plugin_load` under every product. A `*` anywhere in the
+--   name makes it a pattern, matched as written: `on("garrulus:*", fn)`.
+--   In plugin.toml the `[hooks]` keys are the same names, quoted:
+--   `"corvus:commit" = true` (a colon is not legal in a bare TOML key).
+--
 -- Built-in modules available via require():
 --   require("arbor.schema")        → arbor.Schema
 --   require("arbor.async")         → arbor.Async
@@ -73,7 +85,7 @@
 
 
 -- =============================================================================
--- Hook context tables  (passed as `ctx` to arbor.on callbacks)
+-- Hook context tables  (passed as `ctx` to arbor.events.on callbacks)
 -- =============================================================================
 
 ---@class arbor.HookCtxRepo
@@ -89,7 +101,7 @@
 ---@field oid    string  Full 40-character commit SHA
 
 ---@class arbor.HookCtxPreCommit
----Payload of the `on_pre_commit` hook. Handlers may **veto** the commit
+---Payload of the `corvus:pre_commit` hook. Handlers may **veto** the commit
 ---by returning a non-empty string from the handler — the host aborts
 ---the commit and surfaces the string back to the user. Returning nil
 ---(or no value) lets the commit proceed. Multiple plugins each see the
@@ -114,11 +126,60 @@
 ---@field name   string  Feature / release / hotfix branch name
 
 ---@class arbor.HookCtxView
----Payload of the `on_view_open` / `on_view_close` hooks, fired on the owning
+---Payload of the `arbor:view_open` / `arbor:view_close` hooks, fired on the owning
 ---plugin when one of its `arbor.ui.add_view` views is opened / closed. Respond
----to `on_view_open` by pushing the body with `arbor.ui.set_panel_content`.
+---to `arbor:view_open` by pushing the body with `arbor.ui.set_panel_content`.
 ---@field view_id string   Id of the view (matches the `add_view` config)
 ---@field label   string|nil  Display label of the view
+
+---@class arbor.HookCtxVault
+---Payload of the `garrulus:vault_opened` hook (Garrulus note vaults).
+---@field vault_id   string   Stable vault id — also the key of its index cache
+---@field path       string   Absolute vault root on disk
+---@field name       string   Display name shown in the vault switcher
+---@field note_count integer  Notes indexed at open
+
+---@class arbor.HookCtxVaultClosed
+---Payload of the `garrulus:vault_closed` hook. Not fired when no vault was open.
+---@field path string  Absolute root of the vault that closed
+
+---@class arbor.HookCtxVaultNote
+---Payload of the vault-note hooks `garrulus:note_created`, `garrulus:note_saved` and
+---`garrulus:note_deleted`. `path` is always **vault-relative** with POSIX
+---separators — these are Garrulus notes, not git notes, so there is no `tab_id`
+---and no `commit_oid`. The `corvus:` hooks of the same event name are the
+---git-note ones and carry `{ tab_id, commit_oid, namespace }` instead.
+---@field path     string       Vault-relative path of the note
+---@field bytes    integer|nil  Bytes written — `garrulus:note_saved`, ordinary save only
+---@field source   string|nil   "trash" (garrulus:note_created, restored) | "conflict" (garrulus:note_saved, remote side adopted)
+---@field trash_id string|nil   Trash entry id — `garrulus:note_deleted` only, for a later restore
+
+---@class arbor.HookCtxVaultNoteRenamed
+---Payload of the `garrulus:note_renamed` hook. The `[[wikilinks]]` that pointed at the
+---note are rewritten as ordinary saves by the rename flow, not by this hook.
+---@field old_path string  Vault-relative path the note had
+---@field new_path string  Vault-relative path the note now has
+
+---@class arbor.HookCtxTypeApplied
+---Payload of the `garrulus:type_applied` hook. Fires even when the note already carried
+---that type and nothing was rewritten.
+---@field path string  Vault-relative path of the note
+---@field type string  Note type id that was applied
+
+---@class arbor.HookCtxSync
+---Payload of the vault sync hooks `garrulus:sync_started` and `garrulus:sync_done`. Never
+---fired by the background probe: the probe is read-only, and every sync in
+---Garrulus is a handler a user's click reached.
+---@field op        string       "pull" | "push" | "sync" (pull then push)
+---@field notes     integer|nil  Push batch size — `garrulus:sync_started`, push only; 0 means "everything changed"
+---@field applied   integer|nil  Notes the pull brought in — `garrulus:sync_done`, pull and sync only
+---@field conflicts integer|nil  Conflicts the pull could not merge — `garrulus:sync_done`, pull and sync only; non-zero means a "sync" skipped its push half
+
+---@class arbor.HookCtxSyncConflict
+---Payload of the `garrulus:sync_conflict` hook, fired before the matching
+---`garrulus:sync_done`. No merge marker is ever written into a note: each remote side
+---lands as its own file beside it and the user resolves from the Conflicts panel.
+---@field count integer  Number of conflicted notes
 
 ---@class arbor.HookField
 ---@field name        string   Field name in the ctx table
@@ -127,7 +188,7 @@
 ---@field description string
 
 ---@class arbor.HookDef
----@field name        string             Hook name (e.g. "on_repo_open")
+---@field name        string             Fully-qualified hook name, "<product>:<event>" (e.g. "corvus:commit", "arbor:repo_open")
 ---@field category    string             Grouping for docs (e.g. "repo", "branch", "pipeline")
 ---@field description string
 ---@field ctx         arbor.HookField[]  Ordered list of fields the ctx table carries
@@ -490,7 +551,7 @@ function Repo.untracked() end
 ---"renamed", "typechange") so the caller can filter (e.g. skip
 ---deletions when inspecting file contents).
 ---
----The canonical caller is an `on_pre_commit` hook: this is the precise
+---The canonical caller is an `corvus:pre_commit` hook: this is the precise
 ---set about to enter the next commit. Working-tree-only changes
 ---(`git add` not yet run) are NOT included.
 ---
@@ -1143,8 +1204,8 @@ function Ui.add_sidebar(config) end
 ---occupies the body at a time; the selection persists across tab / workspace
 ---switches and requires a repo open.
 ---
----When the view opens Arbor fires `on_view_open` on the plugin (and
----`on_view_close` on teardown). Respond by pushing the body with
+---When the view opens Arbor fires `arbor:view_open` on the plugin (and
+---`arbor:view_close` on teardown). Respond by pushing the body with
 ---`arbor.ui.set_panel_content(id, {title, nodes, actions?})` — the SAME channel
 ---sidebar panels use. View ids must be distinct from sidebar ids. Drive live,
 ---high-frequency updates with `arbor.ui.form.{patch,set_state_path,set_value}`.
@@ -1155,7 +1216,7 @@ function Ui.add_view(config) end
 ---Push form-DSL content into a panel registered via `add_sidebar` OR a view
 ---registered via `add_view`. Arbor re-renders in place and caches the content
 ---so subsequent opens display immediately while the plugin recomputes. Call it
----from the `panel:open:<id>` hook (sidebar) / `on_view_open` hook (view) — or
+---from the `panel:open:<id>` hook (sidebar) / `arbor:view_open` hook (view) — or
 ---any time the underlying state changes.
 ---
 ---Sidebar panels use a lightweight renderer (`heading`, `label`, `paragraph`,
@@ -1236,7 +1297,7 @@ function Ui.add_graph_combo(config) end
 ---Thin sugar over `arbor.ui.contribute_patch("arbor:activitybar", id,
 ---{ options = ... })`. When `selected_value` is provided AND it appears in
 ---the new options, also adopts it as the current pick (mirrors plugin-side
----selection state into the UI on `on_repo_open`).
+---selection state into the UI on `arbor:repo_open`).
 ---@param id              string
 ---@param options         arbor.ComboOption[]
 ---@param selected_value  string|nil
@@ -1265,7 +1326,7 @@ function Ui.set_autocomplete_options(id, options) end
 -- RAM-only branding overlay: replace the app mark and overlay extra CSS
 -- variables on top of the active theme. Nothing is persisted — reloading
 -- Arbor restores the bundled identity unless the same plugin re-applies
--- the overrides during its `on_plugin_load` handler.
+-- the overrides during its `arbor:plugin_load` handler.
 -- =============================================================================
 
 ---@class arbor.UiBrandingConfig
@@ -1566,9 +1627,20 @@ function Ui.tree.get(sidebar_or_request_id) end
 -- =============================================================================
 -- arbor.events — unified subscribe / emit
 --
--- One namespace for both built-in lifecycle hooks (`on_repo_open`, `on_commit`,
--- …) and plugin-defined events. Inter-plugin events are namespaced with the
--- publisher's plugin name to keep cross-plugin contracts explicit:
+-- One namespace for both built-in hooks (`corvus:commit`, `garrulus:sync_done`,
+-- `arbor:plugin_load`, …) and plugin-defined events. Everything on the bus is
+-- `<namespace>:<event>`, so a subscriber never has to tell the two apart.
+--
+--   built-in hook   <product>:<event>   the product that owns the concept —
+--                                       corvus, garrulus, pipeline, or arbor
+--                                       for the host runtime itself
+--   plugin event    <plugin>:<event>    the plugin that published it
+--
+-- The event half never repeats the namespace: `garrulus:note_saved`, not
+-- `garrulus:vault_note_saved`.
+--
+-- Both sides auto-prefix an unqualified name, and the prefix each one supplies
+-- is the only one it could mean:
 --
 --   -- plugin "compile-action"
 --   arbor.events.emit("build-done", { status = "ok", job = "build-42" })
@@ -1578,9 +1650,16 @@ function Ui.tree.get(sidebar_or_request_id) end
 --     arbor.log.info("build finished: " .. ctx.status)
 --   end)
 --
--- `emit` auto-prefixes the event name with this plugin's name when no ':' is
--- present. Publishing under another plugin's namespace (e.g.
+-- `emit` auto-prefixes with this PLUGIN's name when no ':' is present.
+-- Publishing under another plugin's namespace (e.g.
 -- `arbor.events.emit("other-plugin:event", ...)`) raises a runtime error.
+-- `on` auto-prefixes with the host PRODUCT's id, so inside a Garrulus plugin
+-- `arbor.events.on("note_saved", fn)` is `garrulus:note_saved`. When the
+-- product-qualified form is not a real hook but `arbor:` has one by that
+-- event, it falls back to the host namespace: `on("plugin_load", fn)` is
+-- `arbor:plugin_load` under every product, so one source line means one hook
+-- no matter which host loads it. Write the qualified form to listen across
+-- products — a name that already carries a ':' is never rewritten.
 -- Delivery is asynchronous — `emit` returns immediately, subscribers run on a
 -- background thread.
 -- =============================================================================
@@ -1588,20 +1667,35 @@ function Ui.tree.get(sidebar_or_request_id) end
 ---@class arbor.Events
 local Events = {}
 
----Subscribe to a built-in hook (e.g. "on_repo_open") OR to a plugin event
+---Subscribe to a built-in hook (e.g. "corvus:commit") OR to a plugin event
 ---(e.g. "compile-action:build-done"). The event name may be the exact string
 ---or a glob pattern containing one or more "*" wildcards. Each "*" matches
 ---any sequence of characters (including empty strings and ":" separators).
 ---
+---The `<product>:` prefix is OPTIONAL on a built-in hook: a name with no ":"
+---is resolved against the product hosting this plugin, so "commit" inside a
+---Corvus plugin is "corvus:commit". Hooks the host runtime owns (plugin
+---lifecycle, views, theme, which project is open) fall back to "arbor:" when
+---the product-qualified form is not a real hook, so "plugin_load" is
+---"arbor:plugin_load" under every product. Spell the prefix out to listen to
+---another product — a name that already carries a ":" is never rewritten.
+---
 ---Examples:
----  "on_commit"                  -- built-in lifecycle hook
+---  "corvus:commit"              -- built-in hook, written out
+---  "commit"                     -- same hook, resolved against the host product
+---  "plugin_load"                -- "arbor:plugin_load" — host fallback
+---  "garrulus:*"                 -- every Garrulus hook, including future ones
 ---  "compile-action:build-done"  -- exact match for a plugin event
 ---  "compile-action:*"           -- any event from compile-action
----  "*:build-done"               -- any plugin's build-done event
+---  "*:note_saved"               -- git notes and vault notes alike
 ---  "*"                          -- every event fired (debug)
 ---
+---The RESOLVED name is checked against the hook catalog: a name that matches
+---no hook and no plugin event is reported in the plugin log rather than
+---silently never firing. Patterns containing "*" are matched, not validated.
+---
 ---A plugin with at least one wildcard subscription also receives built-in
----lifecycle hooks without needing to declare them in the manifest.
+---hooks without needing to declare them in the manifest.
 ---@param event string  Hook / event name or glob pattern with "*" wildcards
 ---@param fn    fun(ctx: any)
 function Events.on(event, fn) end
@@ -4122,14 +4216,18 @@ function CoreAssert.register() end
 ---@class arbor.Hooks
 local Hooks = {}
 
----List every built-in hook with its full schema. Useful for generating docs
----or building runtime validators.
+---List every built-in hook with its full schema. `name` on each entry is the
+---fully-qualified `<product>:<event>`. The whole catalog is returned, across
+---every product — filter on the namespace half of `name` to narrow it to the
+---host this plugin runs under. Useful for generating docs or building runtime
+---validators.
 ---@return arbor.HookDef[]
 function Hooks.list() end
 
----Look up a single built-in hook by name. Returns nil for unknown hooks
----(plugin-defined action hooks, or typos in the name).
----@param  name string
+---Look up a single built-in hook by name. The `<product>:` prefix is optional
+---and resolves against the host product, exactly as in `arbor.events.on`.
+---Returns nil for unknown hooks (plugin-defined action hooks, or typos).
+---@param  name string  "corvus:commit", or "commit" under Corvus
 ---@return arbor.HookDef|nil
 function Hooks.describe(name) end
 

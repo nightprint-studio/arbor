@@ -43,27 +43,30 @@ terminal_scope       = []          # allowed command basenames when terminal = "
 # env_read accepts: true (all vars) | false (no os.getenv) | allowlist of names
 env_read             = ["PATH", "JAVA_HOME"]
 
+# Hook names are "<product>:<event>" — quote them, a colon is not a legal
+# bare TOML key. "arbor:" hooks fire under every product; "corvus:" ones only
+# where a git repo is open. See Plugin Development -> Hooks & Events.
 [hooks]
-on_plugin_load   = true   # fires once after main.lua executes (init/constructor)
-on_plugin_unload = true   # fires when Arbor shuts down (cleanup)
-on_repo_open     = true   # fires when a repo tab becomes active
-on_repo_close  = true   # fires when a repo tab is closed
-on_repo_init   = true   # fires when a new repo is initialized from a non-git folder
-on_tab_switch  = true   # fires on every tab switch
-on_commit        = true
-on_push          = true
-on_pull          = true
-on_checkout      = true
-on_fetch         = true
-on_branch_create = true
-on_branch_delete = true
-on_branch_rename = true
-on_tag_create    = true
-on_tag_delete    = true
-on_stash_push    = true
-on_stash_pop     = true
-on_rebase_start  = true
-on_rebase_abort  = true
+"arbor:plugin_load"    = true  # fires once after main.lua executes (init/constructor)
+"arbor:plugin_unload"  = true  # fires when Arbor shuts down (cleanup)
+"arbor:repo_open"      = true  # fires when a repo tab becomes active
+"arbor:repo_close"     = true  # fires when a repo tab is closed
+"arbor:tab_switch"     = true  # fires on every tab switch
+"corvus:repo_init"     = true  # fires when a new repo is initialized from a non-git folder
+"corvus:commit"        = true
+"corvus:push"          = true
+"corvus:pull"          = true
+"corvus:checkout"      = true
+"corvus:fetch"         = true
+"corvus:branch_create" = true
+"corvus:branch_delete" = true
+"corvus:branch_rename" = true
+"corvus:tag_create"    = true
+"corvus:tag_delete"    = true
+"corvus:stash_push"    = true
+"corvus:stash_pop"     = true
+"corvus:rebase_start"  = true
+"corvus:rebase_abort"  = true
 
 # Background scheduler — opt-in only. Schedule data (action, trigger,
 # focus gating, …) is declared from main.lua via arbor.scheduler.register.
@@ -129,24 +132,24 @@ enabled = true
 local state = require("state")        -- sub-module inside this plugin dir
 
 -- ── Lifecycle ──────────────────────────────────────────────────────────────────
--- on_plugin_load fires once AFTER main.lua finishes executing.
+-- arbor:plugin_load fires once AFTER main.lua finishes executing.
 -- Ideal for one-time initialisation (load settings, register combos, etc.)
-arbor.events.on("on_plugin_load", function(ctx)
+arbor.events.on("arbor:plugin_load", function(ctx)
   arbor.log.info("loaded — api_version=" .. ctx.api_version)
   state.init()
 end)
 
 -- ── Hooks ──────────────────────────────────────────────────────────────────────
-arbor.events.on("on_repo_open", function(ctx)
+arbor.events.on("arbor:repo_open", function(ctx)
   state.set_repo(ctx.repo)
   arbor.log.debug("repo_open: " .. ctx.repo)
 end)
 
-arbor.events.on("on_commit", function(ctx)
+arbor.events.on("corvus:commit", function(ctx)
   arbor.notify{ message = "Committed: " .. ctx.message, level = "success" }
 end)
 
-arbor.events.on("on_branch_rename", function(ctx)
+arbor.events.on("corvus:branch_rename", function(ctx)
   -- ctx.tab_id   : string  — the repository tab
   -- ctx.old_name : string  — previous branch name
   -- ctx.new_name : string  — new branch name
@@ -165,9 +168,14 @@ arbor.ui.contribute("arbor:context-menu:commit", {
 <h2>Hook and level strings</h2>
 <p>Hook names and notification levels are passed as plain string literals. The full list is browseable at runtime via <code>arbor.hooks.list()</code> / <code>arbor.hooks.describe(name)</code>. Log levels also have symbolic constants on <code>arbor.log.LEVELS</code> for autocomplete.</p>
 <pre class="language-lua">{@html highlight(`-- Hooks: pass the literal name to arbor.events.on
-arbor.events.on("on_repo_open",  function(ctx) end)
-arbor.events.on("on_commit",     function(ctx) end)
-arbor.events.on("on_pipeline_done", function(ctx) end)
+arbor.events.on("arbor:repo_open",     function(ctx) end)
+arbor.events.on("corvus:commit",        function(ctx) end)
+arbor.events.on("pipeline:done", function(ctx) end)
+
+-- The product prefix is optional: inside a Corvus plugin "commit" means the same
+-- as "corvus:commit". Spell it out when the context is not obvious.
+-- Host hooks resolve to "arbor:" under every product, so "plugin_load" and
+-- "repo_open" mean the same thing no matter which host loads the plugin.
 
 -- Notification levels (arbor.notify): "info" | "success" | "warning" | "error"
 arbor.notify{ message = "saved",  level = "success" }
@@ -274,7 +282,7 @@ arbor.timer.cancel(id)   -- cancel a timer by its id`, '.lua')}</pre>
     <tr><td><code>arbor.ui.add_sidebar(opts)</code></td><td>Register a plugin panel with its own ActivityBar icon. <code>side: "left"|"right"</code> (default "right"), <code>position: "top"|"bottom"</code> (default "top"). Fires <code>panel:open:&lt;id&gt;</code>; respond with <code>set_panel_content</code>.</td></tr>
     <tr><td><code>arbor.ui.set_panel_content(id, body)</code></td><td>Push form-DSL content (<code>&#123;title, nodes, actions?&#125;</code>) into a registered plugin panel.</td></tr>
     <tr><td><code>arbor.ui.add_graph_combo(opts)</code></td><td>Register a split button (run + dropdown). <code>target</code>: "activity_bar" (default) or "repo_actions"</td></tr>
-    <tr><td><code>arbor.ui.set_combo_options&#123; id, options, selected? &#125;</code></td><td>Dynamically update a combo's option list. Optional <code>selected</code> adopts a pick if it appears in <code>options</code> (call from <code>on_repo_open</code> to refresh per-repo).</td></tr>
+    <tr><td><code>arbor.ui.set_combo_options&#123; id, options, selected? &#125;</code></td><td>Dynamically update a combo's option list. Optional <code>selected</code> adopts a pick if it appears in <code>options</code> (call from <code>arbor:repo_open</code> to refresh per-repo).</td></tr>
     <tr><td><code>arbor.ui.contribute_patch(point, id, partial)</code></td><td>Shallow-merge <code>partial</code> into the existing payload of a previously-contributed item — without re-specifying the full payload.</td></tr>
     <tr><td><code>arbor.ui.add_separator()</code></td><td>Insert a horizontal separator in the activity bar after the last registered item</td></tr>
     <tr><td><code>arbor.ui.add_context_menu_item(opts)</code></td><td>Add item to the commit/branch/file context menu</td></tr>
@@ -323,9 +331,9 @@ arbor.command.unregister("my-action")`, '.lua')}</pre>
 <p>Register keyboard shortcuts that fire a Lua action when triggered anywhere in the app. Plugin shortcuts are visible under the <strong>Plugins</strong> group in the <strong>Keyboard Shortcuts</strong> panel (read-only).</p>
 <pre class="language-lua">{@html highlight(`-- arbor.keybinding.register(config)
 -- config: { key, action, description?, ctrl?, shift?, alt? }
--- Call once during on_plugin_load.
+-- Call once during arbor:plugin_load.
 
-arbor.events.on("on_plugin_load", function(_ctx)
+arbor.events.on("arbor:plugin_load", function(_ctx)
   arbor.keybinding.register({
     key         = "F5",
     action      = "compile:run",   -- fired as a plugin hook
@@ -553,7 +561,7 @@ end)`, '.lua')}</pre>
   You can register <strong>multiple combos</strong> from the same plugin; they appear in
   registration order within the target area.
 </p>
-<pre class="language-lua">{@html highlight(`-- Register once (e.g. in on_plugin_load).
+<pre class="language-lua">{@html highlight(`-- Register once (e.g. in arbor:plugin_load).
 -- Example: two combos — Run (▶) and Build (🔨).
 arbor.ui.add_graph_combo({
   id         = "my_plugin:run",
@@ -573,7 +581,7 @@ arbor.ui.add_graph_combo({
 })
 
 -- Refresh options when repo changes
-arbor.events.on("on_repo_open", function(ctx)
+arbor.events.on("arbor:repo_open", function(ctx)
   arbor.ui.set_combo_options{
     id = "my_plugin:run",
     options = {
@@ -650,59 +658,21 @@ ev.emit("config_changed", { repo = arbor.repo.current() })`, '.lua')}</pre>
 <p><code>require()</code> inside a plugin is sandboxed to the plugin directory. Dots in the module name are converted to path separators (<code>require("lib.utils")</code> → <code>plugins/my-plugin/lib/utils.lua</code>). Path traversal attempts (<code>../</code>) raise a Lua error. Standard Lua packages (<code>string</code>, <code>table</code>, <code>math</code>, <code>os</code>) are always available.</p>
 
 <h2>Hooks reference</h2>
-<p>Declare which hooks your plugin subscribes to via boolean flags in <code>[hooks]</code>. Each hook handler is registered with <code>arbor.events.on("on_hook_name", fn)</code> in Lua.</p>
-<table class="shortcuts-table">
-  <thead><tr><th>Hook constant</th><th>TOML key</th><th>Context fields</th></tr></thead>
-  <tbody>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Lifecycle ─────────────────────────────────────────────────────────────────</td></tr>
-    <tr><td><code>PLUGIN_LOAD</code></td><td><code>on_plugin_load</code></td><td>plugin_name, dir, api_version</td></tr>
-    <tr><td><code>REPO_OPEN</code></td><td><code>on_repo_open</code></td><td>tab_id, path, name</td></tr>
-    <tr><td><code>REPO_CLOSE</code></td><td><code>on_repo_close</code></td><td>tab_id, path, name</td></tr>
-    <tr><td><code>REPO_INIT</code></td><td><code>on_repo_init</code></td><td>path, name, default_branch, provider, remote_url, has_readme, license, gitignore</td></tr>
-    <tr><td><code>TAB_SWITCH</code></td><td><code>on_tab_switch</code></td><td>tab_id</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Git operations ────────────────────────────────────────────────────────────</td></tr>
-    <tr><td><code>COMMIT</code></td><td><code>on_commit</code></td><td>tab_id, oid, message, amend</td></tr>
-    <tr><td><code>PUSH</code></td><td><code>on_push</code></td><td>tab_id, remote, refspec, force</td></tr>
-    <tr><td><code>PULL</code></td><td><code>on_pull</code></td><td>tab_id, remote</td></tr>
-    <tr><td><code>FETCH</code></td><td><code>on_fetch</code></td><td>tab_id, remote</td></tr>
-    <tr><td><code>CHECKOUT</code></td><td><code>on_checkout</code></td><td>tab_id, branch <em>or</em> oid (detached)</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Branch / tag ──────────────────────────────────────────────────────────────</td></tr>
-    <tr><td><code>BRANCH_CREATE</code></td><td><code>on_branch_create</code></td><td>tab_id, name, from_oid</td></tr>
-    <tr><td><code>BRANCH_DELETE</code></td><td><code>on_branch_delete</code></td><td>tab_id, name <em>or</em> names[] (bulk delete)</td></tr>
-    <tr><td><code>BRANCH_RENAME</code></td><td><code>on_branch_rename</code></td><td>tab_id, old_name, new_name</td></tr>
-    <tr><td><code>TAG_CREATE</code></td><td><code>on_tag_create</code></td><td>tab_id, name, oid, annotated</td></tr>
-    <tr><td><code>TAG_DELETE</code></td><td><code>on_tag_delete</code></td><td>tab_id, name</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Stash ─────────────────────────────────────────────────────────────────────</td></tr>
-    <tr><td><code>STASH_PUSH</code></td><td><code>on_stash_push</code></td><td>tab_id, index, message, include_untracked</td></tr>
-    <tr><td><code>STASH_POP</code></td><td><code>on_stash_pop</code></td><td>tab_id, index, drop (true=pop, false=apply)</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Rebase ────────────────────────────────────────────────────────────────────</td></tr>
-    <tr><td><code>REBASE_START</code></td><td><code>on_rebase_start</code></td><td>tab_id, base, action_count</td></tr>
-    <tr><td><code>REBASE_ABORT</code></td><td><code>on_rebase_abort</code></td><td>tab_id</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Git Flow ──────────────────────────────────────────────────────────────────</td></tr>
-    <tr><td><code>FLOW_INIT</code></td><td><code>on_flow_init</code></td><td>tab_id</td></tr>
-    <tr><td><code>FLOW_FEATURE_START</code></td><td><code>on_flow_feature_start</code></td><td>tab_id, name</td></tr>
-    <tr><td><code>FLOW_FEATURE_FINISH</code></td><td><code>on_flow_feature_finish</code></td><td>tab_id, name</td></tr>
-    <tr><td><code>FLOW_RELEASE_START</code></td><td><code>on_flow_release_start</code></td><td>tab_id, version</td></tr>
-    <tr><td><code>FLOW_RELEASE_FINISH</code></td><td><code>on_flow_release_finish</code></td><td>tab_id, version</td></tr>
-    <tr><td><code>FLOW_HOTFIX_START</code></td><td><code>on_flow_hotfix_start</code></td><td>tab_id, name</td></tr>
-    <tr><td><code>FLOW_HOTFIX_FINISH</code></td><td><code>on_flow_hotfix_finish</code></td><td>tab_id, name</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Pipelines ─────────────────────────────────────────────────────────────────</td></tr>
-    <tr><td><code>PIPELINE_STARTED</code></td><td><code>on_pipeline_started</code></td><td>run_id, pipeline_id, plugin</td></tr>
-    <tr><td><code>PIPELINE_STEP_DONE</code></td><td><code>on_pipeline_step_done</code></td><td>run_id, stage, step, exit_code</td></tr>
-    <tr><td><code>PIPELINE_DONE</code></td><td><code>on_pipeline_done</code></td><td>run_id, plugin, status</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Merge Requests / Pull Requests ────────────────────────────────────────────</td></tr>
-    <tr><td><code>MR_OPENED</code></td><td><code>on_mr_opened</code></td><td>number, title, source_branch, target_branch, provider</td></tr>
-    <tr><td><code>MR_MERGED</code></td><td><code>on_mr_merged</code></td><td>number, provider</td></tr>
-    <tr><td><code>MR_UPDATED</code></td><td><code>on_mr_updated</code></td><td>number, provider</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Issues (Linear) ───────────────────────────────────────────────────────────</td></tr>
-    <tr><td><code>ISSUE_LINKED</code></td><td><code>on_issue_linked</code></td><td>issue_id, identifier, sha, branch</td></tr>
-    <tr><td><code>ISSUE_TRANSITIONED</code></td><td><code>on_issue_transitioned</code></td><td>issue_id, identifier, from_status, to_status</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Theme / branding ──────────────────────────────────────────────────────────</td></tr>
-    <tr><td><code>THEME_CHANGED</code></td><td><code>on_theme_changed</code></td><td>theme_id, theme_name, vars (merged effective stylesheet), source ("user"|"plugin"|"init")</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Schedulers ────────────────────────────────────────────────────────────────</td></tr>
-    <tr><td>(action name)</td><td><code>arbor.scheduler.register</code></td><td>Spring-style triggers: <code>fixed_rate</code> / <code>fixed_delay</code> / <code>cron</code>. Manifest opt-in: <code>[scheduler] enabled = true</code></td></tr>
-  </tbody>
-</table>
+<p>
+  Hooks are named <code>&lt;product&gt;:&lt;event&gt;</code> — <code>arbor:plugin_load</code>,
+  <code>corvus:commit</code>, <code>garrulus:sync_done</code>. Declare the ones you want under
+  <code>[hooks]</code> (quoted, because a colon is not legal in a bare TOML key) and register
+  handlers with <code>arbor.events.on(name, fn)</code>. The prefix is optional when you
+  subscribe: an unqualified name resolves against the product hosting your plugin, falling back
+  to <code>arbor:</code> for the host's own hooks — so <code>"plugin_load"</code> is
+  <code>arbor:plugin_load</code> under every product.
+</p>
+<p>
+  <strong>Plugin Development &rarr; Hooks &amp; Events</strong> carries the full catalog with the
+  <code>ctx</code> schema of every hook, plus the namespacing and wildcard rules. The same
+  catalog is browseable from Lua via <code>arbor.hooks.list()</code> and
+  <code>arbor.hooks.describe(name)</code>.
+</p>
 
 <h2>Permissions reference</h2>
 <ul>
@@ -780,7 +750,7 @@ local state     = require("state")
 local combo     = require("ui.combo")
 local run_combo = require("ui.run_combo")
 
-arbor.events.on("on_plugin_load", function(ctx)
+arbor.events.on("arbor:plugin_load", function(ctx)
   combo.register()      -- 🔨 Build combo (right)
   run_combo.register()  -- ▶  Run combo (left)
 
@@ -788,7 +758,7 @@ arbor.events.on("on_plugin_load", function(ctx)
   arbor.keybinding.register({ key = "F5", action = "run:run",     description = "Run selected"   })
 end)
 
-arbor.events.on("on_repo_open", function(ctx)
+arbor.events.on("arbor:repo_open", function(ctx)
   state.set_repo(ctx.path)
   combo.refresh()
   run_combo.refresh()

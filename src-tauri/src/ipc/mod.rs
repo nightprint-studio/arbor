@@ -26,12 +26,18 @@
 //!
 //! ## Programs
 //!
-//! Two backends are registered: **`corvus`** (git — the bulk of the migrated
-//! domains, served in-process or by `corvus-be` when present) and
-//! **`platform`** (app-agnostic services: config/theme/session/workspace/jobs/
-//! fs/terminal/app metadata — in-process only for now, no `platform-be` yet).
-//! Each is a router product label; handlers self-register into their program's
-//! slice of the `arbor-rpc` inventory (see [`corvus`] / [`platform`]).
+//! Each program is a router product label; handlers self-register into their
+//! program's slice of the `arbor-rpc` inventory (see [`corvus`] / [`platform`]).
+//! Three shapes are registered here:
+//!
+//! - **`corvus`** (git) — the only *hybrid*: the migrated domains are served
+//!   in-process, or by `corvus-be` when it is attached.
+//! - **`platform`** / **`studio`** — in-process only, no backend process exists
+//!   yet. `platform` is the app-agnostic set (config/theme/session/workspace/
+//!   jobs/fs/terminal/app metadata); `studio` is the pipeline-config editor.
+//! - **`merula`**, **`sitta`**, **`tyto`**, **`bennu`**, **`picus`**,
+//!   **`garrulus`** — *pure OOP*: every method lives in the product's own
+//!   backend binary, spawned lazily when that product's window opens.
 
 pub mod corvus;
 pub mod event_sink;
@@ -213,6 +219,16 @@ pub fn build_router(app: &AppHandle) -> Router {
     // unadvertised method reports `UnknownMethod` — no catch-all sink. Routing flips
     // at attach/detach time.
     router.register("picus", Arc::new(SplitBroker::pure_oop("picus")));
+
+    // Garrulus backend: the notes product (an Obsidian-shaped vault plus the sync
+    // engine that keeps two machines on the same one). Like picus/bennu, served
+    // out-of-process by `garrulus-be` — spawned lazily by [`ensure_garrulus_be`]
+    // when the Garrulus window opens, so no other window pays for a vault scan or a
+    // filesystem watcher. Garrulus has NO in-process handlers in this shell, so it
+    // is `pure_oop`: a `garrulus` call with `garrulus-be` detached reports
+    // `BackendNotRunning`, an unadvertised method reports `UnknownMethod` — no
+    // catch-all sink. Routing flips at attach/detach time.
+    router.register("garrulus", Arc::new(SplitBroker::pure_oop("garrulus")));
 
     router
 }
@@ -1462,6 +1478,59 @@ fn host_dispatch(
         return Ok(serde_json::Value::Null);
     }
 
+    // ── Garrulus sync remote ──────────────────────────────────────────────────
+    //
+    // Minting the repository a vault will sync to. `garrulus-be` owns neither the
+    // `GitProvider` trait nor the tokens and must not learn to, so it sends a name
+    // (+ optional provider) and gets back the URLs it needs for `git remote add`.
+    // The provider comes from the registry the shell seeds at boot — same
+    // instances, same keyring, as every other REST path.
+    //
+    // The visibility is HARD-CODED `Private` and is deliberately NOT a parameter:
+    // a personal note vault has no business being public, and an accidental public
+    // flag cannot be undone once the content has been indexed. This is a product
+    // decision, not an oversight — do not "fix" it by threading a visibility
+    // through from the caller.
+    if method == "__garrulus_create_repo" {
+        use corvus_git_provider_api::prelude::{RepoCreateRequest, RepoVisibility};
+        let name = params
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "__garrulus_create_repo: missing required field `name`".to_string())?
+            .to_string();
+        // Same `"github"` / `"gitlab"` vocabulary (and the same wire error) the
+        // repo browser speaks; the hosted instances only, as there is no
+        // self-hosted vault destination to resolve a host from yet.
+        let host = match params.get("provider").and_then(|v| v.as_str()).unwrap_or("github") {
+            "github" => "github.com",
+            "gitlab" => "gitlab.com",
+            other => return Err(format!("Unknown provider: {other}")),
+        };
+        // Clone the `Arc` out of the guard in its own scope: the registry mutex
+        // must not be held across the `block_on` below.
+        let provider = {
+            let st = app.state::<AppState>();
+            let registry = st.lock_git_providers().map_err(|e| e.to_string())?;
+            registry
+                .for_host(host)
+                .ok_or_else(|| format!("No provider registered for {host}"))?
+        };
+        let info = tauri::async_runtime::block_on(provider.create_repo(RepoCreateRequest {
+            name,
+            description: Some("Arbor garrulus vault (private).".to_string()),
+            visibility: RepoVisibility::Private,
+            org: None,
+            namespace_id: None,
+        }))
+        .map_err(|e| e.to_string())?;
+        return Ok(serde_json::json!({
+            "cloneUrl": info.clone_url_https,
+            "webUrl":   info.web_url,
+        }));
+    }
+
     let account: String = match method {
         "__session" | "__refresh" => serde_json::from_value(params)
             .map_err(|e| format!("{method}: invalid account: {e}"))?,
@@ -2181,6 +2250,100 @@ fn spawn_picus_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>
     }
 }
 
+/// Lazily spawn `garrulus-be` and attach it to the router, **idempotently**. Called
+/// when the Garrulus product window opens (`window::garrulus::open_garrulus_window`),
+/// off the main thread — the spawn blocks on the child's first `Hello` frame, which
+/// must not stall the UI thread. The garrulus twin of [`ensure_picus_be`].
+pub fn ensure_garrulus_be(app: &AppHandle) {
+    // Serialize concurrent triggers (the launcher tile, the Command Palette and a
+    // `arbor://garrulus/...` deep link can all fire the opener) so we never spawn two
+    // backends; re-check liveness inside the lock. A SEPARATE lock from the other
+    // backends' spawns so they never contend.
+    static SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = match SPAWN_LOCK.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if split_broker::is_attached("garrulus") {
+        tracing::debug!("ensure_garrulus_be: already attached — no-op (window re-summoned)");
+        return; // backend already up — window is just being re-summoned
+    }
+    let gen = split_broker::next_gen();
+    tracing::info!("ensure_garrulus_be: spawning garrulus-be (gen={gen})");
+    match spawn_garrulus_be(app, gen) {
+        Some((child, methods)) => {
+            tracing::info!(
+                "garrulus-be up (lazy, gen={gen}): {} method(s) served out-of-process",
+                methods.len()
+            );
+            split_broker::attach(
+                "garrulus",
+                gen,
+                methods.into_iter().collect(),
+                Arc::new(child) as Arc<dyn BrokerClient>,
+            );
+            // The backend attaches AFTER the Garrulus window may already have run its
+            // shell's one-shot loads (the spawn is off-thread, racing window
+            // creation). Signal "now routable" so the window re-reads the config and
+            // re-opens the last vault instead of being stuck on an empty shell.
+            use tauri::Emitter;
+            let _ = app.emit("arbor://garrulus-be-up", ());
+        }
+        None => {
+            tracing::info!("garrulus-be not available — Garrulus opens with no vault backend");
+        }
+    }
+}
+
+fn spawn_garrulus_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)> {
+    use crate::process_ext::NoWindowExt;
+
+    let bin = match backend_binary(app, "garrulus-be") {
+        Some(b) => b,
+        None => {
+            tracing::info!(
+                "garrulus-be binary not found (backends/ resource or beside the launcher) — Garrulus has no vault backend"
+            );
+            return None;
+        }
+    };
+
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
+
+    let app_for_events = app.clone();
+    let app_for_host = app.clone();
+    let app_for_disc = app.clone();
+    match ChildClient::spawn(
+        cmd,
+        move |topic, payload| {
+            use tauri::Emitter;
+            // Vault push events (`garrulus:vault-changed` from the filesystem watcher,
+            // sync progress). Global emit: Garrulus is a single-window product and the
+            // rate is low (the watcher debounces).
+            let _ = app_for_events.emit(&topic, payload);
+        },
+        move |method, params| host_dispatch(&app_for_host, method, params),
+        move || {
+            // Fires for a genuine crash AND the intentional teardown of an OLD child
+            // after stop+respawn. `detach_if_current` acts only when gen={gen} is
+            // still attached: genuine crash → detach + down event; stale disconnect
+            // of an already-replaced child → logged no-op.
+            use tauri::Emitter;
+            tracing::warn!("garrulus-be disconnect callback fired (gen={gen})");
+            if split_broker::detach_if_current("garrulus", gen, "disconnect") {
+                let _ = app_for_disc.emit("arbor://garrulus-be-down", ());
+            }
+        },
+    ) {
+        Ok(pair) => Some(pair),
+        Err(e) => {
+            tracing::warn!("failed to spawn garrulus-be ({e}) — Garrulus has no vault backend");
+            None
+        }
+    }
+}
+
 /// Forward a product command to its backend through the router and return the
 /// JSON result.
 ///
@@ -2264,7 +2427,7 @@ pub fn registry_repo_paths(state: &AppState) -> Vec<String> {
 /// Every open tab as `(tab_id, path, name)`, mirroring the old
 /// `RepoManager::list_open()` shape. `name` is the workdir basename — byte-
 /// identical to what `RepoInfo.name` held (`workdir.file_name()`). Used by the
-/// plugin host to re-fire `on_repo_open` / resolve repo context.
+/// plugin host to re-fire `arbor:repo_open` / resolve repo context.
 pub fn open_repo_tabs(state: &AppState) -> Vec<(String, String, String)> {
     open_repo_tabs_raw(state)
         .into_iter()

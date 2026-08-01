@@ -226,14 +226,14 @@ default_show_activity = true`, 'toml')}</pre>
 <p>Declare the hook booleans in <code>[hooks]</code> and register handlers in Lua.</p>
 <pre class="language-toml">{@html highlight(`# plugin.toml
 [hooks]
-on_mr_opened  = true
-on_mr_merged  = true`, 'toml')}</pre>
+"corvus:mr_opened"  = true
+"corvus:mr_merged"  = true`, 'toml')}</pre>
 <pre class="language-lua">{@html highlight(`-- main.lua
-arbor.events.on("on_mr_opened", function(ctx)
+arbor.events.on("corvus:mr_opened", function(ctx)
   arbor.notify{ title = "PR opened", message = "#" .. ctx.number .. ": " .. ctx.title, level = "info" }
 end)
 
-arbor.events.on("on_mr_merged", function(ctx)
+arbor.events.on("corvus:mr_merged", function(ctx)
   arbor.notify{ title = "PR merged", message = "#" .. ctx.number .. " was merged", level = "success" }
 end)`, '.lua')}</pre>
 
@@ -242,17 +242,17 @@ end)`, '.lua')}</pre>
   <thead><tr><th>Hook</th><th>Constant</th><th>Context</th></tr></thead>
   <tbody>
     <tr>
-      <td><code>on_mr_opened</code></td>
+      <td><code>corvus:mr_opened</code></td>
       <td><code>hooks.MR_OPENED</code></td>
       <td><code>number, title, source_branch, target_branch, author, provider, web_url</code></td>
     </tr>
     <tr>
-      <td><code>on_mr_merged</code></td>
+      <td><code>corvus:mr_merged</code></td>
       <td><code>hooks.MR_MERGED</code></td>
       <td><code>number, provider</code></td>
     </tr>
     <tr>
-      <td><code>on_mr_updated</code></td>
+      <td><code>corvus:mr_updated</code></td>
       <td><code>hooks.MR_UPDATED</code></td>
       <td><code>number, provider</code> <span class="badge badge-beta">future use</span></td>
     </tr>

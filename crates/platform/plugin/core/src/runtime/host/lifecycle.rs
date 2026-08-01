@@ -16,7 +16,7 @@ use crate::tree::{IconRegistry, TreeStore};
 use super::PluginHost;
 use crate::runtime::consts::{ARBOR_API_VERSION, ARBOR_APP_VERSION};
 use crate::runtime::loaded::{DormantPlugin, LoadedPlugin, TimerCancels, TimerCounter};
-use arbor_plugin_types::prelude::{LoadFailure, Manifest, ScheduleRegistry};
+use arbor_plugin_types::prelude::{hook_names, LoadFailure, Manifest, ScheduleRegistry};
 
 use crate::runtime::manifest::{
     discover_in_roots, load_plugin_states, plugin_dir,
@@ -265,6 +265,7 @@ impl PluginHost {
             let plugin_started = std::time::Instant::now();
             let result = load_plugin(
                 manifest,
+                self.product.clone(),
                 self.app_ctx.clone(),
                 self.self_arc.clone(),
                 self.api_installer.clone(),
@@ -379,7 +380,7 @@ impl PluginHost {
                 "api_version": plugin.manifest.arbor_api,
             });
             let _ = crate::hook_router::fire(
-                &plugin.lua, "on_plugin_load", &ctx.to_string(),
+                &plugin.lua, hook_names::arbor::PLUGIN_LOAD, &ctx.to_string(),
             );
 
             for sched in schedules {
@@ -401,6 +402,7 @@ impl PluginHost {
 
         let loaded = match load_plugin(
             manifest,
+            self.product.clone(),
             self.app_ctx.clone(),
             self.self_arc.clone(),
             self.api_installer.clone(),
@@ -481,7 +483,7 @@ impl PluginHost {
             .ok_or_else(|| PluginCoreError::Other(format!("plugin '{name}' not found")))?;
 
         // Fire unload hook before disabling.
-        let _ = crate::hook_router::fire(&plugin.lua, "on_plugin_unload", "{}");
+        let _ = crate::hook_router::fire(&plugin.lua, hook_names::arbor::PLUGIN_UNLOAD, "{}");
 
         plugin.enabled.store(false, Ordering::Relaxed);
 
@@ -558,7 +560,7 @@ impl PluginHost {
         if let Some(idx) = self.plugins.iter().position(|p| p.manifest.name == name) {
             let plugin = &self.plugins[idx];
             // Best-effort unload hook.
-            let _ = crate::hook_router::fire(&plugin.lua, "on_plugin_unload", "{}");
+            let _ = crate::hook_router::fire(&plugin.lua, hook_names::arbor::PLUGIN_UNLOAD, "{}");
             // Cancel Lua timers.
             if let Ok(tc) = plugin.timer_cancels.lock() {
                 for cancel in tc.values() { cancel.cancel(); }
@@ -630,6 +632,11 @@ impl PluginHost {
 #[allow(clippy::too_many_arguments)]
 pub fn load_plugin(
     manifest:       Manifest,
+    // Product id the loading host is bound to. Threaded through to the sandbox
+    // because `arbor.events.on` resolves an unqualified hook name against it
+    // (D9) — a VM that does not know its product cannot know what "commit"
+    // means.
+    product:        Option<String>,
     app_ctx:        Option<Arc<dyn AppCtx>>,
     host_weak:      Option<Weak<Mutex<PluginHost>>>,
     api_installer:  Option<Arc<dyn LuaApiInstaller>>,
@@ -700,6 +707,7 @@ pub fn load_plugin(
     let sandbox_started = std::time::Instant::now();
     let lua = crate::sandbox::create_sandbox(
         &manifest,
+        product,
         app_ctx,
         host_weak,
         installer.as_ref(),
@@ -742,7 +750,7 @@ pub fn load_plugin(
         "api_version": manifest.arbor_api,
     });
     let _ = crate::hook_router::fire(
-        &lua, "on_plugin_load", &ctx.to_string(),
+        &lua, hook_names::arbor::PLUGIN_LOAD, &ctx.to_string(),
     );
     let hook_ms = hook_started.elapsed().as_millis();
 

@@ -37,6 +37,12 @@ pub struct ApiCtx {
     pub plugin_dir: PathBuf,
     pub arbor_api: u32,
 
+    /// Product id of the host loading this plugin — the namespace an
+    /// unqualified `arbor.events.on("commit", …)` resolves against (**D9**).
+    /// `None` when the host never bound a product (headless / unit-test runs),
+    /// in which case subscriptions are registered exactly as written.
+    pub product: Option<String>,
+
     /// Host capability handle. `None` in headless / test runs that don't
     /// route through a real shell. Tauri-shell ns/* downcast this to a
     /// concrete `TauriAppCtx` via `as_any()` (see the `ApiCtxExt` shim in
@@ -95,6 +101,7 @@ impl ApiCtx {
             plugin_name,
             plugin_dir,
             arbor_api,
+            product,
             app_ctx,
             host_weak,
             timer_cancels,
@@ -134,6 +141,7 @@ impl ApiCtx {
             plugin_name,
             plugin_dir,
             arbor_api,
+            product,
             app_ctx,
             host_weak,
             timer_cancels,

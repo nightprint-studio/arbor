@@ -7,7 +7,7 @@
 //!   arbor.hooks.describe(name) → hook_def | nil
 //!
 //! hook_def shape:
-//!   { name        = string,                 -- e.g. "on_repo_open"
+//!   { name        = string,                 -- e.g. "arbor:repo_open"
 //!     category    = string,                 -- e.g. "repo"
 //!     description = string,
 //!     ctx         = { field, field, … } }   -- ordered list (sequence)

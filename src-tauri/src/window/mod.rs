@@ -16,8 +16,11 @@
 //! - [`bennu`] — the Java-editor / analysis product window (`bennu`). Spawns its
 //!   own `bennu-be` backend lazily, exactly like Corvus.
 //! - [`picus`] — the SQL-studio product window (`picus`): database client +
-//!   maintainer of the per-dialect SQL script repository. No backend yet — the
-//!   shell runs on frontend fixtures until `picus-be` exists.
+//!   maintainer of the per-dialect SQL script repository. Spawns its own
+//!   `picus-be` lazily, like Corvus and Bennu.
+//! - [`garrulus`] — the notes product window (`garrulus`): a markdown vault plus
+//!   the sync engine that keeps two machines on the same one. Spawns its own
+//!   `garrulus-be` lazily.
 //! - [`workspace`] — the tabbed container that can host the workspace products
 //!   in ONE window (`workspace`), used when the user's window mode is `tabbed`.
 //! - [`launcher`] — the JetBrains-Toolbox-like launcher (`launcher`).
@@ -50,6 +53,7 @@ pub mod bennu;
 pub mod corvus;
 pub mod events;
 pub mod explorer;
+pub mod garrulus;
 pub mod hud;
 pub mod launcher;
 pub mod merula;
@@ -329,7 +333,12 @@ pub fn surface_kind_for_label(label: &str) -> SurfaceKind {
 
 /// Map a native window label to the Canopy product id it belongs to, if any.
 /// `corvus` → Corvus, `explorer`/`explorer-N` → Sitta, `merula`/`merula-N` →
-/// Merula. Anything else (launcher, drag-overlay, …) is not a product window.
+/// Merula, and one arm per single-window product (Tyto, Bennu, Picus, Garrulus).
+/// Anything else (launcher, drag-overlay, …) is not a product window.
+///
+/// **Three behaviours hang off this map** and all three fail silently when a
+/// product is missing an arm: the launcher's running-state node, the backend
+/// teardown on last-window-close ([`events`]), and the window switcher.
 pub fn product_id_for_label(label: &str) -> Option<&'static str> {
     if label == corvus::CORVUS_WINDOW_LABEL || label.starts_with("corvus-") {
         Some("corvus")
@@ -344,6 +353,8 @@ pub fn product_id_for_label(label: &str) -> Option<&'static str> {
         Some("bennu")
     } else if label == picus::PICUS_WINDOW_LABEL || label.starts_with("picus-") {
         Some("picus")
+    } else if label == garrulus::GARRULUS_WINDOW_LABEL || label.starts_with("garrulus-") {
+        Some("garrulus")
     } else {
         None
     }

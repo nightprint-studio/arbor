@@ -13,7 +13,7 @@
 //! fresh over the reverse channel before each round-trip (the OOP twin of the
 //! shell's `maybe_refresh_for_provider`).
 //!
-//! **Hooks fire here**: `fetch_security_summary` fires `on_security_summary_loaded`
+//! **Hooks fire here**: `fetch_security_summary` fires `corvus:security_summary_loaded`
 //! fire-and-forget to the co-located host — copied byte-identically from the
 //! shell's in-process command (same `provider_kind` match arms, same field order,
 //! same `summary.counts.total()`). No other method in this domain fires a hook.
@@ -28,7 +28,7 @@
 //! / `arbor://job-done` payloads and the `plugin:notification` toast are
 //! byte-identical to the shell's in-process command.
 
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{hooks, CorvusState};
 use corvus_git_provider_api::prelude::{
     export_to_file, ProviderKind, SecurityFilters, SecurityFinding, SecuritySummary, ThemeTokens,
 };
@@ -64,7 +64,7 @@ async fn supports_security(state: &CorvusState, tab_id: String) -> Result<bool, 
 /// vulnerabilities-over-time window; the GitLab impl tolerates anything
 /// up to 90 days, but the frontend exposes only 30/60/90.
 ///
-/// Fires `on_security_summary_loaded` on success so plugins can react to
+/// Fires `corvus:security_summary_loaded` on success so plugins can react to
 /// posture changes (notifications, dashboards, external trackers).
 #[arbor_rpc::handler]
 async fn fetch_security_summary(
@@ -85,7 +85,7 @@ async fn fetch_security_summary(
     // `arbor-plugin-types::hook_catalog`.
     let total = summary.counts.total();
     state.fire_hook(
-        "on_security_summary_loaded",
+        hooks::SECURITY_SUMMARY_LOADED,
         serde_json::json!({
             "tab_id":     tab_id,
             "provider":   match summary.provider_kind {

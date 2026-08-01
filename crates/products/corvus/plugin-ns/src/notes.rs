@@ -14,7 +14,7 @@
 //!     captured `Arc<dyn NsHost>`, which opens that path with git2 and runs the
 //!     shared `corvus-git::notes` logic — so results and error text match.
 //!
-//! Hooks (`on_note_saved` / `on_note_deleted`) are fired by the host inside
+//! Hooks (`corvus:note_saved` / `corvus:note_deleted`) are fired by the host inside
 //! `notes_set` / `notes_delete` (the host owns the plugin host), exactly as the
 //! shell fired them inline after the write.
 //!
