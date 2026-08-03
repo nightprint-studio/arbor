@@ -23,9 +23,13 @@ import type { GenerateMode } from '$lib/components/bennu/bennu-intentions';
 export type LeftPanel = 'project' | 'structure' | 'dependencies';
 /** Right tool windows (activity bar) — mock tool panels for now. */
 export type RightPanel = 'maven' | 'services';
-/** Bottom dock sections (tabbed). The Forms inspector lives here (wide, horizontal data)
- *  rather than in a narrow side panel; its toggle sits in the right rail's bottom cluster. */
+/** Bottom tool windows — one panel per rail button, except Build and Problems which share
+ *  one. The Forms inspector lives here (wide, horizontal data) rather than in a narrow side
+ *  panel; its toggle sits in the right rail's bottom cluster. */
 export type BottomPanel = 'problems' | 'terminal' | 'build' | 'todos' | 'forms';
+
+/** Which tab the Go-to navigator opens on. */
+export type NavMode = 'class' | 'file' | 'symbol' | 'all';
 
 function createBennuUiStore() {
   // Default the Project tool open so the shell shows the tree on launch.
@@ -48,9 +52,10 @@ function createBennuUiStore() {
   // Run-configuration modal (main class for `java -cp … <mainClass>`) — there's no
   // main-class discovery yet, so ▶ Run without a remembered class opens this.
   let runConfigOpen = $state(false);
-  // Go-to navigator (Ctrl+N = class, Ctrl+Shift+N = file) — a filterable quick-open.
+  // Go-to navigator — one overlay over classes / files / symbols; the shortcut that opened it
+  // picks the starting tab (Ctrl+N = class, Ctrl+Shift+N = file, Ctrl+Shift+Y = symbol).
   let navOpen = $state(false);
-  let navMode = $state<'class' | 'file'>('class');
+  let navMode = $state<NavMode>('class');
   // Index inspector modal (debug: index stats + class list).
   let indexInspectorOpen = $state(false);
   // Project mojibake-scan modal (whole-project UTF-8-as-Cp1252 corruption report).
@@ -173,9 +178,9 @@ function createBennuUiStore() {
     closeProjectConfig() { projectConfigOpen = false; },
     openRunConfig()      { runConfigOpen = true; },
     closeRunConfig()     { runConfigOpen = false; },
-    /** Open the Go-to navigator in `mode` ('class' | 'file'), optionally pre-filling the
-     *  query (e.g. the editor selection). */
-    openNav(mode: 'class' | 'file', initial = '') { navMode = mode; navInitial = initial; navOpen = true; },
+    /** Open the Go-to navigator on `mode`'s tab, optionally pre-filling the query (e.g. the
+     *  editor selection). Every tab is reachable with Tab once it is open. */
+    openNav(mode: NavMode, initial = '') { navMode = mode; navInitial = initial; navOpen = true; },
     closeNav()           { navOpen = false; },
     openIndexInspector() { indexInspectorOpen = true; },
     closeIndexInspector() { indexInspectorOpen = false; },

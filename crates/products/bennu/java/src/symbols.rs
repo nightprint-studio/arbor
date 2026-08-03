@@ -79,6 +79,15 @@ pub struct Annotation {
     /// the single-string `value` can't carry. Empty for a marker or bare-value annotation.
     #[serde(default)]
     pub args: Vec<(String, String)>,
+    /// The annotation's first **positional** argument as raw source text, when it isn't a string
+    /// literal — `@Setter(AccessLevel.PACKAGE)` → `AccessLevel.PACKAGE`.
+    ///
+    /// [`Self::value`] only carries a string literal and [`Self::args`] only carries `name =`
+    /// pairs, so this shape fell between them and an `AccessLevel` was simply not visible: every
+    /// Lombok accessor read as public, and `AccessLevel.NONE` — which generates nothing at all —
+    /// read as "there is a public one".
+    #[serde(default)]
+    pub positional: Option<String>,
 }
 
 /// A field of a type: its name and its declared type (as written in source).
@@ -92,6 +101,11 @@ pub struct FieldDecl {
     pub is_final: bool,
     /// The declared access level (`public`/`protected`/`private`, else package-private).
     pub visibility: Visibility,
+    /// Whether the declaration assigns a value (`private final int x = 3;`). Lombok's
+    /// `@RequiredArgsConstructor` skips an already-initialised `final` field, so the generated
+    /// constructor's parameter list — and therefore its arity — depends on this.
+    #[serde(default)]
+    pub has_initializer: bool,
     /// The field's annotations (`@Getter`, `@Autowired`, …) — for Lombok synthesis and
     /// (future) field-injection resolution. Empty for a field with no annotations.
     pub annotations: Vec<Annotation>,
@@ -321,6 +335,25 @@ fn collect_type(
                 for em in m.named_children(&mut ew) {
                     collect_body_member(&em, bytes, is_interface, package, &fqn, &mut methods, &mut fields, out);
                 }
+            } else if m.kind() == "enum_constant" {
+                // A constant IS a member: `public static final E NAME`, exactly how the compiler
+                // emits it and how bytecode reports it. Leaving it out made a project enum look like
+                // it had no constants at all — `import static E.*` couldn't supply a bare name (the
+                // undefined-variable check then called correct code undefined), completion after
+                // `E.` offered nothing, and the switch-exhaustiveness check bailed on every project
+                // enum because "no visible constants" means "our view is incomplete".
+                if let Some(cname) = m.child_by_field_name("name").and_then(|n| node_text(&n, bytes))
+                {
+                    fields.push(FieldDecl {
+                        name: cname,
+                        type_text: name.clone(),
+                        is_static: true,
+                        is_final: true,
+                        visibility: Visibility::Public,
+                        has_initializer: true, // a constant IS its own initialisation
+                        annotations: collect_annotations(&m, bytes),
+                    });
+                }
             } else {
                 collect_body_member(&m, bytes, is_interface, package, &fqn, &mut methods, &mut fields, out);
             }
@@ -445,7 +478,8 @@ fn collect_annotations(node: &Node, bytes: &[u8]) -> Vec<Annotation> {
                     let simple = name.rsplit('.').next().unwrap_or(&name).to_string();
                     let value = annotation_string_value(&a, bytes);
                     let args = annotation_arg_pairs(&a, bytes);
-                    out.push(Annotation { name: simple, value, args });
+                    let positional = annotation_positional_value(&a, bytes);
+                    out.push(Annotation { name: simple, value, args, positional });
                 }
             }
         }
@@ -473,6 +507,22 @@ fn annotation_string_value(annotation: &Node, bytes: &[u8]) -> Option<String> {
             }
             _ => {}
         }
+    }
+    None
+}
+
+/// The first **positional** (non-`name =`) argument of an annotation, as raw source text, skipping
+/// a string literal (which [`annotation_string_value`] already carries): `@Setter(AccessLevel.PACKAGE)`
+/// → `AccessLevel.PACKAGE`, `@Getter(onMethod_ = @X)` → the annotation text. `None` for a marker, an
+/// empty list, or an all-pairs argument list.
+fn annotation_positional_value(annotation: &Node, bytes: &[u8]) -> Option<String> {
+    let args = annotation.child_by_field_name("arguments")?;
+    let mut aw = args.walk();
+    for arg in args.named_children(&mut aw) {
+        if matches!(arg.kind(), "element_value_pair" | "string_literal") {
+            continue;
+        }
+        return node_text(&arg, bytes).map(|t| t.trim().to_string());
     }
     None
 }
@@ -692,6 +742,7 @@ fn synthesize_record_members(
                 is_static: false,
                 is_final: true,
                 visibility: Visibility::Private,
+                has_initializer: false, // assigned by the canonical constructor
                 annotations: Vec::new(),
             });
         }
@@ -826,6 +877,7 @@ fn parse_field(node: &Node, bytes: &[u8], in_interface: bool, out: &mut Vec<Fiel
                     is_static,
                     is_final,
                     visibility,
+                    has_initializer: c.child_by_field_name("value").is_some(),
                     annotations: annotations.clone(),
                 });
             }
@@ -1218,6 +1270,32 @@ mod tests {
         assert!(t.fields.iter().any(|f| f.name == "sqlCriteriaValue"), "enum field indexed: {:?}", t.fields);
         assert!(t.methods.iter().any(|m| m.name == "getSql"), "enum method indexed: {:?}", t.methods);
         assert!(t.methods.iter().any(|m| m.name == "<init>"), "enum constructor indexed: {:?}", t.methods);
+    }
+
+    /// The constants themselves are members too — `public static final E NAME`, as the compiler
+    /// emits them. Without them a project enum reads as having no constants at all: `import static
+    /// E.*` supplies no name, `E.` completes to nothing, and switch exhaustiveness gives up.
+    #[test]
+    fn enum_constants_are_indexed_as_static_fields_of_the_enum() {
+        let t = one_type("enum Color { RED, GREEN(\"g\"), BLUE { void x() {} }; }");
+        for c in ["RED", "GREEN", "BLUE"] {
+            let f = t
+                .fields
+                .iter()
+                .find(|f| f.name == c)
+                .unwrap_or_else(|| panic!("constant {c} indexed: {:?}", t.fields));
+            assert_eq!(f.type_text, "Color", "a constant's type is its own enum");
+            assert!(f.is_static && f.is_final, "constants are static final");
+        }
+    }
+
+    /// A constant with a body declares a subclass, and its members belong to THAT, not to the enum —
+    /// indexing them on the enum would invent members the type does not have.
+    #[test]
+    fn a_constant_body_does_not_leak_members_onto_the_enum() {
+        let t = one_type("enum E { A { void hidden() {} }; void real() {} }");
+        assert!(t.methods.iter().any(|m| m.name == "real"));
+        assert!(!t.methods.iter().any(|m| m.name == "hidden"), "{:?}", t.methods);
     }
 
     #[test]

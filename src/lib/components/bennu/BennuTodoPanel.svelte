@@ -3,12 +3,14 @@
    * TODO tool window (bottom dock) — every TODO/FIXME/XXX/HACK marker in the project
    * from `bennu_todos`, grouped by file, collapsible, with per-kind filter chips.
    * Clicking a row opens the file and jumps to the line. Fetches on mount + when the
-   * project changes; the dock's Refresh action calls `refresh()` via bind:this.
+   * project changes; the panel owns its header, its count and its Refresh action.
    */
-  import { ListTodo, ChevronRight, ChevronDown, FileCode2, ArrowRight, Copy } from 'lucide-svelte';
+  import { ListTodo, ChevronRight, ChevronDown, FileCode2, ArrowRight, Copy, RefreshCw } from 'lucide-svelte';
   import { SvelteSet } from 'svelte/reactivity';
+  import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
@@ -82,6 +84,26 @@
 </script>
 
 <div class="todo">
+  <BottomPanelHeader
+    title="TODO"
+    count={shown.length}
+    onClose={() => bennuUiStore.closeBottom()}
+  >
+    {#snippet icon()}<ListTodo size={13} />{/snippet}
+    {#snippet actions()}
+      <button
+        class="ps-btn"
+        type="button"
+        use:tooltip={'Refresh'}
+        aria-label="Refresh TODOs"
+        disabled={loading}
+        onclick={() => void refresh()}
+      >
+        <RefreshCw size={13} />
+      </button>
+    {/snippet}
+  </BottomPanelHeader>
+
   <div class="todo-bar">
     {#each KINDS as k (k)}
       <button

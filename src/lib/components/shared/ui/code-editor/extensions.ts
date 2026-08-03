@@ -272,7 +272,9 @@ export function createCodeEditorExtensions(
   // whenever the descriptor supplies one; read-only editors get it too (it's inert).
   const hoverSource = lang.intel?.hover;
   if (hoverSource) {
-    exts.push(hoverTooltip(hoverSource, { hoverTime: 350 }));
+    // 350ms was long enough to read as lag once the source itself answers quickly — the
+    // card should feel like a consequence of stopping the pointer, not a separate wait.
+    exts.push(hoverTooltip(hoverSource, { hoverTime: 200 }));
   }
 
   // Host-owned keys. `Prec.highest`, so they beat `defaultKeymap` — which is the whole

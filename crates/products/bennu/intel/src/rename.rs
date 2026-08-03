@@ -497,22 +497,21 @@ impl RenameEngine {
         Some(info)
     }
 
-    /// Extract the leading Javadoc (`/** … */`) of the project declaration `key` names, by
-    /// locating its declaration site in one of the engine's `.java` sources. `None` when
-    /// the declaration isn't in a project source (a JDK / dep-jar symbol) or carries no
-    /// Javadoc. Best-effort — a parse/lookup miss just yields `None`.
+    /// Extract the leading Javadoc (`/** … */`) of the project declaration `key` names. `None` when
+    /// the declaration isn't in a project source (a JDK / dep-jar symbol) or carries no Javadoc.
+    /// Best-effort — a parse/lookup miss just yields `None`.
+    ///
+    /// It asks the reference index which file declares the owning type and parses **that one**.
+    /// The previous version walked every `.java` in the project, running a full tree-sitter parse
+    /// per file — and, when the declaration it found carried no Javadoc (the common case in a
+    /// legacy codebase), kept going through the rest anyway. On a 1300-file project that is 1300
+    /// parses for one tooltip, which is why hovering a method took an age while hovering a local
+    /// variable (one parse, on the fallback path) was instant.
     fn project_doc_for_key(&self, key: &DeclKey) -> Option<String> {
-        for f in &self.java_files {
-            if let Some(decl_start) = decl_site_for_key(&f.source, key) {
-                if let Some(doc) = leading_javadoc(&f.source, decl_start) {
-                    return Some(doc);
-                }
-                // The declaration is in THIS file but has no Javadoc — a same-named type in
-                // another package could still carry one, so keep scanning rather than
-                // returning early. (Rare; the extra files are already parsed cheaply.)
-            }
-        }
-        None
+        let file = self.index.file_declaring(key.owner_binary())?;
+        let source = project_source(&self.java_files, file)?;
+        let decl_start = decl_site_for_key(source, key)?;
+        leading_javadoc(source, decl_start)
     }
 }
 
@@ -654,29 +653,55 @@ pub struct HoverInfo {
 /// `name(...)` when the class isn't on the resolvable classpath or carries no signature).
 fn hover_for_key(key: &DeclKey, resolver: &dyn TypeResolver) -> HoverInfo {
     match key {
-        DeclKey::Type { binary } => HoverInfo {
-            signature: binary.replace('/', "."),
-            kind: "class".to_string(),
-            container: None,
-            doc: None,
-        },
+        DeclKey::Type { binary } => {
+            // What the type IS, not "class" for everything — an interface reported as a class
+            // is the card stating something false about the thing you are pointing at. The
+            // signature reads like the declaration; the package goes on the meta line.
+            let simple = simple_of(binary).replace('$', ".");
+            let kind = resolver
+                .members_of(binary)
+                .map(|cm| {
+                    if cm.flags.is_annotation {
+                        "annotation"
+                    } else if cm.flags.is_interface {
+                        "interface"
+                    } else if cm.flags.is_enum {
+                        "enum"
+                    } else if cm.flags.is_record {
+                        "record"
+                    } else {
+                        "class"
+                    }
+                })
+                .unwrap_or("class");
+            let dotted = binary.replace('/', ".");
+            let package = dotted.rsplit_once('.').map(|(p, _)| p.to_string());
+            HoverInfo {
+                signature: format!("{kind} {simple}"),
+                kind: kind.to_string(),
+                container: package,
+                doc: None,
+            }
+        }
         DeclKey::Method { owner, name } => {
-            let signature = member_signature(resolver, owner, name, true)
-                .unwrap_or_else(|| format!("{name}(…)"));
+            let found = member_signature(resolver, owner, name, true);
+            let (signature, declaring) = found.unwrap_or_else(|| (format!("{name}(…)"), owner.clone()));
             HoverInfo {
                 signature,
                 kind: "method".to_string(),
-                container: Some(owner.replace('/', ".")),
+                // The type that DECLARES it, not the one it was reached through: hovering an
+                // inherited method and being told the subclass owns it is a wrong answer.
+                container: Some(declaring.replace('/', ".")),
                 doc: None,
             }
         }
         DeclKey::Field { owner, name } => {
-            let signature =
-                member_signature(resolver, owner, name, false).unwrap_or_else(|| name.clone());
+            let found = member_signature(resolver, owner, name, false);
+            let (signature, declaring) = found.unwrap_or_else(|| (name.clone(), owner.clone()));
             HoverInfo {
                 signature,
                 kind: "field".to_string(),
-                container: Some(owner.replace('/', ".")),
+                container: Some(declaring.replace('/', ".")),
                 doc: None,
             }
         }
@@ -684,29 +709,33 @@ fn hover_for_key(key: &DeclKey, resolver: &dyn TypeResolver) -> HoverInfo {
 }
 
 /// Look up a member's `raw_signature` on `owner` (walking supertypes, like the reference
-/// walk's `declaring_owner`). `None` when the class isn't resolvable or the member has no
-/// recorded signature (the caller then synthesizes a fallback).
+/// walk's `declaring_owner`), with the binary name of the type that actually declares it.
+/// `None` when the class isn't resolvable or the member is nowhere in the hierarchy (the
+/// caller then synthesizes a fallback).
 fn member_signature(
     resolver: &dyn TypeResolver,
     owner: &str,
     name: &str,
     is_method: bool,
-) -> Option<String> {
+) -> Option<(String, String)> {
     let mut visited = std::collections::HashSet::new();
     let mut stack = vec![owner.to_string()];
     while let Some(bn) = stack.pop() {
         if !visited.insert(bn.clone()) {
             continue;
         }
-        let cm = resolver.members_of(&bn)?;
+        // A supertype we can't resolve ends THAT branch of the walk, not the whole search —
+        // an un-indexed base class must not hide a member the subclass declares itself.
+        let Some(cm) = resolver.members_of(&bn) else { continue };
         let pool = if is_method { &cm.methods } else { &cm.fields };
         if let Some(m) = pool.iter().find(|m| m.name == name) {
             if !m.raw_signature.is_empty() {
-                return Some(m.raw_signature.clone());
+                return Some((m.raw_signature.clone(), bn.clone()));
             }
             // No recorded signature: synthesize a minimal one from the name (+ empty
             // param list for a method) so the hover still shows something meaningful.
-            return Some(if is_method { format!("{name}()") } else { name.to_string() });
+            let sig = if is_method { format!("{name}()") } else { name.to_string() };
+            return Some((sig, bn.clone()));
         }
         // `cm` is a shared `Arc` — clone the (small) supertype links, don't move.
         if let Some(sc) = cm.superclass.clone() {

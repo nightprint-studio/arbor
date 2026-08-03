@@ -1,135 +1,45 @@
 <script lang="ts">
   /**
-   * BennuBottomDock — the bottom tool window (IntelliJ New UI): Problems + Terminal,
-   * tabbed. Mirrors Corvus's bottom dock: a shared {@link BottomPanelHeader} owns the
-   * chrome (title-less here — the tab strip is the identity), a `Tabs` strip switches
-   * sections, and the section-specific actions (terminal "New") sit in the header's
-   * actions slot. Its toggles live in the LEFT rail's bottom cluster.
+   * The bottom tool window — **one panel at a time**, the one whose rail button opened it.
    *
-   * The Problems body reuses `BennuProblemsPanel` (header hidden); the Terminal body
-   * reuses the generic Corvus `TerminalInstance` via `BennuTerminalView`.
+   * It used to be a tabbed container: a shared header carrying a five-tab strip, with each
+   * section's own bar underneath. That is two rows of chrome for one panel, and it made the rail
+   * buttons and the tab strip two ways of saying the same thing, each needing to be kept in step
+   * with the other. Corvus and Picus have had the other arrangement all along — a button opens
+   * *its* panel, and the panel owns its title, its count, its actions and its close button — and
+   * this is now that. Build and Problems are the one deliberate exception: two readings of the
+   * same run, so they share a panel (see {@link BennuBuildProblemsPanel}).
+   *
+   * Which is why there is so little here. The sections stay MOUNTED and hidden rather than being
+   * destroyed on a switch: a terminal session is a live PTY and a build log is a scroll position,
+   * and neither should end because you looked at the TODOs. The exception is Forms, which is
+   * scoped to the active file and re-analysed on every switch anyway — mounting it while hidden
+   * would burn an include-graph walk for nothing.
    */
-  import { AlertTriangle, TerminalSquare, Plus, Hammer, Square, Trash2, ListTodo, RefreshCw, TextCursorInput } from 'lucide-svelte';
-  import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
-  import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
-  import { tooltip } from '$lib/actions/tooltip';
-  import BennuProblemsPanel from './BennuProblemsPanel.svelte';
+  import BennuBuildProblemsPanel from './BennuBuildProblemsPanel.svelte';
   import BennuTerminalView from './BennuTerminalView.svelte';
-  import BennuBuildPanel from './BennuBuildPanel.svelte';
   import BennuTodoPanel from './BennuTodoPanel.svelte';
   import BennuFormsPanel from './BennuFormsPanel.svelte';
-  import { bennuUiStore, type BottomPanel } from '$lib/stores/bennu/ui.svelte';
-  import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
+  import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
 
   const active = $derived(bennuUiStore.bottomPanel ?? 'problems');
-
-  const tabs: TabItem[] = [
-    { id: 'build', label: 'Build', icon: Hammer, iconSize: 13 },
-    { id: 'problems', label: 'Problems', icon: AlertTriangle, iconSize: 13 },
-    { id: 'todos', label: 'TODO', icon: ListTodo, iconSize: 13 },
-    { id: 'forms', label: 'Forms', icon: TextCursorInput, iconSize: 13 },
-    { id: 'terminal', label: 'Terminal', icon: TerminalSquare, iconSize: 13 },
-  ];
-
-  let terminalView = $state<{ openTerminal: () => void } | null>(null);
-  let todoView = $state<{ refresh: () => void } | null>(null);
-  let formsView = $state<{ refresh: () => void; canRefresh: () => boolean } | null>(null);
+  const buildish = $derived(active === 'build' || active === 'problems');
 </script>
 
 <div class="dock">
-  <BottomPanelHeader onClose={() => bennuUiStore.closeBottom()}>
-    {#snippet children()}
-      <div class="dock-tabs">
-        <Tabs
-          items={tabs}
-          value={active}
-          variant="panel"
-          size="sm"
-          ariaLabel="Bottom tool windows"
-          onSelect={(id) => bennuUiStore.showBottom(id as BottomPanel)}
-        />
-      </div>
-    {/snippet}
-    {#snippet actions()}
-      {#if active === 'terminal'}
-        <button
-          class="ps-btn"
-          type="button"
-          use:tooltip={'New terminal'}
-          aria-label="New terminal"
-          onclick={() => terminalView?.openTerminal()}
-        >
-          <Plus size={13} />
-        </button>
-      {:else if active === 'todos'}
-        <button
-          class="ps-btn"
-          type="button"
-          use:tooltip={'Refresh'}
-          aria-label="Refresh TODOs"
-          onclick={() => todoView?.refresh()}
-        >
-          <RefreshCw size={13} />
-        </button>
-      {:else if active === 'forms'}
-        <button
-          class="ps-btn"
-          type="button"
-          use:tooltip={'Refresh'}
-          aria-label="Refresh forms"
-          disabled={!formsView?.canRefresh()}
-          onclick={() => formsView?.refresh()}
-        >
-          <RefreshCw size={13} />
-        </button>
-      {:else if active === 'build'}
-        {#if bennuRunStore.running}
-          <button
-            class="ps-btn"
-            type="button"
-            use:tooltip={'Stop'}
-            aria-label="Stop run"
-            onclick={() => void bennuRunStore.stop()}
-          >
-            <Square size={12} />
-          </button>
-        {/if}
-        <button
-          class="ps-btn"
-          type="button"
-          use:tooltip={'Clear'}
-          aria-label="Clear build output"
-          disabled={bennuRunStore.active}
-          onclick={() => bennuRunStore.clear()}
-        >
-          <Trash2 size={13} />
-        </button>
-      {/if}
-    {/snippet}
-  </BottomPanelHeader>
-
-  <div class="dock-body">
-    <!-- Both sections stay mounted so a terminal session survives a tab switch;
-         the inactive one is hidden, not destroyed. -->
-    <div class="dock-section" class:hidden={active !== 'build'}>
-      <BennuBuildPanel />
+  <div class="dock-section" class:hidden={!buildish}>
+    <BennuBuildProblemsPanel />
+  </div>
+  <div class="dock-section" class:hidden={active !== 'todos'}>
+    <BennuTodoPanel />
+  </div>
+  {#if active === 'forms'}
+    <div class="dock-section">
+      <BennuFormsPanel dock />
     </div>
-    <div class="dock-section" class:hidden={active !== 'problems'}>
-      <BennuProblemsPanel hideHeader />
-    </div>
-    <div class="dock-section" class:hidden={active !== 'todos'}>
-      <BennuTodoPanel bind:this={todoView} />
-    </div>
-    <!-- Forms is active-file-scoped + re-analysed on every switch (no session state to keep),
-         so mount it only while its tab is showing — don't burn the include-graph walk when hidden. -->
-    {#if active === 'forms'}
-      <div class="dock-section">
-        <BennuFormsPanel bind:this={formsView} hideHeader />
-      </div>
-    {/if}
-    <div class="dock-section" class:hidden={active !== 'terminal'}>
-      <BennuTerminalView bind:this={terminalView} />
-    </div>
+  {/if}
+  <div class="dock-section" class:hidden={active !== 'terminal'}>
+    <BennuTerminalView />
   </div>
 </div>
 
@@ -138,15 +48,9 @@
     display: flex; flex-direction: column;
     height: 100%; width: 100%; min-height: 0;
     background: var(--bg-base);
+    position: relative;
     overflow: hidden;
   }
-  .dock-tabs {
-    display: flex; align-items: stretch; align-self: stretch;
-    margin-left: 6px; min-width: 0;
-  }
-  .dock-tabs :global(.tabs) { flex: 1; min-width: 0; height: 100%; }
-
-  .dock-body { flex: 1; min-height: 0; position: relative; overflow: hidden; }
   .dock-section {
     position: absolute; inset: 0;
     display: flex; flex-direction: column; min-height: 0;

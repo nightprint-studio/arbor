@@ -490,10 +490,11 @@ fn build_class_members(
         .collect();
 
     // Lombok generated members: append the getters/setters/`log` its annotations would generate,
-    // so they resolve like real declarations. A user-declared method of the same name suppresses
-    // the synthetic one (the synth checks against the names already collected above).
-    let existing_methods: std::collections::HashSet<String> =
-        methods.iter().map(|m| m.name.clone()).collect();
+    // so they resolve like real declarations. A user-declared method suppresses the synthetic one —
+    // keyed by NAME AND PARAMETER COUNT, which is Lombok's own rule and the only key that works
+    // when a getter and a setter share a name (`@Accessors(fluent = true)`).
+    let existing_methods: std::collections::HashSet<(String, usize)> =
+        methods.iter().map(|m| (m.name.clone(), m.params.len())).collect();
     let synth = crate::lombok::synthesize(td, imports, project_types, &existing_methods, is_project);
     methods.extend(synth.methods);
     fields.extend(synth.fields);

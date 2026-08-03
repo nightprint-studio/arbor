@@ -531,6 +531,7 @@ export const DEMO_PROJECT: ProjectInfo = {
     struts_xml_config: true,
     struts_convention: true,
     jsp_taglib_tld: true,
+    jsp_views: true,
     ognl_value_stack: true,
     tiles_views: true,
     spring_xml_di: true,

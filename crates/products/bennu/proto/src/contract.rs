@@ -28,6 +28,11 @@ pub struct CapabilitySet {
     pub struts_convention: bool,
     /// JSP taglib / TLD usage (`*.tld` under `WEB-INF`, `web.xml` `<taglib>`).
     pub jsp_taglib_tld: bool,
+    /// The project has JSP views at all (`*.jsp` / `*.jspf` / `*.tag`). Weaker than
+    /// [`Self::jsp_taglib_tld`] — a page with no taglib still counts — and what the JSP-only
+    /// tooling (the Forms inspector, the Tomcat deploy) is gated on: a service module with no
+    /// pages should not be offered a tool that can only ever be empty there.
+    pub jsp_views: bool,
     /// OGNL value-stack expressions (`%{…}`), follows `struts_xml_config`.
     pub ognl_value_stack: bool,
     /// Apache Tiles view composition (`tiles.xml`, `struts2-tiles-plugin`).

@@ -1110,6 +1110,13 @@
    *  outline, meaningless (and historically a freeze risk) on a `.jsp`/XML file. */
   const isJavaFile = $derived(isJavaFileOf(activePath));
   const isJspFile = $derived(isJspFileOf(activePath));
+  /** Struts is on this project at all. The `*-validation.xml` tooling means nothing without it —
+   *  a toolbar button that would create a file no framework reads is a button that teaches the
+   *  wrong thing about the project. */
+  const hasStruts = $derived(
+    projectStore.capabilities?.struts_xml_config === true
+      || projectStore.capabilities?.struts_convention === true,
+  );
 
   // JSP/JSTL/Struts tag snippets for the editor toolbar's "Insert tag" menu. Each inserts at the
   // caret via the shared `insertAtCursor`; `$0`-free plain text keeps it grammar-agnostic (the
@@ -1271,8 +1278,9 @@
             <Plus size={12} /> Validators
           </button>
           <span class="ed-tsep"></span>
-        {:else if isJavaFile}
-          <!-- On a Java action class: create (or open) its `<Class>-validation.xml`. -->
+        {:else if isJavaFile && hasStruts}
+          <!-- On a Java action class: create (or open) its `<Class>-validation.xml`. Offered only
+               where Struts is actually in use — see `hasStruts`. -->
           <button class="ed-tbtn" use:tooltip={'Create or open the Struts validation file for this action class'} onclick={createValidationFile}>
             <ShieldCheck size={12} /> Validation
           </button>

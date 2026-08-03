@@ -134,16 +134,49 @@ export const codeEditorTheme = EditorView.theme(
     // name), a muted meta line, and an optional wrapped body. Bennu renders symbol
     // signatures into it and Picus renders column facts; keeping the class names
     // product-neutral is what stops the second one from forking the CSS.
-    '.cm-tooltip .cm-hover-card': { padding: '6px 9px', maxWidth: '440px' },
+    '.cm-tooltip .cm-hover-card': {
+      padding: '8px 11px', maxWidth: '520px', maxHeight: '340px', overflowY: 'auto',
+    },
+    // The head is the answer: a small kind tag, then the signature. They sit on one line
+    // so the eye lands on the name, not on a label above it.
+    '.cm-hover-card .cm-hc-head': {
+      display: 'flex', alignItems: 'baseline', gap: '7px',
+    },
+    '.cm-hover-card .cm-hc-kind': {
+      flexShrink: '0',
+      fontFamily: 'var(--font-ui-sans)', fontSize: 'var(--font-size-3xs)', fontWeight: '700',
+      letterSpacing: '0.05em', textTransform: 'uppercase',
+      color: 'var(--accent)', backgroundColor: 'var(--accent-subtle)',
+      borderRadius: 'var(--radius-sm)', padding: '1px 5px',
+    },
     '.cm-hover-card .cm-hc-title': {
-      fontFamily: 'var(--font-code)', fontSize: 'var(--font-size-xs)', color: 'var(--text-primary)',
+      fontFamily: 'var(--font-code)', fontSize: 'var(--font-size-sm)', color: 'var(--text-primary)',
       whiteSpace: 'pre-wrap', wordBreak: 'break-word',
     },
-    '.cm-hover-card .cm-hc-meta': { fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)', marginTop: '3px' },
+    '.cm-hover-card .cm-hc-meta': {
+      fontFamily: 'var(--font-code)', fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)',
+      marginTop: '3px', wordBreak: 'break-all',
+    },
     '.cm-hover-card .cm-hc-doc': {
       fontFamily: 'var(--font-ui-sans)', fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)',
-      marginTop: '5px', paddingTop: '5px', borderTop: '1px solid var(--border-subtle)', whiteSpace: 'pre-wrap',
+      lineHeight: '1.5',
+      marginTop: '7px', paddingTop: '7px', borderTop: '1px solid var(--border-subtle)',
+      whiteSpace: 'pre-wrap',
     },
+    // `@param` / `@return` / `@throws` as a definition list: the subject in the left
+    // column, its text in the right, so a six-parameter method stays readable.
+    '.cm-hover-card .cm-hc-tags': {
+      display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', gap: '2px 10px',
+      margin: '6px 0 0', paddingTop: '6px', borderTop: '1px solid var(--border-subtle)',
+      fontSize: 'var(--font-size-2xs)',
+    },
+    '.cm-hover-card .cm-hc-tags dt': {
+      fontFamily: 'var(--font-code)', color: 'var(--text-muted)', whiteSpace: 'nowrap',
+    },
+    '.cm-hover-card .cm-hc-tags dd': {
+      margin: '0', fontFamily: 'var(--font-ui-sans)', color: 'var(--text-secondary)',
+    },
+    '.cm-hover-card .cm-hc-tags dt.cm-hc-deprecated': { color: 'var(--warning)', fontWeight: '700' },
 
     // ── Search panel (Ctrl+F) — themed to match Arbor's inputs/buttons ──
     '.cm-panels': { backgroundColor: 'var(--bg-elevated)', color: 'var(--text-primary)' },

@@ -155,12 +155,17 @@ fn enum_constants(members: &ClassMembers, enum_binary: &str) -> Vec<String> {
 /// Walk an arm's `switch_label`s, appending each named enum constant to `covered` and flipping
 /// `has_default` when a `default` label is present.
 ///
-/// An enum case label is a **bare identifier** (`case A`) — tree-sitter-java exposes it as an
-/// `identifier` named child of the `switch_label`. A `default` label carries no such named
-/// expression child (only the anonymous `default` keyword). We therefore only collect `identifier`
-/// children and detect `default` by scanning the label's anonymous children — conservative: a
-/// non-identifier label expression (something we don't model) is simply not added to `covered`, which
-/// can only make us *under*-report, never over-report.
+/// A case label names a constant in one of two shapes, and BOTH are the same constant:
+///   * bare — `case A`, an `identifier` child of the label (the classic form);
+///   * **qualified** — `case Status.A`, which the grammar gives us as a `field_access`. Java 21
+///     accepts it in a pattern switch, and it is what you write when the constant reads better
+///     with its type. Reading only the bare form is why a switch that covered every constant was
+///     reported as covering none of them: every label was invisible to this check, and the
+///     "missing" list was the whole enum.
+///
+/// A `default` label carries no named expression child (only the anonymous `default` keyword), so
+/// it is detected by scanning the label's anonymous children. Any other label shape is simply not
+/// added to `covered`, which can only make us *under*-report — never over-report.
 fn collect_labels<'a>(
     arm: Node,
     bytes: &'a [u8],
@@ -177,12 +182,28 @@ fn collect_labels<'a>(
         }
         let mut lc = ch.walk();
         for lch in ch.named_children(&mut lc) {
-            if lch.kind() == "identifier" {
-                if let Ok(name) = lch.utf8_text(bytes) {
-                    covered.push(name);
-                }
+            if let Some(name) = label_constant(lch, bytes) {
+                covered.push(name);
             }
         }
+    }
+}
+
+/// The constant a single label expression names: itself when bare, its last segment when
+/// qualified (`Status.A` → `A`). `None` for anything else — a guard, a pattern, a literal.
+///
+/// The qualifier is deliberately NOT matched against the selector's type. A label qualified with
+/// the wrong type does not compile at all, so treating it as covering the constant it names costs
+/// us nothing; refusing it, on the other hand, would report the constant as missing — the exact
+/// false positive this check promises never to produce.
+fn label_constant<'a>(label: Node, bytes: &'a [u8]) -> Option<&'a str> {
+    match label.kind() {
+        "identifier" => label.utf8_text(bytes).ok(),
+        "field_access" => {
+            let field = label.child_by_field_name("field")?;
+            (field.kind() == "identifier").then(|| field.utf8_text(bytes).ok()).flatten()
+        }
+        _ => None,
     }
 }
 
@@ -322,6 +343,27 @@ mod tests {
             "int x = switch (c) { case RED -> 1; case GREEN -> 2; case BLUE -> 3; }; return x;"
         )
         .is_empty());
+    }
+
+    /// The reported bug: qualifying the constants (`case Color.RED`) made every label invisible,
+    /// so a switch that covers the enum completely was reported as covering none of it.
+    #[test]
+    fn qualified_case_labels_count_as_covered() {
+        assert!(
+            diags(
+                "int x = switch (c) { case Color.RED -> 1; case Color.GREEN -> 2; case Color.BLUE -> 3; }; return x;"
+            )
+            .is_empty(),
+            "a qualified label names the same constant a bare one does",
+        );
+    }
+
+    /// …and a qualified switch that really is missing one still says so, naming only that one.
+    #[test]
+    fn qualified_labels_still_report_a_genuinely_missing_constant() {
+        let d = diags("int x = switch (c) { case Color.RED -> 1; case Color.GREEN -> 2; }; return x;");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("missing: BLUE"), "{d:?}");
     }
 
     #[test]

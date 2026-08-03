@@ -76,6 +76,15 @@ Handled (nominal walks, per Spike B):
 
 - **Local variables** by declared type (incl. `Foo x = ...`) and **method
   parameters**.
+- **Every binder that may legally shadow a field**, because a bare name means the
+  binding, not the field: enhanced-`for` variables (`for (Foo x : xs)`, with `var`
+  taking the element type), classic `for` inits, `catch` parameters (a multi-catch
+  union stays unresolved rather than picking an alternative), try-with-resources,
+  lambda parameters, and **pattern variables** (`o instanceof Foo f`, `case Foo f`).
+  A pattern variable is bound only where Java definitely binds it — the branch its
+  test governs, the rest of an `&&`, the statements after an `if (!(o instanceof Foo
+  f)) return;` guard, a `switch` case body — so the name still means the field
+  everywhere else.
 - **`this` / `this.field`** field types, and **bare field** access (implicit `this`).
 - **Method-return-type chaining**: `a.getB().getC()`.
 - **Generics carry-through** (caveat C2): a `List<Foo>` local resolves `.get(i)` and
@@ -103,7 +112,8 @@ a partial identifier).
   overrides collapse to their derived return. Full argument-subtype selection (boxing,
   varargs element types, most-specific) is not modelled.
 - **No flow-typing / reassignment / narrowing** — a variable's declared type is used
-  even after `x = somethingElse`; no ternary/`instanceof` narrowing.
+  even after `x = somethingElse`, and `if (o instanceof Foo) { o.… }` does not narrow
+  `o` itself (only a pattern variable of its own — `instanceof Foo f` — is typed).
 - **`var` inference** only follows the initializer through the same expression rules;
   it does not re-run full flow analysis.
 - **No raw-array element inference** (`arr[i].`) — only generic collections carry

@@ -13,6 +13,7 @@
  */
 
 import type { EditorView, Tooltip } from '@codemirror/view';
+import { hoverCardDom } from '$lib/components/shared/ui/code-editor';
 import type { Column, Dialect, TableInfo } from '$lib/types/picus';
 import { analyzeStatement, identOf, resolveQualifier, type StatementInfo } from './analysis';
 import { builtinMeta, builtinNamed } from './builtins';
@@ -34,27 +35,14 @@ function card(dom: HoverCard): Tooltip {
     end: dom.to,
     above: true,
     create() {
-      const root = document.createElement('div');
-      root.className = 'cm-hover-card';
-
-      const title = document.createElement('div');
-      title.className = 'cm-hc-title';
-      title.textContent = dom.title;
-      root.appendChild(title);
-
-      if (dom.meta.length) {
-        const meta = document.createElement('div');
-        meta.className = 'cm-hc-meta';
-        meta.textContent = dom.meta.join('  ·  ');
-        root.appendChild(meta);
-      }
-      if (dom.doc.length) {
-        const doc = document.createElement('div');
-        doc.className = 'cm-hc-doc';
-        doc.textContent = dom.doc.join('\n');
-        root.appendChild(doc);
-      }
-      return { dom: root };
+      // The shared card — the same one Bennu's Java hover renders.
+      return {
+        dom: hoverCardDom({
+          signature: dom.title,
+          container: dom.meta.length ? dom.meta.join('  ·  ') : null,
+          doc: dom.doc.length ? dom.doc.join('\n') : null,
+        }),
+      };
     },
   };
 }

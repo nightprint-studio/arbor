@@ -117,7 +117,7 @@ mod tests {
     }
 
     fn marker(name: &str) -> Annotation {
-        Annotation { name: name.to_string(), value: None, args: Vec::new() }
+        Annotation { name: name.to_string(), value: None, args: Vec::new(), positional: None }
     }
 
     #[test]
@@ -134,7 +134,7 @@ mod tests {
         let td = typed(
             "FooService",
             "com.x.FooService",
-            vec![Annotation { name: "Service".into(), value: Some("custom".into()), args: Vec::new() }],
+            vec![Annotation { name: "Service".into(), value: Some("custom".into()), args: Vec::new(), positional: None }],
         );
         assert_eq!(stereotype_bean(&td, "f.java").unwrap().name, "custom");
     }

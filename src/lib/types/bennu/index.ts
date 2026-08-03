@@ -32,6 +32,9 @@ export interface CapabilitySet {
   struts_xml_config: boolean;
   struts_convention: boolean;
   jsp_taglib_tld: boolean;
+  /** The project has JSP views at all (`*.jsp` / `*.jspf` / `*.tag`) — what the JSP-only
+   *  tooling (Forms, Tomcat deploy) is gated on. Weaker than {@link jsp_taglib_tld}. */
+  jsp_views: boolean;
   ognl_value_stack: boolean;
   tiles_views: boolean;
   spring_xml_di: boolean;

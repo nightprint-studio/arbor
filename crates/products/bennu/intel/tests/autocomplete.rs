@@ -286,3 +286,44 @@ fn completion_offset_past_end_is_clamped() {
     let s = p.source("Owner.java").to_string();
     let _ = p.complete("Owner.java", s.len());
 }
+
+// ── Enum constants ───────────────────────────────────────────────────────────────────────────
+
+/// A constant is a member of its enum — `public static final E NAME` — and the index must carry
+/// it as one. It didn't, so a project enum looked constant-less everywhere it mattered: nothing
+/// completed after `Color.`, `import static p.Color.*` supplied no bare name (the undefined-variable
+/// check then called correct code undefined), and switch exhaustiveness gave up on every project
+/// enum for want of a constant to check against.
+#[test]
+fn enum_constants_complete_after_the_enum_name() {
+    let p = Project::new(&[
+        (
+            "Color.java",
+            "package p;\n\
+             public enum Color {\n\
+             \x20   RED, GREEN(\"g\"), BLUE;\n\
+             \x20   private String tag;\n\
+             \x20   Color() { }\n\
+             \x20   Color(String t) { this.tag = t; }\n\
+             \x20   public String tag() { return tag; }\n\
+             }\n",
+        ),
+        (
+            "Use.java",
+            "package p;\n\
+             public class Use {\n\
+             \x20   void m() {\n\
+             \x20       Color c = Color.\n\
+             \x20   }\n\
+             }\n",
+        ),
+    ]);
+    let s = p.source("Use.java").to_string();
+    let off = at(&s, "= Color.") + "= Color.".len();
+    let labels = p.complete_labels("Use.java", off);
+    for c in ["RED", "GREEN", "BLUE"] {
+        assert!(labels.contains(&c.to_string()), "expected constant {c:?} in {labels:?}");
+    }
+    // The enum's own members are still there — the constants are additions, not a replacement.
+    assert!(labels.contains(&"tag".to_string()), "enum method still offered: {labels:?}");
+}

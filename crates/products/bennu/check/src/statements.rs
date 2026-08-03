@@ -23,6 +23,16 @@
 //! there is now missed. Telling the two apart needs the switch's surrounding context rather
 //! than the node itself, and while that is knowable, a check that is silent about a rare
 //! mistake beats one that shouts about a common correct construct (docs §7).
+//!
+//! ## `switch (x) { … };` — a trailing semicolon, not a broken block
+//!
+//! The grammar has one rule for both switch forms and puts `switch_expression` inside
+//! `expression`, so a switch **statement** written with a trailing `;` parses as an
+//! `expression_statement` wrapping the whole switch. Read literally that is "a switch is not a
+//! statement expression" — and the squiggle lands on the entire block, which is how a stray `;`
+//! managed to paint a 200-line switch red. Java reads it as a switch statement followed by an
+//! empty statement: legal, merely redundant. So the switch is left alone and the `;` gets the
+//! same *warning* a stray `;` gets anywhere else.
 
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
@@ -37,6 +47,13 @@ fn is_statement_expression(kind: &str) -> bool {
             | "assignment_expression"      // x = …, x += …
             | "update_expression"          // i++, --i
     )
+}
+
+/// The `;` closing an `expression_statement` — the anonymous last child. `None` when the parse is
+/// missing it (malformed input, left to the syntax check).
+fn trailing_semicolon<'t>(stmt: Node<'t>) -> Option<Node<'t>> {
+    let last = stmt.child(stmt.child_count().checked_sub(1)?)?;
+    (last.kind() == ";" && !last.is_missing()).then_some(last)
 }
 
 /// Flag every `expression_statement` whose expression isn't a legal statement expression.
@@ -61,6 +78,17 @@ pub fn invalid_statements_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
         let kind = expr.kind();
         // Leave malformed input to the syntax check; only flag a cleanly-parsed non-statement.
         if kind == "ERROR" || expr.is_error() || expr.has_error() {
+            continue;
+        }
+        // A switch statement that ends with `;`. See the module doc: the switch is fine, the
+        // semicolon is the redundant part — so that is what the diagnostic points at.
+        if kind == "switch_expression" {
+            if let Some(semi) = trailing_semicolon(n) {
+                out.push(crate::check_id::CheckId::EmptyStatement.at(
+                    semi,
+                    "Unnecessary semicolon after a `switch` statement",
+                ));
+            }
             continue;
         }
         if !is_statement_expression(kind) {
@@ -185,6 +213,38 @@ mod tests {
         let tree = parse(src);
         let d = invalid_statements(tree.root_node(), src);
         assert_eq!(d.len(), 1, "a block arm's body is ordinary statement territory: {d:?}");
+    }
+
+    /// The reported bug: a trailing `;` on a switch STATEMENT reported the whole block as "not a
+    /// statement". It must be a warning, and it must point at the semicolon.
+    #[test]
+    fn trailing_semicolon_on_a_switch_statement_warns_on_the_semicolon() {
+        let src = "class C {\n  void f(int i) {\n    switch (i) {\n\
+                   case 1: break;\n    };\n  }\n}";
+        let tree = parse(src);
+        let d = invalid_statements(tree.root_node(), src);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert_eq!(d[0].severity, "warning");
+        assert_eq!(&src[d[0].start..d[0].end], ";", "the squiggle covers the `;`, not the switch");
+        assert!(d[0].message.contains("semicolon"), "{}", d[0].message);
+    }
+
+    /// …and a switch statement WITHOUT the stray `;` says nothing at all.
+    #[test]
+    fn a_plain_switch_statement_is_silent() {
+        let src = "class C {\n  void f(int i) {\n    switch (i) {\n\
+                   case 1: break;\n    }\n  }\n}";
+        let tree = parse(src);
+        assert!(invalid_statements(tree.root_node(), src).is_empty());
+    }
+
+    /// A switch used as a real expression is not an `expression_statement` at all — untouched.
+    #[test]
+    fn a_switch_expression_assigned_to_a_variable_is_silent() {
+        let src = "class C {\n  int f(int i) {\n    int v = switch (i) {\n\
+                   case 1 -> 1;\n default -> 0;\n    };\n    return v;\n  }\n}";
+        let tree = parse(src);
+        assert!(invalid_statements(tree.root_node(), src).is_empty());
     }
 
     /// And the classic colon-form switch is untouched by the skip.

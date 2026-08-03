@@ -320,6 +320,11 @@
   panel grouped by file. A build and a validation can't run at the same time.
 </p>
 <p>
+  <strong>Errors decide the verdict; warnings never do.</strong> A run that ends with warnings only
+  reads as <em>passed</em>, and the counts are coloured for what they are — red errors, yellow
+  warnings, grey when there are none. Only a run with real errors is red.
+</p>
+<p>
   Validation runs across CPU cores, and each file's result is cached against the exact project types
   it depends on — so re-validating an unchanged project is instant, and after an edit only the
   changed file (and anything whose types it touched) is re-checked. The cache is warmed up in the
@@ -374,6 +379,15 @@
   class's. The <code>prefix</code> element is not read yet.
 </p>
 <p>
+  <code>AccessLevel</code> is honoured on <code>@Getter</code> / <code>@Setter</code>, at class or
+  field level: <code>@Setter(AccessLevel.PACKAGE)</code> generates a package-private setter and is
+  treated as one, and <code>AccessLevel.NONE</code> generates nothing at all — so no accessor is
+  offered for a field that has switched it off. The generated <strong>constructors</strong> carry
+  their <code>access = AccessLevel.…</code> the same way, and take the parameters Lombok actually
+  gives them — <code>@RequiredArgsConstructor</code> takes the <code>final</code> fields that aren't
+  already assigned, plus the <code>@NonNull</code> ones.
+</p>
+<p>
   A primitive <code>boolean</code> field whose name <em>already</em> begins with <code>is</code> keeps
   it rather than getting a second one, exactly as Lombok does: <code>isRunning</code> gives
   <code>isRunning()</code> and <code>setRunning(…)</code>, and <code>is_attivo</code> gives
@@ -392,18 +406,41 @@
   <kbd>Ctrl</kbd> + <kbd>F</kbd> searches the current file. <kbd>Ctrl</kbd> + <kbd>Shift</kbd> +
   <kbd>F</kbd> opens <strong>Find in project</strong> — a backend-powered search across the whole
   project with <strong>Match case</strong>, <strong>Whole word</strong> and <strong>Regex</strong>
-  toggles, grouping hits by file with the match highlighted; ↑/↓ move the selection and
-  <kbd>Enter</kbd> opens the hit. If a word is <strong>selected</strong> in the editor, it
-  pre-fills the search field (both here and in Find-in-file).
+  toggles, grouping hits by file with the match highlighted. Results stream in as the scan finds
+  them, so a large project fills the list instead of making you wait for it.
+</p>
+<p>
+  The selected hit is shown <strong>in context</strong> beside the list — the lines around it, with
+  the match highlighted — which is what tells four identical-looking lines apart without opening
+  four files. ↑/↓ move the selection (and the preview follows), <kbd>Enter</kbd> opens the hit.
+  A <strong>file mask</strong> narrows what is listed: <code>*.java</code>, or several at once as
+  <code>*.jsp, *.tag</code>. If a word is <strong>selected</strong> in the editor, it pre-fills the
+  search field (both here and in Find-in-file).
 </p>
 
-<h2>Go to class / file</h2>
+<h2>Go to class / file / symbol</h2>
 <p>
-  <kbd>Ctrl</kbd> + <kbd>N</kbd> opens <strong>Go to Class</strong> and
-  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> opens <strong>Go to File</strong> — a filterable
-  quick-open. Type part of a name, ↑/↓ to move, <kbd>Enter</kbd> to open; a class jumps straight to
-  its declaration line. A word selected in the editor pre-fills the filter. Go-to-File works in any
-  project; Go-to-Class needs the Java symbol index, so it isn't offered in a Cargo one.
+  One navigator over three lists, with a tab each: <strong>Classes</strong>, <strong>Files</strong>
+  and <strong>Symbols</strong> (every method and field the project declares), plus an
+  <strong>All</strong> tab that searches them together and keeps each one's best few under its own
+  heading. <kbd>Ctrl</kbd> + <kbd>N</kbd>, <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> and
+  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Y</kbd> open it on Classes, Files and Symbols
+  respectively; <kbd>Tab</kbd> moves between them without reopening.
+</p>
+<p>
+  Matching is by <strong>subsequence</strong>, not substring: <code>agpo</code> finds
+  <code>AGGIORNAMENTO/POS</code> because the letters appear in order, and the characters that
+  matched are lit in the row so a loose match is legible rather than mysterious. Several terms are
+  each matched independently, so <code>agg pos</code> works on a path that separates them. Results
+  rank on where the hit lands — the start of a word beats the middle, a run beats a scattered match,
+  a short name beats a long one.
+</p>
+<p>
+  Three directives narrow a search further: <code>in:dao</code> (the path contains it),
+  <code>ext:java</code> (that extension) and <code>sort:new</code> (most recently modified first).
+  ↑/↓ move, <kbd>Enter</kbd> opens — a class or symbol jumps straight to its declaration line. A word
+  selected in the editor pre-fills the field. Files work in any project; Classes and Symbols read the
+  Java index, so they aren't offered in a Cargo one.
 </p>
 
 <h2>Mojibake check</h2>
@@ -463,11 +500,25 @@
 
 <h2>Hover</h2>
 <p>
-  Rest the pointer on a class, method or field to see a card with its signature, declaring type and
-  Javadoc (when the source has one). It answers from the project index, so it appears once the index
-  is warm. Hovering a <code>var</code> / <code>val</code> local (or any local variable or parameter)
-  shows its inferred type, so you can see what a <code>var</code> resolves to without reading the
-  initializer.
+  Rest the pointer on a class, method or field to see a card with what it is (a tag: class,
+  interface, enum, method, field), its signature, and the type that <em>declares</em> it — the
+  supertype, when you're hovering an inherited member. It answers from the project index, so it
+  appears once the index is warm.
+</p>
+<p>
+  A <strong>Javadoc</strong> on a project declaration is read rather than dumped: the prose comes
+  first, then <code>@param</code>, <code>@return</code> and <code>@throws</code> as a labelled list,
+  with <code>&lbrace;@link …&rbrace;</code> shown as what it names and <code>@deprecated</code>
+  highlighted.
+</p>
+<p>
+  Hovering a <strong>variable</strong> — a local, a parameter, a loop variable, a
+  <code>catch</code> parameter, a pattern variable — names its type, its
+  <strong>fully-qualified</strong> type (which of the four <code>Order</code>s on the classpath this
+  one is) and <strong>what that type is</strong>: class, interface, enum, record or annotation. A
+  <code>var</code> or a Lombok <code>val</code> never shows as <code>var</code>: the card shows the
+  type the compiler deduced, including the element type in
+  <code>for (val row : rows)</code>.
 </p>
 <p>
   In a JSP, hovering a form field, an OGNL reference or a <code>*-validation.xml</code>
@@ -628,7 +679,8 @@
 
 <h2>Struts validation files</h2>
 <p>
-  From a Java <strong>action class</strong> the toolbar shows a <strong>Validation</strong> button
+  On a project that uses <strong>Struts</strong>, a Java <strong>action class</strong> gets a
+  <strong>Validation</strong> button on the toolbar
   (also in the Command Palette): it creates the class's <code>&lt;Class&gt;-validation.xml</code>
   next to it — following the Struts naming convention — from a proper DTD-headed skeleton if it
   doesn't exist yet, then opens it. If it already exists, it just opens it.

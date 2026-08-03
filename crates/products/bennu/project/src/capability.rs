@@ -62,6 +62,18 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
         src.action_annotation.then_some("@Action / @Namespace in source"),
     );
 
+    // ── JspViews ─────────────────────────────────────────────────────────────
+    // Presence of pages, nothing more. It gates the JSP-only tooling, so it must be true for a
+    // plain page with no taglib and false for a module that has no pages at all.
+    activate(
+        &mut set.jsp_views,
+        &mut hits,
+        "jsp_views",
+        None,
+        src.has_jsp.then_some("*.jsp / *.jspf / *.tag in the project"),
+        None,
+    );
+
     // ── JspTaglibTld ─────────────────────────────────────────────────────────
     activate(
         &mut set.jsp_taglib_tld,
@@ -327,6 +339,9 @@ struct SourceSignals {
     jdbc_usage: bool,
     lombok_import: bool,
     entando_showlet: bool,
+    /// A JSP view exists at all. Recorded from the file NAME, before the read budget is
+    /// consulted, so a project whose pages sit past the scan cap is still known to have them.
+    has_jsp: bool,
 }
 
 impl SourceSignals {
@@ -336,12 +351,16 @@ impl SourceSignals {
         let src_root = root.join("src");
         let scan_root = if src_root.is_dir() { src_root } else { root.to_path_buf() };
         walk_shallow(&scan_root, 8, &mut |path, name| {
-            if scanned >= MAX_SOURCE_FILES {
-                return;
-            }
             let lname = name.to_ascii_lowercase();
             let is_java = lname.ends_with(".java");
             let is_jsp = lname.ends_with(".jsp") || lname.ends_with(".tag");
+            // Presence is decided by the name alone — no read, no budget. The cap below limits
+            // how many files we OPEN, and a project's pages must not become invisible just
+            // because they are deep in the walk.
+            s.has_jsp |= is_jsp || lname.ends_with(".jspf") || lname.ends_with(".tagx");
+            if scanned >= MAX_SOURCE_FILES {
+                return;
+            }
             if !is_java && !is_jsp {
                 return;
             }
@@ -373,6 +392,28 @@ impl SourceSignals {
             // These appear in either kind.
             s.tiles_result |= text.contains("type=\"tiles\"");
         });
+
+        // The walk above starts at `src/` when it exists, and plenty of legacy layouts keep
+        // their pages somewhere else entirely (`web/`, `WebContent/`). Those directories are
+        // checked for pages only — no reads, so this costs a directory listing.
+        if !s.has_jsp {
+            for dir in ["web", "webapp", "WebContent", "src/main/webapp"] {
+                let candidate = root.join(dir);
+                if !candidate.is_dir() {
+                    continue;
+                }
+                walk_shallow(&candidate, 6, &mut |_p, name| {
+                    let l = name.to_ascii_lowercase();
+                    s.has_jsp |= l.ends_with(".jsp")
+                        || l.ends_with(".jspf")
+                        || l.ends_with(".tag")
+                        || l.ends_with(".tagx");
+                });
+                if s.has_jsp {
+                    break;
+                }
+            }
+        }
         s
     }
 }

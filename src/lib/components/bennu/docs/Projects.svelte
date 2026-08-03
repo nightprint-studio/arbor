@@ -117,7 +117,8 @@
 <h2>Form analysis</h2>
 <p>
   The <strong>Forms</strong> tool window (bottom dock, toggled from the right rail with
-  <kbd>Alt</kbd> + <kbd>3</kbd>) analyses the open JSP and lists every <code>&lt;form&gt;</code>
+  <kbd>Alt</kbd> + <kbd>3</kbd> — offered only on a project that actually has JSP pages) analyses
+  the open JSP and lists every <code>&lt;form&gt;</code>
   relevant to it with the <strong>complete set of parameters</strong> it posts. It resolves the action each form targets — the mapped action class
   and the <code>struts.xml</code> fragment that declares it, even when the target is written as an
   Entando <code>&lt;wp:action path=…&gt;</code> — and lists every input, including

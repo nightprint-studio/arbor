@@ -40,7 +40,13 @@
   import Tabs, { type TabItem } from '../ui/Tabs.svelte';
   import Spinner from '../ui/Spinner.svelte';
   import Kbd from '../internal/Kbd.svelte';
-  import { fuzzyMatchPair, segments, type MatchRange } from '$lib/utils/fuzzy';
+  import {
+    fuzzyMatchPrepared,
+    prepareCandidate,
+    segments,
+    type MatchRange,
+    type PreparedCandidate,
+  } from '$lib/utils/fuzzy';
   import {
     compareBy,
     parseQuery,
@@ -159,21 +165,47 @@
     detailRanges: MatchRange[];
   }
 
+  /** An item with its lowercased match forms already built. */
+  interface Prepared {
+    item: NavigateItem;
+    candidate: PreparedCandidate;
+    path: string;
+  }
+
+  /**
+   * Lowercasing every candidate is the one real cost in the loop, and it depends on the
+   * ITEMS, not on the query — so it happens once per opening rather than once per keystroke.
+   * On a legacy project that is tens of thousands of strings not being re-allocated for each
+   * character typed.
+   */
+  const prepared = $derived.by<Record<string, Prepared[]>>(() => {
+    const out: Record<string, Prepared[]> = {};
+    for (const category of categories) {
+      out[category.id] = (loaded[category.id] ?? []).map((item) => {
+        const detail = item.detail ?? '';
+        return {
+          item,
+          candidate: prepareCandidate(item.name, detail),
+          path: detail ? `${detail}/${item.name}` : item.name,
+        };
+      });
+    }
+    return out;
+  });
+
   /** Score and filter one category's items against the current query. */
   function rank(category: NavigateCategory): Scored[] {
     const out: Scored[] = [];
-    for (const item of loaded[category.id] ?? []) {
-      const detail = item.detail ?? '';
-      const path = detail ? `${detail}/${item.name}` : item.name;
-      if (!passesFilters(path, parsed)) continue;
-      const hit = fuzzyMatchPair(item.name, detail, parsed.text);
+    for (const p of prepared[category.id] ?? []) {
+      if (!passesFilters(p.path, parsed)) continue;
+      const hit = fuzzyMatchPrepared(p.candidate, parsed.text);
       if (!hit) continue;
       out.push({
-        ...item,
+        ...p.item,
         category: category.id,
         categoryLabel: category.label,
         score: hit.score,
-        path,
+        path: p.path,
         nameRanges: hit.nameRanges,
         detailRanges: hit.detailRanges,
       });

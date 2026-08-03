@@ -12,7 +12,10 @@ Depends only on the shared contract (`bennu-proto`) + serde.
   dependency coordinate, tier B = config-file presence, tier C = source pattern. A
   capability activates on ≥1 strong (A/B) signal; a C-only match activates
   *provisionally* (recorded, low-confidence), never a hard-fail. The `hits` carry the
-  evidence so the FE can explain the classification.
+  evidence so the FE can explain the classification. One entry is presence rather than a
+  framework — `jsp_views` (the project has `*.jsp` / `*.jspf` / `*.tag` at all) — because
+  the JSP-only tooling is gated on it, and it is decided from file NAMES so a project whose
+  pages sit past the read budget still reports them.
 - **Maven pom parsing** (`pom.rs`) — lightweight targeted extraction (name, modules,
   dependency coordinates, `<properties>`, compiler source/target, toolchains). No XML
   crate (hard rule 7 — none on the approved list); a full config-graph XML model is

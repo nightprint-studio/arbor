@@ -7,14 +7,16 @@
    * composes Arbor's standard IntelliJ-New-UI frame like Corvus/Merula:
    *   TitleBar (project · … · run/debug · palette · docs · settings) + a bg-elevated
    *   WorkspaceShell with left/right activity rails + floating bg-base panel cards +
-   *   a BOTTOM dock (Problems · Terminal) + the footer status bar.
+   *   a BOTTOM dock (one panel per rail button) + the footer status bar.
    *
    * Tool windows (IntelliJ New UI):
    *   • LEFT rail top     — Project (tree), Structure (symbols), Dependencies — left side panels.
    *   • LEFT rail bottom  — the bottom-dock toggles (Build, Problems, TODO, Terminal). Docs &
    *                         Settings live in the titlebar's right cluster.
    *   • RIGHT rail        — Maven (top); Services + the Forms toggle (bottom).
-   *   • BOTTOM dock       — Build · Problems · TODO · Forms · Terminal, tabbed.
+   *   • BOTTOM dock       — one panel per rail button, each owning its header and its actions:
+   *                         Build+Problems (two views of one run, sharing a panel) · TODO ·
+   *                         Forms · Terminal.
    * Find-in-project is a modal (Ctrl+Shift+F / palette), not a rail tool.
    */
   import { onMount, untrack } from 'svelte';
@@ -282,6 +284,15 @@
   // thing about the tool. Project, Build, Problems, TODO and Terminal all mean something
   // for both and stay.
   const javaTools = $derived(!projectStore.isCargo);
+  // Forms reads a JSP's `<form>`s across the include graph, so a project with no pages —
+  // a service module, a library, a Cargo root — has nothing it could ever show. Same reasoning
+  // as `javaTools`, one notch narrower: the capability set says whether pages exist at all.
+  const jspTools = $derived(javaTools && projectStore.capabilities?.jsp_views === true);
+  // The Struts `*-validation.xml` tooling — meaningless on a project that doesn't use Struts.
+  const hasStruts = $derived(
+    projectStore.capabilities?.struts_xml_config === true
+      || projectStore.capabilities?.struts_convention === true,
+  );
 
   const leftTop = $derived<ActivityRailItem[]>([
     { id: 'project',   tooltip: 'Project',   shortcut: 'Alt+1', icon: FolderTree, active: bennuUiStore.leftPanel === 'project',   onclick: () => bennuUiStore.toggleLeft('project') },
@@ -309,27 +320,32 @@
   );
   // Forms drives the BOTTOM dock (wide, horizontal data), not a side panel — its toggle sits
   // in the right rail's bottom cluster; the active state mirrors the dock's open tab.
-  const rightBottom = $derived<ActivityRailItem[]>(
-    javaTools
-      ? [
-          { id: 'forms', tooltip: 'Forms', shortcut: 'Alt+3', icon: TextCursorInput, active: bennuUiStore.bottomPanel === 'forms', onclick: () => bennuUiStore.toggleBottom('forms') },
-          { id: 'services', tooltip: 'Services', shortcut: 'Alt+9', icon: Server, active: bennuUiStore.rightPanel === 'services', onclick: () => bennuUiStore.toggleRight('services') },
-        ]
-      : [],
-  );
+  const rightBottom = $derived<ActivityRailItem[]>([
+    ...(jspTools
+      ? [{ id: 'forms', tooltip: 'Forms', shortcut: 'Alt+3', icon: TextCursorInput, active: bennuUiStore.bottomPanel === 'forms', onclick: () => bennuUiStore.toggleBottom('forms') }]
+      : []),
+    ...(javaTools
+      ? [{ id: 'services', tooltip: 'Services', shortcut: 'Alt+9', icon: Server, active: bennuUiStore.rightPanel === 'services', onclick: () => bennuUiStore.toggleRight('services') }]
+      : []),
+  ]);
 
-  // Switching to a Cargo project takes the Java-only rail icons away; a panel left open
-  // from the previous project would then have no toggle anywhere. Close those.
+  // Switching projects can take rail icons away — a Cargo root loses the Java tools, a
+  // project with no JSP loses Forms. A panel left open from the previous project would then
+  // have no toggle anywhere. Close those.
   $effect(() => {
-    if (javaTools) return;
+    const java = javaTools;
+    const jsp = jspTools;
+    if (java && jsp) return;
     // `untrack`: the call reads the very panel state it writes, and an effect that depends
     // on what it assigns is the shape that loops (CLAUDE.md · "Runes — trap da evitare").
-    // The only dependency that should re-run this is the project kind, read above.
+    // The only dependencies that should re-run this are the two flags read above.
     untrack(() =>
       bennuUiStore.dropUnavailablePanels({
-        left: ['project'],
-        right: [],
-        bottom: ['problems', 'terminal', 'build', 'todos'],
+        left: java ? ['project', 'structure', 'dependencies'] : ['project'],
+        right: java ? ['maven', 'services'] : [],
+        bottom: jsp
+          ? ['problems', 'terminal', 'build', 'todos', 'forms']
+          : ['problems', 'terminal', 'build', 'todos'],
       }),
     );
   });
@@ -404,6 +420,10 @@
         when: !!projectStore.project && javaTools },
       { id: 'gotofile', title: 'Go to file…', icon: 'file', shortcut: 'Ctrl+Shift+N',
         action: () => run(() => bennuUiStore.openNav('file', editor?.getSelectedText() ?? '')), when: !!projectStore.project },
+      { id: 'gotosymbol', title: 'Go to symbol…', icon: 'search', shortcut: 'Ctrl+Shift+Y',
+        action: () => run(() => bennuUiStore.openNav('symbol', editor?.getSelectedText() ?? '')),
+        // Members come from the Java index, like classes.
+        when: !!projectStore.project && javaTools },
       { id: 'filestructure', title: 'File structure…', icon: 'list-tree', shortcut: 'Ctrl+F12',
         action: () => run(() => bennuUiStore.openFileStructure()), when: canNav },
       { id: 'usages', title: 'Find usages', icon: 'search', shortcut: 'Alt+F7',
@@ -430,7 +450,7 @@
         action: () => run(() => bennuUiStore.openValidationCreator()),
         when: projectStore.activeFilePath?.toLowerCase().endsWith('-validation.xml') ?? false },
       { id: 'createvalidation', title: 'Create Struts validation file', icon: 'shield',
-        action: () => run(() => void editor?.createValidationFile()), when: isJava },
+        action: () => run(() => void editor?.createValidationFile()), when: isJava && hasStruts },
       { id: 'hotswap-jsp', title: 'Deploy current JSP to Tomcat', icon: 'server', shortcut: 'Ctrl+Shift+F10',
         action: () => run(() => void deployToTomcat(false)), when: isJspFile(path) },
       // Indentation — mirrors the footer control (BennuIndentStatus). Gated to the
@@ -454,7 +474,7 @@
       // palette entry that opens a permanently-empty panel is the same lie in a different
       // place.
       { id: 'structure', title: 'Toggle Structure', icon: 'list-tree',   shortcut: 'Alt+2', action: () => run(() => bennuUiStore.toggleLeft('structure')), when: javaTools },
-      { id: 'forms',     title: 'Toggle Forms',     icon: 'list',        shortcut: 'Alt+3', action: () => run(() => bennuUiStore.toggleBottom('forms')), when: javaTools },
+      { id: 'forms',     title: 'Toggle Forms',     icon: 'list',        shortcut: 'Alt+3', action: () => run(() => bennuUiStore.toggleBottom('forms')), when: jspTools },
       { id: 'dependencies', title: 'Dependencies',  icon: 'library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: javaTools },
       { id: 'problems',  title: 'Toggle Problems',  icon: 'alert',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
       { id: 'todos',     title: 'Toggle TODO',      icon: 'todo',        shortcut: 'Alt+7', action: () => run(() => bennuUiStore.toggleBottom('todos')), when: true },
@@ -538,7 +558,16 @@
     if (e.key === 'F1') { e.preventDefault(); bennuUiStore.toggleDocs(); return; }
     if (mod && e.key === ',') { e.preventDefault(); bennuUiStore.openSettings(); return; }
 
-    // Go to Class (Ctrl+N) / Go to File (Ctrl+Shift+N) — the quick-open navigator.
+    // The Go-to navigator. One overlay over classes / files / symbols — the shortcut only
+    // decides which tab it lands on, and Tab moves between them without reopening.
+    // Ctrl+Shift+Y for symbols because IntelliJ's Ctrl+Alt+Shift+N is off-limits here:
+    // Ctrl+Alt+<letter> is dropped by Chromium on IT/DE/FR/ES keyboards (AltGr).
+    if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'y') {
+      if (!projectStore.project || !javaTools) return;
+      e.preventDefault();
+      bennuUiStore.openNav('symbol', editor?.getSelectedText() ?? '');
+      return;
+    }
     if (mod && !e.altKey && e.key.toLowerCase() === 'n') {
       if (!projectStore.project) return;
       // Go-to-File works anywhere; Go-to-Class reads the Java symbol index, which a Cargo
@@ -614,7 +643,8 @@
       // only be empty, and whose toggle is nowhere on screen to close it again.
       if (javaTools) {
         if (e.key === '2') { e.preventDefault(); bennuUiStore.toggleLeft('structure'); return; }
-        if (e.key === '3') { e.preventDefault(); bennuUiStore.toggleBottom('forms'); return; }
+        // Forms needs pages, not just Java — same gate as its rail icon.
+        if (e.key === '3' && jspTools) { e.preventDefault(); bennuUiStore.toggleBottom('forms'); return; }
         if (e.key.toLowerCase() === 'n') { e.preventDefault(); bennuUiStore.toggleLeft('dependencies'); return; }
         if (e.key === '8') { e.preventDefault(); bennuUiStore.toggleRight('maven'); return; }
         if (e.key === '9') { e.preventDefault(); bennuUiStore.toggleRight('services'); return; }

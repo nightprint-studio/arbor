@@ -31,14 +31,23 @@ pub struct LombokMembers {
     pub fields: Vec<Member>,
 }
 
-/// Synthesize the members Lombok would generate for `td`, given the method names already declared
-/// in source (`existing_methods` — a user-written getter suppresses the synthetic one). Returns
-/// empty when the type carries no Lombok annotations.
+/// Synthesize the members Lombok would generate for `td`, given the methods already declared in
+/// source as `(name, parameter count)` — a hand-written accessor suppresses the synthetic one.
+/// Returns empty when the type carries no Lombok annotations.
+///
+/// ## Why the arity is part of the key
+///
+/// Lombok skips generation when a method of the same name **and the same number of parameters**
+/// already exists. Suppressing on the name alone is wrong wherever a getter and a setter share a
+/// name — which is exactly what `@Accessors(fluent = true)` does: `ngara()` reads and
+/// `ngara(String)` writes. One hand-written `ngara()` then silently cancelled the *setter* too, so
+/// the only `ngara` the index knew about was the hand-written one — and every verdict about the
+/// setter (does it exist, is it visible) was really a verdict about a different method.
 pub fn synthesize(
     td: &TypeDecl,
     imports: &[Import],
     project_types: &BTreeMap<String, String>,
-    existing_methods: &HashSet<String>,
+    existing_methods: &HashSet<(String, usize)>,
     is_project: &dyn Fn(&str) -> bool,
 ) -> LombokMembers {
     let mut methods = Vec::new();
@@ -69,7 +78,7 @@ pub fn synthesize(
     // `@UtilityClass` generates a `private` constructor (one that throws) so the class can't be
     // instantiated. The rest of what it does — making every member `static` and the class `final` —
     // is a rewrite of existing members, applied by the caller (see [`is_utility_class`]).
-    if is_utility_class(td, imports) && !existing_methods.contains("<init>") {
+    if is_utility_class(td, imports) && !existing_methods.iter().any(|(n, _)| n == "<init>") {
         methods.push(Member {
             name: "<init>".to_string(),
             kind: MemberKind::Method,
@@ -85,6 +94,8 @@ pub fn synthesize(
         });
     }
 
+    synthesize_constructors(td, imports, project_types, existing_methods, is_project, &mut methods);
+
     for f in &td.fields {
         // Lombok does not generate accessors for static fields.
         if f.is_static {
@@ -95,13 +106,21 @@ pub fn synthesize(
             (cls_setter || has_lombok(&f.annotations, imports, &["Setter"])) && !is_value && !f.is_final;
         let acc = accessors_config(&f.annotations, imports).or(cls_accessors).unwrap_or_default();
 
+        // `@Getter(AccessLevel.X)` / `@Setter(AccessLevel.X)` — the level the author asked for,
+        // field-level first, then the class annotation, then Lombok's `public` default. `NONE`
+        // means the accessor is not generated at all, so it must not be indexed as existing.
+        let getter_vis = accessor_visibility(&f.annotations, &td.annotations, imports, &["Getter", "Data"]);
+        let setter_vis = accessor_visibility(&f.annotations, &td.annotations, imports, &["Setter", "Data"]);
+        let want_getter = want_getter && getter_vis.is_some();
+        let want_setter = want_setter && setter_vis.is_some();
+
         if want_getter {
             let name = if acc.fluent {
                 f.name.clone()
             } else {
                 getter_name(&f.name, is_primitive_boolean(&f.type_text))
             };
-            if !existing_methods.contains(&name) {
+            if !existing_methods.contains(&(name.clone(), 0)) {
                 let ret = type_text_to_ref(&f.type_text, imports, project_types, is_project);
                 methods.push(Member {
                     name: name.clone(),
@@ -112,7 +131,7 @@ pub fn synthesize(
                     is_abstract: false,
                     is_default: false,
                     is_final: false,
-                    visibility: Visibility::Public,
+                    visibility: getter_vis.unwrap_or(Visibility::Public),
                     raw_signature: format!("{} {}()", f.type_text, name),
                     throws: Vec::new(),
                 });
@@ -126,7 +145,7 @@ pub fn synthesize(
                 // both through one `toAccessorName`).
                 accessor_name("set", &f.name, is_primitive_boolean(&f.type_text))
             };
-            if !existing_methods.contains(&name) {
+            if !existing_methods.contains(&(name.clone(), 1)) {
                 let param = type_text_to_ref(&f.type_text, imports, project_types, is_project);
                 // `chain` (implied by `fluent`) → the setter returns the owner for call-chaining.
                 let (ret, ret_text) = if acc.chain {
@@ -143,7 +162,7 @@ pub fn synthesize(
                     is_abstract: false,
                     is_default: false,
                     is_final: false,
-                    visibility: Visibility::Public,
+                    visibility: setter_vis.unwrap_or(Visibility::Public),
                     raw_signature: format!("{} {}({})", ret_text, name, f.type_text),
                     throws: Vec::new(),
                 });
@@ -153,7 +172,7 @@ pub fn synthesize(
         let want_with = cls_with || has_lombok(&f.annotations, imports, &["With", "Wither"]);
         if want_with {
             let name = accessor_name("with", &f.name, is_primitive_boolean(&f.type_text));
-            if !existing_methods.contains(&name) {
+            if !existing_methods.contains(&(name.clone(), 1)) {
                 let param = type_text_to_ref(&f.type_text, imports, project_types, is_project);
                 methods.push(Member {
                     name: name.clone(),
@@ -178,7 +197,7 @@ pub fn synthesize(
     // treat as "might exist" → never a false "cannot resolve method". So the whole builder chain stops
     // erroring without us modelling a synthetic builder class.
     if has_lombok(&td.annotations, imports, &["Builder", "SuperBuilder"])
-        && !existing_methods.contains("builder")
+        && !existing_methods.contains(&("builder".to_string(), 0))
     {
         methods.push(Member {
             name: "builder".to_string(),
@@ -288,6 +307,147 @@ fn has_lombok(annotations: &[Annotation], imports: &[Import], wanted: &[&str]) -
     annotations
         .iter()
         .any(|a| wanted.contains(&a.name.as_str()) && lombok_imported(&a.name, imports))
+}
+
+/// The constructors `@NoArgsConstructor` / `@RequiredArgsConstructor` / `@AllArgsConstructor`
+/// (and the bundles `@Data` / `@Value`) generate, appended to `methods`.
+///
+/// These were missing entirely, and a missing constructor is not a quiet gap: a class that
+/// declares one constructor by hand and gets another from Lombok has a non-empty `<init>` list, so
+/// the arity check adjudicates against it — and reports "No constructor of `X` takes N arguments"
+/// for the very call Lombok made legal.
+///
+/// The parameter list follows Lombok's rules exactly, which is why [`FieldDecl::has_initializer`]
+/// exists: `@RequiredArgsConstructor` takes the `final` fields that are NOT already initialised
+/// (plus `@NonNull` ones), and `@AllArgsConstructor` takes every instance field except an
+/// already-initialised `final`. `access = AccessLevel.…` sets the visibility (`@Value` and
+/// `@Builder`'s implicit ones are package-private by convention, but only an explicit `access` is
+/// honoured here — guessing the rest would be inventing accessibility).
+fn synthesize_constructors(
+    td: &TypeDecl,
+    imports: &[Import],
+    project_types: &BTreeMap<String, String>,
+    existing_methods: &HashSet<(String, usize)>,
+    is_project: &dyn Fn(&str) -> bool,
+    methods: &mut Vec<Member>,
+) {
+    let is_value = has_lombok(&td.annotations, imports, &["Value"]);
+    let instance: Vec<&bennu_java::prelude::FieldDecl> =
+        td.fields.iter().filter(|f| !f.is_static).collect();
+
+    // The three parameter lists, each `Some` only when something asks for it.
+    let mut wanted: Vec<(Vec<&bennu_java::prelude::FieldDecl>, &[&str])> = Vec::new();
+    if has_lombok(&td.annotations, imports, &["NoArgsConstructor"]) {
+        wanted.push((Vec::new(), &["NoArgsConstructor"]));
+    }
+    if has_lombok(&td.annotations, imports, &["RequiredArgsConstructor", "Data"]) {
+        let required = instance
+            .iter()
+            .filter(|f| (f.is_final && !f.has_initializer) || f.has_annotation("NonNull"))
+            .copied()
+            .collect::<Vec<_>>();
+        wanted.push((required, &["RequiredArgsConstructor", "Data"]));
+    }
+    if has_lombok(&td.annotations, imports, &["AllArgsConstructor"]) || is_value {
+        let all = instance
+            .iter()
+            .filter(|f| !(f.is_final && f.has_initializer))
+            .copied()
+            .collect::<Vec<_>>();
+        wanted.push((all, &["AllArgsConstructor", "Value"]));
+    }
+
+    for (fields, from) in wanted {
+        // A hand-written constructor of the same arity wins — Lombok skips generation, and
+        // inventing a second one would make an ambiguous overload out of nothing.
+        if existing_methods.contains(&("<init>".to_string(), fields.len())) {
+            continue;
+        }
+        if methods.iter().any(|m| m.name == "<init>" && m.params.len() == fields.len()) {
+            continue; // two Lombok annotations asking for the same arity
+        }
+        let vis = match access_level(&td.annotations, imports, from) {
+            Some(Access::Never) => continue, // `AccessLevel.NONE` → no constructor at all
+            Some(Access::As(v)) => v,
+            None => Visibility::Public,
+        };
+        let params: Vec<TypeRef> = fields
+            .iter()
+            .map(|f| type_text_to_ref(&f.type_text, imports, project_types, is_project))
+            .collect();
+        let written: Vec<String> =
+            fields.iter().map(|f| format!("{} {}", f.type_text, f.name)).collect();
+        methods.push(Member {
+            name: "<init>".to_string(),
+            kind: MemberKind::Method,
+            return_type: type_text_to_ref("void", imports, project_types, is_project),
+            params,
+            is_static: false,
+            is_abstract: false,
+            is_default: false,
+            is_final: false,
+            visibility: vis,
+            raw_signature: format!("{}({})", td.name, written.join(", ")),
+            throws: Vec::new(),
+        });
+    }
+}
+
+/// What an accessor annotation's `AccessLevel` asks for: a visibility, or `None` for
+/// `AccessLevel.NONE` — which is not "public", it is *generate nothing*.
+enum Access {
+    /// Generate the accessor with this visibility.
+    As(Visibility),
+    /// `AccessLevel.NONE` — generate nothing at all.
+    Never,
+}
+
+/// The `AccessLevel` on the first matching annotation of `wanted`, written positionally
+/// (`@Setter(AccessLevel.PACKAGE)`) or as a pair (`@Getter(value = AccessLevel.PROTECTED)`).
+///
+/// `None` when the annotation is absent or carries no level — the caller then falls back to the
+/// class-level annotation and finally to Lombok's default, `public`. Lombok's `MODULE` means
+/// package-private; `PUBLIC` is the default and is spelled out anyway by plenty of codebases.
+fn access_level(annotations: &[Annotation], imports: &[Import], wanted: &[&str]) -> Option<Access> {
+    let a = annotations
+        .iter()
+        .find(|a| wanted.contains(&a.name.as_str()) && lombok_imported(&a.name, imports))?;
+    // `@Setter(AccessLevel.X)` positionally, `@Getter(value = AccessLevel.X)`, or — on the
+    // constructor annotations, whose element is named `access` — `@RequiredArgsConstructor(access = …)`.
+    let written = a
+        .positional
+        .as_deref()
+        .or_else(|| {
+            a.args
+                .iter()
+                .find(|(k, _)| k == "value" || k == "access")
+                .map(|(_, v)| v.as_str())
+        })?;
+    // Written as `AccessLevel.PACKAGE`, or bare `PACKAGE` under a static import.
+    let level = written.rsplit('.').next()?.trim();
+    Some(match level {
+        "NONE" => Access::Never,
+        "PRIVATE" => Access::As(Visibility::Private),
+        "PACKAGE" | "MODULE" => Access::As(Visibility::Package),
+        "PROTECTED" => Access::As(Visibility::Protected),
+        "PUBLIC" => Access::As(Visibility::Public),
+        _ => return None, // not an AccessLevel at all (`onMethod_`, an unknown constant) → default
+    })
+}
+
+/// Resolve an accessor's visibility from the field-level annotation, then the class-level one,
+/// then Lombok's default. `None` means "generate nothing" (`AccessLevel.NONE` at either level).
+fn accessor_visibility(
+    field: &[Annotation],
+    class: &[Annotation],
+    imports: &[Import],
+    wanted: &[&str],
+) -> Option<Visibility> {
+    match access_level(field, imports, wanted).or_else(|| access_level(class, imports, wanted)) {
+        Some(Access::Never) => None,
+        Some(Access::As(v)) => Some(v),
+        None => Some(Visibility::Public),
+    }
 }
 
 /// Whether `td` is a Lombok **`@UtilityClass`**.
@@ -405,7 +565,7 @@ mod tests {
 
     /// A marker annotation (no value) for a test simple name.
     fn ann(name: &str) -> Annotation {
-        Annotation { name: name.to_string(), value: None, args: Vec::new() }
+        Annotation { name: name.to_string(), value: None, args: Vec::new(), positional: None }
     }
 
     /// An annotation carrying `name = value` arg pairs (for `@Accessors(fluent = true)` tests).
@@ -414,6 +574,17 @@ mod tests {
             name: name.to_string(),
             value: None,
             args: args.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            positional: None,
+        }
+    }
+
+    /// An annotation carrying a positional argument — `@Setter(AccessLevel.PACKAGE)`.
+    fn ann_positional(name: &str, positional: &str) -> Annotation {
+        Annotation {
+            name: name.to_string(),
+            value: None,
+            args: Vec::new(),
+            positional: Some(positional.to_string()),
         }
     }
 
@@ -424,6 +595,7 @@ mod tests {
             is_static: false,
             is_final: false,
             visibility: Visibility::Private,
+            has_initializer: false,
             annotations: Vec::new(),
         }
     }
@@ -518,13 +690,147 @@ mod tests {
         assert!(m.methods.iter().any(|x| x.name == "getId"), "getter still synthesized");
     }
 
+    /// A field carrying its own annotation, for the per-field `AccessLevel` cases.
+    fn field_with(name: &str, type_text: &str, annotations: Vec<Annotation>) -> bennu_java::prelude::FieldDecl {
+        bennu_java::prelude::FieldDecl { annotations, ..field(name, type_text) }
+    }
+
+    // ── generated constructors ───────────────────────────────────────────────────────────────
+
+    /// The reported shape: a builder with `@RequiredArgsConstructor(access = AccessLevel.PACKAGE)`.
+    /// The constructor wasn't synthesized at all, so a class that also declares one by hand had a
+    /// non-empty `<init>` list — and the arity check then rejected the Lombok one's own call sites.
+    #[test]
+    fn required_args_constructor_is_synthesized_with_its_access_level() {
+        let mut required = field("id", "long");
+        required.is_final = true;
+        let td = TypeDecl {
+            annotations: vec![ann_args("RequiredArgsConstructor", &[("access", "AccessLevel.PACKAGE")])],
+            ..type_with(&[], vec![required, field("nota", "String")])
+        };
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
+        let ctor = m.methods.iter().find(|x| x.name == "<init>").expect("<init> synthesized");
+        assert_eq!(ctor.params.len(), 1, "only the required (final, uninitialised) field");
+        assert_eq!(ctor.visibility, Visibility::Package);
+    }
+
+    /// An already-initialised `final` is not a constructor parameter — Lombok assigns it at the
+    /// declaration, and counting it would make the generated arity wrong by one.
+    #[test]
+    fn an_initialised_final_is_not_a_required_arg() {
+        let mut assigned = field("kind", "String");
+        assigned.is_final = true;
+        assigned.has_initializer = true;
+        let mut required = field("id", "long");
+        required.is_final = true;
+        let td = type_with(&["RequiredArgsConstructor"], vec![assigned, required]);
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
+        let ctor = m.methods.iter().find(|x| x.name == "<init>").expect("<init>");
+        assert_eq!(ctor.params.len(), 1, "{:?}", ctor.raw_signature);
+    }
+
+    #[test]
+    fn all_args_and_no_args_constructors_are_both_synthesized() {
+        let td = type_with(
+            &["NoArgsConstructor", "AllArgsConstructor"],
+            vec![field("id", "long"), field("nota", "String")],
+        );
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
+        let arities: Vec<usize> =
+            m.methods.iter().filter(|x| x.name == "<init>").map(|x| x.params.len()).collect();
+        assert!(arities.contains(&0) && arities.contains(&2), "{arities:?}");
+    }
+
+    #[test]
+    fn a_hand_written_constructor_of_the_same_arity_wins() {
+        let td = type_with(&["AllArgsConstructor"], vec![field("id", "long")]);
+        let mut existing = HashSet::new();
+        existing.insert(("<init>".to_string(), 1));
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &existing, &|_: &str| false);
+        assert!(m.methods.iter().all(|x| x.name != "<init>"), "{:?}", m.methods);
+    }
+
+    #[test]
+    fn access_level_is_carried_onto_the_accessor() {
+        // `@Setter(AccessLevel.PACKAGE)` generates a PACKAGE-private setter. Recording it as public
+        // is what makes an access from another package silently fine — and, worse, leaves the
+        // visibility check reasoning about a member that doesn't have the visibility it thinks.
+        let td = type_with(
+            &[],
+            vec![field_with("id", "long", vec![ann_positional("Setter", "AccessLevel.PACKAGE")])],
+        );
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
+        let setter = m.methods.iter().find(|x| x.name == "setId").expect("setId synthesized");
+        assert_eq!(setter.visibility, Visibility::Package);
+    }
+
+    #[test]
+    fn access_level_none_generates_nothing() {
+        // `AccessLevel.NONE` is not a visibility — it means Lombok writes no accessor at all, so
+        // indexing one would invent a member the class doesn't have.
+        let td = type_with(
+            &["Data"],
+            vec![field_with("id", "long", vec![ann_positional("Getter", "AccessLevel.NONE")])],
+        );
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
+        assert!(m.methods.iter().all(|x| x.name != "getId"), "no getter: {:?}", m.methods);
+        // `@Data` still generates the setter — only the getter was switched off.
+        assert!(m.methods.iter().any(|x| x.name == "setId"), "setter still there: {:?}", m.methods);
+    }
+
+    #[test]
+    fn a_class_level_access_level_applies_to_every_field() {
+        let td = TypeDecl {
+            annotations: vec![ann_positional("Getter", "AccessLevel.PROTECTED")],
+            ..type_with(&[], vec![field("id", "long")])
+        };
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
+        let g = m.methods.iter().find(|x| x.name == "getId").expect("getId");
+        assert_eq!(g.visibility, Visibility::Protected);
+    }
+
+    #[test]
+    fn no_access_level_is_public() {
+        let td = type_with(&["Getter", "Setter"], vec![field("id", "long")]);
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
+        for name in ["getId", "setId"] {
+            let x = m.methods.iter().find(|x| x.name == name).expect(name);
+            assert_eq!(x.visibility, Visibility::Public, "{name} defaults to public");
+        }
+    }
+
     #[test]
     fn existing_getter_is_not_duplicated() {
         let td = type_with(&["Getter"], vec![field("id", "long")]);
         let mut existing = HashSet::new();
-        existing.insert("getId".to_string());
+        existing.insert(("getId".to_string(), 0));
         let m = synthesize(&td, &lombok(), &BTreeMap::new(), &existing, &|_: &str| false);
         assert!(m.methods.iter().all(|x| x.name != "getId"), "user getId() suppresses the synthetic");
+    }
+
+    /// The reported shape: `@Accessors(fluent = true)` names the getter and the setter alike, so a
+    /// hand-written `id()` must suppress only the READER. Suppressing by name alone cancelled the
+    /// setter too, and every question about `id(v)` — does it exist, is it visible — was then
+    /// answered by the hand-written no-arg method instead.
+    #[test]
+    fn a_hand_written_fluent_getter_does_not_cancel_the_setter() {
+        let td = TypeDecl {
+            annotations: vec![ann("Getter"), ann("Setter"), ann_args("Accessors", &[("fluent", "true")])],
+            ..type_with(&[], vec![field("id", "long")])
+        };
+        let mut existing = HashSet::new();
+        existing.insert(("id".to_string(), 0)); // the user wrote `long id() { … }`
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &existing, &|_: &str| false);
+        assert!(
+            m.methods.iter().all(|x| !(x.name == "id" && x.params.is_empty())),
+            "the hand-written reader still wins: {:?}",
+            m.methods,
+        );
+        assert!(
+            m.methods.iter().any(|x| x.name == "id" && x.params.len() == 1),
+            "the setter is a different method and must still be generated: {:?}",
+            m.methods,
+        );
     }
 
     #[test]

@@ -1,10 +1,11 @@
 //! Hover category — the hover card for the symbol under the caret.
 //!
 //! Hover shares the caret classifier with go-to / find-usages, then renders a card: a method
-//! reports its signature + owning type; a field its type + owner; a type its dotted FQCN (no
-//! container). A member's owner is the type that DECLARES it (the supertype walk), not the
-//! receiver's class. A leading `/** … */` Javadoc on a PROJECT declaration is attached. A local
-//! variable / parameter isn't keyed here, so hover on one is `None` (never a panic).
+//! reports its signature + owning type; a field its type + owner; a type reads like its
+//! declaration (`class Widget`) with its package as the container. A member's owner is the type
+//! that DECLARES it (the supertype walk), not the receiver's class. A leading `/** … */` Javadoc
+//! on a PROJECT declaration is attached. A local variable / parameter isn't keyed here, so hover
+//! on one is `None` (never a panic).
 
 mod common;
 use common::*;
@@ -64,13 +65,30 @@ fn hover_field_reports_owner() {
 }
 
 #[test]
-fn hover_type_has_fqcn_and_no_container() {
+fn hover_type_reads_like_its_declaration_with_the_package_beside_it() {
     let p = ui();
     let s = p.source("Screen.java").to_string();
     let h = p.hover("Screen.java", at(&s, "Widget w")).expect("hover on type");
     assert_eq!(h.kind, "class");
-    assert_eq!(h.signature, "ui.Widget");
-    assert_eq!(h.container, None, "a type reports no container");
+    assert_eq!(h.signature, "class Widget");
+    assert_eq!(h.container.as_deref(), Some("ui"), "the package, not the whole FQCN again");
+}
+
+/// An interface must not report itself as a class — the card would be stating something false
+/// about the thing under the pointer.
+#[test]
+fn hover_interface_says_interface() {
+    let p = Project::new(&[
+        ("Shape.java", "package ui;\npublic interface Shape { int area(); }\n"),
+        (
+            "Use.java",
+            "package ui;\npublic class Use { public int go(Shape s) { return s.area(); } }\n",
+        ),
+    ]);
+    let s = p.source("Use.java").to_string();
+    let h = p.hover("Use.java", at(&s, "Shape s")).expect("hover on interface");
+    assert_eq!(h.kind, "interface");
+    assert_eq!(h.signature, "interface Shape");
 }
 
 #[test]

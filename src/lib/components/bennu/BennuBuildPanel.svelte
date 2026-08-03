@@ -44,6 +44,12 @@
     return { label: 'Slow', tone: 'warn' };
   });
 
+  // Errors decide the verdict; warnings never do. A run that ends with warnings only is a run that
+  // SUCCEEDED — painting it red is how 324 style notes came to read as 324 broken files.
+  const errors = $derived(vres ? vres.error_count : errorCount);
+  const warnings = $derived(vres ? vres.warning_count : warnCount);
+  const failed = $derived(errors > 0 || ok === false);
+
   // Auto-scroll the log to the bottom as new lines stream in.
   let logEl = $state<HTMLDivElement | null>(null);
   $effect(() => {
@@ -101,8 +107,14 @@
       {:else if running}
         <Spinner size={13} /><span class="st-text">Running…</span>
       {:else if vres}
-        <span class="st-ok"><ListChecks size={13} /></span>
-        <span class="st-text">Validated {vres.total_files} file(s) · {formatMs(vres.total_ms)}</span>
+        {#if failed}
+          <span class="st-fail"><CircleAlert size={13} /></span>
+        {:else}
+          <span class="st-ok"><ListChecks size={13} /></span>
+        {/if}
+        <span class="st-text">
+          {failed ? 'Validation failed' : 'Validation passed'} · {vres.total_files} file(s) · {formatMs(vres.total_ms)}
+        </span>
         {#if speed}<span class="st-speed tone-{speed.tone}">{speed.label}</span>{/if}
       {:else if ok === true}
         <span class="st-ok"><CircleCheckBig size={13} /></span>
@@ -111,10 +123,12 @@
         <span class="st-fail"><CircleAlert size={13} /></span>
         <span class="st-text">Build failed{bennuRunStore.tool ? ` · ${bennuRunStore.tool}` : ''}</span>
       {/if}
-      {#if vres}
-        <span class="st-counts">{vres.error_count} errors · {vres.warning_count} warnings</span>
-      {:else if diags.length}
-        <span class="st-counts">{errorCount} errors · {warnCount} warnings</span>
+      {#if vres || diags.length}
+        <span class="st-counts">
+          <span class="ct" class:ct-error={errors > 0}>{errors} error{errors === 1 ? '' : 's'}</span>
+          <span class="ct-sep">·</span>
+          <span class="ct" class:ct-warn={warnings > 0}>{warnings} warning{warnings === 1 ? '' : 's'}</span>
+        </span>
       {/if}
     </div>
 
@@ -130,9 +144,17 @@
         </div>
       </div>
       {#if vres.total_diagnostics > 0}
-        <button class="vproblems" onclick={() => bennuUiStore.showBottom('problems')}>
-          <AlertTriangle size={13} />
-          <span>{vres.total_diagnostics} problem(s) in {vres.diagnostics.length} file(s)</span>
+        {@const Ic = errors > 0 ? CircleAlert : AlertTriangle}
+        <button class="vproblems" class:has-errors={errors > 0} onclick={() => bennuUiStore.showBottom('problems')}>
+          <Ic size={13} />
+          <span>
+            {#if errors > 0}
+              {errors} error{errors === 1 ? '' : 's'}{warnings > 0 ? ` · ${warnings} warning${warnings === 1 ? '' : 's'}` : ''}
+            {:else}
+              {warnings} warning{warnings === 1 ? '' : 's'}
+            {/if}
+            in {vres.diagnostics.length} file(s)
+          </span>
           <span class="vproblems-go">Open Problems <ArrowRight size={12} /></span>
         </button>
       {/if}
@@ -203,7 +225,12 @@
     padding: 1px 6px; border-radius: var(--radius-sm);
   }
   .st-cancel:hover { color: var(--error); background: var(--bg-hover); }
-  .st-counts { margin-left: auto; font-size: var(--font-size-2xs); color: var(--text-muted); }
+  .st-counts { margin-left: auto; display: flex; align-items: center; gap: 5px; font-size: var(--font-size-2xs); }
+  /* A zero count stays grey — only a count that exists earns its colour. */
+  .ct { color: var(--text-disabled); }
+  .ct-error { color: var(--error); font-weight: 600; }
+  .ct-warn { color: var(--warning); font-weight: 600; }
+  .ct-sep { color: var(--text-disabled); }
   .st-speed {
     font-size: var(--font-size-3xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
     padding: 1px 6px; border-radius: var(--radius-sm);
@@ -215,9 +242,10 @@
   .vproblems {
     flex-shrink: 0; display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
     padding: 6px 12px; font-size: var(--font-size-xs); cursor: pointer; background: transparent; border: none;
-    border-bottom: 1px solid var(--border-subtle); color: var(--error);
+    border-bottom: 1px solid var(--border-subtle); color: var(--warning);
     font-family: var(--font-ui-sans); transition: background var(--transition-fast);
   }
+  .vproblems.has-errors { color: var(--error); }
   .vproblems:hover { background: var(--bg-hover); }
   .vproblems-go { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; color: var(--text-muted); font-size: var(--font-size-2xs); }
 

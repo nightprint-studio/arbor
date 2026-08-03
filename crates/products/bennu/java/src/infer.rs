@@ -33,6 +33,10 @@ enum LocalTy {
     Declared(String),
     /// `var x = <init>` — infer from the initializer's byte range (re-descended lazily).
     VarInit(usize, usize),
+    /// `for (var x : <iterable>)` — infer from the ITERABLE's byte range and peel one type
+    /// argument (`List<Foo>` → `Foo`). Distinct from [`LocalTy::VarInit`], which would type the
+    /// loop variable as the collection itself.
+    IterElem(usize, usize),
 }
 
 /// One local declaration in a scope: where the declaration statement starts + how it's typed.
@@ -240,13 +244,24 @@ pub fn infer_expression_type_cached(
         return hit.clone();
     }
     let bytes = source.as_bytes();
-    let result = root.named_descendant_for_byte_range(start, end).and_then(|node| {
-        let ctx = Ctx { root: *root, bytes, resolver, symbols, cache };
-        let enclosing = enclosing_type_fqn(&node, bytes, symbols);
-        ctx.infer_expr(&node, enclosing.as_deref())
-    });
+    let result = root
+        .named_descendant_for_byte_range(start, end)
+        .and_then(|node| {
+            let ctx = Ctx { root: *root, bytes, resolver, symbols, cache };
+            let enclosing = enclosing_type_fqn(&node, bytes, symbols);
+            ctx.infer_expr(&node, enclosing.as_deref())
+        })
+        .filter(is_resolved);
     cache.expr.borrow_mut().insert((start, end), result.clone());
     result
+}
+
+/// Whether an inferred type is something a caller can act on. A bare type VARIABLE (`T`, `S`)
+/// is not: it names a binding Phase-1 didn't resolve, and handing it out as a type invites the
+/// caller to look members up on a class called `S`. Every public entry filters it out, so
+/// "unknown" arrives as `None` rather than as a type that happens to resolve to nothing.
+fn is_resolved(t: &TypeRef) -> bool {
+    !t.binary_name.is_empty() && !is_type_var(&t.binary_name)
 }
 
 /// Infer the type of an **already-located** node — the caller found it during its own tree walk, so
@@ -269,7 +284,7 @@ pub fn infer_node_type_cached(
     let bytes = source.as_bytes();
     let ctx = Ctx { root: *root, bytes, resolver, symbols, cache };
     let enclosing = enclosing_type_fqn(node, bytes, symbols);
-    let result = ctx.infer_expr(node, enclosing.as_deref());
+    let result = ctx.infer_expr(node, enclosing.as_deref()).filter(is_resolved);
     cache.expr.borrow_mut().insert(key, result.clone());
     result
 }
@@ -308,11 +323,13 @@ pub fn infer_receiver_type_cached(
         return hit.clone();
     }
     let bytes = source.as_bytes();
-    let result = find_receiver(root, byte_offset).and_then(|receiver| {
-        let ctx = Ctx { root: *root, bytes, resolver, symbols, cache };
-        let enclosing = enclosing_type_fqn(&receiver, bytes, symbols);
-        ctx.infer_expr(&receiver, enclosing.as_deref())
-    });
+    let result = find_receiver(root, byte_offset)
+        .and_then(|receiver| {
+            let ctx = Ctx { root: *root, bytes, resolver, symbols, cache };
+            let enclosing = enclosing_type_fqn(&receiver, bytes, symbols);
+            ctx.infer_expr(&receiver, enclosing.as_deref())
+        })
+        .filter(is_resolved);
     cache.receiver.borrow_mut().insert(byte_offset, result.clone());
     result
 }
@@ -887,8 +904,19 @@ impl Ctx<'_> {
                 // naming-convention heuristic is the best guess available.
                 type_var_index(bn, recv.type_args.len())
             };
-            return match idx {
-                Some(i) => recv.type_args.get(i).cloned().unwrap_or_else(|| member_ret.clone()),
+            return match idx.and_then(|i| recv.type_args.get(i)) {
+                // An `Object` type argument is where an unbounded wildcard lands: the bytecode
+                // decoder collapses `?` to its upper bound, and `Object` is what "no bound" looks
+                // like. Propagating it is what turns a fluent builder into an `Object` and makes
+                // the NEXT call in the chain a false "cannot resolve method": Spring's
+                // `RestClient.get()` returns `RequestHeadersUriSpec<?>`, whose `uri(…)` returns
+                // its own self-type — so `.uri(…).accept(…)` is perfectly legal, and reporting
+                // `accept` as missing on `Object` is a diagnostic about code that compiles.
+                // Java resolves this through the wildcard's capture (or the variable's bound),
+                // neither of which Phase-1 models, so the honest answer is "unknown" — the type
+                // variable itself, which every consumer treats as unresolved.
+                Some(a) if a.binary_name == "java/lang/Object" => member_ret.clone(),
+                Some(a) => a.clone(),
                 // Unresolved (method-level var, or position unknown on a heuristic miss).
                 None => member_ret.clone(),
             };
@@ -1020,6 +1048,16 @@ impl Ctx<'_> {
             return m.clone();
         }
         let mut map: HashMap<String, Vec<LocalDecl>> = HashMap::new();
+        // A binder declared BY the scope node itself, not by a child statement: the enhanced-`for`
+        // variable (`for (Foo x : xs) { … }`), whose scope is the loop body. Without it, `x` fell
+        // through to a same-named FIELD of the enclosing class and every `x.method()` was typed
+        // against the field's type — a false "cannot resolve method" on perfectly legal shadowing.
+        if scope.kind() == "enhanced_for_statement" {
+            self.add_for_each_var(scope, &mut map);
+        }
+        // Pattern variables (`o instanceof Foo f`, `case Foo f ->`), whose scope is expressed by the
+        // flow around `scope` rather than by a declaration inside it.
+        self.add_pattern_vars(scope, &mut map);
         let mut cw = scope.walk();
         for c in scope.named_children(&mut cw) {
             match c.kind() {
@@ -1060,12 +1098,185 @@ impl Ctx<'_> {
                         }
                     }
                 }
+                // `catch (FooException e) { e.getMessage(); }` — the parameter is a child of the
+                // `catch_clause` (whose body is the scope), and it carries a `catch_type` node
+                // instead of a `type` field. A multi-catch union (`A | B`) binds the LUB, which we
+                // don't compute → left unresolved rather than typed as its first alternative.
+                "catch_formal_parameter" => {
+                    let name = c.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes));
+                    let mut tw = c.walk();
+                    let type_text = c
+                        .named_children(&mut tw)
+                        .find(|n| n.kind() == "catch_type")
+                        .filter(|ct| ct.named_child_count() == 1)
+                        .and_then(|ct| ct.named_child(0))
+                        .and_then(|t| node_text(&t, self.bytes));
+                    if let (Some(vn), Some(t)) = (name, type_text) {
+                        map.entry(vn)
+                            .or_default()
+                            .push(LocalDecl { start: c.start_byte(), ty: LocalTy::Declared(t) });
+                    }
+                }
                 _ => {}
             }
         }
         let rc = Rc::new(map);
         self.cache.scope_locals.borrow_mut().insert(id, rc.clone());
         rc
+    }
+
+    /// Record the enhanced-`for` loop variable of `loop_node` (`for (Foo x : xs)`) as a local of the
+    /// loop scope. `var`/`val` take the ELEMENT type of the iterable, never the iterable itself.
+    ///
+    /// The declaration is anchored AFTER the iterable expression: the variable is in scope only in
+    /// the body, so a same-named identifier inside `xs` (`for (Foo x : x.getKids())`) still resolves
+    /// to the outer binding it actually refers to.
+    fn add_for_each_var(&self, loop_node: &Node, map: &mut HashMap<String, Vec<LocalDecl>>) {
+        let Some(name) = loop_node.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes))
+        else {
+            return;
+        };
+        let type_text = loop_node.child_by_field_name("type").and_then(|n| node_text(&n, self.bytes));
+        let value = loop_node.child_by_field_name("value");
+        let start = value.map_or_else(|| loop_node.start_byte(), |v| v.end_byte());
+        let ty = match type_text.as_deref() {
+            Some("var") | Some("val") => {
+                value.map(|v| LocalTy::IterElem(v.start_byte(), v.end_byte()))
+            }
+            Some(t) => Some(LocalTy::Declared(t.to_string())),
+            None => None,
+        };
+        if let Some(ty) = ty {
+            map.entry(name).or_default().push(LocalDecl { start, ty });
+        }
+    }
+
+    /// Register the pattern variables in scope inside `scope` (`o instanceof Foo f`, `case Foo f`).
+    /// A pattern variable's scope is defined by FLOW, not by nesting, so each shape is matched
+    /// explicitly and conservatively — a binding is registered only where Java guarantees it is
+    /// definitely assigned, never "somewhere in the method":
+    ///   * the branch/body governed by a positive test — `if (o instanceof Foo f) { f.… }`,
+    ///     `while (o instanceof Foo f) { … }`, `cond ? f.… : …`;
+    ///   * the rest of a `&&` chain — `o instanceof Foo f && f.…`;
+    ///   * the statements AFTER a guard that returns/throws — `if (!(o instanceof Foo f)) return;`;
+    ///   * a `switch` case body — `case Foo f -> f.…` / `case Foo f: …`.
+    /// Anything else (an `||` branch, a negation without an abrupt exit, a record-pattern shape we
+    /// can't read) is left unregistered: the identifier stays unresolved instead of being typed wrong.
+    fn add_pattern_vars(&self, scope: &Node, map: &mut HashMap<String, Vec<LocalDecl>>) {
+        let mut binds = Vec::new();
+
+        // The body governed by a positive test — the binding holds throughout it.
+        if let Some(p) = scope.parent() {
+            let governing = match p.kind() {
+                "if_statement" | "ternary_expression" => {
+                    (field_is(&p, "consequence", scope)).then(|| p.child_by_field_name("condition"))
+                }
+                "while_statement" | "for_statement" => {
+                    (field_is(&p, "body", scope)).then(|| p.child_by_field_name("condition"))
+                }
+                _ => None,
+            };
+            if let Some(cond) = governing.flatten() {
+                self.collect_true_bindings(&cond, &mut binds);
+            }
+        }
+
+        match scope.kind() {
+            // `o instanceof Foo f && f.bar()` — the left operand's bindings hold in the right one.
+            "binary_expression"
+                if scope
+                    .child_by_field_name("operator")
+                    .and_then(|o| node_text(&o, self.bytes))
+                    .as_deref()
+                    == Some("&&") =>
+            {
+                if let Some(left) = scope.child_by_field_name("left") {
+                    self.collect_true_bindings(&left, &mut binds);
+                }
+            }
+            // `case Foo f ->` / `case Foo f:` — the label's bindings hold in the case body.
+            "switch_rule" | "switch_block_statement_group" => {
+                let mut lw = scope.walk();
+                for l in scope.named_children(&mut lw).filter(|l| l.kind() == "switch_label") {
+                    self.collect_true_bindings(&l, &mut binds);
+                }
+            }
+            _ => {}
+        }
+
+        // The guard idiom: `if (!(o instanceof Foo f)) return;` binds `f` for the REST of the block.
+        // Anchored at the guard's end, so the negative branch itself (where `f` is NOT in scope, and
+        // the name may legitimately mean a field) is excluded.
+        let mut gw = scope.walk();
+        for st in scope.named_children(&mut gw).filter(|s| s.kind() == "if_statement") {
+            let is_guard = st
+                .child_by_field_name("consequence")
+                .is_some_and(|c| completes_abruptly(&c))
+                && st.child_by_field_name("alternative").is_none();
+            if !is_guard {
+                continue;
+            }
+            let Some(negated) = st
+                .child_by_field_name("condition")
+                .and_then(|c| unwrap_negation(&c))
+            else {
+                continue;
+            };
+            let mut guarded = Vec::new();
+            self.collect_true_bindings(&negated, &mut guarded);
+            binds.extend(guarded.into_iter().map(|(n, t, _)| (n, t, st.end_byte())));
+        }
+
+        for (name, type_text, start) in binds {
+            map.entry(name).or_default().push(LocalDecl { start, ty: LocalTy::Declared(type_text) });
+        }
+    }
+
+    /// Collect `(name, declared type text, binding end offset)` for every pattern variable that is
+    /// definitely bound when `expr` evaluates to TRUE. Descent stops at the constructs that break
+    /// that guarantee: a negation, either side of an `||`, and a nested lambda (its own scope).
+    fn collect_true_bindings(&self, expr: &Node, out: &mut Vec<(String, String, usize)>) {
+        match expr.kind() {
+            // A negation inverts the guarantee; a lambda, a nested `switch` and an anonymous class
+            // body all carry their own scopes — nothing they bind is in scope out here.
+            "unary_expression" | "lambda_expression" | "switch_expression" | "class_body" => return,
+            "binary_expression"
+                if expr
+                    .child_by_field_name("operator")
+                    .and_then(|o| node_text(&o, self.bytes))
+                    .as_deref()
+                    == Some("||") =>
+            {
+                return
+            }
+            // `o instanceof Foo f` — the type is the `right` field, the binding the `name` field.
+            // A record deconstruction (`o instanceof Point(int x, int y)`) has no `name`; its
+            // components are picked up by the descent below.
+            "instanceof_expression" => {
+                if let (Some(n), Some(t)) = (
+                    expr.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes)),
+                    expr.child_by_field_name("right").and_then(|t| node_text(&t, self.bytes)),
+                ) {
+                    out.push((n, t, expr.end_byte()));
+                }
+            }
+            // `case Foo f` (switch patterns) and record-pattern components are positional:
+            // `<type> <identifier>`, with no field names.
+            "type_pattern" | "record_pattern_component" => {
+                if let (Some(t), Some(n)) = (expr.named_child(0), expr.named_child(1)) {
+                    if let (Some(tt), Some(nn)) =
+                        (node_text(&t, self.bytes), node_text(&n, self.bytes))
+                    {
+                        out.push((nn, tt, expr.end_byte()));
+                    }
+                }
+            }
+            _ => {}
+        }
+        let mut w = expr.walk();
+        for c in expr.named_children(&mut w) {
+            self.collect_true_bindings(&c, out);
+        }
     }
 
     /// Classify a local/resource declaration's type from its written `type_text` and optional
@@ -1085,12 +1296,25 @@ impl Ctx<'_> {
 
     /// Resolve a cached local's type — a declared type text, or a `var` initializer re-descended
     /// from the tree by its byte range.
+    ///
+    /// A re-descended expression is inferred with ITS OWN enclosing type, so an initializer that
+    /// reads a field (`var rows = this.dao.find();`, `for (var r : rows())`) resolves like it does
+    /// anywhere else instead of dead-ending on an unknown bare name.
     fn resolve_local_ty(&self, ty: &LocalTy) -> Option<TypeRef> {
         match ty {
             LocalTy::Declared(t) => self.resolve_type_text(t),
             LocalTy::VarInit(start, end) => {
                 let init = self.root.named_descendant_for_byte_range(*start, *end)?;
-                self.infer_expr(&init, None)
+                let enclosing = enclosing_type_fqn(&init, self.bytes, self.symbols);
+                self.infer_expr(&init, enclosing.as_deref())
+            }
+            LocalTy::IterElem(start, end) => {
+                let iter = self.root.named_descendant_for_byte_range(*start, *end)?;
+                let enclosing = enclosing_type_fqn(&iter, self.bytes, self.symbols);
+                let ty = self.infer_expr(&iter, enclosing.as_deref())?;
+                // `List<Foo>` / `Iterable<Foo>` → `Foo`. A RAW collection, a multi-argument type or
+                // an array (arrays aren't modelled in Phase-1) yields nothing rather than a guess.
+                (ty.type_args.len() == 1).then(|| ty.type_args[0].clone())
             }
         }
     }
@@ -1246,6 +1470,39 @@ fn enclosing_type_fqn(node: &Node, bytes: &[u8], symbols: &FileSymbols) -> Optio
         cur = n.parent();
     }
     None
+}
+
+/// Whether `node` is exactly the `field`-named child of `parent` (identity, not text).
+fn field_is(parent: &Node, field: &str, node: &Node) -> bool {
+    parent.child_by_field_name(field).map(|c| c.id()) == Some(node.id())
+}
+
+/// The operand of a `!` — `!(o instanceof Foo f)` → `(o instanceof Foo f)`. `None` for anything else.
+fn unwrap_negation<'t>(cond: &Node<'t>) -> Option<Node<'t>> {
+    let inner = if cond.kind() == "parenthesized_expression" { cond.named_child(0)? } else { *cond };
+    if inner.kind() != "unary_expression" {
+        return None;
+    }
+    let op = inner.child_by_field_name("operator")?;
+    (op.kind() == "!").then(|| inner.child_by_field_name("operand")).flatten()
+}
+
+/// Whether a statement always completes abruptly (`return` / `throw` / `break` / `continue`), or is a
+/// block whose last statement does. Used to recognise the guard shape
+/// `if (!(o instanceof Foo f)) return;`, after which `f` is definitely bound.
+fn completes_abruptly(stmt: &Node) -> bool {
+    match stmt.kind() {
+        "return_statement" | "throw_statement" | "break_statement" | "continue_statement" => true,
+        // Comments are named nodes too — a trailing `// done` must not hide the `return`.
+        "block" => {
+            let mut w = stmt.walk();
+            stmt.named_children(&mut w)
+                .filter(|n| !matches!(n.kind(), "line_comment" | "block_comment"))
+                .last()
+                .is_some_and(|last| completes_abruptly(&last))
+        }
+        _ => false,
+    }
 }
 
 /// `com.foo.Bar` -> `com/foo/Bar`.
@@ -1439,17 +1696,19 @@ mod generic_tests {
     }
 }
 
+/// Fixtures shared by the inference test modules: a fixed `binary → members` resolver plus the two
+/// builders every suite needs. One copy, so a change to the seam's shape lands in one place.
 #[cfg(test)]
-mod overload_tests {
+mod test_support {
     use super::*;
     use crate::seam::ClassMembers;
     use crate::symbols::Import;
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    struct MapResolver {
-        members: HashMap<String, ClassMembers>,
-        simple: HashMap<String, String>,
+    pub(super) struct MapResolver {
+        pub(super) members: HashMap<String, ClassMembers>,
+        pub(super) simple: HashMap<String, String>,
     }
     impl TypeResolver for MapResolver {
         fn members_of(&self, b: &str) -> Option<Arc<ClassMembers>> {
@@ -1460,7 +1719,8 @@ mod overload_tests {
         }
     }
 
-    fn cm(methods: Vec<Member>) -> ClassMembers {
+    /// A class with `methods`, extending `Object` — enough for the nominal walk.
+    pub(super) fn cm(methods: Vec<Member>) -> ClassMembers {
         ClassMembers {
             superclass: Some("java/lang/Object".into()),
             interfaces: vec![],
@@ -1470,9 +1730,24 @@ mod overload_tests {
             type_params: vec![],
         }
     }
-    fn meth(name: &str, ret: &str, params: &[&str]) -> Member {
+
+    pub(super) fn meth(name: &str, ret: &str, params: &[&str]) -> Member {
         Member::method(name, TypeRef::simple(ret), params.iter().map(|p| TypeRef::simple(*p)).collect())
     }
+
+    /// The inferred binary type of the (unique) `expr` substring of `src`.
+    pub(super) fn infer_call(src: &str, expr: &str, r: &MapResolver) -> Option<String> {
+        let start = src.find(expr).expect("expression substring present");
+        assert_eq!(src.matches(expr).count(), 1, "`{expr}` must occur once in the fixture");
+        infer_expression_type(src, start, start + expr.len(), r).map(|t| t.binary_name)
+    }
+}
+
+#[cfg(test)]
+mod overload_tests {
+    use super::test_support::*;
+    use super::*;
+    use std::collections::HashMap;
 
     /// `Fmt` mimics `java.text.Format`/`SimpleDateFormat`: `format(Object) -> String` and
     /// `format(Object, StringBuffer, FieldPosition) -> StringBuffer`. `Ov` has two SAME-arity overloads
@@ -1516,12 +1791,6 @@ mod overload_tests {
         .map(|(s, b)| (s.to_string(), b.to_string()))
         .collect();
         MapResolver { members, simple }
-    }
-
-    /// Infer the binary type of the `call` substring of `src`.
-    fn infer_call(src: &str, call: &str, r: &MapResolver) -> Option<String> {
-        let start = src.find(call).expect("call substring present");
-        infer_expression_type(src, start, start + call.len(), r).map(|t| t.binary_name)
     }
 
     #[test]
@@ -1577,5 +1846,220 @@ mod overload_tests {
         assert_eq!(unique_return(&[&a, &a2]).map(|t| t.binary_name), Some("acme/A".to_string()));
         assert!(unique_return(&[&a, &b]).is_none(), "different returns → no unique");
         assert!(unique_return(&[]).is_none(), "empty → none");
+    }
+}
+
+/// Every construct that can legally shadow a FIELD of the enclosing class. Java allows a local
+/// binding to reuse a field's name, and the bare identifier then means the BINDING — inference that
+/// falls through to the field types the expression against the wrong class and the member checks
+/// report a false "Cannot resolve method" on correct code (the reported bug: an enhanced-`for`
+/// variable named like a field).
+///
+/// The fixture is deliberately adversarial: the field `impresa` is an `acme.Holder` whose members
+/// return `acme/B`, every shadowing binding is an `acme.Impresa` whose members return `acme/A`. So
+/// `acme/A` proves the binding won, `acme/B` proves the field leaked through.
+#[cfg(test)]
+mod shadowing_tests {
+    use super::test_support::*;
+    use super::*;
+    use std::collections::HashMap;
+
+    fn resolver() -> MapResolver {
+        let mut members = HashMap::new();
+        members.insert("java/lang/Object".into(), cm(vec![]));
+        members.insert("java/util/List".into(), cm(vec![]));
+        members.insert("acme/A".into(), cm(vec![]));
+        members.insert("acme/B".into(), cm(vec![]));
+        members.insert("acme/Impresa".into(), cm(vec![meth("id", "acme/A", &[])]));
+        members.insert("acme/Ex".into(), cm(vec![meth("id", "acme/A", &[])]));
+        members.insert("acme/Ex2".into(), cm(vec![meth("id", "acme/A", &[])]));
+        members.insert(
+            "acme/Holder".into(),
+            cm(vec![
+                meth("id", "acme/B", &[]),
+                // `List<Impresa>` — the element type an enhanced-`for` must peel for `var`.
+                Member::method(
+                    "list",
+                    TypeRef {
+                        binary_name: "java/util/List".into(),
+                        type_args: vec![TypeRef::simple("acme/Impresa")],
+                    },
+                    vec![],
+                ),
+            ]),
+        );
+        MapResolver { members, simple: HashMap::new() }
+    }
+
+    /// A class with a field `impresa` of the DECOY type, wrapping `body` in a method.
+    fn with_field(body: &str) -> String {
+        format!("class C {{ private acme.Holder impresa; void m(Object o) {{ {body} }} }}")
+    }
+
+    #[test]
+    fn for_each_variable_shadows_a_same_named_field() {
+        let r = resolver();
+        let src = with_field(
+            "for (acme.Impresa impresa : impresa.list()) { Object x = impresa.id(); }",
+        );
+        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+        // …and the ITERABLE, evaluated before the variable exists, still means the field.
+        assert_eq!(infer_call(&src, "impresa.list()", &r).as_deref(), Some("java/util/List"));
+    }
+
+    #[test]
+    fn for_each_var_takes_the_element_type_not_the_collection() {
+        let r = resolver();
+        let src = with_field("for (var impresa : impresa.list()) { Object x = impresa.id(); }");
+        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+    }
+
+    #[test]
+    fn catch_parameter_shadows_a_same_named_field() {
+        let r = resolver();
+        let src = with_field("try { hop(); } catch (acme.Ex impresa) { Object x = impresa.id(); }");
+        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+    }
+
+    #[test]
+    fn multi_catch_union_stays_unresolved_rather_than_guessing() {
+        // The binding's type is the LUB of `Ex | Ex2`, which we don't compute — and it must NOT fall
+        // back to the shadowed field either. Unresolved keeps the member checks silent.
+        let r = resolver();
+        let src =
+            with_field("try { hop(); } catch (acme.Ex | acme.Ex2 impresa) { Object x = impresa.id(); }");
+        assert_eq!(infer_call(&src, "impresa.id()", &r), None);
+    }
+
+    #[test]
+    fn classic_for_init_shadows_a_same_named_field() {
+        let r = resolver();
+        let src = with_field("for (acme.Impresa impresa = null; ; ) { Object x = impresa.id(); }");
+        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+    }
+
+    #[test]
+    fn try_with_resources_shadows_a_same_named_field() {
+        let r = resolver();
+        let src = with_field("try (acme.Impresa impresa = null) { Object x = impresa.id(); }");
+        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+    }
+
+    #[test]
+    fn local_declaration_shadows_a_same_named_field() {
+        let r = resolver();
+        let src = with_field("acme.Impresa impresa = null; Object x = impresa.id();");
+        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+    }
+
+    #[test]
+    fn instanceof_pattern_shadows_a_same_named_field_in_the_true_branch() {
+        let r = resolver();
+        let src = with_field("if (o instanceof acme.Impresa impresa) { Object x = impresa.id(); }");
+        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+    }
+
+    #[test]
+    fn instanceof_pattern_binds_in_the_rest_of_an_and_chain() {
+        let r = resolver();
+        let src =
+            with_field("boolean b = o instanceof acme.Impresa impresa && impresa.id() != null;");
+        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+    }
+
+    #[test]
+    fn instanceof_guard_binds_after_an_early_return() {
+        // The `if (!(x instanceof T v)) return;` idiom: `v` is definitely bound BELOW the guard.
+        let r = resolver();
+        let src = with_field(
+            "if (!(o instanceof acme.Impresa impresa)) { return; } Object x = impresa.id();",
+        );
+        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+    }
+
+    #[test]
+    fn instanceof_pattern_does_not_leak_into_the_else_branch() {
+        // `impresa` is NOT in scope in the `else` — there it legitimately means the field, and typing
+        // it as the pattern's type would invent a shadow Java never created.
+        let r = resolver();
+        let src = with_field(
+            "if (o instanceof acme.Impresa impresa) { hop(); } else { Object x = impresa.id(); }",
+        );
+        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/B"));
+    }
+
+    #[test]
+    fn instanceof_pattern_does_not_leak_past_a_non_abrupt_if() {
+        // No early exit → after the `if`, `impresa` is the field again.
+        let r = resolver();
+        let src =
+            with_field("if (!(o instanceof acme.Impresa impresa)) { hop(); } Object x = impresa.id();");
+        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/B"));
+    }
+
+    #[test]
+    fn switch_case_pattern_shadows_a_same_named_field() {
+        let r = resolver();
+        let arrow = with_field("switch (o) { case acme.Impresa impresa -> { Object x = impresa.id(); } default -> { hop(); } }");
+        assert_eq!(infer_call(&arrow, "impresa.id()", &r).as_deref(), Some("acme/A"));
+
+        let colon = with_field(
+            "switch (o) { case acme.Impresa impresa: Object x = impresa.id(); break; default: break; }",
+        );
+        assert_eq!(infer_call(&colon, "impresa.id()", &r).as_deref(), Some("acme/A"));
+    }
+
+    #[test]
+    fn while_pattern_binds_in_the_loop_body() {
+        let r = resolver();
+        let src = with_field("while (o instanceof acme.Impresa impresa) { Object x = impresa.id(); }");
+        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+    }
+
+    /// The reported bug: a fluent builder reached through a wildcard. `get()` hands back
+    /// `Spec<?>`; the decoder writes that wildcard as `Object`; substituting the self-type `S`
+    /// with it made the chain an `Object`, and the next call — legal Java — was reported as
+    /// "cannot resolve method … in Object". Unknown is the honest answer, and it is silent.
+    #[test]
+    fn a_wildcard_type_argument_does_not_collapse_a_chain_to_object() {
+        let mut r = resolver();
+        // `Spec<S>` with `S uri()` — the self-returning shape of Spring's RestClient specs.
+        let mut spec = cm(vec![meth("uri", "S", &["java/lang/String"])]);
+        spec.type_params = vec!["S".to_string()];
+        r.members.insert("acme/Spec".into(), spec);
+        r.members.insert("acme/Client".into(), {
+            // `get()` returns `Spec<?>` — the wildcard arrives decoded as Object.
+            cm(vec![Member::method(
+                "get",
+                TypeRef {
+                    binary_name: "acme/Spec".into(),
+                    type_args: vec![TypeRef::simple("java/lang/Object")],
+                },
+                vec![],
+            )])
+        });
+
+        let src = "class C { void m(acme.Client c) { Object o = c.get().uri(\"/x\"); } }";
+        assert_eq!(
+            infer_call(src, "c.get().uri(\"/x\")", &r),
+            None,
+            "unresolved, NOT java/lang/Object — Object is what makes the next call a false error",
+        );
+    }
+
+    #[test]
+    fn method_parameter_shadows_a_same_named_field() {
+        let r = resolver();
+        let src = "class C { private acme.Holder impresa; void m(acme.Impresa impresa) { Object x = impresa.id(); } }";
+        assert_eq!(infer_call(src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+    }
+
+    #[test]
+    fn untyped_lambda_parameter_shadows_without_guessing() {
+        // A lambda parameter we can't target-type must still SHADOW the field: unresolved (silent),
+        // never the field's type (which would flag `id()` against the wrong class).
+        let r = resolver();
+        let src = with_field("java.util.function.Consumer<Object> c = impresa -> impresa.id();");
+        assert_eq!(infer_call(&src, "impresa.id()", &r), None);
     }
 }

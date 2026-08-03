@@ -12,12 +12,14 @@
    * cwd comes from Bennu's project store, and failures toast through Bennu's
    * feedback host. It behaves identically to Corvus's terminal otherwise.
    *
-   * The dock owns the section header; this view renders the session tab strip
-   * (when >1) + the terminal bodies, and exposes `openTerminal()` for the header's
-   * "New terminal" action.
+   * The panel owns its header (title + "New terminal" + close) and renders the
+   * session tab strip (when >1) above the terminal bodies.
    */
   import { Plus, TerminalSquare } from 'lucide-svelte';
+  import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
+  import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import TerminalInstance from '$lib/components/corvus/terminal/TerminalInstance.svelte';
   import { terminalCreate, terminalClose } from '$lib/ipc/corvus/terminal';
   import { terminalStore } from '$lib/stores/corvus/terminal.svelte';
@@ -30,7 +32,7 @@
     return projectStore.project?.root ?? undefined;
   }
 
-  export async function openTerminal(shellId?: string) {
+  async function openTerminal(shellId?: string) {
     if (creating) return;
     creating = true;
     try {
@@ -56,6 +58,22 @@
 </script>
 
 <div class="tv">
+  <BottomPanelHeader title="Terminal" onClose={() => bennuUiStore.closeBottom()}>
+    {#snippet icon()}<TerminalSquare size={13} />{/snippet}
+    {#snippet actions()}
+      <button
+        class="ps-btn"
+        type="button"
+        use:tooltip={'New terminal'}
+        aria-label="New terminal"
+        disabled={creating}
+        onclick={() => void openTerminal()}
+      >
+        <Plus size={13} />
+      </button>
+    {/snippet}
+  </BottomPanelHeader>
+
   {#if terminalStore.tabs.length === 0}
     <div class="tv-empty">
       <TerminalSquare size={26} />

@@ -18,6 +18,7 @@
    */
   import { TextCursorInput, RefreshCw } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
+  import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
@@ -27,10 +28,10 @@
   import BennuFormFieldRow from './BennuFormFieldRow.svelte';
 
   let {
-    /** When true (in the bottom dock) the panel renders headerless — the dock's tab strip is
-     *  the identity and owns the Refresh action (via the exported {@link refresh}). */
-    hideHeader = false,
-  }: { hideHeader?: boolean } = $props();
+    /** Bottom-dock mode: the panel draws the dock's own header (title + Refresh + close)
+     *  instead of the side rail's `PanelShell` chrome. */
+    dock = false,
+  }: { dock?: boolean } = $props();
 
   const JSP_EXT = /\.(jsp|jspf|tag|tagx)$/i;
 
@@ -139,9 +140,25 @@
   {/if}
 {/snippet}
 
-{#if hideHeader}
-  <!-- Bottom-dock mode: the dock tab strip is the header; the Refresh action lives there. -->
-  <div class="ff-dock">{@render body()}</div>
+{#if dock}
+  <div class="ff-dockwrap">
+    <BottomPanelHeader title="Forms" onClose={() => bennuUiStore.closeBottom()}>
+      {#snippet icon()}<TextCursorInput size={13} />{/snippet}
+      {#snippet actions()}
+        <button
+          class="ps-btn"
+          type="button"
+          onclick={refresh}
+          disabled={!canRefresh()}
+          use:tooltip={'Refresh'}
+          aria-label="Refresh forms"
+        >
+          <RefreshCw size={13} />
+        </button>
+      {/snippet}
+    </BottomPanelHeader>
+    <div class="ff-dock">{@render body()}</div>
+  </div>
 {:else}
   <PanelShell title="Forms">
     {#snippet icon()}<TextCursorInput size={13} />{/snippet}
@@ -163,9 +180,14 @@
 
 <style>
   /* Bottom-dock mode: own the full dock body height and scroll the form list. */
+  .ff-dockwrap {
+    display: flex; flex-direction: column;
+    height: 100%; min-height: 0;
+    background: var(--bg-base);
+    overflow: hidden;
+  }
   .ff-dock {
     flex: 1; min-height: 0;
-    height: 100%;
     overflow-y: auto;
   }
   .ff-list {

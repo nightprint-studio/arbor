@@ -106,8 +106,11 @@ function scoreTerm(haystack: string, lowerHaystack: string, term: string): Fuzzy
 export function fuzzyMatch(haystack: string, query: string): FuzzyMatch | null {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return { score: 0, ranges: [] };
+  return matchTerms(haystack, haystack.toLowerCase(), terms);
+}
 
-  const lower = haystack.toLowerCase();
+/** The shared core: every already-lowercased term must land, and their scores sum. */
+function matchTerms(haystack: string, lower: string, terms: string[]): FuzzyMatch | null {
   const ranges: MatchRange[] = [];
   let score = 0;
 
@@ -125,6 +128,36 @@ export function fuzzyMatch(haystack: string, query: string): FuzzyMatch | null {
 }
 
 /**
+ * A candidate with its lowercased forms already computed.
+ *
+ * Lowercasing is the one allocation in the hot path, and a navigator over a legacy
+ * project runs it across tens of thousands of candidates **on every keystroke** —
+ * which is the difference between a box that answers as you type and one that
+ * stutters. A host that holds a stable list prepares it once (see
+ * {@link prepareCandidate}) and matches the prepared form thereafter.
+ */
+export interface PreparedCandidate {
+  name: string;
+  detail: string;
+  lowerName: string;
+  /** `detail/name`, lowercased — the whole-path fallback. */
+  lowerWhole: string;
+  whole: string;
+}
+
+/** Precompute the lowercased forms {@link fuzzyMatchPrepared} needs. */
+export function prepareCandidate(name: string, detail: string): PreparedCandidate {
+  const whole = `${detail}/${name}`;
+  return {
+    name,
+    detail,
+    whole,
+    lowerName: name.toLowerCase(),
+    lowerWhole: whole.toLowerCase(),
+  };
+}
+
+/**
  * Match against a name and a longer context (a path), preferring the name.
  *
  * The two-field shape every navigator has: `Config.java` shown big, its directory
@@ -138,18 +171,26 @@ export function fuzzyMatchPair(
   detail: string,
   query: string,
 ): { score: number; nameRanges: MatchRange[]; detailRanges: MatchRange[] } | null {
-  if (!query.trim()) return { score: 0, nameRanges: [], detailRanges: [] };
+  return fuzzyMatchPrepared(prepareCandidate(name, detail), query);
+}
 
-  const onName = fuzzyMatch(name, query);
+/** {@link fuzzyMatchPair} over an already-prepared candidate. */
+export function fuzzyMatchPrepared(
+  c: PreparedCandidate,
+  query: string,
+): { score: number; nameRanges: MatchRange[]; detailRanges: MatchRange[] } | null {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return { score: 0, nameRanges: [], detailRanges: [] };
+
+  const onName = matchTerms(c.name, c.lowerName, terms);
   if (onName) return { score: onName.score * 2, nameRanges: onName.ranges, detailRanges: [] };
 
   // Fall back to the whole path. The name's own characters are in there too, so a
   // query spanning both — `pic gen view` — is matched here rather than nowhere.
-  const whole = `${detail}/${name}`;
-  const onWhole = fuzzyMatch(whole, query);
+  const onWhole = matchTerms(c.whole, c.lowerWhole, terms);
   if (!onWhole) return null;
 
-  const split = detail.length + 1;
+  const split = c.detail.length + 1;
   const nameRanges: MatchRange[] = [];
   const detailRanges: MatchRange[] = [];
   for (const r of onWhole.ranges) {

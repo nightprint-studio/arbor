@@ -686,12 +686,17 @@ impl NativeJavaProvider {
 
     /// A hover card for a **local variable / parameter** at `file`:`offset` — the piece the
     /// reference-index classifier (fields/methods/types) deliberately doesn't key, so the be layer
-    /// falls back here. Its value is the local's TYPE: for a `var`/`val` the inferred type of the
-    /// initializer (the whole point — the type isn't written), for an explicitly-typed local /
-    /// parameter the declared type, and for a use site the inferred type of the identifier. Uses
-    /// THIS provider's full (JDK-aware) resolver, so `var list = new ArrayList<Foo>()` reads as
-    /// `ArrayList<Foo>`. `None` on the empty provider, an unparseable buffer, or a caret that isn't
-    /// on a resolvable local identifier.
+    /// falls back here.
+    ///
+    /// It answers three questions at once, because hovering a name is always all three: what it is
+    /// (`ArrayList<Foo> rows`), *which* one (the dotted FQCN — four `Order`s on the classpath is the
+    /// normal case in a legacy project), and whether that type is a class, an interface, an enum or
+    /// a record. A `var` / Lombok `val` never shows as `var`: the whole point of hovering one is the
+    /// type the compiler deduced, so the initializer is inferred — with THIS provider's full,
+    /// JDK-aware resolver, so `var list = new ArrayList<Foo>()` reads as `ArrayList<Foo>`.
+    ///
+    /// `None` on the empty provider, an unparseable buffer, or a caret that isn't on a resolvable
+    /// identifier.
     pub fn var_hover(&self, source: &str, offset: usize) -> Option<crate::rename::HoverInfo> {
         use bennu_java::prelude::infer_expression_type;
         let resolver = self.resolver.as_ref()?;
@@ -708,38 +713,110 @@ impl NativeJavaProvider {
         }
         let name = node.utf8_text(bytes).ok()?.to_string();
 
-        // Is the caret on the NAME of a local declaration (`Foo x` / `var x = …`)? Then the hover is
-        // its declared/inferred type, not a self-referential inference of the name.
-        let decl = node
-            .parent()
-            .filter(|p| p.kind() == "variable_declarator")
-            .filter(|p| p.child_by_field_name("name") == Some(node));
-        let type_text = if let Some(declr) = decl {
-            let local = declr.parent().filter(|p| p.kind() == "local_variable_declaration")?;
-            let declared = local.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok());
-            match declared {
-                // `var` / Lombok `val`: infer the initializer (the type the compiler would deduce).
-                Some(d) if d == "var" || d == "val" => {
-                    let value = declr.child_by_field_name("value")?;
-                    let tr = infer_expression_type(source, value.start_byte(), value.end_byte(), resolver)?;
-                    render_type_ref(&tr)
-                }
-                // An explicitly-typed local: just show what's written (e.g. `Map<String, Foo>`).
-                Some(d) => d.to_string(),
-                None => return None,
-            }
-        } else {
-            // A use site: infer the identifier's type (resolves the local/param to its declaration).
-            let tr = infer_expression_type(source, node.start_byte(), node.end_byte(), resolver)?;
-            render_type_ref(&tr)
-        };
+        // The declaration forms whose binding the ordinary inference can't see from the name
+        // itself, then the ordinary path — which covers locals (`var` included), parameters,
+        // `catch` and try-with-resources, at their declaration AND at every use.
+        let ty = self
+            .declared_binding_type(source, bytes, node)
+            .or_else(|| infer_expression_type(source, node.start_byte(), node.end_byte(), resolver))?;
 
+        let (container, kind) = self.describe_type(&ty);
         Some(crate::rename::HoverInfo {
-            signature: format!("{type_text} {name}"),
-            kind: "variable".to_string(),
-            container: None,
+            signature: format!("{} {name}", render_type_ref(&ty)),
+            kind,
+            container,
             doc: None,
         })
+    }
+
+    /// The type a declaration binds when the caret is on the NAME it declares and the use-site
+    /// inference cannot see it from there:
+    ///   * the enhanced-`for` variable — its scope begins *after* the iterable, precisely so that
+    ///     `for (Foo x : x.getKids())` reads the outer `x` in the iterable, which also means the
+    ///     name itself sits outside its own scope;
+    ///   * an `instanceof` pattern variable — bound by a flow fact rather than by a statement.
+    ///
+    /// Every other declaration form resolves through the ordinary path, so it is not repeated here.
+    fn declared_binding_type(
+        &self,
+        source: &str,
+        bytes: &[u8],
+        node: tree_sitter::Node,
+    ) -> Option<bennu_java::prelude::TypeRef> {
+        use bennu_java::prelude::infer_expression_type;
+        let resolver = self.resolver.as_ref()?;
+        let parent = node.parent()?;
+        if parent.child_by_field_name("name").map(|n| n.id()) != Some(node.id()) {
+            return None;
+        }
+        match parent.kind() {
+            "enhanced_for_statement" => {
+                let written = parent.child_by_field_name("type")?.utf8_text(bytes).ok()?;
+                if written == "var" || written == "val" {
+                    let value = parent.child_by_field_name("value")?;
+                    let it =
+                        infer_expression_type(source, value.start_byte(), value.end_byte(), resolver)?;
+                    // `List<Foo>` → `Foo`. A raw or multi-argument iterable says nothing about the
+                    // element, and a guess here would be shown to the user as fact.
+                    (it.type_args.len() == 1).then(|| it.type_args[0].clone())
+                } else {
+                    self.type_of_written(source, written)
+                }
+            }
+            "instanceof_expression" => {
+                let written = parent.child_by_field_name("right")?.utf8_text(bytes).ok()?;
+                self.type_of_written(source, written)
+            }
+            _ => None,
+        }
+    }
+
+    /// A written type (`Foo`, `com.acme.Foo`, `List<Foo>`, `Foo[]`) resolved to its binary name via
+    /// the file's imports. Type arguments are dropped — the caller renders the written text when it
+    /// wants them; this exists to answer "which type is this, exactly".
+    fn type_of_written(&self, source: &str, written: &str) -> Option<bennu_java::prelude::TypeRef> {
+        use bennu_java::prelude::{TypeRef, TypeResolver};
+        let resolver = self.resolver.as_ref()?;
+        let base = written.split('<').next()?.trim().trim_end_matches("[]");
+        if base.is_empty() {
+            return None;
+        }
+        let binary = if base.contains('.') {
+            base.replace('.', "/")
+        } else {
+            let imports = bennu_java::prelude::extract_symbols(source).imports;
+            resolver.resolve_simple_name(base, &imports)?
+        };
+        Some(TypeRef { binary_name: binary, type_args: Vec::new() })
+    }
+
+    /// `(dotted FQCN, what the type IS)` for the hover's meta line. A primitive or a type variable
+    /// has no FQCN and no declaration to read, so it carries neither; an unresolvable type falls
+    /// back to `variable`, which is at least true.
+    fn describe_type(&self, ty: &bennu_java::prelude::TypeRef) -> (Option<String>, String) {
+        use bennu_java::prelude::TypeResolver;
+        if !ty.binary_name.contains('/') {
+            return (None, "variable".to_string());
+        }
+        let kind = self
+            .resolver
+            .as_ref()
+            .and_then(|r| r.members_of(&ty.binary_name))
+            .map(|cm| {
+                if cm.flags.is_annotation {
+                    "annotation"
+                } else if cm.flags.is_interface {
+                    "interface"
+                } else if cm.flags.is_enum {
+                    "enum"
+                } else if cm.flags.is_record {
+                    "record"
+                } else {
+                    "class"
+                }
+            })
+            .unwrap_or("variable");
+        (Some(ty.binary_name.replace('/', ".").replace('$', ".")), kind.to_string())
     }
 
     /// Validate `source` while RECORDING the project types the validation reads — the fingerprint
