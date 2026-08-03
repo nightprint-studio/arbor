@@ -12,8 +12,10 @@
 use std::path::Path;
 
 use bennu_core::prelude::BennuState;
-use bennu_proto::prelude::{FileContents, ProjectInfo, TreeNode, WriteResult};
-use bennu_project::prelude::{build_tree, open_project, read_file, write_file, OpenOptions};
+use bennu_proto::prelude::{FileContents, FileStamp, ProjectInfo, TreeNode, WriteResult};
+use bennu_project::prelude::{
+    build_tree, file_stamp, open_project, read_file, write_file, OpenOptions,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::index_service::IndexService;
@@ -38,15 +40,25 @@ pub struct OpenProjectArgs {
     pub root: String,
 }
 
-/// Open a Maven project: parse its pom, detect capabilities / JDK / encoding, and
-/// return the [`ProjectInfo`]. The default encoding + per-project JDK override come
-/// from the backend-owned config.
+/// Open a project (Maven or Cargo — the leaf dispatches on the manifest): parse the
+/// manifest, detect capabilities / JDK / encoding where they apply, and return the
+/// [`ProjectInfo`]. The default encoding + per-project JDK override come from the
+/// backend-owned config.
+///
+/// The Java **symbol index** is built only for a Maven root. For a Cargo one there is
+/// nothing it could index — its sources aren't Java and its classpath doesn't exist —
+/// so starting it would spend a full tree walk to produce an empty index and light the
+/// FE's "Indexing…" status for a result no feature reads. Rust intelligence is an LSP
+/// job for later; today Bennu gives a Cargo project the editor, and says so.
 #[arbor_rpc::handler]
 fn bennu_open_project(ctx: &BennuState, args: OpenProjectArgs) -> Result<ProjectInfo, String> {
     let cfg = bennu_core::config::load();
     let jdk_override = cfg.jdk_overrides.get(&args.root).map(|s| s.as_str());
     let opts = OpenOptions { default_encoding: &cfg.default_encoding, jdk_override };
     let info = open_project(Path::new(&args.root), &opts).map_err(String::from)?;
+    if !info.kind.is_java() {
+        return Ok(info);
+    }
 
     // Kick off the symbol-index build off the IPC thread (async, non-blocking). The
     // completion provider goes live when it finishes; until then `bennu_completion`
@@ -107,6 +119,35 @@ fn bennu_read_file(_ctx: &BennuState, args: ReadFileArgs) -> Result<FileContents
         .map_err(Into::into)
 }
 
+/// Args for [`bennu_file_stamps`].
+#[derive(Deserialize)]
+pub struct FileStampsArgs {
+    /// Absolute paths to stat. Typically the editor's open tabs — a handful, not a tree.
+    pub files: Vec<String>,
+}
+
+/// Stat `files` and return each one's current on-disk [`FileStamp`].
+///
+/// The external-change poll: the FE holds the stamp each open buffer was read from and
+/// compares. A stat per open tab is cheap enough to run whenever the window regains focus
+/// (and on a slow tick while it has focus), which is what makes "somebody else changed this
+/// file" a thing Bennu notices rather than something it discovers by overwriting it.
+///
+/// Never fails: an unreadable path comes back with an empty stamp and `exists: false`, and
+/// the caller decides what that means (see `bennu_write_file`'s guard — a vanished file
+/// must not block the save that recreates it).
+#[arbor_rpc::handler]
+fn bennu_file_stamps(_ctx: &BennuState, args: FileStampsArgs) -> Result<Vec<FileStamp>, String> {
+    Ok(args
+        .files
+        .into_iter()
+        .map(|file| {
+            let stamp = file_stamp(Path::new(&file));
+            FileStamp { exists: !stamp.is_empty(), file, stamp }
+        })
+        .collect())
+}
+
 /// Args for [`bennu_write_file`].
 #[derive(Deserialize)]
 pub struct WriteFileArgs {
@@ -116,12 +157,22 @@ pub struct WriteFileArgs {
     pub file: String,
     /// The buffer text to save (always valid UTF-8 on the wire).
     pub text: String,
+    /// The on-disk stamp the caller's buffer was read from. When present and still
+    /// matching, the save proceeds; when the file has changed underneath, the save is
+    /// **refused** (see [`bennu_project::prelude::write_file`]). Omitted / empty disables
+    /// the check — `#[serde(default)]`, so a caller that never read the file still saves.
+    #[serde(default)]
+    pub expect_stamp: Option<String>,
 }
 
 /// Write a file encoded in the project's resolved encoding — the round-trip inverse of
 /// [`bennu_read_file`] (per-file/per-project override → pom-declared → config default). A
 /// char the declared encoding can't represent falls back to UTF-8 and still succeeds.
-/// Returns the encoding that actually applied.
+/// Returns the encoding that actually applied + the new on-disk stamp.
+///
+/// Refuses with an [`ERR_EXTERNALLY_MODIFIED`](bennu_proto::prelude::ERR_EXTERNALLY_MODIFIED)-
+/// prefixed error when `expect_stamp` says the file changed since it was read — the guard
+/// that keeps autosave from throwing away an edit made outside Bennu.
 #[arbor_rpc::handler]
 fn bennu_write_file(_ctx: &BennuState, args: WriteFileArgs) -> Result<WriteResult, String> {
     let cfg = bennu_core::config::load();
@@ -138,6 +189,7 @@ fn bennu_write_file(_ctx: &BennuState, args: WriteFileArgs) -> Result<WriteResul
         &args.text,
         &cfg.default_encoding,
         override_label,
+        args.expect_stamp.as_deref(),
     )
     .map_err(Into::into)
 }

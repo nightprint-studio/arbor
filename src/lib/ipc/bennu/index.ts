@@ -19,7 +19,7 @@ import { bennu } from '../rpc';
 import type {
   ProjectInfo, TreeNode, ReadFileResult, CapabilitySet, CompletionItem, Diagnostic,
   BuildResult, ProjectValidationResult, RunHandle, WriteResult, ClassEntry, TodoItem, IndexStats,
-  FileDiagnostics,
+  FileDiagnostics, FileStamp,
 } from '$lib/types/bennu';
 
 /** Open a Java project folder: resolve the build model (modules / JDK) + capabilities.
@@ -41,12 +41,41 @@ export function readFile(root: string, file: string): Promise<ReadFileResult> {
   return bennu('bennu_read_file', { args: { root, file } });
 }
 
-/** Write `text` to `file` on disk, encoded with the project's resolved encoding
- *  (round-trips `bennu_read_file`; falls back to UTF-8 when a char can't be encoded).
- *  Returns the encoding actually used. Wire: `bennu_write_file` —
- *  `WriteFileArgs { root, file, text }`. */
-export function writeFile(root: string, file: string, text: string): Promise<WriteResult> {
-  return bennu('bennu_write_file', { args: { root, file, text } });
+/**
+ * Write `text` to `file` on disk, encoded with the project's resolved encoding
+ * (round-trips `bennu_read_file`; falls back to UTF-8 when a char can't be encoded).
+ * Returns the encoding actually used + the file's new stamp.
+ *
+ * `expectStamp` is the overwrite guard: pass the stamp the buffer was read from and the
+ * write is **refused** — with an {@link ERR_EXTERNALLY_MODIFIED}-prefixed error — when the
+ * file changed underneath. Omit it only for a file that was never read (a fresh one).
+ *
+ * Wire: `bennu_write_file` — `WriteFileArgs { root, file, text, expect_stamp? }`.
+ */
+export function writeFile(
+  root: string,
+  file: string,
+  text: string,
+  expectStamp?: string,
+): Promise<WriteResult> {
+  return bennu('bennu_write_file', { args: { root, file, text, expect_stamp: expectStamp ?? null } });
+}
+
+/** The prefix of the `bennu_write_file` error that means "the file changed on disk since
+ *  you read it". Mirrors `bennu_proto::ERR_EXTERNALLY_MODIFIED` — the error string is the
+ *  contract across the seam, so this is the one message a caller matches on. */
+export const ERR_EXTERNALLY_MODIFIED = 'bennu:externally-modified';
+
+/** True when `err` is the write-refused-because-the-file-changed error. */
+export function isExternallyModifiedError(err: unknown): boolean {
+  return String(err).includes(ERR_EXTERNALLY_MODIFIED);
+}
+
+/** Stat `files` and return each one's current on-disk stamp — the external-change poll for
+ *  the open tabs. Never rejects for a missing path (that comes back `exists: false`).
+ *  Wire: `bennu_file_stamps` — `FileStampsArgs { files }`. */
+export function fileStamps(files: string[]): Promise<FileStamp[]> {
+  return bennu('bennu_file_stamps', { args: { files } });
 }
 
 /** Move a `.java` file into the folder matching the `package` it declares (the filesystem

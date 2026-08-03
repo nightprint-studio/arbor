@@ -1,9 +1,32 @@
 <!-- Bennu docs — Projects, JDK & capabilities. -->
 <h1>Projects, JDK &amp; capabilities</h1>
 <p class="doc-lead">
-  A Bennu project is a Maven project: the folder holding the root <code>pom.xml</code>. Opening it
-  resolves the build model — the display name, the modules, the JDK language level — and scans for
-  the domain frameworks the code relies on.
+  A Bennu project is the folder holding a root manifest — a <strong>Maven</strong>
+  <code>pom.xml</code> or a <strong>Cargo</strong> <code>Cargo.toml</code>. Opening it resolves the
+  build model: the display name, the modules or workspace crates, and — for Maven — the JDK language
+  level and the domain frameworks the code relies on.
+</p>
+
+<h2>Maven and Cargo</h2>
+<p>
+  <strong>Maven</strong> projects get the whole of Bennu: the symbol index, completion, go-to
+  declaration, find usages, rename, capability detection, JDK resolution, validation, Generate, the
+  Structure / Maven / Dependencies / Services / Forms tool windows, and Tomcat hot-swap.
+</p>
+<p>
+  <strong>Cargo</strong> projects get the <strong>editor</strong>: the file tree, go-to file,
+  find in files, TODOs, the terminal, Rust and TOML highlighting, and
+  <strong>Check project</strong> — <code>cargo check</code> over the workspace, whose errors and
+  warnings land in the Problems panel and on the editor gutter like any other build. What is
+  <em>not</em> there is everything that would need a Rust symbol index: completion, navigation,
+  rename. Those need a language server, and until one is wired the actions are hidden rather than
+  offered and silent. The Java-only tool windows and the JDK footer are hidden too, so the window
+  never shows a panel that can only ever be empty.
+</p>
+<p>
+  A folder holding <em>both</em> manifests opens as the Maven project: it is the model that has more
+  to say. The footer names which kind is open — the JDK and capability count for Maven, the
+  toolchain and crate count for Cargo.
 </p>
 
 <h2>Workspaces</h2>
@@ -97,6 +120,10 @@
   Legacy projects often declare <code>Cp1252</code> in their <code>pom.xml</code>
   (<code>project.build.sourceEncoding</code>). Bennu decodes each file with the pom-declared
   encoding and shows which one won in the footer, so a mojibake surprise never slips in silently.
+</p>
+<p>
+  A <strong>Cargo</strong> project is always <code>UTF-8</code>: Rust source is UTF-8 by language
+  definition, so the encoding default configured for a legacy Java tree never reaches it.
 </p>
 
 <h2>Tomcat hot-swap</h2>

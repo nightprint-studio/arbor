@@ -1,11 +1,18 @@
 /**
- * Shared CodeMirror `hoverTooltip` source factory for Bennu editors.
+ * Shared CodeMirror hover machinery for Bennu editors.
  *
- * Both the Java descriptor (symbol signatures + `var`/`val` types via `bennu_hover`) and the JSP
- * descriptor (OGNL/form-field → action-property types via `bennu_action_property_hover`) render the
- * SAME hover card — a signature line, a muted `container · kind` meta line, and an optional Javadoc.
- * Only the async fetch differs, so the whole "find the word under the pointer, map to a byte offset,
- * build the DOM" flow lives here and each descriptor supplies just its fetch function.
+ * Every Bennu language renders the SAME hover card — a signature line, a muted
+ * `container · kind` meta line, and an optional doc body — so the card DOM lives here
+ * once ({@link hoverCardDom}).
+ *
+ * On top of it, {@link makeHoverSource} carries the flow the **backend-resolved**
+ * languages share: find the word under the pointer, map it to a UTF-8 byte offset, ask
+ * the BE. The Java descriptor (`bennu_hover`) and the JSP one
+ * (`bennu_action_property_hover`) differ only in which call they make.
+ *
+ * A language whose vocabulary is *closed* resolves locally instead and has no fetch to
+ * supply (`.dig`, whose whole vocabulary is a table) — it builds its own tooltip and
+ * reuses {@link hoverCardDom}, so the card stays one thing.
  */
 
 import type { EditorView, Tooltip } from '@codemirror/view';
@@ -17,6 +24,49 @@ import type { HoverInfo } from '$lib/ipc/bennu/nav';
 export type HoverFetch = (file: string, source: string, byteOffset: number) => Promise<HoverInfo | null>;
 
 const WORD = /[A-Za-z0-9_$]/;
+
+/** What the hover card renders. A view type, deliberately not {@link HoverInfo}: the card
+ *  is also built from a locally-resolved lookup (`.dig`), and tying it to the Java wire
+ *  shape would force that caller to fake wire fields. `HoverInfo` satisfies it. */
+export interface HoverCard {
+  /** The signature line — the card's title. */
+  signature: string;
+  /** Owning type / namespace, for the muted meta line. */
+  container?: string | null;
+  /** What kind of thing it is, for the muted meta line. */
+  kind?: string | null;
+  /** The explanation body, below the meta line. */
+  doc?: string | null;
+}
+
+/** Build the shared `.cm-hover-card` DOM (styled in the editor theme): the signature, an
+ *  optional muted `container · kind` line, and an optional doc body. `textContent`
+ *  throughout — a doc string is data from a project (or a Javadoc), never markup to run. */
+export function hoverCardDom(info: HoverCard): HTMLElement {
+  const dom = document.createElement('div');
+  dom.className = 'cm-hover-card';
+
+  const sig = document.createElement('div');
+  sig.className = 'cm-hc-title';
+  sig.textContent = info.signature;
+  dom.appendChild(sig);
+
+  const meta = [info.container, info.kind].filter((s): s is string => !!s);
+  if (meta.length) {
+    const m = document.createElement('div');
+    m.className = 'cm-hc-meta';
+    m.textContent = meta.join('  ·  ');
+    dom.appendChild(m);
+  }
+
+  if (info.doc) {
+    const d = document.createElement('div');
+    d.className = 'cm-hc-doc';
+    d.textContent = info.doc;
+    dom.appendChild(d);
+  }
+  return dom;
+}
 
 /** Build a `hoverTooltip` source that resolves the identifier under the pointer through `fetchInfo`
  *  and renders it as a `.cm-hover-card` (the shared card styled in the editor theme). Returns `null` gracefully
@@ -57,28 +107,7 @@ export function makeHoverSource(fetchInfo: HoverFetch) {
       end: to,
       above: true,
       create() {
-        const dom = document.createElement('div');
-        dom.className = 'cm-hover-card';
-        const sig = document.createElement('div');
-        sig.className = 'cm-hc-title';
-        sig.textContent = resolved.signature;
-        dom.appendChild(sig);
-        const meta: string[] = [];
-        if (resolved.container) meta.push(resolved.container);
-        if (resolved.kind) meta.push(resolved.kind);
-        if (meta.length) {
-          const m = document.createElement('div');
-          m.className = 'cm-hc-meta';
-          m.textContent = meta.join('  ·  ');
-          dom.appendChild(m);
-        }
-        if (resolved.doc) {
-          const d = document.createElement('div');
-          d.className = 'cm-hc-doc';
-          d.textContent = resolved.doc;
-          dom.appendChild(d);
-        }
-        return { dom };
+        return { dom: hoverCardDom(resolved) };
       },
     };
   };

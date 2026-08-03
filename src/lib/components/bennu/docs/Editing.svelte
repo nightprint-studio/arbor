@@ -4,7 +4,59 @@
   The editor is a fast, syntax-highlighted view of your project's files with a tab strip,
   a symbol structure, code folding, completions, project-wide search and keyboard-first navigation.
   Java gets full semantic highlighting; XML/JSP, <code>.properties</code>, YAML, JSON, Markdown,
-  HTML, CSS/SCSS, JavaScript and SQL are highlighted too, so the whole legacy stack reads cleanly.
+  HTML, CSS/SCSS, JavaScript, SQL, <strong>Rust</strong>, <strong>TOML</strong> and geode's
+  <strong><code>.dig</code></strong> are highlighted too, so the whole stack reads cleanly.
+</p>
+
+<h2>Languages</h2>
+<p>
+  Three tiers, in descending order of what they know about the file:
+</p>
+<ul>
+  <li><strong>Java</strong>, <strong>JSP</strong> and <strong><code>.dig</code></strong> parse with a
+    real grammar: semantic highlighting and code folding. Java and JSP add navigation and
+    index-backed completion; <code>.dig</code> completes from its own vocabulary (below).</li>
+  <li><strong>HTML</strong>, <strong>JSON</strong> and <strong>Markdown</strong> highlight and fold.</li>
+  <li><strong>Rust</strong>, <strong>TOML</strong>, <strong>RON</strong>, XML, YAML,
+    <code>.properties</code>, CSS/SCSS/LESS, JavaScript/TypeScript, shell and SQL highlight.
+    Colour only: navigation and completion in a Rust project want a language server, and until one
+    is wired those actions are hidden rather than offered and silent.</li>
+</ul>
+<p>
+  <strong>SQL</strong> is highlighted per <strong>dialect</strong>, because the engines disagree
+  about string quoting: Oracle's <code>q'[…]'</code> and PostgreSQL's <code>$$ … $$</code> are each
+  a broken string under the other's rules, and getting it wrong paints the rest of a file as one
+  literal. Nothing inside a <code>.sql</code> file says which engine it targets, so it is a setting —
+  <strong>Settings → Editor → SQL → Dialect</strong>. The default, <em>Portable</em>, uses the rules
+  valid on both.
+</p>
+
+<h2>geode <code>.dig</code> scripts</h2>
+<p>
+  A <code>.dig</code> file is a mole program for <strong>geode</strong> — indentation-delimited, with
+  a fixed set of host builtins. Bennu parses it with geode's own grammar, so highlighting and
+  <strong>folding</strong> (a <code>fn</code>, <code>if</code>, <code>while</code>, <code>for</code>,
+  <code>match</code> or <code>struct</code> body, and multi-line lists and maps) work from the syntax
+  tree, and <kbd>Ctrl</kbd> + <kbd>/</kbd> toggles a <code>#</code> comment.
+</p>
+<p>
+  Because the vocabulary is <strong>closed</strong>, completion and hover are answered locally — no
+  index, no waiting. <strong>Completion</strong> offers the builtins, the reserved words, the
+  namespaces, and the <code>fn</code> / <code>struct</code> / <code>let</code> names declared in the
+  file; after <code>Crystal.</code> / <code>Tool.</code> / <code>Tick.</code> / <code>Speed.</code> /
+  <code>Item.</code> it offers <strong>that namespace's members and nothing else</strong>. After a
+  dot on anything else it offers the <strong>collection methods</strong> — both list and map, each
+  labelled with its receiver, since without type inference both are true and picking one would be a
+  guess. An <code>import</code> line is not completed: a geode module is a library unlocked in the
+  shop, not a file on disk.
+</p>
+<p>
+  <strong>Hover</strong> shows the signature and the full explanation, including the examples —
+  the same help text the game shows, so <code>ripe_left()</code> explains the enormous-number answer
+  and <code>block_size()</code> warns that a value above 1 also means a wall. A qualified member is
+  looked up <em>with</em> its namespace, so <code>Speed.MAX_VALUE</code> and
+  <code>Tick.MAX_VALUE</code> never show each other's text. Over a name the language doesn't own,
+  hover stays silent.
 </p>
 
 <h2>Tabs</h2>
@@ -33,7 +85,9 @@
 <h2>Code folding</h2>
 <p>
   Braced blocks (classes, methods, blocks) and block comments fold from the gutter chevrons; the head
-  line stays visible. Folding is computed live from the syntax tree — no indexing needed.
+  line stays visible. In an indentation-delimited language like <code>.dig</code> the body folds from
+  the end of its header line instead, with the same effect. Folding is computed live from the syntax
+  tree — no indexing needed.
 </p>
 
 <h2>Rainbow brackets</h2>
@@ -83,9 +137,10 @@
 <h2>Completions</h2>
 <p>
   Typing <code>.</code> after an expression offers member completions; press
-  <kbd>Ctrl</kbd> + <kbd>Space</kbd> to request them explicitly. Completions come from the project
-  index and appear once it is warm. Edits re-index in the background as you type, so completion and
-  go-to-definition track your changes without reopening the project.
+  <kbd>Ctrl</kbd> + <kbd>Space</kbd> to request them explicitly. In Java, completions come from the
+  project index and appear once it is warm. Edits re-index in the background as you type, so
+  completion and go-to-definition track your changes without reopening the project. (In
+  <code>.dig</code> they are answered locally — see <em>geode <code>.dig</code> scripts</em> above.)
 </p>
 <p>
   Typing a <strong>capitalised name</strong> (not after a dot) offers <strong>type-name
@@ -106,10 +161,41 @@
   the choice persists across sessions.
 </p>
 
+<h2>Files changed outside Bennu</h2>
+<p>
+  Bennu watches the files you have open — another editor, a <code>git checkout</code>, a code
+  generator, a build — and never writes over a change it didn't make.
+</p>
+<ul>
+  <li>If your tab has <strong>no unsaved edits</strong>, the new content is picked up
+    <strong>silently</strong>. There is nothing to lose and nothing to decide.</li>
+  <li>If your tab <strong>does</strong> have unsaved edits, both versions matter, so Bennu stops
+    and asks: <strong>Keep my edits</strong> (overwrite what's on disk) or <strong>Reload from
+    disk</strong> (discard yours). <em>Not now</em> defers the choice.</li>
+</ul>
+<p>
+  While a file is waiting on that decision its tab is badged <strong>disk</strong> and
+  <strong>autosave is paused for it</strong> — so an unattended timer can't pick a side for you.
+  Nothing else is affected: every other tab keeps autosaving normally.
+</p>
+<p>
+  The check also guards the save itself, not just the warning: a write whose file moved underneath
+  is <strong>refused</strong> rather than applied, and the toast says so. That holds for
+  <kbd>Ctrl</kbd> + <kbd>S</kbd>, autosave, save-on-tab-switch and the multi-file writes a
+  <strong>Rename</strong> performs.
+</p>
+<p>
+  A file <strong>deleted</strong> under an edited buffer is not treated as a conflict to resolve:
+  your buffer is the last copy, so saving simply recreates the file.
+</p>
+
 <h2>Validation</h2>
 <p>
   Java files are checked <strong>as you type</strong>, without compiling. Errors show as red
-  squiggles, warnings as yellow, and everything is also listed in the Problems panel:
+  squiggles, warnings as yellow, and everything is also listed in the Problems panel. (Java, JSP and
+  config XML are the files an analyzer understands; a Rust, <code>.dig</code>, TOML or SQL buffer is
+  edited and highlighted but not checked — in a Cargo project the checker is
+  <strong>Check project</strong>, which runs <code>cargo check</code>.)
 </p>
 <p>
   <strong>Static imports are understood</strong>: a member you bring in with
@@ -219,7 +305,8 @@
 </p>
 <p>
   These checks normally run on the file you're editing, but you can run them over the <strong>whole
-  project</strong> at once: the <strong>Build</strong> button is a split-button — open its chevron and
+  project</strong> at once: in a Maven project the <strong>Build</strong> button is a split-button —
+  open its chevron and
   pick <em>Validate (no compile)</em> (or make it the default so <kbd>Ctrl</kbd> + <kbd>F9</kbd> runs
   it). It validates every <code>.java</code> file without invoking a compiler and reports timing
   statistics — total time, average per file and the slowest file (with a fast/normal/slow verdict) —
@@ -251,6 +338,34 @@
   validation by hand.
 </p>
 
+<h2>Generated members</h2>
+<p>
+  Plenty of Java members exist at compile time and nowhere in the source. Bennu models them, so
+  completion, hover, find-usages and the checks treat them like any declaration:
+</p>
+<ul>
+  <li><strong>Records</strong> — an accessor per component (<code>p.x()</code>, named after the
+    component, not <code>getX()</code>), the backing fields, the canonical constructor, and
+    <code>toString</code> / <code>equals</code> / <code>hashCode</code>. A member the record writes
+    itself always wins.</li>
+  <li><strong>Lombok</strong> — <code>@Getter</code> / <code>@Setter</code> / <code>@Data</code> /
+    <code>@Value</code> accessors (honouring <code>@Accessors(fluent)</code>),
+    <code>@With</code> copy-methods, the <code>@Slf4j</code> <code>log</code> field, the
+    constructor <code>@AllArgsConstructor</code> / <code>@RequiredArgsConstructor</code> generates
+    (including on an enum with valued constants), and <code>@UtilityClass</code> — which makes every
+    member <code>static</code> and the class <code>final</code>.</li>
+</ul>
+<p>
+  Lombok's members are honoured only when the file actually <strong>imports</strong> Lombok, since
+  that is what makes the annotation mean anything — your own <code>@Data</code> in another package
+  generates nothing. A record's members need no such gate: they come from the language.
+</p>
+<p>
+  One limitation, and it is deliberate: <strong>go-to on a generated member</strong> has nothing to
+  open, since there is no name in the source to jump to. Go-to on the backing <em>field</em> (or a
+  record's component) works.
+</p>
+
 <h2>Find</h2>
 <p>
   <kbd>Ctrl</kbd> + <kbd>F</kbd> searches the current file. <kbd>Ctrl</kbd> + <kbd>Shift</kbd> +
@@ -266,7 +381,8 @@
   <kbd>Ctrl</kbd> + <kbd>N</kbd> opens <strong>Go to Class</strong> and
   <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> opens <strong>Go to File</strong> — a filterable
   quick-open. Type part of a name, ↑/↓ to move, <kbd>Enter</kbd> to open; a class jumps straight to
-  its declaration line. A word selected in the editor pre-fills the filter.
+  its declaration line. A word selected in the editor pre-fills the filter. Go-to-File works in any
+  project; Go-to-Class needs the Java symbol index, so it isn't offered in a Cargo one.
 </p>
 
 <h2>Mojibake check</h2>
@@ -528,5 +644,7 @@
   with <kbd>Alt</kbd> + <kbd>1</kbd> / <kbd>2</kbd> (Project · Structure), <kbd>Alt</kbd> +
   <kbd>0</kbd> / <kbd>6</kbd> / <kbd>7</kbd> / <kbd>F12</kbd> (Build · Problems · TODO · Terminal), and
   <kbd>Alt</kbd> + <kbd>8</kbd> / <kbd>9</kbd> (Maven · Services). Build the project with
-  <kbd>Ctrl</kbd> + <kbd>F9</kbd> and run it with <kbd>Shift</kbd> + <kbd>F10</kbd>.
+  <kbd>Ctrl</kbd> + <kbd>F9</kbd> and run it with <kbd>Shift</kbd> + <kbd>F10</kbd>. In a Cargo
+  project the Java-only tools and Run are hidden, and <kbd>Ctrl</kbd> + <kbd>F9</kbd> runs
+  <code>cargo check</code>.
 </div>

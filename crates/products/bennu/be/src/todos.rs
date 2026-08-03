@@ -19,8 +19,10 @@ use serde::Deserialize;
 /// The marker words recognised (case-sensitive), in the FE's display order.
 const MARKERS: [&str; 4] = ["TODO", "FIXME", "XXX", "HACK"];
 
-/// File extensions scanned for TODO markers.
-const SCAN_EXTS: [&str; 4] = ["java", "xml", "jsp", "properties"];
+/// File extensions scanned for TODO markers. `rs` / `toml` / `dig` are here so the TODO
+/// tool isn't empty on a Cargo project — a panel that shows nothing reads as "no TODOs",
+/// not as "this file type isn't scanned".
+const SCAN_EXTS: [&str; 7] = ["java", "xml", "jsp", "properties", "rs", "toml", "dig"];
 
 /// Directory names never descended into during the scan.
 const SKIP_DIRS: [&str; 4] = ["target", ".git", "node_modules", ".idea"];

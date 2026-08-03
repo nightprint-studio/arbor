@@ -15,6 +15,10 @@ export interface BennuConfig {
   default_encoding: string;
   /** Editor indentation width in spaces. */
   indent_width: number;
+  /** Which SQL dialect `.sql` buffers are highlighted as — `'oracle'` / `'postgres'` /
+   *  `'portable'` (default). Highlighting only: a `.sql` file in a Java project carries nothing
+   *  that says which engine it targets, and the two disagree about string quoting. */
+  sql_dialect: string;
   /** The build the split-button runs by default (and on Ctrl+F9): `'mvn'` (Maven compile) or
    *  `'validate'` (whole-project validation without compiling). */
   preferred_build_type: string;

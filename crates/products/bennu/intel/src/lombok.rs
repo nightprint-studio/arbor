@@ -66,6 +66,25 @@ pub fn synthesize(
     // `this`. Configurable at class level or per field (the field's own `@Accessors` overrides).
     let cls_accessors = accessors_config(&td.annotations, imports);
 
+    // `@UtilityClass` generates a `private` constructor (one that throws) so the class can't be
+    // instantiated. The rest of what it does — making every member `static` and the class `final` —
+    // is a rewrite of existing members, applied by the caller (see [`is_utility_class`]).
+    if is_utility_class(td, imports) && !existing_methods.contains("<init>") {
+        methods.push(Member {
+            name: "<init>".to_string(),
+            kind: MemberKind::Method,
+            return_type: type_text_to_ref("void", imports, project_types, is_project),
+            params: Vec::new(),
+            is_static: false,
+            is_abstract: false,
+            is_default: false,
+            is_final: false,
+            visibility: Visibility::Private,
+            raw_signature: format!("private {}()", td.name),
+            throws: Vec::new(),
+        });
+    }
+
     for f in &td.fields {
         // Lombok does not generate accessors for static fields.
         if f.is_static {
@@ -238,6 +257,28 @@ fn has_lombok(annotations: &[Annotation], imports: &[Import], wanted: &[&str]) -
     annotations
         .iter()
         .any(|a| wanted.contains(&a.name.as_str()) && lombok_imported(&a.name, imports))
+}
+
+/// Whether `td` is a Lombok **`@UtilityClass`**.
+///
+/// Unlike every other annotation this module handles, `@UtilityClass` mostly *rewrites* what is
+/// already there rather than adding to it (JLS-visible effects, per Lombok's contract):
+///
+/// * every method becomes `static`,
+/// * every field becomes `static`,
+/// * every nested type becomes `static`,
+/// * the class becomes `final`,
+/// * a `private` constructor is generated (one that throws, so nobody instantiates it).
+///
+/// Only the constructor is a new member, so [`synthesize`] can't express the rest — the promotion
+/// is applied by the member builder in `java_index`, which is what owns the `is_static` / `is_final`
+/// mapping. Exported for that caller.
+///
+/// Gated on the import like everything else here: somebody's own `@UtilityClass` in another package
+/// generates nothing, and inventing `static` where the compiler didn't would turn a correct
+/// instance call into a false error — the exact mirror of the bug this fixes.
+pub fn is_utility_class(td: &TypeDecl, imports: &[Import]) -> bool {
+    file_imports_lombok(imports) && has_lombok(&td.annotations, imports, &["UtilityClass"])
 }
 
 /// Lombok `@Accessors` naming config that shapes the synthetic getters/setters.

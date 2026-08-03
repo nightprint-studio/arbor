@@ -498,12 +498,33 @@ fn build_class_members(
     methods.extend(synth.methods);
     fields.extend(synth.fields);
 
+    // `@UtilityClass` rewrites what is already declared rather than adding to it: every method and
+    // field becomes `static` and the class becomes `final`. It has to be applied HERE, after both
+    // the parsed and the synthesized members exist, because it is a property of the whole type —
+    // and this is the function that owns the `is_static` / flags mapping.
+    //
+    // Without it, `MyUtils.helper()` on a `@UtilityClass` resolved to an *instance* method and was
+    // reported as a non-static member referenced from a static context: correct code, flagged.
+    let utility = crate::lombok::is_utility_class(td, imports);
+    if utility {
+        for m in &mut methods {
+            // The generated constructor is the one member that stays an instance member — a `static`
+            // constructor is not a thing, and marking it one would make `new MyUtils()` resolve.
+            if m.name != "<init>" {
+                m.is_static = true;
+            }
+        }
+        for f in &mut fields {
+            f.is_static = true;
+        }
+    }
+
     ClassMembers {
         superclass,
         interfaces,
         methods,
         fields,
-        flags: class_flags(td),
+        flags: class_flags(td, utility),
         type_params: td.type_params.clone(),
     }
 }
@@ -512,12 +533,14 @@ fn build_class_members(
 /// read — the project-source counterpart to the bytecode-decoded flags. Interfaces + annotation
 /// types are `is_interface` (and implicitly abstract); enums / records set their own bit (the
 /// checks treat those as un-extendable directly, so no need to also force `is_final`).
-fn class_flags(td: &TypeDecl) -> ClassFlags {
+/// `is_utility` = the type is a Lombok `@UtilityClass`, which makes it `final` (see
+/// [`crate::lombok::is_utility_class`]) even though no `final` modifier is written.
+fn class_flags(td: &TypeDecl, is_utility: bool) -> ClassFlags {
     let is_interface = matches!(td.kind, TypeKind::Interface | TypeKind::Annotation);
     ClassFlags {
         is_interface,
         is_abstract: is_interface || td.is_abstract,
-        is_final: td.is_final,
+        is_final: td.is_final || is_utility,
         is_enum: matches!(td.kind, TypeKind::Enum),
         is_annotation: matches!(td.kind, TypeKind::Annotation),
         is_record: matches!(td.kind, TypeKind::Record),

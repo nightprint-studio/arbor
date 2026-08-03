@@ -36,6 +36,14 @@ pub struct BennuConfig {
     pub default_encoding: String,
     /// Editor indentation width in spaces (the whitespace normalizer / display).
     pub indent_width: u32,
+    /// Which SQL dialect `.sql` buffers are **highlighted** as: `"oracle"`,
+    /// `"postgres"`, or `"portable"` (the default). A setting and not a detection,
+    /// because a `.sql` file in a Java project's resources carries nothing that says
+    /// which engine it targets, and guessing wrong is visible: Oracle's `q'[…]'` and
+    /// PostgreSQL's `$$ … $$` are each a broken string under the other's rules.
+    /// `"portable"` uses the rules valid on both — the honest answer for a file
+    /// nobody has classified. Empty is treated as `"portable"`.
+    pub sql_dialect: String,
     /// The build the split-button runs by default (and on Ctrl+F9): `"mvn"` (Maven compile) or
     /// `"validate"` (whole-project validation without compiling). Empty is treated as `"mvn"`.
     pub preferred_build_type: String,
@@ -84,6 +92,7 @@ impl Default for BennuConfig {
         Self {
             default_encoding: "UTF-8".to_string(),
             indent_width: 4,
+            sql_dialect: "portable".to_string(),
             preferred_build_type: "mvn".to_string(),
             validate_on_open: true,
             autosave: true,

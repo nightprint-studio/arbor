@@ -12,6 +12,7 @@
 //!     switch's set (and vice-versa). Each switch is checked against itself alone.
 //!   * `default` is skipped (it is not a constant label; duplicate `default` is a different error we
 //!     don't touch).
+//!   * a **pattern** label is skipped entirely — see below.
 //!   * two labels are a duplicate only when their trimmed text is byte-for-byte equal. Distinct texts
 //!     are never flagged — so `case A` vs `case B`, or `Foo.A` vs `Bar.A`, stay silent.
 //!
@@ -19,6 +20,27 @@
 //! denote the same constant (the compiler would reject them too). The converse — two spellings of the
 //! same constant (`A` vs `Cardinal.A`) — we simply don't flag, which only under-reports, never
 //! over-reports. We flag the SECOND occurrence (the later label is the redundant one).
+//!
+//! ## Pattern labels are not constants
+//!
+//! Java 21's `switch` takes **patterns**, optionally with a `when` guard:
+//!
+//! ```text
+//! case Pair<Boolean, Boolean> p when p.getLeft()  -> "tsd";
+//! case Pair<Boolean, Boolean> p when p.getRight() -> "pdf/a";
+//! ```
+//!
+//! Those two arms share a pattern and differ only in their guard, and they are perfectly legal —
+//! but by source text the patterns are identical, so a text comparison called the second one a
+//! duplicate. Worse, the grammar makes a `guard` a *sibling* of the pattern under `switch_label`,
+//! so the guard expression was itself being collected as if it were a case constant.
+//!
+//! The rule this check implements is about **constants**, and a pattern is not one. What Java
+//! forbids between patterns is *dominance* — an earlier pattern that already matches everything a
+//! later one could — and that is a different analysis: it needs the subtype relation, and an
+//! unguarded pattern dominates where a guarded one dominates nothing. Until that check exists,
+//! pattern labels are left alone: silence on a rule we don't implement, rather than a wrong answer
+//! borrowed from one we do.
 
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
@@ -68,6 +90,13 @@ fn check_switch<'t>(switch: Node<'t>, bytes: &[u8], out: &mut Vec<Diagnostic>) {
             if label_is_default(label, bytes) {
                 continue;
             }
+            // A **pattern** label (`case Foo f`, `case Foo f when …`, `case Point(int x, int y)`)
+            // is not a constant label — see the module doc. Skip the whole label: its pattern is
+            // not comparable by text, and its `guard` is a sibling that must never be mistaken
+            // for a case constant.
+            if label_is_pattern(label) {
+                continue;
+            }
             // A `case` label lists one or more constants as its NAMED children (`case A` → one;
             // `case A, B` → two). Treat each constant separately; compare by trimmed text.
             let mut lc = label.walk();
@@ -91,6 +120,23 @@ fn check_switch<'t>(switch: Node<'t>, bytes: &[u8], out: &mut Vec<Diagnostic>) {
             }
         }
     }
+}
+
+/// Whether a `switch_label` is a **pattern** label rather than a constant one.
+///
+/// Per tree-sitter-java, a `switch_label`'s named children are one of: an `expression` (the constant
+/// forms), a `pattern` (a `type_pattern` or a `record_pattern`), or a `guard` (the `when` clause,
+/// which is a sibling of the pattern, not nested inside it). Either of the latter two makes this a
+/// pattern label — the guard is checked too so a grammar that ever emitted one without a sibling
+/// pattern still can't leak a guard expression into the constant set.
+fn label_is_pattern(label: Node) -> bool {
+    let mut c = label.walk();
+    for ch in label.named_children(&mut c) {
+        if matches!(ch.kind(), "pattern" | "type_pattern" | "record_pattern" | "guard") {
+            return true;
+        }
+    }
+    false
 }
 
 /// Whether a `switch_label` is the `default` clause. The `default` keyword is an anonymous (unnamed)
@@ -185,6 +231,62 @@ mod tests {
     fn duplicate_default_is_not_flagged() {
         // Two `default`s is a different error; this check never touches `default`.
         assert!(dups("switch (i) { case 1: break; default: break; } return \"\";").is_empty());
+    }
+
+    // ── Java 21 pattern labels (never a duplicate) ───────────────────────────────
+
+    /// The reported bug: two arms sharing a type pattern and differing only in their `when` guard
+    /// are legal Java, and were reported as a duplicate case label.
+    #[test]
+    fn same_pattern_with_different_guards_is_not_a_duplicate() {
+        let d = dups(
+            "return switch (Pair.of(a, b)) { \
+               case Pair<Boolean, Boolean> p when p.getLeft() -> \"tsd\"; \
+               case Pair<Boolean, Boolean> p when p.getRight() -> \"pdf/a\"; \
+               default -> \"pdf\"; \
+             };",
+        );
+        assert!(d.is_empty(), "a guard distinguishes the arms: {d:?}");
+    }
+
+    /// Even with no guard at all, a repeated pattern is a *dominance* question this check does not
+    /// answer — it must stay silent rather than borrow the constant rule's verdict.
+    #[test]
+    fn repeated_patterns_without_guards_are_left_alone() {
+        let d = dups(
+            "return switch (o) { case String s -> \"a\"; case String s -> \"b\"; default -> \"c\"; };",
+        );
+        assert!(d.is_empty(), "pattern dominance is not this check's rule: {d:?}");
+    }
+
+    /// A record deconstruction pattern is a pattern too.
+    #[test]
+    fn record_patterns_are_left_alone() {
+        let d = dups(
+            "return switch (o) { case Point(int x, int y) -> \"a\"; \
+               case Point(int x, int y) -> \"b\"; default -> \"c\"; };",
+        );
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    /// The guard expression must never be collected as a case constant — two arms guarded on the
+    /// same expression but matching different types are legal, and the shared guard text used to
+    /// look like a repeated label.
+    #[test]
+    fn a_shared_guard_expression_is_not_a_case_constant() {
+        let d = dups(
+            "return switch (o) { case String s when flag -> \"a\"; \
+               case Integer i when flag -> \"b\"; default -> \"c\"; };",
+        );
+        assert!(d.is_empty(), "a guard is not a label constant: {d:?}");
+    }
+
+    /// And a constant switch in the same file keeps working — the skip is scoped to pattern labels,
+    /// not to switches that happen to contain one.
+    #[test]
+    fn constant_labels_next_to_pattern_labels_still_report() {
+        let d = dups("switch (i) { case 1: break; case 1: break; } return \"\";");
+        assert_eq!(d.len(), 1, "{d:?}");
     }
 
     #[test]

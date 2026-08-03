@@ -17,7 +17,7 @@
    *   • BOTTOM dock       — Build · Problems · TODO · Forms · Terminal, tabbed.
    * Find-in-project is a modal (Ctrl+Shift+F / palette), not a rail tool.
    */
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import {
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info,
@@ -61,6 +61,7 @@
   import BennuValidationModal from './BennuValidationModal.svelte';
   import BennuWorkspaceManagerModal from './BennuWorkspaceManagerModal.svelte';
   import BennuIntentionsOverlay from './BennuIntentionsOverlay.svelte';
+  import BennuExternalChangeModal from './BennuExternalChangeModal.svelte';
   import BennuRunConfigModal from './BennuRunConfigModal.svelte';
   import BennuRenameModal from './BennuRenameModal.svelte';
   import BennuUsagesPopover from './BennuUsagesPopover.svelte';
@@ -102,6 +103,30 @@
     // setting; saves whatever has unsaved edits. `blur` on the window fires when you switch apps.
     const onWindowBlur = () => { if (bennuSettingsStore.autosave) void projectStore.saveAllDirty(); };
     window.addEventListener('blur', onWindowBlur);
+
+    // ── External changes ──────────────────────────────────────────────────────────
+    // Notice files rewritten outside Bennu — another editor, a `git checkout`, a generator.
+    // A clean buffer adopts the new content silently; a dirty one raises a conflict instead
+    // of being overwritten by autosave (see `checkExternalChanges`).
+    //
+    // On `focus` first, because coming back to the window is when an outside edit is most
+    // likely to have just happened — and it must land BEFORE any editing restarts the
+    // autosave timer. The tick covers the case focus can't: Bennu owns a terminal, so a
+    // `git checkout` can change files while the window never loses focus. It only runs while
+    // focused, so a backgrounded window costs nothing.
+    const EXTERNAL_POLL_MS = 2000;
+    const pollExternal = () => { void projectStore.checkExternalChanges(); };
+    let externalTimer: ReturnType<typeof setInterval> | undefined;
+    const startPolling = () => {
+      if (externalTimer === undefined) externalTimer = setInterval(pollExternal, EXTERNAL_POLL_MS);
+    };
+    const stopPolling = () => {
+      if (externalTimer !== undefined) { clearInterval(externalTimer); externalTimer = undefined; }
+    };
+    const onWindowFocus = () => { pollExternal(); startPolling(); };
+    window.addEventListener('focus', onWindowFocus);
+    window.addEventListener('blur', stopPolling);
+    if (document.hasFocus()) onWindowFocus();
     // Reopen the last workspace (its projects + tabs) where the user left off — no-op on a fresh
     // install / when the BE is absent. Driven by the workspace store (owns the named-workspace
     // set). Kicks off the index build via the effect below.
@@ -121,6 +146,9 @@
     requestAnimationFrame(() => requestAnimationFrame(() => void signalWindowReady().catch(() => {})));
     return () => {
       window.removeEventListener('blur', onWindowBlur);
+      window.removeEventListener('focus', onWindowFocus);
+      window.removeEventListener('blur', stopPolling);
+      stopPolling();
       detachRun?.(); detachIndex?.(); detachSpell?.(); detachDecompiled?.(); bennuIndexStore.reset();
     };
   });
@@ -143,13 +171,18 @@
   // parked before this window existed, then on every later request.
   onMount(() => onOpenIntent('bennu', (path) => { void projectStore.openProject(path); }));
 
-  // When a real (non-demo) project opens, kick off the indexing status + job. The BE
+  // When a real (non-demo) **Java** project opens, kick off the indexing status + job. The BE
   // rebuilds the index on every open, so this fires each time the root changes.
+  //
+  // Not for a Cargo project: `bennu_open_project` returns without starting an index there (no
+  // Java sources, no classpath), so arming the status here put up an "Indexing project" job
+  // that watched a build nobody had started — visible work with nothing behind it, on every
+  // single open. The index is a Java-model thing; Rust needs a language server, not this.
   let lastIndexedRoot: string | null = null;
   $effect(() => {
     const root = projectStore.project?.root ?? null;
-    const demo = projectStore.isDemo;
-    if (root && !demo && root !== lastIndexedRoot) {
+    if (!root || projectStore.isDemo || projectStore.isCargo) return;
+    if (root !== lastIndexedRoot) {
       lastIndexedRoot = root;
       bennuIndexStore.onProjectOpen(root);
     }
@@ -158,11 +191,16 @@
   // Project-level diagnostics (JDK status + wrong-encoding files) for the titlebar badge +
   // the Problems panel. Re-fetch when the project changes or the index (re)builds — the
   // encoding report lands after the project phase, `buildRevision` catches each phase.
+  // Java-only for the same reason: a Cargo project has no JDK to report on, and its encoding
+  // is UTF-8 by language definition.
   $effect(() => {
     const root = projectStore.project?.root ?? null;
     void bennuIndexStore.buildRevision; // re-run as the (re)build progresses
-    if (root && !projectStore.isDemo) void bennuDiagnosticsStore.refresh(root);
-    else bennuDiagnosticsStore.reset();
+    if (root && !projectStore.isDemo && !projectStore.isCargo) {
+      void bennuDiagnosticsStore.refresh(root);
+    } else {
+      bennuDiagnosticsStore.reset();
+    }
   });
 
   // ── Build / Run triggers (mirror the titlebar; shared by keybindings + palette) ─
@@ -236,10 +274,23 @@
   }
 
   // ── Left/right rail items ────────────────────────────────────────────────────
+  //
+  // Java-only tools are absent — not disabled — on a Cargo project. Structure, Maven,
+  // Dependencies, Services and Forms are each backed by the Java symbol index or by the
+  // Struts/Spring config graph, and neither exists for a Rust root (see
+  // `bennu_open_project`): a rail icon that always opens an empty panel teaches the wrong
+  // thing about the tool. Project, Build, Problems, TODO and Terminal all mean something
+  // for both and stay.
+  const javaTools = $derived(!projectStore.isCargo);
+
   const leftTop = $derived<ActivityRailItem[]>([
     { id: 'project',   tooltip: 'Project',   shortcut: 'Alt+1', icon: FolderTree, active: bennuUiStore.leftPanel === 'project',   onclick: () => bennuUiStore.toggleLeft('project') },
-    { id: 'structure', tooltip: 'Structure', shortcut: 'Alt+2', icon: ListTree,   active: bennuUiStore.leftPanel === 'structure', onclick: () => bennuUiStore.toggleLeft('structure') },
-    { id: 'dependencies', tooltip: 'Dependencies', shortcut: 'Alt+N', icon: Library, active: bennuUiStore.leftPanel === 'dependencies', onclick: () => bennuUiStore.toggleLeft('dependencies') },
+    ...(javaTools
+      ? [
+          { id: 'structure', tooltip: 'Structure', shortcut: 'Alt+2', icon: ListTree,   active: bennuUiStore.leftPanel === 'structure', onclick: () => bennuUiStore.toggleLeft('structure') },
+          { id: 'dependencies', tooltip: 'Dependencies', shortcut: 'Alt+N', icon: Library, active: bennuUiStore.leftPanel === 'dependencies', onclick: () => bennuUiStore.toggleLeft('dependencies') },
+        ]
+      : []),
   ]);
   // Left rail bottom cluster: only the bottom-dock toggles (Terminal, Problems).
   // Docs/Settings moved to the titlebar's right cluster (IntelliJ/Corvus layout).
@@ -251,15 +302,37 @@
     { id: 'todos',    tooltip: 'TODO', shortcut: 'Alt+7',       icon: ListTodo,       active: bennuUiStore.bottomPanel === 'todos',    onclick: () => bennuUiStore.toggleBottom('todos') },
     { id: 'terminal', tooltip: 'Terminal', shortcut: 'Alt+F12', icon: TerminalSquare, active: bennuUiStore.bottomPanel === 'terminal', onclick: () => bennuUiStore.toggleBottom('terminal') },
   ]);
-  const rightTop = $derived<ActivityRailItem[]>([
-    { id: 'maven', tooltip: 'Maven', shortcut: 'Alt+8', icon: Hammer, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') },
-  ]);
+  const rightTop = $derived<ActivityRailItem[]>(
+    javaTools
+      ? [{ id: 'maven', tooltip: 'Maven', shortcut: 'Alt+8', icon: Hammer, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') }]
+      : [],
+  );
   // Forms drives the BOTTOM dock (wide, horizontal data), not a side panel — its toggle sits
   // in the right rail's bottom cluster; the active state mirrors the dock's open tab.
-  const rightBottom = $derived<ActivityRailItem[]>([
-    { id: 'forms', tooltip: 'Forms', shortcut: 'Alt+3', icon: TextCursorInput, active: bennuUiStore.bottomPanel === 'forms', onclick: () => bennuUiStore.toggleBottom('forms') },
-    { id: 'services', tooltip: 'Services', shortcut: 'Alt+9', icon: Server, active: bennuUiStore.rightPanel === 'services', onclick: () => bennuUiStore.toggleRight('services') },
-  ]);
+  const rightBottom = $derived<ActivityRailItem[]>(
+    javaTools
+      ? [
+          { id: 'forms', tooltip: 'Forms', shortcut: 'Alt+3', icon: TextCursorInput, active: bennuUiStore.bottomPanel === 'forms', onclick: () => bennuUiStore.toggleBottom('forms') },
+          { id: 'services', tooltip: 'Services', shortcut: 'Alt+9', icon: Server, active: bennuUiStore.rightPanel === 'services', onclick: () => bennuUiStore.toggleRight('services') },
+        ]
+      : [],
+  );
+
+  // Switching to a Cargo project takes the Java-only rail icons away; a panel left open
+  // from the previous project would then have no toggle anywhere. Close those.
+  $effect(() => {
+    if (javaTools) return;
+    // `untrack`: the call reads the very panel state it writes, and an effect that depends
+    // on what it assigns is the shape that loops (CLAUDE.md · "Runes — trap da evitare").
+    // The only dependency that should re-run this is the project kind, read above.
+    untrack(() =>
+      bennuUiStore.dropUnavailablePanels({
+        left: ['project'],
+        right: [],
+        bottom: ['problems', 'terminal', 'build', 'todos'],
+      }),
+    );
+  });
 
   const showLeft   = $derived(bennuUiStore.leftPanel !== null);
   const showRight  = $derived(bennuUiStore.rightPanel !== null);
@@ -326,7 +399,9 @@
       { id: 'gotodef', title: 'Go to declaration', icon: 'target', shortcut: 'Ctrl+B',
         action: () => run(() => editor?.goToDefinition()), when: canNav },
       { id: 'gotoclass', title: 'Go to class…', icon: 'box', shortcut: 'Ctrl+N',
-        action: () => run(() => bennuUiStore.openNav('class', editor?.getSelectedText() ?? '')), when: !!projectStore.project },
+        action: () => run(() => bennuUiStore.openNav('class', editor?.getSelectedText() ?? '')),
+        // Classes come from the Java symbol index, which a Cargo project doesn't build.
+        when: !!projectStore.project && javaTools },
       { id: 'gotofile', title: 'Go to file…', icon: 'file', shortcut: 'Ctrl+Shift+N',
         action: () => run(() => bennuUiStore.openNav('file', editor?.getSelectedText() ?? '')), when: !!projectStore.project },
       { id: 'filestructure', title: 'File structure…', icon: 'list-tree', shortcut: 'Ctrl+F12',
@@ -375,28 +450,32 @@
     ];
     const viewItems = [
       { id: 'project',   title: 'Toggle Project',   icon: 'folder-tree', shortcut: 'Alt+1', action: () => run(() => bennuUiStore.toggleLeft('project')), when: true },
-      { id: 'structure', title: 'Toggle Structure', icon: 'list-tree',   shortcut: 'Alt+2', action: () => run(() => bennuUiStore.toggleLeft('structure')), when: true },
-      { id: 'forms',     title: 'Toggle Forms',     icon: 'list',        shortcut: 'Alt+3', action: () => run(() => bennuUiStore.toggleBottom('forms')), when: true },
-      { id: 'dependencies', title: 'Dependencies',  icon: 'library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: true },
+      // The Java-only tools are gated on `javaTools`, exactly like their rail icons — a
+      // palette entry that opens a permanently-empty panel is the same lie in a different
+      // place.
+      { id: 'structure', title: 'Toggle Structure', icon: 'list-tree',   shortcut: 'Alt+2', action: () => run(() => bennuUiStore.toggleLeft('structure')), when: javaTools },
+      { id: 'forms',     title: 'Toggle Forms',     icon: 'list',        shortcut: 'Alt+3', action: () => run(() => bennuUiStore.toggleBottom('forms')), when: javaTools },
+      { id: 'dependencies', title: 'Dependencies',  icon: 'library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: javaTools },
       { id: 'problems',  title: 'Toggle Problems',  icon: 'alert',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
       { id: 'todos',     title: 'Toggle TODO',      icon: 'todo',        shortcut: 'Alt+7', action: () => run(() => bennuUiStore.toggleBottom('todos')), when: true },
       { id: 'terminal',  title: 'Toggle Terminal',  icon: 'terminal',    shortcut: 'Alt+F12', action: () => run(() => bennuUiStore.toggleBottom('terminal')), when: true },
-      { id: 'maven',     title: 'Toggle Maven',     icon: 'hammer',      shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: true },
-      { id: 'services',  title: 'Toggle Services',  icon: 'server',      shortcut: 'Alt+9', action: () => run(() => bennuUiStore.toggleRight('services')), when: true },
+      { id: 'maven',     title: 'Toggle Maven',     icon: 'hammer',      shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: javaTools },
+      { id: 'services',  title: 'Toggle Services',  icon: 'server',      shortcut: 'Alt+9', action: () => run(() => bennuUiStore.toggleRight('services')), when: javaTools },
     ];
+    const idle = !!projectStore.project && !bennuRunStore.active;
     const runItems = [
-      { id: 'build', title: 'Build project', icon: 'hammer', shortcut: 'Ctrl+F9',
-        action: () => run(triggerBuild), when: !!projectStore.project && !bennuRunStore.active },
+      { id: 'build', title: javaTools ? 'Build project' : 'Check project (cargo check)', icon: 'hammer', shortcut: 'Ctrl+F9',
+        action: () => run(triggerBuild), when: idle },
       { id: 'validate', title: 'Validate project (no compile)', icon: 'list-checks',
-        action: () => run(triggerValidate), when: !!projectStore.project && !bennuRunStore.active },
+        action: () => run(triggerValidate), when: idle && javaTools },
       { id: 'run', title: 'Run', icon: 'play', shortcut: 'Shift+F10',
-        action: () => run(triggerRun), when: !!projectStore.project && !bennuRunStore.active },
+        action: () => run(triggerRun), when: idle && javaTools },
       { id: 'stoprun', title: 'Stop', icon: 'hammer',
         action: () => run(() => void bennuRunStore.stop()), when: bennuRunStore.running },
       { id: 'runcfg', title: 'Edit run configuration…', icon: 'sliders',
-        action: () => run(() => bennuUiStore.openRunConfig()), when: !!projectStore.project },
+        action: () => run(() => bennuUiStore.openRunConfig()), when: !!projectStore.project && javaTools },
       { id: 'hotswap-all', title: 'Deploy all JSPs to Tomcat', icon: 'server',
-        action: () => run(() => void deployToTomcat(true)), when: !!projectStore.project },
+        action: () => run(() => void deployToTomcat(true)), when: !!projectStore.project && javaTools },
     ];
     // Switch project — one entry per other project in the ACTIVE workspace (keyboard-first).
     const projectSwitchItems = projectStore.hasWorkspace
@@ -423,11 +502,11 @@
       { id: 'newworkspace', title: 'New workspace…', icon: 'folder-tree',
         action: () => run(async () => { await workspacesStore.create('New workspace'); bennuUiStore.openWorkspaceManager(); }), when: true },
       { id: 'projectcfg', title: 'Project Configuration…', icon: 'sliders', action: () => run(() => bennuUiStore.openProjectConfig()), when: !!projectStore.project },
-      { id: 'tomcatcfg', title: 'Tomcat hot-swap…', icon: 'server', action: () => run(() => bennuUiStore.openTomcatConfig()), when: !!projectStore.project },
-      { id: 'indexinspector', title: 'Index inspector…', icon: 'box', action: () => run(() => bennuUiStore.openIndexInspector()), when: !!projectStore.project },
+      { id: 'tomcatcfg', title: 'Tomcat hot-swap…', icon: 'server', action: () => run(() => bennuUiStore.openTomcatConfig()), when: !!projectStore.project && javaTools },
+      { id: 'indexinspector', title: 'Index inspector…', icon: 'box', action: () => run(() => bennuUiStore.openIndexInspector()), when: !!projectStore.project && javaTools },
       { id: 'reindex', title: 'Rebuild index', icon: 'refresh-cw',
         action: () => run(() => { const r = projectStore.project?.root; if (r) void bennuIndexStore.rebuild(r); }),
-        when: !!projectStore.project && !bennuIndexStore.indexing },
+        when: !!projectStore.project && javaTools && !bennuIndexStore.indexing },
       { id: 'docs', title: 'Documentation', icon: 'command', shortcut: 'F1', action: () => run(() => bennuUiStore.toggleDocs()), when: true },
       { id: 'settings', title: 'Settings', icon: 'command', shortcut: 'Ctrl+,', action: () => run(() => bennuUiStore.openSettings()), when: true },
       { id: 'about', title: 'About Bennu', icon: 'info', action: () => run(() => bennuUiStore.openAbout()), when: true },
@@ -462,6 +541,9 @@
     // Go to Class (Ctrl+N) / Go to File (Ctrl+Shift+N) — the quick-open navigator.
     if (mod && !e.altKey && e.key.toLowerCase() === 'n') {
       if (!projectStore.project) return;
+      // Go-to-File works anywhere; Go-to-Class reads the Java symbol index, which a Cargo
+      // project doesn't build — the modal would list nothing, forever.
+      if (!e.shiftKey && !javaTools) return;
       e.preventDefault();
       // Seed the navigator from the editor selection (IntelliJ) — a highlighted word.
       bennuUiStore.openNav(e.shiftKey ? 'file' : 'class', editor?.getSelectedText() ?? '');
@@ -485,12 +567,13 @@
       e.preventDefault(); triggerBuild(); return;
     }
     if (!mod && e.shiftKey && !e.altKey && e.key === 'F10') {
-      if (!projectStore.project || bennuRunStore.active) return;
+      // Run launches a run configuration — a Java main class. A Cargo project has none.
+      if (!projectStore.project || !javaTools || bennuRunStore.active) return;
       e.preventDefault(); triggerRun(); return;
     }
     // Deploy current JSP to Tomcat (Ctrl+Shift+F10) — the JSP hot-swap.
     if (mod && e.shiftKey && !e.altKey && e.key === 'F10') {
-      if (!projectStore.project) return;
+      if (!projectStore.project || !javaTools) return;
       e.preventDefault(); void deployToTomcat(false); return;
     }
 
@@ -523,14 +606,19 @@
         e.preventDefault(); void editor?.findUsages(); return;
       }
       if (e.key === '1') { e.preventDefault(); bennuUiStore.toggleLeft('project'); return; }
-      if (e.key === '2') { e.preventDefault(); bennuUiStore.toggleLeft('structure'); return; }
-      if (e.key === '3') { e.preventDefault(); bennuUiStore.toggleBottom('forms'); return; }
-      if (e.key.toLowerCase() === 'n') { e.preventDefault(); bennuUiStore.toggleLeft('dependencies'); return; }
       if (e.key === '6') { e.preventDefault(); bennuUiStore.toggleBottom('problems'); return; }
       if (e.key === '7') { e.preventDefault(); bennuUiStore.toggleBottom('todos'); return; }
       if (e.key === '0') { e.preventDefault(); bennuUiStore.toggleBottom('build'); return; }
-      if (e.key === '8') { e.preventDefault(); bennuUiStore.toggleRight('maven'); return; }
-      if (e.key === '9') { e.preventDefault(); bennuUiStore.toggleRight('services'); return; }
+      // The Java-only tools. Gated on `javaTools` for the same reason their rail icons and
+      // palette entries are: on a Cargo project the shortcut would open a panel that can
+      // only be empty, and whose toggle is nowhere on screen to close it again.
+      if (javaTools) {
+        if (e.key === '2') { e.preventDefault(); bennuUiStore.toggleLeft('structure'); return; }
+        if (e.key === '3') { e.preventDefault(); bennuUiStore.toggleBottom('forms'); return; }
+        if (e.key.toLowerCase() === 'n') { e.preventDefault(); bennuUiStore.toggleLeft('dependencies'); return; }
+        if (e.key === '8') { e.preventDefault(); bennuUiStore.toggleRight('maven'); return; }
+        if (e.key === '9') { e.preventDefault(); bennuUiStore.toggleRight('services'); return; }
+      }
       if (e.key === 'Enter') {
         if (!isJavaFile(projectStore.activeFilePath)) return;
         e.preventDefault(); editor?.openIntentions(); return;
@@ -684,6 +772,11 @@
 <!-- Alt+Enter intentions popup. Owns its own visibility via bennuIntentionsStore;
      mounted unconditionally. On close it returns focus to the editor. -->
 <BennuIntentionsOverlay onClose={() => editor?.focusEditor()} />
+
+<!-- "This file changed on disk while you had unsaved edits" — the one interruption Bennu
+     owes the user, since neither version can be discarded silently. Owns its visibility from
+     the project store's conflict set; mounted unconditionally. -->
+<BennuExternalChangeModal />
 
 <!-- Alt+F7 find-usages popover — owns its visibility via bennuRefactorStore. -->
 <BennuUsagesPopover />

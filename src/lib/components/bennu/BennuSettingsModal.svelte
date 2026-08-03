@@ -16,6 +16,7 @@
   import {
     Settings, Coffee, Boxes, FileType, TextCursorInput, ListTree,
     FoldVertical, Braces, RotateCcw, Wand2, Plus, Trash2, TriangleAlert, FolderOpen,
+    Database,
   } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -32,7 +33,10 @@
   import Input from '$lib/components/shared/ui/Input.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
-  import { bennuSettingsStore, SOURCE_ENCODINGS, type IndentStyle, type SourceEncoding } from '$lib/stores/bennu/settings.svelte';
+  import {
+    bennuSettingsStore, SOURCE_ENCODINGS, SQL_DIALECTS,
+    type IndentStyle, type SourceEncoding, type SqlDialectSetting,
+  } from '$lib/stores/bennu/settings.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { getBennuConfig, setBennuConfig, type BennuConfig } from '$lib/ipc/bennu/config';
 
@@ -86,21 +90,36 @@
     await saveConfigPatch({ validation_threads: n });
   }
 
-  const groups: SettingsNavGroup[] = [
+  /** The Java-only sections drop out on a Cargo project: JDK, Capabilities and the
+   *  Java/Java-Style pages are each a statement about a Java stack, and the encoding page
+   *  has nothing to resolve (Rust is UTF-8 by definition). Editor / Completion / Folding
+   *  apply to every buffer and stay. */
+  const groups = $derived<SettingsNavGroup[]>([
     { label: 'Editor', items: [
       { id: 'editor',     label: 'Editor',     icon: TextCursorInput },
       { id: 'completion', label: 'Completion', icon: ListTree },
       { id: 'folding',    label: 'Folding',    icon: FoldVertical },
-      { id: 'style',      label: 'Java Style', icon: Wand2 },
-      { id: 'java',       label: 'Java',       icon: Braces },
+      ...(projectStore.isCargo ? [] : [
+        { id: 'style',    label: 'Java Style', icon: Wand2 },
+        { id: 'java',     label: 'Java',       icon: Braces },
+      ]),
     ] },
-    { label: 'Project', items: [
-      { id: 'jdk',          label: 'JDK',          icon: Coffee },
-      { id: 'capabilities', label: 'Capabilities', icon: Boxes },
-      { id: 'encoding',     label: 'Encoding',     icon: FileType },
-    ] },
-  ];
+    ...(projectStore.isCargo ? [] : [{
+      label: 'Project', items: [
+        { id: 'jdk',          label: 'JDK',          icon: Coffee },
+        { id: 'capabilities', label: 'Capabilities', icon: Boxes },
+        { id: 'encoding',     label: 'Encoding',     icon: FileType },
+      ],
+    }]),
+  ]);
   let active = $state('editor');
+
+  // A section that just disappeared (project switched to Cargo while it was open) would
+  // leave the shell on a page with no nav entry. Fall back to Editor.
+  $effect(() => {
+    const ids = groups.flatMap((g) => g.items.map((i) => i.id));
+    if (!ids.includes(active)) active = 'editor';
+  });
 
   const s = bennuSettingsStore;
 
@@ -109,6 +128,14 @@
     { value: 'tabs',   label: 'Tabs' },
   ];
   const encodingOptions = SOURCE_ENCODINGS.map((e) => ({ value: e, label: e }));
+  /** Engine labels, not the raw setting values — "postgres" in a dropdown reads like a
+   *  hostname. `portable` leads: it is the default and the safe answer. */
+  const SQL_DIALECT_LABELS: Record<SqlDialectSetting, string> = {
+    portable: 'Portable (both engines)',
+    oracle: 'Oracle / PL-SQL',
+    postgres: 'PostgreSQL',
+  };
+  const sqlDialectOptions = SQL_DIALECTS.map((d) => ({ value: d, label: SQL_DIALECT_LABELS[d] }));
 
   // ── Project (read-only facts) ─────────────────────────────────────────────
   const project = $derived(projectStore.project);
@@ -261,6 +288,16 @@
           <FormRow label="Indent using" description="Insert spaces, or keep hard tab characters.">
             <RadioGroup value={s.indentStyle} options={indentOptions} size="sm"
                         onchange={(v) => s.setIndentStyle(v as IndentStyle)} />
+          </FormRow>
+        </div>
+        <div class="card">
+          <div class="card-section-title"><Database size={12} /> SQL</div>
+          <FormRow
+            label="Dialect"
+            description="Which engine’s rules colour a .sql file. Nothing in the file says which one it targets, and the two disagree about string quoting — Portable uses the rules valid on both. Applies on the next file opened."
+          >
+            <Select value={s.sqlDialect} options={sqlDialectOptions}
+                    onchange={(v) => s.setSqlDialect(v as SqlDialectSetting)} ariaLabel="SQL dialect" />
           </FormRow>
         </div>
         <div class="card">

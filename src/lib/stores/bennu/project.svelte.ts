@@ -23,6 +23,8 @@ import {
   projectTree as ipcProjectTree,
   readFile as ipcReadFile,
   writeFile as ipcWriteFile,
+  fileStamps as ipcFileStamps,
+  isExternallyModifiedError,
   projectDiagnostics as ipcProjectDiagnostics,
 } from '$lib/ipc/bennu';
 // Live re-index — kept in its own IPC file to avoid racing edits on index.ts.
@@ -100,6 +102,17 @@ function createProjectStore() {
   // Encoding the file was decoded from, keyed by path (Phase 0 keeps it for later
   // round-tripping; the editor just displays the text).
   const encodings = new SvelteMap<string, string>();
+
+  // ── External changes ──────────────────────────────────────────────────────────
+  // The on-disk stamp each cached buffer corresponds to (see `FileStamp`). Every save
+  // passes it back as the overwrite guard, and `checkExternalChanges` compares against a
+  // fresh stat to notice a file something else rewrote. Plain Map — nothing renders a stamp.
+  const stamps = new Map<string, string>();
+  // Paths whose on-disk content diverged from our buffer AND whose buffer has unsaved
+  // edits, so neither side can be discarded without asking. Reactive: the tab strip badges
+  // them and the conflict modal is driven off it. Autosave is suspended for these — it
+  // would only produce refused writes and a toast per attempt.
+  const conflicted = new SvelteSet<string>();
   let activeFilePath = $state<string | null>(null);
   let openFilePaths = $state<string[]>([]);
 
@@ -149,10 +162,14 @@ function createProjectStore() {
   }
 
   /** Debounced autosave for `path`: after an idle it saves the buffer IF it's still dirty, autosave
-   *  is on, and it's a real (non-demo) file. Reset on every edit, like the re-index debounce. */
+   *  is on, and it's a real (non-demo) file. Reset on every edit, like the re-index debounce.
+   *
+   *  A **conflicted** path is skipped: the file changed on disk under an edited buffer, so a
+   *  write would be refused by the backend guard anyway — retrying it every 1.2s would just
+   *  spin and toast. Autosave resumes for that path once the conflict is resolved. */
   function scheduleAutosave(path: string) {
     cancelAutosave(path);
-    if (!autosaveEnabled() || isDemoPath(path)) return;
+    if (!autosaveEnabled() || isDemoPath(path) || conflicted.has(path)) return;
     autosaveTimers.set(path, setTimeout(() => {
       autosaveTimers.delete(path);
       if (dirty.has(path)) void saveText(path, sources.get(path) ?? '');
@@ -160,10 +177,66 @@ function createProjectStore() {
   }
 
   /** Save every file with unsaved edits (used by save-on-window-blur). Ungated — the caller decides
-   *  when; it saves whatever is dirty, sequentially so the writes don't stampede the BE. */
+   *  when; it saves whatever is dirty, sequentially so the writes don't stampede the BE. A
+   *  conflicted path is skipped rather than refused-and-toasted once per blur. */
   async function saveAllDirty() {
     for (const p of [...dirty]) {
+      if (conflicted.has(p)) continue;
       await saveText(p, sources.get(p) ?? '');
+    }
+  }
+
+  /**
+   * Notice files that changed on disk behind the editor, and act per file:
+   *
+   * * buffer **clean** → adopt the new content silently. There is nothing to lose and
+   *   nothing to decide; this is what makes a `git checkout` or a generator run just show
+   *   up, the way IntelliJ does it.
+   * * buffer **dirty** → mark it {@link conflicted}. Both versions matter, so the UI asks.
+   *   Autosave stands down for that file until it is resolved.
+   *
+   * A file that has been **deleted** is neither: it raises no conflict, and its stamp is
+   * simply dropped. There is no "version on disk" to weigh the buffer against, so there is
+   * nothing to decide — dropping the stamp also lifts the write guard, so a later save
+   * recreates the file (the same call the backend allows for exactly this reason). The tab
+   * keeps showing what it had; closing it is the user's call, and it is the only gesture that
+   * actually agrees with the deletion.
+   *
+   * Cheap enough to call often (one `stat` per open tab, no reads): the window calls it on
+   * focus, on tab activation and on a slow tick while focused. Silent on failure — a poll
+   * that can't reach the backend must never interrupt anything.
+   */
+  async function checkExternalChanges(): Promise<void> {
+    if (isDemo) return;
+    const watched = openFilePaths.filter((p) => !isDemoPath(p) && stamps.has(p));
+    if (!watched.length) return;
+
+    let current;
+    try {
+      current = await ipcFileStamps(watched);
+    } catch {
+      return; // BE absent / busy — try again on the next tick
+    }
+
+    for (const entry of current) {
+      const known = stamps.get(entry.file);
+      // `known` may have gone (tab closed, project switched) while the stat was in flight.
+      if (known === undefined || known === entry.stamp) continue;
+
+      if (!entry.exists) {
+        // Deleted — see the note above. Dropping the stamp both stops the every-tick report
+        // and lifts the guard, so the buffer can be written back if the user saves.
+        stamps.delete(entry.file);
+        continue;
+      }
+
+      if (dirty.has(entry.file)) {
+        conflicted.add(entry.file);
+        cancelAutosave(entry.file);
+      } else {
+        // eslint-disable-next-line no-await-in-loop
+        await adoptFromDisk(entry.file, true);
+      }
     }
   }
 
@@ -287,10 +360,15 @@ function createProjectStore() {
       sources.set(path, res.text);
       savedContent.set(path, res.text);
       encodings.set(path, res.encoding);
+      stamps.set(path, res.stamp);
     } catch {
       sources.set(path, '');
       savedContent.set(path, '');
       encodings.set(path, 'utf-8');
+      // No stamp: the read failed, so we know nothing about what's on disk. An absent stamp
+      // disables the overwrite guard, which is right — refusing a save here would only trap
+      // the buffer, and there is no external edit to protect.
+      stamps.delete(path);
     }
   }
 
@@ -307,6 +385,9 @@ function createProjectStore() {
     // Drop dirty/save state from the previous project.
     savedContent.clear();
     dirty.clear();
+    // …and its external-change bookkeeping: a stamp belongs to a buffer we no longer hold.
+    stamps.clear();
+    conflicted.clear();
     // Drop any pending re-index / autosave timers from the previous project.
     for (const t of reindexTimers.values()) clearTimeout(t);
     reindexTimers.clear();
@@ -356,34 +437,116 @@ function createProjectStore() {
     return sources.get(path) ?? '';
   }
 
-  /** Write `text` to `path`: update the cache, persist to disk (`bennu_write_file`,
-   *  skipped for demo/BE-absent), and flush a live re-index. The editor's controlled
-   *  `value` re-syncs from the updated cache, so an open buffer reflects the change. */
-  async function saveText(path: string, text: string): Promise<void> {
+  /**
+   * Write `text` to `path`: update the cache, persist to disk (`bennu_write_file`, skipped
+   * for demo/BE-absent), and flush a live re-index. The editor's controlled `value`
+   * re-syncs from the updated cache, so an open buffer reflects the change.
+   *
+   * ## The overwrite guard
+   *
+   * The buffer's stamp rides along, so the backend **refuses** the write when something
+   * else changed the file since we read it. That refusal is the point: autosave used to
+   * overwrite an external edit silently, which is data loss on a timer. On a refusal the
+   * path is marked {@link conflicted} — the buffer keeps its edits, stays dirty, autosave
+   * stands down, and the UI asks which side wins.
+   *
+   * `force` skips the guard, for the "keep mine" resolution. It is the only way to overwrite
+   * a file that changed, and it is never automatic.
+   *
+   * Returns whether the content reached disk. Callers that chain filesystem work on a save
+   * (the package move) must not proceed on `false`.
+   */
+  async function saveText(path: string, text: string, force = false): Promise<boolean> {
     sources.set(path, text);
-    if (!isDemoPath(path)) {
-      try {
-        const res = await ipcWriteFile(project?.root ?? path, path, text);
-        encodings.set(path, res.encoding);
-      } catch {
-        /* BE absent — cache updated, disk not (best-effort) */
+    if (isDemoPath(path)) {
+      // MOCK — no disk behind a demo file; treat it as saved so the tab goes clean.
+      markSaved(path, text);
+      return true;
+    }
+    try {
+      const res = await ipcWriteFile(
+        project?.root ?? path,
+        path,
+        text,
+        force ? undefined : stamps.get(path),
+      );
+      encodings.set(path, res.encoding);
+      stamps.set(path, res.stamp);
+      conflicted.delete(path);
+    } catch (err) {
+      if (isExternallyModifiedError(err)) {
+        // Somebody else owns the newer version. Keep our edits, keep the file dirty, stop
+        // autosave from retrying, and surface it — `dirty` must NOT be cleared, or the
+        // unsaved work would look saved.
+        conflicted.add(path);
+        cancelAutosave(path);
+        toastStore.show(
+          `${path.split(/[\\/]/).pop()} changed on disk — your edits were not overwritten`,
+          'warning',
+        );
+        return false;
       }
+      /* BE absent / other I/O failure — cache updated, disk not (best-effort, as before) */
     }
     // Now clean: record the saved snapshot, clear the dirty mark, and drop a pending autosave (this
     // write supersedes it). Best-effort: even if the disk write failed above, we don't loop-retry.
-    savedContent.set(path, text);
-    dirty.delete(path);
-    cancelAutosave(path);
+    markSaved(path, text);
     reindexNow(path);
     // Refresh the Problems panel project-wide (silent, debounced) so cross-file effects of this
     // save appear without a manual "Validate".
     scheduleProblemsRefresh();
+    return true;
+  }
+
+  /** Record `text` as `path`'s on-disk baseline: clean, no pending autosave, not conflicted. */
+  function markSaved(path: string, text: string) {
+    savedContent.set(path, text);
+    dirty.delete(path);
+    conflicted.delete(path);
+    cancelAutosave(path);
+  }
+
+  /**
+   * Adopt the on-disk content of `path`, discarding whatever the buffer held.
+   *
+   * Serves both the explicit "take theirs" resolution and the silent refresh of a clean
+   * buffer — and those differ in one way that matters. `onlyIfClean` re-checks dirtiness
+   * **after** the read: the caller decided the buffer was clean before awaiting, and a
+   * keystroke landing during that await would otherwise be thrown away by the very refresh
+   * that was supposed to be lossless. The explicit resolution passes `false`, because there
+   * discarding the buffer is exactly what was asked for.
+   */
+  async function adoptFromDisk(path: string, onlyIfClean = false) {
+    try {
+      const res = await ipcReadFile(project?.root ?? path, path);
+      if (onlyIfClean && dirty.has(path)) {
+        // Typed while we were reading. Don't touch the buffer; record the stamp so the next
+        // poll sees the file has moved on and raises this as a proper conflict instead.
+        stamps.set(path, res.stamp);
+        conflicted.add(path);
+        cancelAutosave(path);
+        return;
+      }
+      sources.set(path, res.text);
+      encodings.set(path, res.encoding);
+      stamps.set(path, res.stamp);
+      markSaved(path, res.text);
+      reindexNow(path);
+    } catch {
+      /* unreadable (deleted mid-flight) — leave the buffer alone; the conflict flag stands */
+    }
   }
 
   return {
     get project()        { return project; },
     get tree()           { return tree; },
     get capabilities()   { return project?.capabilities ?? null; },
+    /** Which manifest governs the active project. `'maven'` with nothing open, so the
+     *  Java-only chrome keeps its usual (disabled) shape rather than collapsing. */
+    get kind()           { return project?.kind ?? 'maven'; },
+    /** True when the active project is a Cargo one — gate Java-only UI (JDK, Maven,
+     *  Dependencies, Generate, validation, index status) on `!isCargo`. */
+    get isCargo()        { return project?.kind === 'cargo'; },
     get activeFilePath() { return activeFilePath; },
     get openFilePaths()  { return openFilePaths; },
     /** True while the open project is the mock demo. MOCK — remove with the mock. */
@@ -431,6 +594,11 @@ function createProjectStore() {
         sources.set(p, res.text);
         savedContent.set(p, res.text);
         encodings.set(p, res.encoding);
+        // The buffer now matches disk, so the new stamp is the baseline and any conflict
+        // over this file is settled by definition.
+        stamps.set(p, res.stamp);
+        dirty.delete(p);
+        conflicted.delete(p);
       } catch { /* keep the current content on a read failure */ }
     },
 
@@ -536,6 +704,8 @@ function createProjectStore() {
       openFilePaths = [];
       activeFilePath = null;
       isDemo = false;
+      stamps.clear();
+      conflicted.clear();
       for (const t of reindexTimers.values()) clearTimeout(t);
       reindexTimers.clear();
     },
@@ -596,14 +766,28 @@ function createProjectStore() {
      *  with a message the caller can surface. */
     async moveFileToPackage(path: string): Promise<string> {
       const source = sources.get(path) ?? (await loadText(path));
-      // Persist the buffer so the on-disk move carries the current text.
-      await saveText(path, source);
+      // Persist the buffer so the on-disk move carries the current text. A refused save means
+      // the file changed under us — moving it would carry the stale text to the new path and
+      // lose the other edit, so stop and let the conflict be resolved first.
+      if (!(await saveText(path, source))) {
+        throw new Error('The file changed on disk — resolve that first, then move it');
+      }
       const res = await ipcMoveToPackage(path, source);
       const newPath = canonPath(res.new_path);
       // Carry the cached source/encoding to the new key so the reopened tab is instant.
       sources.set(newPath, source);
       const enc = encodings.get(path);
       if (enc) encodings.set(newPath, enc);
+      savedContent.set(newPath, source);
+      // The rename happened behind us, so the new path's stamp is unknown — and a stale one
+      // would make the next save refuse for no reason. Stat it; if that fails, leave it absent
+      // (no stamp = no guard, which is the safe direction).
+      stamps.delete(path);
+      conflicted.delete(path);
+      try {
+        const [fresh] = await ipcFileStamps([newPath]);
+        if (fresh?.stamp) stamps.set(newPath, fresh.stamp);
+      } catch { /* the guard simply stays off for this path until it is re-read */ }
       // Re-point the tab: drop the old path, open the new one, refresh the tree to show the move.
       openFilePaths = openFilePaths.filter((p) => p !== path);
       await openFileInternal(newPath);
@@ -617,6 +801,11 @@ function createProjectStore() {
       const idx = openFilePaths.indexOf(path);
       if (idx === -1) return;
       openFilePaths = openFilePaths.filter((p) => p !== path);
+      // The conflict flag deliberately SURVIVES the close. Closing a tab doesn't discard its
+      // unsaved edits here (`dirty` and the buffer both persist, so reopening restores them),
+      // so clearing the flag would re-arm autosave on a file that is still mid-conflict — the
+      // exact overwrite this guards against. `conflictedPaths` hides it from the modal while
+      // no tab shows it; the decision comes back with the tab.
       if (activeFilePath === path) {
         activeFilePath = openFilePaths.length
           ? openFilePaths[Math.min(idx, openFilePaths.length - 1)]
@@ -673,6 +862,10 @@ function createProjectStore() {
       activeFilePath = path;
       await ensureLoaded(path);
       persistWorkspace();
+      // Arriving at a tab is the moment its staleness matters: a clean buffer refreshes
+      // itself before you read it, and a dirty one raises its conflict before you type into
+      // a version that is about to lose. Fire-and-forget — never make a tab switch wait on I/O.
+      void checkExternalChanges();
     },
 
     /** Update the cached source (editor edits route here): recompute dirty, schedule a debounced
@@ -690,15 +883,18 @@ function createProjectStore() {
 
     /** Ensure + return a file's current text (loads it if no tab is open). */
     loadText,
-    /** Write `text` to a file: cache + disk + re-index. Used by save + rename apply. */
+    /** Write `text` to a file: cache + disk + re-index. Used by save + rename apply. Returns
+     *  whether it reached disk — `false` when the file changed underneath and the write was
+     *  refused (a conflict is raised instead of an overwrite). */
     saveText,
-    /** Save the active file's current buffer to disk. Returns false when no file is
-     *  active. */
+    /** Save the active file's current buffer to disk. `false` when there is no active file —
+     *  or when the save was **refused** because the file changed on disk (the conflict is
+     *  raised instead), so the caller's "Saved" toast doesn't claim something that didn't
+     *  happen. */
     async saveActive(): Promise<boolean> {
       const p = activeFilePath;
       if (!p) return false;
-      await saveText(p, sources.get(p) ?? '');
-      return true;
+      return saveText(p, sources.get(p) ?? '');
     },
 
     // ── Dirty / autosave ──────────────────────────────────────────────────
@@ -709,6 +905,35 @@ function createProjectStore() {
     /** Save every file with unsaved edits — the save-on-window-blur entry point (see BennuWindow).
      *  Ungated: the caller gates on the autosave setting. */
     saveAllDirty,
+
+    // ── External changes ──────────────────────────────────────────────────
+    /** Poll the open tabs for on-disk changes: adopt silently when the buffer is clean, raise
+     *  a conflict when it isn't. Call on window focus, tab activation and a slow tick. */
+    checkExternalChanges,
+    /** Whether `path` changed on disk while its buffer had unsaved edits — neither side can be
+     *  discarded without asking. Its autosave is suspended while this holds. */
+    isConflicted(path: string): boolean { return conflicted.has(path); },
+    /** Paths awaiting an external-change decision, restricted to the ones a tab is showing
+     *  (reactive). The modal reads the first; the tab strip badges them.
+     *
+     *  Filtered to open tabs on purpose: the flag outlives a tab close (see `closeFile`), and
+     *  a modal demanding a decision about a file with nothing on screen would be unanswerable.
+     *  The suppression of autosave keys off the unfiltered set, so a closed-and-reopened
+     *  conflict is still safe. */
+    get conflictedPaths(): string[] {
+      return openFilePaths.filter((p) => conflicted.has(p));
+    },
+    /** Resolve a conflict by **taking the version on disk**, discarding the buffer's edits. */
+    async resolveTakeDisk(path: string) { await adoptFromDisk(path); },
+    /** Resolve a conflict by **keeping the buffer**, overwriting what is on disk. The only
+     *  route past the guard, and never automatic. */
+    async resolveKeepMine(path: string) {
+      await saveText(path, sources.get(path) ?? '', true);
+    },
+    // There is deliberately no "dismiss": a conflict is a fact about the file, and clearing
+    // the flag without choosing would re-arm autosave into the very overwrite this prevents.
+    // Deferring the decision is a *presentation* concern — the modal remembers what it has
+    // already shown, while the tab badge keeps the file findable until a side is picked.
   };
 }
 

@@ -29,6 +29,9 @@ import type { BuildResult, BuildDiagnostic, ProjectValidationResult } from '$lib
 import { bennuUiStore } from './ui.svelte';
 import { bennuDiagnosticsStore } from './diagnostics.svelte';
 import { bennuRunConfigStore, splitArgs } from './run-config.svelte';
+// One-way edge (the project store knows nothing about runs): `runPreferred` needs the
+// active project's KIND, because "Validate (no compile)" is a Java-only build.
+import { projectStore } from './project.svelte';
 
 /** The two build kinds the split-button offers. */
 export type BuildType = 'mvn' | 'validate';
@@ -225,9 +228,18 @@ function createBennuRunStore() {
     }
   }
 
-  /** Run the preferred build type for `root` (the split-button main action + Ctrl+F9). */
+  /**
+   * Run the preferred build type for `root` (the split-button main action + Ctrl+F9).
+   *
+   * "Validate (no compile)" is the whole-project **Java** analysis sweep, so on a Cargo
+   * project it is not an alternative — it is a different language's feature. The
+   * preference is per-profile, not per-project, so a user who left it on `validate` while
+   * working on a Java tree would otherwise press Ctrl+F9 on a Rust one and get an empty
+   * sweep instead of `cargo check`. The stored preference is left untouched: it still
+   * applies to the Java projects it was chosen for.
+   */
   async function runPreferred(root: string): Promise<void> {
-    if (preferredBuildType === 'validate') {
+    if (preferredBuildType === 'validate' && !projectStore.isCargo) {
       await validateProject(root);
     } else {
       await build(root);

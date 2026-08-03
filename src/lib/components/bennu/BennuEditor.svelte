@@ -22,7 +22,10 @@
   import { CodeEditor } from '$lib/components/shared/ui/code-editor';
   import { tooltip } from '$lib/actions/tooltip';
   import { languageForPath } from './languages';
-  import { isJavaFile as isJavaFileOf, isJspFile as isJspFileOf, supportsCodeNav } from './file-kind';
+  import {
+    isJavaFile as isJavaFileOf, isJspFile as isJspFileOf,
+    supportsCodeNav, supportsDiagnostics,
+  } from './file-kind';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import { ChevronDown } from 'lucide-svelte';
@@ -132,16 +135,25 @@
 
   // A tab whose file isn't under the active project's root is "foreign" (opened from another
   // workspace project): badge it with the owning project's name so it's clear where it lives.
+  //
+  // An **external change** to a file with unsaved edits outranks that badge. It is the only
+  // tab state that means "this file needs a decision from you": autosave is paused for it, so
+  // without a mark on the tab the file would just quietly stop saving. The tooltip says so
+  // rather than leaving the badge to be guessed at.
   const tabs = $derived<TabItem[]>(
     openPaths.map((p) => {
       const foreign = projectStore.isForeign(p);
+      const conflicted = projectStore.isConflicted(p);
+      const from = foreign ? `  ·  from ${owningName(p) ?? 'another project'}` : '';
       return {
         id: p,
         label: baseName(p),
         icon: FileCode2,
         iconSize: 13,
-        title: foreign ? `${p}  ·  from ${owningName(p) ?? 'another project'}` : p,
-        badge: foreign ? (owningName(p) ?? 'ext') : undefined,
+        title: conflicted
+          ? `${p}${from}  ·  changed on disk — autosave paused until you choose a version`
+          : `${p}${from}`,
+        badge: conflicted ? 'disk' : foreign ? (owningName(p) ?? 'ext') : undefined,
       };
     }),
   );
@@ -226,6 +238,10 @@
     const path = activePath;
     void bennuIndexStore.buildRevision; // re-run when the index (config graph) rebuilds
     if (!path) { diags = []; return; }
+    // Only the files an analyzer understands are validated. Asking about a `.rs` / `.dig` /
+    // `.toml` buffer would hand it to the Java validator once per keystroke, for an answer
+    // that can only ever be empty.
+    if (!supportsDiagnostics(path)) { diags = []; return; }
     // Java files validate the LIVE buffer — track the source so the check re-runs on edit,
     // debounced so a burst of keystrokes coalesces. JSP checks read the file on the backend, so
     // they don't depend on the buffer.

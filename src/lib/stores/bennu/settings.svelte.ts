@@ -24,6 +24,13 @@ export type IndentStyle = 'spaces' | 'tabs';
 export const SOURCE_ENCODINGS = ['UTF-8', 'Cp1252', 'ISO-8859-1'] as const;
 export type SourceEncoding = (typeof SOURCE_ENCODINGS)[number];
 
+/** SQL dialects a `.sql` buffer can be **highlighted** as. `portable` (the default) uses the
+ *  rules valid on both engines — the honest answer for a script nobody has classified, and the
+ *  reason this is a setting rather than a detection: nothing in a `.sql` file under a Java
+ *  project's resources says which engine it targets. */
+export const SQL_DIALECTS = ['portable', 'oracle', 'postgres'] as const;
+export type SqlDialectSetting = (typeof SQL_DIALECTS)[number];
+
 /**
  * The full editable settings snapshot. Field names are snake_case-free on the FE
  * (camelCase getters), but the shape maps directly onto a future `[bennu]` TOML
@@ -48,6 +55,8 @@ export interface BennuSettingsSnapshot {
   stickyScroll: boolean;
   /** Vertical margin guide column (IntelliJ's hard-wrap ruler). 0 = hidden. */
   rightMargin: number;
+  /** Which SQL dialect `.sql` buffers are highlighted as. Config-backed. */
+  sqlDialect: SqlDialectSetting;
   /** Autosave a modified buffer to disk (after a short idle, on tab switch, on window blur).
    *  Config-backed (persists to `…/bennu/config.toml`). */
   autosave: boolean;
@@ -85,6 +94,7 @@ const DEFAULTS: BennuSettingsSnapshot = {
   indentGuides: true,
   stickyScroll: true,
   rightMargin: 120,
+  sqlDialect: 'portable',
   autosave: true,
   autoPopup: true,
   popupDelayMs: 150,
@@ -115,6 +125,7 @@ function createSettingsStore() {
   let indentGuides = $state(DEFAULTS.indentGuides);
   let stickyScroll = $state(DEFAULTS.stickyScroll);
   let rightMargin = $state(DEFAULTS.rightMargin);
+  let sqlDialect = $state<SqlDialectSetting>(DEFAULTS.sqlDialect);
   let autosave = $state(DEFAULTS.autosave);
   // Completion
   let autoPopup = $state(DEFAULTS.autoPopup);
@@ -139,7 +150,8 @@ function createSettingsStore() {
   function snapshot(): BennuSettingsSnapshot {
     return {
       fontSize, tabSize, indentStyle, wordWrap, showWhitespace,
-      highlightCurrentLine, showLineNumbers, minimap, indentGuides, stickyScroll, rightMargin, autosave,
+      highlightCurrentLine, showLineNumbers, minimap, indentGuides, stickyScroll, rightMargin,
+      sqlDialect, autosave,
       autoPopup, popupDelayMs, caseSensitive, autoImport,
       foldingEnabled, foldBlockComments,
       finalParams, useLombokVal, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
@@ -149,20 +161,21 @@ function createSettingsStore() {
 
   /** MOCK persistence — no-op today for the in-memory-only fields (font, folding, java-style, …).
    *  Wire to `set_bennu_config(snapshot())` when the whole typed `[bennu]` config lands (rule 11).
-   *  The config-backed toggles (autosave / auto-import) DON'T use this — see `persistConfigToggles`. */
+   *  The config-backed fields (autosave / auto-import / SQL dialect) DON'T use this — see
+   *  `persistConfigBacked`. */
   function persist() {
     // MOCK — in-memory only. Future: void setBennuConfig(snapshot()).catch(() => {});
     void snapshot();
   }
 
-  /** Persist the config-backed toggles (autosave / auto-import) to `…/bennu/config.toml`. These two
-   *  are genuinely persisted (not mock). Read-modify-WRITE against the freshest config so a field
-   *  another flow owns (build type, encoding, JDK paths, per-project overrides) is never clobbered.
-   *  Fire-and-forget: a persistence hiccup must never block the UI. */
-  async function persistConfigToggles() {
+  /** Persist the config-backed fields (autosave / auto-import / SQL dialect) to
+   *  `…/bennu/config.toml`. These are genuinely persisted (not mock). Read-modify-WRITE against
+   *  the freshest config so a field another flow owns (build type, encoding, JDK paths, per-project
+   *  overrides) is never clobbered. Fire-and-forget: a persistence hiccup must never block the UI. */
+  async function persistConfigBacked() {
     try {
       const cur = await getBennuConfig();
-      await setBennuConfig({ ...cur, autosave, auto_import: autoImport });
+      await setBennuConfig({ ...cur, autosave, auto_import: autoImport, sql_dialect: sqlDialect });
     } catch {
       /* non-critical — the in-memory value still applies for this session */
     }
@@ -199,8 +212,10 @@ function createSettingsStore() {
     setStickyScroll(v: boolean) { stickyScroll = v; persist(); },
     get rightMargin() { return rightMargin; },
     setRightMargin(v: number) { rightMargin = v; persist(); },
+    get sqlDialect() { return sqlDialect; },
+    setSqlDialect(v: SqlDialectSetting) { sqlDialect = v; void persistConfigBacked(); },
     get autosave() { return autosave; },
-    setAutosave(v: boolean) { autosave = v; void persistConfigToggles(); },
+    setAutosave(v: boolean) { autosave = v; void persistConfigBacked(); },
 
     // ── Completion ────────────────────────────────────────────────────────
     get autoPopup() { return autoPopup; },
@@ -210,7 +225,7 @@ function createSettingsStore() {
     get caseSensitive() { return caseSensitive; },
     setCaseSensitive(v: boolean) { caseSensitive = v; persist(); },
     get autoImport() { return autoImport; },
-    setAutoImport(v: boolean) { autoImport = v; void persistConfigToggles(); },
+    setAutoImport(v: boolean) { autoImport = v; void persistConfigBacked(); },
 
     // ── Folding ───────────────────────────────────────────────────────────
     get foldingEnabled() { return foldingEnabled; },
@@ -243,14 +258,19 @@ function createSettingsStore() {
     /** Full snapshot (future `set_bennu_config` payload). */
     snapshot,
 
-    /** Hydrate the config-backed toggles (autosave / auto-import) from `…/bennu/config.toml`. Call
-     *  once at window boot. The mock in-memory fields keep their defaults until the full store is
-     *  wired to the config. */
+    /** Hydrate the config-backed fields (autosave / auto-import / SQL dialect) from
+     *  `…/bennu/config.toml`. Call once at window boot. The mock in-memory fields keep their
+     *  defaults until the full store is wired to the config. */
     async loadConfig() {
       try {
         const cfg = await getBennuConfig();
         autosave = cfg.autosave;
         autoImport = cfg.auto_import;
+        // An unknown / empty label from a hand-edited config falls back to the default rather
+        // than reaching the editor as an undefined dialect.
+        sqlDialect = (SQL_DIALECTS as readonly string[]).includes(cfg.sql_dialect)
+          ? (cfg.sql_dialect as SqlDialectSetting)
+          : DEFAULTS.sqlDialect;
       } catch {
         /* keep defaults — BE absent / not ready */
       }
@@ -269,6 +289,7 @@ function createSettingsStore() {
       indentGuides = DEFAULTS.indentGuides;
       stickyScroll = DEFAULTS.stickyScroll;
       rightMargin = DEFAULTS.rightMargin;
+      sqlDialect = DEFAULTS.sqlDialect;
       autosave = DEFAULTS.autosave;
       autoPopup = DEFAULTS.autoPopup;
       popupDelayMs = DEFAULTS.popupDelayMs;
@@ -285,7 +306,7 @@ function createSettingsStore() {
       rebuildIndexOnOpen = DEFAULTS.rebuildIndexOnOpen;
       excludedDirs = DEFAULTS.excludedDirs;
       persist();
-      void persistConfigToggles(); // autosave / auto-import are config-backed
+      void persistConfigBacked(); // autosave / auto-import / SQL dialect are config-backed
     },
   };
 }

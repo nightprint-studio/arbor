@@ -18,7 +18,7 @@
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
     Copy, LocateFixed, ChevronDown, ChevronRight,
     Box, CircleDashed, Rows3, AtSign,
-    Braces, Hash, FileCog, FileText, Database, Globe,
+    Braces, Hash, FileCog, FileText, Database, Globe, Pickaxe,
   } from 'lucide-svelte';
   import { tick } from 'svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
@@ -58,7 +58,8 @@
     const root = projectStore.project?.root;
     // Re-fetch when a rebuild lands (the store drops its class cache on rebuild).
     void bennuIndexStore.buildRevision;
-    if (!root) { kindByFile = new Map(); return; }
+    // A Cargo project builds no class index (there are no classes) — skip the round-trip.
+    if (!root || projectStore.isCargo) { kindByFile = new Map(); return; }
     let cancelled = false;
     void bennuIndexStore.classesForRoot(root).then((classes) => {
       if (cancelled) return;
@@ -114,16 +115,30 @@
     sql:  { icon: Database, color: 'var(--info)' },
     md:   { icon: FileText, color: 'var(--text-muted)' },
     txt:  { icon: FileText, color: 'var(--text-muted)' },
+    // Rust projects: sources in Rust's rust-orange, manifests as config, RON game data,
+    // and geode's `.dig` mole scripts (a distinct glyph — they're programs, not data).
+    rs:   { icon: FileCode2, color: '#dea584' },
+    toml: { icon: FileCog, color: '#9c4221' },
+    ron:  { icon: Braces, color: 'var(--text-muted)' },
+    dig:  { icon: Pickaxe, color: 'var(--color-tag, #c792ea)' },
   };
 
-  /** The folder-icon tint by source-root role — main (blue) / test (green) / resources (amber) /
-   *  webapp (purple), so the tree conveys main/test/resource context at a glance. */
+  /** The folder-icon tint by source-root role, so the tree conveys context at a glance.
+   *
+   *  Maven: main (blue) / test (green) / resources (amber) / webapp (purple). Cargo has its
+   *  own conventional roots — `crates` and `src` are code (blue), `tests` / `benches` are
+   *  test (green), `examples` and `content` are data/samples (amber) — and the Maven
+   *  patterns are more specific, so they're tried first and a polyglot repo still reads
+   *  correctly. */
   function folderColor(path: string): string {
     const p = path.replace(/\\/g, '/');
     if (/\/src\/(main|test)\/resources(\/|$)/.test(p)) return 'var(--warning)';
     if (/\/src\/test(\/|$)/.test(p)) return 'var(--success)';
     if (/\/src\/main\/webapp(\/|$)/.test(p)) return 'var(--color-tag, #c792ea)';
     if (/\/src\/main(\/|$)/.test(p)) return 'var(--info)';
+    if (/\/(tests|benches)(\/|$)/.test(p)) return 'var(--success)';
+    if (/\/(examples|content)(\/|$)/.test(p)) return 'var(--warning)';
+    if (/\/(crates|src)(\/|$)/.test(p)) return 'var(--info)';
     return 'var(--text-muted)';
   }
 
@@ -356,7 +371,7 @@
 {#if pickerOpen}
   <FileExplorerModal
     mode="folder"
-    title="Open Java project"
+    title="Open project (Maven or Cargo)"
     onConfirm={openProject}
     onCancel={() => (pickerOpen = false)}
     onClose={() => (pickerOpen = false)}

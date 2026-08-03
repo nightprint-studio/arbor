@@ -20,6 +20,12 @@ use std::path::Path;
 
 use crate::pom::Pom;
 
+/// The canonical UTF-8 label, as this module spells it everywhere it reports one.
+/// Named because it is also an *answer*: a Cargo project is UTF-8 by language
+/// definition, not by falling back to a configured default (see
+/// [`crate::model::open_project`]).
+pub const UTF8: &str = "UTF-8";
+
 /// Resolve the encoding *label* Bennu will decode a project's files in: the pom's
 /// `project.build.sourceEncoding`, else `default_label`.
 pub fn project_encoding_label(pom: &Pom, default_label: &str) -> String {

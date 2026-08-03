@@ -327,6 +327,12 @@ fn collect_type(
         }
     }
 
+    // A record's components are members the LANGUAGE mandates, not a framework's guess — so they
+    // belong here beside the parsed ones, and not in `bennu-intel`'s Lombok synthesis.
+    if matches!(kind, TypeKind::Record) {
+        synthesize_record_members(node, bytes, &mut methods, &mut fields);
+    }
+
     let annotations = collect_annotations(node, bytes);
     let type_params = type_param_names(node, bytes);
     out.push(TypeDecl {
@@ -646,6 +652,118 @@ fn parse_throws(node: &Node, bytes: &[u8]) -> Vec<String> {
 /// (super-constructor chaining, unhandled checked exception from `new T(...)`, constructor arity) see
 /// a PROJECT type's constructors too. The name is the JVM `<init>`; the return type is unused. A
 /// constructor is never static/abstract/default/final for our purposes.
+/// Add the members the JLS says a `record` has, on top of the ones written in its body.
+///
+/// A record's header (`record Point(int x, int y)`) declares, per JLS §8.10, a `private final`
+/// field and a `public` accessor **per component**, a canonical constructor taking them all in
+/// order, and `toString` / `equals` / `hashCode`. None of that is in the source tree, so without
+/// this every `point.x()` on a project record resolved to nothing — and "cannot resolve method"
+/// on correct code is the worst answer an editor can give.
+///
+/// This belongs in the pure extractor, not beside `bennu-intel`'s Lombok synthesis, and the
+/// distinction is the point: Lombok's members depend on an annotation, an import and a dependency
+/// being present, so they are a *guess about the build* that has to be gated. A record's members
+/// depend on nothing but the language, so they are as certain as the ones the parser read.
+///
+/// **A declared member always wins.** A record may write its own accessor, override `toString`, or
+/// declare the canonical constructor explicitly (or a compact one) — in each case the synthetic
+/// version must not be added, or the type would carry the same member twice and overload
+/// resolution would see an ambiguity that doesn't exist. Matching is by name **and arity**, which
+/// is what keeps a record that declares an extra `x(int)` overload from suppressing its own
+/// zero-arg accessor.
+fn synthesize_record_members(
+    node: &Node,
+    bytes: &[u8],
+    methods: &mut Vec<MethodDecl>,
+    fields: &mut Vec<FieldDecl>,
+) {
+    // `record R(int x)` puts its components in the `parameters` field, exactly like a method's —
+    // so the existing parser handles them, varargs component included. A `record Empty()` yields
+    // none, and still gets its constructor and the `Object` overrides below.
+    let components = parse_params(node, bytes);
+
+    for c in &components {
+        // The backing field. `private final`, and it carries the component's own name — which is
+        // also why a record can't declare instance fields of its own (checked in `bennu-check`).
+        if !fields.iter().any(|f| f.name == c.name) {
+            fields.push(FieldDecl {
+                name: c.name.clone(),
+                type_text: c.type_text.clone(),
+                is_static: false,
+                is_final: true,
+                visibility: Visibility::Private,
+                annotations: Vec::new(),
+            });
+        }
+        // The accessor — named after the component, NOT `getX()`. Half the point of the bug report:
+        // people reach for `p.x()`, and Java is on their side.
+        if !is_declared(methods, &c.name, 0) {
+            methods.push(MethodDecl {
+                name: c.name.clone(),
+                return_type_text: c.type_text.clone(),
+                params: Vec::new(),
+                is_static: false,
+                visibility: Visibility::Public,
+                is_abstract: false,
+                is_default: false,
+                is_final: false,
+                throws: Vec::new(),
+            });
+        }
+    }
+
+    // The canonical constructor. Same `<init>` convention `parse_constructor` uses, so arity and
+    // argument-type checks see it like any other. Suppressed when the body declares a constructor
+    // of the same arity — the canonical or compact form the user wrote themselves.
+    if !is_declared(methods, "<init>", components.len()) {
+        methods.push(MethodDecl {
+            name: "<init>".to_string(),
+            return_type_text: "void".to_string(),
+            params: components.clone(),
+            is_static: false,
+            visibility: Visibility::Public,
+            is_abstract: false,
+            is_default: false,
+            is_final: false,
+            throws: Vec::new(),
+        });
+    }
+
+    // The `Object` overrides a record implements for you. Declared ON the record rather than found
+    // by an inherited-from-Object lookup, which is what lets hover say the type provides them — and
+    // what makes `hashCode()` on a record resolve at all when `java.lang.Object` isn't indexed.
+    //
+    // NOT `is_final`: JLS §8.10.3 lets a record declare its own `equals`/`hashCode`/`toString`, and
+    // when it does the branch above suppresses the synthetic one anyway.
+    for (name, ret, params) in [
+        ("toString", "String", Vec::new()),
+        ("hashCode", "int", Vec::new()),
+        ("equals", "boolean", vec![ParamDecl { name: "o".into(), type_text: "Object".into() }]),
+    ] {
+        if is_declared(methods, name, params.len()) {
+            continue;
+        }
+        methods.push(MethodDecl {
+            name: name.to_string(),
+            return_type_text: ret.to_string(),
+            params,
+            is_static: false,
+            visibility: Visibility::Public,
+            is_abstract: false,
+            is_default: false,
+            is_final: false,
+            throws: Vec::new(),
+        });
+    }
+}
+
+/// Whether `methods` already holds one of that name and arity — the "a declared member wins" test.
+/// Arity as well as name, so a record declaring an extra `x(int)` overload doesn't suppress the
+/// zero-arg accessor the language owes it.
+fn is_declared(methods: &[MethodDecl], name: &str, arity: usize) -> bool {
+    methods.iter().any(|m| m.name == name && m.params.len() == arity)
+}
+
 fn parse_constructor(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
     node.child_by_field_name("name")?; // a real declaration names its class
     Some(MethodDecl {
@@ -861,6 +979,94 @@ mod tests {
 
     fn one_type(src: &str) -> TypeDecl {
         extract_symbols(src).types.into_iter().next().expect("one type")
+    }
+
+    // ── record components (JLS §8.10) ────────────────────────────────────────────
+
+    /// The reported bug: a record's generated members didn't exist, so `p.x()` / `p.toString()`
+    /// resolved to nothing and were flagged "cannot resolve method" on correct code.
+    #[test]
+    fn a_record_gets_its_accessors_fields_constructor_and_object_overrides() {
+        let t = one_type("record Point(int x, String label) {}");
+        assert_eq!(t.kind, TypeKind::Record);
+
+        // An accessor per component, named AFTER the component (not `getX`), returning its type.
+        let x = t.methods.iter().find(|m| m.name == "x").expect("x() accessor");
+        assert_eq!(x.return_type_text, "int");
+        assert!(x.params.is_empty());
+        assert_eq!(x.visibility, Visibility::Public);
+        let label = t.methods.iter().find(|m| m.name == "label").expect("label() accessor");
+        assert_eq!(label.return_type_text, "String");
+
+        // A private final backing field per component.
+        let fx = t.fields.iter().find(|f| f.name == "x").expect("x field");
+        assert_eq!(fx.type_text, "int");
+        assert!(fx.is_final);
+        assert_eq!(fx.visibility, Visibility::Private);
+
+        // The canonical constructor, components in order.
+        let ctor = t.methods.iter().find(|m| m.name == "<init>").expect("canonical constructor");
+        assert_eq!(
+            ctor.params.iter().map(|p| p.type_text.as_str()).collect::<Vec<_>>(),
+            vec!["int", "String"],
+        );
+
+        // The Object overrides a record implements for you.
+        for (name, ret) in [("toString", "String"), ("hashCode", "int"), ("equals", "boolean")] {
+            let m = t.methods.iter().find(|m| m.name == name).unwrap_or_else(|| panic!("{name}()"));
+            assert_eq!(m.return_type_text, ret);
+        }
+        assert_eq!(
+            t.methods.iter().find(|m| m.name == "equals").unwrap().params.len(),
+            1,
+            "equals takes one Object",
+        );
+    }
+
+    /// A member the record writes itself wins — synthesizing it too would give the type the same
+    /// method twice and invent an overload ambiguity.
+    #[test]
+    fn a_declared_record_member_is_not_synthesized_twice() {
+        let t = one_type(
+            "record Point(int x) {\n\
+               public int x() { return x * 2; }\n\
+               @Override public String toString() { return \"p\"; }\n\
+             }",
+        );
+        assert_eq!(t.methods.iter().filter(|m| m.name == "x").count(), 1, "{:?}", t.methods);
+        assert_eq!(t.methods.iter().filter(|m| m.name == "toString").count(), 1);
+        // The user's accessor is the one kept — the body is theirs.
+        assert_eq!(t.methods.iter().find(|m| m.name == "x").unwrap().return_type_text, "int");
+    }
+
+    /// An explicitly declared canonical constructor suppresses the synthetic one; an extra
+    /// overload of a different arity does not.
+    #[test]
+    fn a_declared_constructor_of_the_same_arity_wins() {
+        let one = one_type("record R(int x) { R(int x) { this.x = x; } }");
+        assert_eq!(one.methods.iter().filter(|m| m.name == "<init>").count(), 1);
+
+        // A convenience constructor of another arity leaves the canonical one owed.
+        let two = one_type("record R(int x) { R() { this(0); } }");
+        assert_eq!(two.methods.iter().filter(|m| m.name == "<init>").count(), 2, "{:?}", two.methods);
+        assert!(two.methods.iter().any(|m| m.name == "<init>" && m.params.len() == 1));
+    }
+
+    /// A component-less record still gets its constructor and the Object overrides.
+    #[test]
+    fn an_empty_record_still_gets_its_overrides() {
+        let t = one_type("record Unit() {}");
+        assert!(t.fields.is_empty());
+        assert!(t.methods.iter().any(|m| m.name == "<init>" && m.params.is_empty()));
+        assert!(t.methods.iter().any(|m| m.name == "hashCode"));
+    }
+
+    /// A non-record is untouched — no phantom accessors on an ordinary class.
+    #[test]
+    fn a_class_gains_nothing() {
+        let t = one_type("class C { private int x; }");
+        assert!(t.methods.is_empty(), "{:?}", t.methods);
+        assert_eq!(t.fields.len(), 1);
     }
 
     #[test]

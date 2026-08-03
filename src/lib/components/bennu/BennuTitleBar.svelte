@@ -51,6 +51,9 @@
   // later wave — it toasts). All disabled when no project is open.
   const hasProject = $derived(!!projectStore.project);
   const busy = $derived(bennuRunStore.active);
+  /** A Cargo project has no Java model: `cargo check` is its only build, and "Validate
+   *  (no compile)" / the JDK warning are statements about a Java stack that isn't there. */
+  const isCargo = $derived(projectStore.isCargo);
   function notImplemented(what: string) {
     toastStore.show(`${what} isn't implemented yet.`, 'info');
   }
@@ -79,27 +82,47 @@
     else void bennuRunStore.build(root);
   }
 
-  // The active build type drives the main button's icon + label.
+  // The active build type drives the main button's icon + label. A Cargo project has one
+  // build (`cargo check`) and no second choice, so the split dropdown collapses to a
+  // plain button rather than offering a Java-only alternative next to it.
   const buildType = $derived(bennuRunStore.preferredBuildType);
   const buildLabel = $derived(
-    buildType === 'validate' ? 'Validate project (no compile)' : 'Build project (Maven)',
+    isCargo
+      ? 'Check project (cargo check)'
+      : buildType === 'validate'
+        ? 'Validate project (no compile)'
+        : 'Build project (Maven)',
   );
-  // The split dropdown: choose (and run) a build type.
-  const buildMenu = $derived<DropdownItem[]>([
-    { kind: 'separator', label: 'Build with' },
-    { kind: 'item', id: 'mvn',      label: 'Maven build',           icon: Hammer,     disabled: busy, onclick: () => selectBuild('mvn') },
-    { kind: 'item', id: 'validate', label: 'Validate (no compile)', icon: ListChecks, disabled: busy, onclick: () => selectBuild('validate') },
-  ]);
+  // The split dropdown: choose (and run) a build type. Empty for Cargo → no split.
+  const buildMenu = $derived<DropdownItem[]>(
+    isCargo
+      ? []
+      : [
+          { kind: 'separator', label: 'Build with' },
+          { kind: 'item', id: 'mvn',      label: 'Maven build',           icon: Hammer,     disabled: busy, onclick: () => selectBuild('mvn') },
+          { kind: 'item', id: 'validate', label: 'Validate (no compile)', icon: ListChecks, disabled: busy, onclick: () => selectBuild('validate') },
+        ],
+  );
 
   const runMenu = $derived<DropdownItem[]>([
-    { kind: 'item', id: 'run',     label: 'Run',             icon: Play,   shortcut: 'Shift+F10', disabled: busy, onclick: runProject },
-    { kind: 'item', id: 'build',   label: buildLabel,        icon: buildType === 'validate' ? ListChecks : Hammer, shortcut: 'Ctrl+F9', disabled: busy, onclick: buildProject },
-    { kind: 'item', id: 'validate', label: 'Validate project', icon: ListChecks, disabled: busy, onclick: () => selectBuild('validate') },
+    // `Run` launches a run configuration, which is a Java main class — a Cargo project has
+    // none, so the entry is out rather than failing when pressed.
+    ...(isCargo
+      ? []
+      : [{ kind: 'item', id: 'run', label: 'Run', icon: Play, shortcut: 'Shift+F10', disabled: busy, onclick: runProject } as DropdownItem]),
+    { kind: 'item', id: 'build',   label: buildLabel,        icon: isCargo || buildType !== 'validate' ? Hammer : ListChecks, shortcut: 'Ctrl+F9', disabled: busy, onclick: buildProject },
+    ...(isCargo
+      ? []
+      : [{ kind: 'item', id: 'validate', label: 'Validate project', icon: ListChecks, disabled: busy, onclick: () => selectBuild('validate') } as DropdownItem]),
     { kind: 'item', id: 'stop',    label: 'Stop',            icon: Square, disabled: !bennuRunStore.running, onclick: () => void bennuRunStore.stop() },
     { kind: 'separator' },
     { kind: 'item', id: 'debug',   label: 'Debug…',          icon: Bug,  onclick: () => notImplemented('Debug') },
-    { kind: 'separator' },
-    { kind: 'item', id: 'editcfg', label: 'Edit configurations…', icon: SlidersHorizontal, disabled: !hasProject, onclick: () => bennuUiStore.openRunConfig() },
+    ...(isCargo
+      ? []
+      : [
+          { kind: 'separator' } as DropdownItem,
+          { kind: 'item', id: 'editcfg', label: 'Edit configurations…', icon: SlidersHorizontal, disabled: !hasProject, onclick: () => bennuUiStore.openRunConfig() } as DropdownItem,
+        ]),
   ]);
 
   // Ctrl+O (window keybinding) → open the folder picker hosted here.
@@ -200,7 +223,7 @@
   <!-- Right cluster head: the Run / Debug / overflow run-controls, then a small
        gap before the app buttons (palette · docs · settings). -->
   {#snippet trailing()}
-    {#if bennuDiagnosticsStore.jdkMissing}
+    {#if bennuDiagnosticsStore.jdkMissing && !isCargo}
       <button
         class="btb-jdk-warn"
         onclick={() => bennuUiStore.openSettings()}
@@ -212,44 +235,49 @@
       </button>
     {/if}
     <div class="btb-run" role="group" aria-label="Run controls">
+      <!-- `btb-build-main` squares off the right edge for the attached caret. Without the
+           caret (Cargo: one build type, no split) the button must round on both sides. -->
       <button
-        class="btb-run-btn btb-build-main"
+        class="btb-run-btn"
+        class:btb-build-main={!isCargo}
         onclick={buildProject}
         disabled={!hasProject || busy}
         use:tooltip={{ content: buildLabel, shortcut: 'Ctrl+F9' }}
         aria-label={buildLabel}
       >
-        {#if buildType === 'validate'}
+        {#if !isCargo && buildType === 'validate'}
           <ListChecks size={16} />
         {:else}
           <Hammer size={16} />
         {/if}
       </button>
-      <Dropdown items={buildMenu} position="fixed" direction="down" width="220px">
-        {#snippet trigger({ open, toggle })}
-          <button class="btb-run-btn btb-build-caret" class:open onclick={toggle} disabled={!hasProject} use:tooltip={'Choose build type'} aria-label="Choose build type" aria-haspopup="menu" aria-expanded={open}>
-            <ChevronDown size={12} />
-          </button>
-        {/snippet}
-      </Dropdown>
-      <button
-        class="btb-run-btn btb-run-primary"
-        onclick={runProject}
-        disabled={!hasProject || busy}
-        use:tooltip={{ content: 'Run', shortcut: 'Shift+F10' }}
-        aria-label="Run"
-      >
-        <Play size={16} />
-      </button>
-      <button
-        class="btb-run-btn"
-        onclick={() => notImplemented('Debug')}
-        disabled={!hasProject}
-        use:tooltip={'Debug'}
-        aria-label="Debug"
-      >
-        <Bug size={16} />
-      </button>
+      {#if !isCargo}
+        <Dropdown items={buildMenu} position="fixed" direction="down" width="220px">
+          {#snippet trigger({ open, toggle })}
+            <button class="btb-run-btn btb-build-caret" class:open onclick={toggle} disabled={!hasProject} use:tooltip={'Choose build type'} aria-label="Choose build type" aria-haspopup="menu" aria-expanded={open}>
+              <ChevronDown size={12} />
+            </button>
+          {/snippet}
+        </Dropdown>
+        <button
+          class="btb-run-btn btb-run-primary"
+          onclick={runProject}
+          disabled={!hasProject || busy}
+          use:tooltip={{ content: 'Run', shortcut: 'Shift+F10' }}
+          aria-label="Run"
+        >
+          <Play size={16} />
+        </button>
+        <button
+          class="btb-run-btn"
+          onclick={() => notImplemented('Debug')}
+          disabled={!hasProject}
+          use:tooltip={'Debug'}
+          aria-label="Debug"
+        >
+          <Bug size={16} />
+        </button>
+      {/if}
       <Dropdown items={runMenu} position="fixed" direction="down" width="220px">
         {#snippet trigger({ open, toggle })}
           <button class="btb-run-btn" class:open onclick={toggle} disabled={!hasProject} use:tooltip={'More run actions'} aria-label="More run actions" aria-haspopup="menu" aria-expanded={open}>
@@ -269,7 +297,7 @@
 {#if pickerOpen}
   <FileExplorerModal
     mode="folder"
-    title={pickerMode === 'add' ? 'Add project to workspace' : 'Open Java project'}
+    title={pickerMode === 'add' ? 'Add project to workspace' : 'Open project (Maven or Cargo)'}
     onConfirm={confirmPicker}
     onCancel={() => (pickerOpen = false)}
     onClose={() => (pickerOpen = false)}

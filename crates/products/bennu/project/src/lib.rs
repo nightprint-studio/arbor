@@ -20,6 +20,7 @@
 //! but the prelude is the canonical call-site path.
 
 pub mod capability;
+pub mod cargo;
 pub mod encoding;
 pub mod error;
 pub mod jdk;

@@ -45,21 +45,35 @@ export interface CapabilitySet {
   hits: CapabilityHit[];
 }
 
-/** An opened Java project (`bennu_open_project`). */
+/**
+ * Which manifest governs a project root — the one fact that decides how much of Bennu
+ * applies to it. `maven` gets the whole Java stack (symbol index, capability detection,
+ * JDK, validation, Generate…); `cargo` gets the editor (tree, go-to-file,
+ * find-in-files, highlighting, `cargo check`) and nothing that would need a Java index
+ * to be true. Gate Java-only UI on this rather than on `jdk === null`.
+ */
+export type ProjectKind = 'maven' | 'cargo';
+
+/** An opened project (`bennu_open_project`) — Maven or Cargo, see {@link ProjectKind}. */
 export interface ProjectInfo {
-  /** Absolute project root folder (holds the root `pom.xml`). */
+  /** Absolute project root folder (holds the root `pom.xml` / `Cargo.toml`). */
   root: string;
-  /** Display name (pom `<name>`, else `<artifactId>`, else the folder name). */
+  /** Display name (pom `<name>` / Cargo `package.name`, else the folder name). */
   name: string;
-  /** Maven modules (`<modules>`; empty for a single-module project). */
+  /** Sub-projects: Maven `<modules>` or Cargo workspace members (globs expanded).
+   *  Empty for a single-module / single-crate project. */
   modules: string[];
-  /** Resolved JDK, or `null` when it can't be inferred and no override is set. */
+  /** Which manifest governs the root. Absent in an older payload → treat as `maven`. */
+  kind: ProjectKind;
+  /** Resolved JDK, or `null` when it can't be inferred and no override is set — always
+   *  `null` for a Cargo project. */
   jdk: JdkInfo | null;
-  /** The detected domain capabilities. */
+  /** The detected domain capabilities. All-false for a Cargo project. */
   capabilities: CapabilitySet;
   /** The project's declared source encoding — the pom `sourceEncoding`, else the config
    *  default (e.g. `UTF-8`, `Cp1252`). Shown in the app status bar; an individual file's
-   *  decoded encoding (which can differ) rides on the read result / editor footer. */
+   *  decoded encoding (which can differ) rides on the read result / editor footer.
+   *  Always `UTF-8` for a Cargo project (Rust source is UTF-8 by definition). */
   source_encoding: string;
 }
 
@@ -83,12 +97,35 @@ export interface ReadFileResult {
   text: string;
   /** Encoding label, e.g. `UTF-8`, `Cp1252`. */
   encoding: string;
+  /** The on-disk state this text came from — see {@link FileStamp}. Hand it back to
+   *  {@link import('$lib/ipc/bennu').writeFile} so a save refuses instead of overwriting a
+   *  file something else changed meanwhile. */
+  stamp: string;
 }
 
 /** Result of `bennu_write_file`: the encoding the text was actually encoded with
  *  (the project encoding, or `UTF-8` if that couldn't represent a character). */
 export interface WriteResult {
   encoding: string;
+  /** The on-disk state just written — the new baseline for the next save's check. */
+  stamp: string;
+}
+
+/**
+ * One file's on-disk fingerprint (`bennu_file_stamps`) — **opaque**: compare stamps for
+ * equality, never parse one.
+ *
+ * A stat, not a content hash, so polling every open tab costs nothing. `stamp` is `''` and
+ * `exists` is `false` for a file that is gone — which the caller must treat as "changed"
+ * for the purpose of warning, but *not* as a reason to block the save that recreates it.
+ */
+export interface FileStamp {
+  /** Absolute path, echoed back so a batch reply needs no ordering contract. */
+  file: string;
+  /** The stamp, or `''` when the file is gone / unreadable. */
+  stamp: string;
+  /** Whether the file exists on disk at all. */
+  exists: boolean;
 }
 
 /** One completion candidate (`bennu_completion`). Phase 0 returns `[]`. */

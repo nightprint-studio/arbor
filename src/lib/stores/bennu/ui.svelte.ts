@@ -143,6 +143,22 @@ function createBennuUiStore() {
     /** Ensure a specific left tool is showing (used by "reveal in project"). */
     showLeft(p: LeftPanel) { leftPanel = p; },
 
+    /**
+     * Close any open tool window whose rail icon has just disappeared.
+     *
+     * Called when the active project switches to one that doesn't offer a tool (a Cargo
+     * project has no Structure / Maven / Dependencies / Services / Forms — see
+     * `BennuWindow`'s `javaTools`). Without this a panel opened on a Java project would
+     * survive the switch with no way left to close it: its toggle is gone from both the
+     * rail and the palette. Left falls back to Project rather than to nothing, so the
+     * side rail never reads as broken.
+     */
+    dropUnavailablePanels(keep: { left: LeftPanel[]; right: RightPanel[]; bottom: BottomPanel[] }) {
+      if (leftPanel && !keep.left.includes(leftPanel)) leftPanel = 'project';
+      if (rightPanel && !keep.right.includes(rightPanel)) rightPanel = null;
+      if (bottomPanel && !keep.bottom.includes(bottomPanel)) bottomPanel = null;
+    },
+
     openSettings()  { settingsOpen = true; },
     closeSettings() { settingsOpen = false; },
     toggleDocs()    { docsOpen = !docsOpen; },

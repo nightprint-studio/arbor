@@ -69,25 +69,62 @@ pub struct CapabilityHit {
 
 // ── open_project ─────────────────────────────────────────────────────────────
 
+/// Which build system a project root is governed by — the one fact that decides
+/// how much of Bennu applies to it.
+///
+/// Not an "ecosystem" flag with a dozen future members: it is the **manifest** that
+/// was found, and every consumer branches on it for one reason only. A Maven root
+/// gets the whole Java stack (symbol index, capability detection, JDK resolution,
+/// validation); a Cargo root gets the editor — tree, find-in-files, go-to-file,
+/// highlighting — and nothing that would need a Java index to be true. Keeping the
+/// distinction in the contract (rather than "is `jdk` null?") means the FE hides
+/// Java-only affordances instead of showing them empty.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectKind {
+    /// A Maven project — the root holds `pom.xml`. The full Java model applies.
+    #[default]
+    Maven,
+    /// A Cargo project — the root holds `Cargo.toml`. Editor-only: no symbol index,
+    /// no capability detection, no JDK.
+    Cargo,
+}
+
+impl ProjectKind {
+    /// `true` for the kind that carries the Java analysis (index, capabilities, JDK).
+    pub fn is_java(self) -> bool {
+        matches!(self, ProjectKind::Maven)
+    }
+}
+
 /// Result of `bennu_open_project` — the resolved project model the FE needs to
 /// render the workspace header + gate its panels.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectInfo {
-    /// Absolute path to the project root (the directory holding the root `pom.xml`).
+    /// Absolute path to the project root (the directory holding the root manifest —
+    /// `pom.xml` or `Cargo.toml`, see [`kind`](Self::kind)).
     pub root: String,
-    /// Display name (the pom `<name>`, else `<artifactId>`, else the dir name).
+    /// Display name (the pom `<name>` / Cargo `package.name`, else the dir name).
     pub name: String,
-    /// The Maven modules (the `<modules>` list; empty for a single-module project).
+    /// The sub-projects: Maven `<modules>`, or the Cargo workspace members (globs
+    /// expanded). Empty for a single-module / single-crate project.
     pub modules: Vec<String>,
+    /// Which manifest governs the root — decides how much of the Java model applies.
+    /// `#[serde(default)]` → an older payload without the field reads as `Maven`,
+    /// which is what every project was before Cargo roots existed.
+    #[serde(default)]
+    pub kind: ProjectKind,
     /// The resolved JDK for the project (from the pom, overridable). `None` when it
-    /// can't be inferred and no override is set.
+    /// can't be inferred and no override is set — and always `None` for a Cargo root.
     pub jdk: Option<JdkInfo>,
-    /// The detected domain capabilities (Spike D ruleset).
+    /// The detected domain capabilities (Spike D ruleset). Empty for a Cargo root:
+    /// every rule is a statement about a Java stack.
     pub capabilities: CapabilitySet,
     /// The project's declared source encoding — the pom `project.build.sourceEncoding`,
     /// else the config default (e.g. `UTF-8`, `Cp1252`). This is the *project* label the
     /// status bar shows; an individual file's decoded encoding (which can differ via a
     /// per-file override or a recovered mislabel) rides on the per-file read result.
+    /// Always `UTF-8` for a Cargo root — Rust source is UTF-8 by language definition.
     pub source_encoding: String,
 }
 
@@ -130,7 +167,47 @@ pub struct FileContents {
     pub text: String,
     /// The encoding the bytes were decoded from, e.g. `"UTF-8"`, `"Cp1252"`.
     pub encoding: String,
+    /// The on-disk [stamp](FileStamp) this text was read from. Hand it back to
+    /// `bennu_write_file` as `expect_stamp` and the save refuses rather than
+    /// overwriting a file something else changed meanwhile.
+    ///
+    /// `#[serde(default)]` so an older payload without it still deserializes — an empty
+    /// stamp means "unknown", which disables the check rather than failing the save.
+    #[serde(default)]
+    pub stamp: String,
 }
+
+/// A cheap fingerprint of a file's on-disk state: `"<mtime_nanos>:<len>"`, or `""` when
+/// the file is absent or its metadata is unreadable.
+///
+/// Deliberately **not** a content hash. It exists to be taken often — every open tab,
+/// every time the window regains focus — and stat'ing a handful of paths costs nothing
+/// while reading and decoding them would be real I/O on a legacy tree of large JSPs. The
+/// residual blind spot (a rewrite that preserves both the nanosecond mtime and the byte
+/// length) is not a case worth paying for, and it is the same trade every editor makes.
+///
+/// An opaque token to its consumers: the FE compares stamps for equality and never parses
+/// one, so the format can change without touching the other side.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileStamp {
+    /// Absolute path the stamp is for (echoed back so a batch reply needs no ordering
+    /// contract with its request).
+    pub file: String,
+    /// The stamp, or `""` when the file is gone / unreadable.
+    pub stamp: String,
+    /// Whether the file exists at all. Distinguishes "deleted under us" from "changed",
+    /// which the FE resolves differently: a vanished file must not block the save that
+    /// would recreate it.
+    pub exists: bool,
+}
+
+/// The **machine-readable** prefix of the error `bennu_write_file` returns when the file
+/// changed on disk since the caller read it.
+///
+/// Error strings are the contract across the RPC seam (they cross it as `Display`), so the
+/// one error a caller has to *branch* on carries a stable prefix instead of prose the FE
+/// would have to pattern-match. Everything after it is human-readable detail.
+pub const ERR_EXTERNALLY_MODIFIED: &str = "bennu:externally-modified";
 
 // ── completion / diagnostics (Phase-0 stubs) ─────────────────────────────────
 
@@ -238,6 +315,11 @@ pub struct RenamePreview {
 pub struct WriteResult {
     /// The encoding the bytes were written in, e.g. `"UTF-8"`, `"Cp1252"`.
     pub encoding: String,
+    /// The on-disk [stamp](FileStamp) of what was just written — the caller stores it as
+    /// the new "this is what is on disk" baseline, so its own save never trips the
+    /// external-change check on the next one.
+    #[serde(default)]
+    pub stamp: String,
 }
 
 // ── references / find-usages (docs §5 #7) ────────────────────────────────────

@@ -9,6 +9,20 @@
 //!
 //! Pure AST: we only look at the KIND of the expression under each `expression_statement`, so there
 //! are no false positives (an ERROR node is left to the syntax check).
+//!
+//! ## The one place an `expression_statement` isn't a statement
+//!
+//! An arrow switch arm (`case OWNER -> 4;`) is parsed by tree-sitter-java as a `switch_rule`
+//! whose body is an `expression_statement` — but in a switch **expression** that body is the
+//! arm's *value*, and any expression is legal there. `return switch (p) { case OWNER -> 4; }`
+//! is ordinary Java, and reporting "`4` is not a statement" on it is exactly the false
+//! positive this module claims not to have.
+//!
+//! So a `switch_rule` body is skipped. The cost is real and worth naming: in a switch used as
+//! a *statement*, an arm body genuinely must be a statement expression, and `case A -> x.field;`
+//! there is now missed. Telling the two apart needs the switch's surrounding context rather
+//! than the node itself, and while that is knowable, a check that is silent about a rare
+//! mistake beats one that shouts about a common correct construct (docs §7).
 
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
@@ -36,6 +50,10 @@ pub fn invalid_statements_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
     let mut out = Vec::new();
     for &n in nodes {
         if n.kind() != "expression_statement" {
+            continue;
+        }
+        // An arrow switch arm's body: the "statement" is the arm's VALUE. See the module doc.
+        if n.parent().map(|p| p.kind()) == Some("switch_rule") {
             continue;
         }
         // The wrapped expression is the statement's first (and only) named child.
@@ -133,5 +151,49 @@ mod tests {
     fn statements_inside_control_flow_are_checked() {
         let d = bad("if (cond) { obj.value; }");
         assert_eq!(d.len(), 1, "a bad statement in a nested block is still caught: {d:?}");
+    }
+
+    // ── switch expressions ───────────────────────────────────────────────────────
+
+    /// The reported bug: a `return switch (…) { case X -> 4; }` had every arm flagged, because
+    /// tree-sitter wraps an arrow arm's value in an `expression_statement`.
+    #[test]
+    fn switch_expression_arms_are_values_not_statements() {
+        let src = "class C {\n  Integer level(P p) {\n    return switch (p) {\n\
+                   case OWNER -> 4;\n case FULL -> 3;\n case NONE -> 0;\n    };\n  }\n}";
+        let tree = parse(src);
+        let d = invalid_statements(tree.root_node(), src);
+        assert!(d.is_empty(), "an arrow arm's value is legal Java: {d:?}");
+    }
+
+    /// Not just literals: any expression is a legal arm value.
+    #[test]
+    fn switch_expression_arm_expressions_are_not_flagged() {
+        let src = "class C {\n  String f(P p) {\n    return switch (p) {\n\
+                   case A -> a + b;\n case B -> obj.field;\n case C -> \"x\";\n    };\n  }\n}";
+        let tree = parse(src);
+        let d = invalid_statements(tree.root_node(), src);
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    /// The skip is scoped to the arm body itself — a bad statement inside an arm's BLOCK is
+    /// still a statement position, and still caught.
+    #[test]
+    fn a_block_arm_still_checks_its_statements() {
+        let src = "class C {\n  void f(P p) {\n    switch (p) {\n\
+                   case A -> { obj.value; }\n    }\n  }\n}";
+        let tree = parse(src);
+        let d = invalid_statements(tree.root_node(), src);
+        assert_eq!(d.len(), 1, "a block arm's body is ordinary statement territory: {d:?}");
+    }
+
+    /// And the classic colon-form switch is untouched by the skip.
+    #[test]
+    fn colon_form_switch_statements_are_still_checked() {
+        let src = "class C {\n  void f(int i) {\n    switch (i) {\n\
+                   case 1: obj.value; break;\n    }\n  }\n}";
+        let tree = parse(src);
+        let d = invalid_statements(tree.root_node(), src);
+        assert_eq!(d.len(), 1, "{d:?}");
     }
 }

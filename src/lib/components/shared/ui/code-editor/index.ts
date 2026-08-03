@@ -32,5 +32,6 @@ export {
   inlineCompletionActive,
 } from './inline-completion';
 export { codeEditorTheme } from './theme';
+export { sqlHighlight, type SqlDialect } from './sql-modes';
 export { createCodeEditorExtensions, refTextAt, type CodeEditorExtensionsOptions } from './extensions';
 export { createHighlightPlugin, makeByteToU16, makeU16ToByte, parserReady } from './highlight';

@@ -47,9 +47,16 @@ use serde_json::json;
 /// File extensions scanned for text matches. Files with no extension are scanned too when
 /// their name starts with `.` (dotfiles like `.gitignore` / `.editorconfig`), handled in
 /// [`is_scannable`].
-const SCAN_EXTS: [&str; 15] = [
+///
+/// An allow-list rather than a deny-list of binaries, so a `.jar` / `.png` is never read
+/// into memory to be searched. `rs` / `toml` / `ron` / `dig` are here for the Rust side:
+/// a project-wide search that silently skipped every `.rs` file would look like a broken
+/// search, not a narrow one.
+const SCAN_EXTS: [&str; 19] = [
     "java", "xml", "jsp", "jspf", "tag", "properties", "js", "css", "html", "sql", "yml",
     "yaml", "md", "txt", "jspx",
+    // Rust projects: sources, manifests, RON game data, and geode's `.dig` scripts.
+    "rs", "toml", "ron", "dig",
 ];
 
 /// Directory names never descended into during the scan (mirrors [`crate::todos`]).
@@ -442,6 +449,17 @@ mod tests {
         assert!(is_scannable(Path::new("/p/.gitignore")));
         assert!(!is_scannable(Path::new("/p/image.png")));
         assert!(!is_scannable(Path::new("/p/Makefile")));
+    }
+
+    #[test]
+    fn rust_project_files_are_scannable() {
+        assert!(is_scannable(Path::new("/p/src/lib.rs")));
+        assert!(is_scannable(Path::new("/p/Cargo.toml")));
+        assert!(is_scannable(Path::new("/p/content/core/crystals/geode.ron")));
+        assert!(is_scannable(Path::new("/p/content/core/examples/01-tre-righe.dig")));
+        // A lockfile is text, and deliberately out: it is machine-written noise that
+        // would swamp a search for a crate name with hundreds of hits.
+        assert!(!is_scannable(Path::new("/p/Cargo.lock")));
     }
 
     // ── streaming walk (BatchSink flushing + capping) ────────────────────────────

@@ -1,15 +1,22 @@
 <script lang="ts">
   /**
-   * Bennu footer — the IntelliJ-style status strip for the Java-editor window.
-   * Left: JDK (version + where it was resolved from) · detected capabilities count.
+   * Bennu footer — the IntelliJ-style status strip for the editor window.
+   * Left: JDK (version + where it was resolved from) · detected capabilities count, or
+   * the crate count on a Cargo project.
    * Right: indexing status · the open file's encoding · caret Ln/Col · the
    * shared feedback badges (jobs · notifications), injected by the window via the
    * `footerExtra` snippet so this file stays free of Arbor feedback-store imports.
    *
+   * On a **Cargo** project the Java facts are replaced rather than blanked: JDK,
+   * capabilities and the index are all Java-model readings that don't exist for a Rust
+   * root (see `bennu_open_project`), and `JDK —` next to `0 capabilities` reads as a
+   * broken Java project instead of a Rust one. The strip states what it does know: the
+   * toolchain it is, and how many crates the workspace holds.
+   *
    * bg-elevated strip (flows from the titlebar) — mirrors MerulaFooter / Corvus
    * StatusBar. Subtle + keyboard-first (nothing here is mouse-only).
    */
-  import { Coffee, Boxes, Database, FileType } from 'lucide-svelte';
+  import { Coffee, Boxes, Database, FileType, Package } from 'lucide-svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import BennuIndentStatus from './BennuIndentStatus.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -19,7 +26,12 @@
 
   let { footerExtra }: { footerExtra?: Snippet } = $props();
 
+  const isCargo = $derived(projectStore.isCargo);
   const jdk = $derived(projectStore.project?.jdk ?? null);
+  /** Crates in a Cargo workspace: the expanded `members`, plus the root crate itself when
+   *  the manifest declares a `[package]` (a virtual workspace manifest has none, and then
+   *  the members ARE the whole project). */
+  const crateCount = $derived((projectStore.project?.modules.length ?? 0) || 1);
   // The PROJECT's declared source encoding (pom `sourceEncoding` → config default). The
   // open file's own decoded encoding lives on the editor's footer (BennuEditor), which
   // can differ (per-file override / recovered mislabel).
@@ -47,7 +59,15 @@
 
 <div class="bf">
   {#if projectStore.project}
-    {#if jdk}
+    {#if isCargo}
+      <span class="bf-item" use:tooltip={'A Cargo project — editor features only (no symbol index yet)'}>
+        <Package size={12} /> Cargo
+      </span>
+      <span class="bf-sep"></span>
+      <span class="bf-item" use:tooltip={'Crates in this workspace (Cargo.toml members)'}>
+        <Boxes size={12} /> {crateCount} crate{crateCount === 1 ? '' : 's'}
+      </span>
+    {:else if jdk}
       <span class="bf-item" use:tooltip={`JDK ${jdk.version} · ${jdkSourceLabel[jdk.source] ?? jdk.source}`}>
         <Coffee size={12} /> JDK {jdk.version}
         <span class="bf-sub">{jdk.source}</span>
@@ -58,11 +78,13 @@
       </span>
     {/if}
 
-    <span class="bf-sep"></span>
+    {#if !isCargo}
+      <span class="bf-sep"></span>
 
-    <span class="bf-item" use:tooltip={`${capCount} domain capabilit${capCount === 1 ? 'y' : 'ies'} detected`}>
-      <Boxes size={12} /> {capCount} capabilit{capCount === 1 ? 'y' : 'ies'}
-    </span>
+      <span class="bf-item" use:tooltip={`${capCount} domain capabilit${capCount === 1 ? 'y' : 'ies'} detected`}>
+        <Boxes size={12} /> {capCount} capabilit{capCount === 1 ? 'y' : 'ies'}
+      </span>
+    {/if}
   {:else}
     <span class="bf-item bf-muted">No project open</span>
   {/if}
@@ -70,25 +92,28 @@
   <span class="bf-spacer"></span>
 
   {#if projectStore.project}
-    <!-- Indexing status — driven by the real index-progress events / stats poll. -->
-    {#if bennuIndexStore.indexing}
-      {@const rp = bennuIndexStore.refProgress}
-      <span class="bf-item bf-indexing" use:tooltip={`Building the project index${bennuIndexStore.phaseLabel ? ` · ${bennuIndexStore.phaseLabel}` : ''}`}>
-        <Spinner size={11} /> Indexing{bennuIndexStore.phaseLabel ? ` ${bennuIndexStore.phaseLabel.toLowerCase()}` : ''}{rp ? ` ${rp.done.toLocaleString()}/${rp.total.toLocaleString()}` : ''}…
-      </span>
-    {:else}
-      <span class="bf-item" use:tooltip={bennuIndexStore.typeCount ? `Index ready · ${bennuIndexStore.typeCount} types` : 'Project index is up to date'}>
-        <Database size={12} /> Indexed{bennuIndexStore.typeCount ? ` · ${bennuIndexStore.typeCount}` : ''}
-      </span>
+    <!-- Indexing status — driven by the real index-progress events / stats poll. A Cargo
+         project builds no index, so "Indexed · 0" would be a reading of nothing. -->
+    {#if !isCargo}
+      {#if bennuIndexStore.indexing}
+        {@const rp = bennuIndexStore.refProgress}
+        <span class="bf-item bf-indexing" use:tooltip={`Building the project index${bennuIndexStore.phaseLabel ? ` · ${bennuIndexStore.phaseLabel}` : ''}`}>
+          <Spinner size={11} /> Indexing{bennuIndexStore.phaseLabel ? ` ${bennuIndexStore.phaseLabel.toLowerCase()}` : ''}{rp ? ` ${rp.done.toLocaleString()}/${rp.total.toLocaleString()}` : ''}…
+        </span>
+      {:else}
+        <span class="bf-item" use:tooltip={bennuIndexStore.typeCount ? `Index ready · ${bennuIndexStore.typeCount} types` : 'Project index is up to date'}>
+          <Database size={12} /> Indexed{bennuIndexStore.typeCount ? ` · ${bennuIndexStore.typeCount}` : ''}
+        </span>
+      {/if}
+      <span class="bf-sep"></span>
     {/if}
 
-    <span class="bf-sep"></span>
     <!-- Indentation (tabs/spaces + width) — click / keyboard to change; applies live. -->
     <BennuIndentStatus />
 
     {#if encoding}
       <span class="bf-sep"></span>
-      <span class="bf-item" use:tooltip={'Project source encoding (pom sourceEncoding)'}>
+      <span class="bf-item" use:tooltip={isCargo ? 'Rust source is UTF-8 by language definition' : 'Project source encoding (pom sourceEncoding)'}>
         <FileType size={12} /> {encoding}
       </span>
     {/if}

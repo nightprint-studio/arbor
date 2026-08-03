@@ -523,6 +523,7 @@ export const DEMO_PROJECT: ProjectInfo = {
   name: 'PortaleAppalti (demo)',
   // Maven `<modules>` — the parent reactor's child module names.
   modules: ['core', 'web', 'batch'],
+  kind: 'maven',
   jdk: { version: '1.8', source: 'maven.compiler.source' },
   // Legacy target stack: pom-declared Cp1252 source encoding.
   source_encoding: 'Cp1252',

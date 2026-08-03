@@ -25,6 +25,9 @@ pub struct Pom {
     pub dependencies: Vec<String>,
     /// `<properties>` as a flat key→value map (raw string values).
     pub properties: Vec<(String, String)>,
+    /// `maven-compiler-plugin` `<release>` if present. Checked before source/target because
+    /// `javac --release` overrides both.
+    pub compiler_release: Option<String>,
     /// `maven-compiler-plugin` `<source>` if present.
     pub compiler_source: Option<String>,
     /// `maven-compiler-plugin` `<target>` if present.
@@ -112,6 +115,7 @@ pub fn parse(xml: &str) -> Pom {
     // maven-compiler-plugin source/target (best-effort: the first `<source>`/
     // `<target>` inside a `<configuration>`). Also honour `maven.compiler.*` props,
     // resolved by the `jdk` module — here we only surface the plugin values.
+    pom.compiler_release = tag_text(xml, "release").map(|s| s.to_string());
     pom.compiler_source = tag_text(xml, "source").map(|s| s.to_string());
     pom.compiler_target = tag_text(xml, "target").map(|s| s.to_string());
 

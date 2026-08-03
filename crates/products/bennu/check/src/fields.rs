@@ -197,6 +197,80 @@ mod tests {
         assert!(diags("Unknown u = null; Object o = u.whatever;").is_empty());
     }
 
+    // ── anonymous class bodies ───────────────────────────────────────────────────
+
+    /// The reported bug: a field declared by an **anonymous class** was looked up on the
+    /// enclosing class (where the `new` sits), which of course doesn't have it — so
+    /// `this.queriable` inside `new Foo<>() { private Bar queriable; … }` was reported as
+    /// unresolvable, on correct code, for every field such a body declares.
+    #[test]
+    fn a_field_of_an_anonymous_class_is_not_looked_up_on_the_outer_class() {
+        // `Point` (the enclosing type here) has x/y and no `queriable` — exactly the shape that
+        // used to produce the false error.
+        let src = "class Point {\n\
+                     Object make() {\n\
+                       return new Runnable() {\n\
+                         private String queriable;\n\
+                         public void run() { String s = this.queriable; }\n\
+                       };\n\
+                     }\n\
+                   }\n";
+        let d: Vec<String> =
+            unknown_fields(src, &resolver()).into_iter().map(|x| x.message).collect();
+        assert!(d.is_empty(), "an anonymous class's own field must not be flagged: {d:?}");
+    }
+
+    /// A bare `queriable` (no `this.`) inside the same body must stay silent too — that path goes
+    /// through the same enclosing-type lookup.
+    #[test]
+    fn an_unqualified_field_of_an_anonymous_class_is_silent() {
+        let src = "class Point {\n\
+                     Object make() {\n\
+                       return new Runnable() {\n\
+                         private String queriable;\n\
+                         public void run() { int n = queriable.length(); }\n\
+                       };\n\
+                     }\n\
+                   }\n";
+        let d: Vec<String> =
+            unknown_fields(src, &resolver()).into_iter().map(|x| x.message).collect();
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    /// The silence is scoped to the anonymous body — `this.z` in an ordinary class method is still
+    /// checked, so the fix didn't buy itself by switching the rule off.
+    #[test]
+    fn this_in_an_ordinary_class_is_still_checked() {
+        let src = "class Point {\n  int x;\n  void m() { int a = this.z; }\n}\n";
+        // `Point` here is the source's own class; the resolver knows `com/acme/Point`, so this
+        // asserts the walk still REACHES a named enclosing type rather than bailing everywhere.
+        let d: Vec<String> =
+            unknown_fields(src, &resolver()).into_iter().map(|x| x.message).collect();
+        // Either it resolves the enclosing type and flags `z`, or it can't resolve `Point` at all
+        // and stays silent — what must NOT happen is the anonymous-body bail leaking to this case,
+        // which would show up as inference returning None for a plain method. Assert on inference
+        // directly so the test says what it means.
+        let symbols = bennu_java::prelude::extract_symbols(src);
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_java::LANGUAGE.into()).unwrap();
+        let tree = parser.parse(src, None).unwrap();
+        let this_off = src.find("this.z").unwrap();
+        let this_node = tree
+            .root_node()
+            .descendant_for_byte_range(this_off, this_off + 4)
+            .expect("the `this` node");
+        let r = resolver();
+        let inferred = bennu_java::prelude::infer_node_type_cached(
+            &tree.root_node(),
+            src,
+            &symbols,
+            &this_node,
+            &r,
+            &InferCache::new(),
+        );
+        assert!(inferred.is_some(), "`this` in an ordinary method must still infer a type: {d:?}");
+    }
+
     #[test]
     fn array_length_is_not_flagged() {
         assert!(diags("Point[] ps = null; int n = ps.length;").is_empty());

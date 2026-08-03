@@ -2,12 +2,23 @@
 //! fondo": the BUILD and RUN that make the Run/Debug buttons real + feed
 //! `target/classes` to the index).
 //!
-//! - `bennu_build` shells out to **`mvn -q -o compile`** (offline, the project's JDK via
-//!   `JAVA_HOME`); if the `mvn` launcher can't be spawned it falls back to **`javac`**
-//!   over the Maven source roots. Either way it captures stdout/stderr, streams the raw
-//!   log as `arbor://bennu/build-output` events, and PARSES compiler/mvn error lines
-//!   into structured [`BuildDiagnostic`]s. After a **successful** compile it triggers a
-//!   re-index of the project (so `target/classes` output is reflected in completion).
+//! - `bennu_build` compiles the project with the toolchain its manifest implies:
+//!   * **Maven root** → **`mvn -q -o compile`** (offline, the project's JDK via
+//!     `JAVA_HOME`); if the `mvn` launcher can't be spawned it falls back to **`javac`**
+//!     over the Maven source roots.
+//!   * **Cargo root** → **`cargo check --workspace --message-format=short`**. `check`
+//!     and not `build`: what the button is for is *the diagnostics*, and `check` reaches
+//!     them without linking — several times faster on a workspace, which is the
+//!     difference between a usable button and one nobody presses. `short` is chosen for
+//!     one concrete reason: it renders as `file:line:col: error[E0308]: message`, the
+//!     same shape [`parse_diagnostics`] already reads for `javac`, so one parser serves
+//!     both toolchains instead of two that drift.
+//!
+//!   Either way it captures stdout/stderr, streams the raw log as
+//!   `arbor://bennu/build-output` events, and PARSES compiler error lines into structured
+//!   [`BuildDiagnostic`]s. After a **successful** Java compile it triggers a re-index of
+//!   the project (so `target/classes` output is reflected in completion); a Cargo project
+//!   has no index to refresh.
 //! - `bennu_run` launches **`java -cp <classpath> <mainClass>`** — classpath = the
 //!   project's `target/classes` + the Phase-2 `.m2`-resolved dependency jars — and
 //!   streams stdout/stderr as `arbor://bennu/run-output`, ending with an
@@ -94,21 +105,25 @@ pub struct BuildArgs {
     pub root: String,
 }
 
-/// Compile the project: `mvn -q -o compile` (offline, project JDK), falling back to
-/// `javac` over the source roots when `mvn` can't be spawned. Streams the raw log as
-/// `arbor://bennu/build-output`, returns the parsed diagnostics, and re-indexes on
-/// success. A *failed compile* is a normal result carrying diagnostics — not an `Err`
-/// (which is reserved for "no compiler could run at all").
+/// Compile the project with the toolchain its manifest implies (see the module doc).
+/// Streams the raw log as `arbor://bennu/build-output`, returns the parsed diagnostics,
+/// and re-indexes a Java project on success. A *failed compile* is a normal result
+/// carrying diagnostics — not an `Err` (which is reserved for "no compiler could run at
+/// all").
 #[arbor_rpc::handler]
 fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String> {
     // Refuse to start a second build/validation while one is running (only one at a time).
     let _guard = BuildGuard::acquire().ok_or_else(|| BUSY_MSG.to_string())?;
     let sink = ctx.event_sink();
     let root = PathBuf::from(&args.root);
-    let java_home = resolve_java_home(&args.root);
-    let mvn_path = resolve_mvn();
 
-    let outcome = compile(&root, &mvn_path, java_home.as_deref(), &sink)?;
+    let outcome = if is_cargo_root(&root) {
+        let (ok, raw) = run_cargo_check(&root)?;
+        finish_compile("cargo", ok, raw, &sink)
+    } else {
+        let java_home = resolve_java_home(&args.root);
+        compile(&root, &resolve_mvn(), java_home.as_deref(), &sink)?
+    };
 
     sink.emit(EVT_BUILD_DONE, json!({
         "root": &args.root,
@@ -117,13 +132,21 @@ fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String>
         "diagnostics": outcome.diagnostics.len(),
     }));
 
-    // A clean compile means fresh `target/classes` — re-index so completion picks it up.
-    // The reindex emits `arbor://bennu/index-progress` on the same sink.
-    if outcome.ok {
+    // A clean Java compile means fresh `target/classes` — re-index so completion picks it
+    // up. The reindex emits `arbor://bennu/index-progress` on the same sink. A Cargo
+    // project has no symbol index (see `bennu_open_project`), so there is nothing to
+    // refresh and asking would light an "Indexing…" status over an empty build.
+    if outcome.ok && outcome.tool != "cargo" {
         IndexService::global().reindex(&args.root, ctx.event_sink());
     }
 
     Ok(BuildResult { tool: outcome.tool, ok: outcome.ok, diagnostics: outcome.diagnostics })
+}
+
+/// Whether `root` is governed by Cargo — the same precedence `bennu-project`'s
+/// `open_project` uses (Maven first: a polyglot root is the Java project).
+fn is_cargo_root(root: &Path) -> bool {
+    !root.join("pom.xml").is_file() && root.join("Cargo.toml").is_file()
 }
 
 // ── bennu_run ──────────────────────────────────────────────────────────────────
@@ -285,6 +308,29 @@ fn finish_compile(
     CompileOutcome { tool: tool.to_string(), ok, diagnostics: parse_diagnostics(&raw) }
 }
 
+/// `cargo check --workspace --message-format=short` in `root`.
+///
+/// `--workspace` because the root of a Cargo workspace is a *virtual* manifest with no
+/// code of its own: without it, pressing Build on a workspace checks nothing and reports
+/// success, which is the worst possible answer. `--color=never` so ANSI escapes don't end
+/// up rendered as garbage in the build log.
+///
+/// `Err` only when the launcher can't be spawned (no `cargo` on `PATH`) — there is no
+/// fallback compiler to try, unlike the `mvn` → `javac` path: `rustc` invoked by hand
+/// cannot resolve a single dependency, so offering it would produce a wall of
+/// unresolved-import errors that say nothing about the code.
+fn run_cargo_check(root: &Path) -> Result<(bool, String), String> {
+    let mut cmd = Command::new(CARGO);
+    cmd.current_dir(root)
+        .arg("check")
+        .arg("--workspace")
+        .arg("--message-format=short")
+        .arg("--color=never");
+    cmd.no_window();
+    let out = cmd.output().map_err(|e| format!("spawn cargo ({CARGO}): {e}"))?;
+    Ok((out.status.success(), merge_output(&out.stdout, &out.stderr)))
+}
+
 fn run_mvn_compile(
     root: &Path,
     mvn_path: &str,
@@ -360,7 +406,7 @@ fn run_classpath(root: &Path, java_home: Option<&Path>) -> String {
 
 // ── the PURE error parser (unit-tested; no I/O) ────────────────────────────────
 
-/// Parse `javac` / `mvn` compiler output into structured [`BuildDiagnostic`]s.
+/// Parse `javac` / `mvn` / `cargo` compiler output into structured [`BuildDiagnostic`]s.
 ///
 /// Recognised shapes (Windows drive-letter aware — a `C:\` colon is never the
 /// `file:line` separator):
@@ -368,6 +414,11 @@ fn run_classpath(root: &Path, java_home: Option<&Path>) -> String {
 /// - javac line:col: `Path.java:12:7: error: ';' expected`
 /// - javac warning: `Path.java:3: warning: [deprecation] ...`
 /// - mvn compiler-plugin: `[ERROR] /abs/Foo.java:[45,17] cannot find symbol`
+/// - rustc (`--message-format=short`): `src/lib.rs:12:5: error[E0308]: mismatched types`
+///
+/// The rustc form is the javac form with a lint code bracketed onto the severity, which
+/// is why one parser covers both: the `[E0308]` is moved into the message (`E0308:
+/// mismatched types`) so the code stays visible without inventing a field for it.
 ///
 /// mvn often echoes the same javac error both raw and wrapped in `[ERROR]`; identical
 /// diagnostics are de-duped.
@@ -453,11 +504,24 @@ fn parse_javac(body: &str, mvn_sev: Option<&'static str>) -> Option<BuildDiagnos
 }
 
 /// Split `severity: message` off the front; else the mvn-implied severity (or "error").
+///
+/// The severity may carry a bracketed lint code (`error[E0308]:` from rustc), which is
+/// folded into the message as `E0308: …` — the code is the most searchable part of a Rust
+/// diagnostic and dropping it would make the Problems row less useful than the raw log.
 fn split_severity(rest: &str, mvn_sev: Option<&'static str>) -> (String, String) {
     for word in ["error", "warning", "note"] {
-        let pfx = format!("{word}:");
-        if let Some(msg) = rest.strip_prefix(&pfx) {
+        let Some(after) = rest.strip_prefix(word) else { continue };
+        // `error: msg`
+        if let Some(msg) = after.strip_prefix(':') {
             return (word.to_string(), msg.trim().to_string());
+        }
+        // `error[E0308]: msg`
+        if let Some((code, msg)) = after
+            .strip_prefix('[')
+            .and_then(|r| r.split_once(']'))
+            .and_then(|(code, tail)| tail.strip_prefix(':').map(|msg| (code, msg)))
+        {
+            return (word.to_string(), format!("{code}: {}", msg.trim()));
         }
     }
     (mvn_sev.unwrap_or("error").to_string(), rest.to_string())
@@ -564,6 +628,10 @@ fn resolve_java_home(root: &str) -> Option<PathBuf> {
 fn resolve_mvn() -> String {
     "mvn".to_string()
 }
+
+/// The `cargo` launcher: `cargo` on `PATH`. A rustup install puts it there on every
+/// platform, so unlike `mvn` there is no per-OS launcher name to resolve.
+const CARGO: &str = "cargo";
 
 /// The `javac` program under `JAVA_HOME/bin`, else `javac` on `PATH`.
 fn javac_program(java_home: Option<&Path>) -> String {
@@ -702,6 +770,41 @@ mod tests {
              [ERROR] Foo.java:12: error: cannot find symbol",
         );
         assert_eq!(d.len(), 1, "identical diagnostic should be de-duped");
+    }
+
+    #[test]
+    fn parses_rustc_short_format() {
+        let d = parse_diagnostics(
+            "crates/products/bennu/be/src/build.rs:12:5: error[E0308]: mismatched types",
+        );
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].file.as_deref(), Some("crates/products/bennu/be/src/build.rs"));
+        assert_eq!(d[0].line, Some(12));
+        assert_eq!(d[0].col, Some(5));
+        assert_eq!(d[0].severity, "error");
+        // The lint code is kept — it is the searchable half of a Rust diagnostic.
+        assert_eq!(d[0].message, "E0308: mismatched types");
+    }
+
+    #[test]
+    fn parses_rustc_warning_without_a_code() {
+        let d = parse_diagnostics("src/lib.rs:7:9: warning: unused variable: `x`");
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, "warning");
+        assert_eq!(d[0].line, Some(7));
+        assert_eq!(d[0].message, "unused variable: `x`");
+    }
+
+    #[test]
+    fn ignores_cargo_summary_lines() {
+        // Cargo's own chatter carries no `file:line`, so it must not become a diagnostic
+        // pinned to nowhere.
+        let d = parse_diagnostics(
+            "    Checking bennu-project v0.3.0 (/p/crates/products/bennu/project)\n\
+             error: could not compile `bennu-project` (lib) due to 1 previous error\n\
+             warning: `bennu-be` (lib) generated 3 warnings",
+        );
+        assert!(d.is_empty(), "no source:line → no diagnostics, got {d:?}");
     }
 
     #[test]

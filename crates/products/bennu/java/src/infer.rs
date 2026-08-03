@@ -1199,12 +1199,42 @@ fn find_receiver<'t>(root: &Node<'t>, byte_offset: usize) -> Option<Node<'t>> {
 }
 
 /// The FQN of the type enclosing a node (for `this` / field / local resolution).
+///
+/// ## An anonymous class body stops the walk
+///
+/// `new Foo<>() { private Bar b; … this.b … }` declares a type with **no name**, so there is no FQN
+/// to return and nothing in `symbols.types` to match. Walking past its body to the enclosing *named*
+/// class is the tempting thing to do and it is wrong in the way that hurts most: `this` then means
+/// the outer class, `this.b` is looked up on a type that has no `b`, and correct code is reported as
+/// "Cannot resolve field `b`" — for every field an anonymous class declares.
+///
+/// `None` is the honest answer: the anonymous type's members aren't indexed, so nothing downstream
+/// can assert anything about them. Every consumer gates on a known receiver type (the field / method
+/// checks bail when `members_of` is `None`), so the effect is silence inside an anonymous body
+/// rather than a wrong verdict — the same discipline `bennu-check`'s `undefined_var` already applies
+/// by refusing to analyse across an intervening `class_body`.
+///
+/// Detected by the body's PARENT: an anonymous `class_body` hangs directly off the
+/// `object_creation_expression` that creates it, whereas a named type's body hangs off its
+/// declaration. So the two are told apart structurally, with no name guessing.
 fn enclosing_type_fqn(node: &Node, bytes: &[u8], symbols: &FileSymbols) -> Option<String> {
     let mut cur = node.parent();
     while let Some(n) = cur {
+        // An anonymous class body — see the doc above. Must be tested BEFORE the declaration arm,
+        // which is automatic walking bottom-up: the body is always crossed first.
+        if n.kind() == "class_body"
+            && n.parent().map(|p| p.kind()) == Some("object_creation_expression")
+        {
+            return None;
+        }
         if matches!(
             n.kind(),
-            "class_declaration" | "interface_declaration" | "enum_declaration"
+            // `record_declaration` belongs here too: a record body is an ordinary type body, and
+            // leaving it out made `this` inside a record mean the record's ENCLOSING type.
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "record_declaration"
         ) {
             let name = n.child_by_field_name("name").and_then(|x| node_text(&x, bytes))?;
             // Recover the FQN by matching the extracted TypeDecl on simple name.
