@@ -10,7 +10,10 @@
 //!      top-level class. (A nested class may touch its outer's privates, so the identity compared is
 //!      the TOP-LEVEL type, not the immediate one.)
 //!   2. **package-private access from another package** — a `Package` (default) member whose declaring
-//!      type's package differs from the accessing file's package.
+//!      type does not live in the accessing file's package. "Lives in" and not "has the same package
+//!      as": a project nested type's binary joins its nesting with `/` (`com/acme/Outer/Inner`), the
+//!      same separator a package uses, so there is no package to extract and compare — see the note at
+//!      the `Package` arm.
 //!
 //! ## Never a false positive (this is accessibility — when unsure, SKIP)
 //! Every gate below is a SKIP, not a flag:
@@ -27,7 +30,7 @@
 //!   * the resolved member is `Public` or `Protected` → never flagged (protected subclass rules are
 //!     subtle → skipped entirely);
 //!   * CASE 1: the access IS inside the declaring top-level type → legal → SKIP;
-//!   * CASE 2: the two packages are equal, or either package is unknown → SKIP.
+//!   * CASE 2: the declaring type lives under the accessing package, or the package is unknown → SKIP.
 
 use bennu_java::prelude::{
     infer_node_type_cached, FileSymbols, InferCache, Member, TypeResolver, Visibility,
@@ -168,18 +171,31 @@ fn check_access(
             if access_top.as_deref().is_some_and(|t| in_same_nest(t, &declaring_binary)) {
                 return;
             }
-            // CASE 2: legal iff the accessing file's package equals the declaring type's package.
-            // Both must be KNOWN; either unknown → SKIP.
+            // CASE 2: legal iff the declaring type lives in the accessing file's package.
             let Some(access_pkg) = symbols.package.as_deref() else {
                 return; // accessing file's package unknown → SKIP
             };
-            let Some(decl_pkg) = package_of_binary(&declaring_binary) else {
-                return; // declaring type is in the default (root) package or path-less → treat as unknown → SKIP
-            };
             // Normalise the accessing package to slash form for a like-for-like compare.
             let access_pkg = access_pkg.replace('.', "/");
-            if access_pkg == decl_pkg {
-                return; // same package → legal
+            // A **prefix** test, not an equality one, and the reason is that a project-source NESTED
+            // type's binary joins its nesting with `/` — the same separator as a package (the FQN is
+            // built dotted, `Outer.Inner`, then slashed). So `com/acme/Outer/Inner` has no recoverable
+            // package: comparing "everything before the last `/`" yielded `com/acme/Outer`, which can
+            // never equal a real package, and EVERY same-package access to a package-visible member of
+            // a nested type was reported inaccessible.
+            //
+            // Telling a nested class apart from a sub-package inside a slash-joined binary needs a
+            // case convention (`Outer` vs `other`), and a check that guesses there would start
+            // flagging correct code the moment a project spells a name unusually. So the rule is
+            // "declared under the accessing package", which is exact for a nested type and
+            // deliberately lenient for a genuine SUB-package: `com/acme` accessing `com/acme/sub/Foo`
+            // is no longer flagged. That is an under-report in a narrow slice, and this check's stated
+            // policy is that under-reporting is acceptable where a wrong diagnostic is not.
+            if declaring_binary.starts_with(&format!("{access_pkg}/")) {
+                return; // same package (or a sub-package we decline to judge) → legal
+            }
+            if package_of_binary(&declaring_binary).is_none() {
+                return; // declaring type is in the default (root) package / path-less → SKIP
             }
             out.push(CheckId::InaccessibleMember.span(
                 name_node.start_byte(),
@@ -476,7 +492,13 @@ mod tests {
                 superclass: Some("java/lang/Object".to_string()),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
-                fields: vec![field("secret", "int", Visibility::Private)],
+                fields: vec![
+                    field("secret", "int", Visibility::Private),
+                    // …and a PACKAGE-visible one: reachable from any class in `com.acme.access`,
+                    // which the old "everything before the last `/`" package derivation could never
+                    // conclude (it read the package as `com/acme/access/Outer`).
+                    field("shared", "int", Visibility::Package),
+                ],
                 flags: Default::default(),
             },
         );
@@ -606,6 +628,39 @@ mod tests {
         // Accessing file also in `com.acme.other` → same package → legal.
         let src = "package com.acme.other;\nclass Same { void m(com.acme.other.OtherPackageClass other) { int a = other.package_value; } }";
         assert!(diags(src).is_empty(), "{:?}", diags(src));
+    }
+
+    /// The reported bug: a package-visible member of a **nested** type, read from a SIBLING class in
+    /// the same package. A project nested type's binary joins its nesting with `/`
+    /// (`com/acme/access/Outer/Inner`), so deriving "the package" as everything before the last `/`
+    /// gave `com/acme/access/Outer` — which can never equal a real package, and every such access was
+    /// reported inaccessible even though it is legal.
+    #[test]
+    fn package_member_of_a_nested_type_is_reachable_from_the_same_package() {
+        // `Inner` resolves through the simple-name map, exactly as the sibling nest test does.
+        let src = "package com.acme.access;\nclass Sibling { int m(Inner i) { return i.shared; } }";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
+    }
+
+    /// The private member of that same nested type IS still flagged from a sibling — the fix widened
+    /// the *package* rule, not the private one.
+    #[test]
+    fn private_member_of_a_nested_type_is_still_flagged_from_a_sibling() {
+        let src = "package com.acme.access;\nclass Sibling { int m(Inner i) { return i.secret; } }";
+        let d = diags(src);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("private access"), "{d:?}");
+    }
+
+    /// And a package member in a genuinely DIFFERENT package is still flagged — the prefix rule only
+    /// relaxes what sits *under* the accessing package.
+    #[test]
+    fn package_field_from_an_unrelated_package_is_still_flagged() {
+        let src = "package com.acme.access;\n\
+                   class A { void m(com.acme.other.OtherPackageClass o) { int a = o.package_value; } }";
+        let d = diags(src);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("not public"), "{d:?}");
     }
 
     #[test]
