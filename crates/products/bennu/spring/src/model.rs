@@ -238,6 +238,13 @@ pub struct PropertyUsage {
     pub kind: String,
     /// What to call it in a picker (`OrderService.timeout`).
     pub label: String,
+    /// The Java type the reader declares (`int`, `java.time.Duration`, `List<String>`).
+    ///
+    /// This is how a property in a yaml gets a type at all: the file itself says nothing —
+    /// `30` could be a number, a string or a duration — but the field it is injected into
+    /// says exactly. Empty when the reader has no single type (a placeholder inside an XML
+    /// value, a key named by `@ConditionalOnProperty`).
+    pub type_text: String,
 }
 
 /// Everything the extension knows about a project.
@@ -247,6 +254,10 @@ pub struct SpringModel {
     pub endpoints: Vec<Endpoint>,
     pub injections: Vec<InjectionPoint>,
     pub props: PropertySources,
+    /// What Spring and the project's libraries say their own properties are — parsed from the
+    /// `spring-configuration-metadata.json` the host reads out of the dependency jars, with a
+    /// curated table standing in until those arrive. See [`crate::metadata`].
+    pub metadata: crate::metadata::MetadataIndex,
     /// The parsed Spring bean XMLs, kept for their spans (go-to, validation).
     pub xml_files: Vec<XmlBeanFile>,
     /// Project types by dotted FQCN.

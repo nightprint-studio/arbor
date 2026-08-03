@@ -8,11 +8,12 @@ use bennu_spring::prelude::*;
 use bennu_ext::prelude::*;
 
 let ext = SpringExtension::new();
-ext.reindex(&ProjectScan { root, java, xml, resources });
+ext.reindex(&ProjectScan { root, java, xml, resources, descriptors });
 
-ext.gutter(&ctx);            // bean / inject / endpoint marks
-ext.navigate(&ctx, offset);  // ${key} → application.yml, @Qualifier → the bean
-ext.catalog("beans");        // the Beans panel
+ext.gutter(&ctx);              // bean / inject / endpoint marks, usage counts in a yaml
+ext.navigate(&ctx, offset);    // ${key} → application.yml, @Qualifier → the bean
+ext.completions(&ctx, offset); // property keys, from the jars and from the project
+ext.catalog("beans");          // the Beans panel
 ```
 
 ## What it knows
@@ -24,7 +25,9 @@ ext.catalog("beans");        // the Beans panel
 | **Endpoints** | `@RequestMapping` + the five shorthands, class path joined with method path |
 | **Configuration** | `application*.properties` / `.yml` flattened into one dotted key space |
 | **Bound properties** | every `@ConfigurationProperties` field and the *full* key it binds — through nesting, maps (`…<key>…`), collections (`…[0]…`) and `@Name` renames |
-| **Expressions** | `${…}` and `#{…}` inside annotation strings and XML attributes, via [`bennu-spel`](../spel) |
+| **Expressions** | `${…}` and `#{…}` inside annotation strings, XML attributes **and property-file values**, via [`bennu-spel`](../spel) |
+| **The property vocabulary** | `META-INF/spring-configuration-metadata.json` out of the dependency jars — every key Spring and the project's libraries accept, with type, default, prose and deprecation. A curated table ([`builtin_meta`](src/builtin_meta.rs)) stands in until the jars are resolved |
+| **Environment overrides** | a key → the variable that overrides it, by Spring's own three rules (dot → `_`, dash **removed**, uppercase) |
 
 ## Design notes worth knowing before changing it
 

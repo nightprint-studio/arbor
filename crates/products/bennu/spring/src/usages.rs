@@ -39,17 +39,26 @@ pub fn property_usages(
     for u in units {
         for t in &u.facts.types {
             let owner = simple_name(&t.fqcn).to_string();
-            collect(&t.annotations, &u.facts, &owner, &u.facts.file, &mut out);
+            // A type-level annotation reads a key but has no value type — a class is not a
+            // thing a property is converted into.
+            collect(&t.annotations, &u.facts, &owner, "", &u.facts.file, &mut out);
             for f in &t.fields {
                 let label = format!("{owner}.{}", f.name);
-                collect(&f.annotations, &u.facts, &label, &u.facts.file, &mut out);
+                collect(&f.annotations, &u.facts, &label, &f.type_text, &u.facts.file, &mut out);
             }
             for m in &t.methods {
                 let label = format!("{owner}.{}()", m.name);
-                collect(&m.annotations, &u.facts, &label, &u.facts.file, &mut out);
+                collect(&m.annotations, &u.facts, &label, "", &u.facts.file, &mut out);
                 for p in &m.params {
                     let plabel = format!("{owner}.{}({})", m.name, p.name);
-                    collect(&p.annotations, &u.facts, &plabel, &u.facts.file, &mut out);
+                    collect(
+                        &p.annotations,
+                        &u.facts,
+                        &plabel,
+                        &p.type_text,
+                        &u.facts.file,
+                        &mut out,
+                    );
                 }
             }
         }
@@ -63,6 +72,7 @@ pub fn property_usages(
             offset: b.offset,
             kind: "@ConfigurationProperties".to_string(),
             label: format!("{}.{}", simple_name(&b.owner_fqcn), b.field),
+            type_text: b.type_text.clone(),
         });
     }
 
@@ -80,6 +90,9 @@ pub fn property_usages(
                         offset: start + ph.key_start,
                         kind: "<bean>".to_string(),
                         label: format!("{}.{}", bean.id, p.name),
+                        // An XML `<property value="${…}">` is a setter call whose parameter
+                        // type we have not resolved here; claiming one would be a guess.
+                        type_text: String::new(),
                     });
                 }
             }
@@ -94,6 +107,7 @@ fn collect(
     anns: &[AnnFacts],
     facts: &JavaFacts,
     label: &str,
+    type_text: &str,
     file: &str,
     out: &mut Vec<PropertyUsage>,
 ) {
@@ -116,6 +130,9 @@ fn collect(
                     offset: at,
                     kind: "@ConditionalOnProperty".to_string(),
                     label: label.to_string(),
+                    // The condition compares the key to a string; it does not convert it
+                    // into the annotated member's type.
+                    type_text: String::new(),
                 });
             }
         }
@@ -130,6 +147,14 @@ fn collect(
                     offset: s.start + ph.key_start,
                     kind: format!("@{}", ann.name),
                     label: label.to_string(),
+                    // Only when the placeholder is the WHOLE value does the declared type
+                    // describe the key: in `@Value("${host}:${port}")` the field is a String
+                    // built from two keys, and neither of them is a String because of it.
+                    type_text: if ph.start == 0 && ph.end == s.value.len() {
+                        type_text.to_string()
+                    } else {
+                        String::new()
+                    },
                 });
             }
         }
@@ -151,6 +176,24 @@ mod tests {
             _ => format!("{IMPORTS}\n{src}"),
         };
         JavaUnit { facts: scan_java("/p/S.java", &text).unwrap(), text }
+    }
+
+    /// The yaml has no types; the readers do. This is where they come from.
+    #[test]
+    fn a_usage_carries_the_type_its_reader_declares() {
+        let u = unit("package p;\nclass S { @Value(\"${app.timeout}\") java.time.Duration t; }\n");
+        let us = property_usages(std::slice::from_ref(&u), &[], &[]);
+        assert_eq!(us[0].type_text, "java.time.Duration");
+    }
+
+    /// The guard that keeps the inference honest: a key that is only *part* of a value does
+    /// not take the field's type, or `${host}:${port}` would claim both are Strings.
+    #[test]
+    fn a_partial_placeholder_claims_no_type() {
+        let u = unit("package p;\nclass S { @Value(\"${app.host}:${app.port}\") String url; }\n");
+        let us = property_usages(std::slice::from_ref(&u), &[], &[]);
+        assert_eq!(us.len(), 2);
+        assert!(us.iter().all(|u| u.type_text.is_empty()));
     }
 
     #[test]

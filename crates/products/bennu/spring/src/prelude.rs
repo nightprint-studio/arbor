@@ -55,3 +55,17 @@ pub use crate::xml::{
 
 // Expression colouring, shared by both file kinds.
 pub use crate::highlight::{expression_highlights, path_var_highlights};
+
+// The configuration vocabulary: what Spring and the project's libraries say their properties
+// are. `METADATA_ENTRY` is the jar entry a host looks for; `builtin_index` is the stand-in
+// used until it has read any.
+pub use crate::metadata::{
+    builtin_index, is_metadata_path, HintValue, MetadataIndex, PropertyMeta,
+    ADDITIONAL_METADATA_ENTRY, METADATA_ENTRY,
+};
+
+// A key rendered as the environment variable that overrides it, in each paste-ready form.
+pub use crate::env::{env_var, env_var_name, EnvVar};
+
+// The property-file side of the editor's answers, for the handlers that route to it.
+pub use crate::props_intel::{env_var_at, is_property_source};

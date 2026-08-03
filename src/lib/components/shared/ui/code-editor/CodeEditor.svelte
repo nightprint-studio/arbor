@@ -575,9 +575,10 @@
     return true;
   }
 
-  /** Viewport coords (bottom-left) for a **UTF-8 byte offset** rather than the caret —
-   *  for anchoring a popup at a clicked position (e.g. Ctrl+Click on a declaration that
-   *  falls back to find-usages). Null when unmounted or the position is off-screen. */
+  /** Viewport coords (bottom-left) for a **UTF-8 byte offset** rather than the caret — for
+   *  anchoring a popup at a position the host knows: a Ctrl+Click that falls back to
+   *  find-usages, or a keyboard go-to that resolved to several places and has to ask which,
+   *  with no pointer to anchor to. Null when unmounted or the position is off-screen. */
   export function coordsAtByteOffset(byteOffset: number): { x: number; y: number } | null {
     if (!view) return null;
     const b2u = makeByteToU16(view.state.doc.toString());
@@ -697,21 +698,6 @@
   /** Insert `text` at the caret (replacing any selection), leaving the caret right
    *  after the inserted text. Used by generator flows (Alt+Insert → Generate).
    *  Mirrors merula's `insertAtCursor`. */
-  /**
-   * Viewport coordinates of a **UTF-8 byte offset** — for a host that needs to anchor a menu
-   * at the caret rather than at the pointer.
-   *
-   * Exists because a go-to that resolves to several places has to ask which one, and asking
-   * from the keyboard has no mouse position to anchor to. `null` before mount.
-   */
-  export function coordsAtOffset(byteOffset: number): { x: number; y: number } | null {
-    if (!view) return null;
-    const src = view.state.doc.toString();
-    const pos = Math.min(makeByteToU16(src)(byteOffset), view.state.doc.length);
-    const c = view.coordsAtPos(pos);
-    return c ? { x: c.left, y: c.bottom } : null;
-  }
-
   export function insertAtCursor(text: string) {
     if (!view || !text) return;
     const sel = view.state.selection.main;

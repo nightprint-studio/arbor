@@ -41,9 +41,13 @@
 //! `bennu_spring::prelude::...`.
 
 pub mod beans;
+// The curated stand-in used until the jars' own metadata is available.
+pub mod builtin_meta;
 // `@ConfigurationProperties` → the full key each bound field binds (nesting, maps, lists, renames).
 pub mod config_props;
 pub mod endpoints;
+// A configuration key → the environment variable that overrides it.
+pub mod env;
 pub mod ext;
 pub mod highlight;
 pub mod java_intel;
@@ -51,6 +55,9 @@ pub mod java_intel;
 // `@Service` is not a reserved word: without this, a project's own annotation of the same
 // name would register beans that do not exist.
 pub mod known;
+// What Spring says its own properties are — `spring-configuration-metadata.json` out of the
+// dependency jars, which is where the types, defaults and prose in a hover come from.
+pub mod metadata;
 pub mod model;
 pub mod prelude;
 pub mod props;

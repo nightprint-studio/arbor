@@ -59,6 +59,14 @@ stack plus a homegrown Signature decoder.
   present in `~/.m2` and, behind the editor's "Download sources" banner, fetches missing ones via
   `mvn dependency:get`).
 
+- **Non-class jar entries** (`resources.rs`) — `read_jar_entries(&jars, &entries)` reads the
+  descriptor files a library ships to describe *itself*, the motivating case being Spring Boot's
+  `META-INF/spring-configuration-metadata.json` (every starter packages the properties it accepts,
+  with types, defaults and prose). Nothing about it is Spring-specific — the entry names are a
+  parameter, and opening a jar belongs here. Opening a ZIP reads only its central directory, so a
+  jar carrying none of the wanted entries costs one seek; failures are per-jar skips, because one
+  corrupt dependency out of three hundred must not cost the rest.
+
 - **Dependency-jar sourcing from `~/.m2`** (`maven.rs`) —
   `resolve_maven_classpath(project_dir, &opts)` runs
   `mvn dependency:build-classpath` for a Maven project, reads the resolved classpath,

@@ -55,6 +55,16 @@ pub struct PropertyEntry {
     /// segment, since that is where the caret should land.
     pub key_start: usize,
     pub key_end: usize,
+    /// Byte span of the value **as written**, before [`unquote`] — quotes and all.
+    ///
+    /// Separate from `value` because the two answer different questions: `value` is what
+    /// Spring resolves to, this is where the characters are. Highlighting a `${…}` inside a
+    /// value needs the second, and deriving it from the first would mean re-finding the text
+    /// in the line and hoping the match is unique.
+    ///
+    /// Empty span (`start == end`) for a key with no value on its line.
+    pub value_start: usize,
+    pub value_end: usize,
     /// 1-based line of the declaration.
     pub line: u32,
 }
@@ -218,11 +228,17 @@ fn parse_properties(path: &str, name: &str, text: &str) -> PropertyFile {
             continue;
         }
         let indent = line.len() - trimmed.len();
+        let after = &line[sep + 1..];
+        let lead = after.len() - after.trim_start().len();
+        let written = after.trim();
+        let value_start = line_start + sep + 1 + lead;
         entries.push(PropertyEntry {
             key: key.to_string(),
-            value: unquote(line[sep + 1..].trim()),
+            value: unquote(written),
             key_start: line_start + indent,
             key_end: line_start + indent + key.len(),
+            value_start,
+            value_end: value_start + written.len(),
             line: i as u32 + 1,
         });
     }
@@ -275,7 +291,8 @@ fn parse_yaml(path: &str, name: &str, text: &str) -> PropertyFile {
         while stack.last().is_some_and(|(ind, _)| *ind >= indent) {
             stack.pop();
         }
-        let rest = trimmed[colon + 1..].trim();
+        let after = &trimmed[colon + 1..];
+        let rest = after.trim();
         if rest.is_empty() {
             stack.push((indent, key.to_string()));
             continue;
@@ -286,11 +303,15 @@ fn parse_yaml(path: &str, name: &str, text: &str) -> PropertyFile {
             full.push('.');
         }
         full.push_str(key);
+        let lead = after.len() - after.trim_start().len();
+        let value_start = line_start + indent + colon + 1 + lead;
         entries.push(PropertyEntry {
             key: full,
             value: unquote(rest),
             key_start: line_start + indent,
             key_end: line_start + indent + key.len(),
+            value_start,
+            value_end: value_start + rest.len(),
             line: i as u32 + 1,
         });
     }
@@ -305,7 +326,7 @@ fn parse_yaml(path: &str, name: &str, text: &str) -> PropertyFile {
 
 /// The index of the `:` that separates a YAML key from its value — the first one that is
 /// not inside a quoted key. Returns `None` for a line with no separator at all.
-fn split_key(line: &str) -> Option<usize> {
+pub(crate) fn split_key(line: &str) -> Option<usize> {
     let b = line.as_bytes();
     let mut quote: Option<u8> = None;
     for (i, &c) in b.iter().enumerate() {
@@ -345,6 +366,29 @@ mod tests {
     }
     fn yaml(text: &str) -> PropertyFile {
         parse_property_file("/p/application.yml", text).unwrap()
+    }
+
+    /// The span must point at the value **as written** in the file — that is what a
+    /// highlight is drawn over, so an off-by-one here paints the wrong characters.
+    #[test]
+    fn a_value_span_covers_the_raw_text_quotes_included() {
+        let text = "app:\n  url: \"${DB_URL:localhost}\"\n";
+        let f = yaml(text);
+        let e = &f.entries[0];
+        assert_eq!(&text[e.value_start..e.value_end], "\"${DB_URL:localhost}\"");
+        assert_eq!(e.value, "${DB_URL:localhost}", "the resolved value drops the quotes");
+
+        let text = "app.url = ${DB_URL:localhost}\n";
+        let e = &props(text).entries[0];
+        assert_eq!(&text[e.value_start..e.value_end], "${DB_URL:localhost}");
+    }
+
+    #[test]
+    fn a_key_with_no_value_gets_an_empty_span_rather_than_a_wrong_one() {
+        let f = yaml("app:\n  nested:\n    k: v\n");
+        let e = &f.entries[0];
+        assert_eq!(e.key, "app.nested.k");
+        assert!(e.value_end > e.value_start, "this one does have a value");
     }
 
     #[test]

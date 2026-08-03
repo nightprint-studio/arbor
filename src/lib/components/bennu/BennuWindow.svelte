@@ -24,7 +24,7 @@
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info,
     Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck,
-    TextCursorInput, ListChecks,
+    TextCursorInput, ListChecks, BookOpen,
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -433,6 +433,10 @@
     'refresh-cw': RotateCw as unknown as IconComponent,
     'indent': IndentIncrease as unknown as IconComponent,
     'shield': ShieldCheck as unknown as IconComponent,
+    // The two framework catalogs that were falling through to the generic `command` glyph:
+    // a bound-properties list and the property reference read out of the dependency jars.
+    'list': ListTree as unknown as IconComponent,
+    'book': BookOpen as unknown as IconComponent,
   };
   function iconResolver(name: string): IconComponent { return ICONS[name] ?? ICONS.command; }
 

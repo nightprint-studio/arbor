@@ -128,6 +128,38 @@ export function extCompletion(file: string, source: string, offset: number) {
   });
 }
 
+/** The text that **certainly** follows the caret, drawn as ghost text and accepted with Tab —
+ *  a documented default for a key left empty, a prefix exactly one known key can continue.
+ *  `null` is the normal answer, and the only alternative to a guess. Wire:
+ *  `bennu_ext_inline_hint`. */
+export function extInlineHint(
+  file: string,
+  source: string,
+  offset: number,
+): Promise<string | null> {
+  return bennu('bennu_ext_inline_hint', { args: { file, source, offset } });
+}
+
+/** A configuration key rendered as the environment variable that overrides it. */
+export interface EnvVarView {
+  key: string;
+  value: string;
+  /** The variable name (`SPRING_JPA_SHOWSQL`). */
+  name: string;
+  /** `[label, text]` pairs — `.env`, shell, `docker run`, compose. */
+  forms: [string, string][];
+}
+
+/** The environment override for the property on the line at `offset`, or `null` when that line
+ *  declares no key. Read-only: nothing is written to the file. Wire: `bennu_spring_env_var`. */
+export function springEnvVar(
+  file: string,
+  source: string,
+  offset: number,
+): Promise<EnvVarView | null> {
+  return bennu('bennu_spring_env_var', { args: { file, source, offset } });
+}
+
 /** The rows of one catalog. `kind` may be namespaced by extension id (`spring.beans`) or
  *  bare (`beans`, answered by the first extension that has it). Wire: `bennu_ext_catalog`. */
 export function extCatalog(root: string, kind: string): Promise<ExtEntry[]> {

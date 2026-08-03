@@ -134,12 +134,14 @@ impl SpringService {
             .map(|(path, text)| ScannedFile { path, text })
             .collect();
         let (xml_files, resources) = collect_config_files(path);
+        let descriptors = collect_descriptors(path);
 
         registry.reindex(&ProjectScan {
             root: path,
             java: &java,
             xml: &xml_files,
             resources: &resources,
+            descriptors: &descriptors,
         });
         Some(Slot { registry, spring: Some(spring) })
     }
@@ -200,6 +202,90 @@ fn collect_config_files(root: &Path) -> (Vec<ScannedFile>, Vec<ScannedFile>) {
         }
     }
     (xml, resources)
+}
+
+/// The framework descriptor files for `root`: the ones its **dependencies** ship inside their
+/// jars, plus the ones the project writes for itself.
+///
+/// This is where a Spring project's real property vocabulary comes from — every starter on the
+/// classpath packages a description of the keys it accepts, so the union of the jars is exactly
+/// the set of properties this project can legally set, at the versions it actually depends on.
+///
+/// Two deliberate restraints:
+///
+/// - **Maven is never run from here.** Only the jar list the index service has already resolved
+///   is read ([`cached_dep_jars`]). A property hover must not be able to trigger a multi-second
+///   dependency resolve; when the list is not there yet the extension falls back to what it
+///   knows on its own, and the next refresh picks the jars up.
+/// - **The result is cached against the jar list.** Opening a few hundred archives is cheap but
+///   not free, and a refresh (which the frontend fires after every index build) would otherwise
+///   redo it every time. Keying on the jar list means a changed dependency set gets a fresh
+///   read, and nothing else does.
+///
+/// [`cached_dep_jars`]: crate::dep_classpath::cached_dep_jars
+fn collect_descriptors(root: &Path) -> Vec<ScannedFile> {
+    use bennu_spring::prelude::{ADDITIONAL_METADATA_ENTRY, METADATA_ENTRY};
+
+    let jars = crate::dep_classpath::cached_dep_jars(root);
+    let mut out = descriptor_cache(&jars);
+
+    // The project's own generated / hand-written metadata, which describes the keys of its own
+    // `@ConfigurationProperties`. Present only when the annotation processor is on the build,
+    // and worth having when it is: those are the keys nothing else can document.
+    for rel in [
+        format!("target/classes/{METADATA_ENTRY}"),
+        format!("src/main/resources/{ADDITIONAL_METADATA_ENTRY}"),
+    ] {
+        let path = root.join(&rel);
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            out.push(ScannedFile { path, text });
+        }
+    }
+    out
+}
+
+/// The jar-sourced descriptors for a jar list, read once per distinct list.
+fn descriptor_cache(jars: &[PathBuf]) -> Vec<ScannedFile> {
+    use bennu_spring::prelude::{ADDITIONAL_METADATA_ENTRY, METADATA_ENTRY};
+
+    static CACHE: OnceLock<Mutex<HashMap<u64, Arc<Vec<ScannedFile>>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    let key = jar_set_key(jars);
+    if let Ok(map) = cache.lock() {
+        if let Some(hit) = map.get(&key) {
+            return hit.as_ref().clone();
+        }
+    }
+    let read: Vec<ScannedFile> = bennu_classpath::prelude::read_jar_entries(
+        jars,
+        &[METADATA_ENTRY, ADDITIONAL_METADATA_ENTRY],
+    )
+    .into_iter()
+    // `id` is `<jar>!/<entry>` — a display identity, not a path to open. The extension only
+    // ever matches on it, and it is what a hover shows as the provenance of a key.
+    .map(|r| ScannedFile { path: PathBuf::from(r.id), text: r.text })
+    .collect();
+
+    let shared = Arc::new(read);
+    if let Ok(mut map) = cache.lock() {
+        map.insert(key, Arc::clone(&shared));
+    }
+    shared.as_ref().clone()
+}
+
+/// An order-independent key for a jar set (FNV-1a over the sorted paths).
+fn jar_set_key(jars: &[PathBuf]) -> u64 {
+    let mut names: Vec<String> = jars.iter().map(|j| j.to_string_lossy().into_owned()).collect();
+    names.sort();
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for n in names {
+        for b in n.as_bytes() {
+            hash ^= *b as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    hash
 }
 
 fn norm(p: &str) -> String {
@@ -297,6 +383,49 @@ fn bennu_ext_hover(_ctx: &BennuState, args: FileArgs) -> Result<Option<ExtHover>
 fn bennu_ext_completion(_ctx: &BennuState, args: FileArgs) -> Result<Vec<CompletionItem>, String> {
     let offset = args.offset;
     Ok(with_file(&args, |r, ctx| r.completions(ctx, offset)))
+}
+
+/// The continuation that certainly follows the caret, drawn as ghost text and accepted with
+/// Tab. `None` — the normal answer — leaves the editor alone.
+#[arbor_rpc::handler]
+fn bennu_ext_inline_hint(_ctx: &BennuState, args: FileArgs) -> Result<Option<String>, String> {
+    let offset = args.offset;
+    Ok(with_file(&args, |r, ctx| r.inline_hint(ctx, offset)))
+}
+
+/// A configuration key rendered as the environment variable that overrides it, in each
+/// paste-ready form.
+///
+/// Read-only by design: the frontend shows this, and the user copies whichever line they
+/// need. Writing an override into the file would be the opposite of the point — the whole
+/// reason to ask is that the value is going to live somewhere else.
+///
+/// Needs no model, only the buffer, so it answers for any Spring property file whether or
+/// not the project has been indexed yet.
+#[derive(Serialize, Default)]
+pub struct EnvVarView {
+    pub key: String,
+    pub value: String,
+    pub name: String,
+    /// `[label, text]` pairs — `.env`, shell, `docker run`, compose.
+    pub forms: Vec<[String; 2]>,
+}
+
+#[arbor_rpc::handler]
+fn bennu_spring_env_var(_ctx: &BennuState, args: FileArgs) -> Result<Option<EnvVarView>, String> {
+    let source = match &args.source {
+        Some(s) => s.clone(),
+        None => normalize_newlines(&String::from_utf8_lossy(
+            &std::fs::read(&args.file).map_err(|e| e.to_string())?,
+        )),
+    };
+    let path = args.file.replace('\\', "/");
+    Ok(bennu_spring::prelude::env_var_at(&path, &source, args.offset).map(|v| EnvVarView {
+        key: v.key,
+        value: v.value,
+        name: v.name,
+        forms: v.forms.into_iter().map(|(label, text)| [label, text]).collect(),
+    }))
 }
 
 /// Args for the project-scoped handlers.

@@ -17,10 +17,15 @@
 import type { ExtEntry } from '$lib/ipc/bennu/ext';
 
 /** Bottom-dock ids for the framework catalogs. */
-export type FrameworkCatalogId = 'beans' | 'endpoints' | 'springconfig' | 'springbindings';
+export type FrameworkCatalogId =
+  | 'beans'
+  | 'endpoints'
+  | 'springconfig'
+  | 'springbindings'
+  | 'springdocumented';
 
 /** How rows can be grouped. Which of these a catalog offers is per-catalog. */
-export type GroupMode = 'none' | 'path' | 'owner' | 'kind';
+export type GroupMode = 'none' | 'path' | 'owner' | 'kind' | 'namespace';
 
 export interface FrameworkCatalogSpec {
   id: FrameworkCatalogId;
@@ -93,6 +98,22 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     picker: true,
   },
   {
+    // The property reference, version-matched to this project's jars: everything Spring and the
+    // libraries on the classpath accept, whether or not the project sets it. What you would
+    // otherwise keep open in a browser tab, except that this one knows which keys you already use.
+    id: 'springdocumented',
+    kind: 'spring.documented',
+    title: 'Property reference',
+    command: 'Spring property reference',
+    icon: 'book',
+    placeholder: 'Filter by key, type or description…',
+    empty: 'No configuration metadata found — build the project once so its dependencies resolve.',
+    groups: [
+      { id: 'namespace', label: 'Group by namespace' },
+      { id: 'none', label: 'No grouping' },
+    ],
+  },
+  {
     id: 'springbindings',
     kind: 'spring.bindings',
     title: 'Bound properties',
@@ -132,6 +153,12 @@ export function groupKeyOf(mode: GroupMode, row: ExtEntry): string {
     case 'path': {
       const seg = row.primary.split('/').filter(Boolean)[0];
       return seg ? `/${seg}` : '/';
+    }
+    case 'namespace': {
+      // Two leading segments, because one is uselessly coarse for property keys — everything
+      // interesting lives under `spring.` — and three splits families that belong together.
+      const segs = row.primary.split('.');
+      return segs.length > 1 ? segs.slice(0, 2).join('.') : row.primary || '—';
     }
     case 'owner': {
       if (row.secondary.includes('#')) return row.secondary.split('#')[0];

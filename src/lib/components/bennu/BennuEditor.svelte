@@ -14,7 +14,7 @@
     Hash, FileCode2, MapPin, Scissors, Copy, ClipboardPaste, Target, SearchCode,
     PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed, ShieldCheck, Plus, BookOpen,
     Braces, ArrowLeftRight, Package, FolderInput, CircleAlert, TriangleAlert, Check,
-    DownloadCloud, FileDown,
+    DownloadCloud, FileDown, Variable,
   } from 'lucide-svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -53,9 +53,11 @@
     renameApply as ipcRenameApply, type RenameEdit,
   } from '$lib/ipc/bennu/nav';
   import {
-    extNavigate, extHighlights, extGutter,
-    type ExtHighlight, type ExtGutterMark, type ExtTarget,
+    extNavigate, extHighlights, extGutter, springEnvVar,
+    type ExtHighlight, type ExtGutterMark, type ExtTarget, type EnvVarView,
   } from '$lib/ipc/bennu/ext';
+  import { isSpringPropertyFile } from './spring-props-lang';
+  import BennuEnvVarModal from './BennuEnvVarModal.svelte';
   import { makeByteToU16 } from '$lib/components/shared/ui/code-editor';
   import { applyByteEdits } from './rename-apply';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
@@ -324,6 +326,9 @@
   // because the backend speaks bytes and the editor speaks code units.
   let springMarks = $state<{ from: number; to: number; className: string }[]>([]);
   let springGutter = $state<ExtGutterMark[]>([]);
+  // The environment-override card, when the right-click menu asked for one. Local to the
+  // editor because that menu is the only thing that opens it.
+  let envVarView = $state<EnvVarView | null>(null);
   $effect(() => {
     const path = activePath;
     // Java / JSP / XML, plus the Spring property files — those carry no diagnostics but do
@@ -1104,7 +1109,7 @@
     const targets = await extNavigate(path, editorComp.getValue(), offset).catch(() => []);
     if (targets.length === 0) return false;
     if (targets.length > 1) {
-      const at = editorComp.coordsAtOffset(offset);
+      const at = editorComp.coordsAtByteOffset(offset);
       if (at) {
         showTargetPicker(targets, at.x, at.y);
         return true;
@@ -1302,11 +1307,20 @@
           { id: 'rename', label: 'Rename…', icon: PenLine, shortcut: 'Shift+F6' },
         ]
       : [];
+    // On a Spring property file: the one thing you reach for that the file cannot tell you —
+    // the environment variable that overrides the line you are pointing at.
+    const envItems: MenuItem[] = isSpringPropertyFile(activePath)
+      ? [
+          { id: 's3', label: '', separator: true },
+          { id: 'envvar', label: 'Show as environment variable…', icon: Variable },
+        ]
+      : [];
     const items: MenuItem[] = [
       { id: 'cut', label: 'Cut', icon: Scissors, shortcut: 'Ctrl+X' },
       { id: 'copy', label: 'Copy', icon: Copy, shortcut: 'Ctrl+C' },
       { id: 'paste', label: 'Paste', icon: ClipboardPaste, shortcut: 'Ctrl+V' },
       ...navItems,
+      ...envItems,
       { id: 's2', label: '', separator: true },
       ...(isJavaFile
         ? [{ id: 'generate', label: 'Generate…', icon: Wand2, shortcut: 'Alt+Insert' } as MenuItem]
@@ -1327,10 +1341,29 @@
         if (isJavaFile) bennuUiStore.openGenerate();
         else toastStore.show('Generate works on Java files', 'info');
         break;
+      case 'envvar': void showEnvVar(); break;
       case 'save':
         void projectStore.saveActive().then((ok) => { if (ok) toastStore.show('Saved', 'success'); });
         break;
     }
+  }
+
+  /**
+   * Show the environment override for the property line under the pointer.
+   *
+   * The caret was already moved to the click by `onEditorContextMenu`, so the line is the one
+   * that was right-clicked. Nothing is written — the modal is a thing to copy from.
+   */
+  async function showEnvVar() {
+    const path = activePath;
+    if (!path || !editorComp) return;
+    const view = await springEnvVar(path, editorComp.getValue(), editorComp.caretByteOffset())
+      .catch(() => null);
+    if (!view) {
+      toastStore.show('That line declares no property key', 'info');
+      return;
+    }
+    envVarView = view;
   }
 
   // ── Tab-strip context menu (right-click a tab) ────────────────────────────────
@@ -1569,6 +1602,10 @@
     </div>
   {/if}
 </div>
+
+{#if envVarView}
+  <BennuEnvVarModal view={envVarView} onClose={() => { envVarView = null; editorComp?.focus(); }} />
+{/if}
 
 <style>
   .ed {

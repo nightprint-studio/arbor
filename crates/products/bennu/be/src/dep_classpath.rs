@@ -81,6 +81,22 @@ pub fn resolve_dep_classpath(root: &Path, jdk_version: &str) -> DepOutcome {
     DepOutcome::Resolved(DepClasspath { source, memo_path, jars })
 }
 
+/// The dependency jars **already resolved** for `root`, without running Maven.
+///
+/// For consumers that want to read something out of the jars but have no business triggering a
+/// resolve to get it — the framework-extension descriptors are the case this exists for. The
+/// index service resolves the classpath as part of its own work; this reads whatever that left
+/// behind and returns nothing when it has not run yet, which is the correct degradation (the
+/// extension falls back to what it knows on its own).
+pub(crate) fn cached_dep_jars(root: &Path) -> Vec<PathBuf> {
+    poms_mtime(root)
+        .and_then(|mtime| load_list(root, mtime))
+        .unwrap_or_default()
+        .into_iter()
+        .map(PathBuf::from)
+        .collect()
+}
+
 /// Run Maven's `dependency:build-classpath` (offline, pointed at the project's JDK) and return the
 /// resolved jar paths as strings. `Err` carries a short user-facing reason — a "0 jars" state has to be
 /// diagnosable from the UI, not only from the process's stderr.

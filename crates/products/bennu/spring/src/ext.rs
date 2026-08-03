@@ -89,6 +89,7 @@ impl SpringExtension {
             simple_names: current.simple_names.clone(),
             config_bindings: current.config_bindings.clone(),
             property_usages: current.property_usages.clone(),
+            metadata: current.metadata.clone(),
         };
         if let Ok(mut slot) = self.model.write() {
             *slot = Arc::new(next);
@@ -145,6 +146,7 @@ impl FrameworkExtension for SpringExtension {
         let property_usages =
             crate::usages::property_usages(&units, &xml_files, &config_bindings);
         let model = SpringModel {
+            metadata: build_metadata(scan.descriptors),
             endpoints: crate::endpoints::endpoints(&units),
             injections: crate::beans::injection_points(&units),
             config_bindings,
@@ -177,10 +179,16 @@ impl FrameworkExtension for SpringExtension {
     }
 
     fn highlights(&self, ctx: &FileCtx<'_>) -> Vec<ExtHighlight> {
+        let path = ctx.path_str();
         match ctx.extension().as_str() {
-            "java" => java_intel::highlights(&ctx.path_str(), ctx.source),
+            "java" => java_intel::highlights(&path, ctx.source),
             "xml" if xml_intel::is_bean_xml(ctx.source) => {
-                xml_intel::highlights(&ctx.path_str(), ctx.source)
+                xml_intel::highlights(&path, ctx.source)
+            }
+            // `${…}` in a yaml value is the same expression as `${…}` in a `@Value`, and
+            // reading it as prose is how a typo in one survives. Same pass, same colours.
+            _ if props_intel::is_property_source(&path) => {
+                props_intel::highlights(&path, ctx.source)
             }
             _ => Vec::new(),
         }
@@ -188,10 +196,14 @@ impl FrameworkExtension for SpringExtension {
 
     fn completions(&self, ctx: &FileCtx<'_>, offset: usize) -> Vec<CompletionItem> {
         let model = self.model();
+        let path = ctx.path_str();
         match ctx.extension().as_str() {
-            "java" => java_intel::completions(&model, &ctx.path_str(), ctx.source, offset),
+            "java" => java_intel::completions(&model, &path, ctx.source, offset),
             "xml" if xml_intel::is_bean_xml(ctx.source) => {
                 xml_intel::completions(&model, ctx.source, offset)
+            }
+            _ if props_intel::is_property_source(&path) => {
+                props_intel::completions(&model, &path, ctx.source, offset)
             }
             _ => Vec::new(),
         }
@@ -210,6 +222,16 @@ impl FrameworkExtension for SpringExtension {
             }
             _ => None,
         }
+    }
+
+    /// Ghost text, and only in a property file: a documented default for a key left empty, or
+    /// the one continuation a prefix can have. Java and XML have nothing certain to add here.
+    fn inline_hint(&self, ctx: &FileCtx<'_>, offset: usize) -> Option<String> {
+        let path = ctx.path_str();
+        if !props_intel::is_property_source(&path) {
+            return None;
+        }
+        props_intel::inline_hint(&self.model(), &path, ctx.source, offset)
     }
 
     fn navigate(&self, ctx: &FileCtx<'_>, offset: usize) -> Vec<ExtTarget> {
@@ -324,6 +346,38 @@ impl FrameworkExtension for SpringExtension {
                     children: Vec::new(),
                 })
                 .collect(),
+            // The vocabulary itself: every property Spring and the project's libraries accept,
+            // whether or not this project sets it. The reference you would otherwise have open
+            // in a browser tab, version-matched to the jars actually on the classpath.
+            "documented" => m
+                .metadata
+                .all()
+                .map(|p| ExtEntry {
+                    id: p.name.clone(),
+                    primary: p.name.clone(),
+                    secondary: p.description.clone(),
+                    kind: simple_name(&strip_generics(&p.type_text)).to_string(),
+                    file: None,
+                    offset: None,
+                    line: None,
+                    tags: {
+                        let mut tags = Vec::new();
+                        if p.deprecation.is_some() {
+                            tags.push("deprecated".to_string());
+                        }
+                        if !p.default_value.is_empty() {
+                            tags.push(format!("= {}", p.default_value));
+                        }
+                        // Whether this project actually sets it — the reason to browse the
+                        // list beside a config file rather than in a browser.
+                        if m.props.lookup(&p.name).is_some() {
+                            tags.push("set".to_string());
+                        }
+                        tags
+                    },
+                    children: Vec::new(),
+                })
+                .collect(),
             "properties" => m
                 .props
                 .files()
@@ -411,8 +465,39 @@ impl FrameworkExtension for SpringExtension {
                 value: m.config_bindings.len(),
                 catalog: Some("bindings".into()),
             },
+            ExtStat {
+                label: "Documented keys".into(),
+                value: m.metadata.len(),
+                catalog: Some("documented".into()),
+            },
         ]
     }
+}
+
+/// Fold every `spring-configuration-metadata.json` the host found into one index.
+///
+/// The **curated table goes in last**, and that ordering is the whole policy: `absorb` keeps
+/// the first description of a key, so a real jar always beats the stand-in, and the stand-in
+/// only fills the gaps left when few jars (or none) were resolved. A project with a complete
+/// classpath therefore never sees the hand-written table at all.
+fn build_metadata(descriptors: &[ScannedFile]) -> crate::metadata::MetadataIndex {
+    let mut idx = crate::metadata::MetadataIndex::default();
+    for f in descriptors {
+        let path = f.path.to_string_lossy().replace('\\', "/");
+        if !crate::metadata::is_metadata_path(&path) {
+            continue;
+        }
+        // The jar name is what a hover should say ("described by spring-boot-actuator"), not
+        // the whole `…!/META-INF/…` identity.
+        let origin = path
+            .split_once("!/")
+            .map(|(jar, _)| jar.rsplit('/').next().unwrap_or(jar))
+            .unwrap_or("this project")
+            .to_string();
+        idx.absorb(&f.text, &origin);
+    }
+    idx.merge_defaults(crate::metadata::builtin_index());
+    idx
 }
 
 fn bean_tags(b: &crate::model::BeanDef) -> Vec<String> {
@@ -521,12 +606,22 @@ mod tests {
     }
 
     fn indexed(java: Vec<ScannedFile>, xml: Vec<ScannedFile>, res: Vec<ScannedFile>) -> SpringExtension {
+        indexed_with(java, xml, res, vec![])
+    }
+
+    fn indexed_with(
+        java: Vec<ScannedFile>,
+        xml: Vec<ScannedFile>,
+        res: Vec<ScannedFile>,
+        descriptors: Vec<ScannedFile>,
+    ) -> SpringExtension {
         let ext = SpringExtension::new();
         ext.reindex(&ProjectScan {
             root: std::path::Path::new("/p"),
             java: &java,
             xml: &xml,
             resources: &res,
+            descriptors: &descriptors,
         });
         ext
     }
@@ -644,6 +739,7 @@ mod tests {
                 file("/p/application.yml", "app:\n  mode: base\n"),
                 file("/p/application-dev.yml", "app:\n  mode: dev\n"),
             ],
+            descriptors: &[],
         });
         assert_eq!(ext.model().props.lookup("app.mode").unwrap().1.value, "dev");
     }
@@ -670,9 +766,65 @@ mod tests {
         };
         assert!(!ext.highlights(&xml).is_empty());
 
+        // A property file gets the same expression colouring — that is the point of routing
+        // it here rather than leaving `${…}` to read as prose in a yaml.
+        let yaml = FileCtx {
+            path: std::path::Path::new("/p/application.yml"),
+            source: "app:\n  size: ${MAX:200MB}\n",
+        };
+        assert!(ext.highlights(&yaml).iter().any(|h| h.kind == "spring.placeholder.key"));
+
         // A file kind the extension has nothing to do with.
         let other = FileCtx { path: std::path::Path::new("/p/notes.md"), source: "${a.b}" };
         assert!(ext.highlights(&other).is_empty());
         assert!(ext.gutter(&other).is_empty());
+        assert!(ext.inline_hint(&other, 0).is_none());
+    }
+
+    /// The descriptors a host reads out of the dependency jars become the completion
+    /// vocabulary — and they outrank the curated stand-in for the keys they cover.
+    #[test]
+    fn a_jar_descriptor_supplies_the_vocabulary_and_beats_the_builtin_table() {
+        let ext = indexed_with(
+            vec![],
+            vec![],
+            vec![],
+            vec![file(
+                "/m2/acme-starter-1.0.jar!/META-INF/spring-configuration-metadata.json",
+                r#"{"properties":[
+                     {"name":"acme.retries","type":"java.lang.Integer","defaultValue":3,
+                      "description":"How many times a call is retried."},
+                     {"name":"server.port","type":"java.lang.Integer","description":"Overridden."}
+                   ]}"#,
+            )],
+        );
+        let m = ext.model();
+        let acme = m.metadata.lookup("acme.retries").expect("the starter's own key");
+        assert_eq!(acme.default_value, "3");
+        assert_eq!(acme.origin, "acme-starter-1.0.jar", "the hover names the jar, not the entry");
+        assert_eq!(
+            m.metadata.lookup("server.port").unwrap().description,
+            "Overridden.",
+            "a real descriptor wins over the curated table",
+        );
+        // …and the table still covers what no descriptor mentioned.
+        assert!(m.metadata.lookup("spring.datasource.url").is_some());
+
+        let ctx = FileCtx {
+            path: std::path::Path::new("/p/application.properties"),
+            source: "acme.ret",
+        };
+        assert_eq!(ext.inline_hint(&ctx, 8).as_deref(), Some("ries"));
+        assert!(ext.completions(&ctx, 8).iter().any(|c| c.label == "acme.retries"));
+    }
+
+    /// Even with no jars read at all the feature is useful — the point of the curated table.
+    #[test]
+    fn a_project_with_no_descriptors_still_completes_the_common_keys() {
+        let ext = indexed(vec![], vec![], vec![]);
+        let ctx =
+            FileCtx { path: std::path::Path::new("/p/application.properties"), source: "server.po" };
+        assert!(ext.completions(&ctx, 9).iter().any(|c| c.label == "server.port"));
+        assert!(!ext.catalog("documented").is_empty());
     }
 }

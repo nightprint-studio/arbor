@@ -35,6 +35,7 @@ import { json as jsonLang } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { html } from '@codemirror/lang-html';
 import { javaLanguage } from './java-lang';
+import { isSpringPropertyFile, springPropsLang } from './spring-props-lang';
 import { jspLanguage } from './jsp-lang';
 import { digLanguage } from './dig/dig-lang';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
@@ -69,6 +70,11 @@ const lessLang = streamLang('less', less);
 const jsLang = streamLang('javascript', javascript);
 const propsLang = streamLang('properties', properties);
 const yamlLang = streamLang('yaml', yaml);
+// Same colouring, plus the intelligence a Spring config file can have and a generic one
+// cannot: key/value completion, ghost text, and a hover that knows the type. Built once —
+// the identity has to be stable or the editor remounts on every keystroke.
+const springYamlLang = springPropsLang('spring-yaml', yaml);
+const springPropertiesLang = springPropsLang('spring-properties', properties);
 const shellLang = streamLang('shell', shell);
 const rustLang = streamLang('rust', rust);
 const tomlLang = streamLang('toml', toml);
@@ -116,6 +122,11 @@ export function languageForPath(path: string | null): LanguageDescriptor {
 
   const dot = name.lastIndexOf('.');
   const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';
+  // An `application*.yml` is a YAML file the backend has a great deal to say about; a
+  // `messages.properties` is not. The name is the whole test, matching the backend's.
+  if (isSpringPropertyFile(name)) {
+    return ext === 'properties' ? springPropertiesLang : springYamlLang;
+  }
   switch (ext) {
     case 'java': return javaLanguage;
     case 'rs': return rustLang;

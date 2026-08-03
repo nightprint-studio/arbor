@@ -66,6 +66,20 @@ pub trait FrameworkExtension: Send + Sync {
         None
     }
 
+    /// The text that **certainly** follows the caret — drawn inline as ghost text, accepted
+    /// with Tab.
+    ///
+    /// Separate from [`completions`] because the bar is different, not because the data is.
+    /// A completion list may offer twenty plausible candidates and let the user choose; this
+    /// is rendered ahead of the caret as if it were already typed, so it must be
+    /// single-valued: a documented default, a prefix exactly one known key can continue.
+    /// When in doubt the answer is `None` and the popup does the job honestly.
+    ///
+    /// [`completions`]: FrameworkExtension::completions
+    fn inline_hint(&self, _ctx: &FileCtx<'_>, _offset: usize) -> Option<String> {
+        None
+    }
+
     /// Go-to targets at a caret. Several = the host shows a picker.
     fn navigate(&self, _ctx: &FileCtx<'_>, _offset: usize) -> Vec<ExtTarget> {
         Vec::new()
@@ -153,6 +167,13 @@ impl ExtensionRegistry {
     /// their `applies`, not something to render twice.
     pub fn hover(&self, ctx: &FileCtx<'_>, offset: usize) -> Option<ExtHover> {
         self.active.iter().find_map(|e| e.hover(ctx, offset))
+    }
+
+    /// The first extension with a certain continuation wins — like `hover`, only one thing
+    /// can be drawn at the caret, and two extensions claiming it is a conflict to fix in
+    /// their `applies` rather than something to concatenate.
+    pub fn inline_hint(&self, ctx: &FileCtx<'_>, offset: usize) -> Option<String> {
+        self.active.iter().find_map(|e| e.inline_hint(ctx, offset))
     }
 
     pub fn navigate(&self, ctx: &FileCtx<'_>, offset: usize) -> Vec<ExtTarget> {

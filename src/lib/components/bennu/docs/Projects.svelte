@@ -235,6 +235,48 @@
   <code>read-timeout</code>) count as one.
 </p>
 <p>
+  <strong>Writing a property file.</strong> An <code>application*.yml</code> or
+  <code>*.properties</code> gets completion over every key Spring and the project's libraries
+  document, <em>and</em> over the project's own <code>@ConfigurationProperties</code> paths — the
+  second half being the one that matters on a legacy tree, where nobody wrote documentation for
+  your own namespace and everybody misspells it. Under a nested mapping the candidates are offered
+  relative to where you are, so <code>u</code> under <code>spring: datasource:</code> completes to
+  <code>url</code>. Values complete too where the set is closed: an enum, a boolean, a log level.
+</p>
+<p>
+  <strong>Where the vocabulary comes from.</strong> Every Spring starter packages a description of
+  the properties it accepts inside its own jar, so Bennu reads the ones this project resolves. That
+  makes the list version-exact, covers third-party and in-house starters, and needs no network. A
+  curated table of the common keys stands in until the dependencies have been resolved once, so the
+  feature is useful on a cold checkout rather than silently empty. Browse the whole thing with
+  <strong>Spring property reference</strong> from the palette — it marks the keys this project
+  already sets.
+</p>
+<p>
+  <strong>Ghost text</strong> appears only where the answer is single-valued: a documented default
+  for a key you left empty (<code>server.port:</code> proposes <code>8080</code>), or a prefix
+  exactly one known key can continue. <kbd>Tab</kbd> accepts. Anywhere else it stays away and lets
+  the completion popup present the alternatives honestly — it is never a guess.
+</p>
+<p>
+  <strong>Hovering a key</strong> answers what the file itself cannot: its type, its documented
+  default, the library's own description of it, and who reads it. The type comes from the
+  declaration when Spring provides one and from the readers otherwise — <code>30</code> against a
+  <code>Duration</code> field means thirty seconds, which the line alone never says. Two readers
+  that disagree about the type are reported rather than resolved, because that is usually a bug
+  worth seeing. <code>$&#123;…&#125;</code> inside a value is coloured exactly as it is inside a
+  <code>@Value</code>: it is the same expression, and reading it as prose is how a typo in one
+  survives.
+</p>
+<p>
+  <strong>As an environment variable.</strong> Right-click a property line →
+  <em>Show as environment variable</em>. Nothing is written to the file; you get the name and the
+  ready-to-paste line for a <code>.env</code>, a shell, <code>docker run</code> and a compose file.
+  Worth computing rather than typing because of one rule everybody forgets: dashes are
+  <em>removed</em>, not replaced — <code>spring.jpa.show-sql</code> is
+  <code>SPRING_JPA_SHOWSQL</code>.
+</p>
+<p>
   <strong>When a jump has more than one destination</strong> — a bean injected in six places, a
   key read from three — Bennu asks instead of picking. The menu opens at the pointer for a gutter
   icon and at the caret for <kbd>Ctrl</kbd> + <kbd>B</kbd>, and each entry says what kind of site
@@ -250,12 +292,12 @@
   readable.
 </p>
 <p>
-  <strong>Four panels</strong>, the rest from the command palette: <strong>Spring beans</strong>
-  (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>) lists every bean with its stereotype, scope and
-  profile; <strong>Spring endpoints</strong> lists every route with the class-level and method-level
-  mappings already joined, so <code>GET /orders/&#123;id&#125;</code> is one searchable line;
-  <strong>Spring configuration</strong> lists every property key with its value and source file.
-  Each row opens its declaration.
+  <strong>The panels</strong>, all but Endpoints from the command palette:
+  <strong>Spring beans</strong> (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>) lists every bean
+  with its stereotype, scope and profile; <strong>Spring configuration</strong> lists every property
+  key with its value and source file; <strong>Spring bound properties</strong> lists what each
+  <code>@ConfigurationProperties</code> field binds; <strong>Spring property reference</strong>
+  lists everything the project's dependencies accept, set or not. Each row opens its declaration.
 </p>
 
 <h2>Tomcat hot-swap</h2>

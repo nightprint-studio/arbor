@@ -18,12 +18,15 @@ makes those indistinguishable to the caller.
 use bennu_ext::prelude::*;
 
 let registry = ExtensionRegistry::new(vec![Arc::new(SpringExtension::new())], &capabilities);
-registry.reindex(&ProjectScan { root, java, xml, resources });   // off the request path
+// Off the request path. `descriptors` are the self-descriptions the host read out of the
+// project's dependency jars — the one input an extension cannot derive from the source tree.
+registry.reindex(&ProjectScan { root, java, xml, resources, descriptors });
 
 let ctx = FileCtx { path, source };
 let diags  = registry.diagnostics(&ctx);
 let marks  = registry.gutter(&ctx);
 let target = registry.navigate(&ctx, caret_byte_offset);
+let ghost  = registry.inline_hint(&ctx, caret_byte_offset);   // only when it is certain
 ```
 
 ## Four constraints, and why

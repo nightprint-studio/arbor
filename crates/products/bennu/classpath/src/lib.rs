@@ -41,6 +41,8 @@ pub mod maven;
 pub mod members;
 pub mod meta;
 pub mod prelude;
+// Non-class jar entries: the descriptor files a library ships to describe itself.
+pub mod resources;
 pub mod sig;
 pub mod source;
 pub mod sources;

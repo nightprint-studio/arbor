@@ -41,6 +41,24 @@ pub struct ProjectScan<'a> {
     pub xml: &'a [ScannedFile],
     /// Resource files that carry configuration: `.properties`, `.yml`, `.yaml`.
     pub resources: &'a [ScannedFile],
+    /// **Descriptor files from outside the source tree** — the machine-readable descriptions
+    /// frameworks ship *inside their own jars*.
+    ///
+    /// This is the one input an extension cannot derive from the project's text, and it is
+    /// also the most valuable: a framework that documents itself in a jar entry has already
+    /// answered "what properties does this library accept, of what type, defaulting to what"
+    /// far better than any heuristic could, and version-exactly for the jars this project
+    /// actually resolves.
+    ///
+    /// The host does the reading (it owns the classpath and the archives), so the
+    /// no-filesystem invariant holds. `path` is a display identity rather than something to
+    /// open — for a jar entry it reads `<jar file name>!/<entry>`. The extension decides which
+    /// of these are its own by matching that path.
+    ///
+    /// Empty is normal and must stay harmless: a project whose dependencies have not been
+    /// resolved yet simply has no descriptors, and an extension is expected to degrade to
+    /// whatever it knows on its own rather than go quiet.
+    pub descriptors: &'a [ScannedFile],
 }
 
 /// One file an extension is being asked about — the buffer as it is *right now*, which
