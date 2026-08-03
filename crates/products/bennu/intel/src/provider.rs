@@ -97,6 +97,105 @@ fn render_type_ref(t: &bennu_java::prelude::TypeRef) -> String {
     }
 }
 
+/// The hover card for a local whose type could NOT be resolved.
+///
+/// The alternative is showing nothing, and showing nothing is the worst of the three possible
+/// answers: it looks exactly like a broken tooltip, so a user learns "hover doesn't work on
+/// `val`" from a case where the truth is "this one initializer didn't resolve". This card states
+/// what is certain — that it is a local, and how it was written — and names the expression whose
+/// type is missing, which is also the thing to report if it turns out to be a gap in the inference.
+///
+/// `None` only when the name has no local declaration in any enclosing scope (a field, a type — not
+/// this function's business).
+fn unresolved_local_hover(
+    bytes: &[u8],
+    node: tree_sitter::Node,
+    name: &str,
+) -> Option<crate::rename::HoverInfo> {
+    let (written, initializer) = local_declaration_of(node, bytes, name)?;
+    let doc = match initializer {
+        Some(expr) => format!("Type not resolved from the initializer `{}`.", ellipsize(&expr, 120)),
+        None => "Type not resolved.".to_string(),
+    };
+    Some(crate::rename::HoverInfo {
+        signature: format!("{written} {name}"),
+        kind: "variable".to_string(),
+        container: None,
+        doc: Some(doc),
+    })
+}
+
+/// The `(written type, initializer text)` of the local named `name`, searched outwards from `node`
+/// through the enclosing scopes. Covers the two forms that carry an inferred type: an ordinary
+/// declaration and an enhanced-`for` variable.
+fn local_declaration_of(
+    node: tree_sitter::Node,
+    bytes: &[u8],
+    name: &str,
+) -> Option<(String, Option<String>)> {
+    fn text(n: &tree_sitter::Node, bytes: &[u8]) -> Option<String> {
+        n.utf8_text(bytes).ok().map(|s| s.to_string())
+    }
+    /// `(type, value)` of `decl` when it declares `name`.
+    fn declares(
+        decl: &tree_sitter::Node,
+        bytes: &[u8],
+        name: &str,
+    ) -> Option<(String, Option<String>)> {
+        let declared = decl.child_by_field_name("type").and_then(|t| text(&t, bytes))?;
+        if decl.kind() == "enhanced_for_statement" {
+            let n = decl.child_by_field_name("name").and_then(|n| text(&n, bytes))?;
+            return (n == name)
+                .then(|| (declared, decl.child_by_field_name("value").and_then(|v| text(&v, bytes))));
+        }
+        let mut w = decl.walk();
+        for d in decl.named_children(&mut w) {
+            if d.kind() != "variable_declarator" {
+                continue;
+            }
+            if d.child_by_field_name("name").and_then(|n| text(&n, bytes)).as_deref() == Some(name) {
+                return Some((declared, d.child_by_field_name("value").and_then(|v| text(&v, bytes))));
+            }
+        }
+        None
+    }
+
+    let mut scope = Some(node);
+    while let Some(s) = scope {
+        if matches!(s.kind(), "local_variable_declaration" | "enhanced_for_statement") {
+            if let Some(hit) = declares(&s, bytes, name) {
+                return Some(hit);
+            }
+        }
+        let mut w = s.walk();
+        let mut found = None;
+        for c in s.named_children(&mut w) {
+            if matches!(c.kind(), "local_variable_declaration" | "enhanced_for_statement") {
+                if let Some(hit) = declares(&c, bytes, name) {
+                    found = Some(hit);
+                    break;
+                }
+            }
+        }
+        if found.is_some() {
+            return found;
+        }
+        scope = s.parent();
+    }
+    None
+}
+
+/// Shorten `s` to `max` characters with an ellipsis — an initializer can be a whole chained
+/// expression, and a tooltip is not the place to reproduce it in full.
+fn ellipsize(s: &str, max: usize) -> String {
+    let flat = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= max {
+        return flat;
+    }
+    let cut: String = flat.chars().take(max).collect();
+    format!("{cut}…")
+}
+
 /// Render a decompiled-from-bytecode **Java stub** (signatures only) for a type's members. A readable
 /// approximation of the class file's API surface — package, the type declaration with its
 /// `extends`/`implements`, then each field and method signature. Method bodies don't exist in
@@ -718,7 +817,16 @@ impl NativeJavaProvider {
         // `catch` and try-with-resources, at their declaration AND at every use.
         let ty = self
             .declared_binding_type(source, bytes, node)
-            .or_else(|| infer_expression_type(source, node.start_byte(), node.end_byte(), resolver))?;
+            .or_else(|| infer_expression_type(source, node.start_byte(), node.end_byte(), resolver));
+
+        let Some(ty) = ty else {
+            // Nothing resolved. Returning `None` here — which is what this used to do — makes
+            // the tooltip simply not appear, and an absent tooltip is indistinguishable from a
+            // broken one: the user cannot tell "Bennu could not type this" from "hover doesn't
+            // work on `val`". So a local always gets a card, saying what is certain (it is a
+            // local, this is how it was declared) and admitting the rest.
+            return unresolved_local_hover(bytes, node, &name);
+        };
 
         let (container, kind) = self.describe_type(&ty);
         Some(crate::rename::HoverInfo {
@@ -1065,6 +1173,75 @@ impl IntelProvider for LspClientProvider {
 
     fn symbols(&self, _file: &str) -> Result<Vec<DocumentSymbol>, IntelError> {
         Err(IntelError::Unimplemented("lsp symbols"))
+    }
+}
+
+#[cfg(test)]
+mod local_hover_tests {
+    use super::{ellipsize, local_declaration_of, unresolved_local_hover};
+
+    /// Parse `src` and return the identifier node at the first occurrence of `needle`.
+    fn ident_at(src: &str, needle: &str) -> (tree_sitter::Tree, usize) {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_java::LANGUAGE.into()).unwrap();
+        let tree = parser.parse(src, None).unwrap();
+        (tree, src.find(needle).unwrap())
+    }
+
+    fn declaration(src: &str, needle: &str, name: &str) -> Option<(String, Option<String>)> {
+        let (tree, at) = ident_at(src, needle);
+        let node = tree.root_node().named_descendant_for_byte_range(at, at).unwrap();
+        local_declaration_of(node, src.as_bytes(), name)
+    }
+
+    #[test]
+    fn a_lombok_val_is_found_from_its_own_name() {
+        let src = "class C { void m() { val properties = Retriever.properties(svc); } }";
+        let (written, init) = declaration(src, "properties =", "properties").expect("declared here");
+        assert_eq!(written, "val");
+        assert_eq!(init.as_deref(), Some("Retriever.properties(svc)"));
+    }
+
+    #[test]
+    fn it_is_found_from_a_later_use_too() {
+        let src = "class C { void m() { val rows = dao.find(); use(rows); } }";
+        let (written, init) = declaration(src, "rows)", "rows").expect("found by walking out");
+        assert_eq!(written, "val");
+        assert_eq!(init.as_deref(), Some("dao.find()"));
+    }
+
+    #[test]
+    fn an_enhanced_for_variable_carries_its_iterable() {
+        let src = "class C { void m() { for (val row : dao.all()) { use(row); } } }";
+        let (written, init) = declaration(src, "row :", "row").expect("loop variable");
+        assert_eq!(written, "val");
+        assert_eq!(init.as_deref(), Some("dao.all()"));
+    }
+
+    #[test]
+    fn a_name_that_is_not_a_local_yields_nothing() {
+        let src = "class C { int field; void m() { use(field); } }";
+        assert!(declaration(src, "field);", "field").is_none(), "a field is not this function's business");
+    }
+
+    #[test]
+    fn the_card_says_what_is_certain_and_admits_the_rest() {
+        let src = "class C { void m() { val properties = Retriever.properties(svc); } }";
+        let (tree, at) = ident_at(src, "properties =");
+        let node = tree.root_node().named_descendant_for_byte_range(at, at).unwrap();
+        let info = unresolved_local_hover(src.as_bytes(), node, "properties").expect("a card");
+        assert_eq!(info.signature, "val properties");
+        assert_eq!(info.kind, "variable");
+        assert!(info.doc.unwrap().contains("Retriever.properties(svc)"));
+    }
+
+    #[test]
+    fn a_long_initializer_is_shortened_and_flattened() {
+        assert_eq!(ellipsize("a  \n  b", 40), "a b");
+        let long = "x".repeat(200);
+        let cut = ellipsize(&long, 10);
+        assert_eq!(cut.chars().count(), 11, "10 characters plus the ellipsis");
+        assert!(cut.ends_with('…'));
     }
 }
 

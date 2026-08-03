@@ -35,9 +35,11 @@ impl DbProvider for PostgresProvider {
         spec: &ConnectionSpec,
         secret: Option<Secret>,
     ) -> DbResult<Box<dyn DbSession>> {
+        let host = dial_host(&spec.host, spec.port).await?;
+
         let mut config = tokio_postgres::Config::new();
         config
-            .host(&spec.host)
+            .host(&host)
             .port(spec.port)
             .dbname(&spec.database)
             .user(&spec.user)
@@ -107,14 +109,90 @@ async fn spawn_connection(
     }
 }
 
+/// The host to actually dial.
+///
+/// Normally the configured host, verbatim. There is one exception, and it is not a
+/// workaround for somebody's broken machine — it is what the standard asks a client
+/// to do.
+///
+/// **`localhost` is a reserved name.** RFC 6761 §6.3 defines it as always meaning
+/// the loopback interface, and says resolvers *should* answer it themselves rather
+/// than passing it to the network. Windows normally does. What breaks it is a
+/// client that inserts itself into name resolution — a VPN's DNS layer is the usual
+/// one — and answers "no such host" for a name that, by definition, cannot fail to
+/// resolve. Every literal address still works; only the name is broken.
+///
+/// So when a **loopback name** does not resolve, the loopback address is used
+/// instead. That is a fact, not a guess: `localhost` has exactly one correct answer
+/// and this is it. Any other host that fails to resolve is still an error, because
+/// there we would be inventing one.
+///
+/// Two deliberate limits:
+///
+/// * ordinary resolution is tried **first**, so a machine whose resolver works is
+///   completely unaffected — including one that deliberately maps `localhost`
+///   somewhere unusual;
+/// * the substitution is announced on the log rather than performed silently. A
+///   host that is not the one that was configured is exactly the kind of thing that
+///   must not be discovered later.
+///
+/// The one thing it costs: with TLS, the certificate is then verified against the
+/// address rather than the name. A TLS server reached by an unresolvable
+/// `localhost` is not a combination that occurs in practice, and the alternative
+/// there is failing outright.
+async fn dial_host(host: &str, port: u16) -> DbResult<String> {
+    // The lookup is consumed here rather than in a `match` guard: a binding is
+    // immutable until the end of its guard, so advancing the iterator there does
+    // not compile.
+    let resolved = match tokio::net::lookup_host((host, port)).await {
+        Ok(mut addrs) => addrs.next().is_some(),
+        Err(e) => {
+            if !is_loopback_name(host) {
+                return Err(DbError::Connect(format!("cannot resolve the host name {host}: {e}")));
+            }
+            false
+        }
+    };
+
+    if resolved {
+        return Ok(host.to_string());
+    }
+
+    if !is_loopback_name(host) {
+        return Err(DbError::Connect(format!("{host} resolved to no address")));
+    }
+
+    eprintln!(
+        "picus: this machine cannot resolve {host} — a name that always means the \
+         loopback interface — so 127.0.0.1 is being used instead. Something is \
+         intercepting name resolution here; a VPN client is the usual cause."
+    );
+    Ok(LOOPBACK.to_string())
+}
+
+const LOOPBACK: &str = "127.0.0.1";
+
+/// The names RFC 6761 reserves for the loopback interface: `localhost` itself, and
+/// anything under it.
+fn is_loopback_name(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host.to_ascii_lowercase().ends_with(".localhost")
+}
+
 /// Connect-time errors get their own mapping: at this point an authentication
 /// failure is the single most likely cause and deserves to be said plainly, rather
 /// than arriving as a generic "connection lost".
 fn connect_error(err: tokio_postgres::Error) -> DbError {
-    match map_pg(err) {
+    let mapped = match map_pg(err) {
         DbError::Disconnected(m) => DbError::Connect(m),
         other => other,
-    }
+    };
+    // On stderr as well as in the tooltip. A failure to connect is the one error
+    // whose cause the user most often has to correlate with something outside the
+    // window — a service that is down, a firewall, a certificate — and a tooltip
+    // is gone the moment the pointer moves.
+    eprintln!("picus: {mapped}");
+    mapped
 }
 
 /// The server banner, best-effort — a session is perfectly usable without it.
@@ -133,4 +211,33 @@ async fn read_server_version(client: &Client) -> String {
         // words of it.
         .map(|v| v.split_whitespace().take(2).collect::<Vec<_>>().join(" "))
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_loopback_name;
+
+    /// The substitution in `dial_host` is only ever right for the names the standard
+    /// reserves, so which names those are is the part worth pinning down.
+    #[test]
+    fn the_reserved_loopback_names_are_recognised() {
+        assert!(is_loopback_name("localhost"));
+        assert!(is_loopback_name("LOCALHOST"));
+        assert!(is_loopback_name("LocalHost"));
+        // RFC 6761 reserves everything under it too.
+        assert!(is_loopback_name("db.localhost"));
+        assert!(is_loopback_name("Api.LocalHost"));
+    }
+
+    #[test]
+    fn anything_else_is_a_real_host() {
+        assert!(!is_loopback_name("db.example.test"));
+        assert!(!is_loopback_name("127.0.0.1"));
+        // The suffix has to be a label of its own: a host that merely ends in those
+        // letters is somebody else's machine, and answering it with the loopback
+        // would be sending a query to the wrong server.
+        assert!(!is_loopback_name("notlocalhost"));
+        assert!(!is_loopback_name("mylocalhost"));
+        assert!(!is_loopback_name(""));
+    }
 }

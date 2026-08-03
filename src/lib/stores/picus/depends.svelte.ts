@@ -188,11 +188,9 @@ function createDependsStore() {
      * decided is not there.
      */
     get supported() {
-      // Primes the read itself. The rail button is gated on this getter, and the
-      // panel — the only other place that would have asked — cannot render until
-      // the button exists, so waiting for it would be waiting for something this
-      // answer is the precondition of.
-      void picusProvidersStore.load();
+      // A pure read — see the note on `activityStore.supported`. `PicusShell`
+      // primes the descriptors once, in an effect; asking from here meant asking
+      // on every render of the rail.
       return picusProvidersStore.capabilities(connectionsStore.activeDialect)
         ?.dependencyGraph ?? false;
     },

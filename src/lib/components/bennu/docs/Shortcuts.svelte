@@ -49,6 +49,18 @@
 </ul>
 <p>In a Maven project the <strong>Build</strong> button is a split-button: click it to run the current type, or open its chevron to pick <em>Maven build</em> or <em>Validate (no compile)</em> — the choice is remembered and becomes what <kbd>Ctrl</kbd> + <kbd>F9</kbd> runs. In a Cargo project there is one build and the button is plain. Validation checks every <code>.java</code> file with the editor's diagnostics, reports timing statistics (total, average, slowest file) in the Build tool window, and lists every problem it finds in the <strong>Problems</strong> panel, grouped by file. Only one build or validation runs at a time. Output streams to the <strong>Build</strong> tool window; problems there are clickable and jump to the offending line. The main class is set once per project from the run configuration (▷ menu → <em>Edit configurations…</em>).</p>
 
+<h2>Frameworks</h2>
+<ul>
+  <li><kbd>Alt</kbd> + <kbd>4</kbd> — <strong>Endpoints</strong> — every request mapping, grouped, with its parameters</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd> — <strong>Spring beans</strong> — every bean the project declares</li>
+  <li>Command palette — <strong>Spring configuration</strong> (every property key, and which <code>application*.yml</code> resolves first) and <strong>Spring bound properties</strong> (every <code>@ConfigurationProperties</code> field with the key it binds)</li>
+</ul>
+<p>
+  These appear only on a project that actually uses the framework. Endpoints has a button in the
+  right activity bar, because a route list is something you keep open; the others are opened from
+  the palette, so the rail doesn't grow a row per framework.
+</p>
+
 <h2>Window</h2>
 <ul>
   <li><kbd>Ctrl</kbd> + <kbd>K</kbd> — command palette</li>

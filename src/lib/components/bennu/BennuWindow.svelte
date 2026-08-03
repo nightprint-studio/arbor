@@ -92,6 +92,8 @@
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import { bennuTomcatStore } from '$lib/stores/bennu/tomcat.svelte';
+  import { springStore } from '$lib/stores/bennu/spring.svelte';
+  import { FRAMEWORK_CATALOGS } from './framework-catalogs';
   import { hotswapJsp } from '$lib/ipc/bennu/tomcat';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 
@@ -293,6 +295,22 @@
     projectStore.capabilities?.struts_xml_config === true
       || projectStore.capabilities?.struts_convention === true,
   );
+  // Framework tooling (Beans / Endpoints / Config): offered only when a framework extension
+  // actually applies to the open project. The backend answers that — it owns the
+  // capability gate — so this is one round-trip per project, not a guess from the
+  // capability bitset duplicated here.
+  const hasFramework = $derived(javaTools && springStore.available);
+  $effect(() => {
+    const root = projectStore.project?.root ?? null;
+    // Re-read after each index (re)build: a rebuild is exactly when new beans, new
+    // endpoints and new property files appear.
+    void bennuIndexStore.buildRevision;
+    if (!root || projectStore.isDemo || projectStore.isCargo) {
+      springStore.reset();
+      return;
+    }
+    void springStore.loadOverview(root, true);
+  });
 
   const leftTop = $derived<ActivityRailItem[]>([
     { id: 'project',   tooltip: 'Project',   shortcut: 'Alt+1', icon: FolderTree, active: bennuUiStore.leftPanel === 'project',   onclick: () => bennuUiStore.toggleLeft('project') },
@@ -324,6 +342,19 @@
     ...(jspTools
       ? [{ id: 'forms', tooltip: 'Forms', shortcut: 'Alt+3', icon: TextCursorInput, active: bennuUiStore.bottomPanel === 'forms', onclick: () => bennuUiStore.toggleBottom('forms') }]
       : []),
+    // The framework catalogs that asked for a rail button — today just Endpoints, which is a
+    // list you keep open while working rather than one you go and fetch. The rest stay
+    // palette-only so the rail doesn't grow a row per framework.
+    ...(hasFramework
+      ? FRAMEWORK_CATALOGS.filter((c) => c.rail).map((c) => ({
+          id: c.id,
+          tooltip: c.title,
+          shortcut: c.shortcut,
+          icon: Target,
+          active: bennuUiStore.bottomPanel === c.id,
+          onclick: () => bennuUiStore.toggleBottom(c.id),
+        }))
+      : []),
     ...(javaTools
       ? [{ id: 'services', tooltip: 'Services', shortcut: 'Alt+9', icon: Server, active: bennuUiStore.rightPanel === 'services', onclick: () => bennuUiStore.toggleRight('services') }]
       : []),
@@ -335,17 +366,22 @@
   $effect(() => {
     const java = javaTools;
     const jsp = jspTools;
-    if (java && jsp) return;
+    const framework = hasFramework;
+    if (java && jsp && framework) return;
     // `untrack`: the call reads the very panel state it writes, and an effect that depends
     // on what it assigns is the shape that loops (CLAUDE.md · "Runes — trap da evitare").
-    // The only dependencies that should re-run this are the two flags read above.
+    // The only dependencies that should re-run this are the three flags read above.
     untrack(() =>
       bennuUiStore.dropUnavailablePanels({
         left: java ? ['project', 'structure', 'dependencies'] : ['project'],
         right: java ? ['maven', 'services'] : [],
-        bottom: jsp
-          ? ['problems', 'terminal', 'build', 'todos', 'forms']
-          : ['problems', 'terminal', 'build', 'todos'],
+        bottom: [
+          'problems', 'terminal', 'build', 'todos',
+          ...(jsp ? ['forms' as const] : []),
+          // The framework catalogs have no rail button, so a panel left open after
+          // switching to a project with no framework would be unclosable.
+          ...(framework ? FRAMEWORK_CATALOGS.map((c) => c.id) : []),
+        ],
       }),
     );
   });
@@ -481,6 +517,17 @@
       { id: 'terminal',  title: 'Toggle Terminal',  icon: 'terminal',    shortcut: 'Alt+F12', action: () => run(() => bennuUiStore.toggleBottom('terminal')), when: true },
       { id: 'maven',     title: 'Toggle Maven',     icon: 'hammer',      shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: javaTools },
       { id: 'services',  title: 'Toggle Services',  icon: 'server',      shortcut: 'Alt+9', action: () => run(() => bennuUiStore.toggleRight('services')), when: javaTools },
+      // The framework catalogs. Palette-only by design (see `framework-catalogs.ts`) and
+      // gated on a framework extension actually applying to this project, so they are
+      // absent — not empty — everywhere else.
+      ...FRAMEWORK_CATALOGS.map((c) => ({
+        id: `cat:${c.id}`,
+        title: c.command,
+        icon: c.icon,
+        shortcut: c.shortcut as string | undefined,
+        action: () => run(() => bennuUiStore.toggleBottom(c.id)),
+        when: hasFramework,
+      })),
     ];
     const idle = !!projectStore.project && !bennuRunStore.active;
     const runItems = [
@@ -612,6 +659,14 @@
     // Workspace manager (Ctrl+Shift+W) — create / switch / manage named workspaces.
     if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'w') { e.preventDefault(); bennuUiStore.openWorkspaceManager(); return; }
 
+    // Spring beans (Ctrl+Shift+B) — the framework catalog with a keyboard door, since it
+    // is the one you reach for while reading code. Its siblings (Endpoints, Config) stay
+    // palette-only. Silent on a project with no framework: no panel to open.
+    if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+      if (!hasFramework) return;
+      e.preventDefault(); bennuUiStore.toggleBottom('beans'); return;
+    }
+
     // File Structure popup (Ctrl+F12, IntelliJ) — a searchable quick-outline of the
     // active file (methods/fields for Java, element names for XML/JSP/HTML).
     if (mod && !e.shiftKey && !e.altKey && e.key === 'F12') {
@@ -635,6 +690,9 @@
         e.preventDefault(); void editor?.findUsages(); return;
       }
       if (e.key === '1') { e.preventDefault(); bennuUiStore.toggleLeft('project'); return; }
+      // Endpoints — the one framework catalog with a rail button, so it gets the rail's
+      // digit like every other tool there.
+      if (e.key === '4' && hasFramework) { e.preventDefault(); bennuUiStore.toggleBottom('endpoints'); return; }
       if (e.key === '6') { e.preventDefault(); bennuUiStore.toggleBottom('problems'); return; }
       if (e.key === '7') { e.preventDefault(); bennuUiStore.toggleBottom('todos'); return; }
       if (e.key === '0') { e.preventDefault(); bennuUiStore.toggleBottom('build'); return; }

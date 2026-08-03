@@ -110,19 +110,28 @@ fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Dia
     } else {
         // A Java file → AST-level validation (syntax errors + unused imports) over the live buffer,
         // no compile needed. Other file types have no diagnostics here.
+        let mut java = Vec::new();
         if is_java_file(&args.file) {
             if let Some(source) = &args.source {
                 // Route through the owning project's provider so the resolver-backed checks
                 // (unknown members via type inference) run when the index is built; falls back to
                 // the pure AST checks otherwise. `resolved` picks the tier (fast pure-AST vs full).
-                return Ok(IndexService::global().validate_java(
+                java = IndexService::global().validate_java(
                     &args.file,
                     source,
                     args.resolved.unwrap_or(true),
-                ));
+                );
             }
         }
-        return Ok(Vec::new());
+        // Framework-contributed problems (Spring placeholders / SpEL / bean XML) ride the same
+        // pipe as the language's own, so the editor needs no second request and the Problems
+        // panel needs no second source. Skipped on the FAST tier: the fast pass exists to paint
+        // syntax squiggles within ~120ms of a keystroke, and a framework check is a project-wide
+        // question. Not restricted to `.java` — a bean XML has diagnostics and no Java validation.
+        if args.resolved.unwrap_or(true) {
+            java.extend(crate::spring::diagnostics_for(&args.file, args.source.as_deref()));
+        }
+        return Ok(java);
     };
 
     let svc = IndexService::global();

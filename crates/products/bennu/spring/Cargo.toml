@@ -1,0 +1,31 @@
+[package]
+name         = "bennu-spring"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Spring support for Bennu as a framework extension — bean registry (annotations, @Bean, XML), injection points, request-mapping endpoints, application*.yml/properties, and the editor answers over them (highlight / diagnostics / go-to / hover / completion / gutter)."
+
+[dependencies]
+# The extension seam this crate implements. Everything it contributes crosses this
+# boundary, and nothing Spring-shaped goes the other way.
+bennu-ext  = { path = "../ext" }
+# `${…}` and `#{…}` — the two little languages inside annotation strings.
+bennu-spel = { path = "../spel" }
+# The wire types a contribution is made of (Diagnostic / CompletionItem / CapabilitySet).
+bennu-proto = { path = "../proto" }
+
+# This crate parses Java ITSELF rather than using `bennu-java`: annotations with their
+# argument spans, on methods and parameters, are the whole substance here, and teaching
+# the shared model to carry them would put framework-shaped data in the core for one
+# consumer. Self-contained also means WASM-portable later. Same pinned runtime as the
+# rest of the workspace (one shared `links = "tree-sitter"` native lib).
+tree-sitter      = "0.25"
+tree-sitter-java = "0.23"
+# Bean XML, with attribute value ranges (`range_value`) — the spans every positional
+# feature is built on. Same version `bennu-web` already uses.
+roxmltree  = "0.20"
+
+serde      = { workspace = true }
+serde_json = { workspace = true }

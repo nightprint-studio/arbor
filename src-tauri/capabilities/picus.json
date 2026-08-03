@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "picus",
-  "description": "Capability for the Picus (SQL studio) product shell — its dedicated window, and the tabbed container that can host it as a tab.",
+  "description": "Capability for the Picus (SQL studio) product shell — its dedicated window, and the tabbed container that can host it as a tab. `allow-destroy` is here because Picus listens for the close request (to ask about an open transaction before the window goes) and Tauri's own `onCloseRequested` ends with `destroy()` whenever the listener did not prevent the default — so every close of this window, including the ordinary one with nothing to ask, goes through that command. Without it the window refuses to close at all.",
   "windows": ["picus", "picus-*", "workspace"],
   "permissions": [
     "core:default",
     "core:window:allow-close",
+    "core:window:allow-destroy",
     "core:window:allow-minimize",
     "core:window:allow-maximize",
     "core:window:allow-toggle-maximize",

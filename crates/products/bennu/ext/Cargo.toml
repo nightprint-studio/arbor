@@ -1,0 +1,15 @@
+[package]
+name         = "bennu-ext"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu framework-extension seam — the `FrameworkExtension` trait (index / diagnostics / completion / hover / navigation / gutter / catalog) plus the capability-gated registry that dispatches to it. Framework-agnostic: knows nothing about Spring, Struts or anything else."
+
+[dependencies]
+# The wire types an extension contributes (diagnostics / completion) and the capability
+# set it is gated on. Nothing else: this crate is the seam, not an implementation.
+bennu-proto = { path = "../proto" }
+serde      = { workspace = true }
+serde_json = { workspace = true }

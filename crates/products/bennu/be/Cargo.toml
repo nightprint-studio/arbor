@@ -54,6 +54,14 @@ bennu-web = { path = "../web" }
 # The classpath resolver: `find_jdk_home` (JAVA_HOME for the build/run shell-out) + the
 # Phase-2 `.m2` Maven classpath resolver (dep jars for the run classpath).
 bennu-classpath = { path = "../classpath" }
+# The framework-extension seam: the `FrameworkExtension` trait + the capability-gated
+# registry the `spring` domain dispatches through. Framework-agnostic — the be layer holds
+# a registry, not a Spring model.
+bennu-ext = { path = "../ext" }
+# The first extension: Spring (beans / injection points / endpoints / application*.yml +
+# the editor answers over them). Registered by name in ONE place (`spring::SpringService`);
+# a second framework is one more entry in that vector.
+bennu-spring = { path = "../spring" }
 # `NoWindowExt` — suppress the console window on the short-lived mvn/javac/java children.
 arbor-process-ext = { path = "../../../platform/process-ext" }
 # Shared job model (`JobSpec` / `JobStatus`): the whole-project analysis warm-up registers itself

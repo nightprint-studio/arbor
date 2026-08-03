@@ -5,15 +5,47 @@
 //! session offers to reconnect; a SQL error carries a position the editor can put a
 //! squiggle at. Everything else is honestly generic.
 
+use std::error::Error as StdError;
+
 use picus_db_api::prelude::DbError;
 use tokio_postgres::error::SqlState;
+
+/// A driver error **with its cause**, as one line.
+///
+/// `tokio_postgres::Error`'s `Display` is a category, not a reason: every failure
+/// to reach a server — the port closed, the host unresolvable, a TLS handshake
+/// rejected, a certificate signed by an unknown authority — prints the same seven
+/// words, `error connecting to server`, and the thing that would tell you which
+/// sits one level down in `source()`.
+///
+/// So the chain is walked and joined. This is not tidiness: "cannot connect: error
+/// connecting to server" is a message that sends someone to read the code, and
+/// this product's whole claim is that its refusals say why. `to_string()` alone
+/// was throwing the answer away at the last step.
+///
+/// Duplicate links are skipped — some wrappers already embed their source's text,
+/// and repeating it reads as two different problems.
+fn with_causes(err: &(dyn StdError + 'static)) -> String {
+    let mut out = err.to_string();
+    let mut cursor = err.source();
+    while let Some(cause) = cursor {
+        let text = cause.to_string();
+        if !text.is_empty() && !out.contains(&text) {
+            out.push_str(": ");
+            out.push_str(&text);
+        }
+        cursor = cause.source();
+    }
+    out
+}
 
 /// Map a `tokio_postgres::Error` onto the provider contract.
 pub fn map_pg(err: tokio_postgres::Error) -> DbError {
     // The database's own error carries the detail worth keeping; a driver-level
-    // failure (socket closed, TLS handshake) has none and is a lost session.
+    // failure (socket closed, TLS handshake) carries its detail in the cause chain
+    // rather than in its own message, so that is what is read.
     let Some(db) = err.as_db_error() else {
-        return DbError::Disconnected(err.to_string());
+        return DbError::Disconnected(with_causes(&err));
     };
 
     let code = db.code();

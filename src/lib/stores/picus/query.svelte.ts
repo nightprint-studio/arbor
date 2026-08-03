@@ -95,6 +95,25 @@ interface QueryTabState {
    * as often as about a SELECT. `null` until something has run.
    */
   elapsedMs: number | null;
+  /**
+   * What the rows on screen actually came from — the link between a result and the
+   * statement that produced it.
+   *
+   * Kept because "run this again" and "run what the caret is in" are two different
+   * requests, and only one of them is right after a write. Re-reading through the
+   * caret asks the *buffer* a question that belongs to the *result*: a query tab
+   * holds several statements, the editor may not even be mounted when the answer is
+   * needed, and an unresolved caret lands on offset zero — which is how storing an
+   * edited cell came back showing the first statement in the tab instead of the
+   * rows that had just been written.
+   *
+   * It holds the statement's **text**, not a position in the buffer. The result
+   * outlives the text: the panel can be open on rows whose query has since been
+   * edited or deleted outright, and it still has to be able to read them again.
+   *
+   * `null` until something has run here.
+   */
+  lastRun: { targets: RunTarget[]; binding: Dialect | null } | null;
 }
 
 function emptyTab(): QueryTabState {
@@ -110,6 +129,7 @@ function emptyTab(): QueryTabState {
     hasRun: false,
     source: null,
     elapsedMs: null,
+    lastRun: null,
   };
 }
 
@@ -642,12 +662,55 @@ function createQueryStore() {
       try {
         const targets = await plan(tabId, text, region, dialect, scope);
         if (!current(tabId, mine)) return;
+        // Recorded before the send, so that what a re-read replays is what was
+        // asked for even if the run fails partway.
+        //
+        // The **text** is kept and the buffer range is dropped. What is remembered
+        // has to be the statement itself, not where it was: the result panel
+        // outlives the text that produced it, and the buffer is a scratchpad the
+        // user is free to edit or clear while looking at the rows. A range kept
+        // across that points into a document that has changed underneath it.
+        state.lastRun = {
+          targets: targets.map((t) => ({ ...t, range: null })),
+          binding,
+        };
         await runInOrder(tabId, connectionId, targets, mine, binding);
       } finally {
         // Only this run's own spinner. An abandoned run whose reply finally arrives
         // must not clear the spinner of the one the user started afterwards.
         if (current(tabId, mine)) state.running = false;
       }
+    },
+
+    /**
+     * Run again exactly what produced the rows on screen.
+     *
+     * Not `run(…, 'statement')`. That verb answers "run what I am pointing at",
+     * which is the right question when a person presses Run and the wrong one when
+     * the studio re-reads on their behalf — after storing an edited cell, the rows
+     * that must come back are *those* rows, and the caret has nothing to do with
+     * it. Resolving through the caret there re-read whichever statement it happened
+     * to sit in, and with no editor mounted it re-read the first one in the tab.
+     *
+     * Answers `false` when this tab has never run anything, so the caller can
+     * decide what to do rather than being told a re-read happened.
+     */
+    async rerun(tabId: string, connectionId: string): Promise<boolean> {
+      const state = ensure(tabId);
+      const last = state.lastRun;
+      if (!last || !last.targets.length || !connectionId || state.running) return false;
+
+      const mine = nextRun(tabId);
+      state.running = true;
+      state.error = null;
+      state.affected = null;
+      state.elapsedMs = null;
+      try {
+        await runInOrder(tabId, connectionId, last.targets, mine, last.binding);
+      } finally {
+        if (current(tabId, mine)) state.running = false;
+      }
+      return true;
     },
 
     /**

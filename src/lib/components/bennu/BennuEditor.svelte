@@ -52,6 +52,11 @@
     jspActions as ipcJspActions, setJspAction as ipcSetJspAction, type JspActionBinding,
     renameApply as ipcRenameApply, type RenameEdit,
   } from '$lib/ipc/bennu/nav';
+  import {
+    extNavigate, extHighlights, extGutter,
+    type ExtHighlight, type ExtGutterMark, type ExtTarget,
+  } from '$lib/ipc/bennu/ext';
+  import { makeByteToU16 } from '$lib/components/shared/ui/code-editor';
   import { applyByteEdits } from './rename-apply';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
@@ -246,7 +251,11 @@
     // debounced so a burst of keystrokes coalesces. JSP checks read the file on the backend, so
     // they don't depend on the buffer.
     const isJava = /\.java$/i.test(path);
-    const src = isJava ? projectStore.sourceOf(path) : undefined;
+    // The live buffer goes with the request for Java AND for XML: a bean XML's framework
+    // diagnostics are computed from the text, so reading the stale file from disk would
+    // squiggle the version you already fixed. JSP checks resolve against the project
+    // config on the backend and genuinely don't need it.
+    const src = isJava || /\.xml$/i.test(path) ? projectStore.sourceOf(path) : undefined;
     let cancelled = false;
     let fullDone = false;
     // The FULL (resolver-backed) pass — the authoritative set: drives the editor squiggles AND the
@@ -306,6 +315,102 @@
   // buffer, debounced, re-run on index rebuild).
   let strutsDiags = $state<EditorDiagnostic[]>([]);
   const allDiags = $derived([...diags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags]);
+
+  // ── Framework syntax marks (Spring `${…}` / `#{…}` / `{pathVar}`) ────────────────
+  // A property placeholder inside a Java string literal is, to the Java grammar, one
+  // undifferentiated string — which is exactly why a typo in it is invisible. These marks
+  // colour the parts the framework actually reads: the key, the default, the SpEL bean
+  // reference, the path variable. Debounced with the buffer, and byte→UTF-16 mapped
+  // because the backend speaks bytes and the editor speaks code units.
+  let springMarks = $state<{ from: number; to: number; className: string }[]>([]);
+  let springGutter = $state<ExtGutterMark[]>([]);
+  $effect(() => {
+    const path = activePath;
+    // Java / JSP / XML, plus the Spring property files — those carry no diagnostics but do
+    // carry the gutter's usage counts, which is the whole point of opening one.
+    const wantsFramework =
+      !!path
+      && (supportsDiagnostics(path)
+        || /(^|[\\/])(application|bootstrap)[^\\/]*\.(ya?ml|properties)$/i.test(path));
+    if (!path || !wantsFramework) { springMarks = []; springGutter = []; return; }
+    const src = projectStore.sourceOf(path);
+    void bennuIndexStore.buildRevision; // new beans / new keys after a rebuild
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void extHighlights(path, src)
+        .then((hs) => { if (!cancelled) springMarks = toSpringMarks(src, hs); })
+        // No framework on this project (or an older backend) — no marks, no noise.
+        .catch(() => { if (!cancelled) springMarks = []; });
+      void extGutter(path, src)
+        .then((gs) => { if (!cancelled) springGutter = gs; })
+        .catch(() => { if (!cancelled) springGutter = []; });
+    }, 220);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
+  /** Glyph per gutter-mark kind. Text, not an icon set: the shared editor draws whatever
+   *  string it is given, so a new kind costs a character here and nothing anywhere else. */
+  const GUTTER_GLYPHS: Record<string, string> = {
+    bean: '◆',      // ◆ a bean is declared on this line
+    inject: '→',    // → something is injected here
+    endpoint: '»',  // » a route enters here
+  };
+
+  const springGutterMarks = $derived(
+    springGutter.map((g) => ({
+      line: g.line,
+      // For a usage mark the COUNT is the glyph: beside a property key, `2` says more in one
+      // character than any icon could, and an unmarked line is the signal that nothing reads it.
+      glyph: g.kind === 'usage' ? String(g.targets.length) : (GUTTER_GLYPHS[g.kind] ?? '•'),
+      tooltip: g.targets.length > 0 ? `${g.tooltip} — click to open` : g.tooltip,
+      className: `cm-fw-gutter cm-fw-gutter-${g.kind}`,
+    })),
+  );
+
+  /**
+   * Clicking a gutter icon opens what it points at — and when it points at more than one
+   * thing, it asks.
+   *
+   * Silently picking one is the wrong answer twice over: it hides that there were others, and
+   * the one it picks is the one *we* ranked rather than the one you meant. A bean injected in
+   * six places has six real answers, so the menu is anchored at the pointer and lists them all.
+   */
+  function onSpringGutterClick(line: number, event: MouseEvent) {
+    const mark = springGutter.find((g) => g.line === line);
+    if (!mark || mark.targets.length === 0) return;
+    if (mark.targets.length === 1) {
+      openDefinitionFile(mark.targets[0].file, mark.targets[0].offset);
+      return;
+    }
+    showTargetPicker(mark.targets, event.clientX, event.clientY);
+  }
+
+  /** A menu over `targets`, anchored at a point. Each row names the target and, under it, what
+   *  kind of site it is — which is how you tell two injections of the same bean apart. */
+  function showTargetPicker(targets: ExtTarget[], x: number, y: number) {
+    const items: MenuItem[] = targets.map((t, i) => ({
+      id: String(i),
+      label: t.detail ? `${t.label} — ${t.detail}` : t.label,
+      icon: Target,
+    }));
+    bennuContextMenuStore.show(x, y, items, (id) => {
+      const t = targets[Number(id)];
+      if (t) openDefinitionFile(t.file, t.offset);
+    });
+  }
+
+  /** Map backend byte spans to the editor's UTF-16 offsets + a CSS class per kind. */
+  function toSpringMarks(src: string, hs: ExtHighlight[]) {
+    const toU16 = makeByteToU16(src);
+    return hs.map((h) => ({
+      from: toU16(h.start),
+      to: toU16(h.end),
+      // `spring.placeholder.key` → `cm-fw-spring-placeholder-key`. An unknown kind still
+      // gets a class, so a backend that adds one degrades to "styled neutrally" rather
+      // than to nothing.
+      className: `cm-fw cm-fw-${h.kind.replace(/\./g, '-')}`,
+    }));
+  }
   // Error / warning counts for the editor's top-right status badge (IntelliJ-style).
   const diagCounts = $derived.by(() => {
     let errors = 0, warnings = 0;
@@ -981,6 +1086,34 @@
     return false;
   }
 
+  /**
+   * Try **framework-extension** navigation for the caret at `offset`.
+   *
+   * One call covers every framework target because the backend resolves them behind one
+   * seam: a `${property}` key, a `@Qualifier` / SpEL `@bean` reference, an injected
+   * field's candidate beans, and — in a bean XML — `class=`, `ref=` and
+   * `<property name=>`. Empty on a caret that is none of those, which is most of a file.
+   *
+   * With several candidates it **asks**, anchoring the menu at the caret — a bean with six
+   * injection points has six real answers, and picking one silently hides that there were
+   * others and lands on the one we ranked rather than the one you meant.
+   */
+  async function tryGoToFrameworkExt(offset: number): Promise<boolean> {
+    const path = activePath;
+    if (!path || !editorComp) return false;
+    const targets = await extNavigate(path, editorComp.getValue(), offset).catch(() => []);
+    if (targets.length === 0) return false;
+    if (targets.length > 1) {
+      const at = editorComp.coordsAtOffset(offset);
+      if (at) {
+        showTargetPicker(targets, at.x, at.y);
+        return true;
+      }
+    }
+    openDefinitionFile(targets[0].file, targets[0].offset);
+    return true;
+  }
+
   /** Try **MyBatis mapper-XML** navigation for the caret at `offset` — a statement `id` → the
    *  Java interface method (XML→Java), the mapper `namespace` → the interface type, an
    *  `<include refid>` → its `<sql>` fragment, a statement `resultMap="…"` → its `<resultMap>`.
@@ -1021,6 +1154,13 @@
     // 1. BE go-to-declaration — any Java symbol (class/method/field/local) — when we have
     //    a byte offset to classify at. Authoritative + precise (jumps to the exact line).
     if (offset != null && (await tryGoToDeclarationBE(offset, action))) return;
+    // 1a-bis. Framework extensions (Spring): a `${property}` key → its `application*.yml`
+    //     entry, a `@Qualifier` / SpEL `@bean` → the bean declaration, an injected field →
+    //     its candidate beans, and in a bean XML a `class=`, a `ref=` or a
+    //     `<property name=>` → the member it names. Runs AFTER the language's own answer,
+    //     because a caret inside a string literal or an XML attribute is invisible to the
+    //     Java resolver by construction — this is the only place those can resolve.
+    if (offset != null && (await tryGoToFrameworkExt(offset))) return;
     // 1b. JSP page-scoped variable (a `<c:set var>`/`${var}` under the caret) — single-file,
     //     resolved off the buffer with no project index (only runs for non-`.java` files).
     if (offset != null && (await tryGoToJspVar(offset))) return;
@@ -1339,6 +1479,9 @@
           language={editorLanguage}
           readOnly={isDecompiledView}
           diagnostics={allDiags}
+          marks={springMarks}
+          gutterMarks={springGutterMarks}
+          onGutterClick={onSpringGutterClick}
           rulerColumn={bennuSettingsStore.rightMargin}
           minimap={false}
           scrollbarOverview={bennuSettingsStore.minimap}
@@ -1578,4 +1721,79 @@
     transition: background var(--transition-fast), color var(--transition-fast);
   }
   .ed-rename-preview:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+  /*
+   * Framework syntax inside string literals and XML attributes.
+   *
+   * `:global` is unavoidable and is the documented exception (CLAUDE.md): these classes
+   * are attached by CodeMirror to spans it creates inside its own DOM, so Svelte's
+   * scoping hash never reaches them. Same arrangement as Picus's SQL abbreviations.
+   *
+   * Restraint on purpose: the base `.cm-fw` is a faint tint that says "the framework
+   * reads this", and only the parts you would actually click — the property key, the bean
+   * reference, the path variable — get a real colour. Colouring every token of a SpEL
+   * expression would turn one string into a rainbow and make the page harder to read
+   * than it was with no highlighting at all.
+   */
+  /*
+   * Two things make these rules look over-specified, and both are load-bearing.
+   *
+   * `.cm-content` in front: the syntax highlighter colours the enclosing string literal,
+   * and a plain single-class rule ties with it on specificity — so which colour won came
+   * down to stylesheet order, and the string's won. Inherited properties came through
+   * (the default value did render italic), which is exactly the confusing half-working
+   * state this avoids.
+   *
+   * The `span` descendant: where a mark covers only part of a token, CodeMirror nests the
+   * two, and a colour set on the outer element loses to one set on the inner regardless
+   * of specificity. Colouring the descendants is the only thing that reaches it.
+   */
+  /*
+   * Colours come from the `--syntax-*` palette, not from the UI one (`--info`,
+   * `--accent`, …). This is text in a code buffer sitting beside Java tokens, so it
+   * belongs to the same family as those tokens; borrowing the app's info blue put a
+   * colour that means "badge, chip, status" in the middle of source, and one that is
+   * already carrying too many jobs elsewhere.
+   *
+   * Three colours, one idea each — a framework highlight should read as a small extension
+   * of the language's own scheme, not as a second scheme competing with it:
+   *   • violet — a NAME the framework resolves for you (a property key, a path variable);
+   *   • gold   — something CALLABLE (a bean reference, a SpEL type reference);
+   *   • orange — a keyword, the same orange keywords already have everywhere.
+   * The default value stays muted italic: it is the fallback, not the subject.
+   */
+  /* The tint marks the whole expression, so it goes on the OUTER span only — putting it
+     on every mark would stack it on the key and the default, which sit inside. */
+  :global(.cm-content .cm-fw-spring-placeholder),
+  :global(.cm-content .cm-fw-spring-spel) {
+    background: color-mix(in srgb, var(--syntax-field, #9876aa) 12%, transparent);
+    border-radius: 2px;
+  }
+  :global(.cm-content .cm-fw-spring-placeholder-key),
+  :global(.cm-content .cm-fw-spring-placeholder-key span),
+  :global(.cm-content .cm-fw-spring-path-var),
+  :global(.cm-content .cm-fw-spring-path-var span) { color: var(--syntax-field, #9876aa); font-weight: 600; }
+  :global(.cm-content .cm-fw-spring-spel-variable),
+  :global(.cm-content .cm-fw-spring-spel-variable span) {
+    color: var(--syntax-field, #9876aa); font-weight: 600; font-style: italic;
+  }
+  :global(.cm-content .cm-fw-spring-spel-bean),
+  :global(.cm-content .cm-fw-spring-spel-bean span),
+  :global(.cm-content .cm-fw-spring-spel-type),
+  :global(.cm-content .cm-fw-spring-spel-type span) { color: var(--syntax-function, #ffc66d); font-weight: 600; }
+  :global(.cm-content .cm-fw-spring-spel-keyword),
+  :global(.cm-content .cm-fw-spring-spel-keyword span) { color: var(--syntax-keyword, #cc7832); font-weight: 600; }
+  :global(.cm-content .cm-fw-spring-placeholder-default),
+  :global(.cm-content .cm-fw-spring-placeholder-default span) { color: var(--text-muted); font-style: italic; }
+
+  /* Gutter icons: colour by what the mark means, so a glance separates "a bean is
+     declared here" from "something is injected here" without reading the tooltip. */
+  :global(.cm-fw-gutter-bean) { color: var(--success); }
+  :global(.cm-fw-gutter-inject) { color: var(--info); }
+  :global(.cm-fw-gutter-endpoint) { color: var(--warning); }
+  /* The usage count beside a property key: a number, so it reads as one. */
+  :global(.cm-fw-gutter-usage) {
+    color: var(--text-muted); font-family: var(--font-code); font-weight: 600;
+  }
+  :global(.cm-fw-gutter-usage:hover) { color: var(--accent); }
 </style>

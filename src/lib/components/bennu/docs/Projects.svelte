@@ -153,6 +153,111 @@
   definition, so the encoding default configured for a legacy Java tree never reaches it.
 </p>
 
+<h2>Spring</h2>
+<p>
+  On a project that uses Spring — detected the same way every other capability is, from the pom and
+  the sources — Bennu reads the wiring and puts it where you are already looking. Nothing here
+  appears on a project without Spring.
+</p>
+<p>
+  <strong>In the gutter.</strong> A <code>◆</code> marks a bean declaration and lists
+  where it is injected; a <code>→</code> marks an injection point and points at the beans
+  that can satisfy it; a <code>»</code> marks a request handler and names its route.
+  Click one to jump. Injection points include the ones with no constructor in sight — a single
+  constructor needs no <code>@Autowired</code>, and Lombok's generated one makes the
+  <code>final</code> fields themselves the injection points.
+</p>
+<p>
+  <strong>In annotation strings.</strong> <code>@Value("$&#123;app.timeout:30&#125;")</code>
+  is one opaque
+  string to Java and three different things to Spring, so the key, the default and any embedded
+  SpEL are coloured apart. <kbd>Ctrl</kbd> + <kbd>B</kbd> on the key opens the
+  <code>application*.yml</code> line that declares it; hovering shows the value it resolves to;
+  typing inside <code>$&#123;</code> completes from the project's own keys. The same works for
+  <code>@Qualifier("…")</code> and for a SpEL <code>@beanName</code>, which navigate to the bean.
+</p>
+<p>
+  <strong>Which <code>application.yml</code>?</strong> A project has several — a base file, one per
+  profile, one per module — and which one runs is a launch argument, not something the sources
+  reveal. So Bennu asks instead of guessing: open <strong>Spring configuration</strong> from the
+  palette and pick one under <em>Resolve against</em>. The choice is remembered per project; with
+  none set, the profile-less files answer (what Spring always loads).
+</p>
+<p>
+  <strong>In bean XML.</strong> <code>&lt;bean class=&gt;</code>, <code>ref=</code> and
+  <code>&lt;property name=&gt;</code> all navigate and complete, and a
+  <code>&lt;property&gt;</code> that names nothing writable on the bean's class is flagged. That
+  check only speaks when it is sure: if the class extends something outside the project, or carries
+  a Lombok annotation whose generated accessors Bennu doesn't model, it stays quiet rather than
+  guess. Same discipline elsewhere — a missing <code>class=</code> is reported only when its package
+  is one the project itself declares, an unknown <code>ref=</code> only when it looks like a typo of
+  a bean that does exist (a bean can legitimately come from a jar), and an unresolved
+  <code>$&#123;key&#125;</code> only when it has no default and the project already
+  configures other keys in the same namespace.
+</p>
+<p>
+  <strong>An annotation is checked by origin, not by name.</strong> <code>@Service</code> is not a
+  reserved word — a project can declare its own, and several do. Bennu resolves each annotation
+  through the file's imports exactly as the compiler would: a qualified use decides outright, then
+  an explicit <code>import</code> of that name, then a wildcard import of the expected package, and
+  a bare name with no import at all can only be a class from the same package, so it is not
+  Spring's. Your <code>com.acme.Service</code> therefore declares no bean, gets no gutter icon and
+  is counted in no panel. The one thing this misses is a meta-annotation — your own
+  <code>@MyService</code> that is itself annotated <code>@Service</code> is a real stereotype and is
+  not recognised, which loses a bean rather than inventing one.
+</p>
+<p>
+  <strong>Configuration properties.</strong> Hovering a field of a
+  <code>@ConfigurationProperties</code> class shows the <em>full key it binds</em> — the string that
+  appears nowhere in the source and that you otherwise assemble in your head from the prefix, the
+  chain of field names above it, and Spring's relaxed-binding rules. <code>readTimeout</code> three
+  levels down reads as <code>app.http.client.read-timeout</code>, with the value it currently has,
+  and <kbd>Ctrl</kbd> + <kbd>B</kbd> opens the line that sets it. Nesting is followed, a
+  <code>Map</code> binds <code>…&lt;key&gt;…</code> and a <code>List</code> binds
+  <code>…[0]…</code>, and <code>@Name</code> overrides the field name. A class reached from two
+  different roots shows both keys rather than picking one.
+</p>
+<p>
+  <strong>Conditional beans.</strong> A bean behind a <code>@ConditionalOn…</code> is a different
+  thing from a bean, so it says which condition gates it — in the Beans panel and on hover.
+  <code>@ConditionalOnProperty</code>, <code>OnBean</code>, <code>OnMissingBean</code>,
+  <code>OnClass</code>, <code>OnExpression</code> and the rest of the family are read; the
+  property one goes further, because its key is a real key: hovering it shows the value it has
+  right now, and <kbd>Ctrl</kbd> + <kbd>B</kbd> opens the line that sets it.
+</p>
+<p>
+  <strong>From the yaml side.</strong> Open an <code>application*.yml</code> and each key that
+  something reads carries a count in the gutter — <code>2</code> means two places read it, and
+  clicking asks which one. A key with no mark is the useful signal: nothing in this project reads
+  it. The count includes <code>@Value</code>, <code>@ConditionalOnProperty</code>,
+  <code>@ConfigurationProperties</code> fields and XML <code>value="$&#123;…&#125;"</code>, and
+  both spellings of a relaxed-binding key (<code>readTimeout</code> and
+  <code>read-timeout</code>) count as one.
+</p>
+<p>
+  <strong>When a jump has more than one destination</strong> — a bean injected in six places, a
+  key read from three — Bennu asks instead of picking. The menu opens at the pointer for a gutter
+  icon and at the caret for <kbd>Ctrl</kbd> + <kbd>B</kbd>, and each entry says what kind of site
+  it is, which is how you tell two injections of the same bean apart.
+</p>
+<p>
+  <strong>The Endpoints panel</strong> (right activity bar, <kbd>Alt</kbd> + <kbd>4</kbd>) lists
+  every route with the class-level and method-level mappings already joined. It groups — by path,
+  by controller or by method — filters across paths, handlers, return types <em>and</em> parameter
+  names, and each route expands to show what it takes: which values come from the path, the query
+  string or the body, which are optional, and what each is called when the annotation renames it.
+  Verbs are coloured the way an API console colours them, so the list is skimmable rather than
+  readable.
+</p>
+<p>
+  <strong>Four panels</strong>, the rest from the command palette: <strong>Spring beans</strong>
+  (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>) lists every bean with its stereotype, scope and
+  profile; <strong>Spring endpoints</strong> lists every route with the class-level and method-level
+  mappings already joined, so <code>GET /orders/&#123;id&#125;</code> is one searchable line;
+  <strong>Spring configuration</strong> lists every property key with its value and source file.
+  Each row opens its declaration.
+</p>
+
 <h2>Tomcat hot-swap</h2>
 <p>
   Link the project to a local Tomcat and push changed JSPs straight into the running server — no

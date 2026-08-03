@@ -20,10 +20,16 @@
   import BennuTerminalView from './BennuTerminalView.svelte';
   import BennuTodoPanel from './BennuTodoPanel.svelte';
   import BennuFormsPanel from './BennuFormsPanel.svelte';
+  import BennuCatalogPanel from './BennuCatalogPanel.svelte';
+  import { isFrameworkCatalog } from './framework-catalogs';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
 
   const active = $derived(bennuUiStore.bottomPanel ?? 'problems');
   const buildish = $derived(active === 'build' || active === 'problems');
+  // The framework catalogs share one component, parameterised by id — and, like Forms,
+  // are mounted only while shown: their rows come from a store that caches per project,
+  // so nothing is lost by unmounting and nothing is fetched while hidden.
+  const catalog = $derived(isFrameworkCatalog(active) ? active : null);
 </script>
 
 <div class="dock">
@@ -36,6 +42,11 @@
   {#if active === 'forms'}
     <div class="dock-section">
       <BennuFormsPanel dock />
+    </div>
+  {/if}
+  {#if catalog}
+    <div class="dock-section">
+      {#key catalog}<BennuCatalogPanel id={catalog} />{/key}
     </div>
   {/if}
   <div class="dock-section" class:hidden={active !== 'terminal'}>

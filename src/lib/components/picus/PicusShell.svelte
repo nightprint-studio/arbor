@@ -57,6 +57,7 @@
   import PicusConnectionModal from './PicusConnectionModal.svelte';
   import PicusConnectionDetailsModal from './PicusConnectionDetailsModal.svelte';
   import PicusDocsPanel from './PicusDocsPanel.svelte';
+  import PicusTxGuard from './PicusTxGuard.svelte';
   import AddDestinationModal from './generate/AddDestinationModal.svelte';
   import SaveDestinationSetModal from './generate/SaveDestinationSetModal.svelte';
   import ClassifyFolderModal from './ClassifyFolderModal.svelte';
@@ -81,6 +82,7 @@
   import { queryStore } from '$lib/stores/picus/query.svelte';
   import { activityStore } from '$lib/stores/picus/activity.svelte';
   import { dependsStore } from '$lib/stores/picus/depends.svelte';
+  import { picusProvidersStore } from '$lib/stores/picus/providers.svelte';
   import { picusEditorStore } from '$lib/stores/picus/editor.svelte';
   import { resultEditStore } from '$lib/stores/picus/result-edit.svelte';
   import { picusSettingsStore } from '$lib/stores/picus/settings.svelte';
@@ -681,6 +683,17 @@
       return;
     }
   }
+
+  /**
+   * Read the engine descriptors, once, for the whole window.
+   *
+   * The single place this is asked from. The capability getters that gate the
+   * rail buttons used to prime it themselves, which is a side effect performed
+   * during derivation — and when the backend was slow to answer, the failure
+   * wrote reactive state, the write re-rendered, and the render asked again. One
+   * effect, mounted once, has no such loop.
+   */
+  $effect(() => { void picusProvidersStore.load(); });
 </script>
 
 <svelte:window onkeydown={onKeyDown} />
@@ -936,6 +949,12 @@
     onClose={() => picusUiStore.closeDocs()}
   />
 {/if}
+
+<!-- The confirmation raised when something would end an open transaction — closing
+     the window, dropping a connection. Mounted here, once, because it is what
+     resolves the promise `txStore.confirmRelease` hands its callers: unmounted,
+     that promise never settles and the disconnect it gates waits forever. -->
+<PicusTxGuard />
 
 <!-- One menu for the window, raised from wherever was right-clicked. Mounted here
      rather than inside each surface so there is exactly one open at a time. -->

@@ -63,15 +63,28 @@
   $effect(() => {
     const win = getCurrentWindow();
     const registered = win.onCloseRequested(async (event) => {
-      if (allowClose) return;
-      const open = txStore.openConnectionIds;
-      if (!open.length) return;
-      // Vetoed first, asked second: the question is worth nothing if the window has
-      // already gone by the time it is on screen.
-      event.preventDefault();
-      if (!(await txStore.confirmRelease(open, 'window'))) return;
-      allowClose = true;
-      await win.close();
+      try {
+        if (allowClose) return;
+        const open = txStore.openConnectionIds;
+        if (!open.length) return;
+        // Vetoed first, asked second: the question is worth nothing if the window has
+        // already gone by the time it is on screen.
+        event.preventDefault();
+        if (!(await txStore.confirmRelease(open, 'window'))) return;
+        allowClose = true;
+        await win.close();
+      } catch (e) {
+        // Whatever went wrong, the window must still close.
+        //
+        // Tauri awaits this handler and only closes if it settles without a veto,
+        // so a rejection here does not merely skip the question — it leaves a
+        // window that cannot be closed at all, by any means short of killing the
+        // process. Losing an unasked-about transaction is bad; trapping the user in
+        // the window is worse, and the server rolls that transaction back anyway.
+        console.error('picus: the transaction guard failed — closing anyway', e);
+        allowClose = true;
+        void win.close();
+      }
     });
     return () => void registered.then((unlisten) => unlisten()).catch(() => {});
   });

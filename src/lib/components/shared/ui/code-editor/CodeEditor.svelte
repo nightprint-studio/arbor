@@ -17,10 +17,13 @@
   import {
     Decoration,
     EditorView,
+    GutterMarker,
+    gutter,
     placeholder as cmPlaceholder,
     type DecorationSet,
     type KeyBinding,
   } from '@codemirror/view';
+  import { RangeSet } from '@codemirror/state';
   import { indentUnit as cmIndentUnit } from '@codemirror/language';
   import { setDiagnostics as cmSetDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
   import { openSearchPanel } from '@codemirror/search';
@@ -48,6 +51,8 @@
     wrap = false,
     keyBindings,
     marks = [],
+    gutterMarks = [],
+    onGutterClick,
     oninput,
     oncaret,
     onViewState,
@@ -119,6 +124,20 @@
      * a backend. Applied live, so a host can recompute them freely.
      */
     marks?: readonly { from: number; to: number; className: string }[];
+    /**
+     * Icons for the left gutter, one per line — the affordance that makes a relationship
+     * visible without being asked for it.
+     *
+     * The host owns what a mark means and what clicking it does; this only draws a glyph
+     * with a tooltip and reports the click. `glyph` is rendered as text, so an emoji, an
+     * arrow or a single letter all work and no icon set has to be agreed on across
+     * products. Applied live, and empty by default — an editor that passes nothing gets
+     * no gutter at all, not an empty column.
+     */
+    gutterMarks?: readonly { line: number; glyph: string; tooltip: string; className?: string }[];
+    /** A gutter icon was clicked: its 1-based line, plus the event — so a host that has more
+     *  than one thing to offer can anchor a menu where the pointer is instead of guessing. */
+    onGutterClick?: (line: number, event: MouseEvent) => void;
     oninput?: (text: string) => void;
     /** Live caret position (1-based line/col) — drives a host footer Ln/Col. */
     oncaret?: (line: number, col: number) => void;
@@ -216,6 +235,87 @@
   }
   $effect(() => { void marks; pushMarks(); });
 
+  // ── Host-supplied gutter icons ────────────────────────────────────────────────
+  //
+  // Same shape as the marks above and for the same reason: the host recomputes them from
+  // its own state and this field holds the last set. The gutter extension is installed
+  // only when the host actually passes marks — an editor that doesn't use them gets no
+  // extra column, which matters because an empty gutter still costs horizontal space in
+  // every editor in the app.
+  // Plain fields, not constructor parameter properties: Svelte's compiler parses this
+  // script without a TypeScript transform, so `constructor(private x: string)` is a
+  // syntax error here however valid it is in a `.ts` file.
+  class HostGutterMarker extends GutterMarker {
+    glyph: string;
+    tooltip: string;
+    markerClass: string;
+
+    constructor(glyph: string, tooltip: string, markerClass: string) {
+      super();
+      this.glyph = glyph;
+      this.tooltip = tooltip;
+      this.markerClass = markerClass;
+    }
+
+    // No `override` modifier for the same reason as above — another TypeScript-only
+    // keyword this script is not preprocessed for.
+    toDOM() {
+      const el = document.createElement('span');
+      el.className = `cm-host-gutter-icon ${this.markerClass}`.trim();
+      el.textContent = this.glyph;
+      el.title = this.tooltip;
+      return el;
+    }
+  }
+
+  const setGutter = StateEffect.define<RangeSet<GutterMarker>>();
+  const gutterField = StateField.define<RangeSet<GutterMarker>>({
+    create: () => RangeSet.empty,
+    update(current, tr) {
+      for (const effect of tr.effects) if (effect.is(setGutter)) return effect.value;
+      return current.map(tr.changes);
+    },
+  });
+
+  function pushGutter() {
+    if (!view) return;
+    const lines = view.state.doc.lines;
+    const ranges = gutterMarks
+      .filter((m) => m.line >= 1 && m.line <= lines)
+      // One icon per line: two marks on the same line would be two ranges at the same
+      // position, and the gutter draws only the first anyway.
+      .filter((m, i, all) => all.findIndex((o) => o.line === m.line) === i)
+      .sort((a, b) => a.line - b.line)
+      .map((m) =>
+        new HostGutterMarker(m.glyph, m.tooltip, m.className ?? '').range(
+          view!.state.doc.line(m.line).from,
+        ),
+      );
+    view.dispatch({ effects: setGutter.of(RangeSet.of(ranges, true)) });
+  }
+  $effect(() => { void gutterMarks; pushGutter(); });
+
+  /**
+   * The gutter extension. Always installed, never conditional on the current marks: they
+   * arrive asynchronously (a host fetches them from a backend), so deciding at mount
+   * whether to have a gutter would mean never having one. With no marks the field is
+   * empty and the column collapses to nothing — no spacer, so an editor that never uses
+   * this pays no horizontal space.
+   */
+  const hostGutter = [
+    gutterField,
+    gutter({
+      class: 'cm-host-gutter',
+      markers: (v) => v.state.field(gutterField, false) ?? RangeSet.empty,
+      domEventHandlers: {
+        mousedown(v, line, event) {
+          onGutterClick?.(v.state.doc.lineAt(line.from).number, event as MouseEvent);
+          return true;
+        },
+      },
+    }),
+  ];
+
   function mount(target: HTMLDivElement) {
     const { extensions } = createCodeEditorExtensions(language, {
       readOnly, onGoto, rulerColumn, emmet, indentGuides, stickyScroll, scrollbarOverview,
@@ -244,6 +344,7 @@
       extensions: [
         extensions,
         markField,
+        hostGutter,
         indentCompartment.of(indentExtensions()),
         minimapCompartment.of(minimap ? minimapExtension() : []),
         placeholder ? cmPlaceholder(placeholder) : [],
@@ -254,6 +355,7 @@
     view = new EditorView({ state, parent: target });
     pushDiagnostics();
     pushMarks();
+    pushGutter();
 
     // Restore the host-provided cursor + scroll (per-tab position). The scroll is set
     // after a frame so the layout the offset refers to exists.
@@ -595,6 +697,21 @@
   /** Insert `text` at the caret (replacing any selection), leaving the caret right
    *  after the inserted text. Used by generator flows (Alt+Insert → Generate).
    *  Mirrors merula's `insertAtCursor`. */
+  /**
+   * Viewport coordinates of a **UTF-8 byte offset** — for a host that needs to anchor a menu
+   * at the caret rather than at the pointer.
+   *
+   * Exists because a go-to that resolves to several places has to ask which one, and asking
+   * from the keyboard has no mouse position to anchor to. `null` before mount.
+   */
+  export function coordsAtOffset(byteOffset: number): { x: number; y: number } | null {
+    if (!view) return null;
+    const src = view.state.doc.toString();
+    const pos = Math.min(makeByteToU16(src)(byteOffset), view.state.doc.length);
+    const c = view.coordsAtPos(pos);
+    return c ? { x: c.left, y: c.bottom } : null;
+  }
+
   export function insertAtCursor(text: string) {
     if (!view || !text) return;
     const sel = view.state.selection.main;
@@ -618,4 +735,19 @@
     overflow: hidden;
   }
   .code-editor :global(.cm-editor) { height: 100%; }
+
+  /* Host gutter icons. Scoped under `.code-editor` so this stays a component rule
+     despite `:global` — the classes are on nodes CodeMirror creates, which Svelte's
+     scoping hash never reaches. No padding on the empty column: an editor whose host
+     passes no marks must not pay horizontal space for a gutter it never uses. */
+  .code-editor :global(.cm-host-gutter) { min-width: 0; }
+  .code-editor :global(.cm-host-gutter .cm-gutterElement) { padding: 0; }
+  .code-editor :global(.cm-host-gutter-icon) {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 15px; height: 100%;
+    font-size: 10px; line-height: 1;
+    color: var(--text-muted); cursor: pointer;
+    transition: color var(--transition-fast);
+  }
+  .code-editor :global(.cm-host-gutter-icon:hover) { color: var(--accent); }
 </style>

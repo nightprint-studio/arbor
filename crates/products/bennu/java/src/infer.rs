@@ -709,7 +709,14 @@ impl Ctx<'_> {
         let args = self.call_arg_nodes(node);
 
         let recv_type = match node.child_by_field_name("object") {
-            Some(obj) => self.infer_expr(&obj, enclosing)?,
+            Some(obj) => match self.infer_expr(&obj, enclosing) {
+                Some(t) => t,
+                // Not a value — so it may be a TYPE, and this a static call:
+                // `StringUtils.isEmpty(s)`, `Math.max(a, b)`, `Retriever.properties(svc)`.
+                // Tried only after value resolution fails, which is also Java's own rule (a
+                // variable named `Foo` obscures the type `Foo`).
+                None => self.type_receiver(&obj)?,
+            },
             // Bare call `foo()` → the enclosing type's method, else a statically-imported static method
             // (`import static X.max;` → `max(…)`). We try the enclosing type first (an instance/own
             // method wins over an import, as in Java), then fall back to the static import.
@@ -729,6 +736,29 @@ impl Ctx<'_> {
         };
 
         self.method_return_on(&recv_type, &name, &args, enclosing)
+    }
+
+    /// A receiver that names a **type** rather than a value — the static-call form.
+    ///
+    /// Without this, `Foo.bar()` dead-ends: the receiver resolves as a local, a lambda parameter,
+    /// a field or a static-imported field, and a *type* is none of those, so the whole invocation
+    /// yields nothing. That silently cost every `var`/`val` initialised from a static call its
+    /// type, which is a very common way to write one.
+    ///
+    /// The capitalisation guard is what keeps it honest: type names are capitalised in every
+    /// codebase this will run on, and without it an unresolved lowercase variable would be
+    /// "resolved" as a phantom type whose members then fail to match — turning a clean miss into
+    /// a confusing one. A name that resolves to no known type still yields nothing.
+    fn type_receiver(&self, obj: &Node) -> Option<TypeRef> {
+        if !matches!(obj.kind(), "identifier" | "scoped_identifier" | "field_access") {
+            return None;
+        }
+        let text = node_text(obj, self.bytes)?;
+        let last = text.rsplit('.').next()?;
+        if !last.chars().next()?.is_uppercase() {
+            return None;
+        }
+        self.resolve_type_text(&text)
     }
 
     /// The real argument nodes of a call — the `arguments` (`argument_list`) named children, skipping
@@ -1791,6 +1821,41 @@ mod overload_tests {
         .map(|(s, b)| (s.to_string(), b.to_string()))
         .collect();
         MapResolver { members, simple }
+    }
+
+    #[test]
+    fn a_static_call_resolves_through_its_type_receiver() {
+        // The reported bug: `val x = Retriever.properties(svc)` showed no hover at all, because
+        // the receiver is a TYPE and identifier resolution only ever looked for values.
+        let r = resolver();
+        // This expression is exactly what a `val`'s initializer re-descends into, so typing it
+        // is what gives the `val` its type — and its tooltip.
+        let src = "class C { void m() { val s = Fmt.format(null); } }";
+        assert_eq!(infer_call(src, "Fmt.format(null)", &r).as_deref(), Some("java/lang/String"));
+        // A qualified receiver works the same way.
+        let qualified = "class C { void m() { Object o = acme.Fmt.format(null); } }";
+        assert_eq!(
+            infer_call(qualified, "acme.Fmt.format(null)", &r).as_deref(),
+            Some("java/lang/String")
+        );
+    }
+
+    #[test]
+    fn a_value_receiver_still_wins_over_a_type_of_the_same_name() {
+        // Java's obscuring rule: a variable named `Fmt` hides the type `Fmt`. The type fallback
+        // must run only after value resolution has failed.
+        let r = resolver();
+        let src = "class C { void m(acme.Fmt Fmt) { Object o = Fmt.format(Fmt); } }";
+        assert_eq!(infer_call(src, "Fmt.format(Fmt)", &r).as_deref(), Some("java/lang/String"));
+    }
+
+    #[test]
+    fn a_lowercase_receiver_is_never_guessed_to_be_a_type() {
+        // An unresolved lowercase name is a variable we could not type, not a class. Resolving it
+        // as one would turn a clean miss into a confusing one.
+        let r = resolver();
+        let src = "class C { void m() { Object o = unknownThing.format(null); } }";
+        assert_eq!(infer_call(src, "unknownThing.format(null)", &r), None);
     }
 
     #[test]

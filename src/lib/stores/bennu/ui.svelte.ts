@@ -25,8 +25,22 @@ export type LeftPanel = 'project' | 'structure' | 'dependencies';
 export type RightPanel = 'maven' | 'services';
 /** Bottom tool windows — one panel per rail button, except Build and Problems which share
  *  one. The Forms inspector lives here (wide, horizontal data) rather than in a narrow side
- *  panel; its toggle sits in the right rail's bottom cluster. */
-export type BottomPanel = 'problems' | 'terminal' | 'build' | 'todos' | 'forms';
+ *  panel; its toggle sits in the right rail's bottom cluster.
+ *
+ *  The three framework catalogs (`beans` / `endpoints` / `springconfig`, see
+ *  `framework-catalogs.ts`) have no rail button at all: they are opened from the command
+ *  palette, because a framework tool is noise on the projects that don't use it and the
+ *  rail is the one piece of chrome that is always on screen. */
+export type BottomPanel =
+  | 'problems'
+  | 'terminal'
+  | 'build'
+  | 'todos'
+  | 'forms'
+  | 'beans'
+  | 'endpoints'
+  | 'springconfig'
+  | 'springbindings';
 
 /** Which tab the Go-to navigator opens on. */
 export type NavMode = 'class' | 'file' | 'symbol' | 'all';

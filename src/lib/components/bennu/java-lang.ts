@@ -37,6 +37,7 @@ import {
 import type { EditorView } from '@codemirror/view';
 import { completion as ipcCompletion, importEdit as ipcImportEdit } from '$lib/ipc/bennu';
 import { hover as ipcHover, libraryHover as ipcLibraryHover } from '$lib/ipc/bennu/nav';
+import { extHover, extCompletion } from '$lib/ipc/bennu/ext';
 import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
@@ -307,6 +308,27 @@ function appendFallbackCompletions(
   }
 }
 
+/**
+ * Whether the caret sits inside a `"…"` string literal, by counting unescaped quotes on
+ * the line before it.
+ *
+ * Deliberately a line-local character count rather than a tree query: it runs on every
+ * completion keystroke, it only gates an optional extra request, and the failure mode is
+ * benign in both directions (a missed framework list, or one extra call that returns
+ * nothing). A text block spanning lines reads as "outside", which is correct often enough
+ * and never wrong in a way that costs the user anything.
+ */
+function insideStringLiteral(ctx: CompletionContext): boolean {
+  const line = ctx.state.doc.lineAt(ctx.pos);
+  const before = line.text.slice(0, ctx.pos - line.from);
+  let quotes = 0;
+  for (let i = 0; i < before.length; i++) {
+    if (before[i] === '\\') { i++; continue; }
+    if (before[i] === '"') quotes++;
+  }
+  return quotes % 2 === 1;
+}
+
 const javaCompletionSource: CompletionSource = async (
   ctx: CompletionContext,
 ): Promise<CompletionResult | null> => {
@@ -339,6 +361,30 @@ const javaCompletionSource: CompletionSource = async (
     items = []; // BE absent / not indexed yet — fall back to keywords + buffer words.
   }
   if (seq !== completionSeq) return null; // superseded by a newer keystroke
+
+  // Inside a string literal the Java resolver has nothing to offer by construction — and
+  // that is exactly where `@Value("${app.…}")` and `@Qualifier("…")` live. Ask the
+  // framework extensions there, and only there: the string test is a character count on
+  // the current line, so the common case costs nothing and no extra round-trip happens
+  // while typing ordinary code.
+  if ((items?.length ?? 0) === 0 && insideStringLiteral(ctx)) {
+    const extItems = await extCompletion(path, src, byteOffset).catch(() => []);
+    if (seq !== completionSeq) return null;
+    if (extItems.length > 0) {
+      // A property key is dotted and a bean name may be hyphenated, so the token to
+      // replace is not the Java word — `app.tim` must be replaced whole, not appended to.
+      const token = ctx.matchBefore(/[\w$.\-/]*$/);
+      return {
+        from: token ? token.from : ctx.pos,
+        options: extItems.map((it) => ({
+          label: it.label,
+          detail: it.detail ?? undefined,
+          type: it.kind === 'bean' ? 'class' : 'property',
+        })),
+        validFor: /^[\w$.\-/]*$/,
+      };
+    }
+  }
 
   const options: Completion[] = (items ?? []).map((it) => {
     const c: Completion = { label: it.label, detail: it.detail, type: kindToType(it.kind) };
@@ -373,13 +419,20 @@ const javaCompletionSource: CompletionSource = async (
 // container (+ Javadoc), and for a local `var`/`val` (or any local / parameter) its resolved type.
 // The shared factory owns the word-finding + DOM; this just supplies the fetch.
 
-const javaHoverSource = makeHoverSource((path, src, byteOffset) => {
+const javaHoverSource = makeHoverSource(async (path, src, byteOffset) => {
   // Inside a library/JDK source view (a tracked decompiled tab), hover resolves against the ORIGIN
   // project's classpath resolver — its own `/decompiled/` path is under no project.
   const ctx = decompiledStore.ctx(path);
-  return ctx
-    ? ipcLibraryHover(ctx.originFile, src, byteOffset)
-    : ipcHover(path, src, byteOffset);
+  const info = ctx
+    ? await ipcLibraryHover(ctx.originFile, src, byteOffset)
+    : await ipcHover(path, src, byteOffset);
+  if (info) return info;
+  // The language had nothing to say — ask the framework extensions. This is where
+  // `@Value("${app.timeout}")` gets its resolved value and `@Qualifier("fast")` gets the
+  // bean it names: a caret inside a string literal is invisible to the Java resolver by
+  // construction, so the fallback order is the only one that can work.
+  const ext = await extHover(path, src, byteOffset).catch(() => null);
+  return ext ? { signature: ext.signature, kind: ext.title, container: null, doc: ext.doc || null } : null;
 });
 
 /** The Java {@link LanguageDescriptor} handed to the shared `CodeEditor`. */

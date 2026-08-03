@@ -19,6 +19,9 @@
 import type { Dialect } from '$lib/types/picus';
 import { listProviders, type DbProviderDescriptor, type EngineCapabilities } from '$lib/ipc/picus/db';
 
+/** Floor between two attempts after a failure. */
+const RETRY_MS = 5000;
+
 function createProvidersStore() {
   let descriptors = $state<DbProviderDescriptor[]>([]);
   let error = $state('');
@@ -28,6 +31,8 @@ function createProvidersStore() {
    * `load` would be one more dependency able to re-trigger them.
    */
   let asked = false;
+  /** When the last attempt started, so a failure backs off instead of spinning. */
+  let lastAttempt = 0;
 
   return {
     get all() { return descriptors; },
@@ -47,16 +52,30 @@ function createProvidersStore() {
       return this.byKind(kind)?.capabilities ?? null;
     },
 
-    /** Read the descriptors, once. Idempotent and safe to call from an effect. */
+    /**
+     * Read the descriptors, once.
+     *
+     * Idempotent, and safe to call from an effect. **Not** safe to call from a
+     * getter that a `$derived` reads, which is how this was first wired and what it
+     * cost: a failure re-armed the read *and* wrote `error`, `error` is `$state`,
+     * the write re-rendered, the render re-read the getter, and the getter asked
+     * again — an unbounded storm of RPCs at a backend that was already not
+     * answering. Priming belongs in one effect, and it is in `PicusShell`.
+     *
+     * A failure is re-askable, because "the backend is not up yet" is the ordinary
+     * reason and remembering it would keep every capability false for the session.
+     * But it is re-askable on a **floor**, so that even a caller that does ask on
+     * every render costs one attempt every few seconds rather than one per frame.
+     */
     async load() {
       if (asked) return;
+      if (Date.now() - lastAttempt < RETRY_MS) return;
       asked = true;
+      lastAttempt = Date.now();
       try {
         descriptors = await listProviders();
         error = '';
       } catch (e) {
-        // Re-askable: a backend that was not up yet is the ordinary reason, and
-        // remembering the failure would keep every capability false for the session.
         asked = false;
         error = String(e);
       }

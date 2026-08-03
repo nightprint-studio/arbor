@@ -80,6 +80,17 @@ pub struct BennuConfig {
     /// Per-project (or per-file) encoding override, keyed by absolute path → encoding
     /// label (e.g. `"Cp1252"`). Present entries win over the pom-declared encoding.
     pub encoding_overrides: BTreeMap<String, String>,
+    /// Which `application*.yml` / `application*.properties` a project's Spring
+    /// `${placeholder}`s resolve against, keyed by absolute (forward-slashed) project root
+    /// → absolute file path.
+    ///
+    /// A real project has several — `application.yml`, `application-dev.yml`, one per
+    /// module — and which one is *running* is a launch argument, not something the sources
+    /// reveal. So the editor doesn't guess: an absent entry resolves against the
+    /// profile-less files (what Spring always loads), and an entry pins the user's choice.
+    /// A stale path (the file was deleted or renamed) is ignored rather than breaking
+    /// resolution.
+    pub spring_property_files: BTreeMap<String, String>,
     /// Explicit **JSP → Struts action** binding, keyed by absolute (forward-slashed) JSP path →
     /// action qualified-name. For a view-only JSP (OGNL, no `<form>`) that maps to several actions
     /// — or none the reverse-lookup can see — the user pins which action the page's properties are
@@ -102,6 +113,7 @@ impl Default for BennuConfig {
             jdk_paths: Vec::new(),
             jdk_overrides: BTreeMap::new(),
             encoding_overrides: BTreeMap::new(),
+            spring_property_files: BTreeMap::new(),
             jsp_action_bindings: BTreeMap::new(),
         }
     }

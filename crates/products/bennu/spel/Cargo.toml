@@ -1,0 +1,13 @@
+[package]
+name         = "bennu-spel"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Spring expression syntax — `${property.placeholder:default}` and `#{SpEL}` — tokenized into spans with a conservative issue list. Pure, zero-dependency, allocation-light: the piece a framework extension needs to highlight, navigate and lint annotation strings."
+
+# Deliberately DEPENDENCY-FREE (not even serde). This crate is the first candidate to be
+# compiled to WASM as an out-of-process extension module, and everything it returns is a
+# span plus a plain `String` — no wire types, no framework model, nothing to version.
+[dependencies]

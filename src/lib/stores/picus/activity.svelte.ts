@@ -167,7 +167,10 @@ function createActivityStore() {
      * hold it.
      */
     get supported(): boolean {
-      void picusProvidersStore.load();
+      // A pure read. Priming the descriptors from here is what turned a backend
+      // that was slow to answer into an RPC storm: the getter is read from a
+      // `$derived` on the rail, so every failure re-rendered and re-asked.
+      // `PicusShell` primes them once, in an effect.
       const engine = connectionsStore.active?.dialect;
       return picusProvidersStore.capabilities(engine)?.sessionActivity ?? false;
     },
