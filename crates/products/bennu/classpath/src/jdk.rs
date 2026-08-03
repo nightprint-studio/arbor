@@ -9,8 +9,11 @@
 //!   [`JimageSource`](crate::source::JimageSource), probing `java.base` first (the
 //!   JDK core), then the common platform modules.
 //!
-//! JDK discovery: `JAVA_HOME` first, then every child of `C:/Program Files/Java`
-//! (and the x86 variant). Each candidate's language level is read from its `release`
+//! JDK discovery: the user-configured extra homes, then `JAVA_HOME`, then every JDK
+//! under the platform's standard install roots — Windows `Program Files` vendor dirs,
+//! macOS `/Library/Java/JavaVirtualMachines` bundles, Linux `/usr/lib/jvm`, the Homebrew
+//! `openjdk` formula, and the per-user version-manager / IDE locations (see
+//! [`jdk_install_roots`]). Each candidate's language level is read from its `release`
 //! file (`JAVA_VERSION`); the first candidate whose major version matches the
 //! requested level wins. When none matches, [`resolve_jdk_classpath`] falls back to the
 //! newest installed JDK (so a Java-8 project still resolves the standard library on a
@@ -171,35 +174,156 @@ fn jdk_major(home: &Path) -> Option<u32> {
     requested_major(quoted)
 }
 
-/// Candidate JDK homes: `JAVA_HOME` first (if set), then each child directory of the
-/// standard Windows install roots, deduplicated by path.
+/// Candidate JDK homes in priority order: the user-configured extras, then `JAVA_HOME`, then every
+/// JDK under the platform's standard install roots — deduplicated, and each normalized to the
+/// directory that actually holds `release` (see [`normalize_jdk_home`]).
 fn candidate_jdks() -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     // User-configured extra homes first (highest priority — an explicit setting).
     if let Ok(extra) = EXTRA_JDK_HOMES.read() {
         for p in extra.iter() {
-            if p.is_dir() && !out.contains(p) {
-                out.push(p.clone());
-            }
+            push_jdk_home(p, &mut out);
         }
     }
     if let Ok(home) = std::env::var("JAVA_HOME") {
-        let p = PathBuf::from(home);
-        if p.is_dir() && !out.contains(&p) {
-            out.push(p);
-        }
+        push_jdk_home(Path::new(&home), &mut out);
     }
-    for root in ["C:/Program Files/Java", "C:/Program Files (x86)/Java"] {
-        if let Ok(entries) = fs::read_dir(root) {
-            for e in entries.flatten() {
-                let p = e.path();
-                if p.is_dir() && !out.contains(&p) {
-                    out.push(p);
+    for root in jdk_install_roots() {
+        let Ok(entries) = fs::read_dir(&root.dir) else { continue };
+        let mut children: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| match root.name_contains {
+                Some(needle) => {
+                    p.file_name().is_some_and(|n| n.to_string_lossy().contains(needle))
                 }
-            }
+                None => true,
+            })
+            .collect();
+        // Sorted so which same-level JDK wins doesn't depend on filesystem enumeration order.
+        children.sort();
+        for child in children {
+            push_jdk_home(&child, &mut out);
         }
     }
     out
+}
+
+/// Normalize `dir` to a JDK home and append it to `out`, unless it isn't a JDK or is already there.
+fn push_jdk_home(dir: &Path, out: &mut Vec<PathBuf>) {
+    if let Some(home) = normalize_jdk_home(dir) {
+        if !out.contains(&home) {
+            out.push(home);
+        }
+    }
+}
+
+/// Resolve a discovered directory to the actual JDK **home** — the directory that holds `release`
+/// (which is what [`jdk_major`] reads and what a `JAVA_HOME` export must point at).
+///
+/// Three shapes exist in the wild and only the first one is the directory you find by listing an
+/// install root:
+///   * the home itself — Windows and Linux installs, and a hand-set `JAVA_HOME`;
+///   * a macOS **bundle**, whose home is nested at `Contents/Home` — everything under
+///     `/Library/Java/JavaVirtualMachines`, i.e. every Temurin / Zulu / Corretto install on a Mac;
+///   * a Homebrew *formula* directory, which wraps such a bundle under `libexec`.
+///
+/// `None` when no candidate holds a `release` file — i.e. the directory isn't a JDK. Normalizing
+/// `JAVA_HOME` and the user's configured extras through here too is deliberate: pointing either at a
+/// macOS bundle rather than at `Contents/Home` is an easy and previously silent mistake.
+fn normalize_jdk_home(dir: &Path) -> Option<PathBuf> {
+    for rel in ["", "Contents/Home", "libexec/openjdk.jdk/Contents/Home"] {
+        let home = if rel.is_empty() { dir.to_path_buf() } else { dir.join(rel) };
+        if home.join("release").is_file() {
+            return Some(home);
+        }
+    }
+    None
+}
+
+/// One directory whose children are JDK installs, with an optional filter on the child name.
+struct JdkRoot {
+    dir: PathBuf,
+    /// When set, only children whose name contains this are probed. For a shared prefix like
+    /// Homebrew's `opt/`, where a few `openjdk@N` formulae sit among hundreds of unrelated ones,
+    /// this is the difference between three probes and a thousand.
+    name_contains: Option<&'static str>,
+}
+
+/// The directories whose children are JDK installs, across platforms.
+///
+/// This used to be the two Windows `Program Files` roots and nothing else, so on macOS and Linux the
+/// only discoverable JDK was whatever `JAVA_HOME` pointed at — and a desktop app launched from
+/// Finder / the Dock / a desktop launcher inherits the system's minimal environment, not the user's
+/// shell profile, so `JAVA_HOME` is typically **unset** there. The result was an empty JDK tier:
+/// `java.lang.String` itself didn't resolve, and the whole project reported thousands of
+/// "cannot resolve" errors that looked like anything except a missing JDK.
+///
+/// A root that doesn't exist costs one failed `read_dir`, so listing every plausible location beats
+/// guessing at the platform.
+fn jdk_install_roots() -> Vec<JdkRoot> {
+    /// Roots whose every child is a candidate JDK.
+    const SYSTEM_ROOTS: [&str; 12] = [
+        // Windows: the vendor directories under Program Files.
+        "C:/Program Files/Java",
+        "C:/Program Files (x86)/Java",
+        "C:/Program Files/Eclipse Adoptium",
+        "C:/Program Files/Amazon Corretto",
+        "C:/Program Files/Microsoft",
+        "C:/Program Files/Zulu",
+        // macOS: every installed JVM is a bundle under this one directory (the `Contents/Home`
+        // nesting is `normalize_jdk_home`'s job).
+        "/Library/Java/JavaVirtualMachines",
+        // Linux: distro packages and unpacked vendor tarballs.
+        "/usr/lib/jvm",
+        "/usr/lib64/jvm",
+        "/usr/java",
+        "/opt/java",
+        "/opt/jdk",
+    ];
+    /// Per-user roots, relative to the home directory: version managers, and the JDKs an IDE
+    /// downloads for you (`~/.jdks` is IntelliJ's).
+    const USER_ROOTS: [&str; 5] = [
+        ".jdks",
+        ".sdkman/candidates/java",
+        ".asdf/installs/java",
+        ".gradle/jdks",
+        "Library/Java/JavaVirtualMachines",
+    ];
+    /// Homebrew's `openjdk` FORMULA — as opposed to the Temurin/Zulu *casks*, which land in
+    /// `/Library/Java/JavaVirtualMachines` above. The formula installs into its own prefix and
+    /// deliberately does NOT register itself system-wide, so it's invisible unless we look here.
+    const BREW_PREFIXES: [&str; 2] = ["/opt/homebrew/opt", "/usr/local/opt"];
+
+    let mut roots: Vec<JdkRoot> = Vec::new();
+    for dir in SYSTEM_ROOTS {
+        roots.push(JdkRoot { dir: PathBuf::from(dir), name_contains: None });
+    }
+    for prefix in BREW_PREFIXES {
+        roots.push(JdkRoot { dir: PathBuf::from(prefix), name_contains: Some("jdk") });
+    }
+    if let Some(home) = user_home() {
+        for rel in USER_ROOTS {
+            roots.push(JdkRoot { dir: home.join(rel), name_contains: None });
+        }
+    }
+    roots
+}
+
+/// The current user's home directory, from the environment (`HOME`, or `USERPROFILE` on Windows).
+///
+/// `bennu-classpath` is a leaf crate with no platform-dirs dependency, and these are the variables
+/// such a crate would read anyway. Shared with the Maven-launcher discovery in `bennu-be`, which has
+/// the same "a GUI process has no shell profile" problem.
+pub fn user_home() -> Option<PathBuf> {
+    for var in ["HOME", "USERPROFILE"] {
+        if let Ok(v) = std::env::var(var) {
+            if !v.is_empty() {
+                return Some(PathBuf::from(v));
+            }
+        }
+    }
+    None
 }
 
 /// Find an installed JDK whose language level matches `major`.
@@ -337,5 +461,83 @@ mod tests {
         assert_eq!(requested_major("21"), Some(21));
         assert_eq!(requested_major("21.0.6"), Some(21));
         assert_eq!(requested_major("garbage"), None);
+    }
+
+    // ── JDK-home normalization (the three install shapes) ─────────────────────
+
+    /// Lay out a fake JDK: a `release` file at `home_rel` under a fresh temp dir. Returns the dir the
+    /// *discovery* would hand to `normalize_jdk_home` (the top of the install), and the real home.
+    fn fake_jdk(tag: &str, home_rel: &str, version: &str) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("bennu-jdk-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let home = if home_rel.is_empty() { dir.clone() } else { dir.join(home_rel) };
+        fs::create_dir_all(&home).unwrap();
+        fs::write(home.join("release"), format!("JAVA_VERSION=\"{version}\"\n")).unwrap();
+        (dir, home)
+    }
+
+    #[test]
+    fn normalizes_a_plain_home() {
+        let (dir, home) = fake_jdk("plain", "", "21.0.11");
+        assert_eq!(normalize_jdk_home(&dir), Some(home));
+        assert_eq!(jdk_major(&dir), Some(21));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The macOS shape: listing `/Library/Java/JavaVirtualMachines` yields the BUNDLE, whose home is
+    /// two levels down. Not descending into it is what left a Mac with an empty JDK tier.
+    #[test]
+    fn normalizes_a_macos_bundle() {
+        let (dir, home) = fake_jdk("bundle", "Contents/Home", "1.8.0_492");
+        assert_eq!(normalize_jdk_home(&dir), Some(home.clone()));
+        assert_eq!(jdk_major(&home), Some(8));
+        // The bundle root itself has no `release` — the whole point of the normalization.
+        assert_eq!(jdk_major(&dir), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The Homebrew `openjdk` formula shape.
+    #[test]
+    fn normalizes_a_homebrew_formula_dir() {
+        let (dir, home) = fake_jdk("brew", "libexec/openjdk.jdk/Contents/Home", "17.0.9");
+        assert_eq!(normalize_jdk_home(&dir), Some(home));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_directory_without_a_release_file_is_not_a_jdk() {
+        let dir = std::env::temp_dir().join(format!("bennu-jdk-none-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("bin")).unwrap();
+        assert_eq!(normalize_jdk_home(&dir), None);
+        assert_eq!(normalize_jdk_home(Path::new("/definitely/not/here")), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The Homebrew prefixes hold hundreds of unrelated formulae, so they MUST carry a name filter —
+    /// without it every `candidate_jdks()` call (and `jdk_status` is polled) would probe them all.
+    #[test]
+    fn shared_prefix_roots_are_name_filtered() {
+        let roots = jdk_install_roots();
+        for shared in ["/opt/homebrew/opt", "/usr/local/opt"] {
+            let root = roots
+                .iter()
+                .find(|r| r.dir == Path::new(shared))
+                .unwrap_or_else(|| panic!("{shared} is no longer scanned"));
+            assert!(root.name_contains.is_some(), "{shared} would be scanned unfiltered");
+        }
+    }
+
+    /// `push_jdk_home` deduplicates, so `JAVA_HOME` pointing at an install that the root scan also
+    /// finds yields one candidate, not two.
+    #[test]
+    fn push_jdk_home_deduplicates() {
+        let (dir, home) = fake_jdk("dedup", "Contents/Home", "21.0.11");
+        let mut out = Vec::new();
+        push_jdk_home(&dir, &mut out);
+        push_jdk_home(&dir, &mut out);
+        push_jdk_home(&home, &mut out); // the already-normalized form of the same JDK
+        assert_eq!(out, vec![home]);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

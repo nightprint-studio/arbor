@@ -68,8 +68,34 @@
 <h2>The JDK</h2>
 <p>
   The footer shows the resolved Java language level and where it came from — usually
-  <code>maven.compiler.source</code>, but also the compiler plugin, toolchains, or a manual
-  override. When it can't be inferred the footer reads <code>JDK —</code>.
+  <code>maven.compiler.source</code>, but also <code>maven.compiler.release</code>,
+  <code>&lt;java.version&gt;</code>, the compiler plugin, toolchains, or a manual override. When it
+  can't be inferred the footer reads <code>JDK —</code>.
+</p>
+<p>
+  The <em>install</em> Bennu resolves the standard library against is looked for in the extra JDK
+  directories from Settings first, then <code>JAVA_HOME</code>, then each platform's usual
+  locations: the <code>JavaVirtualMachines</code> bundles on macOS, the Program Files vendor
+  directories on Windows, <code>/usr/lib/jvm</code> on Linux, the Homebrew <code>openjdk</code>
+  formula, and the directories a version manager or an IDE installs JDKs into. The one whose level
+  matches the project wins; failing that, the newest installed. When none is found the title bar
+  carries a <strong>No JDK</strong> warning, because without one nothing — not even
+  <code>String</code> — resolves.
+</p>
+
+<h2>Dependencies</h2>
+<p>
+  For a Maven project Bennu resolves the dependency jars from your local repository so completion,
+  navigation and validation see library types, not just the JDK and your own sources. The resolve is
+  <strong>offline</strong>: a dependency that has never been downloaded can't be resolved, so build
+  the project once. Every module of a multi-module project contributes its own dependencies.
+</p>
+<p>
+  The result is cached against your poms' timestamps — editing a <code>pom.xml</code> re-resolves,
+  and <strong>Rebuild index</strong> re-resolves unconditionally. When the resolve can't happen at
+  all, Bennu says so with the reason rather than leaving you with unresolvable library types: Maven
+  is looked for on <code>PATH</code>, then in the usual install directories, then as the project's
+  own <code>mvnw</code> wrapper.
 </p>
 
 <h2>Capabilities</h2>

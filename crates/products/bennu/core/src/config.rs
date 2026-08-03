@@ -68,10 +68,11 @@ pub struct BennuConfig {
     /// Doesn't affect the one-shot initial index build. `#[serde(default)]` fills a missing key with
     /// `0`, so existing config files get the auto behaviour.
     pub validation_threads: usize,
-    /// Extra JDK install directories to search, on top of `JAVA_HOME` +
-    /// `C:/Program Files/Java/*`. For a JDK installed somewhere non-standard (a portable
-    /// SDK, an IDE-bundled JDK, `/usr/lib/jvm/…`), so the index can still resolve the
-    /// standard library. Each is a JDK home (the dir holding `release` / `bin/java`).
+    /// Extra JDK install directories to search, **before** `JAVA_HOME` and each platform's standard
+    /// install roots (see `bennu_classpath`'s `jdk_install_roots`). For a JDK installed somewhere
+    /// non-standard — a portable SDK, an unpacked tarball — so the index can still resolve the
+    /// standard library. Each is a JDK home (the dir holding `release`), or, on macOS, the `.jdk`
+    /// bundle wrapping one.
     pub jdk_paths: Vec<String>,
     /// Per-project JDK override, keyed by absolute project-root path → Java version
     /// string (e.g. `"17"`). Present entries win over the pom-detected JDK.

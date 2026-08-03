@@ -43,7 +43,7 @@
 //! resolved classpath on the pom's mtime, so a re-resolve within a session is free
 //! until the pom changes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -153,14 +153,39 @@ impl MavenClasspath {
     }
 }
 
+/// The per-module file `dependency:build-classpath` writes its classpath into. **Relative** on
+/// purpose — see [`resolve_maven_classpath`].
+const OUTPUT_FILE_NAME: &str = "bennu-classpath.txt";
+
 /// Run `mvn dependency:build-classpath` for the project rooted at `project_dir`
 /// (must contain a `pom.xml`) and collect the resolved dependency classpath.
 ///
-/// Maven writes the classpath (an OS-separated list of jar paths) to a file under the
-/// project's `target/`; we read that file rather than parse `-q` stdout, so log noise
-/// is irrelevant. A non-zero Maven exit is **not** fatal on its own: as long as an
-/// output file was written (partial resolution), it is read and its entries split into
-/// existing jars vs [`MavenClasspath::unresolved`].
+/// Maven writes the classpath (an OS-separated list of jar paths) to a file under each module's
+/// `target/`; we read those files rather than parse `-q` stdout, so log noise is irrelevant. A
+/// non-zero Maven exit is **not** fatal on its own: as long as an output file was written (partial
+/// resolution), it is read and its entries split into existing jars vs
+/// [`MavenClasspath::unresolved`].
+///
+/// ## Multi-module: one file per module, then the union
+///
+/// `mdep.outputFile` used to be passed as an **absolute** path, and that quietly broke every
+/// multi-module project. `build-classpath` runs once per module of the reactor, and every module
+/// wrote to the *same* absolute file — so each overwrote the previous one and what survived was
+/// whichever module Maven happened to build last. Worse, a reactor root is usually `<packaging>pom`
+/// with no dependencies of its own, so the "resolved classpath" could end up essentially empty.
+/// Opening a class in any other module then found none of its dependencies, and every library type
+/// in it was reported unresolvable — thousands of errors on a project that compiles.
+///
+/// Passing a **relative** name makes Maven resolve it per-module, so each writes into its own
+/// `target/`. We then read every file the run produced and take the **union**, deduplicated: the
+/// index serves one project, and a type is either on some module's classpath or nowhere.
+///
+/// Stale files are removed across the whole tree first, so a module Maven fails on can't contribute
+/// last session's answer.
+///
+/// A sibling module's own artifact may appear on another module's classpath — as `target/classes` (a
+/// directory) or as its jar in `~/.m2`. Either is harmless: a directory fails to open as a jar and is
+/// skipped, and the module's types are indexed from source anyway, which is the better tier.
 pub fn resolve_maven_classpath(
     project_dir: &Path,
     opts: &MavenResolveOpts,
@@ -170,17 +195,19 @@ pub fn resolve_maven_classpath(
         return Err(format!("no pom.xml in {}", project_dir.display()));
     }
 
-    // Write the classpath to a temp file inside the project's target dir (created by
-    // the plugin if absent). Using a file avoids parsing `-q` stdout.
-    let out_file = project_dir.join("target").join("bennu-classpath.txt");
-    // Best-effort: remove a stale file so a total mvn failure can't be read as success.
-    let _ = fs::remove_file(&out_file);
+    // Best-effort: clear every stale output under the tree so a module whose resolve fails this run
+    // can't have last run's file read as a success.
+    for stale in find_output_files(project_dir) {
+        let _ = fs::remove_file(stale);
+    }
 
     let mut cmd = Command::new(&opts.mvn_path);
     cmd.current_dir(project_dir)
         .arg("-q")
         .arg("dependency:build-classpath")
-        .arg(format!("-Dmdep.outputFile={}", out_file.display()))
+        // RELATIVE: resolved against each module's own basedir, so a reactor writes one file per
+        // module instead of N modules racing to overwrite one path.
+        .arg(format!("-Dmdep.outputFile=target/{OUTPUT_FILE_NAME}"))
         // Don't let one unresolvable artifact abort the reactor before writing.
         .arg("-Dmdep.ignoreMissing=true")
         .arg("--fail-never")
@@ -197,24 +224,86 @@ pub fn resolve_maven_classpath(
         .map_err(|e| format!("spawn mvn ({}): {e}", opts.mvn_path))?;
     let mvn_ok = output.status.success();
 
-    // Read the classpath file even on non-zero exit: build-classpath commonly writes
+    // Read every file the run produced, even on a non-zero exit: build-classpath commonly writes
     // the deps it *could* resolve before failing on a private-repo one.
-    let raw = match fs::read_to_string(&out_file) {
-        Ok(s) => s,
-        Err(_) if !mvn_ok => {
-            // No file AND mvn failed → surface a readable reason from the stderr tail.
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let tail: String = stderr.lines().rev().take(6).collect::<Vec<_>>().join(" | ");
-            return Err(format!(
-                "mvn build-classpath produced no output file (exit {:?}). stderr tail: {tail}",
-                output.status.code()
-            ));
-        }
-        Err(e) => return Err(format!("read {}: {e}", out_file.display())),
-    };
+    let produced = find_output_files(project_dir);
+    if produced.is_empty() {
+        // Nothing written anywhere → surface a readable reason from the stderr tail.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let tail: String = stderr.lines().rev().take(6).collect::<Vec<_>>().join(" | ");
+        return Err(format!(
+            "mvn build-classpath produced no output file (exit {:?}). stderr tail: {tail}",
+            output.status.code()
+        ));
+    }
 
-    let (jars, unresolved) = split_classpath(&raw);
+    let (jars, unresolved) = classify_entries(union_entries(&produced));
+
     Ok(MavenClasspath { jars, unresolved, mvn_ok })
+}
+
+/// The deduplicated union of the classpath entries written in `files`, in first-seen order.
+///
+/// One `dependency:build-classpath` run over a reactor writes one file per module, and the same
+/// third-party jar appears in most of them. Deduplicating here — *before* [`classify_entries`] pays
+/// one `stat` per entry — keeps a wide reactor from restat'ing the same jar dozens of times. The order
+/// is first-seen-stable because the resolver's decode memo is keyed on the jar set.
+///
+/// An unreadable file is skipped rather than failing the union: a module whose file we can't read
+/// costs its own deps, not everybody else's.
+fn union_entries(files: &[PathBuf]) -> Vec<String> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out: Vec<String> = Vec::new();
+    for file in files {
+        let Ok(raw) = fs::read_to_string(file) else { continue };
+        for entry in split_entries(&raw) {
+            let entry = entry.trim().to_string();
+            if !entry.is_empty() && seen.insert(entry.clone()) {
+                out.push(entry);
+            }
+        }
+    }
+    out
+}
+
+/// Every `*/target/bennu-classpath.txt` under `root` (the root's own included), for a reactor of any
+/// nesting depth.
+///
+/// A bounded walk that only ever descends into a directory that could hold a module: a `target/` is
+/// entered just to read the file, and the usual noise dirs are skipped. Depth-capped because a
+/// module tree is shallow by construction and an unbounded walk of a large repo to find a handful of
+/// files would be the wrong trade.
+fn find_output_files(root: &Path) -> Vec<PathBuf> {
+    /// Deep enough for `root/group/subgroup/module/target/file`; deeper reactors are vanishingly rare.
+    const MAX_DEPTH: usize = 6;
+    let mut out = Vec::new();
+    collect_output_files(root, MAX_DEPTH, &mut out);
+    out.sort(); // deterministic union order regardless of filesystem enumeration
+    out
+}
+
+fn collect_output_files(dir: &Path, depth_left: usize, out: &mut Vec<PathBuf>) {
+    let candidate = dir.join("target").join(OUTPUT_FILE_NAME);
+    if candidate.is_file() {
+        out.push(candidate);
+    }
+    if depth_left == 0 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let Ok(ft) = entry.file_type() else { continue };
+        if !ft.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        // `target` is handled by the `candidate` probe above; the rest is noise a module never hides in.
+        if matches!(name.as_ref(), "target" | ".git" | "node_modules" | ".idea" | "src") {
+            continue;
+        }
+        collect_output_files(&entry.path(), depth_left - 1, out);
+    }
 }
 
 /// Open a list of dependency jar paths as one [`MultiSource`], skipping any that fail to open (a
@@ -234,9 +323,18 @@ pub fn source_from_jars(jars: &[PathBuf]) -> MultiSource {
 
 /// Split a build-classpath string into existing jars vs non-existent entries.
 fn split_classpath(raw: &str) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    classify_entries(split_entries(raw))
+}
+
+/// Partition classpath entries into "exists on disk" (openable as a [`JarSource`]) and "doesn't"
+/// (private-repo / unresolved deps, kept for reporting). Blank entries are dropped.
+///
+/// Split out from [`split_classpath`] so the multi-module union can dedup entries before paying one
+/// `stat` each, while both paths still classify identically.
+fn classify_entries<I: IntoIterator<Item = String>>(entries: I) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let mut jars = Vec::new();
     let mut unresolved = Vec::new();
-    for entry in split_entries(raw) {
+    for entry in entries {
         let entry = entry.trim();
         if entry.is_empty() {
             continue;
@@ -382,6 +480,73 @@ mod tests {
         let (jars, unresolved) = split_classpath(";;  ;");
         assert!(jars.is_empty());
         assert!(unresolved.is_empty());
+    }
+
+    // ── Multi-module discovery + union (no mvn needed) ────────────────────────
+
+    /// Write `text` to `path`, creating parents.
+    fn seed(path: &Path, text: &str) {
+        let _ = fs::create_dir_all(path.parent().unwrap());
+        fs::write(path, text).unwrap();
+    }
+
+    /// A reactor fixture: the root plus two modules (one nested) each carrying an output file, plus
+    /// two decoys under directories the walk must not enter.
+    fn reactor_fixture(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("bennu-reactor-{tag}"));
+        let _ = fs::remove_dir_all(&root);
+        seed(&root.join("pom.xml"), "<project/>");
+        seed(&root.join("target").join(OUTPUT_FILE_NAME), "/m2/shared.jar:/m2/root.jar");
+        seed(&root.join("api/target").join(OUTPUT_FILE_NAME), "/m2/shared.jar:/m2/api.jar");
+        seed(&root.join("group/impl/target").join(OUTPUT_FILE_NAME), "/m2/impl.jar");
+        // Decoys: a `target` inside `src` (skipped dir) and one under `.git`.
+        seed(&root.join("src/main/java/target").join(OUTPUT_FILE_NAME), "/m2/decoy-src.jar");
+        seed(&root.join(".git/x/target").join(OUTPUT_FILE_NAME), "/m2/decoy-git.jar");
+        root
+    }
+
+    /// The bug this fixes: `dependency:build-classpath` runs once per reactor module, so the resolve
+    /// has to read *every* module's file — reading one meant a module's deps were simply absent and
+    /// every library type in it was unresolvable.
+    #[test]
+    fn find_output_files_collects_every_module() {
+        let root = reactor_fixture("find");
+        let found = find_output_files(&root);
+        assert_eq!(found.len(), 3, "root + api + group/impl: {found:?}");
+        assert!(found.windows(2).all(|w| w[0] <= w[1]), "sorted for a stable union: {found:?}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn find_output_files_skips_src_and_noise_dirs() {
+        let root = reactor_fixture("noise");
+        let found = find_output_files(&root);
+        let joined = found.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(" ");
+        assert!(!joined.contains("src"), "a target under src/ is not a module: {joined}");
+        assert!(!joined.contains(".git"), "{joined}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn union_deduplicates_the_jar_shared_by_two_modules() {
+        let root = reactor_fixture("union");
+        let entries = union_entries(&find_output_files(&root));
+        assert_eq!(
+            entries.iter().filter(|e| e.ends_with("shared.jar")).count(),
+            1,
+            "root and api both list it: {entries:?}"
+        );
+        for expected in ["/m2/root.jar", "/m2/api.jar", "/m2/impl.jar"] {
+            assert!(entries.iter().any(|e| e == expected), "missing {expected}: {entries:?}");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn union_of_nothing_is_empty() {
+        assert!(union_entries(&[]).is_empty());
+        // A path that doesn't exist is skipped, not fatal.
+        assert!(union_entries(&[PathBuf::from("/definitely/missing/bennu-classpath.txt")]).is_empty());
     }
 
     // ── Cache semantics (no mvn: exercised via a missing-pom project) ─────────

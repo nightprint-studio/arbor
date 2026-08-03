@@ -645,18 +645,33 @@ impl IndexService {
             // project. The decoded members are memoized to a per-project file; the jar list itself is
             // disk-cached, so `mvn dependency:build-classpath` runs at most once per pom.
             emit_progress(&sink, &root_str, "dependencies", "start");
-            let deps = crate::dep_classpath::resolve_dep_classpath(&root_path, &jdk_version).map(|d| {
-                eprintln!(
-                    "bennu-be: dependency classpath resolved for {} ({} jars)",
-                    root_path.display(),
-                    d.jars.len()
-                );
-                // Record the resolved jars on the slot so the index inspector's Jars count reflects
-                // what the resolver loaded — independent of whether `mvn` re-ran (the jar list is
-                // disk-cached, so a cached open skips mvn but still indexes the same jars).
-                *slot.dep_jars.write().unwrap_or_else(|p| p.into_inner()) = d.jars;
-                (d.source, d.memo_path)
-            });
+            let deps = match crate::dep_classpath::resolve_dep_classpath(&root_path, &jdk_version) {
+                crate::dep_classpath::DepOutcome::Resolved(d) => {
+                    eprintln!(
+                        "bennu-be: dependency classpath resolved for {} ({} jars)",
+                        root_path.display(),
+                        d.jars.len()
+                    );
+                    // Record the resolved jars on the slot so the index inspector's Jars count reflects
+                    // what the resolver loaded — independent of whether `mvn` re-ran (the jar list is
+                    // disk-cached, so a cached open skips mvn but still indexes the same jars).
+                    *slot.dep_jars.write().unwrap_or_else(|p| p.into_inner()) = d.jars;
+                    Some((d.source, d.memo_path))
+                }
+                // A Maven project with no dependency tier is NOT a benign degradation: every library
+                // type in it reads as "cannot resolve", which looks like thousands of unrelated errors.
+                // Say so once, where the user is looking — the stderr line alone left them guessing.
+                crate::dep_classpath::DepOutcome::Failed(reason) => {
+                    notify(
+                        &sink,
+                        "Dependencies not resolved",
+                        &format!("{reason} Library types won't resolve until this is fixed."),
+                        "warning",
+                    );
+                    None
+                }
+                crate::dep_classpath::DepOutcome::NotApplicable => None,
+            };
             emit_progress(&sink, &root_str, "dependencies", "end");
 
             // Build the index-backed provider and swap it in. The JDK member index is persistent
@@ -790,11 +805,15 @@ impl IndexService {
         };
         if let Some((jdk, encoding_label)) = opened_with {
             // A manual rebuild is authoritative: drop the incremental reference cache so the
-            // reopen re-walks every file from scratch (not just the changed ones), and the
-            // diagnostic cache so a fresh full validation runs (the classpath may have changed).
+            // reopen re-walks every file from scratch (not just the changed ones), the diagnostic
+            // cache so a fresh full validation runs, and the persisted dependency jar LIST so Maven
+            // is re-run. That last one is the point of the button for a user whose library types
+            // aren't resolving: the list is keyed on pom mtimes, so without dropping it here a
+            // rebuild would faithfully re-serve the same wrong classpath forever.
             let base = index_base_for(root);
             bennu_intel::prelude::clear_ref_cache(&bennu_intel::prelude::ref_cache_path(&base));
             bennu_intel::prelude::clear_diag_cache(&bennu_intel::prelude::diag_cache_path(&base));
+            crate::dep_classpath::clear_list_cache(Path::new(root));
             self.open(root, &jdk, &encoding_label, sink);
         }
     }
@@ -1694,7 +1713,7 @@ impl IndexService {
                 "Download",
                 true,
             );
-            let mvn = crate::dep_classpath::find_mvn_launcher();
+            let mvn = crate::dep_classpath::find_mvn_launcher(&root_path);
             let jdk_home = bennu_classpath::prelude::find_jdk_home(&jdk_version);
             match crate::sources_download::run_mvn_get_sources(&root_path, &mvn, jdk_home.as_deref(), &gav)
             {

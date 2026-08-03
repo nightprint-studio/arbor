@@ -98,7 +98,8 @@ fn split_prefix(source: &str, caret: usize) -> (usize, String) {
 }
 
 /// Walk `recv`'s class + its superclass/interfaces, collecting members whose name
-/// starts with `prefix`. Picks up inherited members; dedups overrides by name+kind.
+/// starts with `prefix`. Picks up inherited members; dedups overrides by [`dedup_key`] — which keeps
+/// overloads distinct, so an overload set is offered one entry per signature.
 fn collect_members<M: CpMemberIndex>(
     resolver: &IndexResolver<M>,
     recv: &TypeRef,
@@ -145,8 +146,7 @@ fn add_matching(
         if m.visibility == Visibility::Private && !allow_private {
             continue;
         }
-        let key = format!("{}/{}", kind_tag(m.kind), m.name);
-        if !seen.insert(key) {
+        if !seen.insert(dedup_key(m)) {
             continue;
         }
         out.push(CompletionItem {
@@ -156,6 +156,28 @@ fn add_matching(
             auto_import: None, // a member has no import to add
         });
     }
+}
+
+/// The identity a member is deduplicated on while walking a hierarchy: kind, name **and parameter
+/// types**.
+///
+/// The parameters are the load-bearing part. The dedup exists so an override doesn't appear twice —
+/// once from the subclass, once from the supertype — and an override has the same parameter types as
+/// the method it overrides *by definition*, so including them costs that nothing. Keying on the name
+/// alone also collapsed every **overload**: `substring(int)` and `substring(int, int)` offered as one
+/// entry, nine `valueOf`s as one, and — the way this surfaced — a Lombok `@Accessors(fluent = true)`
+/// getter `name()` hiding its own setter `name(String)`, since fluent accessors share the field's
+/// name and differ only in arity.
+fn dedup_key(m: &Member) -> String {
+    let mut key = String::with_capacity(32);
+    key.push_str(kind_tag(m.kind));
+    key.push('/');
+    key.push_str(&m.name);
+    for p in &m.params {
+        key.push('(');
+        key.push_str(&p.binary_name);
+    }
+    key
 }
 
 fn kind_tag(k: MemberKind) -> &'static str {

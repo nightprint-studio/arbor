@@ -390,7 +390,7 @@
   path override field. Use the override if:
 </p>
 <ul>
-  <li>The IDE executable is not in <code>PATH</code> (common on Windows for JetBrains IDEs).</li>
+  <li>The IDE is installed somewhere detection doesn't look.</li>
   <li>You have multiple versions installed and want to pin a specific one.</li>
   <li>The default command name doesn't match your installation (e.g. a custom build).</li>
 </ul>
@@ -410,14 +410,24 @@
 
 <h4>IDE Detection</h4>
 <p>
-  At startup, Arbor probes each built-in IDE in the background via <code>which</code> / <code>where</code>.
-  This runs as a non-cancellable background job (<strong>System → IDE Detection</strong>) so it never
-  blocks the UI. Results populate the Executable Paths status dots and the worktree context menu.
+  At startup, Arbor probes each built-in IDE in the background. This runs as a non-cancellable
+  background job (<strong>System → IDE Detection</strong>) so it never blocks the UI. Results populate
+  the Executable Paths status dots and the worktree context menu.
+</p>
+<p>
+  Each probe looks, in order, for a path override, then <code>PATH</code>, then the usual launcher
+  directories (<code>/usr/local/bin</code>, Homebrew, MacPorts, snaps, <code>~/.local/bin</code> and
+  the <strong>JetBrains Toolbox</strong> scripts folder), and finally — on macOS — the application
+  bundle itself in <code>~/Applications</code> or <code>/Applications</code>. The last two matter
+  because a windowed app inherits the system's minimal environment rather than your shell profile, and
+  because most macOS IDEs ship no command-line launcher unless you install one from the IDE's own
+  settings. A command-line launcher is preferred over a bundle when both exist, since only it can
+  carry extra arguments such as VS Code's <code>--new-window</code>.
 </p>
 <ul>
   <li>Detection runs <strong>once per session</strong>. Closing and reopening Settings does not re-trigger it.</li>
   <li>Click <strong>Re-detect</strong> (or press <strong>Save</strong>) to run a new detection pass — useful after installing an IDE mid-session or changing a path override.</li>
-  <li>IDEs with an explicit path override are checked directly (file existence) — no <code>which</code> call needed.</li>
+  <li>An absolute path override is checked directly for existence and wins over every other step.</li>
 </ul>
 
 <h3>Terminals</h3>

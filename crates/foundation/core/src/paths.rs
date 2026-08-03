@@ -19,6 +19,28 @@ pub fn arbor_config_dir() -> PathBuf {
         .join("arbor")
 }
 
+/// The current user's home directory.
+///
+/// Not an Arbor-owned location — it's here because several discovery paths need to look at
+/// *other* software's per-user install directories (a JetBrains Toolbox scripts dir, a version
+/// manager's SDK root, `~/Applications`), and those searches must not each roll their own.
+///
+/// `dirs::home_dir()` first, with an explicit `HOME` / `USERPROFILE` fallback so a stripped-down
+/// environment still resolves. `None` when neither is available.
+pub fn user_home() -> Option<PathBuf> {
+    if let Some(h) = dirs::home_dir() {
+        return Some(h);
+    }
+    for var in ["HOME", "USERPROFILE"] {
+        if let Ok(v) = std::env::var(var) {
+            if !v.is_empty() {
+                return Some(PathBuf::from(v));
+            }
+        }
+    }
+    None
+}
+
 /// Convenience: join a relative path under [`arbor_config_dir`].
 pub fn arbor_config_path<P: AsRef<Path>>(sub: P) -> PathBuf {
     arbor_config_dir().join(sub)

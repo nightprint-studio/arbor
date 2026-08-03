@@ -446,7 +446,7 @@
         </div>
         <div class="card">
           <div class="card-section-title"><FolderOpen size={12} /> Search paths</div>
-          <p class="bs-hint">Extra JDK install directories, searched on top of <code>JAVA_HOME</code> and the standard install roots — for a JDK installed somewhere non-standard.</p>
+          <p class="bs-hint">Extra JDK install directories, searched before <code>JAVA_HOME</code> and the standard install roots — for a JDK installed somewhere non-standard. On macOS either the <code>.jdk</code> bundle or the <code>Contents/Home</code> inside it works.</p>
           {#if jdkPaths.length}
             <div class="bs-paths">
               {#each jdkPaths as p (p)}

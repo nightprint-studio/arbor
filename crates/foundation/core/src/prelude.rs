@@ -18,7 +18,7 @@ pub use crate::paths::{
     bennu_config_dir, bennu_config_path, bennu_data_dir, merula_config_dir, merula_config_path,
     merula_data_dir, merula_legacy_sibling_dirs, picus_config_dir, picus_config_path,
     picus_data_dir, sitta_config_dir, sitta_config_path, sitta_data_dir, try_arbor_config_path,
-    tyto_config_dir, tyto_config_path, tyto_data_dir,
+    tyto_config_dir, tyto_config_path, tyto_data_dir, user_home,
 };
 pub use crate::profile::{
     active_profile, active_profile_pointer_path, arbor_profile_dir, arbor_profile_path,

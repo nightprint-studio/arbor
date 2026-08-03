@@ -119,7 +119,13 @@ pub fn synthesize(
             }
         }
         if want_setter {
-            let name = if acc.fluent { f.name.clone() } else { format!("set{}", capitalize(&f.name)) };
+            let name = if acc.fluent {
+                f.name.clone()
+            } else {
+                // Same rule as the getter, so a `boolean isRunning` gets `setRunning` (Lombok runs
+                // both through one `toAccessorName`).
+                accessor_name("set", &f.name, is_primitive_boolean(&f.type_text))
+            };
             if !existing_methods.contains(&name) {
                 let param = type_text_to_ref(&f.type_text, imports, project_types, is_project);
                 // `chain` (implied by `fluent`) → the setter returns the owner for call-chaining.
@@ -146,7 +152,7 @@ pub fn synthesize(
         // `@With foo` → `Foo withFoo(T value)` (an immutable "copy with one field changed").
         let want_with = cls_with || has_lombok(&f.annotations, imports, &["With", "Wither"]);
         if want_with {
-            let name = format!("with{}", capitalize(&f.name));
+            let name = accessor_name("with", &f.name, is_primitive_boolean(&f.type_text));
             if !existing_methods.contains(&name) {
                 let param = type_text_to_ref(&f.type_text, imports, project_types, is_project);
                 methods.push(Member {
@@ -214,18 +220,43 @@ pub fn synthesize(
     LombokMembers { methods, fields }
 }
 
-/// The backing field name a Lombok accessor method maps to (`getId`/`setId`/`isShipped` →
-/// `id`/`id`/`shipped`), for go-to redirection from a generated getter/setter to the field it
-/// wraps. `None` when the name isn't an accessor shape. The CALLER must still verify the field
-/// actually exists (so a real `getStatus()` with no `status` field never mis-redirects).
-pub(crate) fn backing_field_name(accessor: &str) -> Option<String> {
-    let rest = accessor
-        .strip_prefix("get")
-        .or_else(|| accessor.strip_prefix("set"))
-        .or_else(|| accessor.strip_prefix("is"))?;
-    let mut chars = rest.chars();
-    let first = chars.next()?;
-    Some(first.to_ascii_lowercase().to_string() + chars.as_str())
+/// The field names a Lombok accessor method could be wrapping, best guess first — for go-to
+/// redirection from a generated accessor to the field it wraps. Empty when the name is no accessor
+/// shape at all.
+///
+/// Several candidates rather than one, because [`accessor_name`]'s mapping is not injective: the
+/// `is`-stripping rule for boolean fields means `setRunning` may wrap `isRunning`, and a getter can
+/// carry the field's own name verbatim — either because the field was already `is`-prefixed
+/// (`is_attivo()` wraps `is_attivo`) or because `@Accessors(fluent = true)` drops the prefix entirely
+/// (`customer()` wraps `customer`).
+///
+/// The CALLER must still verify each candidate is a real field, and takes the first that is. That is
+/// what keeps the extra candidates safe: a name with no matching field simply doesn't redirect. The
+/// caller also only reaches here when no *declared* method has this name, so a hand-written `run()`
+/// beside a field `run` is never redirected.
+pub(crate) fn backing_field_candidates(accessor: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |name: String| {
+        if !name.is_empty() && !out.contains(&name) {
+            out.push(name);
+        }
+    };
+    // The plain shape: drop the prefix, lowercase what's left (`getId` → `id`).
+    for prefix in ["get", "set", "is", "with"] {
+        if let Some(rest) = accessor.strip_prefix(prefix) {
+            if let Some(first) = rest.chars().next() {
+                add(first.to_ascii_lowercase().to_string() + &rest[first.len_utf8()..]);
+            }
+            // A boolean field that kept its own `is`: `setRunning`/`withRunning` wrap `isRunning`.
+            if prefix != "is" && !rest.is_empty() {
+                add(format!("is{rest}"));
+            }
+        }
+    }
+    // The accessor named exactly after its field — a fluent accessor, or an `is`-prefixed boolean
+    // whose getter is the field name.
+    add(accessor.to_string());
+    out
 }
 
 /// Whether the file imports Lombok at all — any `import lombok.…` (specific) or `import lombok.*` /
@@ -301,19 +332,35 @@ fn accessors_config(annotations: &[Annotation], imports: &[Import]) -> Option<Ac
     Some(Accessors { fluent, chain })
 }
 
-/// The Lombok getter name for `field`: `getFoo`, or `isFoo` for a primitive `boolean` (and no
-/// double `is` when the field is already `isFoo`).
-fn getter_name(field: &str, is_bool: bool) -> String {
-    if is_bool {
-        if field.len() > 2
-            && field.starts_with("is")
-            && field.as_bytes()[2].is_ascii_uppercase()
-        {
-            return field.to_string();
-        }
-        return format!("is{}", capitalize(field));
+/// Lombok's accessor-name rule (`HandlerUtil.toAccessorName`), for a non-fluent accessor. `prefix` is
+/// `"get"` / `"is"` / `"set"` / `"with"`.
+///
+/// Normally the prefix is glued onto the capitalised field name. The wrinkle is a primitive `boolean`
+/// field whose name **already begins with `is`**: Lombok strips that `is` before applying the prefix,
+/// so `isRunning` yields `isRunning` and `setRunning` — not `isIsRunning` / `setIsRunning`.
+///
+/// The condition for stripping is "`is` followed by something that is not a **lowercase letter**",
+/// which is wider than "followed by an uppercase letter". An underscore qualifies: a field named
+/// `is_attivo` gets the getter `is_attivo()`, and reading the rule as *uppercase* instead produced
+/// `isIs_attivo` — so a getter that genuinely exists was reported as unresolvable at every call site.
+/// A field named `isattivo` (lowercase after `is`) does NOT strip: its getter is `isIsattivo`.
+fn accessor_name(prefix: &str, field: &str, is_bool: bool) -> String {
+    if is_bool && already_is_prefixed(field) {
+        // Byte slicing is safe: `starts_with("is")` pins bytes 0..2 to ASCII, so 2 is a char boundary.
+        return format!("{prefix}{}", &field[2..]);
     }
-    format!("get{}", capitalize(field))
+    format!("{prefix}{}", capitalize(field))
+}
+
+/// Whether a boolean field's name already carries the `is` that Lombok would otherwise prepend — `is`
+/// followed by any character that is not a lowercase letter.
+fn already_is_prefixed(field: &str) -> bool {
+    field.starts_with("is") && field.chars().nth(2).is_some_and(|c| !c.is_lowercase())
+}
+
+/// The Lombok getter name for `field`: `getFoo`, or `isFoo` for a primitive `boolean`.
+fn getter_name(field: &str, is_bool: bool) -> String {
+    accessor_name(if is_bool { "is" } else { "get" }, field, is_bool)
 }
 
 /// Uppercase the first character (ASCII), leaving the rest unchanged.
@@ -500,11 +547,62 @@ mod tests {
     }
 
     #[test]
-    fn backing_field_name_inverts_accessors() {
-        assert_eq!(backing_field_name("getId").as_deref(), Some("id"));
-        assert_eq!(backing_field_name("setCustomer").as_deref(), Some("customer"));
-        assert_eq!(backing_field_name("isShipped").as_deref(), Some("shipped"));
-        assert_eq!(backing_field_name("run"), None, "not an accessor shape");
+    fn backing_field_candidates_invert_accessors() {
+        assert_eq!(backing_field_candidates("getId").first().map(String::as_str), Some("id"));
+        assert_eq!(backing_field_candidates("setCustomer").first().map(String::as_str), Some("customer"));
+        assert_eq!(backing_field_candidates("isShipped").first().map(String::as_str), Some("shipped"));
+        // A boolean that kept its own `is`: the setter's field is `isRunning`, not `running`.
+        assert!(backing_field_candidates("setRunning").contains(&"isRunning".to_string()));
+        // A fluent accessor (and an `is_`-prefixed getter) is named exactly after its field.
+        assert!(backing_field_candidates("customer").contains(&"customer".to_string()));
+        assert!(backing_field_candidates("is_attivo").contains(&"is_attivo".to_string()));
+    }
+
+    // ── the boolean `is…` naming rule ────────────────────────────────────────────
+
+    /// The reported bug. Lombok strips a field's own `is` when what follows is not a **lowercase
+    /// letter** — an underscore counts — so `private final boolean is_attivo` gets the getter
+    /// `is_attivo()`. Reading the rule as "followed by an uppercase letter" produced `isIs_attivo`,
+    /// and every `x.is_attivo()` in correct code was reported as unresolvable.
+    #[test]
+    fn boolean_field_named_is_underscore_keeps_its_name() {
+        let td = type_with(&["Getter"], vec![field("is_attivo", "boolean")]);
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
+        let names: Vec<&str> = m.methods.iter().map(|x| x.name.as_str()).collect();
+        assert!(names.contains(&"is_attivo"), "getter keeps the field's name, got {names:?}");
+        assert!(!names.contains(&"isIs_attivo"), "no doubled `is`, got {names:?}");
+    }
+
+    #[test]
+    fn boolean_field_named_is_camel_keeps_its_name() {
+        let td = type_with(&["Data"], vec![field("isRunning", "boolean")]);
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
+        let names: Vec<&str> = m.methods.iter().map(|x| x.name.as_str()).collect();
+        assert!(names.contains(&"isRunning"), "got {names:?}");
+        // The SETTER drops the field's `is` too — Lombok runs both through one naming function.
+        assert!(names.contains(&"setRunning"), "setter drops the field's `is`, got {names:?}");
+        assert!(!names.contains(&"setIsRunning"), "got {names:?}");
+    }
+
+    /// The rule does NOT apply when a lowercase letter follows `is` — `isattivo` is just a field whose
+    /// name happens to start with those two letters, so the prefix is added normally.
+    #[test]
+    fn boolean_field_named_is_lowercase_gets_the_prefix() {
+        let td = type_with(&["Getter"], vec![field("isattivo", "boolean")]);
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
+        let names: Vec<&str> = m.methods.iter().map(|x| x.name.as_str()).collect();
+        assert!(names.contains(&"isIsattivo"), "lowercase after `is` → prefixed, got {names:?}");
+    }
+
+    /// The `is`-stripping is for the primitive `boolean` only: a `Boolean` wrapper field, or any other
+    /// type, is a plain `getX`.
+    #[test]
+    fn non_boolean_field_starting_with_is_is_not_stripped() {
+        let td = type_with(&["Getter"], vec![field("isOwner", "Boolean"), field("island", "String")]);
+        let m = synthesize(&td, &lombok(), &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
+        let names: Vec<&str> = m.methods.iter().map(|x| x.name.as_str()).collect();
+        assert!(names.contains(&"getIsOwner"), "wrapper Boolean uses getX, got {names:?}");
+        assert!(names.contains(&"getIsland"), "got {names:?}");
     }
 
     #[test]

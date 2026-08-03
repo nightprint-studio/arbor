@@ -16,10 +16,11 @@ pub use crate::members::{
 
 // JDK bootclasspath resolution by language level, the chained multi-source, the JDK-home
 // locator (JAVA_HOME for the build/run shell-out), the resolution-status probe (FE JDK
-// diagnostics), and the user-configured extra-JDK-homes setter.
+// diagnostics), the user-configured extra-JDK-homes setter, and the user-home lookup shared
+// with the Maven-launcher discovery.
 pub use crate::jdk::{
     find_jdk_home, jdk_status, resolve_jdk_classpath, resolve_jdk_sources, set_extra_jdk_homes,
-    JdkStatus, MultiSource,
+    user_home, JdkStatus, MultiSource,
 };
 
 // Java SOURCE containers (`.java` text with bodies) for the "go to source" view — the JDK's

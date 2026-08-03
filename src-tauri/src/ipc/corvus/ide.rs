@@ -12,8 +12,9 @@
 //! `start_ide_detection` streams probe results to the frontend
 //! (`arbor://job-*`, `arbor://ide-detection-done`); it captures the **event
 //! sink** (`Arc<dyn EventSink>`) plus the job registry `Arc` into its detached
-//! probe thread instead of an `AppHandle`. Behavior (job entries, probe order,
-//! topics + payloads) is byte-identical to the old inline command.
+//! probe thread instead of an `AppHandle`. Job entries, probe order and event
+//! topics / payloads are unchanged; what each probe *looks at* is
+//! [`crate::ide::locate_ide`], which searches well beyond `PATH`.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -22,7 +23,6 @@ use crate::config::app_config;
 use crate::error::AppError;
 use crate::ide::{self, BUILTIN_IDES};
 use crate::ipc::corvus;
-use crate::process_ext::NoWindowExt;
 use crate::AppState;
 
 // ---------------------------------------------------------------------------
@@ -175,13 +175,10 @@ fn start_ide_detection(state: &AppState) -> Result<String, AppError> {
                     _                           => ide.cmd.to_string(),
                 };
 
-                // Probe: prefer explicit path check, then `which`/`where`.
-                let (available, detected_path) = if Path::new(&cmd).exists() {
-                    (true, Some(cmd.clone()))
-                } else {
-                    let found = probe_which(&cmd);
-                    (found.is_some(), found)
-                };
+                // Probe: an override path, then PATH, then the well-known launcher dirs, then a
+                // macOS app bundle — see `ide::locate_ide` for why the last two are load-bearing.
+                let detected_path = ide::locate_ide(ide, &cmd);
+                let available = detected_path.is_some();
 
                 let line = if available {
                     format!("✓  {} — {}", ide.name, detected_path.as_deref().unwrap_or(&cmd))
@@ -223,25 +220,6 @@ fn start_ide_detection(state: &AppState) -> Result<String, AppError> {
     Ok(job_id)
 }
 
-/// Resolve a command via `which` (Unix) / `where` (Windows).
-fn probe_which(cmd: &str) -> Option<String> {
-    #[cfg(windows)]
-    let prog = "where";
-    #[cfg(not(windows))]
-    let prog = "which";
-
-    std::process::Command::new(prog)
-        .arg(cmd)
-        .no_window()
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| {
-            let s = String::from_utf8_lossy(&o.stdout);
-            s.lines().next().map(|l| l.trim().to_string())
-        })
-}
-
 // ---------------------------------------------------------------------------
 // Helper: resolve IDE command + args from config
 // ---------------------------------------------------------------------------
@@ -255,13 +233,19 @@ fn resolve_ide(
         return Ok((custom.command.clone(), custom.args.clone()));
     }
 
-    // 2. Built-in IDE — check for a path override first
+    // 2. Built-in IDE — a path override first, else the catalogue's command name.
     if let Some(builtin) = BUILTIN_IDES.iter().find(|b| b.id == ide_id) {
         let cmd = if let Some(ov) = ide_cfg.path_overrides.get(ide_id) {
             if !ov.is_empty() { ov.clone() } else { builtin.cmd.to_owned() }
         } else {
             builtin.cmd.to_owned()
         };
+        // Resolve it the same way detection did, rather than handing the bare name to the spawn:
+        // the name only works when the process's PATH carries it, which for a windowed app on macOS
+        // it usually doesn't — the IDE was *listed* as available (detection looks wider) and then
+        // failed to launch. Falls back to the bare name so the spawn's own error is still the one
+        // reported when nothing is found.
+        let cmd = ide::locate_ide(builtin, &cmd).unwrap_or(cmd);
         let args = builtin.args.iter().map(|s| s.to_string()).collect();
         return Ok((cmd, args));
     }

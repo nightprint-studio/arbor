@@ -249,21 +249,25 @@ pub fn resolve_declaration(
                 });
             }
             // No source method with that name: a Lombok-generated accessor (`getId`/`setId`/
-            // `isShipped`) has no name token to open — redirect to the BACKING FIELD it wraps,
-            // when that field actually exists in the declaring type.
+            // `isShipped`, a fluent `customer`) has no name token to open — redirect to the BACKING
+            // FIELD it wraps. Several candidate names are tried because the accessor→field mapping
+            // isn't injective (see `backing_field_candidates`); the first that is a real field wins,
+            // and a candidate that isn't simply doesn't match.
             if let DeclKey::Method { owner, name } = &key {
-                let field = crate::lombok::backing_field_name(name)?;
-                let field_key = DeclKey::Field { owner: owner.clone(), name: field };
-                let (s, e) = find_member_name_span(decl_src, &field_key)?;
-                let (line, col) = line_col_1based(decl_src, s);
-                return Some(DeclarationLocation {
-                    file: decl_file,
-                    start: s,
-                    end: e,
-                    line,
-                    col,
-                    label: field_key.label(),
-                });
+                for field in crate::lombok::backing_field_candidates(name) {
+                    let field_key = DeclKey::Field { owner: owner.clone(), name: field };
+                    if let Some((s, e)) = find_member_name_span(decl_src, &field_key) {
+                        let (line, col) = line_col_1based(decl_src, s);
+                        return Some(DeclarationLocation {
+                            file: decl_file,
+                            start: s,
+                            end: e,
+                            line,
+                            col,
+                            label: field_key.label(),
+                        });
+                    }
+                }
             }
             None
         }

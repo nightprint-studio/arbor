@@ -131,6 +131,168 @@ fn goto_on_the_backing_field_still_works() {
     assert_eq!(d.label, "field shop.Order.id");
 }
 
+/// A `@Getter` enum whose primitive `boolean` field is named `is_attivo`: Lombok strips the field's
+/// own `is` (what follows it is not a lowercase letter), so the getter is `is_attivo()` — the field's
+/// exact name. Bennu named it `isIs_attivo`, so a real getter read as unresolvable everywhere.
+/// Go-to on it lands on the field, whose name the accessor happens to share.
+#[test]
+fn boolean_is_underscore_getter_resolves_on_an_enum() {
+    let p = Project::new(&[
+        (
+            "StatoElenco.java",
+            "package shop;\n\
+             import lombok.Getter;\n\
+             import lombok.RequiredArgsConstructor;\n\
+             @Getter\n\
+             @RequiredArgsConstructor\n\
+             public enum StatoElenco {\n\
+             \x20   ATTIVO(true),\n\
+             \x20   ARCHIVIATO(false);\n\
+             \x20   private final boolean is_attivo;\n\
+             }\n",
+        ),
+        (
+            "Use.java",
+            "package shop;\n\
+             public class Use {\n\
+             \x20   boolean run(StatoElenco s) { return s.is_attivo(); }\n\
+             \x20   void offer(StatoElenco s) { s.\n }\n\
+             }\n",
+        ),
+    ]);
+    let src = p.source("Use.java").to_string();
+    let off = at(&src, "s.\n") + "s.".len();
+    let labels = p.complete_labels("Use.java", off);
+    assert!(labels.contains(&"is_attivo".to_string()), "getter keeps the field's name, got {labels:?}");
+    assert!(!labels.contains(&"isIs_attivo".to_string()), "no doubled `is`, got {labels:?}");
+
+    // Go-to on the generated getter redirects to the field it wraps — which here is named identically.
+    let call = at(&src, "s.is_attivo()") + "s.".len();
+    let d = p.goto("Use.java", call).expect("the generated getter redirects to its field");
+    assert_eq!(d.file, "StatoElenco.java");
+    assert_eq!(d.label, "field shop.StatoElenco.is_attivo");
+}
+
+/// `@Accessors(chain = true, fluent = true)` names both accessors after the field, so the getter
+/// `name()` and the setter `name(String)` differ ONLY in arity. Completion deduplicated by name+kind,
+/// so the getter (offered first) swallowed the setter and the fluent setters looked unsupported.
+#[test]
+fn fluent_accessors_offer_both_the_getter_and_the_setter() {
+    let p = Project::new(&[
+        (
+            "Order.java",
+            "package shop;\n\
+             import lombok.Data;\n\
+             import lombok.experimental.Accessors;\n\
+             @Data\n\
+             @Accessors(chain = true, fluent = true)\n\
+             public class Order {\n\
+             \x20   private String customer;\n\
+             }\n",
+        ),
+        (
+            "Use.java",
+            "package shop;\n\
+             public class Use {\n\
+             \x20   void run(Order o) { o.\n }\n\
+             }\n",
+        ),
+    ]);
+    let s = p.source("Use.java").to_string();
+    let off = at(&s, "o.\n") + "o.".len();
+    let items = p.complete("Use.java", off);
+    let accessors: Vec<&str> = items
+        .iter()
+        .filter(|i| i.label == "customer" && i.kind == "method")
+        .filter_map(|i| i.detail.as_deref())
+        .collect();
+    assert_eq!(accessors.len(), 2, "getter AND setter, got {accessors:?}");
+    assert!(
+        accessors.iter().any(|d| d.contains("customer(String)")),
+        "the fluent setter takes the field's type, got {accessors:?}"
+    );
+    assert!(
+        accessors.iter().any(|d| d.contains("customer() : String")),
+        "the fluent getter returns it, got {accessors:?}"
+    );
+    // `chain = true` → the setter returns the owner, so `o.customer("x").customer("y")` chains.
+    assert!(
+        accessors.iter().any(|d| d.contains("customer(String) : Order")),
+        "chained setter returns the owner, got {accessors:?}"
+    );
+    // No get/set-prefixed names exist at all under `fluent`.
+    let labels = p.complete_labels("Use.java", off);
+    assert!(
+        !labels.iter().any(|l| l.starts_with("get") || l.starts_with("set")),
+        "fluent accessors have no prefix, got {labels:?}"
+    );
+}
+
+/// The same dedup collapsed every ordinary **overload**, Lombok or not — this is the general case.
+#[test]
+fn overloads_are_offered_one_entry_per_signature() {
+    let p = Project::new(&[
+        (
+            "Fmt.java",
+            "package util;\n\
+             public class Fmt {\n\
+             \x20   public String render(String s) { return s; }\n\
+             \x20   public String render(String s, int width) { return s; }\n\
+             \x20   public String render(int n) { return \"\"; }\n\
+             }\n",
+        ),
+        (
+            "UseFmt.java",
+            "package util;\n\
+             public class UseFmt {\n\
+             \x20   void run(Fmt f) { f.\n }\n\
+             }\n",
+        ),
+    ]);
+    let s = p.source("UseFmt.java").to_string();
+    let off = at(&s, "f.\n") + "f.".len();
+    let renders: Vec<String> = p
+        .complete("UseFmt.java", off)
+        .into_iter()
+        .filter(|i| i.label == "render")
+        .filter_map(|i| i.detail)
+        .collect();
+    assert_eq!(renders.len(), 3, "all three overloads, got {renders:?}");
+}
+
+/// The dedup still has to do its actual job: an override must not appear twice, once from the
+/// subclass and once from the supertype that declares the same signature.
+#[test]
+fn an_override_is_still_offered_once() {
+    let p = Project::new(&[
+        (
+            "Base.java",
+            "package h;\n\
+             public class Base {\n\
+             \x20   public String describe() { return \"base\"; }\n\
+             }\n",
+        ),
+        (
+            "Sub.java",
+            "package h;\n\
+             public class Sub extends Base {\n\
+             \x20   @Override public String describe() { return \"sub\"; }\n\
+             }\n",
+        ),
+        (
+            "UseSub.java",
+            "package h;\n\
+             public class UseSub {\n\
+             \x20   void run(Sub s) { s.\n }\n\
+             }\n",
+        ),
+    ]);
+    let src = p.source("UseSub.java").to_string();
+    let off = at(&src, "s.\n") + "s.".len();
+    let n = p.complete_labels("UseSub.java", off).iter().filter(|l| *l == "describe").count();
+    assert_eq!(n, 1, "the override collapses with the method it overrides");
+}
+
 #[test]
 fn value_annotation_is_getters_only() {
     let p = Project::new(&[
