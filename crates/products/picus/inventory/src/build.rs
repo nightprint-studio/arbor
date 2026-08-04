@@ -139,6 +139,7 @@ fn index_statement(
                 folder_path: placement.folder.path.clone(),
                 scope: placement.scope(),
                 role: placement.effective_role(),
+                product: placement.product().map(str::to_string),
                 statement_index: index,
                 range: object.range,
                 line: script.parsed.line_of(object.range.start),

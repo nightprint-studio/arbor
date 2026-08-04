@@ -135,6 +135,24 @@ impl Fixture {
         self
     }
 
+    /// Declare which installed product a subtree's scripts belong to.
+    ///
+    /// The axis a repository that installs **two databases** has and cannot
+    /// express any other way: two initialisation subtrees, each creating its own
+    /// version table. Declared on a folder and inherited, so a test says it once
+    /// at the top exactly as a project file does — which is also why the tree is
+    /// re-resolved here rather than the effective value being written directly.
+    pub fn product(mut self, folder: &str, name: &str) -> Fixture {
+        for_each_folder(&mut self.project, &mut |node| {
+            if node.path == folder {
+                node.product = Some(name.to_string());
+            }
+        });
+        resolve(&mut self.project.tree, None, None);
+        self.config.declaration_mut(folder).product = Some(name.to_string());
+        self
+    }
+
     /// Declare that the two halves of the install story must agree in **both**
     /// directions.
     ///
@@ -216,6 +234,19 @@ fn files_mut(project: &mut Project) -> impl Iterator<Item = &mut ScriptFile> {
     let mut out = Vec::new();
     walk(&mut project.tree, &mut out);
     out.into_iter()
+}
+
+/// Every folder of the tree, in place. A closure rather than an iterator of
+/// `&mut FolderNode`: a node and its children are one value, so yielding both
+/// would be two overlapping borrows.
+fn for_each_folder(project: &mut Project, f: &mut impl FnMut(&mut FolderNode)) {
+    fn walk(nodes: &mut [FolderNode], f: &mut impl FnMut(&mut FolderNode)) {
+        for node in nodes {
+            f(node);
+            walk(&mut node.children, f);
+        }
+    }
+    walk(&mut project.tree, f);
 }
 
 fn script_file(path: &str, source: &str) -> ScriptFile {

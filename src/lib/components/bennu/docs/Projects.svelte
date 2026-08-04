@@ -326,6 +326,22 @@
   lists everything the project's dependencies accept, set or not. Each row opens its declaration.
 </p>
 <p>
+  <strong>Spring beans from libraries</strong> lists the beans declared inside your
+  <strong>dependencies</strong> — read from their bytecode, so it needs no sources — one row per
+  artifact with its beans nested underneath. Nothing is read until you name the dependencies under
+  <strong>Settings → Spring → Beans</strong>, by group id, artifact id, or a prefix of either. The
+  entries worth adding are your own shared modules and starters.
+</p>
+<p>
+  These are <strong>declarations, not facts</strong>. Spring Boot's auto-configuration is gated —
+  <code>@ConditionalOnMissingBean</code>, <code>@ConditionalOnClass</code>,
+  <code>@ConditionalOnProperty</code> — so a bean in a jar is what Spring <em>may</em> register, and
+  knowing what it actually registers means running Spring's own evaluator. So every gated bean is
+  shown with the conditions gating it, and none of them take part in autowiring candidates,
+  completion or any diagnostic. Your project's own beans stay the only answer to what this
+  application has.
+</p>
+<p>
   Each of them is offered only where it has something to say. Having Spring on the classpath turns
   the tooling on; what the model actually found decides which panels exist — a batch job or an
   XML-wired service layer with no request mappings gets no Endpoints button in the activity bar, no

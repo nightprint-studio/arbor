@@ -38,6 +38,7 @@ export type BottomPanel =
   | 'todos'
   | 'forms'
   | 'beans'
+  | 'librarybeans'
   | 'endpoints'
   | 'springconfig'
   | 'springbindings'

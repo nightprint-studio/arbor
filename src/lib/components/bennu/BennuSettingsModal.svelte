@@ -77,6 +77,35 @@
     void commitJdkPaths((cfg?.jdk_paths ?? []).filter((x) => x !== p));
   }
 
+  // ── Library beans: which dependencies are read ────────────────────────────────
+  // Four axes, each a list, edited as comma-separated text: the entries are coordinates
+  // people paste from a pom, and a chip editor would make pasting four of them slower than
+  // typing them. Committed on blur/Enter so a half-typed prefix never triggers a scan.
+  const beanAxes = [
+    { key: 'group_id',           label: 'Group ids',           hint: 'com.acme.platform' },
+    { key: 'group_id_prefix',    label: 'Group id prefixes',   hint: 'com.acme.  — the trailing dot matters' },
+    { key: 'artifact_id',        label: 'Artifact ids',        hint: 'shared-security' },
+    { key: 'artifact_id_prefix', label: 'Artifact id prefixes', hint: 'acme-starter-' },
+  ] as const;
+
+  const libraryBeans = $derived(
+    cfg?.library_beans ?? { group_id: [], group_id_prefix: [], artifact_id: [], artifact_id_prefix: [] },
+  );
+  const beansAllowlistEmpty = $derived(
+    beanAxes.every((a) => (libraryBeans[a.key] ?? []).length === 0),
+  );
+
+  /** Split a comma/newline-separated field into entries, dropping blanks — an empty prefix
+   *  would otherwise mean "every artifact", which is not a reasonable reading of a stray
+   *  comma. (The backend refuses an empty prefix too; this keeps the file tidy.) */
+  function parseAxis(text: string): string[] {
+    return text.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+  }
+
+  async function commitBeanAxis(key: (typeof beanAxes)[number]['key'], text: string) {
+    await saveConfigPatch({ library_beans: { ...libraryBeans, [key]: parseAxis(text) } });
+  }
+
   // ── Validate-project-on-open (real bennu config, default on) ──────────────────
   const validateOnOpen = $derived(cfg?.validate_on_open ?? true);
   async function commitValidateOnOpen(v: boolean) {
@@ -109,6 +138,10 @@
         { id: 'jdk',          label: 'JDK',          icon: Coffee },
         { id: 'capabilities', label: 'Capabilities', icon: Boxes },
         { id: 'encoding',     label: 'Encoding',     icon: FileType },
+      ],
+    }, {
+      label: 'Spring', items: [
+        { id: 'beans', label: 'Beans', icon: Boxes },
       ],
     }]),
   ]);
@@ -511,6 +544,50 @@
             <p class="bs-none">Open a file to see the encoding it was decoded from.</p>
           {/if}
         </div>
+      {:else if active === 'beans'}
+        <div class="section-header">
+          <h2>Beans</h2>
+          <p>
+            Which dependencies contribute their Spring beans to the <strong>Library beans</strong>
+            view. Nothing is read until you name something here.
+          </p>
+        </div>
+        <div class="card">
+          <div class="card-section-title"><Boxes size={12} /> Read beans from these dependencies</div>
+          <p class="bs-none">
+            Any match admits an artifact. The intended entries are your <strong>own</strong> shared
+            modules and starters — their beans are plain <code>@Service</code> /
+            <code>@Configuration</code> and simply true. Spring Boot's own starters can be added,
+            but their beans are conditional and are shown as such.
+          </p>
+          {#each beanAxes as axis (axis.key)}
+            <div class="bs-field">
+              <label class="bs-k" for="beans-{axis.key}">{axis.label}</label>
+              <Input
+                id="beans-{axis.key}"
+                value={(libraryBeans[axis.key] ?? []).join(', ')}
+                placeholder={axis.hint}
+                onchange={(v: string) => void commitBeanAxis(axis.key, v)}
+              />
+            </div>
+          {/each}
+          {#if beansAllowlistEmpty}
+            <p class="bs-none">
+              Empty — no dependency jar is opened, and the Library beans view stays empty.
+            </p>
+          {/if}
+        </div>
+        <div class="card">
+          <div class="card-section-title"><Boxes size={12} /> What this view is not</div>
+          <p class="bs-none">
+            A bean declared inside a jar is what Spring <em>may</em> register:
+            <code>@ConditionalOnMissingBean</code> and its family decide the rest, and deciding them
+            faithfully means running Spring's own evaluator. So these beans are listed and navigable,
+            each labelled with the conditions gating it — and they take no part in autowiring
+            candidates, completion, or any diagnostic. Your project's own beans remain the only
+            answer to “what does this application have”.
+          </p>
+        </div>
       {/if}
     {/snippet}
   </SettingsShell>
@@ -569,6 +646,10 @@
   .bs-path-del:hover { color: var(--error); background: var(--bg-hover); }
   .bs-path-add { padding: 6px 2px 2px; }
   .bs-kv { display: flex; align-items: center; gap: 10px; padding: 6px 2px; font-size: var(--font-size-sm); }
+  /* Same row shape as `.bs-kv`, but the value is an editable field that has to take the
+     remaining width — a coordinate list is long and reading it half-clipped is useless. */
+  .bs-field { display: flex; align-items: center; gap: 10px; padding: 6px 2px; font-size: var(--font-size-sm); }
+  .bs-field :global(.input-wrap) { flex: 1; min-width: 0; }
   .bs-k { width: 110px; flex-shrink: 0; color: var(--text-muted); }
   .bs-v { color: var(--text-primary); }
   .bs-none { font-size: var(--font-size-sm); color: var(--text-muted); font-style: italic; padding: 4px 2px; }

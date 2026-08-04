@@ -152,7 +152,7 @@ fn missing_finding(
     // called `AGGIORNAMENTO` can perfectly well have a *table* called
     // `AGGIORNAMENTO` — an update log is exactly the sort of thing that gets that
     // name — and "AGGIORNAMENTO is not touched by the Oracle scripts", anchored at
-    // a folder path ending in `AGGIORNAMENTO/DBPORT/ORA`, reads as a claim about
+    // a folder path ending in `AGGIORNAMENTO/2026/ORA`, reads as a claim about
     // the folder. It is a claim about the table, and one word settles it.
     let mut draft = Finding::new(
         RuleId::Cons001,

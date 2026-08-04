@@ -7,6 +7,14 @@
 // The human-readable rendering of a class (one string per member).
 pub use crate::meta::{parse_class_meta, ClassMeta, MemberMeta};
 
+// Runtime-visible annotations off a `.class` — the framework metadata a library carries
+// when the only thing on disk is its jar. A separate, opt-in decode: it is deliberately
+// NOT part of `ClassMembers`, which is memoized for every class the resolver touches.
+pub use crate::annotations::{
+    class_annotations_of, parse_class_annotations, Annotation, AnnotationValue, ClassAnnotations,
+    MemberAnnotations,
+};
+
 // The shared-seam structured member index: TypeRef / Member / ClassMembers /
 // MemberIndex, plus the ClassSource→MemberIndex adapter.
 pub use crate::members::{

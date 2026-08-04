@@ -55,6 +55,7 @@ pub mod java_intel;
 // `@Service` is not a reserved word: without this, a project's own annotation of the same
 // name would register beans that do not exist.
 pub mod known;
+pub mod library_beans;
 // What Spring says its own properties are — `spring-configuration-metadata.json` out of the
 // dependency jars, which is where the types, defaults and prose in a hover come from.
 pub mod metadata;

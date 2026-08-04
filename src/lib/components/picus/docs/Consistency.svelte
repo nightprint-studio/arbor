@@ -146,7 +146,7 @@
     <tr><td><code>VER002</code></td><td>Block that changes data without carrying a version forward</td><td>blocking</td></tr>
     <tr><td><code>VER003</code></td><td>Version chain with holes or overlaps between update files</td><td>blocking</td></tr>
     <tr><td><code>DUP001</code></td><td>Same row inserted twice in one script, with no <code>DELETE</code> or <code>TRUNCATE</code> of that table between them</td><td>blocking</td></tr>
-    <tr><td><code>DUP002</code></td><td>Object created in more than one file that the same half of the install story runs. <code>CREATE OR REPLACE</code> is exempt — replacing is what it is for</td><td>worth checking</td></tr>
+    <tr><td><code>DUP002</code></td><td>Object created in more than one file that the same half of the install story runs, for one engine and one declared product. <code>CREATE OR REPLACE</code> is exempt — replacing is what it is for</td><td>worth checking</td></tr>
     <tr><td><code>ENC001</code></td><td>File whose encoding changed from the expected one</td><td>worth checking</td></tr>
     <tr><td><code>ENC002</code></td><td>Character not representable in the destination encoding</td><td>blocking</td></tr>
     <tr><td><code>DML001</code></td><td>DELETE or UPDATE with no WHERE, not marked as intentional</td><td>worth checking</td></tr>

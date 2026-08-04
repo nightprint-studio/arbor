@@ -18,7 +18,7 @@
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
     Copy, LocateFixed, ChevronDown, ChevronRight,
     Box, CircleDashed, Rows3, AtSign,
-    Braces, Hash, FileCog, FileText, Database, Globe, Pickaxe,
+    Braces, Hash, FileCog, FileText, Database, Globe, Pickaxe, Package,
   } from 'lucide-svelte';
   import { tick } from 'svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
@@ -37,6 +37,7 @@
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import type { TreeNode } from '$lib/types/bennu';
+  import { packageTree, isInPackageRoot } from './package-tree';
 
   let pickerOpen = $state(false);
   let filter = $state('');
@@ -46,7 +47,12 @@
 
   // The store's tree root is a single dir node; render its children as the top level
   // so the project folder itself isn't an extra nesting level.
-  const rootChildren = $derived<TreeNode[]>(projectStore.tree?.children ?? []);
+  //
+  // Under a source root the package chain is collapsed into one dotted row
+  // (`it.acme.portal`), IntelliJ-style — three levels of indentation that say one name
+  // are three levels not spent on the thing you were looking for. Paths are untouched,
+  // so expansion, selection and opening all still key off exactly what they did.
+  const rootChildren = $derived<TreeNode[]>(packageTree(projectStore.tree?.children ?? []));
 
   // ── File-tree icons (IntelliJ-style) ─────────────────────────────────────────
   // Per-`.java`-file type kind (class/interface/enum/record/annotation), from the project's class
@@ -145,7 +151,14 @@
   /** The icon + color for a tree node: a source-root-tinted folder, a Java kind glyph, or the
    *  default file icon. */
   function iconFor(node: TreeNode): { icon: typeof FileCode2; color: string } {
-    if (node.is_dir) return { icon: Folder, color: folderColor(node.path) };
+    if (node.is_dir) {
+      // A directory inside a source root is a package, and reads as one — the row says
+      // `it.acme.portal`, so a folder icon next to it would be describing the storage
+      // rather than the thing. The source root itself keeps its folder icon: it is the
+      // container the packages live in, not a package.
+      if (isInPackageRoot(node.path)) return { icon: Package, color: 'var(--text-muted)' };
+      return { icon: Folder, color: folderColor(node.path) };
+    }
     const path = node.path.replace(/\\/g, '/');
     if (path.endsWith('.java')) {
       const meta = KIND_ICON[kindByFile.get(path) ?? ''];

@@ -566,24 +566,36 @@ mod tests {
 
     /// Resolve a real Maven project when `mvn` + a populated `~/.m2` are available;
     /// otherwise skip (the leaf crate must build/test on a machine without Maven).
+    ///
+    /// The project comes from `BENNU_TEST_MAVEN_PROJECT` and the JDK from
+    /// `BENNU_TEST_JAVA_HOME`, because a checkout path is one machine's: hard-coded,
+    /// this skipped silently everywhere else and looked like a passing test.
     #[test]
     fn maven_resolve_real_project_when_available() {
-        let project =
-            Path::new("C:/Sviluppo/Mio/temp/disposable-projects/PortaleAppalti");
+        let Ok(project) = std::env::var("BENNU_TEST_MAVEN_PROJECT") else {
+            eprintln!("SKIP maven_resolve: BENNU_TEST_MAVEN_PROJECT not set");
+            return;
+        };
+        let project = std::path::PathBuf::from(project);
+        let project = project.as_path();
         if !project.join("pom.xml").is_file() {
-            eprintln!("SKIP maven_resolve: no test project");
+            eprintln!("SKIP maven_resolve: no pom.xml at BENNU_TEST_MAVEN_PROJECT");
             return;
         }
-        // Only attempt when a Maven launcher is discoverable.
-        let mvn = ["C:/Sviluppo/Software/apache-maven-3.9.9/bin/mvn.cmd", "mvn"]
+        // Only attempt when a Maven launcher is discoverable — `mvn` on PATH, or
+        // one named outright.
+        let launcher = std::env::var("BENNU_TEST_MVN").unwrap_or_else(|_| "mvn".to_string());
+        let mvn = [launcher.as_str(), "mvn"]
             .into_iter()
             .find(|p| *p == "mvn" || Path::new(p).is_file());
         let Some(mvn) = mvn else {
             eprintln!("SKIP maven_resolve: no mvn");
             return;
         };
-        let opts = MavenResolveOpts::with_mvn(mvn)
-            .java_home("C:/Program Files/Java/jdk8u442-b06");
+        let mut opts = MavenResolveOpts::with_mvn(mvn);
+        if let Ok(java_home) = std::env::var("BENNU_TEST_JAVA_HOME") {
+            opts = opts.java_home(java_home);
+        }
 
         let mut cache = MavenClasspathCache::new();
         let Ok(cp) = cache.get(project, &opts) else {

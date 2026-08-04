@@ -97,6 +97,43 @@ pub struct BennuConfig {
     /// checked/navigated against. Empty (the common case) → the binding is auto-resolved from the
     /// page's forms + the single reverse-lookup candidate.
     pub jsp_action_bindings: BTreeMap<String, String>,
+    /// Which **dependencies contribute their Spring beans** to the Library beans view.
+    ///
+    /// Empty by default, and empty means no jar is ever opened — this reads a project's
+    /// third-party code, which has to be asked for. The four axes are how a coordinate gets
+    /// matched in practice: one artifact, a whole group, everything an organisation
+    /// publishes (`com.acme.` — the trailing dot matters, since `com.acme` also admits
+    /// `com.acmegroup`), or a naming convention (`acme-starter-`).
+    ///
+    /// The intended entries are your **own** shared modules, whose beans are plain
+    /// `@Service` / `@Configuration` and therefore simply true. Allowlisting Spring Boot's
+    /// own starters is allowed, but shows conditional beans — declarations Spring may or may
+    /// not act on — which is why each one carries the conditions gating it and why none of
+    /// them take part in injection resolution or in any diagnostic.
+    ///
+    /// A table, so it lives at the end: TOML requires every value before any table (see the
+    /// note on this struct), and a scalar declared after this one would be read back as a
+    /// key of it.
+    pub library_beans: LibraryBeansConfig,
+}
+
+/// Which dependencies' beans are read. See [`BennuConfig::library_beans`].
+///
+/// Mirrors `bennu_spring::prelude::LibraryBeanAllowlist`, and deliberately does not reuse
+/// it: this is the persisted wire shape, and `bennu-core` has no business depending on a
+/// framework crate to describe its own config file. The one conversion lives where the two
+/// meet (`bennu-be`), which is also the only place that could get it wrong.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct LibraryBeansConfig {
+    /// Exact group ids (`com.acme.platform`).
+    pub group_id: Vec<String>,
+    /// Group-id prefixes (`com.acme.`).
+    pub group_id_prefix: Vec<String>,
+    /// Exact artifact ids (`shared-security`).
+    pub artifact_id: Vec<String>,
+    /// Artifact-id prefixes (`acme-starter-`).
+    pub artifact_id_prefix: Vec<String>,
 }
 
 impl Default for BennuConfig {
@@ -115,6 +152,7 @@ impl Default for BennuConfig {
             encoding_overrides: BTreeMap::new(),
             spring_property_files: BTreeMap::new(),
             jsp_action_bindings: BTreeMap::new(),
+            library_beans: LibraryBeansConfig::default(),
         }
     }
 }

@@ -114,6 +114,21 @@ impl<'a> Placement<'a> {
     pub fn effective_role(&self) -> FolderRole {
         self.folder.effective_role
     }
+
+    /// Which installed product this script belongs to, after inheritance.
+    ///
+    /// `None` for the ordinary repository, which installs one thing — and for
+    /// every repository written before anyone declared a product, which is why
+    /// the rules that read it have to treat "nobody said" as one group rather
+    /// than as a difference.
+    ///
+    /// The distinction it buys is the one a repository installing **two**
+    /// databases cannot express any other way: a version table created by one
+    /// module's initialisation and again by the other's is two tables in two
+    /// databases, not one table created twice.
+    pub fn product(&self) -> Option<&'a str> {
+        self.folder.effective_product.as_deref()
+    }
 }
 
 /// Does this folder hold files of more than one engine?

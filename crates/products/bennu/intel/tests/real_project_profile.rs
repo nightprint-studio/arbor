@@ -5,7 +5,7 @@
 //! a mock resolver can't reproduce the bytecode/fst/wildcard cost.
 //!
 //! Run (PowerShell):
-//!   $env:BENNU_PROFILE=1; $env:BENNU_TEST_PROJECT="C:\Sviluppo\Mio\temp\disposable-projects\e-procurement-Appalti"
+//!   $env:BENNU_PROFILE=1; $env:BENNU_TEST_PROJECT="<a checked-out Maven project>"
 //!   cargo test -p bennu-intel --test real_project_profile --release -- --ignored --nocapture
 //!
 //! `#[ignore]` so it never runs in the normal suite (needs a JDK + a big checkout on disk).
@@ -22,10 +22,13 @@ use bennu_intel::prelude::{
 #[test]
 #[ignore]
 fn profile_real_project() {
+    // No default. A hard-coded path is one machine's checkout, and a profiler that
+    // silently measured somebody else's tree — or nothing at all — is worse than one
+    // that refuses to start.
     let root = std::env::var("BENNU_TEST_PROJECT")
-        .unwrap_or_else(|_| r"C:\Sviluppo\Mio\temp\disposable-projects\e-procurement-Appalti".to_string());
+        .expect("set BENNU_TEST_PROJECT to a checked-out Maven project");
     let root = PathBuf::from(root);
-    assert!(root.exists(), "set BENNU_TEST_PROJECT to a checked-out project ({})", root.display());
+    assert!(root.exists(), "BENNU_TEST_PROJECT does not exist ({})", root.display());
 
     // The resolved JDK to validate against (JAVA_HOME is 21 on this box). Version-gating uses the
     // project's own target (1.5 here) but that's cosmetic for timing.
@@ -83,15 +86,18 @@ fn profile_real_project() {
 /// re-build" the symbol-table cache buys — the warm pass should be a small fraction of the cold one.
 ///
 /// Run (PowerShell):
-///   $env:BENNU_TEST_PROJECT="C:\Sviluppo\Mio\temp\disposable-projects\e-procurement-Appalti"
+///   $env:BENNU_TEST_PROJECT="<a checked-out Maven project>"
 ///   cargo test -p bennu-intel --test real_project_profile --release -- --ignored --nocapture profile_diag_cache
 #[test]
 #[ignore]
 fn profile_diag_cache() {
+    // No default. A hard-coded path is one machine's checkout, and a profiler that
+    // silently measured somebody else's tree — or nothing at all — is worse than one
+    // that refuses to start.
     let root = std::env::var("BENNU_TEST_PROJECT")
-        .unwrap_or_else(|_| r"C:\Sviluppo\Mio\temp\disposable-projects\e-procurement-Appalti".to_string());
+        .expect("set BENNU_TEST_PROJECT to a checked-out Maven project");
     let root = PathBuf::from(root);
-    assert!(root.exists(), "set BENNU_TEST_PROJECT to a checked-out project ({})", root.display());
+    assert!(root.exists(), "BENNU_TEST_PROJECT does not exist ({})", root.display());
     let jdk_version = std::env::var("BENNU_TEST_JDK").unwrap_or_else(|_| "21".to_string());
 
     let mut sources = read_java_sources(&root, "UTF-8").sources;

@@ -99,6 +99,21 @@ stack plus a homegrown Signature decoder.
   deps degrades exactly to the JDK-only behavior. `MavenResolveOpts` runs Maven
   offline (`-o`) by default and can pin `JAVA_HOME` so the project's JDK is used.
 
+## Annotations (`annotations.rs`)
+
+`parse_class_annotations` decodes `RuntimeVisibleAnnotations` on the class and its members, with
+element values (`@Bean(name = "audit")`, `@ConditionalOnProperty(name = "x")`), so a framework can
+read a library's metadata when the only thing on disk is the jar.
+
+It is a **separate, opt-in decode and not part of `ClassMembers`** — on purpose. `ClassMembers` is
+memoized for every class the resolver ever touches (the whole JDK, every dependency) and is read on
+the hot path of completion and inference, none of which has any use for an annotation. Folding these
+in would grow every persisted memo and invalidate the ones already on disk, to carry a field almost
+nothing reads.
+
+Only `RuntimeVisible*` is read: `RuntimeInvisible*` holds `CLASS`-retention annotations, which by
+definition are not what the framework sees at run time.
+
 ## Risk
 
 `jimage-rs` is `0.0.x` / mono-maintainer (docs §4). It is kept behind `ClassSource`

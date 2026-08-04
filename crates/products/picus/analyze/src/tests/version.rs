@@ -290,7 +290,7 @@ fn a_guard_inside_a_postgresql_function_body_counts() {
          $$ LANGUAGE plpgsql;",
     )])
     .configured(|c| {
-        c.version_table.table = "PPCOMMON_VER".to_string();
+        c.version_table.table = "VERSIONE_DB".to_string();
         c.version_table.also = vec!["ELDAVER".to_string()];
     });
     let report = repo.report();

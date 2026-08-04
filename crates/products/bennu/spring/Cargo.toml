@@ -22,6 +22,10 @@ bennu-proto = { path = "../proto" }
 # this crate is the policy — the relevance markers (`scan.rs`) and the package table
 # (`known.rs`).
 bennu-facts = { path = "../facts" }
+# Runtime-visible annotations off a `.class`. A bean declared inside a dependency has no
+# source on disk, so the only place its `@Service` / `@Bean` is written is the bytecode —
+# same framework facts this crate already reads from Java text and bean XML, third container.
+bennu-classpath = { path = "../classpath" }
 # The completion mechanics — the caret's token, the prefix rule, the de-duplicated capped
 # candidate list, and the discipline that separates ghost text from a guess. Extracted here
 # too, and for the same reason: the second provider needed all of it unchanged.

@@ -22,6 +22,7 @@ import type { ExtEntry, ExtStat } from '$lib/ipc/bennu/ext';
 /** Bottom-dock ids for the framework catalogs. */
 export type FrameworkCatalogId =
   | 'beans'
+  | 'librarybeans'
   | 'endpoints'
   | 'springconfig'
   | 'springbindings'
@@ -87,6 +88,21 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
       { id: 'none', label: 'No grouping' },
     ],
     shortcut: 'Ctrl+Shift+B',
+  },
+  {
+    id: 'librarybeans',
+    kind: 'spring.librarybeans',
+    title: 'Library beans',
+    command: 'Spring beans from libraries',
+    icon: 'box',
+    placeholder: 'Filter by bean, class or artifact…',
+    // Offered only when the allowlist matched something that declares beans, so this is what
+    // you see having configured a coordinate that turns out to have none.
+    empty: 'No beans in the allowlisted dependencies.',
+    // No grouping options: the rows ARE the artifacts, with their beans nested underneath.
+    // Which dependency declared a bean is the only grouping this list wants, and it has it
+    // structurally — a "group by" that regrouped it would be undoing the shape.
+    groups: [],
   },
   {
     id: 'springconfig',

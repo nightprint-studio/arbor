@@ -1219,6 +1219,14 @@ pub struct CatalogArgs {
 /// The rows of one catalog — what every framework list panel (Beans, Endpoints) reads.
 #[arbor_rpc::handler]
 fn bennu_ext_catalog(_ctx: &BennuState, args: CatalogArgs) -> Result<Vec<ExtEntry>, String> {
+    // One catalog is contributed by the HOST rather than by an extension: the beans an
+    // allowlisted dependency declares are read out of jars, and the classpath and the
+    // allowlist are the host's, not the Spring extension's — which sees this project's
+    // sources and nothing else. Answered before the registry because no extension claims
+    // this kind, so falling through would return an empty list rather than the answer.
+    if args.kind == crate::library_beans::CATALOG_KIND {
+        return Ok(crate::library_beans::catalog_entries(&args.root));
+    }
     Ok(FrameworkService::global()
         .slot(&args.root)
         .map(|s| s.registry.catalog(&args.kind))
@@ -1272,6 +1280,13 @@ fn bennu_ext_overview(_ctx: &BennuState, args: RootArgs) -> Result<ExtOverview, 
         stats: slot.registry.stats(),
         ..ExtOverview::default()
     };
+    // The host's own contribution (see `bennu_ext_catalog`). Present only when the allowlist
+    // matched something that actually declares beans, so a project that configured nothing —
+    // or configured a coordinate that turns out to have none — gets no button rather than a
+    // door onto an empty list.
+    if let Some(stat) = crate::library_beans::stat(&args.root) {
+        out.stats.push(stat);
+    }
     if let Some(ext) = &slot.spring {
         let model = ext.model();
         out.property_files = model

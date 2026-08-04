@@ -30,6 +30,14 @@ impl JobHandle {
         Ok(JobHandle { host, id })
     }
 
+    /// Append an output line to the job's buffer. Registry-only — the caller is responsible
+    /// for emitting `arbor://job-output-batch` for the live stream, which is what the panel
+    /// actually renders while the job runs; this is what a job opened *after* the fact still
+    /// has to show.
+    pub fn append(&self, line: &str) {
+        let _ = self.host.call("__job_append", json!({ "job_id": self.id, "line": line }));
+    }
+
     /// Set the job's status (terminal or running). Registry-only — the caller is
     /// responsible for emitting `arbor://job-done` on a terminal status.
     pub fn set_status(&self, status: JobStatus) {

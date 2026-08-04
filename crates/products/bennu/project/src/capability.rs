@@ -465,13 +465,13 @@ mod tests {
     use super::*;
     use crate::pom;
 
-    // A Struts / Entando-flavoured pom (like the reference PortaleAppalti) → the
-    // Struts / Spring-XML / JDBC / Tiles capabilities on; MyBatis / JPA / Spring-Data
-    // / Lombok OFF (docs §10 validates exactly this profile).
+    // A Struts / Entando-flavoured pom → the Struts / Spring-XML / JDBC / Tiles
+    // capabilities on; MyBatis / JPA / Spring-Data / Lombok OFF (docs §10 validates
+    // exactly this profile).
     const STRUTS_POM: &str = r#"
       <project>
-        <artifactId>portale-appalti</artifactId>
-        <name>Portale Appalti</name>
+        <artifactId>gestionale-web</artifactId>
+        <name>Gestionale Web</name>
         <dependencies>
           <dependency><groupId>org.apache.struts</groupId><artifactId>struts2-core</artifactId></dependency>
           <dependency><groupId>org.apache.struts</groupId><artifactId>struts2-tiles-plugin</artifactId></dependency>

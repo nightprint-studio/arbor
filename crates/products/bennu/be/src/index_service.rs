@@ -429,6 +429,10 @@ pub struct IndexService {
     /// stub. Built lazily on first library go-to (only the sources jars already on disk), and cleared
     /// after a "Download sources" fetch so the freshly-downloaded jar is picked up without a reindex.
     dep_sources: Mutex<HashMap<String, Arc<Vec<bennu_classpath::prelude::JavaSourceZip>>>>,
+    /// The last event sink a handler brought in, so background work with no request behind it —
+    /// the classpath watcher — can still emit. One window per backend, so the latest is the
+    /// right one. `None` until the first open.
+    sink: RwLock<Option<Arc<dyn EventSink>>>,
 }
 
 /// Buffer-edit bookkeeping for [`IndexService::patch_counts`] — see that field.
@@ -465,7 +469,64 @@ impl IndexService {
             patch_counts: Mutex::new(PatchCounts::default()),
             host: RwLock::new(None),
             dep_sources: Mutex::new(HashMap::new()),
+            sink: RwLock::new(None),
         })
+    }
+
+    /// The last sink seen, for background work that has no request of its own.
+    pub fn sink(&self) -> Option<Arc<dyn EventSink>> {
+        self.sink.read().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    /// Every FULLY-BUILT project, as `(root, jdk version, dependency jars)`.
+    ///
+    /// Only ready slots: a project mid-build is about to recompute all of this anyway, and
+    /// stamping a classpath while it is being resolved would record a half-written answer as
+    /// the baseline.
+    ///
+    /// The root comes back in the form the slot map is **keyed** by, separators and all —
+    /// not forward-slashed for looks. The caller's next move is to hand it straight back to
+    /// [`reload_changed_classpath`](Self::reload_changed_classpath), and a tidied path would
+    /// not find the slot it just came from.
+    pub fn classpath_snapshot(&self) -> Vec<(String, String, Vec<String>)> {
+        let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        slots
+            .iter()
+            .filter(|(_, s)| s.ready.load(Ordering::Relaxed))
+            .map(|(root, s)| {
+                (
+                    root.to_string_lossy().to_string(),
+                    s.jdk_version.clone(),
+                    s.dep_jars.read().unwrap_or_else(|p| p.into_inner()).clone(),
+                )
+            })
+            .collect()
+    }
+
+    /// Rebuild `root`'s index because its **dependency jars changed on disk** — the same
+    /// artifacts, rewritten.
+    ///
+    /// Deliberately NOT [`reindex`](Self::reindex): that one also drops the persisted
+    /// dependency-jar list so Maven re-runs, which is right for a user pressing the button
+    /// after their classpath came out wrong, and pure waste here. The jar *set* has not
+    /// changed — the same paths hold new bytes — so the list is still correct and re-running
+    /// Maven would cost seconds to arrive at the answer already in hand.
+    ///
+    /// The diagnostic cache needs no explicit drop: it is keyed by the classpath epoch, which
+    /// is what just changed.
+    pub fn reload_changed_classpath(&'static self, root: &str, sink: Arc<dyn EventSink>) {
+        let opened_with = {
+            let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            slots
+                .get(&PathBuf::from(root))
+                .map(|s| (s.jdk_version.clone(), s.encoding_label.clone()))
+        };
+        if let Some((jdk, encoding_label)) = opened_with {
+            // The opened `-sources.jar` pool is per-root and holds file handles into jars that
+            // have just been replaced — drop it so the next library go-to reopens them.
+            self.dep_sources.lock().unwrap_or_else(|p| p.into_inner()).remove(root);
+            self.open(root, &jdk, &encoding_label, sink);
+        }
     }
 
     /// Attach (or refresh) the reverse channel back to the shell, so the background analysis warm-up
@@ -533,6 +594,11 @@ impl IndexService {
         encoding_label: &str,
         sink: Arc<dyn EventSink>,
     ) {
+        // Keep the background-work sink current: the classpath watcher has no request of its
+        // own to take one from.
+        *self.sink.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&sink));
+        crate::classpath_watch::ensure_running();
+
         let root_path = PathBuf::from(root);
         let index_base = index_base_for(root);
         // A fresh generation dir for THIS build so its files are never the ones a prior
@@ -762,7 +828,7 @@ impl IndexService {
                 // no reverse channel is wired — the warm-up still runs, just untracked.
                 let job = host.as_ref().and_then(|h| register_warmup_job(h, &sink, &root_str));
                 emit_progress(&sink, &root_str, "validation", "start");
-                warm_up_validation_cache(&root_str, &sources);
+                warm_up_validation_cache(&root_str, &sources, job.as_ref(), &sink);
                 // Only stamp "up to date" when this gen is still current — a warm-up superseded
                 // mid-run must not record a marker the winning build would trust and then skip its
                 // own warm-up over possibly-different sources.
@@ -1211,7 +1277,7 @@ impl IndexService {
     /// (or that may not exist) is what makes it stable: a volatile/absent file used to flip the epoch
     /// on some opens, dropping the whole cache and forcing a full cold re-warm every startup.
     fn diag_epoch(&self, root: &str) -> u64 {
-        let (jdk, mut jars) = {
+        let (jdk, jars) = {
             let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
             match slots.get(&PathBuf::from(root)) {
                 Some(s) => (
@@ -1221,13 +1287,12 @@ impl IndexService {
                 None => (String::new(), Vec::new()),
             }
         };
-        jars.sort_unstable(); // order-independent: the jar SET, not the resolve order, defines the epoch
-        let mut seed = format!("{jdk}\0");
-        for j in &jars {
-            seed.push_str(j);
-            seed.push('\0');
-        }
-        bennu_intel::prelude::source_hash(&seed)
+        // Through the shared stamp, which is what makes this notice a jar REWRITTEN IN
+        // PLACE. Hashing the paths alone — which this did — moves on a dependency added or
+        // removed but not on `mvn install` over an existing `-SNAPSHOT`: same path, same
+        // set, different bytes. The cache then kept serving diagnostics computed against the
+        // old classes, and the artifacts that happens to are the ones being actively edited.
+        crate::classpath_stamp::classpath_epoch(&jdk, &jars)
     }
 
     /// Resolve a JSP form/link action reference to its go-to-definition target (the C1
@@ -1441,6 +1506,49 @@ impl IndexService {
     /// `source` is the current (possibly-unsaved) buffer. Returns `None` when no project
     /// owns the file, the engine is still building, or the caret isn't on a referenceable
     /// symbol.
+    /// Find-usages for a caret inside a **library source view** — a file under no project, so
+    /// its own path cannot pick one. `origin_file` (the project file the view was opened from)
+    /// does, and the rest is identical: the caret is classified against that project's index,
+    /// which is where the use sites are.
+    ///
+    /// Separate from [`find_usages`](Self::find_usages) only in how the project is found. The
+    /// classification itself needs no special case — a library buffer declares its own package,
+    /// so the key it produces is the same one the walk indexed those uses under.
+    pub fn find_usages_from(
+        &self,
+        origin_file: &str,
+        view_file: &str,
+        source: &str,
+        offset: usize,
+    ) -> Option<ReferencesResult> {
+        // The origin normally names the project. When it doesn't — a tab restored from a
+        // previous session carries the view but not the registration that recorded where it
+        // came from — fall back to the only project open. Bennu is one window, and with a
+        // single project there is no ambiguity to resolve: refusing to answer because the
+        // frontend could not say *which* project, when there is only one, is a worse answer
+        // than the obvious one.
+        // Three distinct ways this comes back empty, and from the outside they look identical
+        // — "find usages did nothing". Naming which one it was is the difference between
+        // diagnosing this in one step and guessing at it.
+        let Some(slot) = self.slot_for_file(origin_file).or_else(|| self.sole_slot()) else {
+            eprintln!("bennu-be: find-usages in a library view — no project for origin {origin_file}");
+            return None;
+        };
+        let engine = {
+            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
+            g.as_ref().map(Arc::clone)
+        };
+        let Some(engine) = engine else {
+            eprintln!("bennu-be: find-usages in a library view — the reference index is still building");
+            return None;
+        };
+        let result = engine.find_usages(view_file, source, offset);
+        if result.is_none() {
+            eprintln!("bennu-be: find-usages in a library view — the caret at {offset} in {view_file} classified to nothing");
+        }
+        result
+    }
+
     pub fn find_usages(&self, file: &str, source: &str, offset: usize) -> Option<ReferencesResult> {
         let slot = self.slot_for_file(file)?;
         let engine = {
@@ -1537,6 +1645,17 @@ impl IndexService {
             offset: 0,
             can_download: self.can_download_sources(&slot, &binary, is_stub),
         })
+    }
+
+    /// The dependency jars resolved for `root`, or empty when no project is open there / Maven
+    /// never resolved. The classpath as it actually is, which is what any per-artifact reading
+    /// (the library-bean scan) has to walk.
+    pub fn dep_jars_of(&self, root: &str) -> Vec<String> {
+        let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        slots
+            .get(&PathBuf::from(root))
+            .map(|s| s.dep_jars.read().unwrap_or_else(|p| p.into_inner()).clone())
+            .unwrap_or_default()
     }
 
     /// The on-disk **source view** for a library/JDK `binary`, best-first: the REAL `.java` from the
@@ -2056,6 +2175,17 @@ impl IndexService {
     }
 
     /// The slot whose root is the longest prefix of `file`.
+    /// The open project, when there is exactly one. `None` with none or several — with
+    /// several, picking one would be a guess, and a wrong project answers confidently with
+    /// the wrong use sites.
+    fn sole_slot(&self) -> Option<Arc<ProjectSlot>> {
+        let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        if slots.len() != 1 {
+            return None;
+        }
+        slots.values().next().cloned()
+    }
+
     fn slot_for_file(&self, file: &str) -> Option<Arc<ProjectSlot>> {
         let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
         let mut best: Option<&Arc<ProjectSlot>> = None;
@@ -2299,13 +2429,55 @@ fn finish_warmup_job(sink: &Arc<dyn EventSink>, job: Option<JobHandle>) {
     finish_bennu_job(sink, job, true, None);
 }
 
-fn warm_up_validation_cache(root: &str, sources: &[(PathBuf, String)]) {
+/// Report the warm-up's progress into its job, coalesced.
+///
+/// The batch calls back **per file** — thousands of times on a real project — so a line
+/// each would flood the reverse channel to say what one line says: the flooding that once
+/// left the backend answering nothing. One line per whole percentage point is at most a
+/// hundred for the entire pass, and a percentage is what somebody watching a progress
+/// readout is reading anyway.
+fn warmup_progress_line(
+    job: Option<&JobHandle>,
+    sink: &Arc<dyn EventSink>,
+    last_pct: &AtomicUsize,
+    done: usize,
+    total: usize,
+) {
+    let Some(job) = job else { return };
+    if total == 0 {
+        return;
+    }
+    let pct = done * 100 / total;
+    // `swap` and not load-then-store: the callback runs on the batch's worker threads, and
+    // two arriving together must not both emit the same percentage.
+    if last_pct.swap(pct, Ordering::Relaxed) == pct {
+        return;
+    }
+    let line = format!("Analyzing… {pct}% ({done}/{total} files)");
+    job.append(&line);
+    sink.emit(
+        "arbor://job-output-batch",
+        json!({ "job_id": &job.id, "lines": [line] }),
+    );
+}
+
+fn warm_up_validation_cache(
+    root: &str,
+    sources: &[(PathBuf, String)],
+    job: Option<&JobHandle>,
+    sink: &Arc<dyn EventSink>,
+) {
     let svc = IndexService::global();
     if !svc.has_resolver(root) {
         return; // pre-index / no JDK — validating pure-AST with nothing to cache would be waste
     }
     let mut cache = svc.diag_cache_load(root);
-    let results = svc.validate_project_batch(root, sources, &cache, &|_done: usize, _total: usize| {});
+    // `usize::MAX` and not 0: a project whose first callback really is 0% should still print
+    // it, and a sentinel that collides with a real value swallows the first line.
+    let last_pct = AtomicUsize::new(usize::MAX);
+    let results = svc.validate_project_batch(root, sources, &cache, &|done: usize, total: usize| {
+        warmup_progress_line(job, sink, &last_pct, done, total);
+    });
     if svc.validation_cancelled() {
         return; // cancelled → don't stamp/persist a partial warm-up
     }
@@ -2320,6 +2492,12 @@ fn warm_up_validation_cache(root: &str, sources: &[(PathBuf, String)]) {
     }
     cache.files.retain(|k, _| seen.contains(k));
     svc.diag_cache_save(root, &cache);
+    // The closing line: a job whose output ends mid-percentage reads as one that died there.
+    if let Some(job) = job {
+        let line = format!("Analyzed {filled} files ({} cached)", seen.len());
+        job.append(&line);
+        sink.emit("arbor://job-output-batch", json!({ "job_id": &job.id, "lines": [line] }));
+    }
     eprintln!(
         "bennu-be: validation cache warmed for {root} ({filled} validated, {} total cached)",
         seen.len()

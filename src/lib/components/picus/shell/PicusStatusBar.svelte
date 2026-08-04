@@ -56,7 +56,7 @@
     <!-- The connection, once.
          The engine and the installed version used to be spelled out again right
          here, three chips after the toolbar one row up had already said both —
-         which put `appalti_local` on screen four times and `PostgreSQL` three,
+         which put the connection's name on screen four times and `PostgreSQL` three,
          and taught the eye to skip all of them. The bar above owns the tab's
          binding; this one owns the window, so it keeps the name and hands the
          rest to the pill's tooltip. -->

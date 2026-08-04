@@ -12,7 +12,7 @@
    *  • **Scripts** — the reason it exists. A repository with a folder set per
    *    delivered version has eleven files called `4_13.sql`, and finding one by
    *    expanding folders is the interaction this replaces.
-   *  • **Objects** — "where is `PPCOMMON_PROPERTIES` touched" is asked far more
+   *  • **Objects** — "where is `PARAMETRI` touched" is asked far more
    *    often than "what is in this directory", and it lands in the Inventory with
    *    the object in view.
    *  • **Connections** — cheap to include and the fastest way to switch.

@@ -30,6 +30,15 @@ pub struct ObjectSite {
     /// go through `covers` rather than an equality test.
     pub scope: Option<DialectScope>,
     pub role: FolderRole,
+    /// Which installed product the folder belongs to, after inheritance. `None`
+    /// for the repository that installs one thing, and for every repository that
+    /// has never declared a product.
+    ///
+    /// Carried on the site rather than looked up per rule because it is the same
+    /// kind of fact as `scope` and `role` — a property of where the statement
+    /// sits — and because the rules that need it are asking "do these two sites
+    /// end up in the same database", which is a comparison, not a lookup.
+    pub product: Option<String>,
     /// Index into the file's `statements`, so a caller can get back to the whole
     /// statement without searching by range.
     pub statement_index: usize,

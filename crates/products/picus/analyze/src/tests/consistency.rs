@@ -402,17 +402,17 @@ fn a_table_a_view_only_reads_is_not_a_gap() {
     let repo = Fixture::build(&[
         (
             "ORACLE/AGGIORNAMENTO/4_12__4_13.sql",
-            "CREATE VIEW V_APPALTI AS SELECT ID FROM APPALTI;",
+            "CREATE VIEW V_ORDINI AS SELECT ID FROM ORDINI;",
         ),
         (
             "POSTGRES/AGGIORNAMENTO/4_12__4_13.sql",
-            "create view v_appalti as select a.id, m.descr from mecatalogo m join appalti a on a.cat = m.id;",
+            "create view v_ordini as select o.id, c.descr from catalogo_esterno c join ordini o on o.cat = c.id;",
         ),
     ]);
     let report = repo.report();
     let titles: Vec<&str> =
         open_of(&report, RuleId::Cons001).iter().map(|f| f.title.as_str()).collect();
-    assert!(!titles.iter().any(|t| t.contains("MECATALOGO")), "{titles:?}");
+    assert!(!titles.iter().any(|t| t.contains("CATALOGO_ESTERNO")), "{titles:?}");
 }
 
 #[test]

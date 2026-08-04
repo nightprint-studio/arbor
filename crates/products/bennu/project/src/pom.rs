@@ -181,8 +181,8 @@ mod tests {
     fn extracts_name_encoding_and_deps() {
         let xml = r#"
           <project>
-            <artifactId>portale-appalti</artifactId>
-            <name>Portale Appalti</name>
+            <artifactId>gestionale-web</artifactId>
+            <name>Gestionale Web</name>
             <properties>
               <project.build.sourceEncoding>Cp1252</project.build.sourceEncoding>
               <maven.compiler.source>1.8</maven.compiler.source>
@@ -201,8 +201,8 @@ mod tests {
           </project>
         "#;
         let pom = parse(xml);
-        assert_eq!(pom.name, "Portale Appalti");
-        assert_eq!(pom.artifact_id, "portale-appalti");
+        assert_eq!(pom.name, "Gestionale Web");
+        assert_eq!(pom.artifact_id, "gestionale-web");
         assert_eq!(pom.property("project.build.sourceEncoding"), Some("Cp1252"));
         assert_eq!(pom.property("maven.compiler.source"), Some("1.8"));
         assert!(pom.has_dependency("struts2-core"));

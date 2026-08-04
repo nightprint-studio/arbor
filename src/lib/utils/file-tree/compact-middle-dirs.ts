@@ -34,6 +34,11 @@ export interface CompactAccessors<N> {
    *  helper itself only reads it and replaces it wholesale. */
   getChildren:  (n: N) => N[];
   setChildren:  (n: N, kids: N[]) => void;
+  /** What joins the collapsed segments. Defaults to `/` — a path, which is what
+   *  a file tree is showing. A **package** tree passes `.`, because
+   *  `it.acme.portal` is how the thing being named is actually written and
+   *  `it/acme/portal` would be a folder chain wearing a package's clothes. */
+  separator?:   string;
 }
 
 /** Collapse single-child directory chains under each of `roots`. Returns the
@@ -51,11 +56,12 @@ function collapse<N>(node: N, acc: CompactAccessors<N>): N {
 
   // Walk the single-child directory chain. `cur` ends pointing at the deepest
   // dir whose direct children are *not* "exactly one sub-directory".
-  let cur  = node;
+  const sep = acc.separator ?? '/';
+  let  cur  = node;
   let kids = acc.getChildren(cur);
   while (kids.length === 1 && acc.isDir(kids[0])) {
     const next = kids[0];
-    acc.setName(next, acc.getName(cur) + '/' + acc.getName(next));
+    acc.setName(next, acc.getName(cur) + sep + acc.getName(next));
     cur  = next;
     kids = acc.getChildren(cur);
   }

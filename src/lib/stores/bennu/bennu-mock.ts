@@ -26,7 +26,7 @@
 import type { ProjectInfo, TreeNode, ReadFileResult } from '$lib/types/bennu';
 
 /** Sentinel root path for the demo project (never touches the filesystem). */
-export const DEMO_ROOT = 'demo://PortaleAppalti';
+export const DEMO_ROOT = 'demo://GestionaleAtti';
 
 const SEP = '/';
 const j = (...parts: string[]) => parts.join(SEP);
@@ -38,7 +38,7 @@ const j = (...parts: string[]) => parts.join(SEP);
 
 // ── module: core (the domain + persistence layer) ────────────────────────────────
 
-const BANDO_MODEL_JAVA = `package it.appalti.portale.core.model;
+const BANDO_MODEL_JAVA = `package it.comune.gestionale.core.model;
 
 import java.io.Serializable;
 import javax.persistence.Entity;
@@ -86,10 +86,10 @@ public class Bando implements Serializable {
 }
 `;
 
-const BANDO_SERVICE_JAVA = `package it.appalti.portale.core.service;
+const BANDO_SERVICE_JAVA = `package it.comune.gestionale.core.service;
 
 import java.util.List;
-import it.appalti.portale.core.model.Bando;
+import it.comune.gestionale.core.model.Bando;
 
 /** Query surface for tenders — implemented over the Hibernate-backed DAO. */
 public interface BandoService {
@@ -98,14 +98,14 @@ public interface BandoService {
 }
 `;
 
-const BANDO_DAO_JAVA = `package it.appalti.portale.core.dao;
+const BANDO_DAO_JAVA = `package it.comune.gestionale.core.dao;
 
 import java.util.List;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.query.Query;
-import it.appalti.portale.core.model.Bando;
-import it.appalti.portale.core.service.BandoService;
+import it.comune.gestionale.core.model.Bando;
+import it.comune.gestionale.core.service.BandoService;
 
 /**
  * Hibernate implementation of {@link BandoService}. Wired as a Spring bean in
@@ -146,10 +146,10 @@ const HIBERNATE_CFG_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <hibernate-configuration>
   <session-factory>
     <property name="hibernate.dialect">org.hibernate.dialect.Oracle12cDialect</property>
-    <property name="hibernate.connection.datasource">java:/comp/env/jdbc/appaltiDS</property>
+    <property name="hibernate.connection.datasource">java:/comp/env/jdbc/gestionaleDS</property>
     <property name="hibernate.current_session_context_class">thread</property>
     <property name="hibernate.show_sql">false</property>
-    <mapping class="it.appalti.portale.core.model.Bando"/>
+    <mapping class="it.comune.gestionale.core.model.Bando"/>
   </session-factory>
 </hibernate-configuration>
 `;
@@ -159,14 +159,14 @@ const CORE_POM_XML = `<?xml version="1.0" encoding="UTF-8"?>
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
-    <groupId>it.appalti</groupId>
-    <artifactId>portale-appalti</artifactId>
+    <groupId>it.comune</groupId>
+    <artifactId>gestionale-atti</artifactId>
     <version>3.7.2</version>
   </parent>
 
   <artifactId>portale-core</artifactId>
   <packaging>jar</packaging>
-  <name>PortaleAppalti :: Core</name>
+  <name>GestionaleAtti :: Core</name>
 
   <dependencies>
     <dependency>
@@ -185,14 +185,14 @@ const CORE_POM_XML = `<?xml version="1.0" encoding="UTF-8"?>
 
 // ── module: web (the Struts/JSP front-end) ───────────────────────────────────────
 
-const BANDO_ACTION_JAVA = `package it.appalti.portale.web.action;
+const BANDO_ACTION_JAVA = `package it.comune.gestionale.web.action;
 
 import java.util.List;
 import com.opensymphony.xwork2.ActionSupport;
 import org.apache.struts2.convention.annotation.Action;
 import org.apache.struts2.convention.annotation.Result;
-import it.appalti.portale.core.model.Bando;
-import it.appalti.portale.core.service.BandoService;
+import it.comune.gestionale.core.model.Bando;
+import it.comune.gestionale.core.service.BandoService;
 
 /**
  * Struts 2 action backing the tender ("bando") search + detail pages.
@@ -283,7 +283,7 @@ const LAYOUT_JSP = `<%@ taglib prefix="tiles" uri="http://tiles.apache.org/tags-
 <body>
   <div id="header"><tiles:insertAttribute name="header" /></div>
   <div id="body"><tiles:insertAttribute name="body" /></div>
-  <div id="footer">&copy; Comune di Esempio &mdash; Portale Appalti</div>
+  <div id="footer">&copy; Comune di Esempio &mdash; Gestionale Atti</div>
 </body>
 </html>
 `;
@@ -301,12 +301,12 @@ const APPLICATION_CONTEXT_XML = `<?xml version="1.0" encoding="UTF-8"?>
   </bean>
 
   <!-- DAO gets the SessionFactory constructor-injected -->
-  <bean id="bandoService" class="it.appalti.portale.core.dao.BandoDaoImpl">
+  <bean id="bandoService" class="it.comune.gestionale.core.dao.BandoDaoImpl">
     <constructor-arg ref="sessionFactory"/>
   </bean>
 
   <!-- Struts action pulls the service by name off this context -->
-  <bean id="bandoAction" class="it.appalti.portale.web.action.BandoAction" scope="prototype">
+  <bean id="bandoAction" class="it.comune.gestionale.web.action.BandoAction" scope="prototype">
     <property name="bandoService" ref="bandoService"/>
   </bean>
 </beans>
@@ -320,7 +320,7 @@ const STRUTS_XML = `<?xml version="1.0" encoding="UTF-8"?>
   <constant name="struts.objectFactory" value="spring"/>
   <constant name="struts.convention.result.path" value="/WEB-INF/jsp/"/>
 
-  <package name="appalti" namespace="/" extends="tiles-default">
+  <package name="gestionale" namespace="/" extends="tiles-default">
     <action name="bando-detail" class="bandoAction" method="detail">
       <result name="success" type="tiles">bando.detail</result>
       <result name="none">/WEB-INF/jsp/not-found.jsp</result>
@@ -355,18 +355,18 @@ const WEB_POM_XML = `<?xml version="1.0" encoding="UTF-8"?>
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
-    <groupId>it.appalti</groupId>
-    <artifactId>portale-appalti</artifactId>
+    <groupId>it.comune</groupId>
+    <artifactId>gestionale-atti</artifactId>
     <version>3.7.2</version>
   </parent>
 
   <artifactId>portale-web</artifactId>
   <packaging>war</packaging>
-  <name>PortaleAppalti :: Web</name>
+  <name>GestionaleAtti :: Web</name>
 
   <dependencies>
     <dependency>
-      <groupId>it.appalti</groupId>
+      <groupId>it.comune</groupId>
       <artifactId>portale-core</artifactId>
       <version>3.7.2</version>
     </dependency>
@@ -401,7 +401,7 @@ const WEB_POM_XML = `<?xml version="1.0" encoding="UTF-8"?>
 
 // ── module: batch (a plain JDBC nightly job — no Struts/Spring) ───────────────────
 
-const IMPORT_JOB_JAVA = `package it.appalti.portale.batch;
+const IMPORT_JOB_JAVA = `package it.comune.gestionale.batch;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -438,14 +438,14 @@ const BATCH_POM_XML = `<?xml version="1.0" encoding="UTF-8"?>
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
-    <groupId>it.appalti</groupId>
-    <artifactId>portale-appalti</artifactId>
+    <groupId>it.comune</groupId>
+    <artifactId>gestionale-atti</artifactId>
     <version>3.7.2</version>
   </parent>
 
   <artifactId>portale-batch</artifactId>
   <packaging>jar</packaging>
-  <name>PortaleAppalti :: Batch</name>
+  <name>GestionaleAtti :: Batch</name>
 
   <dependencies>
     <dependency>
@@ -463,11 +463,11 @@ const PARENT_POM_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>it.appalti</groupId>
-  <artifactId>portale-appalti</artifactId>
+  <groupId>it.comune</groupId>
+  <artifactId>gestionale-atti</artifactId>
   <version>3.7.2</version>
   <packaging>pom</packaging>
-  <name>PortaleAppalti</name>
+  <name>GestionaleAtti</name>
 
   <properties>
     <maven.compiler.source>1.8</maven.compiler.source>
@@ -492,7 +492,7 @@ const P_POM = j(DEMO_ROOT, 'pom.xml');
 // core module
 const CORE = j(DEMO_ROOT, 'core');
 const P_CORE_POM = j(CORE, 'pom.xml');
-const CORE_JAVA = j(CORE, 'src', 'main', 'java', 'it', 'appalti', 'portale', 'core');
+const CORE_JAVA = j(CORE, 'src', 'main', 'java', 'it', 'comune', 'gestionale', 'core');
 const P_MODEL = j(CORE_JAVA, 'model', 'Bando.java');
 const P_SERVICE = j(CORE_JAVA, 'service', 'BandoService.java');
 const P_DAO = j(CORE_JAVA, 'dao', 'BandoDaoImpl.java');
@@ -501,7 +501,7 @@ const P_HIBERNATE_CFG = j(CORE, 'src', 'main', 'resources', 'hibernate.cfg.xml')
 // web module
 const WEB = j(DEMO_ROOT, 'web');
 const P_WEB_POM = j(WEB, 'pom.xml');
-const WEB_JAVA = j(WEB, 'src', 'main', 'java', 'it', 'appalti', 'portale', 'web');
+const WEB_JAVA = j(WEB, 'src', 'main', 'java', 'it', 'comune', 'gestionale', 'web');
 const P_ACTION = j(WEB_JAVA, 'action', 'BandoAction.java');
 const WEB_RES = j(WEB, 'src', 'main', 'resources');
 const P_APP_CTX = j(WEB_RES, 'applicationContext.xml');
@@ -514,13 +514,13 @@ const P_LAYOUT_JSP = j(WEB_JSP, 'layout.jsp');
 // batch module
 const BATCH = j(DEMO_ROOT, 'batch');
 const P_BATCH_POM = j(BATCH, 'pom.xml');
-const BATCH_JAVA = j(BATCH, 'src', 'main', 'java', 'it', 'appalti', 'portale', 'batch');
+const BATCH_JAVA = j(BATCH, 'src', 'main', 'java', 'it', 'comune', 'gestionale', 'batch');
 const P_IMPORT_JOB = j(BATCH_JAVA, 'ImportJob.java');
 
 /** MOCK project manifest — realistic JDK + capability evidence across all modules. */
 export const DEMO_PROJECT: ProjectInfo = {
   root: DEMO_ROOT,
-  name: 'PortaleAppalti (demo)',
+  name: 'GestionaleAtti (demo)',
   // Maven `<modules>` — the parent reactor's child module names.
   modules: ['core', 'web', 'batch'],
   kind: 'maven',
@@ -560,9 +560,9 @@ const file = (name: string, path: string): TreeNode => ({ name, path, is_dir: fa
 const dir = (name: string, path: string, children: TreeNode[]): TreeNode => ({ name, path, is_dir: true, children });
 
 // ── tree builders ────────────────────────────────────────────────────────────────
-// A `src/main/java/it/appalti/portale/<module>/<leaf...>` package chain is the same
+// A `src/main/java/it/comune/gestionale/<module>/<leaf...>` package chain is the same
 // shape for every module, so build the nested-directory spine once instead of
-// repeating the `it → appalti → portale` boilerplate three times.
+// repeating the `it → comune → gestionale` boilerplate three times.
 
 /** Nest `children` under a chain of single-child directories named by `segments`,
  *  anchoring each directory's path at `base` + the accumulated segments. */
@@ -581,15 +581,15 @@ function nestDirs(base: string, segments: string[], children: TreeNode[]): TreeN
 const javaTree = (moduleRoot: string, packages: string[], leaves: TreeNode[]): TreeNode =>
   dir('java', j(moduleRoot, 'src', 'main', 'java'), [nestDirs(j(moduleRoot, 'src', 'main', 'java'), packages, leaves)]);
 
-const IT_APPALTI_PORTALE = ['it', 'appalti', 'portale'];
+const IT_COMUNE_GESTIONALE = ['it', 'comune', 'gestionale'];
 
 /** MOCK file tree — the parent reactor with its three modules fully expanded. */
-export const DEMO_TREE: TreeNode = dir('PortaleAppalti', DEMO_ROOT, [
+export const DEMO_TREE: TreeNode = dir('GestionaleAtti', DEMO_ROOT, [
   // ── core ──────────────────────────────────────────────────────────────────────
   dir('core', CORE, [
     dir('src', j(CORE, 'src'), [
       dir('main', j(CORE, 'src', 'main'), [
-        javaTree(CORE, [...IT_APPALTI_PORTALE, 'core'], [
+        javaTree(CORE, [...IT_COMUNE_GESTIONALE, 'core'], [
           dir('dao', j(CORE_JAVA, 'dao'), [file('BandoDaoImpl.java', P_DAO)]),
           dir('model', j(CORE_JAVA, 'model'), [file('Bando.java', P_MODEL)]),
           dir('service', j(CORE_JAVA, 'service'), [file('BandoService.java', P_SERVICE)]),
@@ -606,7 +606,7 @@ export const DEMO_TREE: TreeNode = dir('PortaleAppalti', DEMO_ROOT, [
   dir('web', WEB, [
     dir('src', j(WEB, 'src'), [
       dir('main', j(WEB, 'src', 'main'), [
-        javaTree(WEB, [...IT_APPALTI_PORTALE, 'web'], [
+        javaTree(WEB, [...IT_COMUNE_GESTIONALE, 'web'], [
           dir('action', j(WEB_JAVA, 'action'), [file('BandoAction.java', P_ACTION)]),
         ]),
         dir('resources', WEB_RES, [
@@ -631,7 +631,7 @@ export const DEMO_TREE: TreeNode = dir('PortaleAppalti', DEMO_ROOT, [
   dir('batch', BATCH, [
     dir('src', j(BATCH, 'src'), [
       dir('main', j(BATCH, 'src', 'main'), [
-        javaTree(BATCH, [...IT_APPALTI_PORTALE, 'batch'], [
+        javaTree(BATCH, [...IT_COMUNE_GESTIONALE, 'batch'], [
           file('ImportJob.java', P_IMPORT_JOB),
         ]),
       ]),

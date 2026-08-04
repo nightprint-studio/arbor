@@ -20,6 +20,7 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { SvelteMap } from 'svelte/reactivity';
 import { operationsStore } from '$lib/feedback/stores/operations.svelte';
+import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 import { indexStats as ipcIndexStats, classIndex as ipcClassIndex } from '$lib/ipc/bennu';
 import { reindex as ipcReindex } from '$lib/ipc/bennu/nav';
 import type { ClassEntry } from '$lib/types/bennu';
@@ -64,6 +65,7 @@ function createBennuIndexStore() {
 
   let attached = false;
   let unlisten: UnlistenFn | null = null;
+  let unlistenClasspath: UnlistenFn | null = null;
   // The active safety-net poll timer + a token so a new project open cancels the old.
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let pollToken = 0;
@@ -188,6 +190,18 @@ function createBennuIndexStore() {
     async attach(): Promise<UnlistenFn> {
       if (attached) return () => {};
       attached = true;
+
+      // A dependency jar was rebuilt on disk while the window was open — the backend has
+      // already started re-indexing against the new classes, so everything keyed on the
+      // index settling refreshes on its own. What it cannot do on its own is explain
+      // itself: an editor that begins re-indexing for no visible reason reads as a glitch,
+      // and the one thing the user knows that we don't is that they just ran a build.
+      unlistenClasspath = await listen<{ root: string }>(
+        'arbor://bennu/classpath-changed',
+        () => {
+          toastStore.show('Dependencies changed on disk — re-indexing', 'info');
+        },
+      ).catch(() => null);
       unlisten = await listen<{
         root: string; phase: string; state: string; done?: number; total?: number;
       }>(
@@ -228,7 +242,7 @@ function createBennuIndexStore() {
           operationsStore.update(OP_ID, { current: ph, activeDetail: detail });
         },
       );
-      return () => { unlisten?.(); attached = false; };
+      return () => { unlisten?.(); unlistenClasspath?.(); attached = false; };
     },
 
     /** Called when a (non-demo) project opens: show the indexing job + start the

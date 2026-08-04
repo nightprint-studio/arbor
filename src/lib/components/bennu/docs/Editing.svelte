@@ -81,6 +81,18 @@
   file in the tree, collapse or expand the whole tree, and an options menu. Right-clicking a file or
   folder opens a context menu (Open · Copy path · Copy relative path · Reveal).
 </p>
+<p>
+  Inside a <strong>source root</strong> — <code>src/main/java</code>, <code>src/test/java</code> and
+  the matching <code>resources</code> — directories are shown as <strong>packages</strong>: a chain
+  with nothing in it but the next directory collapses into one dotted row,
+  <code>it.comune.gestionale_atti</code>, with a package icon rather than a folder. The
+  three levels of indentation it replaces were spelling one name. A folder that holds files, or more
+  than one subfolder, ends the chain and keeps its own row.
+</p>
+<p>
+  Everywhere else the tree stays a plain folder tree — including <code>src/main/webapp</code>, whose
+  directories are paths and not packages, because they are what a URL is made of.
+</p>
 
 <h2>Code folding</h2>
 <p>

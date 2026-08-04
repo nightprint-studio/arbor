@@ -261,6 +261,78 @@ fn a_wrapper_function_every_update_replaces_is_not_a_duplicate() {
 }
 
 #[test]
+fn the_engine_folders_of_one_subtree_are_never_compared_with_each_other() {
+    // The shape a real repository has, three levels down: one initialisation
+    // subtree with a portable folder beside one folder per dialect, and the two
+    // dialect folders creating the same table — which is the whole premise, not a
+    // duplicate. The portable folder sits alongside and answers for both engines
+    // without being folded into either.
+    let repo = Fixture::build(&[
+        (
+            "INIZIALIZZAZIONE/MODULO_A/COMUNE/1_COMUNE.sql",
+            "CREATE TABLE CATALOGO_WIDGET (CHIAVE VARCHAR(30));",
+        ),
+        (
+            "INIZIALIZZAZIONE/MODULO_A/ORA/2_ORA.sql",
+            "CREATE TABLE VERSIONE_DB (MODULO VARCHAR2(30));",
+        ),
+        (
+            "INIZIALIZZAZIONE/MODULO_A/POS/2_POS.sql",
+            "create table versione_db (modulo varchar(30));",
+        ),
+    ]);
+    assert!(open_of(&repo.report(), RuleId::Dup002).is_empty(), "{:?}", repo.report().findings);
+}
+
+#[test]
+fn two_installed_products_each_creating_their_own_version_table_is_not_a_duplicate() {
+    // A repository that installs two databases says everything twice again, one
+    // database's worth per subtree — and the version table is the one object
+    // *every* such subtree has. Without the product axis these two `CREATE`s are
+    // one dialect, one half and one name, which is exactly what DUP002 fires on.
+    let repo = || {
+        Fixture::build(&[
+            (
+                "INIZIALIZZAZIONE/MODULO_A/ORA/2_ORA.sql",
+                "CREATE TABLE VERSIONE_DB (MODULO VARCHAR2(30));",
+            ),
+            (
+                "INIZIALIZZAZIONE/MODULO_B/ORA/3_ORA.sql",
+                "CREATE TABLE VERSIONE_DB (MODULO VARCHAR2(30));",
+            ),
+        ])
+    };
+    // Undeclared, the two subtrees are indistinguishable and the finding stands:
+    // Picus has been told nothing that would make it wrong.
+    assert_eq!(open_of(&repo().report(), RuleId::Dup002).len(), 1);
+
+    let declared = repo()
+        .product("INIZIALIZZAZIONE/MODULO_A", "MODULO_A")
+        .product("INIZIALIZZAZIONE/MODULO_B", "MODULO_B");
+    assert!(open_of(&declared.report(), RuleId::Dup002).is_empty());
+}
+
+#[test]
+fn one_product_declared_twice_over_still_fights_with_itself() {
+    // The other half of the same rule: the split follows the declaration, so two
+    // folders that install the *same* database are still a race — otherwise
+    // naming a product would be a way of switching the rule off.
+    let repo = Fixture::build(&[
+        (
+            "INIZIALIZZAZIONE/MODULO_A/ORA/2_ORA.sql",
+            "CREATE TABLE CATALOGO_WIDGET (CHIAVE VARCHAR2(30));",
+        ),
+        (
+            "INIZIALIZZAZIONE/MODULO_B/ORA/3_ORA.sql",
+            "CREATE TABLE CATALOGO_WIDGET (CHIAVE VARCHAR2(30), ORDINE NUMBER);",
+        ),
+    ])
+    .product("INIZIALIZZAZIONE/MODULO_A", "GESTIONALE")
+    .product("INIZIALIZZAZIONE/MODULO_B", "GESTIONALE");
+    assert_eq!(open_of(&repo.report(), RuleId::Dup002).len(), 1);
+}
+
+#[test]
 fn a_plain_create_in_two_places_is_still_a_duplicate() {
     // Without OR REPLACE the two files genuinely race, and whichever runs last
     // decides what is in the database. The exemption above is about the stated

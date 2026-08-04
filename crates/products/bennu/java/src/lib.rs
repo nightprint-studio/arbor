@@ -328,16 +328,24 @@ mod tests {
         assert!(td.implements.contains(&"Other".to_string()));
     }
 
-    /// Sanity over real legacy Java, when a local checkout of PortaleAppalti is
-    /// present (it lives outside the repo, so this is a no-op in CI). Asserts we
-    /// never panic and recover the expected members of a known file.
+    /// Sanity over real legacy Java: point `BENNU_TEST_JAVA_ROOT` at a source root
+    /// of a checked-out Entando-era application and this asserts we never panic and
+    /// recover the expected members of a known framework class.
+    ///
+    /// Opt-in by environment rather than by a path in the source: the checkout
+    /// lives outside the repository, so a hard-coded one is one machine's — and a
+    /// test that quietly skipped on every other machine is a test that passes
+    /// everywhere and checks nothing anywhere.
     #[test]
-    fn extract_over_real_portale_appalti() {
-        let root = std::path::Path::new(
-            "C:/Sviluppo/Mio/temp/disposable-projects/PortaleAppalti/src/main/java",
-        );
+    fn extract_over_a_real_legacy_checkout() {
+        let Ok(root) = std::env::var("BENNU_TEST_JAVA_ROOT") else {
+            eprintln!("BENNU_TEST_JAVA_ROOT not set, skipping");
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        let root = root.as_path();
         if !root.exists() {
-            eprintln!("PortaleAppalti not present, skipping");
+            eprintln!("BENNU_TEST_JAVA_ROOT does not exist, skipping");
             return;
         }
 

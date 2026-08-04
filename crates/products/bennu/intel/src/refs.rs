@@ -442,6 +442,9 @@ struct FileWalker<'a> {
     edges: Vec<(DeclKey, UsageLocation)>,
     attempted: usize,
     resolved: usize,
+    /// The file's `import`s, set by [`walk`](Self::walk) before it starts. A dependency type
+    /// is reachable by its simple name **only** through these — see `resolve_type_simple`.
+    imports: Vec<bennu_java::prelude::Import>,
 }
 
 impl<'a> FileWalker<'a> {
@@ -467,6 +470,7 @@ impl<'a> FileWalker<'a> {
             edges: Vec::new(),
             attempted: 0,
             resolved: 0,
+            imports: Vec::new(),
         }
     }
 
@@ -476,6 +480,9 @@ impl<'a> FileWalker<'a> {
     /// receiver-type inference below reuses `root` + `symbols` (via `infer_receiver_type_at`)
     /// instead of re-parsing the whole file per call site — linear, not quadratic.
     fn walk(&mut self, root: &Node, symbols: &FileSymbols) {
+        // The file's imports, for the whole walk: they are what turns a bare `SharedService`
+        // into `com/acme/SharedService` when the class lives in a dependency.
+        self.imports = symbols.imports.clone();
         let mut stack = vec![*root];
         while let Some(n) = stack.pop() {
             let mut cur = n.walk();
@@ -626,7 +633,12 @@ impl<'a> FileWalker<'a> {
         if let Some(b) = self.project_types.get(simple) {
             return Some(b.clone());
         }
-        self.resolver.resolve_simple_name(simple, &[])
+        // WITH the file's imports. A project type resolves off `project_types` above, but a
+        // **dependency** type only ever resolves through the `import` that named it — the
+        // resolver's simple-name hints hold the project's own types and common JDK names, not
+        // every class on the classpath. Passing an empty list here meant no use of a library
+        // class was ever indexed, so find-usages on one reported nothing at all.
+        self.resolver.resolve_simple_name(simple, &self.imports)
     }
 
     fn is_declaration_name(&self, node: &Node) -> bool {
@@ -739,7 +751,15 @@ fn classify_caret_at(
         "method_invocation" => {
             let name_node = parent.child_by_field_name("name")?;
             if name_node.id() != ident.id() {
-                return receiver_side_key(&ident, &ident_text, source, resolver, project_types);
+                let symbols = extract_symbols_from_root(root, source);
+                return receiver_side_key(
+                    &ident,
+                    &ident_text,
+                    source,
+                    resolver,
+                    project_types,
+                    &symbols.imports,
+                );
             }
             let owner = match parent.child_by_field_name("object") {
                 Some(obj) => {
@@ -769,7 +789,15 @@ fn classify_caret_at(
         "field_access" => {
             let field_node = parent.child_by_field_name("field")?;
             if field_node.id() != ident.id() {
-                return receiver_side_key(&ident, &ident_text, source, resolver, project_types);
+                let symbols = extract_symbols_from_root(root, source);
+                return receiver_side_key(
+                    &ident,
+                    &ident_text,
+                    source,
+                    resolver,
+                    project_types,
+                    &symbols.imports,
+                );
             }
             let obj = parent.child_by_field_name("object")?;
             let symbols = extract_symbols_from_root(root, source);
@@ -792,11 +820,13 @@ fn classify_caret_at(
             // fully-qualified `alpha.Widget` resolves by its package (never the ambiguous bare
             // `Widget` shared with another package). `type_key` strips generics.
             let text = parent.utf8_text(bytes).map(str::to_string).unwrap_or_else(|_| ident_text.clone());
-            type_key(&text, project_types, resolver)
+            let symbols = extract_symbols_from_root(root, source);
+            type_key(&text, project_types, resolver, &symbols.imports)
         }
         _ => {
             if ident.kind() == "type_identifier" {
-                return type_key(&ident_text, project_types, resolver);
+                let symbols = extract_symbols_from_root(root, source);
+                return type_key(&ident_text, project_types, resolver, &symbols.imports);
             }
             // A bare `identifier` that isn't a declaration name, a member selector
             // (`x.foo` / `foo.bar()` — handled above), or a local/param (filtered before
@@ -837,7 +867,14 @@ fn decl_name_key(
                 .symbols(file)
                 .and_then(|fs| fs.types.iter().find(|t| t.name == name))
                 .map(|t| t.fqn.replace('.', "/"))
-                .or_else(|| project_types.get(&name).cloned())?;
+                .or_else(|| project_types.get(&name).cloned())
+                // Neither indexed nor a project type: a library source view, where the caret
+                // is on the dependency class's own declaration. Its own `package` line names
+                // it, and asking the file is the only thing that can work — there is no index
+                // entry for a file that is under no project.
+                .or_else(|| {
+                    buffer_package(bytes).map(|pkg| format!("{}/{name}", pkg.replace('.', "/")))
+                })?;
             Some(DeclKey::Type { binary })
         }
         "method_declaration" => {
@@ -868,6 +905,7 @@ fn receiver_side_key(
     source: &str,
     resolver: &dyn TypeResolver,
     project_types: &HashMap<String, String>,
+    imports: &[bennu_java::prelude::Import],
 ) -> Option<DeclKey> {
     // The receiver of a member access (`obj` in `obj.foo()` / `obj.field`) is usually a
     // VARIABLE, not a type. Resolve it as a FIELD of the enclosing type first — a `this`-less
@@ -881,7 +919,7 @@ fn receiver_side_key(
             return Some(DeclKey::Field { owner, name: ident_text.to_string() });
         }
     }
-    type_key(ident_text, project_types, resolver)
+    type_key(ident_text, project_types, resolver, imports)
 }
 
 /// The owner type of `member` accessed on `obj` in `obj.member` (`obj.foo()` / `obj.field`).
@@ -908,7 +946,9 @@ fn receiver_owner(
         }
     }
     let obj_text = obj.utf8_text(bytes).ok()?;
-    if let Some(DeclKey::Type { binary }) = type_key(obj_text, project_types, resolver) {
+    if let Some(DeclKey::Type { binary }) =
+        type_key(obj_text, project_types, resolver, &symbols.imports)
+    {
         return declaring_owner(resolver, &binary, member, is_method);
     }
     None
@@ -918,6 +958,7 @@ fn type_key(
     simple: &str,
     project_types: &HashMap<String, String>,
     resolver: &dyn TypeResolver,
+    imports: &[bennu_java::prelude::Import],
 ) -> Option<DeclKey> {
     let base = simple.split('<').next().unwrap_or(simple).trim();
     if base.contains('.') {
@@ -939,7 +980,11 @@ fn type_key(
     if let Some(b) = project_types.get(base) {
         return Some(DeclKey::Type { binary: b.clone() });
     }
-    resolver.resolve_simple_name(base, &[]).map(|binary| DeclKey::Type { binary })
+    // With the file's imports — the only route by which a bare `SharedService` reaches a class
+    // that lives in a dependency. The key produced here has to be byte-identical to the one the
+    // walker indexed the use sites under, so this and `resolve_type_simple` must resolve the
+    // same way; an empty list here made find-usages silent even once the edges existed.
+    resolver.resolve_simple_name(base, imports).map(|binary| DeclKey::Type { binary })
 }
 
 fn declaring_owner(
@@ -988,9 +1033,37 @@ fn enclosing_type_binary(
             if let Some(b) = project_types.get(&name) {
                 return Some(b.clone());
             }
-            return Some(name);
+            // Not a project type — which is the normal state inside a LIBRARY source view,
+            // where the file being read belongs to a dependency. The buffer says which
+            // package it is in, so use it: the bare simple name this used to fall back to
+            // could never match `com/acme/SharedService`, the key every use site was indexed
+            // under, so a caret anywhere inside such a file classified to a key that existed
+            // nowhere and find-usages reported nothing.
+            return Some(match buffer_package(bytes) {
+                Some(pkg) => format!("{}/{name}", pkg.replace('.', "/")),
+                None => name,
+            });
         }
         cur = n.parent();
+    }
+    None
+}
+
+/// The `package` a buffer declares, read off its own text.
+///
+/// The file is the authority on what it declares — more so than an index, which may not hold
+/// it at all (a library source view is under no project). Scans only the head: a package
+/// declaration precedes every type, so anything after the first `{` is past the point.
+fn buffer_package(bytes: &[u8]) -> Option<String> {
+    let head_len = bytes.iter().position(|b| *b == b'{').unwrap_or(bytes.len()).min(4096);
+    let head = std::str::from_utf8(&bytes[..head_len]).ok()?;
+    for line in head.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("package ") else { continue };
+        let pkg = rest.trim_end_matches(';').trim();
+        if !pkg.is_empty() {
+            return Some(pkg.to_string());
+        }
     }
     None
 }

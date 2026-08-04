@@ -1055,6 +1055,7 @@ version = "0.3.0"
 name = "bennu-spring"
 version = "0.3.0"
 dependencies = [
+ "bennu-classpath",
  "bennu-complete",
  "bennu-ext",
  "bennu-facts",

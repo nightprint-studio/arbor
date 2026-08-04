@@ -850,7 +850,17 @@
         return;
       }
 
-      const res = await ipcReferences(activePath, source, offset);
+      // Inside a library source view the buffer is under no project root, so the backend
+      // cannot tell from its path which index holds the use sites — it needs to be told.
+      //
+      // The registered context is the precise answer but not always present: a tab restored
+      // from a previous session, or one reached through the library→library chain, has the
+      // view without the registration. `isDecompiledView` recognises those (it also tests the
+      // path), and the open project's root serves as the origin just as well — the backend
+      // only uses it to pick a slot, and any path inside the project picks the same one.
+      const origin = decompiledCtx?.originFile
+        ?? (isDecompiledView ? projectStore.project?.root : undefined);
+      const res = await ipcReferences(activePath, source, offset, origin);
       if (res && res.usages.length) {
         bennuRefactorStore.setUsages(res.target_label, res.usages);
         return;

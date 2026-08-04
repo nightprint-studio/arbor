@@ -141,6 +141,22 @@ mod dep_classpath;
 // out of the poms — inheritance, `${properties}`, `<dependencyManagement>` — matched against the jars
 // `dep_classpath` already resolved. Reads files only; never runs Maven.
 mod dependencies;
+// The Spring beans an **allowlisted** dependency declares (`bennu_library_beans`): its jar's classes
+// decoded for their annotations, grouped by artifact. Display only — a bean declared in a jar is a
+// declaration Spring may or may not act on, so nothing here feeds resolution or a diagnostic.
+mod library_beans;
+// That scan, remembered on disk per ARTIFACT (not per project — two projects asking about the same
+// jar are asking about the same bytes). Invalidated by the jar's mtime+size and by the extraction's
+// own schema, because both the jar and the code that reads it can change the right answer.
+mod library_bean_cache;
+// One definition of "this classpath, unchanged" — path + mtime + size per jar, and the epoch every
+// classpath-derived cache keys off. Central because the trap is shared: a jar's identity is not its
+// path, and an in-place `-SNAPSHOT` reinstall is invisible to anything that thinks it is.
+mod classpath_stamp;
+// Noticing that a dependency was rebuilt WHILE Bennu is open — the one window the on-disk stamping
+// cannot cover, because the dependency member tier is in memory by design. Re-stamps on a timer and
+// rebuilds + emits `classpath-changed` when the jars move.
+mod classpath_watch;
 // "Download sources" for a Maven dependency: locate its ~/.m2 jar, derive coordinates, and fetch
 // the `-sources.jar` via `mvn dependency:get` — behind the decompiled-tab banner.
 mod sources_download;

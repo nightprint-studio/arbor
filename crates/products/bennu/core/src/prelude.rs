@@ -8,5 +8,5 @@ pub use crate::state::BennuState;
 
 pub use crate::config::{
     load as load_config, load_workspaces, save as save_config, save_workspaces, BennuConfig,
-    BennuWorkspace, BennuWorkspaces, ProjectSession,
+    BennuWorkspace, BennuWorkspaces, LibraryBeansConfig, ProjectSession,
 };

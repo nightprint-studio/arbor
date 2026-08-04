@@ -119,7 +119,7 @@ export const RULE_FAMILIES: RuleFamily[] = [
         id: 'DUP002',
         title: 'The same object created twice in one half of the install story',
         offWhen:
-          'Rarely — a CREATE OR REPLACE is already exempt, so a wrapper function every update script redefines does not reach this rule.',
+          'Rarely — a CREATE OR REPLACE is already exempt, so a wrapper function every update script redefines does not reach this rule. If a repository that installs two databases reports its version table here, name the product on each subtree rather than switching the rule off.',
         severity: 'review',
       },
       {

@@ -351,13 +351,17 @@ export interface UsagesResult {
  *  the current (possibly-unsaved) buffer — the caret is classified against it.
  *  Resolves to `null` gracefully when the caret isn't on a resolvable declaration or
  *  the reference index is still building.
- *  Wire: `bennu_references` — `ReferencesArgs { file, source, offset }`. */
+ *  `originFile` is for a caret inside a **library source view**: that file lives under no
+ *  project root, so its own path cannot pick the index the use sites are in — a file from
+ *  the project it was opened from does. Omit it for an ordinary project buffer.
+ *  Wire: `bennu_references` — `ReferencesArgs { file, source, offset, origin_file }`. */
 export function references(
   file: string,
   source: string,
   offset: number,
+  originFile?: string,
 ): Promise<UsagesResult | null> {
-  return bennu('bennu_references', { args: { file, source, offset } });
+  return bennu('bennu_references', { args: { file, source, offset, origin_file: originFile } });
 }
 
 /** Find-usages for a Struts **action** reference (a JSP `action="…"` value under the

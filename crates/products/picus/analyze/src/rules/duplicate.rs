@@ -7,6 +7,10 @@
 //!   is the product's entire premise, not a duplicate. `DUP002` therefore compares
 //!   **within one dialect** — and folders no ancestor declares a dialect for form
 //!   a group of their own rather than being lumped in with somebody's;
+//! * a repository that installs **two databases** says everything twice again, one
+//!   database's worth per subtree. `DUP002` therefore also compares within one
+//!   declared product: the version table created by the portal's initialisation
+//!   and again by the services' is two tables in two databases;
 //! * a table created in the initialisation folder and altered by four update
 //!   scripts is an ordinary, healthy repository. `DUP002` counts **creations**,
 //!   never definitions;
@@ -202,16 +206,30 @@ fn duplicate_definitions(context: &Context<'_>, output: &mut Output) {
         if context.excludes(&entry.name) {
             continue;
         }
-        // Keyed by scope **and** by the exact kind the source declared: two
-        // dialects creating the same table is the point of the repository, and a
-        // package spec is not its body.
+        // Keyed by the product **and** the scope **and** the exact kind the source
+        // declared: two databases creating the same table is two databases, two
+        // dialects creating it is the point of the repository, and a package spec
+        // is not its body.
+        //
+        // The product comes first because it is the coarsest: two subtrees that
+        // install different databases have nothing to say to each other whatever
+        // their dialects. It is `None` for the repository that installs one thing
+        // and for every repository that has never declared one, so those compare
+        // exactly as they always did — this narrows the comparison for projects
+        // that say more, and never widens it.
         //
         // A portable folder is its own key rather than being folded into either
         // dialect. Creating a table portably *and* creating it in the Oracle
-        // folder is a genuine duplicate — which is what `DUP001` reports across
-        // scopes; here the question is only "twice within the same origin".
+        // folder is a genuine duplicate on Oracle — reported here as a pair of
+        // scopes only when the same origin holds both, which is the conservative
+        // half of that question and the one that cannot be wrong.
         let mut by_origin: BTreeMap<
-            (Option<DialectScope>, picus_parse::prelude::ObjectKind, Option<Half>),
+            (
+                Option<&str>,
+                Option<DialectScope>,
+                picus_parse::prelude::ObjectKind,
+                Option<Half>,
+            ),
             Vec<&ObjectSite>,
         > = BTreeMap::new();
         for site in entry.creations() {
@@ -230,7 +248,10 @@ fn duplicate_definitions(context: &Context<'_>, output: &mut Output) {
                 continue;
             }
             let half = split_by_half.then(|| half_of(site.role));
-            by_origin.entry((site.scope, site.declared_kind, half)).or_default().push(site);
+            by_origin
+                .entry((site.product.as_deref(), site.scope, site.declared_kind, half))
+                .or_default()
+                .push(site);
         }
         for (_, sites) in by_origin {
             let Some((first, rest)) = sites.split_first() else { continue };

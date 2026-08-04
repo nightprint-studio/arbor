@@ -97,7 +97,26 @@ environment".
 | `java_intel.rs` | the editor's answers for a `.java` buffer |
 | `xml_intel.rs` | the editor's answers for a bean XML buffer |
 | `props_intel.rs` | the editor's answers for an `application*.yml` / `.properties` buffer |
+| `library_beans.rs` | beans declared **inside an allowlisted dependency**, read from bytecode — their own tier, never merged into `SpringModel` |
 | `ext.rs` | `FrameworkExtension` impl: file selection, model ownership, routing |
+
+### Why library beans are a separate tier
+
+A bean declared in a jar is a **declaration Spring may or may not act on**. Boot's whole model is
+auto-configuration gated by `@ConditionalOnMissingBean` / `@ConditionalOnClass` /
+`@ConditionalOnProperty`, and deciding what is actually registered is Spring's own condition
+evaluator — `@ConditionalOnMissingBean` depends on the entire bean set *and* on registration order,
+so nothing short of running it gives a true answer.
+
+So `LibraryBean` is deliberately not a `BeanDef`: it carries the conditions that gate it, it is
+grouped by the artifact it came from, and it takes no part in injection-candidate matching or in any
+diagnostic. Merging the two would turn `known.rs`'s house rule — *a bean that does not exist,
+navigated to and counted in a panel, is a confident lie* — into a lie told thousands of times.
+
+Which dependencies are read at all is the `LibraryBeanAllowlist`, empty by default. It is not only a
+volume control: the artifacts anyone allowlists in practice are their own shared modules, whose beans
+are plain `@Service` / `@Configuration` and unconditional. Boot's conditional ones only appear if
+somebody deliberately asks for them.
 
 ## What moved out
 

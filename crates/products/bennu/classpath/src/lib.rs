@@ -36,6 +36,7 @@
 //! `bennu_classpath::prelude::...`. The submodules stay `pub` for rustdoc
 //! navigation, but the prelude is the canonical call-site path.
 
+pub mod annotations;
 pub mod jdk;
 pub mod maven;
 pub mod members;

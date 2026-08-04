@@ -41,6 +41,19 @@ export interface BennuConfig {
   jdk_overrides: Record<string, string>;
   /** Per-project / per-file encoding override, keyed by absolute path → encoding label. */
   encoding_overrides: Record<string, string>;
+  /** Which dependencies contribute their Spring beans to the Library beans view. Empty by
+   *  default, and empty means no jar is ever opened. */
+  library_beans: LibraryBeansConfig;
+}
+
+/** Which dependency coordinates are read for their beans. Four axes because that is how a
+ *  coordinate gets matched in practice: one artifact, a whole group, everything an
+ *  organisation publishes (`com.acme.` — the trailing dot matters), or a naming convention. */
+export interface LibraryBeansConfig {
+  group_id: string[];
+  group_id_prefix: string[];
+  artifact_id: string[];
+  artifact_id_prefix: string[];
 }
 
 /** Read the typed bennu config (BE returns defaults on a missing/corrupt file). */

@@ -8,7 +8,7 @@
  * - **completion** over the keys Spring and the project's libraries document (read out of the
  *   dependency jars) *plus* the project's own `@ConfigurationProperties` paths — the second
  *   half being the one that matters on a legacy tree, where nobody wrote documentation for
- *   `appaltiecontratti.application.*` and everybody misspells it;
+ *   `gestionale.application.*` and everybody misspells it;
  * - **value completion** where the set is closed (an enum, a boolean);
  * - **ghost text** where the answer is single-valued — a documented default for a key left
  *   empty, or a prefix exactly one key can continue;

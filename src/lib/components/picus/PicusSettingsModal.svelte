@@ -379,7 +379,7 @@
           >
             <Input
               value={picusSettingsStore.otherVersionTables.join(', ')}
-              placeholder="VERSIONE_PORTALE, VERSIONE_DBPORT"
+              placeholder="VERSIONE_PORTALE, VERSIONE_ANAGRAFICA"
               oninput={(v) =>
                 picusSettingsStore.setOtherVersionTables(
                   v.split(',').map((n) => n.trim()).filter(Boolean),

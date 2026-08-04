@@ -26,6 +26,11 @@ pub struct ReferencesArgs {
     pub source: String,
     /// Byte offset of the caret.
     pub offset: usize,
+    /// For a caret inside a **library source view**: a file in the project the view was opened
+    /// from. That file is under no project root, so its own path cannot pick the index the use
+    /// sites live in — this does. Absent for an ordinary project buffer.
+    #[serde(default)]
+    pub origin_file: Option<String>,
 }
 
 /// Find all usages of the symbol at `file`:`offset`. `None` when no project owns the file,
@@ -35,7 +40,11 @@ fn bennu_references(
     _ctx: &BennuState,
     args: ReferencesArgs,
 ) -> Result<Option<UsagesResult>, String> {
-    let result = IndexService::global().find_usages(&args.file, &args.source, args.offset);
+    let service = IndexService::global();
+    let result = match &args.origin_file {
+        Some(origin) => service.find_usages_from(origin, &args.file, &args.source, args.offset),
+        None => service.find_usages(&args.file, &args.source, args.offset),
+    };
     Ok(result.map(usages_result_of))
 }
 

@@ -70,7 +70,7 @@ ten of them, and the cross-dialect rules ask about eight per object in the inven
 | `VER002` | blocking | An `update` file changes something and never writes the version table | The folder is not `update`; the file changes nothing |
 | `VER003` | blocking | Two update files leave a hole, overlap, or both install the same version | Files that are not update scripts under the project's pattern |
 | `DUP001` | blocking | The same row is inserted twice in one script | The rows differ anywhere; a value is computed; a named row would have to be matched against a positional one; the two INSERTs are in different files |
-| `DUP002` | review | The same object is **created** twice for one dialect | The two creations are for **different dialects** (that is the point of the repository); one of them is an `ALTER`; they are a package spec and its body |
+| `DUP002` | review | The same object is **created** twice for one dialect and one declared product | The two creations are for **different dialects** (that is the point of the repository) or for **different declared products** (two databases, one repository); one of them is an `ALTER`; they are a package spec and its body |
 | `ENC001` | review | A file's encoding differs from what its folder expects | The encoding was **pinned** by the user |
 | `ENC002` | blocking | A character in the file cannot be represented in the folder's encoding | The character does have a byte there (every accented Italian character does) |
 | `DML001` | review | A `DELETE` or an `UPDATE` has no `WHERE` | It is a `TRUNCATE`; it has a `WHERE`; it is the closing `UPDATE` on the project's **version table**, which has no `WHERE` by design |
