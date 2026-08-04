@@ -17,7 +17,7 @@
 //! (boxing/varargs/most-specific), flow-typing / reassignment, conditional/ternary narrowing, raw-array
 //! element inference, static member access on bare type names, wildcard/bound modelling.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -247,7 +247,7 @@ pub fn infer_expression_type_cached(
     let result = root
         .named_descendant_for_byte_range(start, end)
         .and_then(|node| {
-            let ctx = Ctx { root: *root, bytes, resolver, symbols, cache };
+            let ctx = Ctx { root: *root, bytes, resolver, symbols, cache, depth: Cell::new(0) };
             let enclosing = enclosing_type_fqn(&node, bytes, symbols);
             ctx.infer_expr(&node, enclosing.as_deref())
         })
@@ -282,7 +282,7 @@ pub fn infer_node_type_cached(
         return hit.clone();
     }
     let bytes = source.as_bytes();
-    let ctx = Ctx { root: *root, bytes, resolver, symbols, cache };
+    let ctx = Ctx { root: *root, bytes, resolver, symbols, cache, depth: Cell::new(0) };
     let enclosing = enclosing_type_fqn(node, bytes, symbols);
     let result = ctx.infer_expr(node, enclosing.as_deref()).filter(is_resolved);
     cache.expr.borrow_mut().insert(key, result.clone());
@@ -325,7 +325,7 @@ pub fn infer_receiver_type_cached(
     let bytes = source.as_bytes();
     let result = find_receiver(root, byte_offset)
         .and_then(|receiver| {
-            let ctx = Ctx { root: *root, bytes, resolver, symbols, cache };
+            let ctx = Ctx { root: *root, bytes, resolver, symbols, cache, depth: Cell::new(0) };
             let enclosing = enclosing_type_fqn(&receiver, bytes, symbols);
             ctx.infer_expr(&receiver, enclosing.as_deref())
         })
@@ -333,6 +333,24 @@ pub fn infer_receiver_type_cached(
     cache.receiver.borrow_mut().insert(byte_offset, result.clone());
     result
 }
+
+/// How deep [`Ctx::infer_expr`] may recurse before it gives up and answers "unknown".
+///
+/// Inference descends the expression tree, and the tree's depth is not bounded by
+/// anything a person wrote: `"a" + "b" + "c" + …` nests one level per operand, so a
+/// machine-generated concatenation of a few thousand pieces — an unrolled SQL
+/// builder, a generated messages class — is a few thousand levels. Recursing that
+/// far exhausts the stack, and a stack overflow in Rust is **not** a panic that
+/// [`std::panic::catch_unwind`] can turn into an error: the process aborts. One
+/// generated file in the project would take the whole backend down with it, and
+/// every other file's diagnostics with that.
+///
+/// So depth is capped and the answer past it is `None` — "I don't know", which every
+/// caller already handles, because inference not resolving is the ordinary case for
+/// anything off the classpath. 128 is far past hand-written code (a long fluent
+/// chain is tens of levels) and far short of what troubles a stack, counting the
+/// several frames each level actually costs.
+const MAX_INFER_DEPTH: usize = 128;
 
 /// Shared inference context. `root` is the file's parse tree root (to re-descend for `var`
 /// initializers); `cache` memoizes results + per-scope locals.
@@ -342,6 +360,22 @@ struct Ctx<'a> {
     resolver: &'a dyn TypeResolver,
     symbols: &'a FileSymbols,
     cache: &'a InferCache,
+    /// Current recursion depth of [`Ctx::infer_expr`]. See [`MAX_INFER_DEPTH`].
+    depth: Cell<usize>,
+}
+
+/// Holds a level of [`Ctx::depth`] for as long as it lives.
+///
+/// A `Drop` guard and not a decrement at the end of the function, because
+/// `infer_expr` leaves through a dozen `?` operators and a hand-written decrement
+/// would be missed by all of them — the counter would climb and inference would go
+/// permanently silent for the rest of the file.
+struct DepthGuard<'c>(&'c Cell<usize>);
+
+impl Drop for DepthGuard<'_> {
+    fn drop(&mut self) {
+        self.0.set(self.0.get().saturating_sub(1));
+    }
 }
 
 /// Classification of a bare identifier against the enclosing lambda scopes: it's a lambda parameter
@@ -355,7 +389,16 @@ enum LambdaParam {
 
 impl Ctx<'_> {
     /// Infer the type of an arbitrary receiver expression node.
+    ///
+    /// Every recursive path through inference comes back here, so this is the one
+    /// place the depth has to be counted (see [`MAX_INFER_DEPTH`]).
     fn infer_expr(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
+        if self.depth.get() >= MAX_INFER_DEPTH {
+            return None;
+        }
+        self.depth.set(self.depth.get() + 1);
+        let _depth = DepthGuard(&self.depth);
+
         match node.kind() {
             // `foo` — a bare name: local var / param / field of the enclosing type.
             "identifier" => self.infer_identifier(node, enclosing),
@@ -2126,5 +2169,63 @@ mod shadowing_tests {
         let r = resolver();
         let src = with_field("java.util.function.Consumer<Object> c = impresa -> impresa.id();");
         assert_eq!(infer_call(&src, "impresa.id()", &r), None);
+    }
+}
+
+/// The depth cap ([`MAX_INFER_DEPTH`]): what it stops, and what it must not cost.
+#[cfg(test)]
+mod depth_tests {
+    use super::test_support::*;
+    use super::*;
+    use std::collections::HashMap;
+
+    fn resolver() -> MapResolver {
+        let mut members = HashMap::new();
+        members.insert("java/lang/Object".to_string(), cm(vec![]));
+        members.insert("java/lang/String".to_string(), cm(vec![]));
+        MapResolver { members, simple: HashMap::new() }
+    }
+
+    /// `"x" + "x" + …` nests one level per operand, so a machine-generated
+    /// concatenation is thousands of levels deep. Without the cap this recursed
+    /// until the stack ran out — and a stack overflow is not a catchable panic, so
+    /// it took the whole backend process down with it.
+    ///
+    /// The assertion is that this **returns at all**: if the guard regresses, the
+    /// test process aborts rather than failing.
+    #[test]
+    fn deep_concatenation_answers_instead_of_overflowing() {
+        let chain = vec!["\"x\""; 3000].join(" + ");
+        let src = format!("class A {{ void m() {{ String s = {chain}; }} }}");
+        let start = src.find('"').expect("the chain is in the fixture");
+        let _ = infer_expression_type(&src, start, start + chain.len(), &resolver());
+    }
+
+    /// The cap is a backstop, not a budget: code anyone might actually write still
+    /// types. A twenty-piece concatenation is a long line, not a deep one.
+    #[test]
+    fn ordinary_concatenation_still_types() {
+        let chain = vec!["\"x\""; 20].join(" + ");
+        let src = format!("class A {{ void m() {{ String s = {chain}; }} }}");
+        let start = src.find('"').expect("the chain is in the fixture");
+        assert_eq!(
+            infer_expression_type(&src, start, start + chain.len(), &resolver())
+                .map(|t| t.binary_name),
+            Some("java/lang/String".to_string()),
+        );
+    }
+
+    /// The guard gives its level back when it goes out of scope — which is the whole
+    /// reason it is a `Drop` type and not a decrement at the end of `infer_expr`,
+    /// since that function leaves through a dozen `?` operators. A level that leaked
+    /// would make the counter climb and inference go silent for the rest of the call.
+    #[test]
+    fn guard_releases_its_level_when_dropped() {
+        let depth = Cell::new(1);
+        {
+            let _held = DepthGuard(&depth);
+            assert_eq!(depth.get(), 1, "held for as long as the guard lives");
+        }
+        assert_eq!(depth.get(), 0, "released on the way out");
     }
 }

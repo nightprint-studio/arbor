@@ -105,6 +105,13 @@ a partial identifier).
 
 ## NOT handled yet (honest edges)
 
+- **Depth-capped** — `infer_expr` recurses over the expression tree, and that tree's depth is
+  whatever the source says: a generated `"a" + "b" + …` of a few thousand pieces nests one level
+  per piece. Past `MAX_INFER_DEPTH` (128) inference answers `None` instead of descending further.
+  Exceeding it is not a stack that grows slowly — a stack overflow in Rust aborts the process,
+  which in `bennu-be` means every file loses its diagnostics, so the cap is load-bearing rather
+  than tidy. Hand-written code does not come close: a long fluent chain is tens of levels.
+
 - **Overload resolution is arity-first, not full argument-subtype** — among same-named
   overloads we keep those whose arity admits the call and take their return type when it
   is unique (breaking a return-type tie by a conservative primitive/reference argument

@@ -10,10 +10,13 @@
 //!     alone (we don't second-guess a written FQN);
 //!   * excluded up front: in-scope **type parameters** (`<T>`), types **declared in this file**,
 //!     `var`, and the ubiquitous `java.lang` names;
+//!   * excluded too: a **member type inherited from a supertype** (JLS §8.1.5) — `class Sub extends
+//!     Base` has `Base`'s nested `Inner` in scope as a bare `Inner`, and there is no import to look
+//!     for because there is nothing to import;
 //!   * flagged only when the resolver — imports, project index, star-imports, `java.lang` — returns
 //!     nothing.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use bennu_java::prelude::{extract_symbols, FileSymbols, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
@@ -56,6 +59,7 @@ pub fn unresolved_types_in(
     let mut known: HashSet<String> = symbols.types.iter().map(|t| t.name.clone()).collect();
     collect_type_params(nodes, bytes, &mut known);
 
+    let mut inherited = InheritedTypes::new(symbols, resolver);
     let mut out = Vec::new();
     for &n in nodes {
         if n.kind() != "type_identifier" {
@@ -94,9 +98,75 @@ pub fn unresolved_types_in(
         if crate::resolve::type_binary(name, symbols, resolver).is_some() {
             continue;
         }
+        // A member type inherited from a supertype is in scope by its simple name with no
+        // import (JLS §8.1.5) — `class Sub extends Base` writes `Inner` for `Base.Inner`,
+        // and there is nothing to import. Checked last: it costs resolver calls, and by
+        // here every cheaper rule has already declined.
+        if inherited.declares(name) {
+            continue;
+        }
         out.push(crate::check_id::CheckId::UnresolvedType.at(n, format!("Cannot resolve symbol `{name}`")));
     }
     out
+}
+
+/// Simple names in scope because a type declared in this file **inherits** them.
+///
+/// Two deliberate economies. It is **lazy**: the supertype roots cost a resolver lookup
+/// each and most files never reach this question, so nothing is computed until a name is
+/// about to be flagged. And it is **file-wide** rather than per-enclosing-type — a name
+/// inherited by any type in the file clears it everywhere in the file. Over-including is
+/// the conservative direction here (the same trade `collect_type_params` makes): the cost
+/// is a missed typo in the rare file that declares two unrelated classes, against the
+/// certainty of never reporting good code as broken.
+struct InheritedTypes<'a> {
+    symbols: &'a FileSymbols,
+    resolver: &'a dyn TypeResolver,
+    /// The supertypes of every type declared here, resolved on first use.
+    roots: Option<Vec<String>>,
+    /// name → answer, so a name written twenty times costs one walk.
+    seen: HashMap<String, bool>,
+}
+
+impl<'a> InheritedTypes<'a> {
+    fn new(symbols: &'a FileSymbols, resolver: &'a dyn TypeResolver) -> Self {
+        Self { symbols, resolver, roots: None, seen: HashMap::new() }
+    }
+
+    /// Whether `simple` names a member type inherited by something declared in this file.
+    fn declares(&mut self, simple: &str) -> bool {
+        if let Some(&answer) = self.seen.get(simple) {
+            return answer;
+        }
+        if self.roots.is_none() {
+            self.roots = Some(supertype_roots(self.symbols, self.resolver));
+        }
+        let resolver = self.resolver;
+        let answer = self.roots.as_ref().is_some_and(|roots| {
+            roots
+                .iter()
+                .any(|root| crate::resolve::inherited_member_type(root, simple, resolver).is_some())
+        });
+        self.seen.insert(simple.to_string(), answer);
+        answer
+    }
+}
+
+/// Every supertype named by a type declared in this file, as binary names. An `extends`
+/// or `implements` that doesn't resolve is dropped: we cannot see through it, and a
+/// caller that reads "not inherited" from an unreadable ancestor would be guessing.
+fn supertype_roots(symbols: &FileSymbols, resolver: &dyn TypeResolver) -> Vec<String> {
+    let mut roots: Vec<String> = Vec::new();
+    for declared in &symbols.types {
+        for written in declared.extends.iter().chain(declared.implements.iter()) {
+            if let Some(binary) = crate::resolve::type_binary(written, symbols, resolver) {
+                if !roots.contains(&binary) {
+                    roots.push(binary);
+                }
+            }
+        }
+    }
+    roots
 }
 
 /// Whether the file imports Lombok's `val` — the specific `import lombok.val;` or a `lombok.*`
@@ -145,6 +215,9 @@ mod tests {
         /// same-package resolution probes `members_of("<pkg>/<name>")`, so a same-package test seeds
         /// the sibling's binary here.
         known: HashSet<String>,
+        /// `binary → superclass binary`, for the hierarchies the inherited-member-type walk
+        /// climbs. Anything absent extends `Object`, which is where the walk stops.
+        supers: HashMap<String, String>,
     }
 
     impl TypeResolver for MapResolver {
@@ -152,7 +225,12 @@ mod tests {
             self.known.contains(binary).then(|| {
                 Arc::new(ClassMembers {
                     type_params: Vec::new(),
-                    superclass: Some("java/lang/Object".to_string()),
+                    superclass: Some(
+                        self.supers
+                            .get(binary)
+                            .cloned()
+                            .unwrap_or_else(|| "java/lang/Object".to_string()),
+                    ),
                     interfaces: Vec::new(),
                     methods: Vec::new(),
                     fields: Vec::new(),
@@ -176,7 +254,7 @@ mod tests {
             .into_iter()
             .map(|(s, b)| (s.to_string(), b.to_string()))
             .collect();
-        MapResolver { simple, known: HashSet::new() }
+        MapResolver { simple, known: HashSet::new(), supers: HashMap::new() }
     }
 
     fn diags(src: &str) -> Vec<String> {
@@ -285,5 +363,73 @@ mod tests {
         let d = diags("class C { void m() { try {} catch (Ouch e) {} } }");
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(d[0].contains("Ouch"), "{d:?}");
+    }
+
+    // ── Member types inherited from a supertype (JLS §8.1.5) ────────────────────
+    //
+    // A subclass using a static nested class of the class it extends. Nobody imports it,
+    // because there is nothing to import — the name is in scope by inheritance — so
+    // flagging it says a perfectly good build is broken.
+
+    /// `Base`, plus a nested `Inner` seeded under whichever binary form the test wants.
+    fn with_base(nested: &str) -> MapResolver {
+        let mut r = resolver();
+        r.simple.insert("Base".to_string(), "com/acme/Base".to_string());
+        r.known.insert("com/acme/Base".to_string());
+        r.known.insert(nested.to_string());
+        r
+    }
+
+    fn diags_with(src: &str, r: &MapResolver) -> Vec<String> {
+        unresolved_types(src, r).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn nested_type_of_a_superclass_needs_no_import() {
+        let r = with_base("com/acme/Base$Inner");
+        let d = diags_with("class Sub extends Base { Inner i; }", &r);
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    /// A project-source supertype is keyed off its dotted FQN, so its nested type is
+    /// `…/Base/Inner` rather than `…$Inner`. Both forms have to answer.
+    #[test]
+    fn nested_type_in_the_project_slash_form_also_resolves() {
+        let r = with_base("com/acme/Base/Inner");
+        let d = diags_with("class Sub extends Base { Inner i; }", &r);
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    /// Inherited means the whole chain, not just the immediate parent — a legacy hierarchy
+    /// keeps the shared nested types at its root.
+    #[test]
+    fn nested_type_is_found_through_the_whole_chain() {
+        let mut r = resolver();
+        r.simple.insert("Base".to_string(), "com/acme/Base".to_string());
+        r.known.insert("com/acme/Base".to_string());
+        r.known.insert("com/acme/Root".to_string());
+        r.known.insert("com/acme/Root$Inner".to_string());
+        r.supers.insert("com/acme/Base".to_string(), "com/acme/Root".to_string());
+        let d = diags_with("class Sub extends Base { Inner i; }", &r);
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    /// The fix must not blunt the check: a name that is genuinely nowhere is still flagged,
+    /// including inside a subclass that does inherit other names.
+    #[test]
+    fn a_real_typo_in_a_subclass_is_still_flagged() {
+        let r = with_base("com/acme/Base$Inner");
+        let d = diags_with("class Sub extends Base { Innr i; }", &r);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("Innr"), "{d:?}");
+    }
+
+    /// A class that extends nothing inherits nothing — the roots are empty and the name is
+    /// flagged exactly as before.
+    #[test]
+    fn a_class_with_no_supertype_gains_nothing() {
+        let r = with_base("com/acme/Base$Inner");
+        let d = diags_with("class Free { Inner i; }", &r);
+        assert_eq!(d.len(), 1, "{d:?}");
     }
 }

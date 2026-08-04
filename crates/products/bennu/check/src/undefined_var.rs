@@ -208,6 +208,14 @@ pub fn undefined_var_errors_in(
         if type_binary(name, symbols, resolver).is_some() {
             continue;
         }
+        // …and so is a nested type INHERITED from a supertype (JLS §8.1.5): a subclass writes
+        // `Inner.CONST` for `Base.Inner.CONST`, with no import, because the name is in scope by
+        // inheritance. Neither the resolver's simple-name index nor `type_binary` can see that —
+        // they don't know which type the name was written inside — so it is asked here, where
+        // the enclosing type's binary name is already established.
+        if crate::resolve::inherited_member_type(&top_binary, name, resolver).is_some() {
+            continue;
+        }
         // RESOLUTION 6: a bare name brought in by an `import static …` (a specific member, or a member
         // of a fully-known wildcard owner). Precomputed in `static_import_names`.
         if static_import_names.contains(name) {

@@ -179,6 +179,23 @@
   }
 
   // ── Byte-span diagnostics → CM lint markers ───────────────────────────────────
+
+  /**
+   * A diagnostic message is meant to be a sentence, and every backend here writes
+   * one — but nothing in the contract enforces it, and the way it breaks is that a
+   * message quotes the text it is complaining about. Rendered whole that is a wall
+   * over the editor that reads as a crash, which is a bad way to learn a line is
+   * wrong. Clamped, a long message stays readable and a pathological one stays a
+   * message. The tooltip also scrolls (see `theme.ts`); this keeps the DOM node
+   * itself from being the size of the file.
+   */
+  const MAX_DIAGNOSTIC_CHARS = 2000;
+  function clampMessage(message: string): string {
+    return message.length <= MAX_DIAGNOSTIC_CHARS
+      ? message
+      : message.slice(0, MAX_DIAGNOSTIC_CHARS) + ' […]';
+  }
+
   function toCmDiagnostics(errors: EditorDiagnostic[], src: string): CmDiagnostic[] {
     const b2u = makeByteToU16(src);
     const len = src.length;
@@ -189,7 +206,7 @@
       from = Math.max(0, Math.min(from, len));
       to = Math.max(from, Math.min(to, len));
       if (to === from) to = Math.min(len, from + 1); // give the marker some width
-      out.push({ from, to, severity: e.severity, message: e.message, actions: e.actions });
+      out.push({ from, to, severity: e.severity, message: clampMessage(e.message), actions: e.actions });
     }
     return out;
   }

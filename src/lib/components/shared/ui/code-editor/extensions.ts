@@ -192,6 +192,11 @@ export function createCodeEditorExtensions(
     exts.push(EditorState.languageData.of(() => [{ commentTokens: ct }]));
   }
 
+  // Editing behaviours the language owns (escaped paste into a string literal, …).
+  // Independent of how it highlights — a tree-sitter descriptor has no `cmExtension`
+  // to compose them into.
+  if (lang.editing) exts.push(lang.editing);
+
   // Lezer folding for a `cmExtension` language that opts in (`cmFold`) — drives the
   // fold gutter from the language's own `foldNodeProp` (e.g. `lang-html` folds tag
   // bodies, `lang-json` folds objects). Tree-sitter descriptors fold via `foldNode`

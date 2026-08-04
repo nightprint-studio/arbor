@@ -6,13 +6,19 @@
  * syntax error. Every SQL editor worth using fixes that at the moment of the paste,
  * because the alternative is finding it at the moment of the run.
  *
- * This file is only the wiring. Which quote encloses the caret — the part that can
- * be wrong without anyone noticing — is {@link quoteAround}, in `quote-context.ts`,
- * where it can be run without an editor.
+ * This file is only SQL's half of the rule. Which quote encloses the caret — the
+ * part that can be wrong without anyone noticing — is {@link quoteAround}, in
+ * `quote-context.ts`, where it can be run without an editor; the CodeMirror wiring
+ * is {@link pasteIntoLiteral}, shared with the Java editor.
+ *
+ * Newlines are left alone on purpose, unlike Java's: a SQL literal may span lines,
+ * so a pasted multi-line value is already correct, and breaking it into `||` pieces
+ * would be noise — and would not even be portable, since the engines disagree about
+ * how strings are concatenated.
  */
 
-import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
+import { pasteIntoLiteral } from '$lib/components/shared/ui/code-editor';
 import type { Dialect } from '$lib/types/picus';
 import { quoteAround } from './quote-context';
 
@@ -20,34 +26,11 @@ import { quoteAround } from './quote-context';
  * The CodeMirror extension. Rides with the SQL language descriptor rather than
  * living in the shared editor: escaping is a property of the language, and the
  * editor has no business knowing what a SQL string is.
- *
- * Registered through `domEventHandlers`, whose handlers CodeMirror runs **before**
- * its own — so returning `true` here is what stops the default paste from also
- * inserting the unescaped text.
  */
 export function escapeQuotesOnPaste(dialect: Dialect): Extension {
-  return EditorView.domEventHandlers({
-    paste(event, view) {
-      const text = event.clipboardData?.getData('text/plain') ?? '';
-      if (!text) return false;
-
-      // The paste lands where the selection starts, so that is the position whose
-      // context decides — not the caret's head, which for a backwards selection is
-      // the other end.
-      const { from, to } = view.state.selection.main;
-      const quote = quoteAround(view.state.doc.toString(), from, dialect);
-      if (!quote || !text.includes(quote)) return false;
-
-      const escaped = text.split(quote).join(quote + quote);
-      event.preventDefault();
-      view.dispatch({
-        changes: { from, to, insert: escaped },
-        selection: { anchor: from + escaped.length },
-        // Named as a paste so it joins the undo history as one, and so `Ctrl+Z`
-        // takes the whole insertion back rather than unpicking it piecemeal.
-        userEvent: 'input.paste',
-      });
-      return true;
-    },
+  return pasteIntoLiteral((doc, offset, text) => {
+    const quote = quoteAround(doc, offset, dialect);
+    if (!quote) return null;
+    return text.split(quote).join(quote + quote);
   });
 }

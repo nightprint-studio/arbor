@@ -108,7 +108,9 @@ fn check_switch<'t>(switch: Node<'t>, bytes: &[u8], out: &mut Vec<Diagnostic>) {
                 }
                 if seen.iter().any(|s| s == text) {
                     out.push(Diagnostic {
-                        message: format!("Duplicate case label `{text}`"),
+                        // A case label is usually a constant, but it can be a string
+                        // literal of any size — quote it as an excerpt.
+                        message: format!("Duplicate case label `{}`", crate::text::short(text)),
                         severity: crate::check_id::CheckId::DuplicateCaseLabel.severity().to_string(),
                         code: crate::check_id::CheckId::DuplicateCaseLabel.code().to_string(),
                         start: cst.start_byte(),

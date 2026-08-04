@@ -134,6 +134,38 @@
   just indents as usual.
 </p>
 
+<h2>Pasting into a string</h2>
+<p>
+  Paste inside a Java <code>"…"</code> and the text is <strong>escaped</strong> as it lands:
+  quotes and backslashes are escaped, tabs become <code>\t</code>. Paste something that
+  <strong>spans several lines</strong> and it becomes concatenated literals, one per line, aligned
+  under the opening quote and joined with <code>+</code> — the shape you would have typed by hand,
+  because a <code>"…"</code> cannot span lines in Java:
+</p>
+<pre><code>{`String q = "SELECT *\\n" +
+           "FROM \\"user\\"";`}</code></pre>
+<p>
+  A <strong>text block</strong> (<code>"""</code>) is treated differently, because it exists to avoid
+  exactly that: newlines stay newlines, pasted lines are indented to match the block, and only the
+  quotes that would close it early are escaped. Inside a <code>'…'</code> character literal the text
+  is escaped and never split.
+</p>
+<p>
+  Everywhere else — in code, in a comment, or just past the closing quote — a paste arrives exactly
+  as it left.
+</p>
+<p>
+  Past <strong>500 lines</strong> the text is still escaped but no longer split: the newlines stay
+  inline in a single literal. A concatenation of thousands of pieces is one expression nested
+  thousands of levels deep, which is more than the tools that read it can walk.
+</p>
+<p>
+  Past <strong>64&nbsp;KB</strong> the paste is <strong>refused</strong>, with a note at the caret
+  saying so. That is the most a compiled string constant can hold however it is written — splitting
+  it changes nothing, because the compiler joins the pieces back into one constant — so there is no
+  arrangement of that text that would build, and inserting it would only mean finding that out later.
+</p>
+
 <h2>Completions</h2>
 <p>
   Typing <code>.</code> after an expression offers member completions; press
@@ -347,6 +379,21 @@
   a file also silently refreshes the whole panel, so a fix that resolves an error in a
   <em>different</em> file (one that used what you changed) clears there too — again without re-running
   validation by hand.
+</p>
+<h3>Machine-generated expressions</h3>
+<p>
+  Everything that reasons about <em>types</em> — hover, the checks that compare one against another,
+  completion after a dot — works by walking the expression it is looking at. Nesting is what that walk
+  costs, and an expression's nesting is not bounded by what a person would write: a generated
+  concatenation of a few thousand pieces (<code>"a" + "b" + …</code>, an unrolled query builder, a
+  generated messages class) nests one level per piece.
+</p>
+<p>
+  Past about <strong>128 levels</strong> Bennu stops descending and answers <em>unknown</em> for that
+  expression. In practice that means a hover over it says nothing and the type-dependent checks skip
+  it — <strong>only there</strong>, in that one expression. The syntax checks, the outline, find
+  usages and go-to are unaffected, and every other expression in the file types normally. Hand-written
+  code never reaches the limit; a long fluent chain is tens of levels, not hundreds.
 </p>
 
 <h2>Generated members</h2>

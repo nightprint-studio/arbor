@@ -99,7 +99,10 @@ pub fn invalid_statements_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
                 ""
             };
             out.push(Diagnostic {
-                message: format!("`{}` is not a statement{hint}", text.trim()),
+                // `text` is whatever expression the parser found — which may be a
+                // string literal holding a pasted document, so it is quoted as an
+                // excerpt. The span already points at the whole thing.
+                message: format!("`{}` is not a statement{hint}", crate::text::short(text)),
                 severity: crate::check_id::CheckId::NotAStatement.severity().to_string(),
                 code: crate::check_id::CheckId::NotAStatement.code().to_string(),
                 start: expr.start_byte(),

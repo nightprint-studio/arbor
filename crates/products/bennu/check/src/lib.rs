@@ -75,6 +75,7 @@ pub mod switch_dup;
 pub mod switch_flow;
 pub mod switches;
 pub mod syntax;
+pub mod text;
 pub mod throws_widen;
 pub mod type_arg_arity;
 pub mod type_use;

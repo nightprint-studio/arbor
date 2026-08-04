@@ -75,11 +75,10 @@ export function sqlLanguage(
 
   const descriptor: LanguageDescriptor = {
     id: `sql-${resolved}`,
-    // Highlighting, plus the one editing behaviour that belongs to the *language*
-    // rather than to the editor: a paste into a string literal has its quotes
-    // escaped. CodeMirror accepts an array as an extension, so this composes here
-    // without the shared editor having to learn what a SQL string is.
-    cmExtension: [sqlHighlight(resolved), escapeQuotesOnPaste(spoken)],
+    cmExtension: sqlHighlight(resolved),
+    // The one editing behaviour that belongs to the *language* rather than to the
+    // editor: a paste into a string literal has its quotes escaped.
+    editing: escapeQuotesOnPaste(spoken),
     // No `commentTokens` here on purpose: a `cmExtension` language already carries
     // its own (the legacy SQL modes declare `--`), so `Ctrl+/` works without one.
     intel: createSqlIntel(spoken, connectionId),

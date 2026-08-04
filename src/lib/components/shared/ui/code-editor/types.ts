@@ -179,6 +179,17 @@ export interface LanguageDescriptor {
    */
   commentTokens?: { line?: string; block?: { open: string; close: string } };
 
+  /**
+   * Optional editing behaviours that belong to the **language** rather than to the
+   * editor — an escaped paste into a string literal, a smart delimiter, a language's
+   * own input handler.
+   *
+   * Installed whichever way the descriptor highlights, which is why it is not folded
+   * into {@link cmExtension}: that one is the highlighter, and a tree-sitter
+   * descriptor (Java) cannot set it without losing its own colouring.
+   */
+  editing?: Extension;
+
   /** Optional language-intelligence hooks (autocomplete / hover / …). A product
    *  fills this in to grow completions without a core change; the core installs
    *  the matching CodeMirror extensions when present (see

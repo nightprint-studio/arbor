@@ -117,27 +117,35 @@ class TreeSitterHighlighter {
     const builder = new RangeSetBuilder<Decoration>();
     const classify = this.lang.classify;
     const injections = this.lang.injections;
-    const visit = (node: Node, parentType: string | null, field: string | null) => {
+    // Pre-order walk over an **explicit** stack rather than the call stack. Depth here
+    // is the source's nesting depth, and some real code nests in the thousands — a
+    // `a + b + c + …` chain is one level per operand — which recursion answers with a
+    // blown stack and a dead window. Children are pushed in reverse so they pop in
+    // index order, which is also what `RangeSetBuilder` requires (ascending positions).
+    const stack: { node: Node; parentType: string | null; field: string | null }[] = [
+      { node: this.tree.rootNode, parentType: null, field: null },
+    ];
+    while (stack.length > 0) {
+      const { node, parentType, field } = stack.pop()!;
       if (node.childCount === 0) {
         // Embedded language (e.g. JS in a JSP `<script>` body): tokenize the leaf's raw
         // text with the injected StreamParser instead of a single `classify` colour.
         const inj = injections?.[node.type];
         if (inj && node.endIndex > node.startIndex) {
           addInjectedTokens(builder, inj, node.text, node.startIndex);
-          return;
+          continue;
         }
         const cls = classify(node, node.isNamed, field, parentType);
         if (cls && node.endIndex > node.startIndex) {
           builder.add(node.startIndex, node.endIndex, tokenMark(cls));
         }
-        return;
+        continue;
       }
-      for (let i = 0; i < node.childCount; i++) {
+      for (let i = node.childCount - 1; i >= 0; i--) {
         const child = node.child(i);
-        if (child) visit(child, node.type, node.fieldNameForChild(i));
+        if (child) stack.push({ node: child, parentType: node.type, field: node.fieldNameForChild(i) });
       }
-    };
-    visit(this.tree.rootNode, null, null);
+    }
     return builder.finish();
   }
 }

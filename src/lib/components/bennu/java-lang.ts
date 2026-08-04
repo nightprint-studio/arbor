@@ -42,6 +42,7 @@ import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
 import { makeHoverSource } from './bennu-hover';
+import { javaStringPaste } from './java-string-paste';
 
 const RUNTIME_WASM = '/bennu/tree-sitter.wasm';
 const GRAMMAR_WASM = '/bennu/tree-sitter-java.wasm';
@@ -442,6 +443,9 @@ export const javaLanguage: LanguageDescriptor = {
   classify,
   foldNode,
   commentTokens: { line: '//', block: { open: '/*', close: '*/' } },
+  // A paste into a string literal is escaped, and one that spans lines becomes
+  // concatenated literals — Java has no syntax for a `"…"` across two lines.
+  editing: javaStringPaste,
   intel: { completion: javaCompletionSource, hover: javaHoverSource },
   // resolveGoto: reserved for when the symbol index / language service lands.
 };

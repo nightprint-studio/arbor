@@ -42,7 +42,7 @@ use bennu_java::prelude::{extract_symbols_from_root, FileSymbols, InferCache, Ty
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::{Node, Parser};
 
-use crate::check::{check_file, check_file_in, collect_nodes, FileContext, MAX_DIAGNOSTICS};
+use crate::check::{check_file, check_file_in, collect_nodes, finish, FileContext};
 
 /// Per-file state threaded across successive validations of the same buffer. Opaque to callers — hand
 /// the same `&mut` back each time; a `Default` (empty) cache just means "first run, recompute all".
@@ -100,9 +100,7 @@ pub fn check_file_resolved_incremental(
     // any stale cache, so a later JDK-available run rebuilds from scratch).
     if !jdk_available {
         *cache = IncrementalCache::default();
-        out.sort_by_key(|d| d.start);
-        out.truncate(MAX_DIAGNOSTICS);
-        return out;
+        return finish(out);
     }
 
     let symbols = extract_symbols_from_root(&root, source);
@@ -164,9 +162,7 @@ pub fn check_file_resolved_incremental(
 
     *cache = IncrementalCache { structural_hash: structural, resolver_rev, bodies: new_bodies };
 
-    out.sort_by_key(|d| d.start);
-    out.truncate(MAX_DIAGNOSTICS);
-    out
+    finish(out)
 }
 
 /// The expensive, per-expression resolver checks — run over a node bucket (a body, or the structural

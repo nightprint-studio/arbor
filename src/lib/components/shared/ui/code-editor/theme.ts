@@ -127,7 +127,27 @@ export const codeEditorTheme = EditorView.theme(
       backgroundColor: 'var(--bg-elevated)', color: 'var(--text-primary)',
       border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)',
     },
-    '.cm-tooltip.cm-tooltip-lint': { padding: '2px 6px' },
+    // A diagnostic message is a sentence, but nothing guarantees it: a backend that
+    // quotes the offending text can produce one the size of the file. Unbounded, it
+    // covers the window and reads like a crash rather than a message about a line.
+    // Bounded and scrollable, the worst case is a small box you can ignore.
+    '.cm-tooltip.cm-tooltip-lint': {
+      padding: '2px 6px', maxWidth: '520px', maxHeight: '340px', overflowY: 'auto',
+    },
+    '.cm-diagnostic': { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+    // The lint list (the panel) has the same exposure, one row per diagnostic.
+    '.cm-panel.cm-panel-lint ul': { maxHeight: '180px' },
+    '.cm-panel.cm-panel-lint li': { overflowWrap: 'anywhere' },
+
+    // ── Refused paste (`pasteIntoLiteral`) ────────────────────────────────────
+    // Shown at the caret when a language will not perform a paste. It states a
+    // limit, so it is informative rather than alarming — warning, not error.
+    '.cm-paste-hint': {
+      padding: '6px 10px', maxWidth: '380px',
+      fontFamily: 'var(--font-ui-sans)', fontSize: 'var(--font-size-xs)',
+      lineHeight: '1.45', color: 'var(--text-primary)',
+      borderLeft: '2px solid var(--warning)',
+    },
 
     // ── Hover card (a language `intel.hover` source) ──────────────────────────
     // One card shape for every product: a monospaced title (a signature, a column

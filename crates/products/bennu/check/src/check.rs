@@ -9,6 +9,36 @@ use tree_sitter::Parser;
 /// gutter red (or flood the Problems panel). Ordered by position, so the cap keeps the earliest.
 pub const MAX_DIAGNOSTICS: usize = 200;
 
+/// Cap on one diagnostic's message.
+///
+/// Checks quote the code they are about — through [`crate::text::short`], which keeps
+/// that to a phrase. This is the backstop for the ones that don't, present or future:
+/// a message is a sentence, and the failure mode when it isn't is a tooltip the size
+/// of the file, which reads as a crash rather than as a note about a line.
+pub const MAX_MESSAGE_CHARS: usize = 400;
+
+/// Order by position, cap the count, cap each message — the tail every entry point
+/// here shares, so a new one cannot forget a third of it.
+pub(crate) fn finish(mut out: Vec<Diagnostic>) -> Vec<Diagnostic> {
+    out.sort_by_key(|d| d.start);
+    out.truncate(MAX_DIAGNOSTICS);
+    for d in &mut out {
+        clamp_message(&mut d.message);
+    }
+    out
+}
+
+fn clamp_message(message: &mut String) {
+    // Bytes ≥ chars, so this rules out every ordinary message without counting.
+    if message.len() <= MAX_MESSAGE_CHARS {
+        return;
+    }
+    if let Some((cut, _)) = message.char_indices().nth(MAX_MESSAGE_CHARS) {
+        message.truncate(cut);
+        message.push_str(" […]");
+    }
+}
+
 /// Every node of the tree in the SAME order a check's `stack.pop()` DFS visits them (children pushed
 /// then the node recorded), so a check can iterate this flat slice instead of re-walking the tree and
 /// get byte-for-byte identical behaviour. Collecting once and sharing it across the resolver-backed
@@ -119,9 +149,7 @@ pub fn check_file_in(
     if let Some(major) = ctx.java_major {
         out.extend(crate::version::version_errors_nodes(root, nodes, source, major));
     }
-    out.sort_by_key(|d| d.start);
-    out.truncate(MAX_DIAGNOSTICS);
-    out
+    finish(out)
 }
 
 /// Like [`check_file`], plus the **resolver-backed** checks (currently: unknown members on an
@@ -223,9 +251,7 @@ pub fn check_file_resolved(
     if let Some(t) = t_total {
         log_profile(ctx, t.elapsed(), &times);
     }
-    out.sort_by_key(|d| d.start);
-    out.truncate(MAX_DIAGNOSTICS);
-    out
+    finish(out)
 }
 
 /// Whether opt-in per-check profiling is enabled (env `BENNU_PROFILE` set). Read once.
