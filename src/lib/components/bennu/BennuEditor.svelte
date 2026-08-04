@@ -1012,6 +1012,32 @@
     return true;
   }
 
+  /** Go-to from a **project file** into a library/JDK **member or type** — `list.add(…)` lands on
+   *  `add` in `ArrayList`'s source view, not merely on the class.
+   *
+   *  The same backend call as {@link tryGoToLibraryNav}; the only difference is which file names
+   *  the project. `library_declaration` takes `origin_file` purely to pick the project's classpath
+   *  resolver and makes no assumption that the buffer is itself a library view, so a project buffer
+   *  works unchanged — the resolution was simply never offered from here. */
+  async function tryGoToLibraryMember(offset: number): Promise<boolean> {
+    const path = activePath;
+    if (!path || !editorComp || !isJavaFile) return false;
+    const loc = await ipcLibraryDeclaration(path, editorComp.getValue(), offset).catch(() => null);
+    if (!loc) return false;
+    // Tracked with the same origin project, so the opened view is read-only and itself navigable.
+    // No download banner: that needs the TYPE name to re-resolve the artifact, and the word under
+    // the caret here is a member (`add`) — offering a button that cannot work is worse than not
+    // offering it. Reaching the type by name still gets its banner (`tryGoToDecompiled`).
+    decompiledStore.register(loc.file, {
+      originFile: path,
+      originSource: '',
+      name: '',
+      canDownload: false,
+    });
+    openDefinitionFile(loc.file, loc.offset);
+    return true;
+  }
+
   /** Go-to WITHIN a library/JDK source view: resolve the caret against the origin project's
    *  classpath resolver and open the target's source view (member-precise). Registers the target
    *  with the SAME origin project so navigation chains library → library. */
@@ -1173,6 +1199,21 @@
    *  for **Ctrl+click**, where a click on any random token shouldn't pop a toast (IntelliJ
    *  stays quiet there); an explicit **Ctrl+B / palette** invocation keeps the feedback. */
   async function resolveDefinition(action: string, offset?: number, silent = false) {
+    // The whole resolution behind one in-progress mark. It is a chain of round trips —
+    // and the last of them, a library type, has to be found on the classpath and read
+    // out of an archive — so it can run for seconds with nothing on screen changing.
+    // A `finally` and not an end-of-function call: the chain returns from a dozen
+    // places, and a mark that outlives its navigation is a spinner that never stops.
+    const token = bennuUiStore.beginNavigation(action || 'declaration');
+    try {
+      await resolveDefinitionIn(action, offset, silent);
+    } finally {
+      bennuUiStore.endNavigation(token);
+    }
+  }
+
+  /** The body of {@link resolveDefinition} — every resolution step, in order. */
+  async function resolveDefinitionIn(action: string, offset?: number, silent = false) {
     const path = activePath;
     if (!path) return;
     // 0. Current tab IS a library/JDK source view → resolve the caret against the ORIGIN project's
@@ -1211,8 +1252,15 @@
     //     or a Spring bean id — go to the Java class it names.
     if (action && (await tryGoToXmlClass(action))) return;
     // 2. Instant offline class-index fallback (types) when the BE resolver is cold.
+    if (action && (await tryGoToClassDeclaration(action))) return;
+    // 2b. A library/JDK **member** — `list.add(…)`, `LOGGER.info(…)`, `cipher.doFinal(…)`. The
+    //     caret's receiver is typed against this project's classpath and the target is served
+    //     member-precise, so it lands on the method rather than at the top of the class. Runs
+    //     before the name-only fallback below, which can look up a TYPE name and nothing else:
+    //     on `list.add` the word under the caret is `add`, which is no type, so without this
+    //     step every library member go-to quietly did nothing.
+    if (offset != null && (await tryGoToLibraryMember(offset))) return;
     if (action) {
-      if (await tryGoToClassDeclaration(action)) return;
       // A library/JDK type with no project source → its decompiled-from-bytecode stub.
       if (await tryGoToDecompiled(action)) return;
     } else {

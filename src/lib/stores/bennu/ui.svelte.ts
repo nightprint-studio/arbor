@@ -114,6 +114,15 @@ function createBennuUiStore() {
   // Goto relay — a panel (Structure / Problems / a find hit) requests a jump; the
   // editor watches this ticking target and scrolls there. A monotonically bumped
   // `nonce` makes a repeat jump to the same line fire again.
+  /** How long a go-to may take before it is announced. Under this it lands as if
+   *  instantly and an indicator would only flicker. */
+  const NAVIGATION_ANNOUNCE_MS = 250;
+  /** What go-to is resolving right now (`"List"`), or `null`. */
+  let navigatingTo = $state<string | null>(null);
+  /** Bumped per navigation, so a stale one cannot clear a newer one's label. */
+  let navigationToken = 0;
+  let navigationTimer: ReturnType<typeof setTimeout> | null = null;
+
   let gotoTarget = $state<{ line: number; nonce: number } | null>(null);
 
   // Goto-by-byte-offset relay — the Forms tool window (a sibling of the editor) asks the
@@ -246,6 +255,46 @@ function createBennuUiStore() {
     /** Open / close the workspace manager modal. */
     openWorkspaceManager()  { workspaceManagerOpen = true; },
     closeWorkspaceManager() { workspaceManagerOpen = false; },
+
+    /** What go-to is currently resolving, or `null` when nothing is. Drives the status
+     *  bar's "Opening …" item.
+     *
+     *  Go-to is the one action here that can take seconds without anything appearing:
+     *  a library type has to be found on the classpath, its source or bytecode read out
+     *  of an archive and a view written to disk, and until that finishes the editor
+     *  looks exactly as it did before the click. Silence reads as "nothing happened",
+     *  which is why it gets said out loud. */
+    get navigatingTo() {
+      return navigatingTo;
+    },
+
+    /** Mark go-to as in progress, naming what it is opening. Returns the token to hand
+     *  {@link endNavigation}, so a slow resolution that finishes AFTER a newer one
+     *  started cannot clear the newer one's label.
+     *
+     *  The label appears only if the navigation is still running a moment later. Most
+     *  land immediately, and an indicator that appears and vanishes inside a frame is
+     *  noise rather than feedback — only a go-to that is actually making you wait says
+     *  anything. */
+    beginNavigation(label: string): number {
+      navigationToken += 1;
+      const token = navigationToken;
+      if (navigationTimer !== null) clearTimeout(navigationTimer);
+      navigationTimer = setTimeout(() => {
+        if (token === navigationToken) navigatingTo = label;
+      }, NAVIGATION_ANNOUNCE_MS);
+      return token;
+    },
+
+    /** Clear the in-progress mark, if `token` is still the current navigation. */
+    endNavigation(token: number) {
+      if (token !== navigationToken) return;
+      if (navigationTimer !== null) {
+        clearTimeout(navigationTimer);
+        navigationTimer = null;
+      }
+      navigatingTo = null;
+    },
 
     /** Ask the editor to scroll to a 1-based line (a panel → editor relay). */
     requestGoto(line: number) {

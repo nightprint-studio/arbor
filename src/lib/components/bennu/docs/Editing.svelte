@@ -538,6 +538,12 @@
   root that isn't a property of the action, is flagged with a warning squiggle.
 </p>
 <p>
+  The same gesture on a <strong>library or JDK method</strong> — <code>list.add(…)</code>,
+  <code>LOGGER.info(…)</code> — opens that library's source view and lands <strong>on the method
+  itself</strong>. The receiver is typed against the project's classpath, so it works on anything your
+  dependencies resolve to, and it chains: from inside one library view you can go on to the next.
+</p>
+<p>
   Ctrl+B on a <strong>library or JDK type</strong> (one with no project source) opens a
   <strong>decompiled stub</strong> generated from its bytecode — the type declaration plus every field
   and method signature, with a header noting it's decompiled (method bodies aren't stored in a class

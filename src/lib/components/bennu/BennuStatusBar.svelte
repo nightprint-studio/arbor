@@ -22,6 +22,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
+  import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import type { Snippet } from 'svelte';
 
   let { footerExtra }: { footerExtra?: Snippet } = $props();
@@ -91,6 +92,16 @@
 
   <span class="bf-spacer"></span>
 
+  <!-- Go-to in progress. Only shown once it has taken long enough to be worth saying
+       (the store holds it back), and it is the only feedback there is: until the target
+       opens, nothing else on screen changes. -->
+  {#if bennuUiStore.navigatingTo}
+    <span class="bf-item bf-navigating" use:tooltip={'Resolving the declaration — a library type is read from the classpath'}>
+      <Spinner size={11} /> Opening {bennuUiStore.navigatingTo}…
+    </span>
+    <span class="bf-sep"></span>
+  {/if}
+
   {#if projectStore.project}
     <!-- Indexing status — driven by the real index-progress events / stats poll. A Cargo
          project builds no index, so "Indexed · 0" would be a reading of nothing. -->
@@ -140,6 +151,8 @@
   .bf-item :global(svg) { color: var(--text-disabled); }
   .bf-indexing { color: var(--accent); }
   .bf-indexing :global(svg) { color: var(--accent); }
+  .bf-navigating { color: var(--accent); }
+  .bf-navigating :global(svg) { color: var(--accent); }
   .bf-muted { color: var(--text-disabled); }
   .bf-sub {
     font-size: var(--font-size-2xs); color: var(--text-disabled);
