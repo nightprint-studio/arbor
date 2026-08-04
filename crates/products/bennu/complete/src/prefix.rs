@@ -69,6 +69,33 @@ where
     found
 }
 
+/// [`unique_continuation`], refused when the buffer already holds the rest of the token ahead of
+/// the caret.
+///
+/// The fourth way ghost text can be wrong, and the one that only appears when you edit *inside* a
+/// token rather than at the end of one. `</jav|a.version>` has a prefix, one candidate and
+/// therefore a certain continuation — which is sitting one character to the right. Drawn as ghost
+/// text it reads `</java.versiona.version>`: an answer to a question the user did not ask.
+///
+/// Refused rather than trimmed, because there is nothing to trim *to*. Ghost text is committed at
+/// the caret, so with `a.ver` already ahead of it there is no insertion that produces
+/// `java.version` — not the continuation, not the part of it that is missing. The honest answer
+/// is nothing, and the popup (which replaces a span instead of inserting at a point) still works.
+///
+/// `ahead` is what [`crate::caret::token_after`] returns for the same `part` predicate that
+/// produced `prefix`: characters that could still belong to this token. Text the token could
+/// never absorb — `=`, `>`, a quote — is not in it and correctly does not suppress anything.
+pub fn ghost<I, S>(prefix: &str, ahead: &str, candidates: I) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    if !ahead.is_empty() {
+        return None;
+    }
+    unique_continuation(prefix, candidates)
+}
+
 /// The longest string every candidate begins with — the prefix a Tab could safely commit when
 /// the full answer is still ambiguous.
 ///
@@ -153,6 +180,17 @@ mod tests {
         assert_eq!(unique_continuation("", ["server.port"]), None);
         assert_eq!(unique_continuation("server.port", ["server.port"]), None);
         assert_eq!(unique_continuation("zzz", ["server.port"]), None);
+    }
+
+    /// Editing inside an existing token: certain, and already written.
+    #[test]
+    fn nothing_is_ghosted_over_a_token_the_buffer_already_finishes() {
+        assert_eq!(ghost("jav", "a.version", ["java.version"]), None);
+        // The same caret with nothing of the token ahead of it still answers.
+        assert_eq!(ghost("jav", "", ["java.version"]), Some("a.version".to_string()));
+        // And characters the token could never absorb are not "ahead" of it at all — the caller's
+        // `part` predicate has already excluded them.
+        assert_eq!(ghost("server.po", "", ["server.port"]), Some("rt".to_string()));
     }
 
     #[test]

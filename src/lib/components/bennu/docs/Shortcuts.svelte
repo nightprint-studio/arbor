@@ -56,9 +56,11 @@
   <li>Command palette — <strong>Spring configuration</strong> (every property key, and which <code>application*.yml</code> resolves first) and <strong>Spring bound properties</strong> (every <code>@ConfigurationProperties</code> field with the key it binds)</li>
 </ul>
 <p>
-  These appear only on a project that actually uses the framework. Endpoints has a button in the
-  right activity bar, because a route list is something you keep open; the others are opened from
-  the palette, so the rail doesn't grow a row per framework.
+  These appear only on a project that actually uses the framework <em>and</em> has something in the
+  list — a Spring service with no request mappings gets no Endpoints button, shortcut or palette
+  entry, rather than a door onto an empty panel. Endpoints has a button in the right activity bar,
+  because a route list is something you keep open; the others are opened from the palette, so the
+  rail doesn't grow a row per framework.
 </p>
 
 <h2>Window</h2>

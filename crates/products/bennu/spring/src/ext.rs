@@ -61,10 +61,34 @@ impl SpringExtension {
         }
     }
 
-    /// The current model. Cheap (`Arc` clone) and lock-free for the caller, so a query
-    /// never holds the lock while it works.
+    /// The current model. Cheap (`Arc` clone) and lock-free for the caller, so a query never holds
+    /// the lock while it works.
+    ///
+    /// A **poisoned** lock is recovered from rather than treated as failure, and that is not
+    /// laxity. The IPC dispatcher catches a panicking handler and answers that one request with an
+    /// error — the right call, since the alternative is a caller blocked forever. But the lock the
+    /// panic passed through stays poisoned, and `unwrap_or_default()` on it means every later
+    /// query gets an **empty model, silently and permanently**: the gutter goes blank, the
+    /// catalogs empty out, the toolbar loses its buttons, and nothing anywhere says why. One bad
+    /// request should cost one request.
+    ///
+    /// Recovering is sound here because of what is behind the lock: an `Arc` that is only ever
+    /// *replaced whole*. A reader that panicked cannot have left it half-written.
     pub fn model(&self) -> Arc<SpringModel> {
-        self.model.read().map(|m| Arc::clone(&m)).unwrap_or_default()
+        match self.model.read() {
+            Ok(m) => Arc::clone(&m),
+            Err(poisoned) => Arc::clone(&poisoned.into_inner()),
+        }
+    }
+
+    /// Swap the model in, recovering a poisoned lock for the reason in [`Self::model`]. Without
+    /// this a reindex after a panic would quietly do nothing, for the rest of the session.
+    fn store(&self, next: SpringModel) {
+        let mut slot = match self.model.write() {
+            Ok(slot) => slot,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *slot = Arc::new(next);
     }
 
     /// Pin the property file that answers first (see [`PropertySources`]). Rebuilds only
@@ -91,9 +115,7 @@ impl SpringExtension {
             property_usages: current.property_usages.clone(),
             metadata: current.metadata.clone(),
         };
-        if let Ok(mut slot) = self.model.write() {
-            *slot = Arc::new(next);
-        }
+        self.store(next);
     }
 
     /// The pinned property file, if any.
@@ -157,9 +179,7 @@ impl FrameworkExtension for SpringExtension {
             types,
             simple_names,
         };
-        if let Ok(mut slot) = self.model.write() {
-            *slot = Arc::new(model);
-        }
+        self.store(model);
         self.ready.store(true, Ordering::Release);
     }
 

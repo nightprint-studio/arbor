@@ -1,106 +1,87 @@
 /**
- * Bennu dependencies — the resolved dependency set for the open Java project,
- * grouped by module, with per-dependency origin (declared directly by the module
- * vs. inherited from a parent pom's `<dependencyManagement>` / parent inheritance).
+ * Bennu dependencies — the project's real dependency set, per module, from `bennu_dependencies`.
  *
- * This is the FE seam for a future `bennu-be` classpath/pom resolution pass
- * (Phase-2 `.m2` + effective-POM). The data model below is shaped to map cleanly
- * onto that BE payload field-for-field so swapping the mock for real IPC is a
- * no-op for the panel:
+ * One report per project, fetched on demand and cached until the project changes or something
+ * asks for it again. Cheap enough to re-read on request (the backend reads poms and a cached
+ * classpath list — it never runs Maven), which is why the panel offers a refresh instead of
+ * guessing when to invalidate: a pom edit and a background classpath resolve both change the
+ * answer, and neither is worth a watcher.
  *
- *   DependencyModule[]                     — one per Maven module (single-module → one)
- *     · module        : string             — module artifactId / display name
- *     · dependencies  : Dependency[]
- *         · groupId    : string
- *         · artifactId : string
- *         · version    : string
- *         · scope      : DependencyScope    — compile | provided | runtime | test | system | import
- *         · origin     : DependencyOrigin
- *             { kind: 'declared' }                        — declared in THIS module's pom
- *           | { kind: 'inherited'; from: string }         — from a parent pom (artifactId)
- *
- * `coord(dep)` renders the `groupId:artifactId` a call-site shows; version + scope
- * + origin are displayed alongside. Keep the shape stable — the BE will provide it.
- *
- * MOCK — replace with real BE dep data (bennu Phase-2 .m2/pom resolution) later.
+ * Rune store — private `$state`, returned getters + methods (CLAUDE.md).
  */
 
-export type DependencyScope =
-  | 'compile'
-  | 'provided'
-  | 'runtime'
-  | 'test'
-  | 'system'
-  | 'import';
+import { dependencies as fetchDependencies, type DependencyReport } from '$lib/ipc/bennu/deps';
 
-/** Where a dependency entry comes from in the module's effective POM. */
-export type DependencyOrigin =
-  | { kind: 'declared' }
-  | { kind: 'inherited'; from: string };
+function createDependenciesStore() {
+  let report = $state<DependencyReport | null>(null);
+  let loading = $state(false);
+  let error = $state('');
+  let loadedRoot: string | null = null;
+  /** The read in flight, so a burst of `load` calls costs one backend round-trip and not one
+   *  each. A store that answers a stampede by starting a request per caller turns a noisy
+   *  dependency into a backend that stops answering — every request gets its own thread over the
+   *  wire, and a whole-reactor pom walk is not free. */
+  let inFlight: Promise<void> | null = null;
+  /** Something asked for a refresh while one was running: do exactly one more when it lands,
+   *  rather than dropping the request (the answer may have changed) or running N. */
+  let again = false;
 
-export interface Dependency {
-  groupId: string;
-  artifactId: string;
-  version: string;
-  scope: DependencyScope;
-  origin: DependencyOrigin;
+  return {
+    get report(): DependencyReport | null {
+      return report;
+    },
+    get loading() {
+      return loading;
+    },
+    /** A user-facing reason the report could not be read, empty when there is none. The backend
+     *  answers "no poms" with an empty report rather than an error, so this really is exceptional
+     *  — a dead backend, a project that vanished. */
+    get error() {
+      return error;
+    },
+
+    /** Fetch the report for `root`. A repeat call for the same project is a no-op unless `force`,
+     *  and a call while one is already running joins it instead of starting a second. */
+    async load(root: string, force = false) {
+      if (!force && loadedRoot === root && report) return;
+      if (inFlight) {
+        again = true;
+        return inFlight;
+      }
+      if (loadedRoot !== root) report = null;
+      loadedRoot = root;
+      loading = true;
+      error = '';
+      inFlight = (async () => {
+        try {
+          report = await fetchDependencies(root);
+          error = '';
+        } catch (e) {
+          report = null;
+          error = String(e);
+        }
+      })();
+      try {
+        await inFlight;
+      } finally {
+        inFlight = null;
+        loading = false;
+      }
+      // One catch-up read for everything that asked while this was in the air.
+      if (again && loadedRoot === root) {
+        again = false;
+        await this.load(root, true);
+      }
+      again = false;
+    },
+
+    reset() {
+      report = null;
+      loadedRoot = null;
+      error = '';
+      again = false;
+    },
+  };
 }
 
-export interface DependencyModule {
-  /** Module artifactId / display name (matches `ProjectInfo.modules` entries). */
-  module: string;
-  dependencies: Dependency[];
-}
-
-/** The `groupId:artifactId` coordinate (version/scope shown separately). */
-export function coord(d: Dependency): string {
-  return `${d.groupId}:${d.artifactId}`;
-}
-
-// ── MOCK data ────────────────────────────────────────────────────────────────
-// A realistic MULTI-MODULE set: a `-web` module (WAR) and a `-core` module (JAR),
-// each with a few direct deps plus several inherited-from-parent entries pinned by
-// the parent's `<dependencyManagement>` (spring-*, commons-*, servlet-api provided,
-// junit test). Versions/scopes deliberately mixed to exercise the display.
-//
-// MOCK — replace with real BE dep data (bennu Phase-2 .m2/pom resolution) later.
-const MOCK_MODULES: DependencyModule[] = [
-  {
-    module: 'portale-web',
-    dependencies: [
-      { groupId: 'org.apache.struts', artifactId: 'struts2-core', version: '2.5.30', scope: 'compile', origin: { kind: 'declared' } },
-      { groupId: 'org.apache.struts', artifactId: 'struts2-json-plugin', version: '2.5.30', scope: 'compile', origin: { kind: 'declared' } },
-      { groupId: 'javax.servlet', artifactId: 'javax.servlet-api', version: '4.0.1', scope: 'provided', origin: { kind: 'inherited', from: 'portale-parent' } },
-      { groupId: 'javax.servlet.jsp', artifactId: 'javax.servlet.jsp-api', version: '2.3.3', scope: 'provided', origin: { kind: 'inherited', from: 'portale-parent' } },
-      { groupId: 'org.springframework', artifactId: 'spring-web', version: '5.3.27', scope: 'compile', origin: { kind: 'inherited', from: 'portale-parent' } },
-      { groupId: 'org.springframework', artifactId: 'spring-webmvc', version: '5.3.27', scope: 'compile', origin: { kind: 'inherited', from: 'portale-parent' } },
-      { groupId: 'commons-fileupload', artifactId: 'commons-fileupload', version: '1.5', scope: 'compile', origin: { kind: 'inherited', from: 'portale-parent' } },
-      { groupId: 'org.projectlombok', artifactId: 'lombok', version: '1.18.30', scope: 'provided', origin: { kind: 'inherited', from: 'portale-parent' } },
-      { groupId: 'junit', artifactId: 'junit', version: '4.13.2', scope: 'test', origin: { kind: 'inherited', from: 'portale-parent' } },
-    ],
-  },
-  {
-    module: 'portale-core',
-    dependencies: [
-      { groupId: 'org.hibernate', artifactId: 'hibernate-core', version: '5.6.15.Final', scope: 'compile', origin: { kind: 'declared' } },
-      { groupId: 'org.postgresql', artifactId: 'postgresql', version: '42.6.0', scope: 'runtime', origin: { kind: 'declared' } },
-      { groupId: 'org.springframework', artifactId: 'spring-context', version: '5.3.27', scope: 'compile', origin: { kind: 'inherited', from: 'portale-parent' } },
-      { groupId: 'org.springframework', artifactId: 'spring-tx', version: '5.3.27', scope: 'compile', origin: { kind: 'inherited', from: 'portale-parent' } },
-      { groupId: 'org.apache.commons', artifactId: 'commons-lang3', version: '3.12.0', scope: 'compile', origin: { kind: 'inherited', from: 'portale-parent' } },
-      { groupId: 'commons-io', artifactId: 'commons-io', version: '2.13.0', scope: 'compile', origin: { kind: 'inherited', from: 'portale-parent' } },
-      { groupId: 'org.projectlombok', artifactId: 'lombok', version: '1.18.30', scope: 'provided', origin: { kind: 'inherited', from: 'portale-parent' } },
-      { groupId: 'junit', artifactId: 'junit', version: '4.13.2', scope: 'test', origin: { kind: 'inherited', from: 'portale-parent' } },
-      { groupId: 'org.mockito', artifactId: 'mockito-core', version: '4.11.0', scope: 'test', origin: { kind: 'declared' } },
-    ],
-  },
-];
-
-/**
- * The dependency modules for the open project.
- *
- * MOCK — ignores the actual project and returns the fixed multi-module demo set.
- * When bennu-be lands, this becomes an IPC-backed store keyed by project root.
- */
-export function dependencyModules(): DependencyModule[] {
-  return MOCK_MODULES;
-}
+export const dependenciesStore = createDependenciesStore();

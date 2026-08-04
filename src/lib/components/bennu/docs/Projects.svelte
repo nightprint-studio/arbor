@@ -97,6 +97,30 @@
   is looked for on <code>PATH</code>, then in the usual install directories, then as the project's
   own <code>mvnw</code> wrapper.
 </p>
+<p>
+  <strong>The Dependencies tool window</strong> (<kbd>Alt</kbd> + <kbd>N</kbd>) shows that as a list,
+  one group per module. Each row carries the coordinate, the version <em>you actually get</em> — with
+  <code>$&#123;…&#125;</code> expanded and <code>&lt;dependencyManagement&gt;</code> applied — the scope, and
+  where the answer came from: declared here, pinned by a parent's management, or inherited whole
+  from a parent's own <code>&lt;dependencies&gt;</code>. Clicking a row opens the pom that decides
+  it, which is usually not the one you were reading. Rows are also tagged
+  <code>optional</code>, and a dependency that only exists under a <code>&lt;profile&gt;</code> says
+  which one — whether that profile is active depends on the JDK, the OS and the command line, so it
+  is shown and labelled rather than guessed at.
+</p>
+<p>
+  A declared dependency with no jar in your local repository is called out, because that is exactly
+  what "cannot find symbol" looks like in a file that is fine. Until the classpath has been resolved
+  the panel says the column is unknown instead of marking everything missing. The last group,
+  <strong>Pulled in transitively</strong>, is every jar on the classpath that no module asked for —
+  where "why is <em>this</em> version of that library here" gets answered.
+</p>
+<p>
+  Reading it runs nothing: the poms are files, and the classpath is the one already resolved for the
+  index. Imported BOMs and version ranges are the two things it will not compute — a version only
+  they can answer stays blank unless the resolved classpath settles it, which is not a guess but the
+  jar the compiler is being handed.
+</p>
 
 <h2>Capabilities</h2>
 <p>
@@ -256,7 +280,9 @@
   <strong>Ghost text</strong> appears only where the answer is single-valued: a documented default
   for a key you left empty (<code>server.port:</code> proposes <code>8080</code>), or a prefix
   exactly one known key can continue. <kbd>Tab</kbd> accepts. Anywhere else it stays away and lets
-  the completion popup present the alternatives honestly — it is never a guess.
+  the completion popup present the alternatives honestly — it is never a guess, and never a repeat
+  of what the line already says: a caret parked in the middle of a finished key or in front of an
+  existing value gets nothing, because ghost text is inserted where the caret is.
 </p>
 <p>
   <strong>Hovering a key</strong> answers what the file itself cannot: its type, its documented
@@ -298,6 +324,14 @@
   key with its value and source file; <strong>Spring bound properties</strong> lists what each
   <code>@ConfigurationProperties</code> field binds; <strong>Spring property reference</strong>
   lists everything the project's dependencies accept, set or not. Each row opens its declaration.
+</p>
+<p>
+  Each of them is offered only where it has something to say. Having Spring on the classpath turns
+  the tooling on; what the model actually found decides which panels exist — a batch job or an
+  XML-wired service layer with no request mappings gets no Endpoints button in the activity bar, no
+  <kbd>Alt</kbd> + <kbd>4</kbd> and no palette entry, because the alternative is a permanent
+  invitation to open an empty list. They appear as the project index finishes, and again after a
+  rebuild that finds the first route.
 </p>
 
 <h2>JPA</h2>
@@ -355,10 +389,23 @@
   not the repository ones: it has no table, so those could not work.
 </p>
 <p>
-  <strong>Adding an attribute</strong> writes the field, its <code>@Column</code> constraints and
-  optionally its accessors. Choose a relation and it writes the pair people get backwards by hand:
-  the owning side gets the <code>@JoinColumn</code>, and filling in <em>mapped by</em> makes it the
-  inverse side, which owns no column at all.
+  <strong>Adding an attribute</strong> writes the field, how it is stored — a plain column, an
+  <code>@Enumerated(STRING)</code>, an <code>@Embedded</code>, an <code>@Lob</code> — its
+  constraints, the Bean Validation you ask for, and optionally its accessors. The second preview
+  tab shows the <code>alter table</code> the column implies, because the field and the column are
+  one decision usually made in two places and the second one is written later from memory. It is a
+  starting point and not a migration: no dialect, and no back-fill for a <code>not null</code>
+  added to a table that already has rows.
+</p>
+<p>
+  Choose a relation instead and it writes the pair people get backwards by hand: the owning side
+  gets the <code>@JoinColumn</code>, and filling in <em>mapped by</em> makes it the inverse side,
+  which owns no column at all. A to-many is held in a <code>Set</code> unless you say otherwise —
+  a <code>List</code> of children makes Hibernate delete and re-insert the whole collection on any
+  change — and it is always initialized, which is the omission that turns into a
+  <code>NullPointerException</code> the first time anything adds to a new entity. Cascade and
+  orphan removal are there too; the helper methods that keep both sides of a bidirectional relation
+  in step are still yours to write.
 </p>
 <p>
   <strong>Query methods</strong> are built from the entity's own properties, and that is the point:
@@ -366,6 +413,22 @@
   from the keywords instead of being counted by eye. Leave <em>method name</em> empty and the
   derived name is used; write one and the method arrives with its <code>@Query</code> spelled out,
   because a name Spring Data cannot parse is no longer a derived query.
+</p>
+<p>
+  <strong>What a finder hands back</strong> is a row of its own: <code>Optional</code>,
+  the bare entity, <code>List</code>, <code>Page</code>, <code>Slice</code> or
+  <code>Stream</code>. <code>Page</code> and <code>Slice</code> both take a <code>Pageable</code>
+  and differ in what they cost — a <code>Page</code> also runs a <code>count(*)</code> to know the
+  total, which a <code>Slice</code> skips because it only reports whether more rows follow. That is
+  the one you want behind infinite scrolling. A finder can also take a <code>Sort</code> so the
+  caller decides the ordering, except on a paged method, where the <code>Pageable</code> already
+  carries one and taking both would not compile — the dialog says so rather than offering it.
+</p>
+<p>
+  The button you pressed decides where the form <em>opens</em>, not what it can produce: the verb,
+  the return shape, the ordering, a limit and <code>distinct</code> are all editable from inside.
+  Adding several methods in a row is what actually happens, so <strong>Add and continue</strong>
+  writes one and clears the form for the next without losing the repository you chose.
 </p>
 <p>
   <strong>Modify methods</strong> are always <code>@Modifying</code> with the JPQL written out.
@@ -401,7 +464,9 @@
 <p>
   <strong>What you get.</strong> Element names filtered by what the parent may contain; attribute
   names, with the ones already written removed; attribute <em>values</em> where the schema closes
-  the set. Ghost text where exactly one thing can follow. Hover with the schema's documentation,
+  the set. Ghost text where exactly one thing can follow — and never where the rest of the name is
+  already written, which is most carets in a document whose closing tags the editor typed for you.
+  Hover with the schema's documentation,
   the required attributes, and which grammar answered. <kbd>Ctrl</kbd> + <kbd>B</kbd> on a tag or
   an attribute jumps to its declaration in the schema — which turns
   <code>&lt;result type="…"&gt;</code> from a word into something you can read.

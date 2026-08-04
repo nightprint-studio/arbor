@@ -57,7 +57,9 @@ impl Caret {
     }
 }
 
-fn is_name_char(c: char) -> bool {
+/// What may be part of an element or attribute name. Shared with the ghost-text rule, which has to
+/// tokenise the text *after* the caret exactly the way this module tokenises the text before it.
+pub(crate) fn is_name_char(c: char) -> bool {
     c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ':')
 }
 

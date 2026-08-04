@@ -191,8 +191,13 @@
   <!-- The right-click menu is raised from the wrapper rather than from the editor:
        CodeMirror owns its own DOM inside, and a listener there would have to be
        re-attached every time the extension set is rebuilt. -->
+  <!-- `presentation`: the wrapper carries no meaning of its own — the editor inside
+       is the control — and the handler is here only because CodeMirror rebuilds the
+       DOM below it. Saying so is what keeps it out of the accessibility tree
+       instead of announcing a group that does not exist. -->
   <div
     class="qv-editor"
+    role="presentation"
     oncontextmenu={(e) =>
       openEditorContextMenu(e, {
         editor,

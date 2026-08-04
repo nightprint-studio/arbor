@@ -62,6 +62,20 @@ The query builder's guarantee is tested directly: a generated name is fed back t
 [`derived::parse`](src/derived.rs) and resolved, so **the generator cannot emit a name its own
 checker would reject**.
 
+What a finder returns is one field (`ReturnShape`), not a set of flags. It was `many` + `paged`,
+and two booleans could not say `Slice`, could not say `Stream`, and could not say "one result, not
+wrapped in `Optional`" — which is what most of a legacy codebase's finders look like. Three
+unreachable answers is what a flag pair costs when the thing it encodes is a choice among six.
+
+Two things are refused rather than generated: a `Sort` parameter next to a `Pageable` (which
+already carries one, so the method would not compile) and `orphanRemoval` on a `@ManyToOne` (where
+it means "delete the parent", which is never what was meant).
+
+`attribute_ddl` is the one generator with a second view of its result — the `alter table` a field
+implies. A starting point, not a migration: no dialect is chosen and no back-fill is written for a
+`not null` added to a populated table. It exists because the field and the column are one decision
+made in two places, and the second place is usually a file somebody writes later from memory.
+
 Where a generated repository goes is *read off the repositories that exist* rather than assumed —
 "where do repositories live" is a convention every codebase settles differently, and guessing wrong
 puts the file in the wrong package every single time.

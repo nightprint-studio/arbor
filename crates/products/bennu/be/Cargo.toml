@@ -70,6 +70,10 @@ bennu-jpa = { path = "../jpa" }
 # Unlike the other two it is not capability-gated — the resolved grammar is its gate, and a
 # document nothing describes costs one scan and one map lookup.
 bennu-xml = { path = "../xml" }
+# What the project depends on, read out of its poms and matched against the classpath the
+# index service already resolved. Not an extension — it answers about the build, not about a
+# buffer — so it hangs off its own domain rather than the registry.
+bennu-deps = { path = "../deps" }
 # `NoWindowExt` — suppress the console window on the short-lived mvn/javac/java children.
 arbor-process-ext = { path = "../../../platform/process-ext" }
 # Shared job model (`JobSpec` / `JobStatus`): the whole-project analysis warm-up registers itself

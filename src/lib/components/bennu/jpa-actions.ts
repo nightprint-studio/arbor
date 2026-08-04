@@ -23,6 +23,8 @@
  * which one you picked instead of from a toggle you have to remember to flip.
  */
 
+import type { JpaReturnShape } from '$lib/ipc/bennu/jpa';
+
 /** The `kind` sent to `bennu_jpa_generate`. */
 export type JpaGenerateKind =
   | 'repository'
@@ -57,8 +59,9 @@ export interface JpaActionSpec {
   target: 'entity' | 'repository';
   /** Query methods: the verb and the shape it returns. */
   subject: string;
-  many: boolean;
-  paged: boolean;
+  /** The return shape the action starts from. The form can change it — this is where it opens,
+   *  which is the whole reason `find one` and `find many` are separate buttons. */
+  returns: JpaReturnShape;
   distinct: boolean;
   /** Modify methods: a delete rather than an update. */
   delete: boolean;
@@ -68,8 +71,7 @@ export interface JpaActionSpec {
 
 const BASE: Omit<JpaActionSpec, 'id' | 'title' | 'form' | 'kind' | 'target'> = {
   subject: 'find',
-  many: false,
-  paged: false,
+  returns: 'optional',
   distinct: false,
   delete: false,
   event: '',
@@ -88,8 +90,8 @@ const TABLE: JpaActionSpec[] = [
 
   // On a repository — read.
   spec({ id: 'jpa.query.single', title: 'Create find instance method', form: 'query', kind: 'query-method', target: 'repository' }),
-  spec({ id: 'jpa.query.list', title: 'Create find collection method', form: 'query', kind: 'query-method', target: 'repository', many: true }),
-  spec({ id: 'jpa.query.page', title: 'Create find page method', form: 'query', kind: 'query-method', target: 'repository', many: true, paged: true }),
+  spec({ id: 'jpa.query.list', title: 'Create find collection method', form: 'query', kind: 'query-method', target: 'repository', returns: 'list' }),
+  spec({ id: 'jpa.query.page', title: 'Create paged query', form: 'query', kind: 'query-method', target: 'repository', returns: 'page' }),
   spec({ id: 'jpa.query.count', title: 'Create count method', form: 'query', kind: 'query-method', target: 'repository', subject: 'count' }),
   spec({ id: 'jpa.query.exists', title: 'Create exists method', form: 'query', kind: 'query-method', target: 'repository', subject: 'exists' }),
 

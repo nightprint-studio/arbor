@@ -248,6 +248,8 @@ impl ExtAction {
 pub struct ExtStat {
     pub label: String,
     pub value: usize,
-    /// Catalog kind this stat drills into, when it has one.
+    /// Catalog kind this stat drills into, when it has one. An extension names it bare
+    /// (`"endpoints"`); the registry namespaces it on the way out (`"spring.endpoints"`), which is
+    /// the form the frontend matches a panel by.
     pub catalog: Option<String>,
 }

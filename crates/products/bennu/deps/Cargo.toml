@@ -1,0 +1,15 @@
+[package]
+name         = "bennu-deps"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "What a Maven project depends on, and where each answer came from: the reactor's poms read module by module, versions resolved through properties / dependencyManagement / the parent chain, and the result matched against the jars actually resolved into the local repository."
+
+[dependencies]
+# The tolerant XML scanner. A pom is XML, and this codebase already has a scanner that
+# reports tags with their byte spans — which is also what turns every dependency row into
+# a place the editor can jump to. Reading a pom by hand a third time was the alternative.
+bennu-xml = { path = "../xml" }
+serde     = { workspace = true }

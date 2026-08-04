@@ -82,6 +82,7 @@ members = [
     "crates/products/bennu/dtd",
     "crates/products/bennu/xsd",
     "crates/products/bennu/xml",
+    "crates/products/bennu/deps",
     "crates/products/bennu/query",
     "crates/products/bennu/check",
     "crates/products/bennu/intel",

@@ -247,6 +247,38 @@
   the tooltip on each says what it was.
 </p>
 <p>
+  <b>Right-click a cell</b> for the same things without the shortcuts: copy the value, copy
+  the whole row (tab-separated, so it pastes into a spreadsheet as columns), copy the column
+  name, and <b>Set</b> — <code>NULL</code> or empty text, named side by side because they are
+  different values and the difference is what this grid is careful about. A cell with a
+  pending change also offers to restore just that one. On a large object the menu is how you
+  open the value, since it was never fetched with the rest of the row — and how you
+  <b>replace it from a file</b>.
+</p>
+<p>
+  A <b>text</b> column takes a file too — <i>Load from file…</i> — and there the file's
+  contents become an ordinary pending change: marked in the grid, written by <b>Store</b>,
+  undone by <b>Restore</b>, like anything else you type. The file is read as UTF-8 where it
+  is valid UTF-8 and as windows-1252 where it is not, and the dialog <b>says which</b>; a
+  byte-order mark is a declaration and never becomes the first character of the value. If the
+  text is longer than the length the column declares, that is said before you accept it
+  rather than discovered when the server refuses it.
+</p>
+<p>
+  A <b>large object</b> is the exception: it is written <b>straight away</b>, and it is the
+  one write in the grid that does not wait for Store. Bytes cannot travel as a pending
+  change — those carry text, so a file would be stored as its own base64 and the cell would
+  look written while the document was broken. With nothing to review afterwards, the review
+  happens first: the dialog names the column, the file and its size. <b>Restore does not undo
+  it.</b> What comes back is re-read from the server rather than assumed, so the size shown
+  is the stored value's and not the file's.
+</p>
+<p>
+  Nothing appears in that menu that cannot happen: on a read-only connection, or a result
+  whose rows cannot be addressed, the editing entries are absent rather than present and
+  refusing.
+</p>
+<p>
   <b>Nothing is written until you press Store.</b> There is no autosave and no write when you
   leave a cell: a bar above the grid counts what is pending, <b>Store</b>
   (<kbd>Ctrl</kbd>+<kbd>S</kbd>) writes it and <b>Restore</b> puts every cell back. After a

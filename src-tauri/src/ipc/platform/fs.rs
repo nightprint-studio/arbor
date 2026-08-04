@@ -105,6 +105,31 @@ fn fs_write_bytes(_state: &AppState, path: String, base64: String) -> Result<(),
     Ok(mutate::write_bytes(&path, &bytes)?)
 }
 
+/// Read raw bytes, as base64.
+///
+/// The mirror of [`fs_write_bytes`], and base64 for the same reason: bytes have to
+/// cross a JSON seam, and this is what they survive it as.
+///
+/// Capped, unlike the write. A write is bounded by a file the user already has; a
+/// read is the caller pulling an arbitrary file into memory — twice over, since
+/// base64 is a third larger again — and the caller here is putting the result into
+/// a database column. A file too large to be one is refused with its size, which is
+/// a better answer than a window that stops responding while it encodes it.
+#[platform::handler(program = "platform")]
+fn fs_read_bytes(_state: &AppState, path: String) -> Result<String, AppError> {
+    use base64::Engine;
+    const LIMIT: u64 = 64 * 1024 * 1024;
+
+    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    if size > LIMIT {
+        return Err(AppError::Other(format!(
+            "{path} is {size} bytes — larger than the {LIMIT} this reads in one piece"
+        )));
+    }
+    let bytes = std::fs::read(&path).map_err(|e| AppError::Other(format!("{path}: {e}")))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 #[platform::handler(program = "platform")]
 fn fs_delete(_state: &AppState, path: String) -> Result<(), AppError> {
     Ok(mutate::delete(&path)?)

@@ -6,12 +6,14 @@
 
 // Where the caret is, in bytes: the line, the indentation, the token it would replace.
 pub use crate::caret::{
-    indent_of, line_at, line_end, line_number, line_prefix, line_start, safe_offset, token_before,
-    within,
+    indent_of, line_at, line_end, line_number, line_prefix, line_start, safe_offset, token_after,
+    token_before, within,
 };
 
 // Collecting candidates. `Proposals` is the one a provider holds; `Proposal` is what it offers.
 pub use crate::collect::{Proposal, Proposals, DEFAULT_CAP};
 
 // Which candidates a prefix admits, and the ghost-text rule.
-pub use crate::prefix::{common_prefix, continuation, matches, matches_ignore_case, unique_continuation};
+pub use crate::prefix::{
+    common_prefix, continuation, ghost, matches, matches_ignore_case, unique_continuation,
+};

@@ -137,6 +137,10 @@ mod build;
 // across sessions by pom mtime) into a `ClassSource`, so validation/completion resolve library
 // types (Spring, servlet, …), not just the JDK + project. Non-fatal — degrades to JDK-only.
 mod dep_classpath;
+// The Dependencies tool window (`bennu_dependencies`): every module's effective dependency list read
+// out of the poms — inheritance, `${properties}`, `<dependencyManagement>` — matched against the jars
+// `dep_classpath` already resolved. Reads files only; never runs Maven.
+mod dependencies;
 // "Download sources" for a Maven dependency: locate its ~/.m2 jar, derive coordinates, and fetch
 // the `-sources.jar` via `mvn dependency:get` — behind the decompiled-tab banner.
 mod sources_download;

@@ -589,6 +589,23 @@ export function readLob(
   return picus('picus_read_lob', { id: connectionId, table, keys, column });
 }
 
+/**
+ * Replace one large object with the bytes of a file. Answers how many rows changed
+ * — which is one, or the row is gone and it says so.
+ *
+ * `base64` because that is what bytes survive this seam as, and because it is the
+ * exact inverse of what {@link readLob} hands back.
+ */
+export function writeLob(
+  connectionId: string,
+  table: string,
+  keys: Record<string, string | null>,
+  column: string,
+  base64: string,
+): Promise<number> {
+  return picus('picus_write_lob', { id: connectionId, table, keys, column, base64 });
+}
+
 /** One row's worth of change: what identifies it, and what to write. */
 export interface RowEdit {
   /** Key columns, with the values the row had **before** the edit. */

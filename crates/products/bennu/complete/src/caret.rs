@@ -83,6 +83,27 @@ pub fn token_before(source: &str, offset: usize, part: impl Fn(char) -> bool) ->
     (start, &source[start..offset])
 }
 
+/// The token immediately **after** the caret: where it ends, and its text.
+///
+/// The mirror of [`token_before`], and it exists for one rule. Ghost text is inserted *at* the
+/// caret, so anything of the same token already written to the right of it gets duplicated
+/// rather than completed: `</jav|a.version>` has exactly one continuation, and it is already on
+/// screen. A provider passes the same `part` predicate it used for the prefix and hands the
+/// answer to [`crate::prefix::ghost`].
+///
+/// Returns `(offset, "")` when the caret is not on a character boundary or nothing qualifies.
+pub fn token_after(source: &str, offset: usize, part: impl Fn(char) -> bool) -> (usize, &str) {
+    let Some(offset) = safe_offset(source, offset) else { return (offset.min(source.len()), "") };
+    let mut end = offset;
+    for (i, c) in source[offset..].char_indices() {
+        if !part(c) {
+            break;
+        }
+        end = offset + i + c.len_utf8();
+    }
+    (end, &source[offset..end])
+}
+
 /// Whether the caret sits inside `[start, end]` — inclusive at both ends.
 ///
 /// Inclusive on purpose: a caret at the very end of a key is still *on* that key as far as the
@@ -133,6 +154,27 @@ mod tests {
         let (start, tok) = token_before(s, 1, |c| c.is_alphanumeric());
         assert_eq!((start, tok), (1, ""));
         assert_eq!(token_before("", 0, |_| true), (0, ""));
+    }
+
+    #[test]
+    fn the_token_after_the_caret_is_what_ghost_text_would_duplicate() {
+        let s = "</java.version>";
+        // Caret after `</jav`.
+        let (end, tok) = token_after(s, 5, |c| c.is_alphanumeric() || c == '.');
+        assert_eq!(tok, "a.version");
+        assert_eq!(end, 14, "stops at the `>`, which cannot be part of the name");
+
+        // Nothing qualifying at the caret is an empty token at the caret.
+        assert_eq!(token_after(s, 14, |c| c.is_alphanumeric()), (14, ""));
+        assert_eq!(token_after(s, s.len(), |_| true), (s.len(), ""));
+        assert_eq!(token_after("", 0, |_| true), (0, ""));
+    }
+
+    #[test]
+    fn the_token_after_the_caret_never_splits_a_character() {
+        let s = "caffè";
+        let (end, tok) = token_after(s, 2, |c| c.is_alphabetic());
+        assert_eq!((end, tok), (s.len(), "ffè"));
     }
 
     #[test]

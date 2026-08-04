@@ -20,10 +20,25 @@
 //! qualified names would report the rest as unknown. Under-reporting is the standing rule.
 //!
 //! The consequence is stated rather than hidden: two schemas that declare the same local name in
-//! different namespaces merge into one entry, and the first one loaded wins.
+//! different namespaces collapse into one entry.
+//!
+//! ## One name, several declarations
+//!
+//! That collapse is not only a cross-namespace accident — a single schema does it on purpose.
+//! `plugin` in the Maven POM is `Plugin` under `<build>` and `ReportPlugin` under `<reporting>`,
+//! two different types under one name, and neither is wrong. A flat model has to answer for both.
+//!
+//! It answers by **union**: [`Element::merge`] folds every declaration of a name into one entry
+//! whose children and attributes are all of them. That is the under-reporting direction and it is
+//! chosen for the usual reason — a completion list carrying a name that is legal one level away
+//! costs a rejected suggestion, while a check that has forgotten half a declaration reports valid
+//! markup as an error, which is what makes people turn the whole thing off. Where go-to jumps
+//! still comes from the first declaration seen.
 //!
 //! [`bennu-dtd`]: https://docs.rs/bennu-dtd
 //! [`bennu-xsd`]: https://docs.rs/bennu-xsd
+
+use std::collections::HashSet;
 
 use bennu_dtd::prelude as dtd;
 use bennu_xsd::prelude as xsd;
@@ -93,12 +108,16 @@ impl Grammar {
         e.children.iter().filter_map(|n| self.element(n)).collect()
     }
 
-    /// Merge another grammar in. Used to fold an `xs:include` chain into one answer; the first
-    /// declaration of a name wins, so the document's own schema beats what it imports.
+    /// Merge another grammar in. Used to fold an `xs:include` chain into one answer.
+    ///
+    /// A name declared on both sides is merged rather than dropped ([`Element::merge`]): the
+    /// document's own schema still owns the identity — its documentation, the place go-to jumps to
+    /// — but what an included schema says may go inside an element is not thereby forgotten.
     pub fn absorb(&mut self, other: Grammar) {
         for e in other.elements {
-            if !self.elements.iter().any(|x| x.name == e.name) {
-                self.elements.push(e);
+            match self.elements.iter_mut().find(|x| x.name == e.name) {
+                Some(mine) => mine.merge(e),
+                None => self.elements.push(e),
             }
         }
         for r in other.roots {
@@ -131,6 +150,36 @@ impl Element {
     pub fn attribute(&self, name: &str) -> Option<&Attribute> {
         let local = local_name(name);
         self.attributes.iter().find(|a| a.name == local)
+    }
+
+    /// Fold another declaration of the same name into this one.
+    ///
+    /// Union on everything that says what is *legal* — children, attributes, and both "anything
+    /// goes" flags — because a name declared twice is two ways of being right, and a check built
+    /// on half of them reports the other half as an error. `plugin` in the Maven POM is the case
+    /// that proves it: `<build>` gives it `executions`, `<reporting>` gives it `reportSets`, and a
+    /// grammar holding only one of the two flags a perfectly ordinary POM.
+    ///
+    /// First wins on everything that is *identity* — the declaration site, so go-to stays stable
+    /// and points at the schema loaded first, which for an `xs:include` chain is the document's
+    /// own. Documentation is the first **non-empty** one: only one of two declarations usually
+    /// carries an `xs:annotation`, and letting the bare one win would lose the prose for no reason.
+    pub fn merge(&mut self, other: Element) {
+        for c in other.children {
+            if !self.children.contains(&c) {
+                self.children.push(c);
+            }
+        }
+        for a in other.attributes {
+            if !self.attributes.iter().any(|x| x.name == a.name) {
+                self.attributes.push(a);
+            }
+        }
+        self.text |= other.text;
+        self.open |= other.open;
+        if self.doc.is_empty() {
+            self.doc = other.doc;
+        }
     }
 }
 
@@ -194,8 +243,15 @@ pub fn from_dtd(dtd: &dtd::Dtd, source: &str) -> Grammar {
 /// collecting each local declaration on the way — folding in the extension chain at each step,
 /// which [`bennu_xsd`] already does.
 ///
-/// Bounded by a visited set on the local name, which also terminates the recursive schemas that
-/// are entirely normal in XML (an element that may contain itself).
+/// Bounded by a visited set of **declarations**, not of names, which also terminates the recursive
+/// schemas that are entirely normal in XML (an element that may contain itself).
+///
+/// Declarations rather than names because a schema reuses a name for genuinely different content —
+/// `plugin` is `Plugin` under `<build>` and `ReportPlugin` under `<reporting>` — and stopping at
+/// the first one reached would silently adopt whichever the walk happened to pop first and report
+/// the other's children as illegal. Every declaration is visited; the ones that share a name are
+/// merged ([`Element::merge`]). Identity is a pointer into the schema, so each `xs:element` node is
+/// walked exactly once however many paths lead to it.
 pub fn from_xsd(schema: &xsd::Xsd, source: &str) -> Grammar {
     let mut grammar = Grammar {
         source: source.to_string(),
@@ -204,12 +260,13 @@ pub fn from_xsd(schema: &xsd::Xsd, source: &str) -> Grammar {
         elements: Vec::new(),
     };
     let mut queue: Vec<&xsd::XsdElement> = schema.elements.iter().collect();
+    let mut seen: HashSet<usize> = HashSet::new();
     while let Some(e) = queue.pop() {
-        if grammar.elements.iter().any(|x| x.name == e.name) {
+        if !seen.insert(e as *const xsd::XsdElement as usize) {
             continue;
         }
         let children = schema.children_of(e);
-        grammar.elements.push(Element {
+        let declared = Element {
             name: e.name.clone(),
             children: children.iter().map(|c| c.name.clone()).collect(),
             attributes: schema
@@ -240,7 +297,11 @@ pub fn from_xsd(schema: &xsd::Xsd, source: &str) -> Grammar {
             open: schema.is_open(e),
             doc: e.doc.clone(),
             decl: Decl { file: source.to_string(), offset: e.offset, line: e.line },
-        });
+        };
+        match grammar.elements.iter_mut().find(|x| x.name == declared.name) {
+            Some(existing) => existing.merge(declared),
+            None => grammar.elements.push(declared),
+        }
         queue.extend(children);
     }
     grammar
@@ -325,6 +386,44 @@ mod tests {
         assert_eq!(g.element("dep").unwrap().attributes[0].values, ["compile"]);
     }
 
+    /// The Maven POM in miniature, and the bug it caused: `plugin` is declared twice with two
+    /// different types, and a walk that stopped at the first name it reached adopted whichever it
+    /// popped first — so `<executions>` inside a perfectly ordinary `<build><plugins><plugin>` was
+    /// reported as not allowed there.
+    #[test]
+    fn a_name_declared_twice_with_two_types_keeps_both_sets_of_children() {
+        let x = bennu_xsd::prelude::parse(
+            r#"<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                 <xs:element name="project"><xs:complexType><xs:sequence>
+                   <xs:element name="build"><xs:complexType><xs:sequence>
+                     <xs:element name="plugin" type="Plugin"/>
+                   </xs:sequence></xs:complexType></xs:element>
+                   <xs:element name="reporting"><xs:complexType><xs:sequence>
+                     <xs:element name="plugin" type="ReportPlugin"/>
+                   </xs:sequence></xs:complexType></xs:element>
+                 </xs:sequence></xs:complexType></xs:element>
+                 <xs:complexType name="Plugin"><xs:all>
+                   <xs:element name="artifactId" type="xs:string"/>
+                   <xs:element name="executions" minOccurs="0"><xs:complexType><xs:sequence>
+                     <xs:element name="execution" type="xs:string" maxOccurs="unbounded"/>
+                   </xs:sequence></xs:complexType></xs:element>
+                 </xs:all></xs:complexType>
+                 <xs:complexType name="ReportPlugin"><xs:all>
+                   <xs:element name="artifactId" type="xs:string"/>
+                   <xs:element name="reportSets" type="xs:string" minOccurs="0"/>
+                 </xs:all></xs:complexType>
+               </xs:schema>"#,
+        )
+        .unwrap();
+        let g = from_xsd(&x, "/p/maven-4.0.0.xsd");
+        let plugin = g.element("plugin").unwrap();
+        for expected in ["artifactId", "executions", "reportSets"] {
+            assert!(plugin.children.contains(&expected.to_string()), "{expected} is missing");
+        }
+        // And the walk reached inside the type that only one of the two declarations named.
+        assert_eq!(g.element("executions").unwrap().children, ["execution"]);
+    }
+
     /// An element that may contain itself is ordinary in XML and would otherwise not terminate.
     #[test]
     fn a_recursive_schema_terminates() {
@@ -342,22 +441,43 @@ mod tests {
     }
 
     #[test]
-    fn merging_keeps_the_first_declaration_of_a_name() {
+    fn merging_unions_what_is_legal_and_keeps_the_first_identity() {
         let mut a = Grammar {
-            elements: vec![Element { name: "bean".into(), doc: "mine".into(), ..Element::default() }],
+            elements: vec![
+                Element {
+                    name: "bean".into(),
+                    doc: "mine".into(),
+                    children: vec!["property".into()],
+                    ..Element::default()
+                },
+                Element { name: "alias".into(), ..Element::default() },
+            ],
             roots: vec!["beans".into()],
             ..Grammar::default()
         };
         a.absorb(Grammar {
             elements: vec![
-                Element { name: "bean".into(), doc: "imported".into(), ..Element::default() },
-                Element { name: "alias".into(), ..Element::default() },
+                Element {
+                    name: "bean".into(),
+                    doc: "imported".into(),
+                    children: vec!["property".into(), "constructor-arg".into()],
+                    open: true,
+                    ..Element::default()
+                },
+                // A declaration the other side documents and this one does not: losing the prose
+                // to a bare redeclaration would be a loss for nothing.
+                Element { name: "alias".into(), doc: "an alias".into(), ..Element::default() },
+                Element { name: "import".into(), ..Element::default() },
             ],
             roots: vec!["beans".into(), "other".into()],
             ..Grammar::default()
         });
-        assert_eq!(a.element("bean").unwrap().doc, "mine");
-        assert!(a.element("alias").is_some());
+        let bean = a.element("bean").unwrap();
+        assert_eq!(bean.doc, "mine", "identity is the document's own schema");
+        assert_eq!(bean.children, ["property", "constructor-arg"], "but nothing legal is dropped");
+        assert!(bean.open, "and neither is a reason to stop checking");
+        assert_eq!(a.element("alias").unwrap().doc, "an alias");
+        assert!(a.element("import").is_some());
         assert_eq!(a.roots, ["beans", "other"]);
     }
 

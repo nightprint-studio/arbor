@@ -12,9 +12,12 @@
  * framework and invisible noise on the ones that don't, and the activity rail is the one piece of
  * chrome that is always on screen. Endpoints is the exception — it earns a rail button because a
  * route list is something you keep open while working, not something you go and fetch.
+ *
+ * Which of them a project gets is {@link availableCatalogs}: having the framework is not the same
+ * as having anything in the catalog, and only the second earns a place in the UI.
  */
 
-import type { ExtEntry } from '$lib/ipc/bennu/ext';
+import type { ExtEntry, ExtStat } from '$lib/ipc/bennu/ext';
 
 /** Bottom-dock ids for the framework catalogs. */
 export type FrameworkCatalogId =
@@ -157,6 +160,27 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     ],
   },
 ];
+
+/**
+ * The catalogs this project has something to show in, from the overview's headline counts.
+ *
+ * The gate is the count, not the capability that switched the extension on, because those are
+ * different questions. A Spring project is a Spring project whether or not it exposes a single
+ * route — a batch job, a scheduler, a legacy XML-wired service layer — and on that project the
+ * Endpoints rail button is a permanent invitation to open an empty panel. "Which frameworks
+ * apply here" turns the tooling on; "what did they actually find" decides what is worth a button.
+ *
+ * Counts arrive namespaced by extension (`spring.endpoints`), which is exactly {@link
+ * FrameworkCatalogSpec.kind} — the backend's `ExtensionRegistry::stats` does the namespacing, so
+ * a second framework with an `entities` catalog can never light up JPA's panel.
+ *
+ * Empty until the extensions have built their models: a catalog that has not been counted yet is
+ * not offered, which is the same answer as "it is empty" and never the wrong way round — a button
+ * that appears when the index lands is better than one that vanishes under the pointer.
+ */
+export function availableCatalogs(stats: ExtStat[]): FrameworkCatalogSpec[] {
+  return FRAMEWORK_CATALOGS.filter((c) => stats.some((s) => s.catalog === c.kind && s.value > 0));
+}
 
 /** Whether a bottom-dock id is one of the framework catalogs. */
 export function isFrameworkCatalog(id: string): id is FrameworkCatalogId {

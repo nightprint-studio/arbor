@@ -95,7 +95,7 @@
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import { bennuTomcatStore } from '$lib/stores/bennu/tomcat.svelte';
   import { springStore } from '$lib/stores/bennu/spring.svelte';
-  import { FRAMEWORK_CATALOGS } from './framework-catalogs';
+  import { availableCatalogs } from './framework-catalogs';
   import { hotswapJsp } from '$lib/ipc/bennu/tomcat';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 
@@ -297,20 +297,42 @@
     projectStore.capabilities?.struts_xml_config === true
       || projectStore.capabilities?.struts_convention === true,
   );
-  // Framework tooling (Beans / Endpoints / Config): offered only when a framework extension
-  // actually applies to the open project. The backend answers that — it owns the
-  // capability gate — so this is one round-trip per project, not a guess from the
-  // capability bitset duplicated here.
-  const hasFramework = $derived(javaTools && springStore.available);
+  // Framework tooling (Beans / Endpoints / Config / JPA): which panels this project gets.
+  //
+  // Answered by the backend rather than re-derived from the capability bitset here — it owns both
+  // the capability gate and the models built behind it, so this is one round-trip per project.
+  //
+  // A notch narrower than `javaTools`, for the same reason `jspTools` is: an extension applying
+  // says the tooling is *relevant*, its counts say whether any of it found anything. A Spring
+  // service with no REST controllers should not carry an Endpoints button that can only ever open
+  // an empty list — and the rail is the one piece of chrome on screen all the time, so it is the
+  // worst place to keep a promise the project can't fulfil.
+  //
+  // This is also why "does any extension apply" is not the gate it once was: XML applies to every
+  // project, so that question has answered yes for everything since the XML extension landed.
+  const catalogs = $derived(javaTools ? availableCatalogs(springStore.stats) : []);
+  const catalogIds = $derived(catalogs.map((c) => c.id));
+  // Every JPA generator writes into an existing entity or repository, so the verbs are worth
+  // offering exactly when the project has some.
+  const hasJpa = $derived(
+    catalogIds.includes('jpaentities') || catalogIds.includes('jparepositories'),
+  );
   $effect(() => {
     const root = projectStore.project?.root ?? null;
-    // Re-read after each index (re)build: a rebuild is exactly when new beans, new
-    // endpoints and new property files appear.
-    void bennuIndexStore.buildRevision;
+    // Re-read when the index **stops**: that is exactly when new beans, new endpoints and new
+    // property files appear.
+    //
+    // NOT on `buildRevision`, which ticks on every index-progress event — including the per-file
+    // ones of the reference walk. Depending on that meant one `bennu_ext_overview` per file
+    // indexed: thousands of requests on a real project, each on its own backend thread, and the
+    // backend stops answering anything at all. The log for it reads as unanswered calls piling
+    // up across every unrelated domain, which is what makes it hard to attribute.
+    const busyIndexing = bennuIndexStore.indexing;
     if (!root || projectStore.isDemo || projectStore.isCargo) {
       springStore.reset();
       return;
     }
+    if (busyIndexing) return;
     void springStore.loadOverview(root, true);
   });
 
@@ -346,33 +368,33 @@
       : []),
     // The framework catalogs that asked for a rail button — today just Endpoints, which is a
     // list you keep open while working rather than one you go and fetch. The rest stay
-    // palette-only so the rail doesn't grow a row per framework.
-    ...(hasFramework
-      ? FRAMEWORK_CATALOGS.filter((c) => c.rail).map((c) => ({
-          id: c.id,
-          tooltip: c.title,
-          shortcut: c.shortcut,
-          icon: Target,
-          active: bennuUiStore.bottomPanel === c.id,
-          onclick: () => bennuUiStore.toggleBottom(c.id),
-        }))
-      : []),
+    // palette-only so the rail doesn't grow a row per framework. `catalogs` has already dropped
+    // the ones this project found nothing for.
+    ...catalogs
+      .filter((c) => c.rail)
+      .map((c) => ({
+        id: c.id,
+        tooltip: c.title,
+        shortcut: c.shortcut,
+        icon: Target,
+        active: bennuUiStore.bottomPanel === c.id,
+        onclick: () => bennuUiStore.toggleBottom(c.id),
+      })),
     ...(javaTools
       ? [{ id: 'services', tooltip: 'Services', shortcut: 'Alt+9', icon: Server, active: bennuUiStore.rightPanel === 'services', onclick: () => bennuUiStore.toggleRight('services') }]
       : []),
   ]);
 
   // Switching projects can take rail icons away — a Cargo root loses the Java tools, a
-  // project with no JSP loses Forms. A panel left open from the previous project would then
-  // have no toggle anywhere. Close those.
+  // project with no JSP loses Forms, a project whose Spring model has no routes loses Endpoints.
+  // A panel left open from the previous project would then have no toggle anywhere. Close those.
   $effect(() => {
     const java = javaTools;
     const jsp = jspTools;
-    const framework = hasFramework;
-    if (java && jsp && framework) return;
+    const available = catalogIds;
     // `untrack`: the call reads the very panel state it writes, and an effect that depends
     // on what it assigns is the shape that loops (CLAUDE.md · "Runes — trap da evitare").
-    // The only dependencies that should re-run this are the three flags read above.
+    // The only dependencies that should re-run this are the three values read above.
     untrack(() =>
       bennuUiStore.dropUnavailablePanels({
         left: java ? ['project', 'structure', 'dependencies'] : ['project'],
@@ -380,9 +402,9 @@
         bottom: [
           'problems', 'terminal', 'build', 'todos',
           ...(jsp ? ['forms' as const] : []),
-          // The framework catalogs have no rail button, so a panel left open after
-          // switching to a project with no framework would be unclosable.
-          ...(framework ? FRAMEWORK_CATALOGS.map((c) => c.id) : []),
+          // Most framework catalogs have no rail button, so one left open after switching to a
+          // project that doesn't offer it would be unclosable from the rail.
+          ...available,
         ],
       }),
     );
@@ -523,19 +545,20 @@
       { id: 'terminal',  title: 'Toggle Terminal',  icon: 'terminal',    shortcut: 'Alt+F12', action: () => run(() => bennuUiStore.toggleBottom('terminal')), when: true },
       { id: 'maven',     title: 'Toggle Maven',     icon: 'hammer',      shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: javaTools },
       { id: 'services',  title: 'Toggle Services',  icon: 'server',      shortcut: 'Alt+9', action: () => run(() => bennuUiStore.toggleRight('services')), when: javaTools },
-      // The framework catalogs. Palette-only by design (see `framework-catalogs.ts`) and
-      // gated on a framework extension actually applying to this project, so they are
-      // absent — not empty — everywhere else.
-      ...FRAMEWORK_CATALOGS.map((c) => ({
+      // The framework catalogs. Palette-only by design (see `framework-catalogs.ts`) and gated
+      // on the project having something in them, so they are absent — not empty — everywhere
+      // else. Same list the rail is built from: a verb the palette offers must have somewhere to
+      // go, and a panel the palette can open must be closable from the rail.
+      ...catalogs.map((c) => ({
         id: `cat:${c.id}`,
         title: c.command,
         icon: c.icon,
         shortcut: c.shortcut as string | undefined,
         action: () => run(() => bennuUiStore.toggleBottom(c.id)),
-        when: hasFramework,
+        when: true,
       })),
-      // JPA generation. Gated the same way as the catalogs — on a project with no persistence
-      // the verb is absent rather than opening a form with nothing to build against.
+      // JPA generation. Gated on the project having entities or repositories — on a project with
+      // no persistence the verb is absent rather than opening a form with nothing to build against.
       // One entry per generator, so every one is reachable by name from the keyboard. The
       // toolbar's list is per-file and comes from the backend; this one is per-project and
       // cannot be, so it is the whole table.
@@ -544,7 +567,7 @@
         title: `JPA: ${a.title.toLowerCase()}…`,
         icon: 'wand',
         action: () => run(() => bennuUiStore.openJpaGenerate(a.id, projectStore.activeFilePath)),
-        when: hasFramework,
+        when: hasJpa,
       })),
     ];
     const idle = !!projectStore.project && !bennuRunStore.active;
@@ -679,9 +702,9 @@
 
     // Spring beans (Ctrl+Shift+B) — the framework catalog with a keyboard door, since it
     // is the one you reach for while reading code. Its siblings (Endpoints, Config) stay
-    // palette-only. Silent on a project with no framework: no panel to open.
+    // palette-only. Silent on a project that declares none: no panel to open.
     if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
-      if (!hasFramework) return;
+      if (!catalogIds.includes('beans')) return;
       e.preventDefault(); bennuUiStore.toggleBottom('beans'); return;
     }
 
@@ -709,8 +732,8 @@
       }
       if (e.key === '1') { e.preventDefault(); bennuUiStore.toggleLeft('project'); return; }
       // Endpoints — the one framework catalog with a rail button, so it gets the rail's
-      // digit like every other tool there.
-      if (e.key === '4' && hasFramework) { e.preventDefault(); bennuUiStore.toggleBottom('endpoints'); return; }
+      // digit like every other tool there, and only when the rail has it.
+      if (e.key === '4' && catalogIds.includes('endpoints')) { e.preventDefault(); bennuUiStore.toggleBottom('endpoints'); return; }
       if (e.key === '6') { e.preventDefault(); bennuUiStore.toggleBottom('problems'); return; }
       if (e.key === '7') { e.preventDefault(); bennuUiStore.toggleBottom('todos'); return; }
       if (e.key === '0') { e.preventDefault(); bennuUiStore.toggleBottom('build'); return; }

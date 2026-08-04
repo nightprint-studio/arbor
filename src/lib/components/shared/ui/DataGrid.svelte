@@ -130,6 +130,16 @@
     /** Double-click on a cell while `editable`. */
     onEditCell?: (rowIndex: number, columnIndex: number) => void;
     editable?: boolean;
+    /**
+     * Right-click on a cell.
+     *
+     * The grid raises the event and names the cell; what a menu contains is the
+     * host's business, because it depends on things this widget has no notion of —
+     * whether the value can be written, whether it is a large object, what the
+     * column means. The default menu is suppressed only when a handler is given,
+     * so a grid without one still behaves like ordinary text.
+     */
+    onContextMenuCell?: (rowIndex: number, columnIndex: number, event: MouseEvent) => void;
     emptyMessage?: string;
     /** Why sorting and filtering are inert while a window is still filling. */
     partialNotice?: string;
@@ -155,6 +165,7 @@
     onActivate,
     onEditCell,
     editable = false,
+    onContextMenuCell,
     emptyMessage = 'No rows.',
     partialNotice = 'Only part of this result is loaded — sorting and filtering come back once all of it is.',
     ariaLabel = 'Data grid',
@@ -526,7 +537,11 @@
                     class="dg-cell"
                     class:dg-num={col.type === 'number'}
                     role="gridcell"
+                    tabindex={-1}
                     ondblclick={editable ? () => onEditCell?.(entry.index, ci) : undefined}
+                    oncontextmenu={onContextMenuCell
+                      ? (e) => onContextMenuCell(entry.index, ci, e)
+                      : undefined}
                   >
                     {#if cell}
                       {@render cell({ value, column: col, rowIndex: entry.index, columnIndex: ci })}

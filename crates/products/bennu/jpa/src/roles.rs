@@ -110,10 +110,13 @@ fn entity_actions(simple: &str, kind: &str) -> Vec<ExtAction> {
 ///
 /// `find` twice is not a duplicate: "one row or none" and "all of them" differ in return type,
 /// in what a second match means, and in which one is a bug — so they are two things to ask for.
+/// The shapes worth a button. The form offers every [`crate::generate::ReturnShape`]; this is the
+/// short list you reach for without opening a menu, which is why `Slice` and `Stream` are not on
+/// it — they are deliberate choices made inside the form, not defaults.
 const QUERY_SHAPES: &[(&str, &str, &str)] = &[
     ("single", "Single instance", "Optional<E> — one row or none"),
     ("list", "List", "List<E> — every match"),
-    ("page", "Page", "Page<E> — a Pageable slice"),
+    ("page", "Page", "Page<E> — a Pageable page, with the total count"),
     ("count", "Count", "long — how many match"),
     ("exists", "Exists", "boolean — whether any match"),
 ];

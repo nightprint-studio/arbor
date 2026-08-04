@@ -866,6 +866,7 @@ dependencies = [
  "bennu-check",
  "bennu-classpath",
  "bennu-core",
+ "bennu-deps",
  "bennu-ext",
  "bennu-index",
  "bennu-intel",
@@ -921,6 +922,14 @@ dependencies = [
  "serde",
  "serde_json",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "bennu-deps"
+version = "0.3.0"
+dependencies = [
+ "bennu-xml",
+ "serde",
 ]
 
 [[package]]

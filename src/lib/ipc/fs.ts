@@ -54,6 +54,8 @@ export const fsWriteTextFile  = (path: string, content: string)     => platform<
  *  writing, so the value never becomes text on the way to the file. */
 export const fsWriteBytes     = (path: string, bytes: Uint8Array)   => platform<void>('fs_write_bytes',       { path, base64: toBase64(bytes) });
 export const fsReadTextFile   = (path: string)                      => platform<string>('fs_read_text_file', { path });
+/** Raw bytes as base64 — the mirror of {@link fsWriteBytes}. Refuses a very large file. */
+export const fsReadBytes      = (path: string)                      => platform<string>('fs_read_bytes', { path });
 export const fsRename         = (oldPath: string, newPath: string)  => platform<void>('fs_rename',            { old_path: oldPath, new_path: newPath });
 export const fsDelete         = (path: string)                      => platform<void>('fs_delete',            { path });
 

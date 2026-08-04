@@ -69,6 +69,21 @@
   declared. There is no global "current dialect" to get wrong.
 </p>
 
+<h2>Pasting into a string</h2>
+<p>
+  Paste <code>L'Aquila</code> between the quotes of <code>nome = '…'</code> and the
+  apostrophe is <b>doubled</b> for you. Without that you get a closed string, a stray word
+  and a syntax error — found when you run it rather than when you paste it. The same holds
+  for a <code>"</code> pasted inside a delimited identifier.
+</p>
+<p>
+  It happens only where an unescaped quote could not have been meant, so everywhere else a
+  paste arrives exactly as it left. Two places that look like strings are deliberately left
+  alone: a dollar-quoted body (<code>$$ … $$</code>) and Oracle's
+  <code>q'[…]'</code>. Both exist precisely so that what is inside them needs no escaping,
+  and doubling a quote there would corrupt the value instead of protecting it.
+</p>
+
 <h2>Ghost text</h2>
 <p>
   A greyed continuation appears at the caret when the next thing to write is certain.

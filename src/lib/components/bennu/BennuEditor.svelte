@@ -360,7 +360,11 @@
         .catch(() => { if (!cancelled) springGutter = []; });
       void extActions(path, src)
         .then((as) => { if (!cancelled) fwActions = as; })
-        .catch(() => { if (!cancelled) fwActions = []; });
+        // Keep the buttons that were there. A failed call means "I don't know", not "this file
+        // has nothing" — and blanking on it is how a backend that is merely busy reads as an
+        // editor whose toolbar has broken. The marks above do clear, because a stale squiggle
+        // sits at an offset the buffer may no longer have; a button carries no offset.
+        .catch(() => {});
     }, 220);
     return () => { cancelled = true; clearTimeout(t); };
   });

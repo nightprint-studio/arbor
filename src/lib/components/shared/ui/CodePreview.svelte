@@ -1,3 +1,21 @@
+<script module lang="ts">
+  import type { LanguageDescriptor as CodeTabLanguage } from '$lib/components/shared/ui/code-editor';
+
+  /** One view of the same generated thing — the Java it writes, the DDL it implies, the query it
+   *  derives. Tabs rather than three stacked blocks because they are alternatives, not parts: you
+   *  read one of them, and stacking makes the pane scroll for no reason. */
+  export interface CodeTab {
+    id: string;
+    label: string;
+    code: string;
+    language: CodeTabLanguage;
+    /** Right-aligned secondary text while this tab is showing. */
+    detail?: string;
+    /** Shown in place of the code when this tab has none. */
+    empty?: string;
+  }
+</script>
+
 <script lang="ts">
   /**
    * CodePreview — a block of code shown, not edited.
@@ -27,11 +45,18 @@
   import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
 
   interface Props {
-    /** The code to show. */
-    code: string;
+    /** The code to show. Ignored when {@link tabs} is given — pass exactly one of the two. */
+    code?: string;
     /** How to highlight it. Pass a module-singleton descriptor — a fresh object per render
      *  would remount the editor on every keystroke of whatever is driving the preview. */
-    language: LanguageDescriptor;
+    language?: LanguageDescriptor;
+    /**
+     * Several views of the same thing, as a tab strip in the header.
+     *
+     * The header shows the tabs *instead of* the title, because they are the title: "Java / DDL"
+     * says more about what you are looking at than a label saying "Preview" ever did.
+     */
+    tabs?: CodeTab[];
     /** Header label. Omit for a bare block with no header at all. */
     title?: string;
     /** Right-aligned secondary text — where this is going, which file it came from. */
@@ -60,8 +85,9 @@
   }
 
   let {
-    code,
+    code = '',
     language,
+    tabs,
     title,
     detail,
     fill = false,
@@ -73,25 +99,52 @@
     actions,
   }: Props = $props();
 
+  let picked = $state('');
+  // The showing tab: what was picked, or the first one. Derived rather than assigned on change, so
+  // a tab list that changes under the user (a form that grows a DDL view) never leaves this
+  // pointing at an id that no longer exists.
+  const tab = $derived(tabs?.find((t) => t.id === picked) ?? tabs?.[0]);
+  const shownCode = $derived(tab ? tab.code : code);
+  const shownLanguage = $derived(tab ? tab.language : language);
+  const shownDetail = $derived(tab?.detail ?? detail);
+  const shownEmpty = $derived(tab?.empty ?? empty);
+
   /** One line of the editor at the theme's code size, plus the block's own padding. Measured
    *  rather than guessed would be nicer, but it would also make the height lag one frame behind
    *  the content — and a preview that resizes late is worse than one that is a pixel out. */
   const LINE = 19;
   const height = $derived(
-    Math.min(maxHeight, Math.max(minHeight, code.split('\n').length * LINE + 14)),
+    Math.min(maxHeight, Math.max(minHeight, shownCode.split('\n').length * LINE + 14)),
   );
-  const hasCode = $derived(!error && code.trim().length > 0);
+  const hasCode = $derived(!error && shownCode.trim().length > 0 && !!shownLanguage);
 </script>
 
 <div class="cp">
-  {#if title || detail || actions || copyable}
+  {#if title || shownDetail || actions || copyable || tabs?.length}
     <div class="cp-head">
-      {#if title}<span class="cp-title">{title}</span>{/if}
-      {#if detail}<span class="cp-detail">{detail}</span>{/if}
+      {#if tabs?.length}
+        <div class="cp-tabs" role="tablist">
+          {#each tabs as t (t.id)}
+            <button
+              type="button"
+              role="tab"
+              class="cp-tab"
+              class:on={t.id === tab?.id}
+              aria-selected={t.id === tab?.id}
+              onclick={() => (picked = t.id)}
+            >
+              {t.label}
+            </button>
+          {/each}
+        </div>
+      {:else if title}
+        <span class="cp-title">{title}</span>
+      {/if}
+      {#if shownDetail}<span class="cp-detail">{shownDetail}</span>{/if}
       <div class="cp-actions">
         {@render actions?.()}
         {#if copyable && hasCode}
-          <CopyButton value={code} title="Copy the generated code" />
+          <CopyButton value={shownCode} title="Copy the generated code" />
         {/if}
       </div>
     </div>
@@ -99,12 +152,12 @@
 
   {#if error}
     <p class="cp-error" class:cp-grow={fill}>{error}</p>
-  {:else if hasCode}
+  {:else if hasCode && shownLanguage}
     <div class="cp-body" class:cp-grow={fill} style={fill ? undefined : `height: ${height}px`}>
-      <CodeEditor value={code} {language} readOnly />
+      <CodeEditor value={shownCode} language={shownLanguage} readOnly />
     </div>
   {:else}
-    <p class="cp-empty" class:cp-grow={fill}>{empty}</p>
+    <p class="cp-empty" class:cp-grow={fill}>{shownEmpty}</p>
   {/if}
 </div>
 
@@ -147,6 +200,22 @@
     align-items: center;
     gap: 2px;
   }
+
+  /* Tabs sit where the title would: they say what you are looking at better than a label could. */
+  .cp-tabs { display: flex; align-items: center; gap: 2px; }
+  .cp-tab {
+    padding: 3px 9px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+  }
+  .cp-tab:hover { color: var(--text-primary); background: var(--bg-hover); }
+  .cp-tab.on { color: var(--text-primary); background: var(--bg-base); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+  .cp-tab:focus-visible { outline: 1px solid var(--accent-primary); outline-offset: -1px; }
 
   .cp-body {
     min-height: 0;

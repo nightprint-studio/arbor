@@ -32,8 +32,30 @@ impl JpaExtension {
     }
 
     /// The current model — cheap (`Arc` clone) and lock-free for the caller.
+    ///
+    /// A **poisoned** lock is recovered from rather than treated as failure. The IPC dispatcher
+    /// catches a panicking handler and fails that one request; the lock the panic passed through
+    /// stays poisoned, and answering `default()` from then on means every later query gets an
+    /// empty model silently and permanently — no entities, no repositories, no catalogs, and
+    /// nothing anywhere saying why. One bad request should cost one request.
+    ///
+    /// Sound because the `Arc` behind the lock is only ever replaced whole: a reader that panicked
+    /// cannot have left it half-written.
     pub fn model(&self) -> Arc<JpaModel> {
-        self.model.read().map(|m| Arc::clone(&m)).unwrap_or_default()
+        match self.model.read() {
+            Ok(m) => Arc::clone(&m),
+            Err(poisoned) => Arc::clone(&poisoned.into_inner()),
+        }
+    }
+
+    /// Swap the model in, recovering a poisoned lock for the same reason. Without this a reindex
+    /// after a panic would quietly do nothing for the rest of the session.
+    fn store(&self, next: JpaModel) {
+        let mut slot = match self.model.write() {
+            Ok(slot) => slot,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *slot = Arc::new(next);
     }
 }
 
@@ -59,9 +81,7 @@ impl FrameworkExtension for JpaExtension {
             entities: crate::index::entities(&units),
             repositories: crate::index::repositories(&units),
         };
-        if let Ok(mut slot) = self.model.write() {
-            *slot = Arc::new(model);
-        }
+        self.store(model);
         self.ready.store(true, Ordering::Release);
     }
 

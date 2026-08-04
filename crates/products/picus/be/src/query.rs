@@ -332,6 +332,120 @@ async fn picus_read_lob(
     })
 }
 
+/// Replace one large object with the contents of a file.
+///
+/// The mirror of [`picus_read_lob`], and deliberately built the same way: the row is
+/// addressed by its key, exactly one cell is written, and the SQL is composed here
+/// rather than in the driver so that the quoting rules stay in the one place that
+/// knows the dialect.
+///
+/// ## Why the bytes travel as base64 in the statement
+///
+/// `decode('…', 'base64')` is the inverse of the `encode` the read uses, so the
+/// value that goes back is byte-for-byte the one that came out. Binding it as a
+/// parameter would be tidier, but the bind vocabulary crossing the RPC seam is
+/// untagged JSON — a bytes variant there is indistinguishable from text — and
+/// inventing one to save a round of quoting would make every *other* bound value
+/// ambiguous.
+///
+/// ## Capped, and refused rather than truncated
+///
+/// A write that silently stored the first four megabytes of a file would be the
+/// worst possible outcome: the cell would look written and the document would be
+/// broken. Past [`LOB_WRITE_LIMIT`] this refuses, and says the size.
+#[arbor_rpc::handler]
+async fn picus_write_lob(
+    state: &PicusState,
+    id: String,
+    table: String,
+    keys: std::collections::BTreeMap<String, Option<String>>,
+    column: String,
+    base64: String,
+) -> Result<u64, String> {
+    if keys.is_empty() {
+        return Err(NO_KEY_FOR_LOB.to_string());
+    }
+    // The encoded length bounds the decoded one, and it is what actually has to fit
+    // in the statement — so it is what is measured.
+    if base64.len() as u64 > LOB_WRITE_LIMIT {
+        return Err(format!(
+            "that file is too large to store in one statement ({} bytes encoded, limit {LOB_WRITE_LIMIT})",
+            base64.len()
+        ));
+    }
+    if base64.contains('\'') {
+        // Base64's alphabet has no quote. One here means the caller sent something
+        // that is not base64, and the only safe answer is to refuse rather than to
+        // escape it into a statement.
+        return Err("that value is not base64".to_string());
+    }
+
+    let spec = crate::connections::find_spec(&id)?;
+    let session = require_session(state, &id)?;
+    let schema =
+        state.schemas().get(&id).ok_or("the schema of this connection has not been read yet")?;
+    // Tables only: a view's large object has no single row of its own to address.
+    let info = schema
+        .tables
+        .iter()
+        .find(|t| t.name.eq_ignore_ascii_case(&table))
+        .ok_or_else(|| format!("{table} is not a table on this connection"))?;
+
+    let described = |name: &str| {
+        info.columns
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(name))
+            .cloned()
+            .ok_or_else(|| format!("{} has no column {name}", info.name))
+    };
+    let target = described(&column)?;
+    let textual = matches!(
+        target.data_type.trim().to_ascii_lowercase().as_str(),
+        "clob" | "nclob" | "text" | "xml"
+    );
+
+    let scope = DialectScope::One(spec.engine);
+    let id_of = |name: &str| ident(name, scope, false);
+    let filter = keys
+        .iter()
+        .map(|(name, value)| {
+            if name.eq_ignore_ascii_case("ctid") {
+                let v = value.as_deref().unwrap_or_default().replace('\'', "''");
+                return Ok(format!("ctid = '{v}'::tid"));
+            }
+            let col = described(name)?;
+            Ok(format!("{} = {}", id_of(name), literal(value.as_deref(), &col, scope)))
+        })
+        .collect::<Result<Vec<_>, String>>()?
+        .join(" AND ");
+
+    // A textual column takes the decoded bytes as text; a binary one takes them as
+    // they are. Both go through `decode`, so the value stored is the file's bytes
+    // and not some interpretation of them.
+    let value = if textual {
+        format!("convert_from(decode('{base64}', 'base64'), 'UTF8')")
+    } else {
+        format!("decode('{base64}', 'base64')")
+    };
+    let sql = format!(
+        "UPDATE {} SET {} = {value} WHERE {filter}",
+        id_of(&info.name),
+        id_of(&column)
+    );
+
+    let result = session.execute(&sql, 1, LobMasking::Off).await.map_err(|e| e.to_string())?;
+    let affected = result.affected.unwrap_or(0);
+    if affected == 0 {
+        return Err(LOB_ROW_GONE.to_string());
+    }
+    Ok(affected)
+}
+
+/// Ceiling on the encoded size of one stored large object. Generous enough for the
+/// scans and PDFs these columns actually hold, small enough that one statement is
+/// not measured in hundreds of megabytes.
+const LOB_WRITE_LIMIT: u64 = 48 * 1024 * 1024;
+
 const NO_KEY_FOR_LOB: &str = "there is no key to read this value by — a large object is fetched \
     one row at a time, and that needs something that identifies the row";
 

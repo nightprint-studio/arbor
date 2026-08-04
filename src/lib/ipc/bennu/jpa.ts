@@ -89,10 +89,28 @@ export interface JpaQuerySpec {
   conditions: JpaCondition[];
   /** `[path, 'asc' | 'desc']`. */
   order_by: [string, string][];
-  many: boolean;
-  paged: boolean;
+  /** What the finder hands back. One choice, not two flags — `slice` and `stream` had nowhere to
+   *  live in the `many`/`paged` pair this replaces, and neither did "a single result that isn't
+   *  wrapped in Optional", which is what half of a legacy codebase's finders look like. */
+  returns: JpaReturnShape;
+  /** Take a `Sort` parameter, so the caller decides the ordering. Dropped on a paged method — its
+   *  `Pageable` already carries a `Sort`, and a method taking both does not compile. */
+  sorted: boolean;
   projection: string;
 }
+
+/** The shapes a finder can return. */
+export type JpaReturnShape = 'optional' | 'single' | 'list' | 'page' | 'slice' | 'stream';
+
+/** `[value, label, what it means]` — the return-type row, in the order it reads. */
+export const JPA_RETURN_SHAPES: [JpaReturnShape, string, string][] = [
+  ['optional', 'Optional', 'Optional<E> — one row or none'],
+  ['single', 'Single', 'E — one row, or null'],
+  ['list', 'List', 'List<E> — every match, held in memory'],
+  ['page', 'Page', 'Page<E> + Pageable — the rows and the total count'],
+  ['slice', 'Slice', 'Slice<E> + Pageable — the rows and whether more follow, with no count(*)'],
+  ['stream', 'Stream', 'Stream<E> — too many rows to hold; the caller closes it'],
+];
 
 export interface JpaInsertion {
   file: string;
@@ -108,6 +126,10 @@ export interface JpaGenerated {
   file: [string, string] | null;
   insertion: JpaInsertion | null;
   preview: string;
+  /** The `alter table` the change implies, for the preview's second tab. Empty when there is none
+   *  to write honestly. A starting point, not a migration: no dialect, and no back-fill for a
+   *  `not null` added to a table that already has rows. */
+  ddl: string;
 }
 
 /** A field being added to an entity. */
@@ -115,18 +137,48 @@ export interface JpaAttributeSpec {
   name: string;
   /** The field's type, or — for a relation — the entity on the other end. */
   type_text: string;
+  /** How the value is mapped. A different axis from `relation`: a relation points at another
+   *  entity, these four are ways of storing a value. */
+  kind: JpaAttributeKind;
   column: string;
   /** `nullable = false` is written when this is off. */
   optional: boolean;
   unique: boolean;
   length: number | null;
+  /** A field initializer, written as given (`0`, `new BigDecimal("0")`). */
+  default_value: string;
+  /** Bean Validation constraints, unqualified (`NotNull`, `Size`, `Email`). */
+  validation: string[];
   /** `''` for a plain column, else `ManyToOne` / `OneToMany` / `ManyToMany` / `OneToOne`. */
   relation: string;
+  /** How a to-many relation is held: `Set` (default), `List` or `Map`. */
+  collection: string;
   /** The owning side's field name, for an inverse relation. */
   mapped_by: string;
   lazy: boolean;
+  /** `cascade = {…}` members, unqualified. */
+  cascade: string[];
+  /** `orphanRemoval = true` — a child removed from the collection is deleted. Only meaningful on
+   *  the side that owns the children. */
+  orphan_removal: boolean;
   accessors: boolean;
 }
+
+/** How a non-relation attribute is mapped. */
+export type JpaAttributeKind = 'base' | 'enum' | 'embedded' | 'lob';
+
+/** The cascade types a relation form offers, in the order they are worth reading. */
+export const JPA_CASCADE_TYPES = ['ALL', 'PERSIST', 'MERGE', 'REMOVE', 'REFRESH', 'DETACH'];
+
+/** `[constraint, what it does]` — the Bean Validation constraints the attribute form offers. */
+export const JPA_VALIDATIONS: [string, string][] = [
+  ['NotNull', 'rejected before it reaches the database'],
+  ['NotBlank', 'not null, and not only whitespace'],
+  ['Size', 'kept in step with the column length'],
+  ['Email', 'address format'],
+  ['Positive', 'greater than zero'],
+  ['PastOrPresent', 'not in the future'],
+];
 
 /** A `@Modifying` bulk write being added to a repository. */
 export interface JpaModifySpec {

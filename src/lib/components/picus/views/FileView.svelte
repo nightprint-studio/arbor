@@ -242,8 +242,11 @@
     <!-- Same menu as a query tab, plus the verb this tab actually has. Raised from
          the wrapper: CodeMirror owns the DOM inside and rebuilds it whenever the
          extension set changes. -->
+    <!-- `presentation`: a positioning wrapper with no meaning of its own, so it stays
+         out of the accessibility tree rather than announcing a group. -->
     <div
       class="fv-code"
+      role="presentation"
       oncontextmenu={(e) =>
         openEditorContextMenu(e, {
           editor,

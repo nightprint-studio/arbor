@@ -23,11 +23,11 @@
 //! Nothing here checks text content or cardinality. The grammar records both, and a curated or
 //! flattened one is exactly the wrong place to be confident about either.
 
-use bennu_complete::prelude::{unique_continuation, within, Proposal, Proposals};
+use bennu_complete::prelude::{ghost, token_after, within, Proposal, Proposals};
 use bennu_ext::prelude::{ExtHover, ExtTarget};
 use bennu_proto::prelude::{CompletionItem, Diagnostic};
 
-use crate::caret::{classify, Caret};
+use crate::caret::{classify, is_name_char, Caret};
 use crate::grammar::{Attribute, Element, Grammar, GrammarKind};
 use crate::scan::{local_name, Scan, Tag, TagKind};
 
@@ -153,15 +153,25 @@ fn attribute_detail(a: &Attribute) -> String {
 
 /// The continuation that certainly follows the caret, or `None`.
 ///
-/// Built from the same candidate list the popup shows, through the same rule
-/// ([`unique_continuation`]) — so the two can never disagree, and "there is exactly one thing
-/// this could be" means the same here as it does in a property file.
+/// Built from the same candidate list the popup shows, through the same rule ([`ghost`]) — so the
+/// two can never disagree, and "there is exactly one thing this could be" means the same here as it
+/// does in a property file.
 ///
 /// One addition the general rule cannot express: an attribute the schema **fixes** to a single
 /// value is certain even with nothing typed, because there is no other legal thing to write.
+///
+/// And one subtraction: nothing at all is offered while the buffer already holds the rest of the
+/// name ahead of the caret. `</jav|a.version>` is where XML meets this — closing tags are written
+/// by the editor, so the caret is *inside* a finished name far more often here than in a property
+/// file, and every one of those carets has a certain continuation that is already on screen.
 pub fn inline_hint(grammar: &Grammar, scan: &Scan, source: &str, offset: usize) -> Option<String> {
+    // The same predicate the caret classifier tokenises names with, so `>`, `=` and quotes — which
+    // no name can absorb — correctly do not count as "already written".
+    let (_, ahead) = token_after(source, offset, is_name_char);
     if let Some(Caret::AttrValue { element, attr, prefix, .. }) = classify(scan, source, offset) {
-        if prefix.is_empty() {
+        // `ahead` applies to the fixed value too: `encoding="|UTF-8"` is a caret with nothing
+        // typed and nothing missing.
+        if prefix.is_empty() && ahead.is_empty() {
             let fixed = grammar.element(&element)?.attribute(&attr)?.fixed.clone();
             if !fixed.is_empty() {
                 return Some(fixed);
@@ -176,7 +186,7 @@ pub fn inline_hint(grammar: &Grammar, scan: &Scan, source: &str, offset: usize) 
     };
     let labels: Vec<String> =
         candidates(grammar, scan, source, offset).into_iter().map(|p| p.label).collect();
-    unique_continuation(&prefix, labels)
+    ghost(&prefix, ahead, labels)
 }
 
 // ── Hover ────────────────────────────────────────────────────────────────────
@@ -524,6 +534,18 @@ mod tests {
         assert_eq!(ghost("<struts><action><result type=\"redirect|\""), None);
         assert_eq!(ghost("<struts><|"), None, "nothing typed, nothing certain");
         assert_eq!(ghost("<struts><package><action><result type=\"redirectA|\"").as_deref(), Some("ction"));
+    }
+
+    /// The case that reaches XML far more often than a property file, because the editor writes
+    /// closing tags for you: the caret lands *inside* a finished name, the continuation is
+    /// certain, and it is already on screen one character to the right.
+    #[test]
+    fn nothing_is_ghosted_into_a_name_the_buffer_already_finishes() {
+        assert_eq!(ghost("<struts><pack|age>"), None);
+        assert_eq!(ghost("<struts><package></pack|age>"), None);
+        // Still answered where the rest of the name is genuinely missing — a `>` is not part of
+        // any name, so it does not count as already written.
+        assert_eq!(ghost("<struts><pack|>").as_deref(), Some("age"));
     }
 
     #[test]

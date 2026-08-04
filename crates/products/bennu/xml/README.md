@@ -61,6 +61,22 @@ report:
 Nothing checks text content or cardinality. The grammar records both, and a flattened or curated
 one is exactly the wrong place to be confident about either.
 
+## One name, several declarations
+
+The model is flat: elements are keyed on their local name. A schema does not have to agree —
+`plugin` in the Maven POM is `Plugin` under `<build>` and `ReportPlugin` under `<reporting>`, two
+different types under one name, and neither is wrong.
+
+So every declaration is walked and the ones sharing a name are **merged**: the entry's children and
+attributes are the union of all of them, while its documentation and its declaration site come from
+the first seen. Keeping only the first instead cost a real bug — `<executions>` inside an ordinary
+`<build><plugins><plugin>` reported as undeclared, because the walk had reached the reporting
+declaration first and never descended into `Plugin` at all.
+
+Union is the under-reporting direction, which is the standing rule here: a completion carrying a
+name that is legal one level away costs a rejected suggestion; a check that has forgotten half a
+declaration reports valid markup as an error.
+
 ## Why the scanner is its own
 
 Because the buffer is being typed into, so it is malformed most of the time. `<dependen` is not

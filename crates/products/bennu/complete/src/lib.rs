@@ -29,6 +29,14 @@
 //! *identically* do produce it — they are the same string, and refusing there would be
 //! superstition rather than caution.
 //!
+//! [`ghost`] is what a provider actually calls: the same rule, plus the one thing certainty alone
+//! cannot see. `</jav|a.version>` has exactly one continuation and no room for it — the buffer is
+//! already showing it, one character to the right — and drawing it there reads as
+//! `java.versiona.version`. Certain is not the same as missing.
+//!
+//! [`unique_continuation`]: prefix::unique_continuation
+//! [`ghost`]: prefix::ghost
+//!
 //! ## What is not here
 //!
 //! Anything that needs to know what the text means. Where a key ends and a value begins, which

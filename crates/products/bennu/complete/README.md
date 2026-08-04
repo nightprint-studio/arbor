@@ -14,8 +14,8 @@ None of those is about Spring, or XML, or Java.
 
 | Module | For |
 |---|---|
-| `caret` | `safe_offset`, `line_start`/`line_end`/`line_at`, `line_number`, `indent_of`, `token_before`, `within` |
-| `prefix` | `matches` / `matches_ignore_case`, `continuation`, `unique_continuation`, `common_prefix` |
+| `caret` | `safe_offset`, `line_start`/`line_end`/`line_at`, `line_number`, `indent_of`, `token_before`/`token_after`, `within` |
+| `prefix` | `matches` / `matches_ignore_case`, `continuation`, `unique_continuation`, `ghost`, `common_prefix` |
 | `collect` | `Proposal` (fluent), `Proposals` (ordered, de-duplicated, capped) |
 
 ## The rule worth centralising
@@ -30,6 +30,13 @@ So the rule is deliberately strict — an empty prefix never ghosts, an exact ma
 nothing, and two candidates that continue differently produce nothing at all. Two candidates that
 continue *identically* do produce it: they are the same string, and refusing there would be
 superstition rather than caution (it also saves every caller from de-duplicating first).
+
+`ghost` adds the clause that only shows up when you edit *inside* a token instead of at the end of
+one: `</jav|a.version>` is certain and already written, and inserting the continuation at the caret
+would read `java.versiona.version`. Refused rather than trimmed — the answer is committed at a
+point, so with part of the token already ahead of the caret there is no insertion that produces the
+right text. Providers pair it with `token_after` and the same `part` predicate that produced the
+prefix, which is what keeps `=`, `>` and quotes from counting as "already written".
 
 ## Two matchers, chosen at the call site
 

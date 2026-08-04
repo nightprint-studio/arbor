@@ -30,11 +30,11 @@ pub use crate::index::{entities, repositories, JavaUnit};
 // Generation — repositories, projections, query methods, and the entity-authoring half.
 // Text only; nothing here writes to disk.
 pub use crate::generate::{
-    effective_name, entity_attribute, keyword_args, keyword_binds_collection, lifecycle_callback,
+    attribute_ddl, effective_name, entity_attribute, keyword_args, keyword_binds_collection, lifecycle_callback,
     method_name, modify_method, modify_method_name, named_query, named_query_name, projection,
     query_method, repository, AttributeSpec, Condition, Generated, GeneratedFile, Insertion,
-    ModifySpec, NamedQuerySpec, QuerySpec, KEYWORDS as QUERY_KEYWORDS, LIFECYCLE_EVENTS,
-    SUBJECTS as QUERY_SUBJECTS,
+    ModifySpec, NamedQuerySpec, QuerySpec, ReturnShape, CASCADE_TYPES,
+    KEYWORDS as QUERY_KEYWORDS, LIFECYCLE_EVENTS, SUBJECTS as QUERY_SUBJECTS, VALIDATIONS,
 };
 
 // What a buffer is, and the toolbar that follows from it.

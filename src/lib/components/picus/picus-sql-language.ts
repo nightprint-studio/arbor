@@ -22,6 +22,7 @@ import { sqlHighlight } from '$lib/components/shared/ui/code-editor';
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor/types';
 import type { Dialect } from '$lib/types/picus';
 import { createSqlIntel } from './sql-intel';
+import { escapeQuotesOnPaste } from './sql-intel/paste-escape';
 
 /** The tree-sitter half of the descriptor is unused for `cmExtension` languages. */
 const NO_TREE = {
@@ -66,17 +67,22 @@ export function sqlLanguage(
   const cached = descriptors.get(key);
   if (cached) return cached;
 
+  // The dialect everything that has to *emit* speaks. A portable script is written
+  // in the intersection of the two, and PostgreSQL is the side of that intersection
+  // which invents nothing: quoting a name its way is valid in a file that must run
+  // on Oracle too. There is no third emitter to pick.
+  const spoken: Dialect = resolved === 'portable' ? 'postgres' : resolved;
+
   const descriptor: LanguageDescriptor = {
     id: `sql-${resolved}`,
-    cmExtension: sqlHighlight(resolved),
+    // Highlighting, plus the one editing behaviour that belongs to the *language*
+    // rather than to the editor: a paste into a string literal has its quotes
+    // escaped. CodeMirror accepts an array as an extension, so this composes here
+    // without the shared editor having to learn what a SQL string is.
+    cmExtension: [sqlHighlight(resolved), escapeQuotesOnPaste(spoken)],
     // No `commentTokens` here on purpose: a `cmExtension` language already carries
     // its own (the legacy SQL modes declare `--`), so `Ctrl+/` works without one.
-    // The intelligence still has to pick a side — the abbreviation expander emits
-    // through one dialect's rules and there is no third emitter. PostgreSQL, for
-    // the same reason its highlighting is used: a portable script is written in
-    // the intersection, and quoting a name the PostgreSQL way is valid in a file
-    // that must run there too.
-    intel: createSqlIntel(resolved === 'portable' ? 'postgres' : resolved, connectionId),
+    intel: createSqlIntel(spoken, connectionId),
     ...NO_TREE,
   };
   descriptors.set(key, descriptor);

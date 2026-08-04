@@ -212,8 +212,26 @@ impl ExtensionRegistry {
         self.active.iter().map(|e| e.catalog(kind)).find(|v| !v.is_empty()).unwrap_or_default()
     }
 
+    /// Every active extension's headline numbers, each stat's catalog id **namespaced by the
+    /// extension that produced it** (`"endpoints"` → `"spring.endpoints"`).
+    ///
+    /// Namespaced here rather than in each extension, for the same reason [`catalog`] accepts a
+    /// namespaced kind: an extension names its own catalogs, and the registry is what makes those
+    /// names unique across extensions. It matters because these ids are load-bearing on the other
+    /// side — the frontend decides whether a panel is worth offering at all from the count next to
+    /// its kind, and two frameworks with an `entities` catalog would answer for each other.
+    ///
+    /// [`catalog`]: ExtensionRegistry::catalog
     pub fn stats(&self) -> Vec<ExtStat> {
-        self.active.iter().flat_map(|e| e.stats()).collect()
+        self.active
+            .iter()
+            .flat_map(|e| {
+                let id = e.id();
+                e.stats()
+                    .into_iter()
+                    .map(move |s| ExtStat { catalog: s.catalog.map(|c| format!("{id}.{c}")), ..s })
+            })
+            .collect()
     }
 }
 
@@ -243,6 +261,12 @@ mod tests {
                 Vec::new()
             }
         }
+        fn stats(&self) -> Vec<ExtStat> {
+            vec![
+                ExtStat { label: "Things".into(), value: 1, catalog: Some("things".into()) },
+                ExtStat { label: "Files".into(), value: 3, catalog: None },
+            ]
+        }
     }
 
     fn reg(all: Vec<Arc<dyn FrameworkExtension>>, lombok: bool) -> ExtensionRegistry {
@@ -265,6 +289,20 @@ mod tests {
         assert!(r.catalog("b.nope").is_empty());
         // A bare kind falls back to the first extension that answers it.
         assert_eq!(r.catalog("things")[0].id, "a");
+    }
+
+    /// The id a stat carries is what the frontend matches a panel by, so it has to say which
+    /// extension counted — two frameworks with an `entities` catalog would otherwise answer for
+    /// each other.
+    #[test]
+    fn a_stat_carries_the_namespaced_catalog_it_drills_into() {
+        let r = reg(vec![Arc::new(Stub("a", false)), Arc::new(Stub("b", false))], false);
+        let ids: Vec<_> = r.stats().into_iter().map(|s| s.catalog).collect();
+        assert_eq!(
+            ids,
+            [Some("a.things".to_string()), None, Some("b.things".to_string()), None],
+            "a stat with no catalog stays without one",
+        );
     }
 
     #[test]

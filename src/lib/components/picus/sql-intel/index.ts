@@ -23,6 +23,7 @@
  * | `hover.ts` | The `hoverTooltip` source. |
  * | `diagnostics.ts` | The four live rules, in UTF-8 byte offsets. |
  * | `ghost.ts` | The deterministic continuations. |
+ * | `paste-escape.ts` | Pasting into a string literal doubles its quotes — and leaves dollar-quoted and `q'[…]'` bodies alone, where doubling would corrupt rather than protect. |
  * | `abbrev.ts` | The abbreviation shorthand — one backend verb for the expansion, the caret context and the refusal. |
  * | `binds.ts` | The placeholders a statement wants values for, and the positional list they are sent as. Read off the scanner's tokens, so `::`, `:=`, `:NEW` and anything inside a string or a comment are not one. |
  *

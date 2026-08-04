@@ -87,12 +87,92 @@ pub struct QuerySpec {
     pub conditions: Vec<Condition>,
     /// `(path, descending)` pairs.
     pub order_by: Vec<(String, bool)>,
-    /// Return a `List<E>` rather than a single `E`.
-    pub many: bool,
-    /// Take a `Pageable` and return a `Page<E>`.
-    pub paged: bool,
+    /// What the method hands back. See [`ReturnShape`].
+    pub returns: ReturnShape,
+    /// Take a `Sort` parameter, so the caller decides the ordering.
+    ///
+    /// Mutually useful with [`Self::order_by`] rather than exclusive — a fixed `OrderBy` in the
+    /// name and a `Sort` argument can coexist, and Spring Data applies the argument. Meaningless
+    /// on a paged method, where the `Pageable` already carries the sort, and dropped there.
+    pub sorted: bool,
     /// Return this projection interface instead of the entity.
     pub projection: String,
+}
+
+/// What a finder hands back.
+///
+/// A single field rather than the two booleans it replaces (`many` + `paged`), because the six
+/// answers are one choice and encoding them as flags made three of them unreachable: `Slice` and
+/// `Stream` had nowhere to live, and "a single result, but not wrapped in `Optional`" — which is
+/// what half of a legacy codebase's finders look like — was not expressible at all.
+///
+/// Only the finders use it. `count` is a `long`, `exists` is a `boolean`, and `delete` is a `long`
+/// or `void`; none of those has a shape to choose.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ReturnShape {
+    /// `Optional<E>` — the honest single result, and the default for that reason.
+    #[default]
+    Optional,
+    /// `E` — a single result that may be null. What most existing code does.
+    Single,
+    /// `List<E>`.
+    List,
+    /// `Page<E>` + a `Pageable` parameter: the rows **and** the total count.
+    Page,
+    /// `Slice<E>` + a `Pageable` parameter: the rows and whether more follow, with no `count(*)`.
+    /// The right answer for infinite scrolling, and the one people reach for `Page` instead of.
+    Slice,
+    /// `Stream<E>` — for a result set too large to hold, closed by the caller.
+    Stream,
+}
+
+impl ReturnShape {
+    /// The wire spelling, which is also what the UI stores.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ReturnShape::Optional => "optional",
+            ReturnShape::Single => "single",
+            ReturnShape::List => "list",
+            ReturnShape::Page => "page",
+            ReturnShape::Slice => "slice",
+            ReturnShape::Stream => "stream",
+        }
+    }
+
+    /// Read one back. Anything unrecognised is [`ReturnShape::Optional`] — a frontend one build
+    /// ahead of the backend should generate something correct, not fail.
+    pub fn parse(text: &str) -> Self {
+        match text {
+            "single" => ReturnShape::Single,
+            "list" => ReturnShape::List,
+            "page" => ReturnShape::Page,
+            "slice" => ReturnShape::Slice,
+            "stream" => ReturnShape::Stream,
+            _ => ReturnShape::Optional,
+        }
+    }
+
+    /// Whether the method takes a `Pageable`.
+    pub fn paged(self) -> bool {
+        matches!(self, ReturnShape::Page | ReturnShape::Slice)
+    }
+
+    /// Whether it returns more than one row — which is also what makes a `delete` return a count.
+    pub fn many(self) -> bool {
+        !matches!(self, ReturnShape::Optional | ReturnShape::Single)
+    }
+
+    /// The return type, given the row type.
+    pub fn type_text(self, row: &str) -> String {
+        match self {
+            ReturnShape::Single => row.to_string(),
+            ReturnShape::Optional => format!("Optional<{row}>"),
+            ReturnShape::List => format!("List<{row}>"),
+            ReturnShape::Page => format!("Page<{row}>"),
+            ReturnShape::Slice => format!("Slice<{row}>"),
+            ReturnShape::Stream => format!("Stream<{row}>"),
+        }
+    }
 }
 
 /// The name the method will actually carry: the override when one was written, else the
@@ -203,10 +283,14 @@ pub fn query_method(
     let return_type = match spec.subject.as_str() {
         "count" => "long".to_string(),
         "exists" => "boolean".to_string(),
-        "delete" => if spec.many { "long".to_string() } else { "void".to_string() },
-        _ if spec.paged => format!("Page<{row}>"),
-        _ if spec.many => format!("List<{row}>"),
-        _ => format!("Optional<{row}>"),
+        "delete" => {
+            if spec.returns.many() {
+                "long".to_string()
+            } else {
+                "void".to_string()
+            }
+        }
+        _ => spec.returns.type_text(&row),
     };
 
     // One parameter per bound argument, named after the property it compares. A second argument
@@ -229,8 +313,15 @@ pub fn query_method(
             _ => params.push(format!("{ty} {base}")),
         }
     }
-    if spec.paged {
+    // A finder's trailing arguments, and only a finder's: `count`, `exists` and `delete` return a
+    // scalar, so neither paging nor sorting has anything to act on.
+    let is_finder = !matches!(spec.subject.as_str(), "count" | "exists" | "delete");
+    if is_finder && spec.returns.paged() {
         params.push("Pageable pageable".to_string());
+    } else if is_finder && spec.sorted {
+        // Only when there is no `Pageable`: that already carries a `Sort`, and a method taking
+        // both is a compile error rather than a preference.
+        params.push("Sort sort".to_string());
     }
 
     // Two reasons to write the query out. One is a choice (`with_query`); the other is not — a
@@ -463,6 +554,12 @@ pub struct AttributeSpec {
     pub name: String,
     /// The field's type, or — for a relation — the entity on the other end.
     pub type_text: String,
+    /// What kind of mapping this is: `""`/`base` a plain column, `enum` an `@Enumerated`,
+    /// `embedded` an `@Embedded` value type, `lob` an `@Lob`.
+    ///
+    /// Separate from [`Self::relation`] because they are different axes: a relation is *to another
+    /// entity*, these four are ways of mapping a value. Ignored when a relation is set.
+    pub kind: String,
     /// `@Column(name = …)`. Empty leaves the provider's default naming in place.
     pub column: String,
     /// `nullable = false` when this is off.
@@ -470,14 +567,40 @@ pub struct AttributeSpec {
     pub unique: bool,
     /// `length = …`, meaningful for a string column only.
     pub length: Option<u32>,
+    /// A field initializer (`= 0`, `= new BigDecimal("0")`). Written as given; empty writes none.
+    pub default_value: String,
+    /// Bean Validation annotations to add, unqualified (`NotNull`, `Size`, `Email`).
+    ///
+    /// A list rather than three flags: which constraints exist is Jakarta's business, and the form
+    /// offers the handful that apply to the chosen type. `Size` takes the column length when there
+    /// is one, which is the pairing people forget and the reason it is offered next to it.
+    pub validation: Vec<String>,
     /// `""` for a plain column, else `ManyToOne` / `OneToMany` / `ManyToMany` / `OneToOne`.
     pub relation: String,
+    /// The collection a to-many relation is held in: `Set` (the default and the right one),
+    /// `List`, or `Map`. Ignored for a to-one.
+    ///
+    /// `Set` by default because a `List` of children on a `@OneToMany` makes Hibernate delete and
+    /// re-insert the whole collection on any change unless it is ordered — the classic "why are
+    /// there 400 statements" bug.
+    pub collection: String,
     /// The owning side's field name, for an inverse relation.
     pub mapped_by: String,
     pub lazy: bool,
+    /// `cascade = {…}` members, unqualified (`PERSIST`, `MERGE`, `REMOVE`, `REFRESH`, `DETACH`),
+    /// or the single entry `ALL`.
+    pub cascade: Vec<String>,
+    /// `orphanRemoval = true` — a child removed from the collection is deleted.
+    pub orphan_removal: bool,
     /// Also write a getter and a setter.
     pub accessors: bool,
 }
+
+/// The cascade types a relation form offers, in the order they are worth reading.
+pub const CASCADE_TYPES: &[&str] = &["ALL", "PERSIST", "MERGE", "REMOVE", "REFRESH", "DETACH"];
+
+/// The Bean Validation constraints the attribute form offers.
+pub const VALIDATIONS: &[&str] = &["NotNull", "NotBlank", "Size", "Email", "Positive", "PastOrPresent"];
 
 /// A field (and optionally its accessors) added to an entity.
 ///
@@ -485,12 +608,45 @@ pub struct AttributeSpec {
 /// works and one that generates a second table is a `@JoinColumn` on the owning side and a
 /// `mappedBy` on the other, and that is exactly the pair people get backwards by hand.
 pub fn entity_attribute(entity: &Entity, source: &str, spec: &AttributeSpec) -> Generated {
-    let collection = matches!(spec.relation.as_str(), "OneToMany" | "ManyToMany");
-    let field_type =
-        if collection { format!("List<{}>", spec.type_text) } else { spec.type_text.clone() };
+    let to_many = matches!(spec.relation.as_str(), "OneToMany" | "ManyToMany");
+    let field_type = if to_many {
+        let holder = match spec.collection.as_str() {
+            "List" => "List",
+            "Map" => "Map",
+            _ => "Set",
+        };
+        if holder == "Map" {
+            // A `Map` needs a key type, and nothing here knows it. `String` is the placeholder
+            // that compiles once you replace it, which beats a type variable that does not.
+            format!("Map<String, {}>", spec.type_text)
+        } else {
+            format!("{holder}<{}>", spec.type_text)
+        }
+    } else {
+        spec.type_text.clone()
+    };
 
     let mut lines: Vec<String> = Vec::new();
+    // Bean Validation goes above the mapping: it is about the value, and reading it first is how
+    // the annotation stack stays legible.
+    for constraint in &spec.validation {
+        lines.push(match (constraint.as_str(), spec.length) {
+            ("Size", Some(n)) => format!("    @Size(max = {n})"),
+            _ => format!("    @{constraint}"),
+        });
+    }
     if spec.relation.is_empty() {
+        // The mapping annotation that says how the value is stored. `@Column` still applies on top
+        // of `@Enumerated` and `@Lob`, which is why this is not an either/or.
+        match spec.kind.as_str() {
+            // STRING, not the ORDINAL default: an ordinal column silently changes meaning the day
+            // somebody inserts a constant in the middle of the enum, and that data loss is
+            // unrecoverable.
+            "enum" => lines.push("    @Enumerated(EnumType.STRING)".to_string()),
+            "lob" => lines.push("    @Lob".to_string()),
+            "embedded" => lines.push("    @Embedded".to_string()),
+            _ => {}
+        }
         let mut attrs: Vec<String> = Vec::new();
         if !spec.column.is_empty() {
             attrs.push(format!("name = \"{}\"", spec.column));
@@ -504,7 +660,9 @@ pub fn entity_attribute(entity: &Entity, source: &str, spec: &AttributeSpec) -> 
         if let Some(n) = spec.length {
             attrs.push(format!("length = {n}"));
         }
-        if !attrs.is_empty() {
+        // An `@Embedded` maps several columns, so a `@Column` on it is meaningless — and one
+        // naming a single column is actively wrong.
+        if !attrs.is_empty() && spec.kind != "embedded" {
             lines.push(format!("    @Column({})", attrs.join(", ")));
         }
     } else {
@@ -512,8 +670,22 @@ pub fn entity_attribute(entity: &Entity, source: &str, spec: &AttributeSpec) -> 
         if !spec.mapped_by.is_empty() {
             attrs.push(format!("mappedBy = \"{}\"", spec.mapped_by));
         }
+        if !spec.cascade.is_empty() {
+            let members: Vec<String> =
+                spec.cascade.iter().map(|c| format!("CascadeType.{c}")).collect();
+            attrs.push(if members.len() == 1 {
+                format!("cascade = {}", members[0])
+            } else {
+                format!("cascade = {{{}}}", members.join(", "))
+            });
+        }
         if spec.lazy {
             attrs.push("fetch = FetchType.LAZY".to_string());
+        }
+        // Only ever on the side that owns the children — `orphanRemoval` on a `@ManyToOne` means
+        // "delete the parent when the child stops pointing at it", which is never what was meant.
+        if spec.orphan_removal && matches!(spec.relation.as_str(), "OneToMany" | "OneToOne") {
+            attrs.push("orphanRemoval = true".to_string());
         }
         // `optional` exists on the to-one annotations only; on a collection it means nothing.
         if !spec.optional && matches!(spec.relation.as_str(), "ManyToOne" | "OneToOne") {
@@ -534,7 +706,21 @@ pub fn entity_attribute(entity: &Entity, source: &str, spec: &AttributeSpec) -> 
             lines.push(format!("    @JoinColumn(name = \"{column}\")"));
         }
     }
-    lines.push(format!("    private {field_type} {};", spec.name));
+    // A collection field is initialized at declaration, always. An uninitialized one is a
+    // `NullPointerException` the first time anything adds to a freshly-`new`ed entity, and it is
+    // the single most common omission when this is written by hand.
+    let initializer = if to_many {
+        match spec.collection.as_str() {
+            "List" => " = new ArrayList<>()".to_string(),
+            "Map" => " = new LinkedHashMap<>()".to_string(),
+            _ => " = new LinkedHashSet<>()".to_string(),
+        }
+    } else if spec.default_value.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" = {}", spec.default_value.trim())
+    };
+    lines.push(format!("    private {field_type} {}{initializer};", spec.name));
 
     if spec.accessors {
         let suffix = capitalize(&spec.name);
@@ -558,6 +744,114 @@ pub fn entity_attribute(entity: &Entity, source: &str, spec: &AttributeSpec) -> 
         file: None,
         preview: text.trim_matches('\n').to_string(),
     }
+}
+
+/// The `ALTER TABLE` an attribute implies, or empty when it implies none.
+///
+/// ## Why an editor generates DDL at all
+///
+/// Because the field and the column are one decision made in two places, and the second place is
+/// usually a migration file somebody writes later from memory. Showing the statement next to the
+/// annotations is what makes `nullable = false` on a column that already has nulls a question you
+/// ask *now* rather than at deploy time.
+///
+/// It is a **starting point, not a migration**: no dialect is chosen, no `DEFAULT` back-fill is
+/// written for a `NOT NULL` added to a populated table, and nothing is transacted. Which is why it
+/// is offered to read and copy rather than to run.
+///
+/// Empty for the two cases where there is nothing honest to say: an inverse relation (the column
+/// lives on the other table) and an `@Embedded` (the columns are the embeddable's, and this does
+/// not know them).
+pub fn attribute_ddl(entity: &Entity, spec: &AttributeSpec) -> String {
+    if spec.kind == "embedded" || !spec.mapped_by.is_empty() {
+        return String::new();
+    }
+    // A to-many owns no column on this table: `@OneToMany` puts the key on the other side and
+    // `@ManyToMany` needs a join table, which is a different statement entirely.
+    if matches!(spec.relation.as_str(), "OneToMany" | "ManyToMany") {
+        return String::new();
+    }
+    let table = if entity.table.is_empty() {
+        to_snake_upper(&entity.simple)
+    } else {
+        entity.table.clone()
+    };
+    let column = if !spec.column.is_empty() {
+        spec.column.clone()
+    } else if spec.relation.is_empty() {
+        to_snake_upper(&spec.name)
+    } else {
+        format!("{}_ID", to_snake_upper(&spec.name))
+    };
+    let sql_type = if spec.relation.is_empty() {
+        sql_type_of(&spec.type_text, spec.kind.as_str(), spec.length)
+    } else {
+        // A foreign key's type is the target's id column, which this cannot see from here.
+        "bigint".to_string()
+    };
+
+    let mut out = format!("alter table {table}\n    add column {column} {sql_type}");
+    if !spec.optional {
+        out.push_str(" not null");
+    }
+    out.push(';');
+    if spec.unique {
+        out.push_str(&format!(
+            "\n\nalter table {table}\n    add constraint UK_{table}_{column} unique ({column});"
+        ));
+    }
+    if !spec.relation.is_empty() {
+        out.push_str(&format!(
+            "\n\nalter table {table}\n    add constraint FK_{table}_{column}\n    foreign key ({column}) references {};",
+            to_snake_upper(&spec.type_text),
+        ));
+    }
+    out
+}
+
+/// The SQL type a Java type maps to, near enough to read. Deliberately dialect-free: `varchar`,
+/// `numeric` and `timestamp` mean the same thing everywhere, and picking a dialect would make this
+/// wrong on every database except one.
+fn sql_type_of(java: &str, kind: &str, length: Option<u32>) -> String {
+    if kind == "lob" {
+        // A `@Lob` is a `clob`/`blob` by the Java type, and the distinction is the one that matters.
+        return if java.contains("byte") { "blob".to_string() } else { "clob".to_string() };
+    }
+    // An enum stored as STRING is a string column, whatever the Java type is called.
+    if kind == "enum" {
+        return format!("varchar({})", length.unwrap_or(50));
+    }
+    match simple_name(java) {
+        "String" | "Character" | "char" => format!("varchar({})", length.unwrap_or(255)),
+        "boolean" | "Boolean" => "boolean".to_string(),
+        "int" | "Integer" | "short" | "Short" => "integer".to_string(),
+        "long" | "Long" => "bigint".to_string(),
+        "double" | "Double" | "float" | "Float" => "double precision".to_string(),
+        "BigDecimal" => "numeric(19, 2)".to_string(),
+        "BigInteger" => "numeric(19, 0)".to_string(),
+        "LocalDate" | "Date" => "date".to_string(),
+        "LocalTime" => "time".to_string(),
+        "LocalDateTime" | "Instant" | "Timestamp" | "OffsetDateTime" | "ZonedDateTime" => {
+            "timestamp".to_string()
+        }
+        "UUID" => "uuid".to_string(),
+        // Unknown is left as the Java name rather than guessed into `varchar`: a statement that
+        // obviously needs a decision is better than one that silently makes the wrong one.
+        other => other.to_string(),
+    }
+}
+
+/// `createdAt` → `CREATED_AT`. The naming JPA's own implicit strategy uses, which is what makes
+/// this the column you would get if you wrote no `@Column` at all.
+fn to_snake_upper(name: &str) -> String {
+    let mut out = String::with_capacity(name.len() + 4);
+    for (i, c) in name.char_indices() {
+        if c.is_uppercase() && i > 0 && !out.ends_with('_') {
+            out.push('_');
+        }
+        out.extend(c.to_uppercase());
+    }
+    out
 }
 
 /// What the "add named query" form collected.
@@ -929,7 +1223,7 @@ mod tests {
         let spec = QuerySpec {
             subject: "find".into(),
             conditions: vec![cond("total", "Between"), cond("customer.name", "IsNull")],
-            many: true,
+            returns: ReturnShape::List,
             ..QuerySpec::default()
         };
         let g = query_method(&m, &repo, "interface R {\n}\n", &spec);
@@ -949,7 +1243,7 @@ mod tests {
             name: "soggetti_aderenti".into(),
             subject: "find".into(),
             conditions: vec![cond("customer.name", "Containing"), cond("total", "GreaterThan")],
-            many: true,
+            returns: ReturnShape::List,
             ..QuerySpec::default()
         };
         let g = query_method(&m, &repo, "interface R {\n}\n", &spec);
@@ -972,7 +1266,7 @@ mod tests {
         let spec = QuerySpec {
             subject: "find".into(),
             conditions: vec![cond("total", "GreaterThan")],
-            many: true,
+            returns: ReturnShape::List,
             ..QuerySpec::default()
         };
         let g = query_method(&m, &repo, "interface R {\n}\n", &spec);
@@ -990,7 +1284,7 @@ mod tests {
             with_query: true,
             subject: "find".into(),
             conditions: vec![cond("total", "GreaterThan")],
-            many: true,
+            returns: ReturnShape::List,
             ..QuerySpec::default()
         };
         let g = query_method(&m, &repo, "interface R {\n}\n", &spec);
@@ -1004,7 +1298,7 @@ mod tests {
     fn a_repository_whose_entity_did_not_resolve_is_not_generated_into_nonsense() {
         let m = model();
         let repo = Repository { entity: String::new(), file: "/p/R.java".into(), ..Repository::default() };
-        let spec = QuerySpec { subject: "find".into(), many: true, ..QuerySpec::default() };
+        let spec = QuerySpec { subject: "find".into(), returns: ReturnShape::List, ..QuerySpec::default() };
         let g = query_method(&m, &repo, "interface R {\n}\n", &spec);
         assert!(!g.preview.contains("List<>"), "an empty row type is never emitted: {}", g.preview);
     }
@@ -1016,12 +1310,48 @@ mod tests {
         let spec = QuerySpec {
             subject: "find".into(),
             conditions: vec![cond("total", "GreaterThan")],
-            paged: true,
+            returns: ReturnShape::Page,
             ..QuerySpec::default()
         };
         let g = query_method(&m, &repo, "interface R {\n}\n", &spec);
         assert!(g.preview.starts_with("Page<Order> "));
         assert!(g.preview.contains("Pageable pageable"));
+    }
+
+    /// The three shapes the old two booleans could not express, plus the `Sort` parameter.
+    #[test]
+    fn every_return_shape_is_reachable_and_sort_never_collides_with_a_pageable() {
+        let m = model();
+        let repo = Repository { entity: "Order".into(), file: "/p/R.java".into(), ..Repository::default() };
+        let build = |returns: ReturnShape, sorted: bool| {
+            let spec = QuerySpec {
+                subject: "find".into(),
+                conditions: vec![cond("total", "GreaterThan")],
+                returns,
+                sorted,
+                ..QuerySpec::default()
+            };
+            query_method(&m, &repo, "interface R {\n}\n", &spec).preview
+        };
+        assert!(build(ReturnShape::Slice, false).starts_with("Slice<Order> "));
+        assert!(build(ReturnShape::Stream, false).starts_with("Stream<Order> "));
+        assert!(build(ReturnShape::Single, false).starts_with("Order "), "a bare single result");
+        assert!(build(ReturnShape::Optional, false).starts_with("Optional<Order> "));
+
+        // A `Sort` argument where the caller decides the ordering…
+        assert!(build(ReturnShape::List, true).contains("Sort sort"));
+        // …but never next to a `Pageable`, which already carries one: taking both does not compile.
+        let paged = build(ReturnShape::Page, true);
+        assert!(paged.contains("Pageable pageable"));
+        assert!(!paged.contains("Sort sort"), "{paged}");
+        // And never on a scalar — there is nothing to sort.
+        let spec = QuerySpec {
+            subject: "count".into(),
+            conditions: vec![cond("total", "GreaterThan")],
+            sorted: true,
+            ..QuerySpec::default()
+        };
+        assert!(!query_method(&m, &repo, "interface R {\n}\n", &spec).preview.contains("Sort"));
     }
 
     #[test]
@@ -1158,7 +1488,101 @@ mod tests {
         let g = entity_attribute(e, order_source(), &inverse);
         assert!(g.preview.contains("@OneToMany(mappedBy = \"order\")"), "{}", g.preview);
         assert!(!g.preview.contains("@JoinColumn"), "the inverse side owns no column");
-        assert!(g.preview.contains("private List<OrderLine> lines;"), "a collection is a List");
+        assert!(
+            g.preview.contains("private Set<OrderLine> lines = new LinkedHashSet<>();"),
+            "a collection defaults to Set and is initialized: {}",
+            g.preview,
+        );
+    }
+
+    /// A collection field that is never initialized is an NPE the first time anything adds to a
+    /// freshly-`new`ed entity, and it is the most common omission when this is written by hand.
+    #[test]
+    fn a_collection_is_held_in_what_was_chosen_and_always_initialized() {
+        let m = model();
+        let e = m.entity("Order").unwrap();
+        let listed = AttributeSpec {
+            name: "lines".into(),
+            type_text: "OrderLine".into(),
+            relation: "OneToMany".into(),
+            collection: "List".into(),
+            mapped_by: "order".into(),
+            optional: true,
+            cascade: vec!["PERSIST".into(), "MERGE".into()],
+            orphan_removal: true,
+            ..AttributeSpec::default()
+        };
+        let g = entity_attribute(e, order_source(), &listed);
+        assert!(g.preview.contains("private List<OrderLine> lines = new ArrayList<>();"), "{}", g.preview);
+        assert!(
+            g.preview.contains("cascade = {CascadeType.PERSIST, CascadeType.MERGE}"),
+            "{}",
+            g.preview,
+        );
+        assert!(g.preview.contains("orphanRemoval = true"));
+
+        // `orphanRemoval` on the many side means "delete the parent", which is never what was
+        // meant — so it is dropped rather than written.
+        let owning = AttributeSpec {
+            name: "customer".into(),
+            type_text: "Customer".into(),
+            relation: "ManyToOne".into(),
+            orphan_removal: true,
+            optional: true,
+            ..AttributeSpec::default()
+        };
+        assert!(!entity_attribute(e, order_source(), &owning).preview.contains("orphanRemoval"));
+    }
+
+    #[test]
+    fn a_value_mapping_writes_the_annotation_that_says_how_it_is_stored() {
+        let m = model();
+        let e = m.entity("Order").unwrap();
+        let enumerated = AttributeSpec {
+            name: "status".into(),
+            type_text: "OrderStatus".into(),
+            kind: "enum".into(),
+            optional: true,
+            ..AttributeSpec::default()
+        };
+        // STRING and not the ORDINAL default: an ordinal column changes meaning the day a constant
+        // is inserted in the middle of the enum, and that data loss is unrecoverable.
+        assert!(entity_attribute(e, order_source(), &enumerated)
+            .preview
+            .contains("@Enumerated(EnumType.STRING)"));
+
+        // An `@Embedded` maps several columns, so a `@Column` naming one is actively wrong.
+        let embedded = AttributeSpec {
+            name: "address".into(),
+            type_text: "Address".into(),
+            kind: "embedded".into(),
+            column: "NOPE".into(),
+            optional: true,
+            ..AttributeSpec::default()
+        };
+        let g = entity_attribute(e, order_source(), &embedded);
+        assert!(g.preview.contains("@Embedded"));
+        assert!(!g.preview.contains("@Column"), "{}", g.preview);
+    }
+
+    #[test]
+    fn bean_validation_sits_above_the_mapping_and_borrows_the_column_length() {
+        let m = model();
+        let spec = AttributeSpec {
+            name: "email".into(),
+            type_text: "String".into(),
+            length: Some(120),
+            validation: vec!["NotNull".into(), "Size".into(), "Email".into()],
+            default_value: "\"\"".into(),
+            ..AttributeSpec::default()
+        };
+        let g = entity_attribute(m.entity("Order").unwrap(), order_source(), &spec);
+        let lines: Vec<&str> = g.preview.lines().map(str::trim).collect();
+        assert_eq!(lines[0], "@NotNull");
+        assert_eq!(lines[1], "@Size(max = 120)", "the constraint takes the column's own length");
+        assert_eq!(lines[2], "@Email");
+        assert!(lines[3].starts_with("@Column("), "the mapping comes after the constraints");
+        assert_eq!(lines[4], "private String email = \"\";");
     }
 
     #[test]

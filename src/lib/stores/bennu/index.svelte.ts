@@ -200,6 +200,14 @@ function createBennuIndexStore() {
           // Bump on every event, BEFORE the `done` guard — a config/references phase can
           // still land after the poll flipped `indexing` false, and the inspector keys its
           // refresh on this so beans/actions/relations show up once their phase completes.
+          //
+          // ⚠ This ticks on EVERY event, including the reference walk's per-file `progress`
+          // ones — thousands on a real project. It is a "something moved" signal, not a
+          // "there is a new answer" one. Anything reading it must be debounced or coalesced:
+          // an effect that fires an un-debounced request per tick sends one request per file
+          // indexed, each on its own backend thread, and the backend stops answering
+          // *everything* — which shows up as unrelated domains timing out and is miserable to
+          // attribute. Use `indexing` going false when what you want is "the build settled".
           buildRevision += 1;
           if (ph === 'ready') { markReady(root); return; }
           // A non-`ready` event after the cycle finished must not reopen the spinner.

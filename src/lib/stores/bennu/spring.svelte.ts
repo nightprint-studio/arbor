@@ -27,6 +27,8 @@ function createSpringStore() {
   let overview = $state<ExtOverview | null>(null);
   let overviewRoot: string | null = null;
   let loadingOverview = $state(false);
+  /** The overview read in flight, so a burst of callers costs one round-trip. */
+  let inFlight: Promise<void> | null = null;
 
   // kind → rows, for the project in `overviewRoot`. Cleared whenever the project changes
   // or the model is rebuilt, so a stale list can never outlive what it describes.
@@ -39,11 +41,6 @@ function createSpringStore() {
   }
 
   return {
-    /** Whether ANY framework extension applies to the open project — the gate every
-     *  framework palette entry and panel is hidden behind. */
-    get available() {
-      return (overview?.extensions.length ?? 0) > 0;
-    },
     /** Whether the active extensions have finished building their model. */
     get ready() {
       return overview?.ready ?? false;
@@ -60,7 +57,13 @@ function createSpringStore() {
     get activePropertyFile(): string | null {
       return overview?.active_property_file ?? null;
     },
-    /** Headline counts (Beans / Endpoints / …), in backend order. */
+    /** Headline counts (Beans / Endpoints / …), in backend order, each naming the catalog it
+     *  drills into (`spring.endpoints`).
+     *
+     *  These are what decides whether a framework panel is offered at all (`availableCatalogs`),
+     *  rather than "does any extension apply to this project" — which XML made a yes for every
+     *  project the moment it was registered, and which was never the interesting question anyway:
+     *  having Spring is not the same as having a single request mapping. */
     get stats() {
       return overview?.stats ?? [];
     },
@@ -73,21 +76,33 @@ function createSpringStore() {
       return loadingKinds.get(kind) === true;
     },
 
-    /** Fetch the overview for `root`. A repeat call for the same project is a no-op
-     *  unless `force` — the panels call this on mount and the window calls it with
-     *  `force` after the index rebuilds. */
+    /** Fetch the overview for `root`. A repeat call for the same project is a no-op unless
+     *  `force` — the panels call this on mount and the window calls it with `force` once the
+     *  index settles.
+     *
+     *  A call made while one is already in the air **joins it** rather than starting a second.
+     *  Every request over the wire gets its own backend thread, so a store that answers a burst
+     *  with one request per caller is how a chatty dependency turns into a backend that has
+     *  stopped answering. */
     async loadOverview(root: string, force = false) {
       if (!force && overviewRoot === root && overview) return;
+      if (inFlight) return inFlight;
       if (overviewRoot !== root) invalidate();
       overviewRoot = root;
       loadingOverview = true;
+      inFlight = (async () => {
+        try {
+          overview = await extOverview(root);
+        } catch {
+          // The backend may not have this domain (older process) — behave as "no framework
+          // here" rather than surfacing an error for a feature the user never asked for.
+          overview = null;
+        }
+      })();
       try {
-        overview = await extOverview(root);
-      } catch {
-        // The backend may not have this domain (older process) — behave as "no framework
-        // here" rather than surfacing an error for a feature the user never asked for.
-        overview = null;
+        await inFlight;
       } finally {
+        inFlight = null;
         loadingOverview = false;
       }
     },
@@ -135,6 +150,7 @@ function createSpringStore() {
     reset() {
       overview = null;
       overviewRoot = null;
+      inFlight = null;
       invalidate();
     },
   };

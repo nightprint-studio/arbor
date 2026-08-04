@@ -32,9 +32,10 @@
 //!
 //! Completion may offer a list; **ghost text may not guess**. It appears only where the answer
 //! is single-valued: a documented default for a key you left empty, or a prefix that exactly one
-//! known key can continue. Anywhere else it stays away and lets the popup do its job.
+//! known key can continue — and only where the line does not already say it. Anywhere else it
+//! stays away and lets the popup do its job.
 //!
-//! That rule is not written here — it is [`bennu_complete::prefix::unique_continuation`], and so
+//! That rule is not written here — it is [`bennu_complete::prefix::ghost`], and so
 //! are the caret mechanics and the de-duplicated candidate list. What stays in this file is the
 //! *vocabulary*: which keys exist, what they mean, and which of two sources describes one better.
 //!
@@ -42,8 +43,8 @@
 //! are one key ([`canonical_key`]).
 
 use bennu_complete::prelude::{
-    line_number, line_prefix, line_start, safe_offset, unique_continuation, within, Proposal,
-    Proposals,
+    ghost, line_end, line_number, line_prefix, line_start, safe_offset, token_after, within,
+    Proposal, Proposals,
 };
 use bennu_ext::prelude::{ExtGutterMark, ExtHighlight, ExtHover, ExtTarget};
 use bennu_proto::prelude::CompletionItem;
@@ -52,6 +53,13 @@ use crate::metadata::PropertyMeta;
 use crate::model::{simple_name, strip_generics, SpringModel};
 use crate::props::{parse_property_file, split_key, PropertyEntry};
 use crate::usages::canonical_key;
+
+/// What may be part of a configuration key. Used to read the text *after* the caret the same way
+/// the classifier reads the text before it, so the ghost-text rule can tell "the key is unfinished"
+/// from "the key is finished and I am standing in the middle of it".
+fn is_key_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | '[' | ']')
+}
 
 /// Whether this file is a property source the extension answers for.
 pub fn is_property_source(path: &str) -> bool {
@@ -488,10 +496,25 @@ fn detail_of(meta: &PropertyMeta) -> String {
 ///    line stays empty, so writing it changes nothing but makes it visible;
 /// 2. **a key prefix exactly one known key can continue** — not a ranking, a unique match.
 ///
-/// Anything else returns `None` and leaves the popup to present the alternatives honestly.
+/// Anything else returns `None` and leaves the popup to present the alternatives honestly — and so
+/// does a caret with text still ahead of it on the line, in either position: ghost text is
+/// committed *at* the caret, so `server.po|rt` would become `server.portrt` and a default written
+/// into `port=|8080` would become `8080` twice.
 pub fn inline_hint(model: &SpringModel, path: &str, source: &str, offset: usize) -> Option<String> {
+    // Through `safe_offset` before anything slices with it. `classify` clamps internally and does
+    // not hand the clamped value back, so an offset past the end of the buffer — the normal state
+    // when the editor's text is a keystroke ahead of the backend's — reaches here as written, and
+    // `source[offset..]` on it panics. A panic in a query handler poisons the model's lock, and
+    // from then on every framework answer for that project is empty: the toolbar goes blank and
+    // stays blank.
+    let offset = safe_offset(source, offset)?;
     match classify(path, source, offset)? {
         Caret::Value { key, partial } if partial.is_empty() => {
+            // "Empty value" is what the *line* says, not what precedes the caret: `port=|8080`
+            // has an empty partial and a value.
+            if !source[offset..line_end(source, offset)].trim().is_empty() {
+                return None;
+            }
             let meta = model.metadata.lookup(&key)?;
             // Only for the key as declared: the default of `logging.level` is not the default
             // of `logging.level.com.acme`.
@@ -503,10 +526,8 @@ pub fn inline_hint(model: &SpringModel, path: &str, source: &str, offset: usize)
         Caret::Value { .. } => None,
         caret @ Caret::Key { .. } => {
             let full = canonical_key(&caret.full_key());
-            unique_continuation(
-                &full,
-                model.metadata.starting_with(&full).map(|m| canonical_key(&m.name)),
-            )
+            let (_, ahead) = token_after(source, offset, is_key_char);
+            ghost(&full, ahead, model.metadata.starting_with(&full).map(|m| canonical_key(&m.name)))
         }
     }
 }
@@ -854,6 +875,36 @@ mod tests {
         // Nor does a nested key borrow its map's default.
         let text = "logging.level.root=";
         assert!(inline_hint(&m, PROPS_PATH, text, text.len()).is_none());
+    }
+
+    /// Editing an existing line rather than writing a new one: certain, and already written.
+    /// Ghost text is committed at the caret, so both of these would duplicate text.
+    #[test]
+    fn nothing_is_ghosted_over_what_the_line_already_says() {
+        let m = with_metadata("class S {}");
+        let text = "server.servlet.context-path=/app";
+        let at = text.find("-p").unwrap() + 2;
+        assert!(inline_hint(&m, PROPS_PATH, text, at).is_none(), "the rest of the key is written");
+
+        let yaml = "server:\n  port: 9090";
+        let at = yaml.find("9090").unwrap();
+        assert!(inline_hint(&m, YAML_PATH, yaml, at).is_none(), "the value is not empty");
+    }
+
+    /// The offset arrives from the editor and can be **past the end of the buffer** the backend
+    /// holds — the normal state when the text is a keystroke ahead of what was last sent. Slicing
+    /// with it panics, the dispatcher turns that into a failed request, and what the user sees is
+    /// suggestions that stop working for no visible reason.
+    #[test]
+    fn an_offset_past_the_end_of_the_buffer_answers_rather_than_panics() {
+        let m = with_metadata("class S {}");
+        let text = "server.port=8080";
+        assert!(inline_hint(&m, PROPS_PATH, text, text.len() + 50).is_none());
+        assert!(inline_hint(&m, YAML_PATH, "server:\n  port: ", 9_999).is_none());
+        // And an offset inside a multi-byte character is refused, not sliced through.
+        let accented = "app.città=1";
+        let inside = accented.find("ttà").unwrap() + 3;
+        assert!(inline_hint(&m, PROPS_PATH, accented, inside).is_none());
     }
 
     // ── Environment override ─────────────────────────────────────────────────

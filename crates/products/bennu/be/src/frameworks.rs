@@ -907,6 +907,9 @@ pub struct JpaAttributeArgs {
     /// The field's type, or — for a relation — the entity on the other end.
     #[serde(default)]
     pub type_text: String,
+    /// How the value is mapped: `base` (or empty), `enum`, `embedded`, `lob`.
+    #[serde(default)]
+    pub kind: String,
     #[serde(default)]
     pub column: String,
     /// `nullable = false` is written when this is off.
@@ -916,13 +919,27 @@ pub struct JpaAttributeArgs {
     pub unique: bool,
     #[serde(default)]
     pub length: Option<u32>,
+    /// A field initializer, written as given.
+    #[serde(default)]
+    pub default_value: String,
+    /// Bean Validation constraints, unqualified (`NotNull`, `Size`, `Email`).
+    #[serde(default)]
+    pub validation: Vec<String>,
     /// `""` for a plain column, else one of the four relation annotations.
     #[serde(default)]
     pub relation: String,
+    /// `Set` (default) | `List` | `Map` — how a to-many relation is held.
+    #[serde(default)]
+    pub collection: String,
     #[serde(default)]
     pub mapped_by: String,
     #[serde(default)]
     pub lazy: bool,
+    /// `cascade = {…}` members, unqualified.
+    #[serde(default)]
+    pub cascade: Vec<String>,
+    #[serde(default)]
+    pub orphan_removal: bool,
     #[serde(default)]
     pub accessors: bool,
 }
@@ -963,10 +980,13 @@ pub struct JpaQuerySpecArgs {
     /// `[path, "desc"|"asc"]`.
     #[serde(default)]
     pub order_by: Vec<[String; 2]>,
+    /// What the finder hands back: `optional` (default) | `single` | `list` | `page` | `slice` |
+    /// `stream`. Replaces the old `many` + `paged` pair, which could not express half of them.
     #[serde(default)]
-    pub many: bool,
+    pub returns: String,
+    /// Take a `Sort` parameter. Dropped on a paged method, whose `Pageable` already carries one.
     #[serde(default)]
-    pub paged: bool,
+    pub sorted: bool,
     #[serde(default)]
     pub projection: String,
 }
@@ -991,6 +1011,13 @@ pub struct JpaGenerated {
     pub insertion: Option<JpaInsertion>,
     /// What the form shows in its preview pane.
     pub preview: String,
+    /// The `alter table` the change implies, for the preview's second tab. Empty when there is
+    /// none to write honestly — everything that is not a column on this entity's own table.
+    ///
+    /// A starting point rather than a migration: no dialect, no back-fill for a `not null` added
+    /// to a populated table. It is here because the field and the column are one decision made in
+    /// two places, and the second place is usually a file somebody writes later from memory.
+    pub ddl: String,
 }
 
 #[derive(Serialize)]
@@ -1044,6 +1071,10 @@ fn bennu_jpa_generate(_ctx: &BennuState, args: JpaGenerateArgs) -> Result<JpaGen
         std::fs::read_to_string(file).ok().map(|t| normalize_newlines(&t))
     };
 
+    // Filled by the arms that have a second view of their result. Declared here because the match
+    // below is an expression producing the `Generated`, and only one arm has anything to say.
+    let mut ddl = String::new();
+
     // The repository the result goes into, with its text.
     let repo = args.repository.as_ref().and_then(|fqcn| {
         let r = model.repositories.iter().find(|r| &r.fqcn == fqcn || &r.simple == fqcn)?;
@@ -1084,8 +1115,8 @@ fn bennu_jpa_generate(_ctx: &BennuState, args: JpaGenerateArgs) -> Result<JpaGen
                         .into_iter()
                         .map(|[path, dir]| (path, dir == "desc"))
                         .collect(),
-                    many: q.many,
-                    paged: q.paged,
+                    returns: jpa::ReturnShape::parse(&q.returns),
+                    sorted: q.sorted,
                     projection: q.projection,
                 },
             )
@@ -1097,26 +1128,31 @@ fn bennu_jpa_generate(_ctx: &BennuState, args: JpaGenerateArgs) -> Result<JpaGen
             }
             let text = text_of(&entity.file)
                 .ok_or_else(|| format!("could not read {}", entity.file))?;
-            jpa::entity_attribute(
-                entity,
-                &text,
-                &jpa::AttributeSpec {
+            let spec = jpa::AttributeSpec {
                     name: a.name,
                     type_text: if a.type_text.trim().is_empty() {
                         "String".to_string()
                     } else {
                         a.type_text
                     },
+                    kind: a.kind,
                     column: a.column,
                     optional: a.optional,
                     unique: a.unique,
                     length: a.length,
+                    default_value: a.default_value,
+                    validation: a.validation,
                     relation: a.relation,
+                    collection: a.collection,
                     mapped_by: a.mapped_by,
                     lazy: a.lazy,
+                    cascade: a.cascade,
+                    orphan_removal: a.orphan_removal,
                     accessors: a.accessors,
-                },
-            )
+            };
+            // The one generator with a second view of its result: the column it implies.
+            ddl = jpa::attribute_ddl(entity, &spec);
+            jpa::entity_attribute(entity, &text, &spec)
         }
         "named-query" => {
             let text = text_of(&entity.file)
@@ -1167,6 +1203,7 @@ fn bennu_jpa_generate(_ctx: &BennuState, args: JpaGenerateArgs) -> Result<JpaGen
             .insertion
             .map(|i| JpaInsertion { file: i.file, offset: i.offset, text: i.text }),
         preview: generated.preview,
+        ddl,
     })
 }
 
