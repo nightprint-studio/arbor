@@ -739,7 +739,11 @@ pub fn collect_java(dir: &Path, out: &mut Vec<PathBuf>) {
         let p = e.path();
         if p.is_dir() {
             let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if name == "target" || name.starts_with('.') {
+            if name.starts_with('.') {
+                continue;
+            }
+            if name == "target" {
+                collect_generated(&p, out);
                 continue;
             }
             collect_java(&p, out);
@@ -749,9 +753,76 @@ pub fn collect_java(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Maven's build directory, entered **only** for the source roots an annotation processor
+/// writes into.
+///
+/// Skipping `target/` wholesale was right about everything in it except the one thing that is
+/// genuinely source: `target/generated-sources/` is where the compiler puts what the processors
+/// produced, and on a modern Java project that is not a curiosity —
+///
+/// - the **JPA static metamodel** (`Order_`, `Customer_`) that type-safe Criteria queries are
+///   written against;
+/// - **MapStruct**'s `*MapperImpl`, the class that actually runs;
+/// - **QueryDSL**'s `QOrder`, **jOOQ**, **Immutables**, JAXB's `xjc` output.
+///
+/// None of it exists in `src/`, all of it is referenced from `src/`. Left out of the index,
+/// every one of those references reads as "cannot resolve" — a file full of red on code that
+/// compiles perfectly.
+///
+/// Only the two generated-source roots are entered, not `target/` at large: `classes/` holds no
+/// `.java` at all, and `dependency/` or `site/` can hold an unpacked copy of somebody else's
+/// sources, which would put duplicate declarations of the same types into the index.
+///
+/// Gradle needs no special case — its generated sources live under `build/`, which was never
+/// skipped.
+fn collect_generated(target: &Path, out: &mut Vec<PathBuf>) {
+    for root in ["generated-sources", "generated-test-sources"] {
+        let dir = target.join(root);
+        if dir.is_dir() {
+            collect_java(&dir, out);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The JPA static metamodel and its neighbours live under `target/generated-sources` and
+    /// nowhere else, while every reference to them lives in `src/`. Out of the index, a Criteria
+    /// query reads as a file full of unresolved names on code that compiles.
+    #[test]
+    fn generated_sources_are_indexed_but_the_rest_of_target_is_not() {
+        let root = std::env::temp_dir().join(format!("bennu-gen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let write = |rel: &str| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, "class X {}\n").unwrap();
+        };
+        write("src/main/java/com/acme/Order.java");
+        write("target/generated-sources/annotations/com/acme/Order_.java");
+        write("target/generated-test-sources/test-annotations/com/acme/OrderTest_.java");
+        // Not source: a build artifact, and an unpacked dependency whose types would be
+        // duplicate declarations of classes the classpath tier already provides.
+        write("target/classes/com/acme/Stale.java");
+        write("target/dependency/com/other/Unpacked.java");
+
+        let mut found = Vec::new();
+        collect_java(&root, &mut found);
+        let names: std::collections::BTreeSet<String> = found
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        assert!(names.contains("Order.java"));
+        assert!(names.contains("Order_.java"), "the JPA metamodel is source");
+        assert!(names.contains("OrderTest_.java"));
+        assert!(!names.contains("Stale.java"), "target/classes is output, not source");
+        assert!(!names.contains("Unpacked.java"), "somebody else's sources, unpacked");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn decl_line_locates_type_and_is_word_bounded() {

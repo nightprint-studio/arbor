@@ -12,7 +12,7 @@
 //! Today this therefore fires against **library / JDK** supertypes (constructors decoded from
 //! bytecode). Project supertypes need their constructors indexed first.
 
-use bennu_java::prelude::{extract_symbols, FileSymbols, MemberKind, TypeResolver};
+use bennu_java::prelude::{extract_symbols, FileSymbols, MemberKind, TypeRef, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::{Node, Parser};
 
@@ -61,21 +61,33 @@ fn check_class(
     let Some(binary) = type_binary(&sup_text, symbols, resolver) else { return };
     let Some(cm) = resolver.members_of(&binary) else { return };
 
-    // Constructors of the superclass, by arity.
-    let ctor_arities: Vec<usize> = cm
+    // Constructors of the superclass.
+    let ctors_of_super: Vec<&_> = cm
         .methods
         .iter()
         .filter(|m| m.name == "<init>" && m.kind == MemberKind::Method)
-        .map(|m| m.params.len())
         .collect();
-    if ctor_arities.is_empty() {
+    if ctors_of_super.is_empty() {
         return; // constructors not indexed → can't assert
     }
-    if ctor_arities.iter().any(|&a| a == 0) {
+    if ctors_of_super.iter().any(|m| m.params.is_empty()) {
         return; // a no-arg super constructor exists → implicit super() is fine
+    }
+    // A **varargs** constructor is callable with nothing at all: `Base(T... xs)` accepts
+    // `super()`, which passes an empty array. Its declared arity is 1, so an arity-only test
+    // reports a compile error on code that compiles — and the pattern shows up deliberately
+    // (a `T...` parameter is the standard trick for capturing a reified element type).
+    //
+    // Varargs-ness is not in the member index, so the test is on the erased parameter type: a
+    // single array parameter *may* be varargs, and may-be is enough to stay quiet. A genuine
+    // `Base(int[] xs)` is then skipped too — a miss, never a false claim, which is the
+    // direction this crate always errs in.
+    if ctors_of_super.iter().any(|m| m.params.len() == 1 && is_array(&m.params[0])) {
+        return;
     }
 
     // The superclass needs an explicit super(args) call from every subclass constructor.
+    // (helper below: whether an erased parameter type is an array)
     let name = simple_name(&binary).to_string();
     let ctors = constructors(n);
     if ctors.is_empty() {
@@ -101,6 +113,13 @@ fn check_class(
 }
 
 /// The direct constructor declarations of a class (in its body).
+/// Whether an erased parameter type is an array — the shape a varargs parameter has once the
+/// `...` is gone. JVMS descriptors write an array as a leading `[`; the index's own rendering
+/// uses a trailing `[]`, so both spellings are accepted rather than assuming one.
+fn is_array(t: &TypeRef) -> bool {
+    t.binary_name.starts_with('[') || t.binary_name.ends_with("[]")
+}
+
 fn constructors<'t>(class: Node<'t>) -> Vec<Node<'t>> {
     let Some(body) = class.child_by_field_name("body") else { return Vec::new() };
     let mut out = Vec::new();
@@ -185,11 +204,34 @@ mod tests {
         members.insert("com/acme/Base".to_string(), cls(vec![ctor(1)]));
         members.insert("com/acme/Zero".to_string(), cls(vec![ctor(0), ctor(1)]));
         members.insert("com/acme/Bare".to_string(), cls(vec![]));
-        let simple = [("Base", "com/acme/Base"), ("Zero", "com/acme/Zero"), ("Bare", "com/acme/Bare")]
-            .into_iter()
-            .map(|(s, b)| (s.to_string(), b.to_string()))
-            .collect();
+        // `Varargs(T... xs)` — declared arity 1, but callable with nothing.
+        members.insert(
+            "com/acme/Varargs".to_string(),
+            cls(vec![Member::method(
+                "<init>",
+                TypeRef::simple("void"),
+                vec![TypeRef::simple("java/lang/Enum[]")],
+            )]),
+        );
+        let simple = [
+            ("Base", "com/acme/Base"),
+            ("Zero", "com/acme/Zero"),
+            ("Bare", "com/acme/Bare"),
+            ("Varargs", "com/acme/Varargs"),
+        ]
+        .into_iter()
+        .map(|(s, b)| (s.to_string(), b.to_string()))
+        .collect();
         MapResolver { members, simple }
+    }
+
+    /// `Base(T... xs)` accepts `super()` — it passes an empty array. Its declared arity is 1, so
+    /// an arity-only test reports a compile error on code that compiles, and the pattern is
+    /// deliberate: a `T...` parameter is the standard trick for capturing a reified element type.
+    #[test]
+    fn a_varargs_super_constructor_counts_as_a_no_arg_one() {
+        assert!(diags("class X extends Varargs { X() {} }").is_empty());
+        assert!(diags("class X extends Varargs {}").is_empty(), "the implicit ctor too");
     }
 
     fn diags(src: &str) -> Vec<String> {

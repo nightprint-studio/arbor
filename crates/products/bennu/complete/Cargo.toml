@@ -1,0 +1,13 @@
+[package]
+name         = "bennu-complete"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The mechanics every bennu completion provider repeats: where the caret's token starts, which candidates a prefix admits, de-duplicating and capping a candidate list, and the one rule that separates ghost text from a guess. Knows no language — the provider brings the vocabulary."
+
+[dependencies]
+# The wire shape of a candidate. The only dependency: this crate produces `CompletionItem`s
+# and nothing else, so it stays as portable as the extension seam promises.
+bennu-proto = { path = "../proto" }

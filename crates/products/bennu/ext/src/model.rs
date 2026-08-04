@@ -41,6 +41,19 @@ pub struct ProjectScan<'a> {
     pub xml: &'a [ScannedFile],
     /// Resource files that carry configuration: `.properties`, `.yml`, `.yaml`.
     pub resources: &'a [ScannedFile],
+    /// **Grammar files** — `.xsd` and `.dtd`, from the project and from inside the dependency
+    /// jars.
+    ///
+    /// Separate from [`Self::xml`] because these describe other files rather than being ones: a
+    /// `.dtd` is not XML at all, and an `.xsd` handed to an extension looking for configuration
+    /// would be read as one. Separate from [`Self::descriptors`] because these are looked up *by
+    /// name* rather than scanned — a document names its schema by URL, and the copy that answers
+    /// it is whichever file has that name.
+    ///
+    /// Empty is normal and must stay harmless: a project whose dependencies are not resolved has
+    /// no schemas, and an extension is expected to go quiet rather than guess.
+    #[allow(clippy::doc_markdown)]
+    pub schemas: &'a [ScannedFile],
     /// **Descriptor files from outside the source tree** — the machine-readable descriptions
     /// frameworks ship *inside their own jars*.
     ///
@@ -176,6 +189,58 @@ pub struct ExtEntry {
     /// deserializes.
     #[serde(default)]
     pub children: Vec<ExtEntry>,
+}
+
+/// Something an extension offers to **write** for the file in front of you.
+///
+/// The counterpart to every other contribution here: those describe what the buffer already
+/// says, this offers to add to it. Contributed rather than hard-coded for the same reason
+/// highlights are — which buttons belong on a repository is JPA's knowledge, and a toolbar that
+/// enumerated them itself would need editing every time an extension learned a new trick.
+///
+/// **Offered means applicable.** An extension returns an action only when the file it is looking
+/// at can actually take it: a `.java` file that declares no entity offers no entity actions, so
+/// the toolbar's contents *are* the answer to "what kind of file is this", and there is no
+/// disabled-button state to explain.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ExtAction {
+    /// Stable identity the host sends back when it is chosen (`"jpa.query.count"`). Namespaced
+    /// by the extension id, like every other kind.
+    pub id: String,
+    /// Button text (`"Add query method"`).
+    pub label: String,
+    /// Tooltip — what it will write, in one line.
+    pub detail: String,
+    /// Icon key the frontend maps to a glyph. Unknown keys render without one rather than
+    /// breaking the row.
+    pub icon: String,
+    /// Sub-actions. Empty means a plain button; non-empty means a dropdown, and choosing the
+    /// parent is not itself an action.
+    #[serde(default)]
+    pub children: Vec<ExtAction>,
+}
+
+impl ExtAction {
+    pub fn new(id: impl Into<String>, label: impl Into<String>, icon: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            detail: String::new(),
+            icon: icon.into(),
+            children: Vec::new(),
+        }
+    }
+
+    pub fn detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = detail.into();
+        self
+    }
+
+    /// Turn it into a dropdown over `children`.
+    pub fn over(mut self, children: Vec<ExtAction>) -> Self {
+        self.children = children;
+        self
+    }
 }
 
 /// A headline number an extension wants surfaced (index inspector / overview cards).

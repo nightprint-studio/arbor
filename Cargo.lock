@@ -871,11 +871,13 @@ dependencies = [
  "bennu-intel",
  "bennu-intentions",
  "bennu-java",
+ "bennu-jpa",
  "bennu-project",
  "bennu-proto",
  "bennu-query",
  "bennu-spring",
  "bennu-web",
+ "bennu-xml",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -904,6 +906,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bennu-complete"
+version = "0.3.0"
+dependencies = [
+ "bennu-proto",
+]
+
+[[package]]
 name = "bennu-core"
 version = "0.3.0"
 dependencies = [
@@ -915,12 +924,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "bennu-dtd"
+version = "0.3.0"
+
+[[package]]
 name = "bennu-ext"
 version = "0.3.0"
 dependencies = [
  "bennu-proto",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "bennu-facts"
+version = "0.3.0"
+dependencies = [
+ "tree-sitter",
+ "tree-sitter-java",
 ]
 
 [[package]]
@@ -969,6 +990,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bennu-jpa"
+version = "0.3.0"
+dependencies = [
+ "bennu-complete",
+ "bennu-ext",
+ "bennu-facts",
+ "bennu-proto",
+ "serde",
+]
+
+[[package]]
 name = "bennu-jsp"
 version = "0.3.0"
 dependencies = [
@@ -1014,14 +1046,14 @@ version = "0.3.0"
 name = "bennu-spring"
 version = "0.3.0"
 dependencies = [
+ "bennu-complete",
  "bennu-ext",
+ "bennu-facts",
  "bennu-proto",
  "bennu-spel",
  "roxmltree",
  "serde",
  "serde_json",
- "tree-sitter",
- "tree-sitter-java",
 ]
 
 [[package]]
@@ -1032,6 +1064,24 @@ dependencies = [
  "roxmltree",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "bennu-xml"
+version = "0.3.0"
+dependencies = [
+ "bennu-complete",
+ "bennu-dtd",
+ "bennu-ext",
+ "bennu-proto",
+ "bennu-xsd",
+]
+
+[[package]]
+name = "bennu-xsd"
+version = "0.3.0"
+dependencies = [
+ "roxmltree",
 ]
 
 [[package]]

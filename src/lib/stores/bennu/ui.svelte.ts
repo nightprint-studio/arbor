@@ -41,7 +41,9 @@ export type BottomPanel =
   | 'endpoints'
   | 'springconfig'
   | 'springbindings'
-  | 'springdocumented';
+  | 'springdocumented'
+  | 'jpaentities'
+  | 'jparepositories';
 
 /** Which tab the Go-to navigator opens on. */
 export type NavMode = 'class' | 'file' | 'symbol' | 'all';
@@ -85,6 +87,18 @@ function createBennuUiStore() {
   // (Alt+Insert opens it fresh; an Alt+Enter "Generate…" intention preselects one).
   let generateOpen = $state(false);
   let generateMode = $state<GenerateMode>('getters-setters');
+  // JPA generation (repository / projection / query method). Its own modal rather than a mode of
+  // the one above: that one rewrites the class you are in, this one builds against the whole
+  // entity model and often writes a different file.
+  let jpaGenerateOpen = $state(false);
+  /** The file the JPA form should start from — the entity or repository you had open when you
+   *  pressed the button. Without it the form opens on whichever entity happens to be first,
+   *  which is never the one you were looking at. */
+  let jpaGenerateFile = $state<string | null>(null);
+  /** Which generation was asked for — the id of a backend-contributed action (`jpa.query.list`).
+   *  Held as a string so the store stays free of the component layer's table, and so an
+   *  extension can contribute an action id this store has never heard of. */
+  let jpaGenerateAction = $state('jpa.query.list');
   // "New validator" modal (opened from the Struts-validation-file editor toolbar).
   let validationCreatorOpen = $state(false);
   // Workspace manager modal (create / rename / recolor / delete workspaces, manage members).
@@ -142,6 +156,9 @@ function createBennuUiStore() {
     get fileStructureOpen() { return fileStructureOpen; },
     get aboutOpen()    { return aboutOpen; },
     get generateOpen() { return generateOpen; },
+    get jpaGenerateOpen() { return jpaGenerateOpen; },
+    get jpaGenerateFile() { return jpaGenerateFile; },
+    get jpaGenerateAction() { return jpaGenerateAction; },
     get generateMode() { return generateMode; },
     get validationCreatorOpen() { return validationCreatorOpen; },
     get workspaceManagerOpen() { return workspaceManagerOpen; },
@@ -215,6 +232,14 @@ function createBennuUiStore() {
       generateOpen = true;
     },
     closeGenerate()      { generateOpen = false; },
+    /** `action` is a contributed action id — the kind is chosen before the dialog opens, so the
+     *  dialog has one job and a title that names it. */
+    openJpaGenerate(action: string, fromFile?: string | null) {
+      jpaGenerateAction = action;
+      jpaGenerateFile = fromFile ?? null;
+      jpaGenerateOpen = true;
+    },
+    closeJpaGenerate()   { jpaGenerateOpen = false; jpaGenerateFile = null; },
     /** Open the "New validator" modal (from the validation-file editor toolbar). */
     openValidationCreator()  { validationCreatorOpen = true; },
     closeValidationCreator() { validationCreatorOpen = false; },

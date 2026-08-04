@@ -156,11 +156,12 @@ mod run_config;
 // Main-class discovery (run-config editor's picker): `bennu_main_classes` — a fresh
 // `.java` scan for types declaring `public static void main(String[])`.
 mod main_classes;
-// Framework extensions (`bennu-ext` + `bennu-spring`): `bennu_ext_*` (highlights / diagnostics /
-// gutter / navigate / hover / completion / catalog / overview) + `bennu_spring_refresh` /
-// `bennu_spring_set_property_file`. Capability-gated and lazy — a project no extension applies to
-// never walks a file. This module is the ONLY place the backend names a framework.
-mod spring;
+// Framework extensions (`bennu-ext` + `bennu-spring` + `bennu-jpa`): `bennu_ext_*` (highlights /
+// diagnostics / gutter / navigate / hover / completion / inline hint / catalog / overview) plus the
+// few framework-specific settings verbs. Capability-gated and lazy — a project no extension applies
+// to never walks a file. This module is the ONLY place the backend names a framework, and adding a
+// third is one entry in `registry_for`.
+mod frameworks;
 // Tomcat JSP hot-swap (per-repo `[bennu.tomcat]`): `bennu_get/set_tomcat_config` (the link) +
 // `bennu_detect_tomcat` (validate a Tomcat root + resolve the deployed context) + `bennu_hotswap_jsp`
 // (copy one/all JSPs into the exploded webapp so Jasper recompiles them — no redeploy/restart).

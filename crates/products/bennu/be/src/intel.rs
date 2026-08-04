@@ -129,7 +129,7 @@ fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Dia
         // syntax squiggles within ~120ms of a keystroke, and a framework check is a project-wide
         // question. Not restricted to `.java` — a bean XML has diagnostics and no Java validation.
         if args.resolved.unwrap_or(true) {
-            java.extend(crate::spring::diagnostics_for(&args.file, args.source.as_deref()));
+            java.extend(crate::frameworks::diagnostics_for(&args.file, args.source.as_deref()));
         }
         return Ok(java);
     };

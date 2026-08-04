@@ -300,6 +300,131 @@
   lists everything the project's dependencies accept, set or not. Each row opens its declaration.
 </p>
 
+<h2>JPA</h2>
+<p>
+  On a project with JPA or Spring Data on its classpath — and only there, like every other
+  framework tool here. Entities, repositories and the queries between them.
+</p>
+<p>
+  <strong>Generated sources are part of the project.</strong> The static metamodel
+  (<code>Order_</code>, <code>Customer_</code>) that Criteria queries are written against is
+  written by an annotation processor into <code>target/generated-sources</code>, and so are
+  MapStruct's <code>*MapperImpl</code>, QueryDSL's <code>QOrder</code> and jOOQ's output. None of
+  it exists under <code>src/</code> and all of it is referenced from there, so Bennu indexes those
+  two roots — but nothing else under <code>target/</code>, which holds build output and sometimes
+  an unpacked copy of somebody else's sources. Build the project once and they resolve.
+</p>
+<p>
+  <strong>Derived query names are checked.</strong>
+  <code>findByCustomerNameAndTotalGreaterThan</code> is not a name, it is a query that Spring Data
+  compiles at <em>application start</em>. A typo in one is invisible to the compiler and to every
+  test that doesn't touch that repository, and then it takes the context down on deploy. So every
+  segment is resolved against the entity — following relations, so <code>CustomerName</code> is
+  <code>customer.name</code> — and a segment that addresses nothing is flagged where you wrote it.
+  The number of arguments the name asks for is checked too: <code>Between</code> wants two,
+  <code>IsNull</code> wants none, and a <code>Pageable</code> is Spring's, not yours.
+</p>
+<p>
+  <strong>The check goes quiet rather than guess.</strong> An entity whose
+  <code>@MappedSuperclass</code> chain leaves the project, a relation whose target was never
+  scanned, a repository over a type Bennu doesn't have — each turns the check off for that method.
+  Nothing about the database is checked at all: whether the column exists needs a connection, which
+  is Picus's business, not this one's.
+</p>
+<p>
+  <strong>A <code>@Query</code> stops being a string.</strong> Keywords, parameters, literals and
+  numbers are coloured inside it, and JPQL and native SQL are tinted apart because they are
+  different risks — JPQL is resolved against the entity model, native SQL is sent to the database
+  as written. A <code>:name</code> that no parameter binds is an error on the placeholder itself,
+  with the fix named. <kbd>Ctrl</kbd> + <kbd>B</kbd> inside a query opens the entity it selects from.
+</p>
+<p>
+  <strong>The gutter links the two ends.</strong> <code>▤</code> beside an entity opens the
+  repositories that manage it; <code>◇</code> beside a repository opens its entity. Hovering a
+  repository method says what it actually asks for — a derived name is rendered as the sentence it
+  compiles to.
+</p>
+<p>
+  <strong>The toolbar follows the file.</strong> Standing on an entity, the editor toolbar carries
+  <strong>Add attribute</strong>, <strong>Add lifecycle callback</strong>,
+  <strong>Add named query</strong>, <strong>Repository</strong> and <strong>Projection</strong>.
+  Standing on a repository it carries <strong>Add query method</strong> and
+  <strong>Add modify method</strong> instead. On a class that is neither there is nothing — the
+  buttons present <em>are</em> the answer to what kind of file this is, so there is no greyed-out
+  row to interpret. A <code>@MappedSuperclass</code> gets the attribute and callback buttons but
+  not the repository ones: it has no table, so those could not work.
+</p>
+<p>
+  <strong>Adding an attribute</strong> writes the field, its <code>@Column</code> constraints and
+  optionally its accessors. Choose a relation and it writes the pair people get backwards by hand:
+  the owning side gets the <code>@JoinColumn</code>, and filling in <em>mapped by</em> makes it the
+  inverse side, which owns no column at all.
+</p>
+<p>
+  <strong>Query methods</strong> are built from the entity's own properties, and that is the point:
+  a name assembled from properties that exist cannot be misspelled, and the parameter list follows
+  from the keywords instead of being counted by eye. Leave <em>method name</em> empty and the
+  derived name is used; write one and the method arrives with its <code>@Query</code> spelled out,
+  because a name Spring Data cannot parse is no longer a derived query.
+</p>
+<p>
+  <strong>Modify methods</strong> are always <code>@Modifying</code> with the JPQL written out.
+  Spring Data has no naming scheme for an update at all, and a bulk write goes straight to the
+  database — the rows are not loaded, so <code>@PreUpdate</code> and <code>@PreRemove</code> do not
+  fire and the persistence context does not see it. The dialog says so, and warns when there are no
+  conditions at all.
+</p>
+<p>
+  <strong>Repositories</strong> land in the package the project already keeps repositories in, read
+  off the ones that exist rather than assumed. A <strong>projection</strong> can be its own file
+  <em>or</em> an interface nested inside the repository that returns it — both are idiomatic, and
+  the dialog offers both. Every generator previews live, <kbd>Ctrl</kbd> + <kbd>Enter</kbd>
+  commits, and nothing is written before that. Each is also in the command palette by name.
+</p>
+
+<h2>XML with a schema behind it</h2>
+<p>
+  An XML file in a Java project is a configuration language whose vocabulary is written down
+  precisely — in the DTD or XSD the document names — and normally nothing reads it. Bennu does.
+  Open a <code>struts.xml</code>, a <code>web.xml</code>, a <code>pom.xml</code> or a
+  <code>beans.xml</code> and typing <code>&lt;</code> lists the elements that may go there, with
+  the schema's own description of each.
+</p>
+<p>
+  <strong>Where the schema comes from.</strong> A document names it by URL, and Bennu never fetches
+  one. It does not have to: frameworks ship their grammar inside their own jar —
+  <code>struts2-core.jar</code> carries <code>struts-2.5.dtd</code>, <code>spring-beans.jar</code>
+  carries every <code>spring-beans.xsd</code> ever published — so the file the URL names is already
+  on the machine. Schemas kept in the project itself are found too, and win over a jar copy of the
+  same name. The Maven POM is the one exception nobody ships, so its vocabulary is built in.
+</p>
+<p>
+  <strong>What you get.</strong> Element names filtered by what the parent may contain; attribute
+  names, with the ones already written removed; attribute <em>values</em> where the schema closes
+  the set. Ghost text where exactly one thing can follow. Hover with the schema's documentation,
+  the required attributes, and which grammar answered. <kbd>Ctrl</kbd> + <kbd>B</kbd> on a tag or
+  an attribute jumps to its declaration in the schema — which turns
+  <code>&lt;result type="…"&gt;</code> from a word into something you can read.
+</p>
+<p>
+  <strong>Following the schema itself.</strong> <kbd>Ctrl</kbd> + <kbd>B</kbd> on the
+  <code>DOCTYPE</code> or the <code>xsi:schemaLocation</code> opens the grammar the file is
+  actually checked against — the copy out of the jar, not the address it is written as. When
+  nobody ships one, Bennu downloads it once and caches it, and that is worth more than the
+  reading: the cached copy joins the catalog, so a <code>pom.xml</code> stops being answered by
+  the built-in table and starts being answered by the real Maven schema. Nothing is ever fetched
+  during a scan — only when you follow the link.
+</p>
+<p>
+  <strong>What it will not do.</strong> Say anything at all without a schema. No grammar resolved
+  means no completion, no ghost text and no warnings — a vocabulary guessed from the tags already
+  in the file would confidently propose whatever typo is already there. And where a schema says
+  content is unconstrained (<code>ANY</code>, <code>xs:any</code>, a POM
+  <code>&lt;configuration&gt;</code>) nothing inside is checked. Prefixed names are never reported
+  either: a document mixing four namespaces usually has schemas for one of them, and the rest must
+  be invisible rather than wrong.
+</p>
+
 <h2>Tomcat hot-swap</h2>
 <p>
   Link the project to a local Tomcat and push changed JSPs straight into the running server — no

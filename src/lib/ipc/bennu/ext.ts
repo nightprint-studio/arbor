@@ -72,6 +72,24 @@ export interface ExtEntry {
   children: ExtEntry[];
 }
 
+/** Something an extension offers to write into the file in front of you.
+ *
+ *  Contributed rather than enumerated here: which buttons belong on a repository is the
+ *  extension's knowledge, and **an action is only ever returned when it applies** — so the
+ *  toolbar's contents are the answer to "what kind of file is this", and there is no
+ *  disabled-button state to explain. */
+export interface ExtAction {
+  /** Namespaced by extension id (`jpa.query.count`); sent back when chosen. */
+  id: string;
+  label: string;
+  /** Tooltip — what it will write, in one line. */
+  detail: string;
+  /** Icon key; unknown keys render without one rather than breaking the row. */
+  icon: string;
+  /** Empty = a plain button. Non-empty = a dropdown, and the parent is not itself an action. */
+  children: ExtAction[];
+}
+
 /** A headline number, optionally drilling into a catalog. */
 export interface ExtStat {
   label: string;
@@ -138,6 +156,23 @@ export function extInlineHint(
   offset: number,
 ): Promise<string | null> {
   return bennu('bennu_ext_inline_hint', { args: { file, source, offset } });
+}
+
+/** What the active frameworks offer to write into this buffer. Empty on most files, which is
+ *  the correct and common answer. Wire: `bennu_ext_actions`. */
+export function extActions(file: string, source: string): Promise<ExtAction[]> {
+  return bennu('bennu_ext_actions', { args: { file, source } });
+}
+
+/** Download the schema an XML document names and cache it; resolves to the local path.
+ *
+ *  Better than opening the address in a browser for a reason that is not convenience: a
+ *  downloaded schema **joins the catalog**, so a `pom.xml` whose grammar was the built-in table
+ *  starts being answered by the real Maven schema instead. Fetched only when the user asks —
+ *  this is the far end of a ctrl+click, never something a scan does.
+ *  Wire: `bennu_xml_fetch_schema`. */
+export function xmlFetchSchema(url: string): Promise<string> {
+  return bennu('bennu_xml_fetch_schema', { args: { url } });
 }
 
 /** A configuration key rendered as the environment variable that overrides it. */

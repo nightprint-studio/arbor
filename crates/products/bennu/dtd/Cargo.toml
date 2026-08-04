@@ -1,0 +1,10 @@
+[package]
+name         = "bennu-dtd"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "A DTD parser: element declarations with their content models, attribute lists with their enumerations and defaults, and parameter-entity expansion. Byte spans on every declaration, so an editor can jump to one. Leaf crate — no dependencies at all."
+
+[dependencies]

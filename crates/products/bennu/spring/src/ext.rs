@@ -542,6 +542,8 @@ fn select_and_scan(java: &[ScannedFile], xml: &[crate::xml::XmlBeanFile]) -> Vec
         looks_spring_relevant(&f.text) || wanted.iter().any(|w| has_stem(f, w))
     });
 
+    pull_in_property_types(java, &mut units);
+
     // One round of supertypes, so `Foo extends AbstractFoo` keeps a complete property set.
     let known: Vec<String> =
         units.iter().flat_map(|u| u.facts.types.iter().map(|t| t.name.clone())).collect();
@@ -553,13 +555,103 @@ fn select_and_scan(java: &[ScannedFile], xml: &[crate::xml::XmlBeanFile]) -> Vec
         .filter(|s| !known.contains(s))
         .collect();
     if !missing.is_empty() {
-        let already: Vec<String> = units.iter().map(|u| u.facts.file.clone()).collect();
-        units.extend(scan_files(java, |f| {
-            !already.contains(&f.path.to_string_lossy().replace('\\', "/"))
-                && missing.iter().any(|m| has_stem(f, m))
+        units.extend(scan_files_not_yet(java, &units, |f| {
+            missing.iter().any(|m| has_stem(f, m))
         }));
     }
     units
+}
+
+/// How far a `@ConfigurationProperties` graph is followed through files that had to be pulled
+/// in. Matches `config_props`'s own depth limit — following further than the key path is walked
+/// would parse files for nothing.
+const MAX_PROPERTY_ROUNDS: usize = 5;
+
+/// Pull in the **nested properties classes** a `@ConfigurationProperties` root reaches.
+///
+/// This is the round without which the feature quietly half-works. A properties tree is
+/// normally one annotated root over a chain of plain POJOs:
+///
+/// ```java
+/// @ConfigurationProperties(prefix = "app")
+/// class AppProperties { private Http http; }        // ← selected: it names Spring
+/// class Http { private Client client; }             // ← NOT selected: it mentions Spring nowhere
+/// class Client { private Duration readTimeout; }    // ← NOT selected
+/// ```
+///
+/// `Http` and `Client` carry no annotation, no import, nothing the relevance pre-filter can see
+/// — so they were never parsed, and the key path stopped dead at `app.http`. Every symptom
+/// followed from that one gap: no full key on hover for the fields that have interesting keys,
+/// no usages counted for them in the yaml, and nothing to complete from in a property file.
+///
+/// Each round takes the field types of the frontier and pulls in the files that declare them,
+/// so the graph is followed a level at a time and stops as soon as a round adds nothing.
+fn pull_in_property_types(java: &[ScannedFile], units: &mut Vec<JavaUnit>) {
+    // The frontier starts at the annotated roots; everything reached from there is a
+    // properties object, and nothing else is followed.
+    let mut frontier: Vec<String> = units
+        .iter()
+        .flat_map(|u| u.facts.types.iter().map(move |t| (t, &u.facts)))
+        .filter(|(t, facts)| {
+            crate::known::has(&t.annotations, facts, "ConfigurationProperties")
+        })
+        .flat_map(|(t, _)| referenced_type_names(t))
+        .collect();
+
+    for _ in 0..MAX_PROPERTY_ROUNDS {
+        if frontier.is_empty() {
+            break;
+        }
+        let known: Vec<String> =
+            units.iter().flat_map(|u| u.facts.types.iter().map(|t| t.name.clone())).collect();
+        let wanted: Vec<String> =
+            frontier.iter().filter(|n| !known.contains(n)).cloned().collect();
+        if wanted.is_empty() {
+            break;
+        }
+        let added =
+            scan_files_not_yet(java, units, |f| wanted.iter().any(|w| has_stem(f, w)));
+        if added.is_empty() {
+            break;
+        }
+        // Only what this round actually brought in seeds the next one, so the walk stays
+        // inside the properties graph instead of spreading across the project.
+        frontier =
+            added.iter().flat_map(|u| u.facts.types.iter()).flat_map(referenced_type_names).collect();
+        units.extend(added);
+    }
+}
+
+/// The simple names of every type written in `t`'s instance fields — the base type *and* its
+/// type arguments, so `Map<String, Endpoint>` offers `Endpoint` as well.
+///
+/// Lowercase-initial words are dropped, which filters out primitives and any stray identifier
+/// without needing to know what a type name looks like.
+fn referenced_type_names(t: &crate::scan::TypeFacts) -> Vec<String> {
+    t.fields
+        .iter()
+        .filter(|f| !f.is_static)
+        .flat_map(|f| {
+            f.type_text
+                .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$' || c == '.'))
+                .filter(|s| !s.is_empty())
+                .map(|s| simple_name(s).to_string())
+                .filter(|s| s.starts_with(char::is_uppercase))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// Scan the files matching `keep` that are not already among `units`.
+fn scan_files_not_yet(
+    java: &[ScannedFile],
+    units: &[JavaUnit],
+    keep: impl Fn(&ScannedFile) -> bool,
+) -> Vec<JavaUnit> {
+    let already: Vec<&str> = units.iter().map(|u| u.facts.file.as_str()).collect();
+    scan_files(java, |f| {
+        !already.contains(&f.path.to_string_lossy().replace('\\', "/").as_str()) && keep(f)
+    })
 }
 
 fn scan_files(java: &[ScannedFile], keep: impl Fn(&ScannedFile) -> bool) -> Vec<JavaUnit> {
@@ -584,7 +676,7 @@ mod tests {
 
     /// The Spring imports on one line. `known` resolves every annotation through them, so a
     /// fixture without them is declaring its own — which is exactly what that check rejects.
-    const IMPORTS: &str = "import org.springframework.stereotype.*; import org.springframework.web.bind.annotation.*; import org.springframework.beans.factory.annotation.*;";
+    const IMPORTS: &str = "import org.springframework.stereotype.*; import org.springframework.web.bind.annotation.*; import org.springframework.beans.factory.annotation.*; import org.springframework.boot.context.properties.*;";
 
     /// A scanned Java file, with the imports spliced onto its `package` line.
     fn java_file(path: &str, text: &str) -> ScannedFile {
@@ -621,6 +713,7 @@ mod tests {
             java: &java,
             xml: &xml,
             resources: &res,
+            schemas: &[],
             descriptors: &descriptors,
         });
         ext
@@ -739,6 +832,7 @@ mod tests {
                 file("/p/application.yml", "app:\n  mode: base\n"),
                 file("/p/application-dev.yml", "app:\n  mode: dev\n"),
             ],
+            schemas: &[],
             descriptors: &[],
         });
         assert_eq!(ext.model().props.lookup("app.mode").unwrap().1.value, "dev");
@@ -779,6 +873,112 @@ mod tests {
         assert!(ext.highlights(&other).is_empty());
         assert!(ext.gutter(&other).is_empty());
         assert!(ext.inline_hint(&other, 0).is_none());
+    }
+
+    /// The round without which the whole `@ConfigurationProperties` feature half-works: the
+    /// nested POJOs mention Spring nowhere, so nothing selects them, and the key path stops at
+    /// the first level — no full key on hover, no usages in the yaml, nothing to complete.
+    #[test]
+    fn a_nested_properties_pojo_is_pulled_in_even_though_it_names_spring_nowhere() {
+        let ext = indexed(
+            vec![
+                java_file(
+                    "/p/src/main/java/com/acme/AppProperties.java",
+                    "package com.acme;\n@ConfigurationProperties(prefix = \"app\")\npublic class AppProperties { private Http http; }\n",
+                ),
+                // No annotation, no import, nothing the relevance pre-filter can see.
+                file(
+                    "/p/src/main/java/com/acme/Http.java",
+                    "package com.acme;\npublic class Http { private Client client; }\n",
+                ),
+                file(
+                    "/p/src/main/java/com/acme/Client.java",
+                    "package com.acme;\npublic class Client { private int readTimeout; }\n",
+                ),
+            ],
+            vec![],
+            vec![],
+        );
+        let paths: Vec<&str> =
+            ext.model().config_bindings.iter().map(|b| b.path.as_str()).collect();
+        assert!(paths.contains(&"app.http"), "got: {paths:?}");
+        assert!(paths.contains(&"app.http.client"), "one level down");
+        assert!(paths.contains(&"app.http.client.read-timeout"), "two levels down");
+    }
+
+    /// The container case, which is where the graph is easiest to lose: the element type is
+    /// inside the type arguments, not the base type.
+    #[test]
+    fn a_properties_class_reached_through_a_map_is_pulled_in_too() {
+        let ext = indexed(
+            vec![
+                java_file(
+                    "/p/src/main/java/com/acme/Root.java",
+                    "package com.acme;\n@ConfigurationProperties(prefix = \"app\")\npublic class Root { private java.util.Map<String, Endpoint> endpoints; }\n",
+                ),
+                file(
+                    "/p/src/main/java/com/acme/Endpoint.java",
+                    "package com.acme;\npublic class Endpoint { private String url; }\n",
+                ),
+            ],
+            vec![],
+            vec![],
+        );
+        let paths: Vec<&str> =
+            ext.model().config_bindings.iter().map(|b| b.path.as_str()).collect();
+        assert!(paths.contains(&"app.endpoints.<key>.url"), "got: {paths:?}");
+    }
+
+    /// A record binds keys exactly like a class — and is the modern way to write one of these.
+    #[test]
+    fn a_record_properties_class_binds_its_components() {
+        let ext = indexed(
+            vec![java_file(
+                "/p/src/main/java/com/acme/AppProperties.java",
+                "package com.acme;\n@ConfigurationProperties(prefix = \"app\")\npublic record AppProperties(String name, int maxPoolSize) {}\n",
+            )],
+            vec![],
+            vec![],
+        );
+        let paths: Vec<&str> =
+            ext.model().config_bindings.iter().map(|b| b.path.as_str()).collect();
+        assert_eq!(paths, ["app.name", "app.max-pool-size"]);
+    }
+
+    /// The bindings are what the three property-file features all read from, so one check that
+    /// the chain actually closes: a nested key completes, and its declaration is a usage.
+    #[test]
+    fn a_nested_bound_key_completes_and_counts_as_a_usage_in_a_yaml() {
+        let ext = indexed(
+            vec![
+                java_file(
+                    "/p/src/main/java/com/acme/AppProperties.java",
+                    "package com.acme;\n@ConfigurationProperties(prefix = \"app\")\npublic class AppProperties { private Http http; }\n",
+                ),
+                file(
+                    "/p/src/main/java/com/acme/Http.java",
+                    "package com.acme;\npublic class Http { private int readTimeout; }\n",
+                ),
+            ],
+            vec![],
+            vec![],
+        );
+        let props = FileCtx {
+            path: std::path::Path::new("/p/application.properties"),
+            source: "app.http.re",
+        };
+        assert!(
+            ext.completions(&props, 11).iter().any(|c| c.label == "app.http.read-timeout"),
+            "a key nobody documented still completes",
+        );
+
+        let yaml = FileCtx {
+            path: std::path::Path::new("/p/application.yml"),
+            source: "app:\n  http:\n    read-timeout: 5000\n",
+        };
+        let marks = ext.gutter(&yaml);
+        assert_eq!(marks.len(), 1, "the bound field is a reader of this key");
+        assert_eq!(marks[0].targets[0].label, "Http.readTimeout");
     }
 
     /// The descriptors a host reads out of the dependency jars become the completion

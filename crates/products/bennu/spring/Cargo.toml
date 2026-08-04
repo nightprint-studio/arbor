@@ -16,13 +16,16 @@ bennu-spel = { path = "../spel" }
 # The wire types a contribution is made of (Diagnostic / CompletionItem / CapabilitySet).
 bennu-proto = { path = "../proto" }
 
-# This crate parses Java ITSELF rather than using `bennu-java`: annotations with their
-# argument spans, on methods and parameters, are the whole substance here, and teaching
-# the shared model to carry them would put framework-shaped data in the core for one
-# consumer. Self-contained also means WASM-portable later. Same pinned runtime as the
-# rest of the workspace (one shared `links = "tree-sitter"` native lib).
-tree-sitter      = "0.25"
-tree-sitter-java = "0.23"
+# The annotation-shaped Java scan + the annotation-origin rule. Both started here and moved
+# out the day JPA needed them identically: parsing Java for framework facts is not a Spring
+# idea, and the alternative to extracting was a second copy that would drift. What stayed in
+# this crate is the policy — the relevance markers (`scan.rs`) and the package table
+# (`known.rs`).
+bennu-facts = { path = "../facts" }
+# The completion mechanics — the caret's token, the prefix rule, the de-duplicated capped
+# candidate list, and the discipline that separates ghost text from a guess. Extracted here
+# too, and for the same reason: the second provider needed all of it unchanged.
+bennu-complete = { path = "../complete" }
 # Bean XML, with attribute value ranges (`range_value`) — the spans every positional
 # feature is built on. Same version `bennu-web` already uses.
 roxmltree  = "0.20"

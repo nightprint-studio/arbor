@@ -60,6 +60,8 @@
   import BennuProjectConfigModal from './BennuProjectConfigModal.svelte';
   import BennuAboutModal from './BennuAboutModal.svelte';
   import BennuGenerateModal from './BennuGenerateModal.svelte';
+  import BennuJpaGenerateModal from './BennuJpaGenerateModal.svelte';
+  import { JPA_PALETTE_ACTIONS } from './jpa-actions';
   import BennuValidationModal from './BennuValidationModal.svelte';
   import BennuWorkspaceManagerModal from './BennuWorkspaceManagerModal.svelte';
   import BennuIntentionsOverlay from './BennuIntentionsOverlay.svelte';
@@ -532,6 +534,18 @@
         action: () => run(() => bennuUiStore.toggleBottom(c.id)),
         when: hasFramework,
       })),
+      // JPA generation. Gated the same way as the catalogs — on a project with no persistence
+      // the verb is absent rather than opening a form with nothing to build against.
+      // One entry per generator, so every one is reachable by name from the keyboard. The
+      // toolbar's list is per-file and comes from the backend; this one is per-project and
+      // cannot be, so it is the whole table.
+      ...JPA_PALETTE_ACTIONS.map((a) => ({
+        id: `jpa:${a.id}`,
+        title: `JPA: ${a.title.toLowerCase()}…`,
+        icon: 'wand',
+        action: () => run(() => bennuUiStore.openJpaGenerate(a.id, projectStore.activeFilePath)),
+        when: hasFramework,
+      })),
     ];
     const idle = !!projectStore.project && !bennuRunStore.active;
     const runItems = [
@@ -850,6 +864,13 @@
     mode={bennuUiStore.generateMode}
     onClose={() => bennuUiStore.closeGenerate()}
     onInsert={(text) => { editor?.insertAtCursor(text); editor?.focusEditor(); }}
+  />
+{/if}
+
+{#if bennuUiStore.jpaGenerateOpen}
+  <BennuJpaGenerateModal
+    action={bennuUiStore.jpaGenerateAction}
+    onClose={() => { bennuUiStore.closeJpaGenerate(); editor?.focusEditor(); }}
   />
 {/if}
 

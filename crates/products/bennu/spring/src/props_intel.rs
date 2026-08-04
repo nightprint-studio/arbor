@@ -34,9 +34,17 @@
 //! is single-valued: a documented default for a key you left empty, or a prefix that exactly one
 //! known key can continue. Anywhere else it stays away and lets the popup do its job.
 //!
+//! That rule is not written here — it is [`bennu_complete::prefix::unique_continuation`], and so
+//! are the caret mechanics and the de-duplicated candidate list. What stays in this file is the
+//! *vocabulary*: which keys exist, what they mean, and which of two sources describes one better.
+//!
 //! Keys are matched in Spring's own terms throughout: `app.readTimeout` and `app.read-timeout`
 //! are one key ([`canonical_key`]).
 
+use bennu_complete::prelude::{
+    line_number, line_prefix, line_start, safe_offset, unique_continuation, within, Proposal,
+    Proposals,
+};
 use bennu_ext::prelude::{ExtGutterMark, ExtHighlight, ExtHover, ExtTarget};
 use bennu_proto::prelude::CompletionItem;
 
@@ -128,7 +136,7 @@ fn target_of(u: &crate::model::PropertyUsage) -> ExtTarget {
 pub fn navigate(model: &SpringModel, path: &str, source: &str, offset: usize) -> Vec<ExtTarget> {
     declared_with_usages(model, path, source)
         .into_iter()
-        .find(|(e, _)| offset >= e.key_start && offset <= e.key_end)
+        .find(|(e, _)| within(offset, e.key_start, e.key_end))
         .map(|(_, usages)| usages.iter().map(|u| target_of(u)).collect())
         .unwrap_or_default()
 }
@@ -139,7 +147,7 @@ pub fn navigate(model: &SpringModel, path: &str, source: &str, offset: usize) ->
 pub fn hover(model: &SpringModel, path: &str, source: &str, offset: usize) -> Option<ExtHover> {
     let (entry, usages) = declared_with_usages(model, path, source)
         .into_iter()
-        .find(|(e, _)| offset >= e.key_start && offset <= e.key_end)?;
+        .find(|(e, _)| within(offset, e.key_start, e.key_end))?;
 
     let meta = model.metadata.lookup(&entry.key);
     let mut lines: Vec<String> = Vec::new();
@@ -295,16 +303,15 @@ impl Caret {
 }
 
 fn classify(path: &str, source: &str, offset: usize) -> Option<Caret> {
-    let offset = offset.min(source.len());
-    if !source.is_char_boundary(offset) {
-        return None;
-    }
-    let line_start = source[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let before = &source[line_start..offset];
+    let offset = safe_offset(source, offset)?;
+    let line_start = line_start(source, offset);
+    let before = line_prefix(source, offset);
     let trimmed = before.trim_start();
     if trimmed.starts_with('#') || trimmed.starts_with('!') || trimmed.starts_with('-') {
         return None;
     }
+    // The caret's own indentation, not the line's: on `  a:  |b` the parent search must start
+    // from where the key was written, and the line may continue past the caret.
     let indent = before.len() - trimmed.len();
 
     let is_yaml = !path.to_ascii_lowercase().ends_with(".properties");
@@ -377,15 +384,16 @@ fn yaml_parents(source: &str, line_start: usize, indent: usize) -> String {
 
 // ── Completion ───────────────────────────────────────────────────────────────
 
-/// How many candidates a single request may return. Enough that a two-letter prefix under a
-/// busy namespace is still complete, small enough that the popup stays a list.
-const MAX_ITEMS: usize = 300;
-
 /// Keys (and legal values) at the caret.
 ///
 /// Two sources, and the second is the one that makes this worth having on a legacy project:
 /// alongside everything Spring documents, the project's **own** `@ConfigurationProperties`
 /// paths complete too — those are keys nobody wrote documentation for and everybody misspells.
+///
+/// Documented first, project's own second, and the ordering is load-bearing: when the
+/// annotation processor is on the classpath a key is in *both* vocabularies, and
+/// [`Proposals`] keeps whichever described it first. Documented wins because it is a
+/// declaration and the other an inference.
 pub fn completions(
     model: &SpringModel,
     path: &str,
@@ -393,52 +401,38 @@ pub fn completions(
     offset: usize,
 ) -> Vec<CompletionItem> {
     let Some(caret) = classify(path, source, offset) else { return Vec::new() };
+    let mut out = Proposals::default();
     match &caret {
-        Caret::Value { key, partial } => value_completions(model, key, partial),
+        Caret::Value { key, partial } => value_completions(model, key, partial, &mut out),
         Caret::Key { parent, .. } => {
             let full = canonical_key(&caret.full_key());
+            // Under a yaml parent only the tail is typed — the ancestors are already on the
+            // page above the caret, and offering them again would write them twice.
             let strip = if parent.is_empty() { 0 } else { canonical_key(parent).len() + 1 };
-            let mut out: Vec<CompletionItem> = Vec::new();
-            let mut seen: Vec<String> = Vec::new();
+            let tail = |key: &str| key.get(strip..).filter(|s| !s.is_empty()).map(str::to_string);
 
-            for meta in model.metadata.starting_with(&full).take(MAX_ITEMS) {
-                let canonical = canonical_key(&meta.name);
-                let Some(label) = canonical.get(strip..).filter(|s| !s.is_empty()) else { continue };
-                seen.push(canonical.clone());
-                out.push(CompletionItem {
-                    label: label.to_string(),
-                    kind: "property".to_string(),
-                    detail: Some(detail_of(meta)),
-                    auto_import: None,
-                });
-            }
-            // The project's own bound paths. Offered after the documented ones and skipped
-            // when already described, so a project whose properties ARE documented (the
-            // annotation processor is on the classpath) does not list them twice.
-            for b in &model.config_bindings {
-                let canonical = canonical_key(&b.path);
-                if !canonical.starts_with(&full) || seen.contains(&canonical) {
-                    continue;
-                }
-                let Some(label) = canonical.get(strip..).filter(|s| !s.is_empty()) else { continue };
-                seen.push(canonical.clone());
-                out.push(CompletionItem {
-                    label: label.to_string(),
-                    kind: "property".to_string(),
-                    detail: Some(format!(
-                        "{}  · {}",
-                        short_type(&b.type_text),
-                        simple_name(&b.owner_fqcn)
-                    )),
-                    auto_import: None,
-                });
-                if out.len() >= MAX_ITEMS {
+            for meta in model.metadata.starting_with(&full) {
+                let Some(label) = tail(&canonical_key(&meta.name)) else { continue };
+                if !out.offer(Proposal::new(label, "property").detail(detail_of(meta))) && out.is_full()
+                {
                     break;
                 }
             }
-            out
+            for b in &model.config_bindings {
+                let canonical = canonical_key(&b.path);
+                if !canonical.starts_with(&full) {
+                    continue;
+                }
+                let Some(label) = tail(&canonical) else { continue };
+                let detail =
+                    format!("{}  · {}", short_type(&b.type_text), simple_name(&b.owner_fqcn));
+                if !out.offer(Proposal::new(label, "property").detail(detail)) && out.is_full() {
+                    break;
+                }
+            }
         }
     }
+    out.into_items()
 }
 
 /// The legal values of `key`, filtered by what has been typed.
@@ -446,20 +440,17 @@ pub fn completions(
 /// Only where the set is genuinely closed: a documented hint list, or a boolean. Everything
 /// else — a URL, a duration, a class name — has no candidates, and offering the current
 /// default as the only entry would dress a guess up as a choice.
-fn value_completions(model: &SpringModel, key: &str, partial: &str) -> Vec<CompletionItem> {
+fn value_completions(model: &SpringModel, key: &str, partial: &str, out: &mut Proposals) {
     let hints = model.metadata.values_for(key);
     let lower = partial.to_ascii_lowercase();
     if !hints.is_empty() {
-        return hints
-            .iter()
-            .filter(|h| h.value.to_ascii_lowercase().starts_with(&lower))
-            .map(|h| CompletionItem {
-                label: h.value.clone(),
-                kind: "value".to_string(),
-                detail: Some(h.description.clone()).filter(|d| !d.is_empty()),
-                auto_import: None,
-            })
-            .collect();
+        out.extend(
+            hints
+                .iter()
+                .filter(|h| h.value.to_ascii_lowercase().starts_with(&lower))
+                .map(|h| Proposal::new(h.value.clone(), "value").detail(h.description.clone())),
+        );
+        return;
     }
     let is_bool = model
         .metadata
@@ -467,18 +458,14 @@ fn value_completions(model: &SpringModel, key: &str, partial: &str) -> Vec<Compl
         .map(|m| m.type_text.ends_with("Boolean") || m.type_text == "boolean")
         .unwrap_or(false);
     if !is_bool {
-        return Vec::new();
+        return;
     }
-    ["true", "false"]
-        .into_iter()
-        .filter(|v| v.starts_with(&lower))
-        .map(|v| CompletionItem {
-            label: v.to_string(),
-            kind: "value".to_string(),
-            detail: None,
-            auto_import: None,
-        })
-        .collect()
+    out.extend(
+        ["true", "false"]
+            .into_iter()
+            .filter(|v| v.starts_with(&lower))
+            .map(|v| Proposal::new(v, "value")),
+    );
 }
 
 fn detail_of(meta: &PropertyMeta) -> String {
@@ -516,15 +503,10 @@ pub fn inline_hint(model: &SpringModel, path: &str, source: &str, offset: usize)
         Caret::Value { .. } => None,
         caret @ Caret::Key { .. } => {
             let full = canonical_key(&caret.full_key());
-            if full.is_empty() {
-                return None;
-            }
-            let mut matches = model.metadata.starting_with(&full);
-            let first = canonical_key(&matches.next()?.name);
-            if matches.next().is_some() {
-                return None;
-            }
-            first.get(full.len()..).filter(|s| !s.is_empty()).map(str::to_string)
+            unique_continuation(
+                &full,
+                model.metadata.starting_with(&full).map(|m| canonical_key(&m.name)),
+            )
         }
     }
 }
@@ -538,8 +520,7 @@ pub fn inline_hint(model: &SpringModel, path: &str, source: &str, offset: usize)
 /// menu item mysteriously do nothing half the time.
 pub fn env_var_at(path: &str, source: &str, offset: usize) -> Option<crate::env::EnvVar> {
     let file = parse_property_file(path, source)?;
-    let offset = offset.min(source.len());
-    let line = source[..offset].bytes().filter(|&b| b == b'\n').count() as u32 + 1;
+    let line = line_number(source, offset);
     let entry = file.entries.into_iter().find(|e| e.line == line)?;
     Some(crate::env::env_var(&entry.key, &entry.value))
 }

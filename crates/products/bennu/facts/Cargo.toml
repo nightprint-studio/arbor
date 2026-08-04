@@ -1,0 +1,14 @@
+[package]
+name         = "bennu-facts"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The Java facts a framework extension reads — an annotation-shaped tree-sitter scan (types, fields, methods, parameters, and every annotation argument with its byte span) plus the origin rule that tells the framework's `@Service` / `@Entity` from a project's own annotation of the same name. Leaf crate: tree-sitter and nothing else."
+
+[dependencies]
+# The same versions the rest of the workspace pins (one shared `links = "tree-sitter"`
+# native lib), so this crate can be linked alongside every other tree-sitter consumer.
+tree-sitter      = "0.25"
+tree-sitter-java = "0.23"

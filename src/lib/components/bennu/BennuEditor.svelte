@@ -14,7 +14,7 @@
     Hash, FileCode2, MapPin, Scissors, Copy, ClipboardPaste, Target, SearchCode,
     PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed, ShieldCheck, Plus, BookOpen,
     Braces, ArrowLeftRight, Package, FolderInput, CircleAlert, TriangleAlert, Check,
-    DownloadCloud, FileDown, Variable,
+    DownloadCloud, FileDown, Variable, Database, Clock, Columns3, ListPlus, SquarePen,
   } from 'lucide-svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -27,6 +27,7 @@
     supportsCodeNav, supportsDiagnostics,
   } from './file-kind';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import { ChevronDown } from 'lucide-svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
@@ -53,8 +54,8 @@
     renameApply as ipcRenameApply, type RenameEdit,
   } from '$lib/ipc/bennu/nav';
   import {
-    extNavigate, extHighlights, extGutter, springEnvVar,
-    type ExtHighlight, type ExtGutterMark, type ExtTarget, type EnvVarView,
+    extNavigate, extHighlights, extGutter, extActions, extRefresh, springEnvVar, xmlFetchSchema,
+    type ExtHighlight, type ExtGutterMark, type ExtTarget, type ExtAction, type EnvVarView,
   } from '$lib/ipc/bennu/ext';
   import { isSpringPropertyFile } from './spring-props-lang';
   import BennuEnvVarModal from './BennuEnvVarModal.svelte';
@@ -77,6 +78,11 @@
   import { collectIntentions, type GenerateMode, type IntentionItem } from './bennu-intentions';
   import { javaOutline } from './java-outline';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+  import { openUrl } from '@tauri-apps/plugin-opener';
+  // Path identity is one function, not one per component: the BE speaks forward slashes and the
+  // FE carries native separators, so a `===` between them is quietly false on Windows — and the
+  // bug it causes is always a silent fallback rather than a visible error.
+  import { baseName, isSamePath } from '$lib/utils/paths';
 
   let {
     /** Open the Generate modal in `mode` (routed to the window's BennuGenerateModal).
@@ -122,9 +128,6 @@
   // Emmet Tab-expansion is markup-only: JSP + HTML (where the abbreviations pay off).
   const emmetEnabled = $derived(!!activePath && /\.(jsp|jspf|tag|html?|xhtml)$/i.test(activePath));
 
-  function baseName(path: string): string {
-    return path.split(/[\\/]/).pop() ?? path;
-  }
 
   /** The workspace project a path belongs to (longest-prefix root match), or undefined when
    *  it's outside every workspace project — for badging a "foreign" tab with its owner. */
@@ -326,6 +329,12 @@
   // because the backend speaks bytes and the editor speaks code units.
   let springMarks = $state<{ from: number; to: number; className: string }[]>([]);
   let springGutter = $state<ExtGutterMark[]>([]);
+  /** What the active frameworks offer to write into this buffer — the toolbar's contents.
+   *  Contributed rather than enumerated here: whether this file is an entity or a repository is
+   *  a question about Java, and it is answered on the same debounce as the marks, off the LIVE
+   *  buffer, so a class you have just annotated grows its buttons without waiting for a
+   *  reindex. */
+  let fwActions = $state<ExtAction[]>([]);
   // The environment-override card, when the right-click menu asked for one. Local to the
   // editor because that menu is the only thing that opens it.
   let envVarView = $state<EnvVarView | null>(null);
@@ -337,7 +346,7 @@
       !!path
       && (supportsDiagnostics(path)
         || /(^|[\\/])(application|bootstrap)[^\\/]*\.(ya?ml|properties)$/i.test(path));
-    if (!path || !wantsFramework) { springMarks = []; springGutter = []; return; }
+    if (!path || !wantsFramework) { springMarks = []; springGutter = []; fwActions = []; return; }
     const src = projectStore.sourceOf(path);
     void bennuIndexStore.buildRevision; // new beans / new keys after a rebuild
     let cancelled = false;
@@ -349,6 +358,9 @@
       void extGutter(path, src)
         .then((gs) => { if (!cancelled) springGutter = gs; })
         .catch(() => { if (!cancelled) springGutter = []; });
+      void extActions(path, src)
+        .then((as) => { if (!cancelled) fwActions = as; })
+        .catch(() => { if (!cancelled) fwActions = []; });
     }, 220);
     return () => { cancelled = true; clearTimeout(t); };
   });
@@ -356,9 +368,11 @@
   /** Glyph per gutter-mark kind. Text, not an icon set: the shared editor draws whatever
    *  string it is given, so a new kind costs a character here and nothing anywhere else. */
   const GUTTER_GLYPHS: Record<string, string> = {
-    bean: '◆',      // ◆ a bean is declared on this line
-    inject: '→',    // → something is injected here
-    endpoint: '»',  // » a route enters here
+    bean: '◆',       // ◆ a bean is declared on this line
+    inject: '→',     // → something is injected here
+    endpoint: '»',   // » a route enters here
+    entity: '▤',     // ▤ a persistent entity — points at the repositories that manage it
+    repository: '◇', // ◇ a repository — points at the entity it manages
   };
 
   const springGutterMarks = $derived(
@@ -875,18 +889,24 @@
    *  the declaration line, not the top of the file; else we scroll to the top. The goto relay
    *  drives the scroll after the cross-file open settles. */
   function openDefinitionFile(path: string, offset?: number) {
+    // A go-to target may be a URL rather than a file: an XML document names its schema by
+    // address, and no local copy of it may exist. Download it and open it HERE rather than in a
+    // browser — not for convenience, but because the cached copy joins the catalog, so the file
+    // that named it stops being answered by a fallback grammar and starts being answered by the
+    // real one. The browser is only the consolation prize when the fetch fails.
+    if (/^https?:\/\//i.test(path)) {
+      void xmlFetchSchema(path)
+        .then((local) => projectStore.openFile(local).then(() => extRefresh(projectStore.project?.root ?? '')))
+        .catch((e) => {
+          toastStore.show(`Could not download the schema — ${String(e)}`, 'error');
+          void openUrl(path).catch(() => {});
+        });
+      return;
+    }
     void projectStore.openFile(path).then(() => {
       if (offset && offset > 0) bennuUiStore.requestGotoOffset(offset);
       else bennuUiStore.requestGoto(1);
     });
-  }
-
-  /** Normalize two paths for identity comparison (forward slashes, case-fold for the
-   *  Windows FS). The BE returns forward-slash paths; the FE's `activePath` may carry
-   *  native separators. */
-  function isSamePath(a: string, b: string): boolean {
-    const n = (p: string) => p.replace(/\\/g, '/').toLowerCase();
-    return n(a) === n(b);
   }
 
   /** Try the BE go-to-declaration for the symbol at `offset` (any Java symbol — class,
@@ -1262,6 +1282,30 @@
     projectStore.capabilities?.struts_xml_config === true
       || projectStore.capabilities?.struts_convention === true,
   );
+  /** Icon key → glyph, for a contributed toolbar action. An extension names what the action
+   *  IS (`column`, `clock`, `search`); the mapping to a picture is the frontend's, and an
+   *  unknown key falls back rather than leaving a hole — so an extension can add an action
+   *  without waiting for a UI build to learn its icon. */
+  const ACTION_ICONS: Record<string, typeof Database> = {
+    database: Database,
+    columns: Columns3,
+    column: ListPlus,
+    clock: Clock,
+    query: FileCode2,
+    search: SearchCode,
+    pencil: SquarePen,
+  };
+  const actionIcon = (kind: string) => ACTION_ICONS[kind] ?? Wand2;
+
+  /** A dropdown built from one contributed action's children. */
+  function actionMenu(a: ExtAction): DropdownItem[] {
+    return a.children.map((c) => ({
+      kind: 'item' as const,
+      id: c.id,
+      label: c.label,
+      onclick: () => bennuUiStore.openJpaGenerate(c.id, activePath),
+    }));
+  }
 
   // JSP/JSTL/Struts tag snippets for the editor toolbar's "Insert tag" menu. Each inserts at the
   // caret via the shared `insertAtCursor`; `$0`-free plain text keeps it grammar-agnostic (the
@@ -1442,25 +1486,78 @@
         <span class="crumb last">{activePath ? baseName(activePath) : ''}</span>
       </div>
       <div class="ed-actions">
+        <!-- What the frameworks offer to write into THIS file. Every button here was
+             contributed by an extension that looked at the buffer, so an entity shows the entity
+             authoring tools and a repository shows the query builders — and a class that is
+             neither shows nothing at all rather than a row of disabled buttons.
+             Not folded into the chain below: a Java file can be a Struts action AND an entity,
+             and one of them silently winning is how a toolbar stops being trustworthy. -->
+        <!-- Icon-only, throughout. A per-file action bar is glanceable or it is furniture: with
+             labels this row was six words wide on an entity and the file name lost its space to
+             it. Every icon carries its tooltip, and the tooltip is also the accessible name —
+             `IconButton` makes that impossible to forget. -->
+        {#if fwActions.length > 0}
+          {#each fwActions as a (a.id)}
+            {@const Icon = actionIcon(a.icon)}
+            {#if a.children.length > 0}
+              <!-- A dropdown, not a dialog tab strip: which shape you are writing is a decision
+                   you have already made when you reach for this. -->
+              <Dropdown items={actionMenu(a)} position="fixed" direction="down" width="230px">
+                {#snippet trigger({ open, toggle })}
+                  <IconButton
+                    tooltip={a.detail || a.label}
+                    size={26}
+                    active={open}
+                    ariaHasPopup
+                    ariaExpanded={open}
+                    onclick={toggle}
+                  >
+                    <span class="ed-menu-icon"><Icon size={13} /><ChevronDown size={9} /></span>
+                  </IconButton>
+                {/snippet}
+              </Dropdown>
+            {:else}
+              <IconButton
+                tooltip={a.detail || a.label}
+                size={26}
+                onclick={() => bennuUiStore.openJpaGenerate(a.id, activePath)}
+              >
+                <Icon size={13} />
+              </IconButton>
+            {/if}
+          {/each}
+          <span class="ed-tsep"></span>
+        {/if}
         {#if isValidationFile}
-          <!-- Struts validation-file tools (JPA-Buddy-style). -->
-          <button class="ed-tbtn" use:tooltip={'Validation reference'} onclick={() => bennuUiStore.toggleDocs()}>
-            <BookOpen size={12} /> Reference
-          </button>
-          <button class="ed-tbtn primary" use:tooltip={'Add a validator chain to a field'} onclick={() => bennuUiStore.openValidationCreator()}>
-            <Plus size={12} /> Validators
-          </button>
+          <!-- Struts validation-file tools. -->
+          <IconButton tooltip="Validation reference" size={26} onclick={() => bennuUiStore.toggleDocs()}>
+            <BookOpen size={13} />
+          </IconButton>
+          <IconButton
+            tooltip="Add a validator chain to a field"
+            size={26}
+            variant="accent"
+            onclick={() => bennuUiStore.openValidationCreator()}
+          >
+            <Plus size={13} />
+          </IconButton>
           <span class="ed-tsep"></span>
         {:else if isJavaFile && hasStruts}
           <!-- On a Java action class: create (or open) its `<Class>-validation.xml`. Offered only
                where Struts is actually in use — see `hasStruts`. -->
-          <button class="ed-tbtn" use:tooltip={'Create or open the Struts validation file for this action class'} onclick={createValidationFile}>
-            <ShieldCheck size={12} /> Validation
-          </button>
+          <IconButton
+            tooltip="Create or open the Struts validation file for this action class"
+            size={26}
+            onclick={createValidationFile}
+          >
+            <ShieldCheck size={13} />
+          </IconButton>
           <span class="ed-tsep"></span>
         {:else if isJspFile}
           <!-- On a view JSP mapped from one or more actions: pick which action its OGNL is checked /
-               navigated against (drives the "unknown property" lint + go-to for %{…} references). -->
+               navigated against (drives the "unknown property" lint + go-to for %{…} references).
+               The one place a label survives: WHICH action is bound is state, not an action, and
+               an icon cannot say `LoginAction`. -->
           {#if jspActionLabel}
             <Dropdown items={jspActionMenu} position="fixed" direction="down" width="240px">
               {#snippet trigger({ open, toggle })}
@@ -1474,14 +1571,23 @@
           <!-- On a JSP: an "Insert tag" menu that drops JSTL/Struts snippets at the caret. -->
           <Dropdown items={snippetMenu} position="fixed" direction="down" width="200px">
             {#snippet trigger({ open, toggle })}
-              <button class="ed-tbtn" class:active={open} onclick={toggle} use:tooltip={'Insert a JSTL / Struts tag at the caret'} aria-haspopup="menu" aria-expanded={open}>
-                <Braces size={12} /> Insert tag <ChevronDown size={11} />
-              </button>
+              <IconButton
+                tooltip="Insert a JSTL / Struts tag at the caret"
+                size={26}
+                active={open}
+                ariaHasPopup
+                ariaExpanded={open}
+                onclick={toggle}
+              >
+                <span class="ed-menu-icon"><Braces size={13} /><ChevronDown size={9} /></span>
+              </IconButton>
             {/snippet}
           </Dropdown>
           <span class="ed-tsep"></span>
         {/if}
-        <button class="ed-tool" use:tooltip={{ content: 'Go to line', shortcut: 'Ctrl+G' }} aria-label="Go to line" onclick={openGoto}><Hash size={13} /></button>
+        <IconButton tooltip="Go to line" shortcut="Ctrl+G" size={26} onclick={openGoto}>
+          <Hash size={13} />
+        </IconButton>
       </div>
     </div>
   {/if}
@@ -1634,17 +1740,25 @@
   .crumb { font-size: var(--font-size-xs); color: var(--text-muted); white-space: nowrap; }
   .crumb.last { color: var(--text-secondary); font-weight: 500; }
 
-  .ed-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-  .ed-tool {
-    display: flex; align-items: center; justify-content: center;
-    width: 24px; height: 22px;
-    background: transparent; border: none; border-radius: var(--radius-sm);
-    color: var(--text-muted); cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
+  .ed-actions { display: flex; align-items: center; gap: 1px; flex-shrink: 0; }
+  /* A dropdown trigger in the toolbar: the icon with a small chevron tucked under its right
+     edge, so an icon that opens a menu is distinguishable from one that acts immediately
+     without costing the row a second glyph's width. */
+  .ed-menu-icon {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
-  .ed-tool:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .ed-menu-icon :global(svg:last-child) {
+    position: absolute;
+    right: -5px;
+    bottom: -4px;
+    opacity: 0.75;
+  }
 
-  /* File-type action buttons in the editor toolbar (text+icon, next to the icon tools). */
+  /* The one labelled button left in the toolbar: the JSP action binding, where WHICH action is
+     bound is state rather than a verb and an icon cannot say `LoginAction`. */
   .crumb-icon { color: var(--accent); flex-shrink: 0; margin-right: 2px; }
   .ed-tbtn {
     display: flex; align-items: center; gap: 5px;
@@ -1823,11 +1937,45 @@
   :global(.cm-content .cm-fw-spring-placeholder-default),
   :global(.cm-content .cm-fw-spring-placeholder-default span) { color: var(--text-muted); font-style: italic; }
 
+  /*
+   * A `@Query` is a second language living inside a Java string, and that is exactly why a
+   * mistake in one survives review: the provider parses it, the compiler does not. The tint
+   * marks the whole query so it reads as *not Java*; the keywords take the language's own
+   * keyword colour; the `:param` placeholders take the same violet a `${key}` takes above,
+   * because they are the same idea — a name something else resolves for you.
+   *
+   * Native SQL gets a warmer tint than JPQL, on purpose. The two are genuinely different
+   * risks: JPQL is checked against the entity model, native SQL is sent to the database as
+   * written and nothing here can vouch for it.
+   */
+  :global(.cm-content .cm-fw-jpa-query) {
+    background: color-mix(in srgb, var(--syntax-function, #ffc66d) 9%, transparent);
+    border-radius: 2px;
+  }
+  :global(.cm-content .cm-fw-jpa-query-native) {
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border-radius: 2px;
+  }
+  :global(.cm-content .cm-fw-jpa-query-keyword),
+  :global(.cm-content .cm-fw-jpa-query-keyword span) {
+    color: var(--syntax-keyword, #cc7832); font-weight: 600;
+  }
+  :global(.cm-content .cm-fw-jpa-query-param),
+  :global(.cm-content .cm-fw-jpa-query-param span) {
+    color: var(--syntax-field, #9876aa); font-weight: 600;
+  }
+  :global(.cm-content .cm-fw-jpa-query-string),
+  :global(.cm-content .cm-fw-jpa-query-string span) { color: var(--syntax-string, #6a8759); }
+  :global(.cm-content .cm-fw-jpa-query-number),
+  :global(.cm-content .cm-fw-jpa-query-number span) { color: var(--syntax-number, #6897bb); }
+
   /* Gutter icons: colour by what the mark means, so a glance separates "a bean is
      declared here" from "something is injected here" without reading the tooltip. */
   :global(.cm-fw-gutter-bean) { color: var(--success); }
   :global(.cm-fw-gutter-inject) { color: var(--info); }
   :global(.cm-fw-gutter-endpoint) { color: var(--warning); }
+  :global(.cm-fw-gutter-entity) { color: var(--syntax-field, #9876aa); }
+  :global(.cm-fw-gutter-repository) { color: var(--syntax-function, #ffc66d); }
   /* The usage count beside a property key: a number, so it reads as one. */
   :global(.cm-fw-gutter-usage) {
     color: var(--text-muted); font-family: var(--font-code); font-weight: 600;

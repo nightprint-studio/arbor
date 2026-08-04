@@ -35,7 +35,7 @@ pub use crate::maven::{
 
 // NON-class jar entries — the descriptor files a library ships about itself (Spring Boot's
 // `spring-configuration-metadata.json` and anything shaped like it).
-pub use crate::resources::{read_jar_entries, JarResource};
+pub use crate::resources::{read_jar_entries, read_jar_entries_matching, JarResource};
 
 // The container abstraction + its three impls.
 pub use crate::source::{ClassSource, DirSource, JarSource, JimageSource};

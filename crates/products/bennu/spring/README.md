@@ -82,15 +82,34 @@ environment".
 
 | File | Holds |
 |---|---|
-| `scan.rs` | the tree-sitter Java pass → annotations, members, spans |
-| `known.rs` | which annotation is *actually* which, resolved through the imports |
+| `scan.rs` | Spring's relevance markers — the pass itself is [`bennu-facts`](../facts) |
+| `known.rs` | the package table: which annotation is *actually* Spring's, resolved through the imports |
 | `config_props.rs` | walking each `@ConfigurationProperties` root down to the key every field binds |
 | `model.rs` | `SpringModel` + the bean/endpoint/injection types + name conventions |
 | `beans.rs` | bean registry, injection points, the type index with `properties_complete` |
 | `endpoints.rs` | request mappings, path joining |
 | `props.rs` | `.properties` / `.yml` parsing, flattening, lookup precedence |
+| `metadata.rs` | `spring-configuration-metadata.json` out of the dependency jars → the documented vocabulary |
+| `builtin_meta.rs` | the curated fallback table, for a project whose jars have not been resolved |
+| `env.rs` | a key → the environment variable that overrides it, in each form you might paste it into |
 | `xml.rs` | bean XML parsing with byte ranges + `attribute_at` |
-| `highlight.rs` | expression → coloured spans (shared by both file kinds) |
+| `highlight.rs` | expression → coloured spans (shared by every file kind) |
 | `java_intel.rs` | the editor's answers for a `.java` buffer |
 | `xml_intel.rs` | the editor's answers for a bean XML buffer |
+| `props_intel.rs` | the editor's answers for an `application*.yml` / `.properties` buffer |
 | `ext.rs` | `FrameworkExtension` impl: file selection, model ownership, routing |
+
+## What moved out
+
+Three times now this crate has grown something that turned out not to be about Spring, and
+each time the second consumer was the signal to extract rather than to copy:
+
+- **[`bennu-facts`](../facts)** — the annotation-shaped tree-sitter scan and the rule that
+  resolves `@Service` through the file's imports the way the compiler would. JPA needed both
+  unchanged.
+- **[`bennu-complete`](../complete)** — the caret's token, the prefix rule, the de-duplicated
+  capped candidate list, and the discipline that separates ghost text from a guess. XML needed
+  all of it unchanged.
+
+What stays is the **policy**: which markers make a file worth parsing, which packages an
+annotation may come from, which keys exist and what they mean.

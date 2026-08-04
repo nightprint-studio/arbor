@@ -62,6 +62,14 @@ bennu-ext = { path = "../ext" }
 # the editor answers over them). Registered by name in ONE place (`spring::SpringService`);
 # a second framework is one more entry in that vector.
 bennu-spring = { path = "../spring" }
+# The second extension: JPA / Spring Data (entities, repositories, `@Query`, and the derived
+# query names Spring Data compiles at startup) + its generators. Registered beside Spring in the
+# same vector — which is the whole claim the extension seam was built on.
+bennu-jpa = { path = "../jpa" }
+# The third extension: XML schemas (DTD + XSD → completion, ghost text, hover, go-to, checks).
+# Unlike the other two it is not capability-gated — the resolved grammar is its gate, and a
+# document nothing describes costs one scan and one map lookup.
+bennu-xml = { path = "../xml" }
 # `NoWindowExt` — suppress the console window on the short-lived mvn/javac/java children.
 arbor-process-ext = { path = "../../../platform/process-ext" }
 # Shared job model (`JobSpec` / `JobStatus`): the whole-project analysis warm-up registers itself

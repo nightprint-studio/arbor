@@ -5,7 +5,8 @@ use std::sync::Arc;
 use bennu_proto::prelude::{CapabilitySet, CompletionItem, Diagnostic};
 
 use crate::model::{
-    ExtEntry, ExtGutterMark, ExtHighlight, ExtHover, ExtStat, ExtTarget, FileCtx, ProjectScan,
+    ExtAction, ExtEntry, ExtGutterMark, ExtHighlight, ExtHover, ExtStat, ExtTarget, FileCtx,
+    ProjectScan,
 };
 
 /// What a framework plugin implements.
@@ -87,6 +88,15 @@ pub trait FrameworkExtension: Send + Sync {
 
     /// Gutter marks for a whole file.
     fn gutter(&self, _ctx: &FileCtx<'_>) -> Vec<ExtGutterMark> {
+        Vec::new()
+    }
+
+    /// What this extension offers to **write** into the file in front of you.
+    ///
+    /// Returned only when it applies: a `.java` file that declares no entity gets no entity
+    /// actions. That makes the toolbar's contents the answer to "what kind of file is this",
+    /// which is the affordance — a disabled button teaches nothing.
+    fn actions(&self, _ctx: &FileCtx<'_>) -> Vec<ExtAction> {
         Vec::new()
     }
 
@@ -182,6 +192,12 @@ impl ExtensionRegistry {
 
     pub fn gutter(&self, ctx: &FileCtx<'_>) -> Vec<ExtGutterMark> {
         self.active.iter().flat_map(|e| e.gutter(ctx)).collect()
+    }
+
+    /// Every active extension's offers for this file, in registration order — so a file that is
+    /// both a Spring bean and a JPA entity shows both groups, in a stable order.
+    pub fn actions(&self, ctx: &FileCtx<'_>) -> Vec<ExtAction> {
+        self.active.iter().flat_map(|e| e.actions(ctx)).collect()
     }
 
     /// Rows of `kind` from the extension that owns it. Catalog kinds are namespaced by

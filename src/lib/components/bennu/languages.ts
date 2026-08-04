@@ -36,6 +36,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { html } from '@codemirror/lang-html';
 import { javaLanguage } from './java-lang';
 import { isSpringPropertyFile, springPropsLang } from './spring-props-lang';
+import { xmlSchemaLang } from './xml-schema-lang';
 import { jspLanguage } from './jsp-lang';
 import { digLanguage } from './dig/dig-lang';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
@@ -59,7 +60,10 @@ function streamLang(id: string, parser: StreamParser<unknown>): LanguageDescript
 }
 
 // Module-singleton descriptors (built once).
-const xmlLang = streamLang('xml', xml);
+// Same colouring as any XML, plus what a document with a schema behind it can have and a
+// generic one cannot: element/attribute/value completion, ghost text, and a hover carrying the
+// schema's own documentation. Silent when no schema resolves, which is most files.
+const xmlLang = xmlSchemaLang('xml', xml);
 // HTML: the real lang-html tree (embedded JS/CSS highlight + tag folding).
 const htmlLang = cmLang('html', html(), true);
 // JSP/JSPF/tag files use the custom tree-sitter-jsp grammar (jsp-lang.ts) — namespaced

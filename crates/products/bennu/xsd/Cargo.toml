@@ -1,0 +1,14 @@
+[package]
+name         = "bennu-xsd"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "An XML Schema reader: global and local elements, named and inline complex types with their extension chains, attributes with their enumerations, model and attribute groups, and the `xs:documentation` on any of them. Byte spans on every declaration, so an editor can jump to one."
+
+[dependencies]
+# XSD is itself XML, and a schema on disk is well-formed by construction — so the document
+# parser is the right tool here, unlike the buffer being edited (which `bennu-xml` scans with
+# its own tolerant lexer). Same version the rest of the workspace pins.
+roxmltree = "0.20"

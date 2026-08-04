@@ -1,40 +1,21 @@
-//! Deciding whether an annotation is the one we think it is.
+//! **Spring's** annotation catalogue — which packages each name may legitimately come from.
 //!
-//! `@Service` is not a reserved word. Anyone can declare `com.acme.Service` and put it on a
-//! class, and a tool that matches on the simple name alone will register a Spring bean that
-//! does not exist — then navigate to it, count it in a panel, and offer it as an injection
-//! candidate. Every one of those is a confident lie, which is the failure mode this crate
-//! exists to avoid.
+//! The rule that reads this table lives in [`bennu_facts::prelude::AnnotationTable`], because
+//! resolving an annotation's origin through the file's imports is not a Spring idea: `@Entity`
+//! needs the identical treatment, and copying it once per framework is how the two drift. What
+//! is Spring's, and lives here, is the table itself.
 //!
-//! So the origin is resolved the way the Java compiler resolves it, in the same order:
+//! Why it matters at all: `@Service` is not a reserved word. Anyone can declare
+//! `com.acme.Service` and put it on a class, and a tool that matches on the simple name alone
+//! will register a Spring bean that does not exist — then navigate to it, count it in a panel,
+//! and offer it as an injection candidate. Every one of those is a confident lie.
 //!
-//! 1. **Written qualified** (`@org.springframework.stereotype.Service`) — the source says it
-//!    outright, nothing else matters.
-//! 2. **A single-type import of that simple name** — `import com.acme.Service;` makes every
-//!    bare `@Service` in the file *that* one. This is the decisive case and the one that
-//!    catches a project's own annotation.
-//! 3. **An on-demand import** of one of the expected packages
-//!    (`import org.springframework.stereotype.*;`).
-//! 4. **Nothing at all** — then the name can only resolve to a type in the *same package*,
-//!    which by definition is not Spring's. Rejected.
-//!
-//! Step 4 looks strict and is simply the language: `@Service` with no import does not
-//! compile unless it is declared next door.
-//!
-//! ## The one thing this does not see
-//!
-//! A **meta-annotation** — a project's `@MyService` that is itself annotated `@Service` — is
-//! a real Spring stereotype and is not recognised here, because recognising it means
-//! resolving the annotation's own declaration. That is an under-report: the bean is missed,
-//! nothing false is claimed. The right direction when in doubt.
+//! The four functions below keep the signatures the rest of this crate has always called, so
+//! the extraction cost no call site anything.
+
+use bennu_facts::prelude::{AnnotationTable, KnownAnnotation as Known};
 
 use crate::scan::{AnnFacts, JavaFacts};
-
-/// An annotation this crate reasons about, and the packages it may legitimately come from.
-struct Known {
-    simple: &'static str,
-    packages: &'static [&'static str],
-}
 
 const SPRING_STEREOTYPE: &str = "org.springframework.stereotype";
 const SPRING_CONTEXT: &str = "org.springframework.context.annotation";
@@ -129,9 +110,8 @@ const KNOWN: &[Known] = &[
     Known { simple: "Accessors", packages: &[LOMBOK_EXPERIMENTAL] },
 ];
 
-fn packages_for(simple: &str) -> Option<&'static [&'static str]> {
-    KNOWN.iter().find(|k| k.simple == simple).map(|k| k.packages)
-}
+/// The catalogue, behind the shared resolution rule.
+const SPRING: AnnotationTable = AnnotationTable::new(KNOWN);
 
 /// Whether `ann` **is** the well-known annotation called `simple` — same name *and* an origin
 /// that resolves to one of its packages.
@@ -139,51 +119,22 @@ fn packages_for(simple: &str) -> Option<&'static [&'static str]> {
 /// An unknown `simple` (not in the catalogue) falls back to a name match, so a caller can ask
 /// about an annotation whose package nobody has pinned down without silently getting `false`.
 pub fn is(ann: &AnnFacts, facts: &JavaFacts, simple: &str) -> bool {
-    if ann.name != simple {
-        return false;
-    }
-    match packages_for(simple) {
-        Some(packages) => resolves_to(ann, facts, packages),
-        None => true,
-    }
+    SPRING.is(ann, facts, simple)
 }
 
 /// The first of `names` that `ann` actually is, or `None`.
 pub fn is_any<'a>(ann: &AnnFacts, facts: &JavaFacts, names: &[&'a str]) -> Option<&'a str> {
-    names.iter().copied().find(|n| is(ann, facts, n))
+    SPRING.is_any(ann, facts, names)
 }
 
 /// Whether any annotation in `anns` is the well-known `simple`.
 pub fn has(anns: &[AnnFacts], facts: &JavaFacts, simple: &str) -> bool {
-    anns.iter().any(|a| is(a, facts, simple))
+    SPRING.has(anns, facts, simple)
 }
 
 /// The well-known `simple` among `anns`, if written.
 pub fn find<'a>(anns: &'a [AnnFacts], facts: &JavaFacts, simple: &str) -> Option<&'a AnnFacts> {
-    anns.iter().find(|a| is(a, facts, simple))
-}
-
-/// Resolve where `ann` comes from, in the compiler's own order. See the module docs.
-fn resolves_to(ann: &AnnFacts, facts: &JavaFacts, packages: &[&str]) -> bool {
-    // 1. Written qualified — the source settles it.
-    if let Some((pkg, _)) = ann.qualified.rsplit_once('.') {
-        return packages.contains(&pkg);
-    }
-    // 2. A single-type import of this simple name decides, whatever it names.
-    let suffix = format!(".{}", ann.name);
-    if let Some(import) = facts.imports.iter().find(|i| i.ends_with(&suffix)) {
-        let pkg = &import[..import.len() - suffix.len()];
-        return packages.contains(&pkg);
-    }
-    // 3. An on-demand import of one of the expected packages.
-    if facts.imports.iter().any(|i| {
-        i.strip_suffix(".*").is_some_and(|pkg| packages.contains(&pkg))
-    }) {
-        return true;
-    }
-    // 4. No import: a bare name can only be a type in this file's own package, so it is the
-    //    project's annotation and not the one we are looking for.
-    false
+    SPRING.find(anns, facts, simple)
 }
 
 #[cfg(test)]
@@ -202,48 +153,38 @@ mod tests {
         (f, a)
     }
 
+    // The resolution ORDER (qualified → single-type import → on-demand → nothing) is tested
+    // where it lives, in `bennu-facts`. What is tested here is the TABLE: that each name is
+    // pinned to the package it actually comes from, which is the part that goes wrong when
+    // someone adds an entry from memory.
+
     #[test]
-    fn the_real_spring_service_is_recognised() {
+    fn the_real_spring_service_is_recognised_and_someone_elses_is_not() {
         let (f, a) = anns("package p;\nimport org.springframework.stereotype.Service;\n@Service class C {}\n");
         assert!(is(&a[0], &f, "Service"));
+        let (f2, a2) = anns("package p;\nimport com.acme.annotations.Service;\n@Service class C {}\n");
+        assert!(!is(&a2[0], &f2, "Service"), "a project may declare its own");
     }
 
+    /// The entries most easily mis-pinned, because they are NOT in the package the rest of
+    /// their family lives in. Each of these was a real judgement call.
     #[test]
-    fn someone_elses_service_is_not() {
-        // The whole point: a project may declare its own, and it must not become a bean.
-        let (f, a) = anns("package p;\nimport com.acme.annotations.Service;\n@Service class C {}\n");
-        assert!(!is(&a[0], &f, "Service"));
-    }
-
-    #[test]
-    fn a_bare_annotation_with_no_import_is_same_package_and_therefore_not_springs() {
-        let (f, a) = anns("package com.acme;\n@Service class C {}\n");
-        assert!(!is(&a[0], &f, "Service"), "no import means it is declared next door");
-    }
-
-    #[test]
-    fn a_fully_qualified_use_needs_no_import() {
-        let (f, a) = anns("package p;\n@org.springframework.stereotype.Service class C {}\n");
-        assert!(is(&a[0], &f, "Service"));
-        let (f2, a2) = anns("package p;\n@com.acme.Service class C {}\n");
-        assert!(!is(&a2[0], &f2, "Service"));
-    }
-
-    #[test]
-    fn an_on_demand_import_of_the_right_package_counts() {
-        let (f, a) = anns("package p;\nimport org.springframework.stereotype.*;\n@Service class C {}\n");
-        assert!(is(&a[0], &f, "Service"));
-        let (f2, a2) = anns("package p;\nimport com.acme.*;\n@Service class C {}\n");
-        assert!(!is(&a2[0], &f2, "Service"));
-    }
-
-    #[test]
-    fn an_explicit_import_beats_an_on_demand_one() {
-        // Java's own precedence: the single-type import wins, so this is com.acme's.
-        let (f, a) = anns(
-            "package p;\nimport org.springframework.stereotype.*;\nimport com.acme.Service;\n@Service class C {}\n",
-        );
-        assert!(!is(&a[0], &f, "Service"));
+    fn the_awkwardly_placed_annotations_are_pinned_where_they_actually_live() {
+        let case = |import: &str, ann: &str| {
+            let (f, a) = anns(&format!("package p;\nimport {import};\n@{ann} class C {{}}\n"));
+            is(&a[0], &f, ann)
+        };
+        // A stereotype, but declared with the web annotations rather than the others.
+        assert!(case("org.springframework.web.bind.annotation.RestController", "RestController"));
+        // …and `@Configuration` sits with the context annotations, not the stereotypes.
+        assert!(case("org.springframework.context.annotation.Configuration", "Configuration"));
+        assert!(!case("org.springframework.stereotype.Configuration", "Configuration"));
+        // `@Name` is under `.bind`, one package deeper than `@ConfigurationProperties`.
+        assert!(case("org.springframework.boot.context.properties.bind.Name", "Name"));
+        assert!(case(
+            "org.springframework.boot.context.properties.ConfigurationProperties",
+            "ConfigurationProperties",
+        ));
     }
 
     #[test]
@@ -274,10 +215,16 @@ mod tests {
         assert_eq!(is_any(&a[0], &f, &["Service", "Component"]), None);
     }
 
+    /// The table must have no duplicate names — a second entry for a name is unreachable, and
+    /// silently so, which is how a package fix gets applied to the wrong copy.
     #[test]
-    fn an_annotation_outside_the_catalogue_falls_back_to_its_name() {
-        let (f, a) = anns("package p;\nimport com.acme.Whatever;\n@Whatever class C {}\n");
-        assert!(is(&a[0], &f, "Whatever"), "nobody pinned a package for this one");
+    fn no_name_is_listed_twice() {
+        let mut seen: Vec<&str> = Vec::new();
+        for k in KNOWN {
+            assert!(!seen.contains(&k.simple), "`{}` is listed twice", k.simple);
+            assert!(!k.packages.is_empty(), "`{}` pins no package", k.simple);
+            seen.push(k.simple);
+        }
     }
 
     #[test]

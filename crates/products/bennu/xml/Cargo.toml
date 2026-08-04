@@ -1,0 +1,22 @@
+[package]
+name         = "bennu-xml"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Schema-driven editing for XML: a tolerant scanner over the buffer being typed, one grammar model behind both DTD and XSD, the rule that decides which schema a document is written against, and the editor answers over them — completion, ghost text, hover, go-to-declaration, and checks that stay silent without a grammar."
+
+[dependencies]
+# The extension seam this crate implements.
+bennu-ext      = { path = "../ext" }
+# The wire types a contribution is made of (Diagnostic / CompletionItem / CapabilitySet).
+bennu-proto    = { path = "../proto" }
+# The completion mechanics — the caret's token, the prefix rule, the de-duplicated capped
+# candidate list, and the discipline that separates ghost text from a guess. This crate is the
+# reason those were extracted rather than written a third time.
+bennu-complete = { path = "../complete" }
+# The two grammar languages. Each parses its own format and knows nothing of the other; the
+# unified model and the adapters live here, which is what keeps them from having to agree.
+bennu-dtd      = { path = "../dtd" }
+bennu-xsd      = { path = "../xsd" }

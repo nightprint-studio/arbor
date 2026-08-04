@@ -1,0 +1,22 @@
+[package]
+name         = "bennu-jpa"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "JPA / Spring Data support for Bennu as a framework extension — entities and their mappings, repositories recognised by what they extend, the JPQL or SQL inside a `@Query`, and the derived query method names that Spring Data compiles at application start. Plus the generators: repository, projection, query method."
+
+[dependencies]
+# The extension seam this crate implements.
+bennu-ext   = { path = "../ext" }
+# The shared Java scan + the annotation-origin rule. Extracted from `bennu-spring` the day this
+# crate needed both, identically — see that crate's README.
+bennu-facts = { path = "../facts" }
+# The wire types a contribution is made of (Diagnostic / CapabilitySet).
+bennu-proto = { path = "../proto" }
+# Byte-offset mechanics (`line_number`) — and the completion machinery this crate will want
+# when repository method names start completing.
+bennu-complete = { path = "../complete" }
+
+serde = { workspace = true }

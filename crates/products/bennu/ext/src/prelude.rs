@@ -6,8 +6,8 @@
 
 // What an extension is given, and what it contributes.
 pub use crate::model::{
-    ExtEntry, ExtGutterMark, ExtHighlight, ExtHover, ExtStat, ExtTarget, FileCtx, ProjectScan,
-    ScannedFile,
+    ExtAction, ExtEntry, ExtGutterMark, ExtHighlight, ExtHover, ExtStat, ExtTarget, FileCtx,
+    ProjectScan, ScannedFile,
 };
 
 // The trait a framework plugin implements + the capability-gated registry over it.

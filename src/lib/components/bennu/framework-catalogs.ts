@@ -22,7 +22,9 @@ export type FrameworkCatalogId =
   | 'endpoints'
   | 'springconfig'
   | 'springbindings'
-  | 'springdocumented';
+  | 'springdocumented'
+  | 'jpaentities'
+  | 'jparepositories';
 
 /** How rows can be grouped. Which of these a catalog offers is per-catalog. */
 export type GroupMode = 'none' | 'path' | 'owner' | 'kind' | 'namespace';
@@ -114,6 +116,34 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     ],
   },
   {
+    id: 'jpaentities',
+    kind: 'jpa.entities',
+    title: 'Entities',
+    command: 'JPA entities',
+    icon: 'box',
+    placeholder: 'Filter by entity, table, column or field…',
+    empty: 'No @Entity classes found in this project.',
+    groups: [
+      { id: 'kind', label: 'Group by kind' },
+      { id: 'owner', label: 'Group by package' },
+      { id: 'none', label: 'No grouping' },
+    ],
+  },
+  {
+    id: 'jparepositories',
+    kind: 'jpa.repositories',
+    title: 'Repositories',
+    command: 'JPA repositories',
+    icon: 'list',
+    placeholder: 'Filter by repository, entity or query…',
+    empty: 'No Spring Data repositories found in this project.',
+    groups: [
+      { id: 'kind', label: 'Group by base interface' },
+      { id: 'owner', label: 'Group by package' },
+      { id: 'none', label: 'No grouping' },
+    ],
+  },
+  {
     id: 'springbindings',
     kind: 'spring.bindings',
     title: 'Bound properties',
@@ -200,6 +230,29 @@ export function kindClass(kind: string): string {
       return 'k-config';
     case '<bean>':
       return 'k-xml';
+    // JPA. The distinction that earns a colour is how a repository method is written — a
+    // derived name is compiled from the name at startup, a `@Query` is not, and a native one
+    // bypasses the entity model entirely. Three risks, three colours.
+    case 'derived':
+      return 'k-get';
+    case '@Query':
+      return 'k-put';
+    case 'native':
+      return 'k-delete';
+    case 'entity':
+      return 'k-service';
+    case 'embeddable':
+    case 'mapped-superclass':
+      return 'k-config';
+    case 'id':
+      return 'k-controller';
+    case 'OneToMany':
+    case 'ManyToOne':
+    case 'OneToOne':
+    case 'ManyToMany':
+      return 'k-repository';
+    case 'column':
+      return 'k-neutral';
     case 'path':
       return 'k-get';
     case 'query':

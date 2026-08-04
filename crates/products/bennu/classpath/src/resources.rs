@@ -54,6 +54,58 @@ pub fn read_jar_entries(jars: &[PathBuf], entries: &[&str]) -> Vec<JarResource> 
     out
 }
 
+/// Read every entry whose name `wanted` accepts, from every jar in `jars`.
+///
+/// The other half of [`read_jar_entries`], for the case where the caller knows the *shape* of the
+/// name rather than the name itself: a framework ships its schema as `struts-2.5.dtd` or
+/// `spring-beans-5.3.xsd`, and which versions are on this classpath is exactly what the caller is
+/// trying to find out.
+///
+/// Costs more than the by-name form — the whole central directory is walked rather than one
+/// lookup per name — so it is bounded: `limit` caps the entries taken from any single jar, which
+/// keeps a pathological artifact (a jar of ten thousand generated schemas) from turning one
+/// project scan into a stall. Same skip-on-failure rule as everything else here.
+pub fn read_jar_entries_matching(
+    jars: &[PathBuf],
+    wanted: impl Fn(&str) -> bool,
+    limit: usize,
+) -> Vec<JarResource> {
+    let mut out = Vec::new();
+    for jar in jars {
+        let Ok(file) = std::fs::File::open(jar) else { continue };
+        let Ok(mut archive) = zip::ZipArchive::new(std::io::BufReader::new(file)) else { continue };
+        let name = jar.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+        let mut taken = 0usize;
+        // Names first, then reads: `by_index` borrows the archive mutably, so collecting the
+        // matches up front is what lets the loop below open them one at a time.
+        let matches: Vec<(usize, String)> = (0..archive.len())
+            .filter_map(|i| archive.name_for_index(i).map(|n| (i, n.to_string())))
+            .filter(|(_, n)| wanted(n))
+            .take(limit)
+            .collect();
+        for (index, entry) in matches {
+            if taken >= limit {
+                break;
+            }
+            let Ok(mut zipped) = archive.by_index(index) else { continue };
+            let mut bytes = Vec::new();
+            if zipped.read_to_end(&mut bytes).is_err() || bytes.is_empty() {
+                continue;
+            }
+            // Lossy, unlike the by-name form: a DTD may be written in any encoding its author
+            // liked, and a stray byte in a comment must not cost the grammar.
+            out.push(JarResource {
+                jar: jar.to_path_buf(),
+                id: format!("{name}!/{entry}"),
+                text: String::from_utf8_lossy(&bytes).into_owned(),
+                entry,
+            });
+            taken += 1;
+        }
+    }
+    out
+}
+
 fn read_from_jar(jar: &Path, entries: &[&str], out: &mut Vec<JarResource>) {
     let Ok(file) = std::fs::File::open(jar) else { return };
     let Ok(mut archive) = zip::ZipArchive::new(std::io::BufReader::new(file)) else { return };
@@ -96,6 +148,34 @@ mod tests {
             zip.write_all(body.as_bytes()).unwrap();
         }
         zip.finish().unwrap();
+    }
+
+    /// The schema case: the caller knows the shape of the name, not the name — which versions
+    /// of a framework's DTD are on this classpath is exactly what it is trying to find out.
+    #[test]
+    fn entries_can_be_matched_by_shape_rather_than_by_name() {
+        let dir = temp_dir("match");
+        let jar = dir.join("struts2-core-2.5.30.jar");
+        make_jar(
+            &jar,
+            &[
+                ("struts-2.5.dtd", "<!ELEMENT struts EMPTY>"),
+                ("struts-2.3.dtd", "<!ELEMENT struts EMPTY>"),
+                ("org/apache/struts2/Thing.class", "not really bytecode"),
+            ],
+        );
+        let found = read_jar_entries_matching(
+            std::slice::from_ref(&jar),
+            |n| n.ends_with(".dtd"),
+            16,
+        );
+        let mut names: Vec<&str> = found.iter().map(|r| r.entry.as_str()).collect();
+        names.sort();
+        assert_eq!(names, ["struts-2.3.dtd", "struts-2.5.dtd"]);
+        assert!(found[0].id.starts_with("struts2-core-2.5.30.jar!/"));
+
+        // Bounded, so one pathological artifact cannot stall a project scan.
+        assert_eq!(read_jar_entries_matching(std::slice::from_ref(&jar), |n| n.ends_with(".dtd"), 1).len(), 1);
     }
 
     #[test]
