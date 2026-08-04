@@ -23,6 +23,7 @@
   import { sqlLanguage } from '../picus-sql-language';
   import { sqlDiagnostics } from '../sql-intel';
   import { abbreviationLines } from '../sql-intel/abbrev';
+  import { longLineMarks } from '../sql-intel/long-line';
   import { parseFaultStore } from '$lib/stores/picus/parse-faults.svelte';
   import { validationStore } from '$lib/stores/picus/validation.svelte';
   import { picusProvidersStore } from '$lib/stores/picus/providers.svelte';
@@ -83,13 +84,17 @@
    * opinions about which lines are abbreviations would eventually disagree, and the
    * one drawn would be the wrong one.
    */
-  const marks = $derived(
-    abbreviations.map((line) => ({
+  const marks = $derived([
+    ...abbreviations.map((line) => ({
       from: line.from,
       to: line.to,
       className: line.error ? 'picus-abbrev-bad' : 'picus-abbrev',
     })),
-  );
+    // And the colour the editor itself gives up on past 10 000 characters into a
+    // line — see `sql-intel/long-line.ts`. One list, because they are the same kind
+    // of thing to the editor: ranges the host asks it to paint.
+    ...longLineMarks(tabState.sql, conn?.dialect ?? 'postgres'),
+  ]);
   /** Whether this connection's engine can validate at all — gates the round trip. */
   const canValidate = $derived(picusProvidersStore.capabilities(conn?.dialect)?.validate ?? false);
 
@@ -214,8 +219,8 @@
         value={tabState.sql}
         {language}
         {diagnostics}
-        keyBindings={runKeys}
         {marks}
+        keyBindings={runKeys}
         oninput={(v) => queryStore.setSql(tab.id, v)}
         oncaret={() => { if (editor) void astStore.revealAt(editor.caretByteOffset()); }}
         onGoto={(word) => openObjectNamed(word, conn?.id)}

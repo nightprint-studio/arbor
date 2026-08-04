@@ -84,6 +84,35 @@
   and doubling a quote there would corrupt the value instead of protecting it.
 </p>
 
+<h2>Very long lines lose their colour</h2>
+<p>
+  Past about <b>10 000 characters on a single line</b> the highlighting stops and the rest of
+  that line is drawn plain. It is a limit in the editor itself, per line rather than per
+  file, so a script stays coloured — only the one enormous line goes flat, and only after the
+  point where it got long.
+</p>
+<p>
+  It is a guard, not a fault: the colouring re-reads a line from its start on every
+  keystroke, and a line of two hundred kilobytes would make typing anywhere in the buffer
+  crawl. So it is not lifted — but it is <b>said</b>: a warning sits at exactly the character
+  the colour stops at, rather than leaving a screen that goes blank halfway through a value
+  looking like a broken product.
+</p>
+<p>
+  The part that matters is also put back. Picus scans the buffer itself, with no length
+  limit, so a <b>string or comment</b> that runs past the point is coloured from that scan
+  instead. Ordinary code past the limit stays plain: marking every keyword on a
+  200 KB line would cost more than the colour is worth, and unlike a literal — where missing
+  colour makes data look like code — plain code reads as what it is.
+</p>
+<p>
+  If you have that much content to store, the statement is still the wrong place for it. Put
+  the value in the cell instead, with <i>Load from file…</i> on a text column or
+  <i>Replace from file…</i> on a large object, and no literal that size ever has to exist. In
+  a script, breaking the value across lines with the concatenation operator keeps every line
+  under the limit and the colour with it.
+</p>
+
 <h2>Ghost text</h2>
 <p>
   A greyed continuation appears at the caret when the next thing to write is certain.

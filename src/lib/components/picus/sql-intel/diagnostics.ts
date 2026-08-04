@@ -27,6 +27,7 @@ import { makeU16ToByte } from '$lib/components/shared/ui/code-editor';
 import type { Dialect } from '$lib/types/picus';
 import { abbreviationLines, type AbbreviationLine } from './abbrev';
 import { analyzeStatement, identOf } from './analysis';
+import { longLineWarnings } from './long-line';
 import { schemaViewFor, type SchemaView } from './schema-view';
 import { scanSql, type SqlStatement } from './tokens';
 
@@ -81,7 +82,20 @@ function checkStatement(stmt: SqlStatement, dialect: Dialect, view: SchemaView, 
 export function sqlDiagnostics(
   text: string, dialect: Dialect, connectionId?: string,
 ): EditorDiagnostic[] {
-  if (!text || text.length > MAX_ANALYSED_CHARS) return [];
+  if (!text) return [];
+
+  // Reported **before** the size guard below, and that ordering is the whole point:
+  // a buffer big enough to have a line the highlighter gives up on is very often a
+  // buffer big enough to be skipped here, so putting this after the guard would
+  // silence the one warning whose case is precisely a huge buffer.
+  const long = longLineWarnings(text).map((w) => ({
+    from: w.from,
+    to: w.to,
+    severity: 'warning' as const,
+    message: w.message,
+  }));
+
+  if (text.length > MAX_ANALYSED_CHARS) return toWire(text, long);
 
   // Which lines are abbreviations is the Rust parser's answer, cached — never a
   // shape test repeated here. Read before anything else because it decides both
@@ -105,6 +119,22 @@ export function sqlDiagnostics(
     }
   }
 
+  return toWire(text, [...long, ...markers]);
+}
+
+/**
+ * Markers to the wire shape: UTF-8 byte offsets, capped.
+ *
+ * One helper and not two call sites, because the offset conversion is the part that
+ * is silently wrong when it is wrong — a marker a few bytes off lands on the wrong
+ * character, and only ever on the buffers that have accented text in them.
+ *
+ * It costs a linear pass (`makeU16ToByte` short-circuits on pure ASCII, which most
+ * SQL is). That is paid on the oversized path too, where the rest of the analysis is
+ * skipped — a deliberate trade: one pass to be able to say why the colour stopped is
+ * worth more than the pass saves on a buffer nobody should be typing into anyway.
+ */
+function toWire(text: string, markers: Marker[]): EditorDiagnostic[] {
   if (markers.length === 0) return [];
   const u2b = makeU16ToByte(text);
   return markers.slice(0, MAX_DIAGNOSTICS).map((m) => ({

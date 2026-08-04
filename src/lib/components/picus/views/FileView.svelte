@@ -25,6 +25,7 @@
   import { astStore } from '$lib/stores/picus/ast.svelte';
   import { sqlLanguage } from '../picus-sql-language';
   import { sqlDiagnostics } from '../sql-intel';
+  import { longLineMarks } from '../sql-intel/long-line';
   import { validationStore } from '$lib/stores/picus/validation.svelte';
   import { picusProvidersStore } from '$lib/stores/picus/providers.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -120,6 +121,10 @@
   const buffer = $derived(edited ?? text);
   /** Whether the borrowed connection's engine can validate. */
   const canValidate = $derived(picusProvidersStore.capabilities(dialect)?.validate ?? false);
+  // The colour the editor gives up on past 10 000 characters into a line, put
+  // back for the literals — see `sql-intel/long-line.ts`.
+  const marks = $derived(longLineMarks(buffer, dialect ?? 'oracle'));
+
   const diagnostics = $derived([
     ...sqlDiagnostics(buffer, dialect ?? 'oracle', catalogue),
     ...validationStore.for(buffer),
@@ -263,6 +268,7 @@
           value={buffer}
           {language}
           {diagnostics}
+          {marks}
           oninput={(v) => { edited = v; picusTabsStore.markDirty(tab.id, true); }}
           oncaret={() => { if (editor) void astStore.revealAt(editor.caretByteOffset()); }}
           onGoto={(word) => openObjectNamed(word, connectionsStore.activeId)}

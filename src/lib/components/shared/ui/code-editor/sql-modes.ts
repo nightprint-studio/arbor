@@ -78,8 +78,23 @@ const oracleMode: StreamParser<unknown> = sql({
  * `portable` is PostgreSQL's mode, and that is not an arbitrary pick between two
  * wrongs. Of the two engines, `pgSQL` is the one whose string rules cover the
  * intersection without inventing anything: it already has `backslashStringEscapes:
- * false`, it understands `''` doubling, and the Oracle form it lacks (`q'[…]'`) cannot
- * appear in a file that has to run on PostgreSQL too.
+ * false`, and the Oracle form it lacks (`q'[…]'`) cannot appear in a file that has to
+ * run on PostgreSQL too.
+ *
+ * ## What neither mode does: `''`
+ *
+ * The upstream tokenizer closes a literal at the first unescaped quote, so
+ * `'L''Aquila'` is scanned as **two adjacent strings** rather than one. Measured, not
+ * assumed — this comment previously claimed the opposite.
+ *
+ * It is invisible, and deliberately left alone. Both halves carry the `string` tag,
+ * so the colour runs unbroken, and the split always lands *on* a quote — which means
+ * the tokenizer immediately re-enters a string and the pairing can never come out
+ * odd. What follows the literal is highlighted correctly.
+ *
+ * The scanner in `picus/sql-intel/tokens.ts` does read `''` as one literal, because
+ * there it decides where completion and diagnostics may act, and being off by one
+ * literal there would be visible. Here it would buy nothing that can be seen.
  */
 const MODES: Record<SqlDialect, Extension> = {
   oracle: StreamLanguage.define(oracleMode),
