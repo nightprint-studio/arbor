@@ -50,6 +50,17 @@ import yarnIcon        from '@iconify-icons/vscode-icons/file-type-yarn';
 import dockerIcon      from '@iconify-icons/vscode-icons/file-type-docker';
 import gitFileIcon     from '@iconify-icons/vscode-icons/file-type-git';
 import makefileIcon    from '@iconify-icons/vscode-icons/file-type-makefile';
+// The JVM / CI vocabulary. A legacy Java project's root is mostly these, and telling a
+// `pom.xml` from any other XML at a glance is most of what an icon is for.
+import mavenIcon       from '@iconify-icons/vscode-icons/file-type-maven';
+import gradleIcon      from '@iconify-icons/vscode-icons/file-type-gradle';
+import jarIcon         from '@iconify-icons/vscode-icons/file-type-jar';
+import gitlabIcon      from '@iconify-icons/vscode-icons/file-type-gitlab';
+import jenkinsIcon     from '@iconify-icons/vscode-icons/file-type-jenkins';
+import editorconfigIcon from '@iconify-icons/vscode-icons/file-type-editorconfig';
+import helmIcon        from '@iconify-icons/vscode-icons/file-type-helm';
+import logIcon         from '@iconify-icons/vscode-icons/file-type-log';
+import keyIcon         from '@iconify-icons/vscode-icons/file-type-key';
 
 // ── Folder icons ─────────────────────────────────────────────────────────────
 import folderDefault       from '@iconify-icons/vscode-icons/default-folder';
@@ -107,6 +118,11 @@ const EXT_ICONS: Record<string, IconifyIcon> = {
   py: pythonIcon, pyi: pythonIcon,
   go: goIcon,
   java: javaIcon,
+  // The rest of a JVM project's file kinds: a packaged artifact, a log to read, a
+  // keystore not to open in a text editor.
+  jar: jarIcon, war: jarIcon, ear: jarIcon,
+  log: logIcon,
+  jks: keyIcon, p12: keyIcon, keystore: keyIcon, pem: keyIcon,
   kt: kotlinIcon, kts: kotlinIcon,
   cs: csharpIcon,
   c: cIcon, h: cIcon,
@@ -157,6 +173,34 @@ const FILENAME_ICONS: Record<string, IconifyIcon> = {
   'gemfile': rubyIcon,
   'gemfile.lock': rubyIcon,
   'procfile': shellIcon,
+  // ── JVM build files ──────────────────────────────────────────────────────
+  // By NAME and not by extension: `pom.xml` is the one XML in a Java project you
+  // look for, and an extension rule would give it the same icon as the forty
+  // others around it.
+  'pom.xml': mavenIcon,
+  '.flattened-pom.xml': mavenIcon,
+  'mvnw': mavenIcon,
+  'mvnw.cmd': mavenIcon,
+  'maven-wrapper.properties': mavenIcon,
+  'settings.xml': mavenIcon,
+  'build.gradle': gradleIcon,
+  'build.gradle.kts': gradleIcon,
+  'settings.gradle': gradleIcon,
+  'settings.gradle.kts': gradleIcon,
+  'gradle.properties': gradleIcon,
+  'gradlew': gradleIcon,
+  'gradlew.bat': gradleIcon,
+  // ── CI / tooling ─────────────────────────────────────────────────────────
+  '.gitlab-ci.yml': gitlabIcon,
+  '.gitlab-ci.yaml': gitlabIcon,
+  'jenkinsfile': jenkinsIcon,
+  '.editorconfig': editorconfigIcon,
+  'chart.yaml': helmIcon,
+  'docker-compose.yml': dockerIcon,
+  'docker-compose.yaml': dockerIcon,
+  'compose.yml': dockerIcon,
+  'compose.yaml': dockerIcon,
+  '.dockerfile': dockerIcon,
 };
 
 /** Folder name → [closed icon, open icon]. */

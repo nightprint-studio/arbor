@@ -39,6 +39,17 @@
     /** Lucide (or any Svelte) icon component. */
     icon?:       any;
     iconSize?:   number;
+    /** Marks a tab whose content is **not the user's own** — a read-only view of something
+     *  from outside this workspace (a dependency's source, a vendored file). It is tinted
+     *  differently in both states, selected and not: a badge alone is read once and then
+     *  stops being noticed, while the thing it warns about — that edits here go nowhere —
+     *  matters every time you look up at the strip. */
+    tone?:       'default' | 'external';
+    /** Props handed to {@link icon}, for an icon component that needs more than a size —
+     *  a file-type or symbol-kind icon is chosen by what it is *of*, not by which component
+     *  it is. Without this a caller with one icon component and N variants has to bypass the
+     *  whole item rendering through `itemContent` to pass a single string. */
+    iconProps?:  Record<string, unknown>;
     /** Compact badge to the right of the label (e.g. unread count). */
     badge?:      string | number;
     /** Per-item override of the global `closable` prop. */
@@ -367,6 +378,7 @@
       {/if}
       <div
         class="tabs-tab"
+        class:tab-external={item.tone === 'external'}
         class:tab-active={active}
         class:tab-hidden={hiddenIds.has(item.id)}
         class:tab-dragging={dragFromIndex === i}
@@ -389,7 +401,7 @@
         {:else}
           {#if item.icon}
             {@const Icon = item.icon}
-            <Icon size={item.iconSize ?? (size === 'sm' ? 12 : 14)} />
+            <Icon size={item.iconSize ?? (size === 'sm' ? 12 : 14)} {...(item.iconProps ?? {})} />
           {/if}
           {#if item.label}
             <span class="tab-label">{item.label}</span>
@@ -580,6 +592,27 @@
   .tabs-underline .tabs-tab.tab-active {
     color: var(--accent);
     border-bottom-color: var(--accent);
+  }
+
+  /* ── Tone: external ─────────────────────────────────────────────────────
+     A tab holding something from outside the workspace. Tinted in BOTH states, because
+     the fact it warns about — that this file is read-only and not yours — is true whether
+     or not the tab is the one you are looking at, and a strip where only the active tab
+     said so would let you lose track of which of the others are real.
+
+     A tint and a left edge rather than a different text colour: the label is a filename and
+     has to stay as readable as any other, so the signal goes around it. `--warning` is the
+     hue, at low alpha — not an error (nothing is wrong) but not ordinary either. */
+  .tabs-tab.tab-external {
+    background: color-mix(in srgb, var(--warning) 7%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in srgb, var(--warning) 45%, transparent);
+  }
+  .tabs-tab.tab-external.tab-active {
+    background: color-mix(in srgb, var(--warning) 16%, transparent);
+    box-shadow: inset 2px 0 0 var(--warning);
+  }
+  .tabs-tab.tab-external:hover:not(.tab-disabled):not(.tab-active) {
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
   }
 
   /* ── Variant: pill ─────────────────────────────────────────────────────── */

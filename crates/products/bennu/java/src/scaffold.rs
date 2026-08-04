@@ -13,6 +13,11 @@ pub enum NewFileKind {
     JavaEnum,
     JavaRecord,
     JavaAnnotation,
+    /// A checked exception: a class extending `Exception`, with the two constructors every
+    /// one of them ends up growing. A kind of its own and not a class you then edit, because
+    /// it is a shape with a fixed body — and writing that body by hand is how you end up with
+    /// the one that forgot to pass `cause` through.
+    JavaException,
     Jsp,
     Xml,
     /// A plain file — `name` is used verbatim (extension included), content empty.
@@ -136,6 +141,17 @@ fn java_decl(kind: NewFileKind, name: &str) -> String {
         NewFileKind::JavaEnum => format!("public enum {name} {{\n}}\n"),
         NewFileKind::JavaRecord => format!("public record {name}() {{\n}}\n"),
         NewFileKind::JavaAnnotation => format!("public @interface {name} {{\n}}\n"),
+        NewFileKind::JavaException => format!(
+            "public class {name} extends Exception {{\n\
+             \x20   public {name}(String message) {{\n\
+             \x20       super(message);\n\
+             \x20   }}\n\
+             \n\
+             \x20   public {name}(String message, Throwable cause) {{\n\
+             \x20       super(message, cause);\n\
+             \x20   }}\n\
+             }}\n"
+        ),
         _ => String::new(),
     }
 }
@@ -170,7 +186,8 @@ pub fn scaffold_new_file(kind: NewFileKind, dir: &Path, name: &str) -> ScaffoldR
         | NewFileKind::JavaInterface
         | NewFileKind::JavaEnum
         | NewFileKind::JavaRecord
-        | NewFileKind::JavaAnnotation => {
+        | NewFileKind::JavaAnnotation
+        | NewFileKind::JavaException => {
             let type_name = strip_ext(name, "java");
             let package = infer_package(dir);
             ScaffoldResult {

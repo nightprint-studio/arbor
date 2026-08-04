@@ -41,6 +41,7 @@ fn kind_of(s: &str) -> Option<NewFileKind> {
         "enum" => NewFileKind::JavaEnum,
         "record" => NewFileKind::JavaRecord,
         "annotation" => NewFileKind::JavaAnnotation,
+        "exception" => NewFileKind::JavaException,
         "jsp" => NewFileKind::Jsp,
         "xml" => NewFileKind::Xml,
         "file" => NewFileKind::PlainFile,
@@ -70,7 +71,9 @@ mod tests {
 
     #[test]
     fn kind_mapping_covers_the_menu() {
-        for k in ["class", "interface", "enum", "record", "annotation", "jsp", "xml", "file"] {
+        for k in
+            ["class", "interface", "enum", "record", "annotation", "exception", "jsp", "xml", "file"]
+        {
             assert!(kind_of(k).is_some(), "{k} should map");
         }
         assert!(kind_of("nope").is_none());

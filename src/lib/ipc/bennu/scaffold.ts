@@ -8,7 +8,8 @@ import { bennu } from '../rpc';
 
 /** The file kinds the "New…" menu can scaffold. */
 export type NewFileKind =
-  | 'class' | 'interface' | 'enum' | 'record' | 'annotation' | 'jsp' | 'xml' | 'file';
+  | 'class' | 'interface' | 'enum' | 'record' | 'annotation' | 'exception'
+  | 'jsp' | 'xml' | 'file';
 
 /** Resolved new-file path + content — mirrors the BE `NewFileResult`. */
 export interface NewFileResult {

@@ -30,6 +30,12 @@
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import { ChevronDown } from 'lucide-svelte';
+  // The tab strip draws the same icons the project tree does — the shared file-type set, and
+  // the lettered ring for a Java type's kind.
+  import IconifyIconView from '@iconify/svelte';
+  import { getFileIcon } from '$lib/utils/file-icons';
+  import JavaKindIcon from './JavaKindIcon.svelte';
+  import { javaKindStore } from '$lib/stores/bennu/java-kinds.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
@@ -155,11 +161,22 @@
       const foreign = projectStore.isForeign(p);
       const conflicted = projectStore.isConflicted(p);
       const from = foreign ? `  ·  from ${owningName(p) ?? 'another project'}` : '';
+      // The same icon the tree shows for this file — a Java type's kind as a lettered ring,
+      // anything else as its file-type icon. A tab strip where every tab wore the identical
+      // generic glyph was spending the space without answering anything with it.
+      const java = p.toLowerCase().endsWith('.java');
       return {
         id: p,
         label: baseName(p),
-        icon: FileCode2,
+        icon: java ? JavaKindIcon : IconifyIconView,
+        iconProps: java
+          ? { kind: javaKindStore.kindOf(p) }
+          : { icon: getFileIcon(baseName(p)), width: 14, height: 14 },
         iconSize: 13,
+        // Not your file: a dependency's source or a file owned by another project. Tinted in
+        // both states — the badge is read once and then stops being noticed, while "edits
+        // here go nowhere" is true every time you glance at the strip.
+        tone: foreign ? ('external' as const) : undefined,
         title: conflicted
           ? `${p}${from}  ·  changed on disk — autosave paused until you choose a version`
           : `${p}${from}`,

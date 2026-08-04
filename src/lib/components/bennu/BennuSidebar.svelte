@@ -16,9 +16,7 @@
   import {
     FolderOpen, Folder, FileCode2, FolderTree, Plus, Crosshair,
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
-    Copy, LocateFixed, ChevronDown, ChevronRight,
-    Box, CircleDashed, Rows3, AtSign,
-    Braces, Hash, FileCog, FileText, Database, Globe, Pickaxe, Package,
+    Copy, LocateFixed, ChevronDown, ChevronRight, FileText,
   } from 'lucide-svelte';
   import { tick } from 'svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
@@ -38,6 +36,22 @@
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import type { TreeNode } from '$lib/types/bennu';
   import { packageTree, isInPackageRoot } from './package-tree';
+  // The shared file-icon vocabulary — the same one Corvus's tree and Sitta's explorer draw
+  // from, so a `pom.xml` looks like a `pom.xml` wherever you meet it.
+  import IconifyIconView from '@iconify/svelte';
+  import type { IconifyIcon } from '@iconify/svelte';
+  import { getFileIcon } from '$lib/utils/file-icons';
+  import JavaKindIcon from './JavaKindIcon.svelte';
+  import { javaKindStore } from '$lib/stores/bennu/java-kinds.svelte';
+
+  /** Row height for the tree, in px.
+   *
+   *  A number and not a variable because the tree is **virtualized**: it multiplies this by
+   *  the row index to place rows and to decide which slice to render, so it has to be
+   *  arithmetic, not CSS. It is the one measurement here that cannot follow `--font-scale`,
+   *  which is why it is set once, named, and left with room to spare — a row shorter than
+   *  its content does not wrap, it clips. */
+  const TREE_ROW_H = 26;
 
   let pickerOpen = $state(false);
   let filter = $state('');
@@ -59,75 +73,17 @@
   // index. Fetched into a plain map (the class index is async + cached) and refreshed when the index
   // rebuilds. A file that declares several types keys off the one matching the file name (the public
   // top-level type).
-  let kindByFile = $state<Map<string, string>>(new Map());
   $effect(() => {
     const root = projectStore.project?.root;
-    // Re-fetch when a rebuild lands (the store drops its class cache on rebuild).
-    void bennuIndexStore.buildRevision;
+    // Reload when the index settles, NOT on `buildRevision` — that ticks once per file
+    // walked, and a read per tick is how the backend was once talked into answering nothing.
+    const busy = bennuIndexStore.indexing;
     // A Cargo project builds no class index (there are no classes) — skip the round-trip.
-    if (!root || projectStore.isCargo) { kindByFile = new Map(); return; }
-    let cancelled = false;
-    void bennuIndexStore.classesForRoot(root).then((classes) => {
-      if (cancelled) return;
-      const m = new Map<string, string>();
-      for (const c of classes) {
-        const key = c.file.replace(/\\/g, '/');
-        const stem = key.split('/').pop()?.replace(/\.java$/, '') ?? '';
-        // Prefer the primary (file-named) type; otherwise keep the first seen.
-        if (!m.has(key) || c.simple === stem) m.set(key, c.kind);
-      }
-      kindByFile = m;
-    }).catch(() => {});
-    return () => { cancelled = true; };
+    if (!root || projectStore.isCargo) { javaKindStore.reset(); return; }
+    if (busy) return;
+    void javaKindStore.load(root, true);
   });
 
-  /** Icon + color for a Java type kind — distinct glyphs so class/interface/enum/annotation read at
-   *  a glance (IntelliJ-style). */
-  const KIND_ICON: Record<string, { icon: typeof FileCode2; color: string }> = {
-    class:      { icon: Box,          color: 'var(--success)' },
-    interface:  { icon: CircleDashed, color: 'var(--info)' },
-    enum:       { icon: Rows3,        color: 'var(--warning)' },
-    record:     { icon: Box,          color: 'var(--info)' },
-    annotation: { icon: AtSign,       color: 'var(--color-tag, #c792ea)' },
-  };
-
-  /** Icon + color by file extension (non-Java files) — lucide glyphs tinted with each language's
-   *  brand color for IntelliJ-like recognition (JS yellow, CSS blue, HTML orange, JSP server-orange).
-   *  Lucide has no official brand LOGOS; these are the closest glyphs + the real brand hues. */
-  const EXT_ICON: Record<string, { icon: typeof FileCode2; color: string }> = {
-    // JSP / JSP fragments / tag files — Java server pages (server-side orange).
-    jsp:  { icon: FileCode2, color: '#e76f00' },
-    jspf: { icon: FileCode2, color: '#e76f00' },
-    jspx: { icon: FileCode2, color: '#e76f00' },
-    tag:  { icon: FileCode2, color: '#e76f00' },
-    // JavaScript / TypeScript.
-    js:   { icon: Braces, color: '#f7df1e' },
-    mjs:  { icon: Braces, color: '#f7df1e' },
-    cjs:  { icon: Braces, color: '#f7df1e' },
-    ts:   { icon: Braces, color: '#3178c6' },
-    // Stylesheets.
-    css:  { icon: Hash, color: '#2965f1' },
-    scss: { icon: Hash, color: '#cf649a' },
-    less: { icon: Hash, color: '#1d365d' },
-    // Markup / data.
-    html: { icon: Globe, color: '#e34f26' },
-    htm:  { icon: Globe, color: '#e34f26' },
-    xml:  { icon: FileCode2, color: 'var(--text-muted)' },
-    json: { icon: Braces, color: 'var(--warning)' },
-    // Config / docs / data.
-    properties: { icon: FileCog, color: 'var(--text-muted)' },
-    yml:  { icon: FileCog, color: '#cb171e' },
-    yaml: { icon: FileCog, color: '#cb171e' },
-    sql:  { icon: Database, color: 'var(--info)' },
-    md:   { icon: FileText, color: 'var(--text-muted)' },
-    txt:  { icon: FileText, color: 'var(--text-muted)' },
-    // Rust projects: sources in Rust's rust-orange, manifests as config, RON game data,
-    // and geode's `.dig` mole scripts (a distinct glyph — they're programs, not data).
-    rs:   { icon: FileCode2, color: '#dea584' },
-    toml: { icon: FileCog, color: '#9c4221' },
-    ron:  { icon: Braces, color: 'var(--text-muted)' },
-    dig:  { icon: Pickaxe, color: 'var(--color-tag, #c792ea)' },
-  };
 
   /** The folder-icon tint by source-root role, so the tree conveys context at a glance.
    *
@@ -148,25 +104,44 @@
     return 'var(--text-muted)';
   }
 
-  /** The icon + color for a tree node: a source-root-tinted folder, a Java kind glyph, or the
-   *  default file icon. */
-  function iconFor(node: TreeNode): { icon: typeof FileCode2; color: string } {
+  /** What a row draws: a lucide glyph this file tints itself, or one of the shared VS Code
+   *  file icons (which carry their own colour and must not be tinted). */
+  type RowIcon =
+    | { shape: 'glyph'; icon: typeof FileCode2; color: string }
+    | { shape: 'file'; icon: IconifyIcon }
+    | { shape: 'kind'; kind: string };
+
+  /** The icon for a tree node.
+   *
+   *  Two sources, because they answer different questions. A `.java` file gets the **kind it
+   *  declares** — class, interface, enum, record, annotation — off the project's class index,
+   *  which is what IntelliJ shows and what no by-extension table can know. Everything else
+   *  goes to the shared resolver (`utils/file-icons`), the same one Corvus's tree and Sitta's
+   *  explorer use, so `pom.xml`, `.gitlab-ci.yml`, `Dockerfile` and the rest look the same
+   *  wherever you meet them — and an addition there shows up in all three at once.
+   *
+   *  This panel used to carry its own by-extension table of lucide glyphs. It was a second
+   *  vocabulary for the same job, always the poorer of the two, and drifting. */
+  function iconFor(node: TreeNode): RowIcon {
     if (node.is_dir) {
       // A directory inside a source root is a package, and reads as one — the row says
       // `it.acme.portal`, so a folder icon next to it would be describing the storage
       // rather than the thing. The source root itself keeps its folder icon: it is the
       // container the packages live in, not a package.
-      if (isInPackageRoot(node.path)) return { icon: Package, color: 'var(--text-muted)' };
-      return { icon: Folder, color: folderColor(node.path) };
+      // A package IS a folder — it is a directory holding files, and the dotted name on the
+      // row already says it is a package. A box glyph next to it named a different kind of
+      // thing than the one being pointed at. The tint carries the role (main / test /
+      // resources / webapp), which is the distinction that actually helps.
+      return { shape: 'glyph', icon: Folder, color: folderColor(node.path) };
     }
     const path = node.path.replace(/\\/g, '/');
     if (path.endsWith('.java')) {
-      const meta = KIND_ICON[kindByFile.get(path) ?? ''];
-      // A `.java` whose kind isn't indexed yet (index still building) → a neutral code icon.
-      return meta ?? { icon: FileCode2, color: 'var(--info)' };
+      // The kind the file declares, as a lettered disc. A `.java` whose kind isn't indexed
+      // yet (the index is still building) reads as a class — the overwhelmingly common
+      // answer, and it settles the moment the index does.
+      return { shape: 'kind', kind: javaKindStore.kindOf(path) };
     }
-    const ext = path.split('.').pop()?.toLowerCase() ?? '';
-    return EXT_ICON[ext] ?? { icon: FileCode2, color: 'var(--text-muted)' };
+    return { shape: 'file', icon: getFileIcon(node.name) };
   }
 
   async function openProject(dir: string) {
@@ -256,12 +231,21 @@
     void navigator.clipboard?.writeText(text).catch(() => { /* clipboard denied — ignore */ });
   }
 
+  /** What "New ›" offers. Two entries for now — a Java type, and a plain file — because
+   *  those are the two the tree is actually used to create; the dialog behind the first one
+   *  is where the choice between class / interface / enum / … is made, exactly where
+   *  IntelliJ puts it. Adding a third here is one line plus a case below. */
+  const NEW_SUBMENU: MenuItem[] = [
+    { id: 'new-class', label: 'Java Class', icon: FileCode2 },
+    { id: 'new-file',  label: 'File',       icon: FileText },
+  ];
+
   function onRowContextMenu(node: TreeNode, e: MouseEvent) {
     // "New file…" creates in this directory (dir node) or the file's directory (file node).
     const newDir = node.is_dir ? node.path : parentDir(node.path);
     const items: MenuItem[] = node.is_dir
       ? [
-          { id: 'new',           label: 'New file…',          icon: Plus },
+          { id: 'new', label: 'New', icon: Plus, children: NEW_SUBMENU },
           { separator: true, id: 'sep-new', label: '' },
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
@@ -272,7 +256,7 @@
         ]
       : [
           { id: 'open',          label: 'Open',               icon: FolderOpen },
-          { id: 'new',           label: 'New file…',          icon: Plus },
+          { id: 'new', label: 'New', icon: Plus, children: NEW_SUBMENU },
           { separator: true, id: 'sep-file', label: '' },
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
@@ -280,7 +264,10 @@
         ];
     bennuContextMenuStore.show(e.clientX, e.clientY, items, (id) => {
       switch (id) {
-        case 'new':       newFileDir = newDir; break;
+        // The submenu leaf decides which shape the dialog opens in — a Java type, with its
+        // kind list, or a plain file that only wants a name.
+        case 'new-class': newFileKind = 'class'; newFileDir = newDir; break;
+        case 'new-file':  newFileKind = 'file';  newFileDir = newDir; break;
         case 'open':      void projectStore.openFile(node.path); break;
         case 'copy-path': copyText(node.path); break;
         case 'copy-rel':  copyText(relativePath(node.path)); break;
@@ -304,6 +291,9 @@
 
   // The directory a New-file modal is open for (null = closed).
   let newFileDir = $state<string | null>(null);
+  /** Which shape the New dialog opens in — set by the submenu leaf that opened it. The
+   *  header's `＋` leaves it at `class`, the overwhelmingly common thing to create here. */
+  let newFileKind = $state<'class' | 'file'>('class');
 
   // ── Options kebab ────────────────────────────────────────────────────────────
   const optionsMenu: DropdownItem[] = [
@@ -351,6 +341,7 @@
       <Tree
         bind:this={treeRef}
         nodes={rootChildren}
+        rowHeight={TREE_ROW_H}
         getId={(n) => n.path}
         getChildren={(n) => (n.is_dir ? n.children : undefined)}
         selectedId={projectStore.activeFilePath}
@@ -363,10 +354,20 @@
       >
         {#snippet row(ctx: RowSnippetCtx<TreeNode>)}
           {@const meta = iconFor(ctx.node)}
-          {@const Icon = meta.icon}
-          <span class="tree-icon" style="color: {meta.color}">
-            <Icon size={14} />
-          </span>
+          {#if meta.shape === 'glyph'}
+            {@const Glyph = meta.icon}
+            <span class="tree-icon" style="color: {meta.color}">
+              <Glyph size={14} />
+            </span>
+          {:else if meta.shape === 'kind'}
+            <span class="tree-icon"><JavaKindIcon kind={meta.kind} /></span>
+          {:else}
+            <!-- A file-type icon carries its own colours (it IS the brand mark), so this one
+                 is not tinted — a `color` here would only fight it. -->
+            <span class="tree-icon">
+              <IconifyIconView icon={meta.icon} width={15} height={15} />
+            </span>
+          {/if}
           <span class="tree-label">{ctx.node.name}</span>
         {/snippet}
       </Tree>
@@ -392,7 +393,11 @@
 {/if}
 
 {#if newFileDir !== null}
-  <BennuNewFileModal dir={newFileDir} onClose={() => (newFileDir = null)} />
+  <BennuNewFileModal
+    dir={newFileDir}
+    initialKind={newFileKind}
+    onClose={() => (newFileDir = null)}
+  />
 {/if}
 
 <style>
@@ -416,6 +421,19 @@
   }
   .bs-empty-action:hover { border-color: var(--border-focus, var(--accent)); color: var(--text-primary); }
 
-  .tree-icon { display: flex; align-items: center; color: var(--text-muted); }
+  /* The project tree reads a step larger than the app's default list size — it is the panel
+     you scan continuously, and at 12px a package row is a lot of small text.
+
+     The icon is sized from the SAME variable rather than from its own number, so the two
+     move together: `--font-scale` (the Appearance setting) then scales the whole row, icons
+     included, instead of growing the text around fixed glyphs. The `size` / `width` props on
+     the components are floors the rule below overrides — one rule for both, since lucide and
+     Iconify each render a plain `<svg>`. */
+  .bs-tree :global(.tree-row) { font-size: var(--font-size-md); }
+  .tree-icon {
+    display: flex; align-items: center; color: var(--text-muted);
+    font-size: calc(var(--font-size-md) * 1.25);
+  }
+  .tree-icon :global(svg) { width: 1em; height: 1em; }
   .tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
