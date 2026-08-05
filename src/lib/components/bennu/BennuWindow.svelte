@@ -51,6 +51,7 @@
   import BennuStructurePanel from './BennuStructurePanel.svelte';
   import BennuDependenciesPanel from './BennuDependenciesPanel.svelte';
   import BennuMavenPanel from './BennuMavenPanel.svelte';
+  import MavenIcon from './MavenIcon.svelte';
   import BennuServicesPanel from './BennuServicesPanel.svelte';
   import BennuBottomDock from './BennuBottomDock.svelte';
   import BennuEditor from './BennuEditor.svelte';
@@ -86,6 +87,7 @@
   import { isJavaFile, isJspFile, supportsCodeNav } from './file-kind';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
+  import { bennuRunConfigStore } from '$lib/stores/bennu/run-config.svelte';
   import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
@@ -231,8 +233,9 @@
   function triggerRun() {
     const root = projectStore.project?.root;
     if (!root) return;
-    // Honor the ACTIVE run configuration (main class + program args); open the editor
-    // when nothing is configured yet.
+    // Honour the ACTIVE run configuration — all of it, VM args and environment included.
+    // With none, the store looks for the project's entry points and runs the one it finds;
+    // the editor opens only when there is a real question to answer (several, or none).
     void bennuRunStore.runActive(root).then((ran) => { if (!ran) bennuUiStore.openRunConfig(); });
   }
 
@@ -410,6 +413,18 @@
     void bennuTestStore.discover(root);
   });
 
+  /**
+   * Hydrate the project's run configurations from its `.arbor/config.toml`. Cheap (one small
+   * file) and needed before the titlebar ▶ can mean anything, so it does not wait for the
+   * index the way test discovery does. The store makes it idempotent per root — this effect
+   * re-runs on more than "a different project", and a re-read would discard edits.
+   */
+  $effect(() => {
+    const root = projectStore.project?.root ?? null;
+    if (!root || projectStore.isDemo) return;
+    void bennuRunConfigStore.load(root);
+  });
+
   const leftTop = $derived<ActivityRailItem[]>([
     { id: 'project',   tooltip: 'Project',   shortcut: 'Alt+1', icon: FolderTree, active: bennuUiStore.leftPanel === 'project',   onclick: () => bennuUiStore.toggleLeft('project') },
     ...(javaTools
@@ -425,10 +440,14 @@
   // state mirrors the dock's open tab.
   const leftBottom = $derived<ActivityRailItem[]>([
     { id: 'build',    tooltip: 'Build', shortcut: 'Alt+0',      icon: Hammer,         active: bennuUiStore.bottomPanel === 'build',    onclick: () => bennuUiStore.toggleBottom('build') },
-    // Tests is Java-only, exactly like Structure and Dependencies: on a Cargo root the panel
-    // could only ever be empty, and its toggle would be the only way to close it again.
+    // Run and Tests are Java-only, exactly like Structure and Dependencies: `bennu_run`
+    // launches a JVM, so on a Cargo root the panel could only ever be empty and its toggle
+    // would be the only way to close it again.
     ...(javaTools
-      ? [{ id: 'tests', tooltip: 'Tests', shortcut: 'Alt+5', icon: FlaskConical, active: bennuUiStore.bottomPanel === 'tests', onclick: () => bennuUiStore.toggleBottom('tests') }]
+      ? [
+          { id: 'run', tooltip: 'Run', shortcut: 'Alt+R', icon: Play, dot: bennuRunStore.running ? ('accent' as const) : undefined, active: bennuUiStore.bottomPanel === 'run', onclick: () => bennuUiStore.toggleBottom('run') },
+          { id: 'tests', tooltip: 'Tests', shortcut: 'Alt+5', icon: FlaskConical, active: bennuUiStore.bottomPanel === 'tests', onclick: () => bennuUiStore.toggleBottom('tests') },
+        ]
       : []),
     { id: 'problems', tooltip: 'Problems', shortcut: 'Alt+6',   icon: AlertTriangle,  active: bennuUiStore.bottomPanel === 'problems', onclick: () => bennuUiStore.toggleBottom('problems') },
     { id: 'todos',    tooltip: 'TODO', shortcut: 'Alt+7',       icon: ListTodo,       active: bennuUiStore.bottomPanel === 'todos',    onclick: () => bennuUiStore.toggleBottom('todos') },
@@ -436,7 +455,7 @@
   ]);
   const rightTop = $derived<ActivityRailItem[]>(
     javaTools
-      ? [{ id: 'maven', tooltip: 'Maven', shortcut: 'Alt+8', icon: Hammer, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') }]
+      ? [{ id: 'maven', tooltip: 'Maven', shortcut: 'Alt+8', icon: MavenIcon, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') }]
       : [],
   );
   // Forms drives the BOTTOM dock (wide, horizontal data), not a side panel — its toggle sits
@@ -480,7 +499,7 @@
         right: java ? ['maven', 'services'] : [],
         bottom: [
           'problems', 'terminal', 'build', 'todos',
-          ...(java ? ['tests' as const] : []),
+          ...(java ? ['run' as const, 'tests' as const] : []),
           ...(jsp ? ['forms' as const] : []),
           // Most framework catalogs have no rail button, so one left open after switching to a
           // project that doesn't offer it would be unclosable from the rail.
@@ -524,6 +543,7 @@
     'alert': AlertTriangle as unknown as IconComponent,
     'terminal': TerminalSquare as unknown as IconComponent,
     'hammer': Hammer as unknown as IconComponent,
+    'maven': MavenIcon as unknown as IconComponent,
     'list-checks': ListChecks as unknown as IconComponent,
     'play': Play as unknown as IconComponent,
     'flask': FlaskConical as unknown as IconComponent,
@@ -622,11 +642,12 @@
       { id: 'structure', title: 'Toggle Structure', icon: 'list-tree',   shortcut: 'Alt+2', action: () => run(() => bennuUiStore.toggleLeft('structure')), when: javaTools },
       { id: 'forms',     title: 'Toggle Forms',     icon: 'list',        shortcut: 'Alt+3', action: () => run(() => bennuUiStore.toggleBottom('forms')), when: jspTools },
       { id: 'dependencies', title: 'Dependencies',  icon: 'library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: javaTools },
+      { id: 'runpanel',  title: 'Toggle Run',       icon: 'play',        shortcut: 'Alt+R', action: () => run(() => bennuUiStore.toggleBottom('run')), when: javaTools },
       { id: 'tests',     title: 'Toggle Tests',     icon: 'flask',       shortcut: 'Alt+5', action: () => run(() => bennuUiStore.toggleBottom('tests')), when: javaTools },
       { id: 'problems',  title: 'Toggle Problems',  icon: 'alert',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
       { id: 'todos',     title: 'Toggle TODO',      icon: 'todo',        shortcut: 'Alt+7', action: () => run(() => bennuUiStore.toggleBottom('todos')), when: true },
       { id: 'terminal',  title: 'Toggle Terminal',  icon: 'terminal',    shortcut: 'Alt+F12', action: () => run(() => bennuUiStore.toggleBottom('terminal')), when: true },
-      { id: 'maven',     title: 'Toggle Maven',     icon: 'hammer',      shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: javaTools },
+      { id: 'maven',     title: 'Toggle Maven',     icon: 'maven',       shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: javaTools },
       { id: 'services',  title: 'Toggle Services',  icon: 'server',      shortcut: 'Alt+9', action: () => run(() => bennuUiStore.toggleRight('services')), when: javaTools },
       // The framework catalogs. Palette-only by design (see `framework-catalogs.ts`) and gated
       // on the project having something in them, so they are absent — not empty — everywhere
@@ -664,7 +685,9 @@
         action: () => run(triggerValidate), when: idle && javaTools },
       { id: 'run', title: 'Run', icon: 'play', shortcut: 'Shift+F10',
         action: () => run(triggerRun), when: idle && javaTools },
-      { id: 'stoprun', title: 'Stop', icon: 'hammer',
+      { id: 'rerun', title: 'Rerun', icon: 'rerun',
+        action: () => run(() => void bennuRunStore.rerunApp()), when: idle && javaTools && bennuRunStore.canRerun },
+      { id: 'stoprun', title: 'Stop the program', icon: 'hammer',
         action: () => run(() => void bennuRunStore.stop()), when: bennuRunStore.running },
       { id: 'runcfg', title: 'Edit run configuration…', icon: 'sliders',
         action: () => run(() => bennuUiStore.openRunConfig()), when: !!projectStore.project && javaTools },
@@ -869,6 +892,10 @@
         // Forms needs pages, not just Java — same gate as its rail icon.
         if (e.key === '3' && jspTools) { e.preventDefault(); bennuUiStore.toggleBottom('forms'); return; }
         if (e.key.toLowerCase() === 'n') { e.preventDefault(); bennuUiStore.toggleLeft('dependencies'); return; }
+        // The Run console. A letter and not a digit because IntelliJ's Alt+4 is already
+        // Endpoints here, and moving an existing tool's shortcut to make room would cost
+        // more than it buys.
+        if (e.key.toLowerCase() === 'r') { e.preventDefault(); bennuUiStore.toggleBottom('run'); return; }
         if (e.key === '8') { e.preventDefault(); bennuUiStore.toggleRight('maven'); return; }
         if (e.key === '9') { e.preventDefault(); bennuUiStore.toggleRight('services'); return; }
       }

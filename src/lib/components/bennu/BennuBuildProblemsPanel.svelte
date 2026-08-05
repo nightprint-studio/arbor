@@ -11,7 +11,7 @@
    * The panel owns its chrome: the title strip, the section's actions (Stop / Clear while a
    * build is what you are looking at) and the close button.
    */
-  import { Hammer, Square, Trash2 } from 'lucide-svelte';
+  import { Hammer, Trash2 } from 'lucide-svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -52,17 +52,8 @@
     {/snippet}
     {#snippet actions()}
       {#if section === 'build'}
-        {#if bennuRunStore.running}
-          <button
-            class="ps-btn"
-            type="button"
-            use:tooltip={'Stop'}
-            aria-label="Stop run"
-            onclick={() => void bennuRunStore.stop()}
-          >
-            <Square size={12} />
-          </button>
-        {/if}
+        <!-- No Stop here any more: what was being stopped is the launched PROGRAM, and it
+             now has its own console with its own Stop. A build is not cancellable. -->
         <button
           class="ps-btn"
           type="button"

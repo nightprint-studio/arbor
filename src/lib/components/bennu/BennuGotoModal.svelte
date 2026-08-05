@@ -24,11 +24,14 @@
    *   its owner and signature as the detail. Entries with no navigable site are dropped for
    *   the same reason.
    */
-  import { Box, FileCode2, Braces, Spline, Layers, AtSign } from 'lucide-svelte';
+  import { Braces } from 'lucide-svelte';
   import NavigateTo, {
     type NavigateCategory,
     type NavigateItem,
   } from '$lib/components/shared/navigate/NavigateTo.svelte';
+  import type { IconComponent } from '$lib/types/icon';
+  import JavaKindIconRaw from './JavaKindIcon.svelte';
+  import BennuFileIconRaw from './BennuFileIcon.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
@@ -36,6 +39,11 @@
   import type { TreeNode } from '$lib/types/bennu';
 
   let { onClose }: { onClose: () => void } = $props();
+
+  // The row's `icon` slot is typed for lucide's class-based components; a Svelte 5 `.svelte`
+  // component is a function, so it needs the same cast the palette's icon map uses.
+  const JavaKindIcon = JavaKindIconRaw as unknown as IconComponent;
+  const BennuFileIcon = BennuFileIconRaw as unknown as IconComponent;
 
   /** Which tab the shortcut that opened this asked for. */
   const initialCategory = $derived(
@@ -61,7 +69,10 @@
           id: node.path,
           name: node.name,
           detail: dirOf(node.path),
-          icon: FileCode2,
+          // The tree's own icon rule, not a stand-in for it — a `.java` wears the kind it
+          // declares, everything else its file type.
+          icon: BennuFileIcon,
+          iconProps: { path: node.path },
           onOpen: () => go(node.path, null),
         });
       }
@@ -82,11 +93,6 @@
   }
 
   // ── classes ─────────────────────────────────────────────────────────────────
-  const KIND_ICON: Record<string, typeof Box> = {
-    interface: Spline,
-    enum: Layers,
-    annotation: AtSign,
-  };
 
   /** The package part of a FQCN — what tells four same-named classes apart. */
   function packageOf(fqcn: string): string {
@@ -107,7 +113,10 @@
           id: `${c.fqcn}@${c.file}:${c.line}`,
           name: c.simple,
           detail: packageOf(c.fqcn),
-          icon: KIND_ICON[c.kind] ?? Box,
+          // The lettered ring the tree and the editor tabs use — C / I / E / R / @ — rather
+          // than a second vocabulary of lucide shapes for the same five kinds.
+          icon: JavaKindIcon,
+          iconProps: { kind: c.kind },
           tag: c.kind && c.kind !== 'class' ? c.kind : undefined,
           onOpen: () => go(c.file, c.line),
         }));

@@ -227,10 +227,61 @@ export interface ProjectValidationResult {
 }
 
 /** Result of `bennu_run`: the id correlating the `arbor://bennu/run-output` /
- *  `arbor://bennu/run-exit` event stream, plus the resolved main class. */
+ *  `arbor://bennu/run-exit` event stream, plus what was actually launched. */
 export interface RunHandle {
   run_id: string;
   main_class: string;
+  /** The spawned command line, quoted for pasting, with the classpath summarised. Comes
+   *  from the backend because only it knows which `java` and which resolved classpath. */
+  command: string;
+  /** The directory the child was started in. */
+  working_dir: string;
+}
+
+/** One class declaring `public static void main(String[])`, from `bennu_main_classes` —
+ *  what the run-config editor offers instead of asking you to type an FQCN. */
+export interface MainClassEntry {
+  fqcn: string;
+  source_file: string | null;
+  /** The Maven module it lives in, relative to the root; null on a single-module project. */
+  module: string | null;
+  /** The declaring type carries `@SpringBootApplication` — this is a Boot entry point. */
+  spring_boot: boolean;
+}
+
+/** One `key=value` environment row of a persisted run configuration. */
+export interface RunConfigEnvVar {
+  key: string;
+  value: string;
+}
+
+/** A persisted run configuration — the wire shape of a `[[bennu.run.configs]]` entry.
+ *  snake_case because it crosses the seam; the store's {@link RunConfig} is its camelCase
+ *  twin, and `run-config.svelte.ts` owns the one conversion between them. */
+export interface RunConfigDto {
+  id: string;
+  name: string;
+  /** `"application"` | `"springboot"` | `"junit"` — the category. A string, not a union,
+   *  because the wire may carry a kind this build has never heard of (see the Rust
+   *  contract). */
+  kind: string;
+  /** The Maven module, relative to the project root. Empty = the root module. */
+  module: string;
+  main_class: string;
+  program_args: string;
+  vm_args: string;
+  working_dir: string;
+  env: RunConfigEnvVar[];
+  /** junit only — `"all"` | `"module"` | `"class"`. */
+  test_scope: string;
+  /** junit only — the module directory or class selector `test_scope` names. */
+  test_target: string;
+}
+
+/** The per-repo run-config bundle stored in `<root>/.arbor/config.toml`. */
+export interface RunConfigSetDto {
+  configs: RunConfigDto[];
+  active_id: string | null;
 }
 
 // ── navigation / tools ─────────────────────────────────────────────────────────

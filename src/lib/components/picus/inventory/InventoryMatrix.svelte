@@ -340,7 +340,9 @@
     cursor: pointer;
   }
   .im-cell-btn:hover { background: var(--bg-hover); }
-  .im-cell-open { background: var(--bg-active); box-shadow: inset 0 -2px 0 var(--accent); }
+  /* `--bg-active` is not a token this theme defines: the open cell was carrying its accent
+     underline over no fill at all. */
+  .im-cell-open { background: var(--bg-selected); box-shadow: inset 0 -2px 0 var(--accent); }
   /* The one verdict this table renders as colour — and it agrees, cell for cell,
      with what the consistency report raises. */
   .im-gap { color: var(--error); font-weight: 700; background: var(--error-subtle); }

@@ -31,10 +31,15 @@ pub struct ReindexArgs {
 fn bennu_reindex(ctx: &BennuState, args: ReindexArgs) -> Result<(), String> {
     // Keep the reverse channel current so the rebuild's warm-up job still tracks.
     IndexService::global().set_host(ctx.host_caller());
-    // Test discovery is its own cached scan of the same sources, so it goes stale in exactly
-    // the same circumstances. Rebuilding one and not the other is how a newly written test
-    // class ends up needing a restart to appear in the Tests panel.
+    // Test discovery and entry-point discovery are cached scans of the same sources, so they
+    // go stale in exactly the same circumstances. Rebuilding the index and not these is how a
+    // newly written test class — or a newly written `main` — ends up needing a restart to
+    // appear.
     crate::tests::forget_discovery(&args.root);
+    crate::main_classes::forget_main_classes(&args.root);
+    // And the "nothing has changed since the last compile" stamp: a re-index is the user
+    // saying they no longer trust what we remember about this project.
+    crate::build::forget_build_stamp(&args.root);
     IndexService::global().reindex(&args.root, ctx.event_sink());
     Ok(())
 }

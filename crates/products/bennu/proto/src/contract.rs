@@ -862,6 +862,18 @@ pub struct RunHandle {
     pub run_id: String,
     /// The resolved main class the run launched.
     pub main_class: String,
+    /// The command line actually spawned, as a single display string (the resolved `java`,
+    /// the VM args, `-cp`, the main class, the program args) — what the console prints as
+    /// its first line.
+    ///
+    /// It comes from the backend rather than being reassembled by the console because only
+    /// the backend knows what was really run: which JDK's `java`, and a classpath resolved
+    /// out of `~/.m2`. A console showing a plausible reconstruction of the command is worse
+    /// than one showing none — it is the line you copy into a terminal when the run
+    /// misbehaves.
+    pub command: String,
+    /// The working directory the child was started in.
+    pub working_dir: String,
 }
 
 // ── run configurations (per-repo `[bennu.run]`, IntelliJ-style run targets) ───
@@ -885,12 +897,34 @@ pub struct EnvVar {
 /// `id` is STABLE across restarts — the FE generates it and it is persisted verbatim;
 /// the backend never re-assigns it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RunConfig {
     /// Stable id (FE-generated, persisted verbatim — the map/selection key).
     pub id: String,
     /// Display name of the configuration.
     pub name: String,
-    /// The fully-qualified main class to launch.
+    /// What KIND of thing this launches — `"application"` (a `main` class), `"springboot"`
+    /// (a Boot application: the same launch plus its active profiles) or `"junit"` (a test
+    /// scope). It is what the editor and the title-bar selector group by.
+    ///
+    /// A plain string and not an enum: the set grows (a Tomcat deployment, a Maven goal), and
+    /// a `.arbor/config.toml` written by a newer Bennu must not make an older one refuse to
+    /// read the whole file. An unknown kind degrades to a row the reader cannot launch, which
+    /// is recoverable; a failed parse loses every configuration in the project.
+    ///
+    /// `#[serde(default)]` on the struct is load-bearing: configurations written before kinds
+    /// existed have no such key, and they are all applications.
+    pub kind: String,
+    /// The Maven module this configuration belongs to, relative to the project root
+    /// (`services/core`). Empty = the root module.
+    ///
+    /// It decides the run classpath, so on a multi-module project it is the field that makes
+    /// the difference between a run and a `ClassNotFoundException`. A `junit` configuration
+    /// uses its own scope for this and leaves it empty.
+    pub module: String,
+    /// The fully-qualified main class to launch. `application`/`springboot` only — a Spring
+    /// Boot configuration may leave it empty, and the module's `@SpringBootApplication` class
+    /// is resolved at launch.
     pub main_class: String,
     /// Program arguments (passed after the main class), a raw single-line string.
     pub program_args: String,
@@ -900,6 +934,35 @@ pub struct RunConfig {
     pub working_dir: String,
     /// Environment-variable entries applied to the launched process.
     pub env: Vec<EnvVar>,
+    /// `springboot` only — the active profiles, comma-separated as Spring itself spells them
+    /// (`dev,local`). Turned into `-Dspring.profiles.active=…` at launch.
+    pub profiles: String,
+    /// `junit` only — how much to run: `"all"`, `"module"` or `"class"`. Empty means all.
+    pub test_scope: String,
+    /// `junit` only — the module directory or the class selector [`test_scope`] names.
+    /// Unused for `"all"`.
+    pub test_target: String,
+}
+
+impl Default for RunConfig {
+    /// An empty **application** — the kind everything was before kinds existed, so a config
+    /// deserialized from a file that predates them lands here.
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            kind: "application".to_string(),
+            module: String::new(),
+            main_class: String::new(),
+            program_args: String::new(),
+            vm_args: String::new(),
+            working_dir: String::new(),
+            env: Vec::new(),
+            profiles: String::new(),
+            test_scope: String::new(),
+            test_target: String::new(),
+        }
+    }
 }
 
 /// Result of `bennu_get_run_config` — the per-repo run-config bundle (the ordered list
@@ -928,4 +991,12 @@ pub struct MainClassEntry {
     /// The Maven module the source lives in (relative to the project root), when the
     /// project is multi-module; `None` for a single-module project.
     pub module: Option<String>,
+    /// Whether the declaring type carries `@SpringBootApplication` — i.e. this is a Spring
+    /// Boot application's entry point.
+    ///
+    /// Sent so a Spring Boot run configuration can fill its own main class in. A Boot app has
+    /// exactly one of these per module by construction, so asking which class to start is
+    /// asking a question with one possible answer.
+    #[serde(default)]
+    pub spring_boot: bool,
 }

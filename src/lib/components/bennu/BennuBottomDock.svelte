@@ -17,6 +17,7 @@
    * would burn an include-graph walk for nothing.
    */
   import BennuBuildProblemsPanel from './BennuBuildProblemsPanel.svelte';
+  import BennuRunPanel from './BennuRunPanel.svelte';
   import BennuTestPanel from './BennuTestPanel.svelte';
   import BennuTerminalView from './BennuTerminalView.svelte';
   import BennuTodoPanel from './BennuTodoPanel.svelte';
@@ -36,6 +37,11 @@
 <div class="dock">
   <div class="dock-section" class:hidden={!buildish}>
     <BennuBuildProblemsPanel />
+  </div>
+  <!-- Stays mounted for the same reason the terminal does: there is a LIVE PROCESS behind it.
+       Unmounting would drop the console's scroll, its buffer and the input box mid-run. -->
+  <div class="dock-section" class:hidden={active !== 'run'}>
+    <BennuRunPanel />
   </div>
   <!-- Stays mounted: a test run is minutes long and streams into it, and looking at the
        TODOs mid-run must not be the thing that throws the results away. -->

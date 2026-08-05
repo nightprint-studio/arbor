@@ -7,10 +7,10 @@
  *
  * Tool-window layout (IntelliJ New UI):
  *   • LEFT rail (top)     — Project (tree), Structure (symbols), Dependencies.
- *   • LEFT rail (bottom)  — bottom-dock toggles: Build, Tests, Problems, TODO, Terminal.
+ *   • LEFT rail (bottom)  — bottom-dock toggles: Build, Run, Tests, Problems, TODO, Terminal.
  *   • RIGHT rail          — Maven (top); Services + the Forms toggle (bottom).
- *   • BOTTOM dock         — Build · Tests · Problems · TODO · Forms · Terminal, tabbed.
- *                           Toggles live in the left rail (+ Forms in the right rail bottom).
+ *   • BOTTOM dock         — Build · Run · Tests · Problems · TODO · Forms · Terminal, one
+ *                           panel per rail button (Build and Problems share one).
  * Find-in-project is a modal (Ctrl+Shift+F), not a rail tool.
  *
  * Rune store — private `$state`, returned getters + methods (CLAUDE.md).
@@ -35,6 +35,9 @@ export type BottomPanel =
   | 'problems'
   | 'terminal'
   | 'build'
+  /** The launched program's console — its own tool window, not a section of Build: a build
+   *  log is finished when you read it, a program's output is live, typed into and stopped. */
+  | 'run'
   | 'tests'
   | 'todos'
   | 'forms'

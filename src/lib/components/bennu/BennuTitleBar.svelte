@@ -33,6 +33,7 @@
   import { createNativeMenuPublisher } from '$lib/utils/native-menu';
   import { windowMenuItems } from '$lib/utils/window-menu';
   import WorkspaceTabs from '$lib/components/shared/internal/WorkspaceTabs.svelte';
+  import BennuRunConfigSelect from './BennuRunConfigSelect.svelte';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
@@ -116,7 +117,11 @@
     // none, so the entry is out rather than failing when pressed.
     ...(isCargo
       ? []
-      : [{ kind: 'item', id: 'run', label: 'Run', icon: Play, shortcut: 'Shift+F10', disabled: busy, onclick: runProject } as DropdownItem]),
+      : [
+          { kind: 'item', id: 'run', label: 'Run', icon: Play, shortcut: 'Shift+F10', disabled: busy, onclick: runProject } as DropdownItem,
+          { kind: 'item', id: 'rerun', label: 'Rerun', icon: RotateCw, disabled: busy || !bennuRunStore.canRerun,
+            onclick: () => void bennuRunStore.rerunApp() } as DropdownItem,
+        ]),
     { kind: 'item', id: 'build',   label: buildLabel,        icon: isCargo || buildType !== 'validate' ? Hammer : ListChecks, shortcut: 'Ctrl+F9', disabled: busy, onclick: buildProject },
     ...(isCargo
       ? []
@@ -257,6 +262,12 @@
       </button>
     {/if}
     <div class="btb-run" role="group" aria-label="Run controls">
+      <!-- What ▷ will launch, named next to the button that launches it. Java only: a Cargo
+           project has no run configurations, and an empty selector beside a disabled ▷ would
+           be two controls saying the same nothing. -->
+      {#if !isCargo}
+        <BennuRunConfigSelect />
+      {/if}
       <!-- `btb-build-main` squares off the right edge for the attached caret. Without the
            caret (Cargo: one build type, no split) the button must round on both sides. -->
       <button
@@ -351,6 +362,9 @@
     display: flex; align-items: center; gap: 1px;
     -webkit-app-region: no-drag;
   }
+  /* The selector is a field, the rest are buttons — the gap is what separates the two
+     groups. Set by the consumer, not by the chip: spacing belongs to the layout. */
+  .btb-run :global(.rcs) { margin-right: 7px; }
   /* Gap between the run cluster and the app buttons (palette · docs · settings),
      so the two groups on the right read as distinct (~72px). */
   .btb-run-gap { width: 72px; flex-shrink: 0; }

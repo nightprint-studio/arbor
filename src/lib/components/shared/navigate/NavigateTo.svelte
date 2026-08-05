@@ -72,6 +72,14 @@
     /** Leading icon. Any Svelte component taking a `size` prop — see
      *  {@link IconComponent} for why lucide needs the legacy alias. */
     icon?: IconComponent;
+    /**
+     * Extra props for {@link icon}, spread after `size`. What lets a host use its own
+     * icon components rather than only lucide's: a Java kind mark needs `kind`, an
+     * iconify glyph needs `icon`. Without it every host is limited to the icons whose
+     * entire identity fits in the component reference — which is why the classes here
+     * were generic boxes while the tree three feet away drew the real thing.
+     */
+    iconProps?: Record<string, unknown>;
     /** A short word on the right — the object kind, the engine, the role. */
     tag?: string;
     onOpen: () => void;
@@ -354,7 +362,7 @@
               onclick={() => open(row)}
             >
               {#if row.icon}
-                <span class="nv-icon"><row.icon size={13} /></span>
+                <span class="nv-icon"><row.icon size={13} {...row.iconProps ?? {}} /></span>
               {:else}
                 <span class="nv-icon nv-icon-gap"></span>
               {/if}
@@ -461,7 +469,18 @@
     font-size: var(--font-size-sm);
     cursor: pointer;
   }
-  .nv-on { background: var(--bg-active); }
+  /* Hover and the cursor are drawn separately even though moving the mouse over a row also
+     moves the cursor: a pointer resting where the list re-rendered under it gets no
+     `mousemove`, and a row you are pointing at that looks identical to the forty around it
+     is a list that appears not to respond to the mouse at all. */
+  .nv-row:hover { background: var(--bg-hover); }
+  /* Was `--bg-active`, which is not a token this theme defines — so it resolved to nothing
+     and NEITHER the hovered nor the keyboard-selected row was marked. */
+  .nv-on, .nv-on:hover { background: var(--bg-selected); color: var(--text-primary); }
+  .nv-on .nv-detail { color: var(--text-secondary); }
+  /* On the selection fill the kind colours go muddy — hand the icon the row's own colour
+     (see JavaKindIcon's `--jki-color`). */
+  .nv-on .nv-icon { color: var(--text-primary); --jki-color: currentColor; }
   .nv-icon { display: inline-flex; align-self: center; color: var(--text-muted); flex-shrink: 0; }
   .nv-icon-gap { width: 13px; }
   .nv-name { color: var(--text-primary); white-space: nowrap; }

@@ -25,12 +25,10 @@
 //!
 //! ## Cancel really kills
 //!
-//! A test run is minutes long, so Stop cannot be the bookkeeping-only cancel `bennu_run`
-//! settles for. On Windows the child is `mvn.cmd`, whose JVM is a **grandchild** — killing
-//! the handle leaves the tests running, still holding `target/`. So cancellation goes
-//! through `taskkill /T` (the whole tree) with `Child::kill` as the backstop. The run thread
-//! polls with `try_wait` rather than blocking on `wait`, so the handle is free for the
-//! canceller to take.
+//! On Windows the child is `mvn.cmd`, whose JVM is a **grandchild** — killing the handle
+//! leaves the tests running, still holding `target/`. So cancellation goes through
+//! [`crate::child::kill_tree`] (the same one the app run uses). The run thread polls with
+//! `try_wait` rather than blocking on `wait`, so the handle is free for the canceller to take.
 //!
 //! ## Why the run is not offline
 //!
@@ -313,25 +311,8 @@ fn bennu_cancel_tests(_ctx: &BennuState, args: CancelTestsArgs) -> Result<bool, 
     let Some((child, cancelled)) = live else { return Ok(false) };
     *cancelled.lock().unwrap_or_else(|p| p.into_inner()) = true;
     let mut child = child.lock().unwrap_or_else(|p| p.into_inner());
-    kill_tree(&mut child);
+    crate::child::kill_tree(&mut child);
     Ok(true)
-}
-
-/// Kill the child **and everything it started**.
-///
-/// On Windows the handle is `mvn.cmd`; the JVM actually running the tests is a grandchild,
-/// and `Child::kill` leaves it running — still holding `target/`, still writing reports,
-/// with the UI claiming the run has stopped. `taskkill /T` takes the tree. `kill` follows in
-/// both cases: on Unix it is the whole mechanism, and everywhere it reaps the handle.
-fn kill_tree(child: &mut Child) {
-    #[cfg(windows)]
-    {
-        let mut tk = Command::new("taskkill");
-        tk.arg("/PID").arg(child.id().to_string()).arg("/T").arg("/F");
-        tk.no_window();
-        let _ = tk.output();
-    }
-    let _ = child.kill();
 }
 
 /// A run the canceller can reach.

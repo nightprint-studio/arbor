@@ -130,9 +130,12 @@ mod spell;
 mod find;
 // Build/run (docs §4 "il fondo"): `bennu_build` (mvn -q -o compile / javac fallback +
 // error parser → structured diagnostics) / `bennu_run` (java <vm> -cp … streaming output,
-// cwd + env) / `bennu_cancel_run`. Makes the Run/Debug buttons real + re-indexes
-// target/classes.
+// cwd + env, stdin piped) / `bennu_run_input` / `bennu_cancel_run`. Makes the Run/Debug
+// buttons real + re-indexes target/classes.
 mod build;
+// Killing a child and everything it started (`taskkill /T` on Windows) — shared by the two
+// domains that launch long-lived children, `build`'s run and `tests`' `mvn test`.
+mod child;
 // Dependency-classpath sourcing for the index: resolve a Maven project's `~/.m2` dep jars (cached
 // across sessions by pom mtime) into a `ClassSource`, so validation/completion resolve library
 // types (Spring, servlet, …), not just the JDK + project. Non-fatal — degrades to JDK-only.

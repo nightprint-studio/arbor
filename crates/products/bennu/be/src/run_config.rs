@@ -124,6 +124,8 @@ mod tests {
                 RunConfig {
                     id: "rc-abc".to_string(),
                     name: "App".to_string(),
+                    kind: "application".to_string(),
+                    module: "services/core".to_string(),
                     main_class: "com.acme.App".to_string(),
                     program_args: "--verbose input.txt".to_string(),
                     vm_args: "-Xmx512m -Dfoo=bar".to_string(),
@@ -132,15 +134,15 @@ mod tests {
                         EnvVar { key: "PROFILE".to_string(), value: "dev".to_string() },
                         EnvVar { key: "PORT".to_string(), value: "8080".to_string() },
                     ],
+                    ..RunConfig::default()
                 },
                 RunConfig {
                     id: "rc-def".to_string(),
-                    name: "Tests".to_string(),
-                    main_class: "com.acme.TestRunner".to_string(),
-                    program_args: String::new(),
-                    vm_args: String::new(),
-                    working_dir: "sub/module".to_string(),
-                    env: vec![],
+                    name: "All tests".to_string(),
+                    kind: "junit".to_string(),
+                    test_scope: "module".to_string(),
+                    test_target: "sub/module".to_string(),
+                    ..RunConfig::default()
                 },
             ],
             active_id: Some("rc-abc".to_string()),
@@ -162,6 +164,38 @@ mod tests {
         // Env round-trips as key/value pairs.
         assert_eq!(back.configs[0].env[0].key, "PROFILE");
         assert_eq!(back.configs[0].env[0].value, "dev");
+        // The kind survives, which is what the editor and the selector group by — and the
+        // module, which is what the run classpath is built from.
+        assert_eq!(back.configs[0].module, "services/core");
+        assert_eq!(back.configs[1].kind, "junit");
+        assert_eq!(back.configs[1].test_target, "sub/module");
+    }
+
+    /// A configuration written before kinds existed has no `kind` key. It must read back as
+    /// an APPLICATION rather than failing — one unknown field cannot be allowed to cost a
+    /// project every run configuration it has.
+    #[test]
+    fn a_config_without_a_kind_is_an_application() {
+        // Root keys before the array of tables — a key after `[[configs]]` would belong to
+        // that table, not to the set.
+        let text = "\
+active_id = \"rc-old\"
+
+[[configs]]
+id = \"rc-old\"
+name = \"App\"
+main_class = \"com.acme.App\"
+program_args = \"\"
+vm_args = \"\"
+working_dir = \"\"
+env = []
+";
+        let set: RunConfigSet = toml::from_str(text).expect("an older file must still parse");
+        assert_eq!(set.configs.len(), 1);
+        assert_eq!(set.configs[0].kind, "application");
+        assert_eq!(set.configs[0].main_class, "com.acme.App");
+        // And the new fields land empty rather than absent.
+        assert_eq!(set.configs[0].test_scope, "");
     }
 
     /// A fresh repo — no `bennu.run` section at all — decodes to the empty default,

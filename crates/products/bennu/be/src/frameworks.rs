@@ -65,30 +65,61 @@ struct Slot {
 /// Process-wide extension host, one slot per project root.
 pub struct FrameworkService {
     slots: Mutex<HashMap<String, Arc<Slot>>>,
+    /// One build lock per root, so a cold slot is built ONCE. See [`FrameworkService::slot`].
+    building: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl FrameworkService {
     pub fn global() -> &'static FrameworkService {
         static INSTANCE: OnceLock<FrameworkService> = OnceLock::new();
-        INSTANCE.get_or_init(|| FrameworkService { slots: Mutex::new(HashMap::new()) })
+        INSTANCE.get_or_init(|| FrameworkService {
+            slots: Mutex::new(HashMap::new()),
+            building: Mutex::new(HashMap::new()),
+        })
     }
 
     /// The slot for `root`, building it if this is the first ask. `None` when the root
     /// isn't a directory we can read.
+    ///
+    /// **Single-flight.** Every request gets its own thread, and the editor asks four
+    /// questions per keystroke — highlights, gutter, actions, diagnostics — all of which land
+    /// here. With a cold slot each of them used to start its own build of the same model:
+    /// four full walks-and-parses of the project, concurrently, none of them reusing the
+    /// others' work, and every one of them repeated on the next keystroke because none had
+    /// finished to populate the map yet. That is a backend that stops answering for minutes
+    /// on a project that would take seconds to read once.
+    ///
+    /// So the first caller for a root takes that root's build lock and builds; the rest block
+    /// on it and then find the finished slot in the map. Still built outside the `slots`
+    /// mutex — holding that across a parse would serialise every OTHER project's queries too.
     fn slot(&self, root: &str) -> Option<Arc<Slot>> {
         let key = norm(root);
-        if let Ok(map) = self.slots.lock() {
-            if let Some(s) = map.get(&key) {
-                return Some(Arc::clone(s));
-            }
+        if let Some(s) = self.cached(&key) {
+            return Some(s);
         }
-        // Build OUTSIDE the lock: this walks and parses, and holding the map mutex here
-        // would serialise every other project's queries behind it.
+
+        let gate = {
+            let mut map = self.building.lock().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(map.entry(key.clone()).or_default())
+        };
+        let _building = gate.lock().unwrap_or_else(|p| p.into_inner());
+        // Re-check under the gate: whoever held it before us has just filled the map, and
+        // rebuilding on top of their work is the very thing the gate is for.
+        if let Some(s) = self.cached(&key) {
+            return Some(s);
+        }
+
         let slot = Arc::new(Self::build(&key)?);
         if let Ok(mut map) = self.slots.lock() {
             map.insert(key, Arc::clone(&slot));
         }
         Some(slot)
+    }
+
+    /// The already-built slot for a normalized key, if any.
+    fn cached(&self, key: &str) -> Option<Arc<Slot>> {
+        let map = self.slots.lock().ok()?;
+        map.get(key).map(Arc::clone)
     }
 
     /// The slot for the project owning `file`, via the index service's root map.

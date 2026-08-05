@@ -2,6 +2,25 @@
 //! fondo": the BUILD and RUN that make the Run/Debug buttons real + feed
 //! `target/classes` to the index).
 //!
+//! ## Why the build is not just "run Maven"
+//!
+//! Maven's floor is seconds *with nothing to do*: every invocation starts a JVM, re-reads and
+//! interpolates every pom in the reactor, re-resolves each module's plugins and re-runs its
+//! up-to-date checks before concluding there was nothing to compile. An IDE feels instant
+//! because it does not ask the build tool that question — it keeps its own model of what
+//! changed and invokes a compiler only when something has.
+//!
+//! So this module does the same two things, in order:
+//!
+//! 1. [`up_to_date`] — a few hundred `stat` calls over the modules' `src/main/{java,resources}`
+//!    against the stamp of the last successful compile. Unchanged → no Maven at all.
+//! 2. `-pl <module> -am` — when it must compile, only the module being run and the ones it is
+//!    built from, not the reactor.
+//!
+//! Note that `spring-boot:run` would be *slower*, not faster: it is `mvn compile` plus a
+//! plugin to resolve, plus a lifecycle fork, plus a second JVM between us and the program —
+//! which also puts a process between Stop and what it has to kill.
+//!
 //! - `bennu_build` compiles the project with the toolchain its manifest implies:
 //!   * **Maven root** → **`mvn -q -o compile`** (offline, the project's JDK via
 //!     `JAVA_HOME`); if the `mvn` launcher can't be spawned it falls back to **`javac`**
@@ -23,7 +42,8 @@
 //!   project's `target/classes` + the Phase-2 `.m2`-resolved dependency jars — and
 //!   streams stdout/stderr as `arbor://bennu/run-output`, ending with an
 //!   `arbor://bennu/run-exit`. Returns a [`RunHandle`] the FE uses to correlate the
-//!   stream and to `bennu_cancel_run`.
+//!   stream, to `bennu_run_input` (the child's stdin is a pipe, so the console can answer
+//!   a prompt) and to `bennu_cancel_run` (which kills the tree — see there).
 //!
 //! Threading: build shells out via short-lived **NoWindow** children. The serve loop
 //! dispatches each request on its own thread (see `arbor_ipc::serve_stdio`), so a
@@ -34,12 +54,13 @@
 //! The pure **error parser** ([`parse_diagnostics`]) is the unit-tested core; the
 //! shell-out + streaming is the glue around it.
 
-use std::collections::HashSet;
-use std::io::{BufRead, BufReader};
+use std::collections::{HashMap, HashSet};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use arbor_ipc::prelude::EventSink;
 use arbor_process_ext::prelude::NoWindowExt;
@@ -105,6 +126,14 @@ pub(crate) const BUSY_MSG: &str = "A build or validation is already running";
 pub struct BuildArgs {
     /// Absolute path to the project root (the dir holding the root `pom.xml`).
     pub root: String,
+    /// Compile only this module (and the ones it is built from), relative to `root`. `None`
+    /// = the whole reactor, which is what the Build button means.
+    ///
+    /// Set by the launch path, where the only compiled output that matters is the one the
+    /// run's classpath uses. It is the difference between a launch waiting on every module
+    /// in the project and one waiting on the module you are running.
+    #[serde(default)]
+    pub module: Option<String>,
 }
 
 /// Compile the project with the toolchain its manifest implies (see the module doc).
@@ -124,8 +153,35 @@ fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String>
         finish_compile("cargo", ok, raw, &sink)
     } else {
         let java_home = resolve_java_home(&args.root);
-        compile(&root, &resolve_mvn(&root), java_home.as_deref(), &sink)?
+        let module = args.module.as_deref().map(str::trim).filter(|m| !m.is_empty());
+        // Nothing has changed since the last successful compile → say so and stop. This is
+        // the whole difference between "press ▷ and wait" and "press ▷": Maven's floor is
+        // seconds even with nothing to do, and the most common launch of all is the one where
+        // you have changed nothing.
+        match up_to_date(&root) {
+            Some(stamp) => {
+                sink.emit(EVT_BUILD_OUTPUT, json!({ "text": "Everything is up to date." }));
+                CompileOutcome { tool: "up-to-date".into(), ok: true, diagnostics: Vec::new(), stamp: Some(stamp) }
+            }
+            None => {
+                let stamp = source_stamp(&root);
+                let mut out =
+                    compile(&root, module, &resolve_mvn(&root), java_home.as_deref(), &sink)?;
+                out.stamp = Some(stamp);
+                out
+            }
+        }
     };
+
+    // Remember what was on disk when this compile succeeded, so the next launch can tell
+    // whether anything has changed. Recorded from the stamp taken BEFORE compiling: a build
+    // writes into `target/`, and stamping afterwards would record a tree that includes its
+    // own output.
+    if outcome.ok {
+        if let Some(stamp) = outcome.stamp {
+            build_stamps().lock().unwrap_or_else(|p| p.into_inner()).insert(args.root.clone(), stamp);
+        }
+    }
 
     sink.emit(EVT_BUILD_DONE, json!({
         "root": &args.root,
@@ -138,7 +194,10 @@ fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String>
     // up. The reindex emits `arbor://bennu/index-progress` on the same sink. A Cargo
     // project has no symbol index (see `bennu_open_project`), so there is nothing to
     // refresh and asking would light an "Indexing…" status over an empty build.
-    if outcome.ok && outcome.tool != "cargo" {
+    // …but not when nothing was compiled: re-indexing after a no-op costs the user a whole
+    // index rebuild for nothing, and — since a rebuild deliberately forgets the build stamp —
+    // it would make the NEXT launch compile again. The skip would defeat itself.
+    if outcome.ok && outcome.tool != "cargo" && outcome.tool != "up-to-date" {
         IndexService::global().reindex(&args.root, ctx.event_sink());
     }
 
@@ -169,7 +228,17 @@ pub struct RunArgs {
     /// back-compatible — a caller passing only `{ root, main_class, args }` still works.
     #[serde(default)]
     pub vm_args: Option<Vec<String>>,
-    /// Working directory for the child. Empty / `None` = the project root.
+    /// The Maven module the class belongs to, relative to `root` (`services/core`). Empty /
+    /// `None` = the root module.
+    ///
+    /// It decides the classpath, and on a multi-module project there is no useful default:
+    /// the root of a reactor usually compiles nothing at all, so a run configured without a
+    /// module got a classpath whose only entry did not exist and died on
+    /// `ClassNotFoundException`.
+    #[serde(default)]
+    pub module: Option<String>,
+    /// Working directory for the child. Empty / `None` = the module's directory (the project
+    /// root when there is no module) — which is what a program reading `./config` expects.
     #[serde(default)]
     pub working_dir: Option<String>,
     /// Extra environment variables applied to the child (merged over the inherited env).
@@ -182,43 +251,65 @@ pub struct RunArgs {
 /// VM args (when given) precede `-cp`; the working dir + extra env (when given) are
 /// applied to the child. Returns immediately with the [`RunHandle`] correlating the
 /// stream; the child runs on a background thread.
+///
+/// **stdin is a pipe**, not `/dev/null`: a console you cannot answer is not a console, and a
+/// program that stops at a prompt with no way to reply looks hung. [`bennu_run_input`] writes
+/// to it.
 #[arbor_rpc::handler]
 fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
     let root = PathBuf::from(&args.root);
     let java_home = resolve_java_home(&args.root);
     let java = java_program(java_home.as_deref());
-    let classpath = run_classpath(&root, java_home.as_deref());
+    // The module the class lives in, if any — an empty string is "the root", not a directory
+    // called "".
+    let module = args.module.as_deref().map(str::trim).filter(|m| !m.is_empty());
+    let classpath = run_classpath(&root, module, java_home.as_deref());
 
-    // Working dir: an explicit non-empty override, else the project root.
+    // Working dir: an explicit non-empty override, else the module's own directory (the root
+    // when there is none) — a program that reads `./config` means its module's.
     let cwd = match args.working_dir.as_deref() {
         Some(d) if !d.trim().is_empty() => PathBuf::from(d),
-        _ => root.clone(),
+        _ => module.map(|m| root.join(m)).unwrap_or_else(|| root.clone()),
     };
 
     let mut cmd = Command::new(&java);
     cmd.current_dir(&cwd);
     // VM args come BEFORE -cp / main class (JVM options must precede the class).
-    if let Some(vm) = &args.vm_args {
-        for a in vm {
-            cmd.arg(a);
+    let vm_args = args.vm_args.clone().unwrap_or_default();
+    for a in &vm_args {
+        cmd.arg(a);
+    }
+    // How the classpath reaches the JVM — see `classpath_form`. On a real dependency tree it
+    // does NOT fit on the command line.
+    let base = module.map(|m| root.join(m)).unwrap_or_else(|| root.clone());
+    let cp_form = classpath_form(&base, &classpath, launching_jdk_major(&args.root));
+    match &cp_form {
+        ClasspathForm::Inline => {
+            cmd.arg("-cp").arg(&classpath);
+        }
+        ClasspathForm::ArgFile(path) => {
+            cmd.arg(format!("@{}", path.display()));
+        }
+        ClasspathForm::Environment => {
+            // `-cp` would override it, so it is deliberately not passed.
+            cmd.env("CLASSPATH", &classpath);
         }
     }
-    cmd.arg("-cp")
-        .arg(&classpath)
-        .arg(&args.main_class)
+    cmd.arg(&args.main_class)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .stdin(Stdio::null());
+        .stdin(Stdio::piped());
     for a in &args.args {
         cmd.arg(a);
     }
-    // Extra env merged over the inherited environment (later entries win by key).
+    // Extra env merged over the inherited environment (later entries win by key). After the
+    // classpath, so a configuration that sets CLASSPATH itself wins over ours — it asked.
     if let Some(env) = &args.env {
         for (k, v) in env {
             cmd.env(k, v);
         }
     }
-    // A run child is short-lived-ish and console-less; suppress the window on Windows.
+    // A run child is console-less; suppress the window on Windows.
     cmd.no_window();
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn java ({java}): {e}"))?;
@@ -226,10 +317,14 @@ fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
     let run_id = next_run_id();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
+    let stdin = child.stdin.take();
     let sink = ctx.event_sink();
-    RunRegistry::global().register(&run_id);
+
+    let child = Arc::new(Mutex::new(child));
+    RunRegistry::global().register(&run_id, child.clone(), stdin);
 
     let run_id_thread = run_id.clone();
+    let child_thread = child.clone();
     std::thread::Builder::new()
         .name(format!("bennu-run-{run_id}"))
         .spawn(move || {
@@ -242,7 +337,19 @@ fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
             if let Some(err) = stderr {
                 pumps.push(spawn_pump(err, "stderr", run_id_thread.clone(), sink.clone()));
             }
-            let code = child.wait().ok().and_then(|s| s.code());
+            // POLLED, not `wait()`: the canceller needs the same handle to kill the tree, and
+            // a thread parked inside `wait()` holds the lock for the entire run.
+            let code = loop {
+                let status = {
+                    let mut guard = child_thread.lock().unwrap_or_else(|p| p.into_inner());
+                    guard.try_wait()
+                };
+                match status {
+                    Ok(Some(s)) => break s.code(),
+                    Ok(None) => std::thread::sleep(Duration::from_millis(80)),
+                    Err(_) => break None,
+                }
+            };
             for p in pumps {
                 let _ = p.join();
             }
@@ -251,7 +358,52 @@ fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
         })
         .map_err(|e| format!("spawn run thread: {e}"))?;
 
-    Ok(RunHandle { run_id, main_class: args.main_class })
+    let command =
+        display_command(&java, &vm_args, &classpath, &cp_form, &args.main_class, &args.args);
+    Ok(RunHandle {
+        run_id,
+        main_class: args.main_class,
+        command,
+        working_dir: cwd.display().to_string(),
+    })
+}
+
+/// The spawned command as one display line. Arguments containing spaces are quoted.
+///
+/// How the classpath appears depends on how it was passed, because the point of the line is
+/// to be the truth about what ran: an **argument file** is named, and that line really is
+/// pasteable; an inline one is abbreviated to a count, since a resolved `~/.m2` classpath is
+/// tens of thousands of characters and would bury everything anyone reads.
+fn display_command(
+    java: &str,
+    vm_args: &[String],
+    classpath: &str,
+    form: &ClasspathForm,
+    main_class: &str,
+    args: &[String],
+) -> String {
+    let entries = classpath.split(if cfg!(windows) { ';' } else { ':' }).count();
+    let plural = if entries == 1 { "y" } else { "ies" };
+    let mut parts: Vec<String> = vec![quoted(java)];
+    parts.extend(vm_args.iter().map(|a| quoted(a)));
+    match form {
+        ClasspathForm::Inline => {
+            parts.push("-cp".to_string());
+            parts.push(format!("<classpath: {entries} entr{plural}>"));
+        }
+        ClasspathForm::ArgFile(p) => parts.push(format!("@{}", p.display())),
+        ClasspathForm::Environment => {
+            parts.push(format!("<classpath: {entries} entr{plural}, via CLASSPATH>"))
+        }
+    }
+    parts.push(main_class.to_string());
+    parts.extend(args.iter().map(|a| quoted(a)));
+    parts.join(" ")
+}
+
+/// Wrap in double quotes when the token contains whitespace.
+fn quoted(s: &str) -> String {
+    if s.contains(char::is_whitespace) { format!("\"{s}\"") } else { s.to_string() }
 }
 
 /// Args for [`bennu_cancel_run`].
@@ -261,11 +413,43 @@ pub struct CancelRunArgs {
     pub run_id: String,
 }
 
-/// Kill a running `bennu_run` child by id. Returns `true` if a live run was killed,
-/// `false` if the id is unknown or already finished.
+/// Kill a live run — **the process tree**, not just the handle. Returns `true` when a run
+/// was killed, `false` when the id is unknown or it had already finished.
+///
+/// This used to remove the id from a set of live ids and return `true`, killing nothing: the
+/// panel said "stopped" and the JVM went on running, holding its port and writing to its
+/// files, with no way left to stop it short of Task Manager. Stop now means stop.
 #[arbor_rpc::handler]
 fn bennu_cancel_run(_ctx: &BennuState, args: CancelRunArgs) -> Result<bool, String> {
-    Ok(RunRegistry::global().cancel(&args.run_id))
+    let Some(child) = RunRegistry::global().child_of(&args.run_id) else { return Ok(false) };
+    let mut child = child.lock().unwrap_or_else(|p| p.into_inner());
+    crate::child::kill_tree(&mut child);
+    Ok(true)
+}
+
+/// Args for [`bennu_run_input`].
+#[derive(Deserialize)]
+pub struct RunInputArgs {
+    /// The run id returned by `bennu_run`.
+    pub run_id: String,
+    /// One line to feed the program. The newline is added here — the console sends what was
+    /// typed, and "did the caller include the terminator" is exactly the kind of question a
+    /// wire contract should not have.
+    pub text: String,
+}
+
+/// Write a line to a live run's stdin. `Err` when the run is unknown or has already exited —
+/// which the console reports, because typing into a dead process and seeing nothing happen
+/// is indistinguishable from the program ignoring you.
+#[arbor_rpc::handler]
+fn bennu_run_input(_ctx: &BennuState, args: RunInputArgs) -> Result<(), String> {
+    let Some(stdin) = RunRegistry::global().stdin_of(&args.run_id) else {
+        return Err("that run is no longer live".to_string());
+    };
+    let mut guard = stdin.lock().unwrap_or_else(|p| p.into_inner());
+    let Some(pipe) = guard.as_mut() else { return Err("that run has no input pipe".to_string()) };
+    writeln!(pipe, "{}", args.text).map_err(|e| format!("write to the program's input: {e}"))?;
+    pipe.flush().map_err(|e| format!("flush the program's input: {e}"))
 }
 
 // ── compile (mvn → javac fallback) ─────────────────────────────────────────────
@@ -276,6 +460,9 @@ struct CompileOutcome {
     tool: String,
     ok: bool,
     diagnostics: Vec<BuildDiagnostic>,
+    /// The source stamp this compile corresponds to, recorded on success so the next one can
+    /// skip. `None` for a toolchain the staleness check doesn't cover (Cargo).
+    stamp: Option<u64>,
 }
 
 /// Run `mvn -q -o compile`; if the launcher can't be spawned, fall back to `javac`.
@@ -283,11 +470,12 @@ struct CompileOutcome {
 /// could run.
 fn compile(
     root: &Path,
+    module: Option<&str>,
     mvn_path: &str,
     java_home: Option<&Path>,
     sink: &Arc<dyn EventSink>,
 ) -> Result<CompileOutcome, String> {
-    match run_mvn_compile(root, mvn_path, java_home) {
+    match run_mvn_compile(root, module, mvn_path, java_home) {
         Ok((ok, raw)) => Ok(finish_compile("mvn", ok, raw, sink)),
         Err(spawn_err) => {
             let (ok, raw) = run_javac(root, java_home)
@@ -307,7 +495,7 @@ fn finish_compile(
     for line in raw.lines() {
         sink.emit(EVT_BUILD_OUTPUT, json!({ "text": line }));
     }
-    CompileOutcome { tool: tool.to_string(), ok, diagnostics: parse_diagnostics(&raw) }
+    CompileOutcome { tool: tool.to_string(), ok, diagnostics: parse_diagnostics(&raw), stamp: None }
 }
 
 /// `cargo check --workspace --message-format=short` in `root`.
@@ -335,6 +523,7 @@ fn run_cargo_check(root: &Path) -> Result<(bool, String), String> {
 
 fn run_mvn_compile(
     root: &Path,
+    module: Option<&str>,
     mvn_path: &str,
     java_home: Option<&Path>,
 ) -> Result<(bool, String), String> {
@@ -344,6 +533,14 @@ fn run_mvn_compile(
         .arg("compile")
         .arg("--batch-mode")
         .arg("-o"); // offline: resolve only from the local ~/.m2 cache
+    // Scope the reactor when we know which module is about to run. `mvn compile` at the root
+    // of a large reactor costs tens of seconds with NOTHING to do — Maven still scans every
+    // pom, resolves every module's plugins and runs each one's up-to-date checks. `-pl` cuts
+    // that to the module, `-am` keeps the ones it is built from, which is exactly the set the
+    // run's classpath needs compiled.
+    if let Some(m) = module {
+        cmd.arg("-pl").arg(m).arg("-am");
+    }
     if let Some(jh) = java_home {
         cmd.env("JAVA_HOME", jh);
     }
@@ -382,28 +579,281 @@ fn run_javac(root: &Path, java_home: Option<&Path>) -> Result<(bool, String), St
     Ok((out.status.success(), merge_output(&out.stdout, &out.stderr)))
 }
 
-// ── run classpath ──────────────────────────────────────────────────────────────
+// ── getting a very long classpath to the JVM ───────────────────────────────────
 
-/// The run classpath: `target/classes` first, then the `.m2`-resolved dependency jars
-/// (Phase-2 resolver, offline). Dep resolution failure is non-fatal — the run degrades
-/// to `target/classes` only.
-fn run_classpath(root: &Path, java_home: Option<&Path>) -> String {
-    let sep = if cfg!(windows) { ";" } else { ":" };
-    let mut parts: Vec<String> = vec![root.join("target").join("classes").display().to_string()];
+/// How the classpath is handed over.
+enum ClasspathForm {
+    /// `-cp <classpath>` on the command line. Short ones, and the readable case.
+    Inline,
+    /// `@<file>` — a JDK 9+ argument file holding the `-cp`.
+    ArgFile(PathBuf),
+    /// The `CLASSPATH` environment variable, for a JDK 8 that has no argument files.
+    Environment,
+}
 
-    let mut opts = MavenResolveOpts::default();
-    opts.mvn_path = resolve_mvn(root);
-    opts.offline = true;
-    if let Some(jh) = java_home {
-        opts.java_home = Some(jh.to_path_buf());
+/// Past this many characters the classpath does not go on the command line.
+///
+/// Windows caps a whole command line at 32767 characters and fails the spawn with
+/// `os error 206` — "the filename or extension is too long", which names neither the
+/// classpath nor the limit and is why this took a report to find. A resolved `~/.m2`
+/// classpath on a Spring project is hundreds of jars and passes that on its own. The
+/// threshold is well under the cap because the command line also carries the JDK path, the VM
+/// arguments, the main class and the program arguments.
+const MAX_INLINE_CLASSPATH: usize = 8_000;
+
+/// Decide how to pass `classpath`, writing the argument file if that is the answer.
+///
+/// An **argument file** is the JDK's own remedy (`java @file`, JDK 9+) and costs nothing but a
+/// small write. Paths go in with forward slashes: the JVM accepts them on Windows, and a
+/// backslash inside an argument file is an escape character — `C:\lib\x.jar` would arrive as
+/// `C:libx.jar` and the run would die on a classpath that looks correct in every log.
+///
+/// A **JDK 8** has no argument files, so its classpath goes in the environment instead, which
+/// the launcher reads when `-cp` is absent. That is the older, blunter tool: it caps out too,
+/// just not on the same budget as the command line.
+fn classpath_form(base: &Path, classpath: &str, major: u32) -> ClasspathForm {
+    if classpath.len() <= MAX_INLINE_CLASSPATH {
+        return ClasspathForm::Inline;
     }
-    let mut cache = MavenClasspathCache::new();
-    if let Ok(cp) = cache.get(root, &opts) {
-        for jar in &cp.jars {
-            parts.push(jar.display().to_string());
+    if major < 9 {
+        return ClasspathForm::Environment;
+    }
+    let dir = base.join("target");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("bennu-run.args");
+    let body = format!("-cp \"{}\"\n", classpath.replace('\\', "/"));
+    match std::fs::write(&path, body) {
+        Ok(()) => ClasspathForm::ArgFile(path),
+        // Nowhere to write it — the environment is the remaining option, and a run that might
+        // work beats one that certainly will not.
+        Err(_) => ClasspathForm::Environment,
+    }
+}
+
+/// The major version of the JDK a launch will actually use — which is the one that decides
+/// whether argument files exist.
+///
+/// The project's declared level is the question; the INSTALLED JDK that answers it is what
+/// matters, and the two differ whenever the exact level isn't installed. `jdk_status` resolves
+/// it the same way the classpath tier does, so a project declaring 21 on a machine that only
+/// has 17 is read as 17 — still an argument file, and still correct.
+fn launching_jdk_major(root: &str) -> u32 {
+    let level = project_jdk_level(root);
+    bennu_classpath::prelude::jdk_status(&level)
+        .resolved_major
+        .unwrap_or_else(|| jdk_major(&level))
+}
+
+/// The major version of a language-level string (`"1.8"` → 8, `"21"` → 21). `0` when it is
+/// not a version we recognise, which reads as "older than 9" and takes the conservative path.
+fn jdk_major(level: &str) -> u32 {
+    let v = level.trim();
+    let head = v.strip_prefix("1.").unwrap_or(v);
+    head.split(['.', '_', '-']).next().and_then(|s| s.parse().ok()).unwrap_or(0)
+}
+
+// ── "has anything changed since the last compile" ──────────────────────────────
+
+/// The source stamp of the last SUCCESSFUL compile, per project root.
+///
+/// In memory only. Persisting it would mean trusting a stamp written by a different version
+/// of Bennu, or one taken before someone ran `mvn clean` outside the editor — and the cost of
+/// being wrong is a run against stale classes, which is the single most confusing failure a
+/// build system can produce. One Maven invocation per session is a price worth paying for
+/// never being wrong about it.
+fn build_stamps() -> &'static Mutex<HashMap<String, u64>> {
+    static STAMPS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+    STAMPS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// `Some(stamp)` when the project has not changed since its last successful compile — the
+/// caller can skip the build and keep the stamp. `None` when it must compile.
+///
+/// The output has to still be there: `mvn clean` in a terminal, or a deleted `target/`, makes
+/// a matching stamp a lie.
+fn up_to_date(root: &Path) -> Option<u64> {
+    let key = root.display().to_string();
+    let previous = *build_stamps().lock().unwrap_or_else(|p| p.into_inner()).get(&key)?;
+    if !any_output_exists(root) {
+        return None;
+    }
+    (source_stamp(root) == previous).then_some(previous)
+}
+
+/// Whether any module of the project has compiled output at all.
+fn any_output_exists(root: &Path) -> bool {
+    if root.join("target").join("classes").is_dir() {
+        return true;
+    }
+    module_dirs(root).iter().any(|m| m.join("target").join("classes").is_dir())
+}
+
+/// A hash of the project's compilable inputs: every file under each module's `src/main/java`
+/// and `src/main/resources`, by relative path, size and modification time.
+///
+/// **Stats, not reads.** Nothing is opened and nothing is parsed, so this is a few hundred
+/// `stat` calls on a large project — milliseconds against Maven's seconds. That difference is
+/// the entire answer to "why is the IDE instant and this is not": an IDE keeps its own model
+/// of what changed and asks the build tool only when something has, while every `mvn`
+/// invocation re-reads every pom, re-resolves every plugin and re-checks every module before
+/// discovering there was nothing to do.
+///
+/// Modification time and size together, rather than content hashing: reading every source to
+/// decide whether to compile them would cost more than the compile it is trying to avoid. The
+/// failure mode is an edit that preserves both, which is not something an editor produces.
+///
+/// Resources are in it deliberately — an edited `application.yml` changes what the program
+/// does, and a stamp that ignored it would launch the old one.
+fn source_stamp(root: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+
+    let mut dirs = vec![root.to_path_buf()];
+    dirs.extend(module_dirs(root));
+    // Sorted so the hash does not depend on the order the reactor happens to be walked in.
+    dirs.sort();
+
+    for dir in dirs {
+        for rel in ["src/main/java", "src/main/resources"] {
+            let mut files = Vec::new();
+            collect_files(&dir.join(rel), &mut files);
+            files.sort();
+            for f in files {
+                f.to_string_lossy().hash(&mut hasher);
+                if let Ok(md) = std::fs::metadata(&f) {
+                    md.len().hash(&mut hasher);
+                    if let Ok(t) = md.modified() {
+                        if let Ok(d) = t.duration_since(std::time::UNIX_EPOCH) {
+                            d.as_nanos().hash(&mut hasher);
+                        }
+                    }
+                }
+            }
         }
     }
+    hasher.finish()
+}
+
+/// Every file under `dir`, recursively. Dot-directories are skipped — nothing under `.git`
+/// is a compile input, and walking it would dwarf the rest.
+fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            if p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.')) {
+                continue;
+            }
+            collect_files(&p, out);
+        } else {
+            out.push(p);
+        }
+    }
+}
+
+/// Forget a project's build stamp, so the next build runs for real. Called when the index is
+/// rebuilt — the moment the user has told us not to trust what we remember.
+pub(crate) fn forget_build_stamp(root: &str) {
+    build_stamps().lock().unwrap_or_else(|p| p.into_inner()).remove(root);
+}
+
+// ── run classpath ──────────────────────────────────────────────────────────────
+
+/// The run classpath for a launch in `module` (`None` = the root module).
+///
+/// Order: **the module's own `target/classes` first**, then every OTHER reactor module's,
+/// then the root's, then the `.m2`-resolved dependency jars (offline). Dep resolution
+/// failure is non-fatal — the run degrades to the compiled output only.
+///
+/// Why the sibling modules are all there: on a reactor, `web` depends on `core`, and until
+/// `core` is installed to `~/.m2` the only copy of its classes is `core/target/classes`. A
+/// developer's inner loop is compile-and-run without installing, so a classpath that only
+/// held the launched module's output would fail on the first call across a module boundary.
+/// They come *after* the launched module so its own classes always win a name collision.
+///
+/// This used to take only the root, which on a multi-module project is the one directory
+/// that never contains anything: a reactor root is packaging `pom` and compiles nothing.
+fn run_classpath(root: &Path, module: Option<&str>, java_home: Option<&Path>) -> String {
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    let base = module.map(|m| root.join(m)).unwrap_or_else(|| root.to_path_buf());
+
+    let mut parts: Vec<String> = Vec::new();
+    let mut push_classes = |dir: &Path, parts: &mut Vec<String>| {
+        let classes = dir.join("target").join("classes");
+        let s = classes.display().to_string();
+        if !parts.contains(&s) {
+            parts.push(s);
+        }
+    };
+    push_classes(&base, &mut parts);
+    for dir in module_dirs(root) {
+        push_classes(&dir, &mut parts);
+    }
+    push_classes(root, &mut parts);
+
+    // The dependency jars the INDEX already resolved when the project was opened. Free: they
+    // are in memory, and they are the same jars completion and navigation resolve against, so
+    // a run cannot disagree with the editor about what is on the classpath.
+    //
+    // This used to build a `MavenClasspathCache::new()` here — a cache with nothing in it, on
+    // every call — so pressing ▷ shelled out to `mvn dependency:build-classpath` and the run
+    // did not start until Maven had finished, every single time.
+    let mut jars = IndexService::global().dep_jars_of(&root.display().to_string());
+    if jars.is_empty() {
+        // No project open on this root, or Maven never resolved for it. Shell out — slow, but
+        // it is that or a run with no dependencies at all.
+        let mut opts = MavenResolveOpts::default();
+        opts.mvn_path = resolve_mvn(root);
+        opts.offline = true;
+        if let Some(jh) = java_home {
+            opts.java_home = Some(jh.to_path_buf());
+        }
+        let mut cache = MavenClasspathCache::new();
+        // The MODULE's own dependencies when it has a pom of its own; the root's otherwise.
+        // Chosen by asking whether the pom EXISTS rather than by letting the resolve fail —
+        // a failed resolve is a Maven invocation, and falling back on it means paying twice.
+        let dir = if base.join("pom.xml").is_file() { base.as_path() } else { root };
+        if let Ok(cp) = cache.get(dir, &opts) {
+            jars = cp.jars.iter().map(|j| j.display().to_string()).collect();
+        }
+    }
+    parts.extend(jars);
     parts.join(sep)
+}
+
+/// Every module directory of the Maven reactor rooted at `root`, absolute, in declaration
+/// order and including nested ones.
+///
+/// Reads only `pom.xml` files (never walks the tree), so it costs one small read per module.
+/// Bounded by [`MAX_MODULES`] against a pom that declares itself as its own module.
+pub(crate) fn module_dirs(root: &Path) -> Vec<PathBuf> {
+    /// Enough for the largest legacy reactor and small enough that a cycle stops quickly.
+    const MAX_MODULES: usize = 300;
+
+    let mut out: Vec<PathBuf> = Vec::new();
+    let mut queue: Vec<PathBuf> = vec![root.to_path_buf()];
+    while let Some(dir) = queue.pop() {
+        if out.len() >= MAX_MODULES {
+            break;
+        }
+        let Ok(xml) = std::fs::read_to_string(dir.join("pom.xml")) else { continue };
+        for name in bennu_project::prelude::parse_pom(&xml).modules {
+            let name = name.trim();
+            // `.` / `..` / empty name a directory that is not a new module. Skipped by NAME
+            // rather than by comparing the joined paths, because `a/b/.` and `a/b` are
+            // different `PathBuf`s and the walk would keep finding "new" modules.
+            if name.is_empty() || name == "." || name == ".." {
+                continue;
+            }
+            let child = dir.join(name);
+            if child == dir || out.contains(&child) {
+                continue; // a module reachable by two paths
+            }
+            out.push(child.clone());
+            queue.push(child);
+        }
+    }
+    out
 }
 
 // ── the PURE error parser (unit-tested; no I/O) ────────────────────────────────
@@ -555,33 +1005,48 @@ fn non_empty(s: String) -> Option<String> {
     if s.is_empty() { None } else { Some(s) }
 }
 
-// ── run registry (cancellation) ────────────────────────────────────────────────
+// ── run registry (cancellation + input) ────────────────────────────────────────
 
-/// Tracks live `bennu_run` ids so `bennu_cancel_run` can report whether a run is
-/// in-flight. The run thread owns the `Child` (it `wait()`s on it), so this port's
-/// `cancel` deregisters the id and returns whether it was live; the FE close button
-/// stops consuming the stream. Kill-by-handle (a shared `Child` the canceller can
-/// `.kill()`) is a follow-up — see the limits note in the summary.
+/// A live run the rest of the domain can reach: the handle to kill and the pipe to write to.
+///
+/// Both are shared with the run thread rather than owned by it. The thread used to own the
+/// `Child` outright and park inside `wait()`, which is why cancellation could only ever be
+/// bookkeeping — there was no handle left to kill with.
+struct LiveRun {
+    child: Arc<Mutex<Child>>,
+    /// `None` once the pipe is dropped. Behind its own lock so a write doesn't queue behind
+    /// the poll loop holding the child.
+    stdin: Arc<Mutex<Option<ChildStdin>>>,
+}
+
+/// The live `bennu_run` children, by run id.
 struct RunRegistry {
-    live: Mutex<HashSet<String>>,
+    live: Mutex<HashMap<String, LiveRun>>,
 }
 
 impl RunRegistry {
     fn global() -> &'static RunRegistry {
         static REG: OnceLock<RunRegistry> = OnceLock::new();
-        REG.get_or_init(|| RunRegistry { live: Mutex::new(HashSet::new()) })
+        REG.get_or_init(|| RunRegistry { live: Mutex::new(HashMap::new()) })
     }
 
-    fn register(&self, run_id: &str) {
-        self.live.lock().unwrap_or_else(|p| p.into_inner()).insert(run_id.to_string());
+    fn register(&self, run_id: &str, child: Arc<Mutex<Child>>, stdin: Option<ChildStdin>) {
+        self.live.lock().unwrap_or_else(|p| p.into_inner()).insert(
+            run_id.to_string(),
+            LiveRun { child, stdin: Arc::new(Mutex::new(stdin)) },
+        );
     }
 
     fn finish(&self, run_id: &str) {
         self.live.lock().unwrap_or_else(|p| p.into_inner()).remove(run_id);
     }
 
-    fn cancel(&self, run_id: &str) -> bool {
-        self.live.lock().unwrap_or_else(|p| p.into_inner()).remove(run_id)
+    fn child_of(&self, run_id: &str) -> Option<Arc<Mutex<Child>>> {
+        self.live.lock().unwrap_or_else(|p| p.into_inner()).get(run_id).map(|r| r.child.clone())
+    }
+
+    fn stdin_of(&self, run_id: &str) -> Option<Arc<Mutex<Option<ChildStdin>>>> {
+        self.live.lock().unwrap_or_else(|p| p.into_inner()).get(run_id).map(|r| r.stdin.clone())
     }
 }
 
@@ -861,9 +1326,166 @@ mod tests {
         // No mvn / no deps needed: a nonexistent project resolves no dep jars, so the
         // classpath is just target/classes — which is what we assert leads.
         let root = Path::new(if cfg!(windows) { r"C:\definitely\missing\proj" } else { "/definitely/missing/proj" });
-        let cp = run_classpath(root, None);
+        let cp = run_classpath(root, None, None);
         let sep = if cfg!(windows) { ";" } else { ":" };
         let first = cp.split(sep).next().unwrap();
         assert!(first.ends_with("classes"), "target/classes must lead: {cp}");
+    }
+
+    /// The module's own output leads, and the root's is still there behind it. The bug this
+    /// guards: on a reactor the root compiles nothing, so a classpath built from the root
+    /// alone contains one directory that does not exist.
+    #[test]
+    fn run_classpath_leads_with_the_module() {
+        let root = Path::new(if cfg!(windows) { r"C:\definitely\missing\proj" } else { "/definitely/missing/proj" });
+        let cp = run_classpath(root, Some("services/core"), None);
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let entries: Vec<&str> = cp.split(sep).collect();
+        assert!(
+            entries[0].replace('\\', "/").ends_with("services/core/target/classes"),
+            "the launched module's classes must lead: {cp}",
+        );
+        assert!(
+            entries.iter().any(|e| {
+                let e = e.replace('\\', "/");
+                e.ends_with("proj/target/classes")
+            }),
+            "the root's classes must still be on it: {cp}",
+        );
+    }
+
+    /// A reactor is walked through its poms, and a pom naming itself as a module cannot
+    /// spin the walk.
+    #[test]
+    fn module_dirs_reads_the_reactor_and_survives_a_cycle() {
+        let dir = std::env::temp_dir().join(format!("bennu-reactor-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let write = |rel: &str, xml: &str| {
+            let p = dir.join(rel);
+            std::fs::create_dir_all(&p).unwrap();
+            std::fs::write(p.join("pom.xml"), xml).unwrap();
+        };
+        // root → core, web; web → api (nested); api names itself (the cycle).
+        write("", "<project><modules><module>core</module><module>web</module></modules></project>");
+        write("core", "<project></project>");
+        write("web", "<project><modules><module>api</module></modules></project>");
+        write("web/api", "<project><modules><module>.</module></modules></project>");
+
+        let mods = module_dirs(&dir);
+        let rel: std::collections::HashSet<String> = mods
+            .iter()
+            .map(|p| p.strip_prefix(&dir).unwrap().to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert!(rel.contains("core"), "{rel:?}");
+        assert!(rel.contains("web"), "{rel:?}");
+        assert!(rel.contains("web/api"), "the walk must descend into nested modules: {rel:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The console's first line: pasteable, and with the classpath summarised rather than
+    /// spelled out — a resolved `~/.m2` classpath is tens of thousands of characters.
+    #[test]
+    fn display_command_is_readable_and_pasteable() {
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let cp = format!("target/classes{sep}/home/u/.m2/a.jar{sep}/home/u/.m2/b.jar");
+        let line = display_command(
+            "/opt/jdk21/bin/java",
+            &["-Xmx512m".into()],
+            &cp,
+            &ClasspathForm::Inline,
+            "com.acme.App",
+            &["--port".into(), "input file.txt".into()],
+        );
+        assert_eq!(
+            line,
+            "/opt/jdk21/bin/java -Xmx512m -cp <classpath: 3 entries> com.acme.App --port \"input file.txt\"",
+        );
+        // The jar paths themselves must not be in there — that is the whole point.
+        assert!(!line.contains(".m2"), "the classpath must be summarised: {line}");
+    }
+
+    /// The stamp is stable when nothing moves, and changes when a source OR a resource does.
+    /// Resources matter as much as sources here: an edited `application.yml` changes what the
+    /// program does, and a stamp that ignored it would launch the previous one.
+    #[test]
+    fn source_stamp_notices_sources_and_resources() {
+        let dir = std::env::temp_dir().join(format!("bennu-stamp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let write = |rel: &str, text: &str| {
+            let p = dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, text).unwrap();
+        };
+        write("pom.xml", "<project></project>");
+        write("src/main/java/com/acme/App.java", "class App {}\n");
+
+        let first = source_stamp(&dir);
+        assert_eq!(first, source_stamp(&dir), "an untouched tree stamps the same twice");
+
+        write("src/main/java/com/acme/App.java", "class App { void x() {} }\n");
+        let after_source = source_stamp(&dir);
+        assert_ne!(first, after_source, "an edited source must change the stamp");
+
+        write("src/main/resources/application.yml", "server:\n  port: 8080\n");
+        assert_ne!(after_source, source_stamp(&dir), "a new resource must change the stamp");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A short classpath stays on the command line, where it is readable.
+    #[test]
+    fn a_short_classpath_goes_inline() {
+        let dir = std::env::temp_dir();
+        assert!(matches!(classpath_form(&dir, "a.jar;b.jar", 21), ClasspathForm::Inline));
+    }
+
+    /// A long one on a modern JDK becomes an argument file — with FORWARD slashes, because a
+    /// backslash inside an argument file is an escape character and `C:\lib\x.jar` would
+    /// arrive as `C:libx.jar`.
+    #[test]
+    fn a_long_classpath_becomes_an_argfile_with_forward_slashes() {
+        let base = std::env::temp_dir().join(format!("bennu-argfile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let long = std::iter::repeat(r"C:\Users\u\.m2\repository\org\acme\lib.jar")
+            .take(400)
+            .collect::<Vec<_>>()
+            .join(";");
+        assert!(long.len() > MAX_INLINE_CLASSPATH);
+
+        match classpath_form(&base, &long, 21) {
+            ClasspathForm::ArgFile(p) => {
+                let body = std::fs::read_to_string(&p).unwrap();
+                assert!(body.starts_with("-cp \""), "the file holds the -cp: {body:.40}");
+                assert!(!body.contains('\\'), "backslashes would be read as escapes");
+                assert!(body.contains("C:/Users/u/.m2/repository/org/acme/lib.jar"));
+            }
+            _ => panic!("a classpath over the limit must not go on the command line"),
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A JDK 8 has no argument files, so the same classpath goes to the environment.
+    #[test]
+    fn a_long_classpath_on_java_8_goes_to_the_environment() {
+        let dir = std::env::temp_dir();
+        let long = "x".repeat(MAX_INLINE_CLASSPATH + 1);
+        assert!(matches!(classpath_form(&dir, &long, 8), ClasspathForm::Environment));
+    }
+
+    #[test]
+    fn jdk_major_reads_both_spellings() {
+        assert_eq!(jdk_major("1.8"), 8);
+        assert_eq!(jdk_major("8"), 8);
+        assert_eq!(jdk_major("21"), 21);
+        assert_eq!(jdk_major("21.0.6"), 21);
+        // Unrecognised reads as "older than 9" — the conservative path.
+        assert_eq!(jdk_major("toolchains"), 0);
+    }
+
+    #[test]
+    fn quoting_only_kicks_in_for_whitespace() {
+        assert_eq!(quoted("-Xmx512m"), "-Xmx512m");
+        assert_eq!(quoted("C:/Program Files/jdk/bin/java.exe"), "\"C:/Program Files/jdk/bin/java.exe\"");
     }
 }

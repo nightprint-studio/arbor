@@ -19,7 +19,7 @@ import { bennu } from '../rpc';
 import type {
   ProjectInfo, TreeNode, ReadFileResult, CapabilitySet, CompletionItem, Diagnostic,
   BuildResult, ProjectValidationResult, RunHandle, WriteResult, ClassEntry, TodoItem, IndexStats,
-  FileDiagnostics, FileStamp,
+  FileDiagnostics, FileStamp, MainClassEntry, RunConfigSetDto,
 } from '$lib/types/bennu';
 
 /** Open a Java project folder: resolve the build model (modules / JDK) + capabilities.
@@ -124,11 +124,13 @@ export function diagnostics(file: string, source?: string, resolved = true): Pro
 }
 
 /** Compile the project: `mvn -q -o compile` (offline, project JDK) with a `javac`
- *  fallback. The raw log streams as `arbor://bennu/build-output`; the resolved promise
- *  carries the parsed diagnostics. A clean build re-indexes `target/classes`. Wire:
- *  `bennu_build` — `BuildArgs { root }`. */
-export function build(root: string): Promise<BuildResult> {
-  return bennu('bennu_build', { args: { root } });
+ *  fallback. With `module`, only that module and the ones it is built from (`-pl … -am`) —
+ *  what the launch path passes, since a run only needs its own module's output. The raw log
+ *  streams as `arbor://bennu/build-output`; the resolved promise carries the parsed
+ *  diagnostics. A clean build re-indexes `target/classes`. Wire: `bennu_build` —
+ *  `BuildArgs { root, module? }`. */
+export function build(root: string, module = ''): Promise<BuildResult> {
+  return bennu('bennu_build', { args: { root, module } });
 }
 
 /** Validate the WHOLE project without compiling: walk every `.java`, run the editor's per-file
@@ -155,18 +157,73 @@ export function projectDiagnostics(root: string): Promise<FileDiagnostics[] | nu
   return bennu('bennu_project_diagnostics', { args: { root } });
 }
 
-/** Launch `java -cp <target/classes:deps> <mainClass> <args…>`, streaming stdout/stderr
- *  as `arbor://bennu/run-output` and ending with `arbor://bennu/run-exit`. Resolves
- *  immediately with the run handle. `mainClass` is required (main-class discovery is a
- *  later wave). Wire: `bennu_run` — `RunArgs { root, main_class, args? }`. */
-export function run(root: string, mainClass: string, args: string[] = []): Promise<RunHandle> {
-  return bennu('bennu_run', { args: { root, main_class: mainClass, args } });
+/** Everything a launch can carry beyond the main class. All optional — a caller with only
+ *  a class still runs. */
+export interface RunOptions {
+  /** The Maven module the class lives in, relative to the root. Decides the classpath —
+   *  omitting it on a multi-module project runs against the reactor root, which compiles
+   *  nothing. */
+  module?: string;
+  /** Program arguments, after the main class. */
+  args?: string[];
+  /** JVM options (`-Xmx…`, `-D…`), before `-cp`. */
+  vmArgs?: string[];
+  /** Working directory; empty/omitted = the project root. */
+  workingDir?: string;
+  /** Extra environment, merged over the inherited one. */
+  env?: Record<string, string>;
 }
 
-/** Stop a running `bennu_run` child by id. Resolves `true` if a live run was stopped.
- *  Wire: `bennu_cancel_run` — `CancelRunArgs { run_id }`. */
+/** Launch `java <vm…> -cp <target/classes:deps> <mainClass> <args…>`, streaming stdout/stderr
+ *  as `arbor://bennu/run-output` and ending with `arbor://bennu/run-exit`. Resolves
+ *  immediately with the run handle (which carries the command line that was actually spawned).
+ *  Wire: `bennu_run` — `RunArgs { root, main_class, args?, vm_args?, working_dir?, env? }`. */
+export function run(root: string, mainClass: string, opts: RunOptions = {}): Promise<RunHandle> {
+  return bennu('bennu_run', {
+    args: {
+      root,
+      main_class: mainClass,
+      module: opts.module ?? '',
+      args: opts.args ?? [],
+      vm_args: opts.vmArgs ?? [],
+      working_dir: opts.workingDir ?? '',
+      env: opts.env ?? {},
+    },
+  });
+}
+
+/** Feed one line to a live run's stdin (the console's input box). The newline is added by
+ *  the backend. Rejects when the run has already exited. Wire: `bennu_run_input` —
+ *  `RunInputArgs { run_id, text }`. */
+export function runInput(runId: string, text: string): Promise<void> {
+  return bennu('bennu_run_input', { args: { run_id: runId, text } });
+}
+
+/** Stop a live run — the process TREE, not just the handle we hold. Resolves `true` if a run
+ *  was killed. Wire: `bennu_cancel_run` — `CancelRunArgs { run_id }`. */
 export function cancelRun(runId: string): Promise<boolean> {
   return bennu('bennu_cancel_run', { args: { run_id: runId } });
+}
+
+/** Every class in the project declaring `public static void main(String[])` — a source scan
+ *  (so it works before the index is built), pre-filtered and cached per project on the
+ *  backend, dropped when the project is re-indexed. Prefer `bennuMainClassStore`, which
+ *  shares one read between the picker, ▷ and the Spring Boot resolution. Wire:
+ *  `bennu_main_classes` — `MainClassesArgs { root, force? }`. */
+export function mainClasses(root: string, force = false): Promise<MainClassEntry[]> {
+  return bennu('bennu_main_classes', { args: { root, force } });
+}
+
+/** Read the per-repo run configurations from `<root>/.arbor/config.toml` `[bennu.run]`. A repo
+ *  that has never had one yields an empty bundle. Wire: `bennu_get_run_config`. */
+export function getRunConfig(root: string): Promise<RunConfigSetDto> {
+  return bennu('bennu_get_run_config', { args: { root } });
+}
+
+/** Persist the per-repo run configurations, leaving every other section of the shared
+ *  `.arbor/config.toml` untouched. Wire: `bennu_set_run_config`. */
+export function setRunConfig(root: string, configSet: RunConfigSetDto): Promise<void> {
+  return bennu('bennu_set_run_config', { args: { root, config_set: configSet } });
 }
 
 /** List every project class (a fresh source scan) for the Go-to-Class navigator.

@@ -7,7 +7,8 @@
    *
    * Reuses shared/ui only (PanelShell, SidebarSection, SidebarItem, EmptyState).
    */
-  import { Hammer, Play, Puzzle, FolderGit2 } from 'lucide-svelte';
+  import { Play, Puzzle, FolderGit2 } from 'lucide-svelte';
+  import MavenIcon from './MavenIcon.svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
@@ -45,7 +46,7 @@
 </script>
 
 <PanelShell title="Maven">
-  {#snippet icon()}<Hammer size={13} />{/snippet}
+  {#snippet icon()}<MavenIcon size={13} />{/snippet}
 
   {#if !projectStore.project}
     <EmptyState message="Open a project to see its Maven goals." />

@@ -1,12 +1,15 @@
 <script lang="ts">
   /**
-   * Build (bottom tool window section) — the compile/run console.
+   * Build (bottom tool window section) — the compiler's own output.
    *
    * Shows the parsed compiler diagnostics (clickable → open the file + jump to the
-   * line) followed by the raw streamed log (`arbor://bennu/build-output` +
-   * `run-output`). Data + lifecycle live in {@link bennuRunStore}; this is pure
-   * presentation. The dock owns the header (tab switcher + Stop/Rerun actions), so
-   * this renders body-only.
+   * line) followed by the raw streamed log (`arbor://bennu/build-output`). Data +
+   * lifecycle live in {@link bennuRunStore}; this is pure presentation. The panel
+   * shell owns the header (tab switcher + actions), so this renders body-only.
+   *
+   * A launched program's output is NOT here — it has its own tool window
+   * ({@link BennuRunPanel}). The two shared this buffer, which meant a run's output
+   * arrived under Maven's and the next build wiped it.
    */
   import { CircleAlert, AlertTriangle, Info, Hammer, CircleCheckBig, ListChecks, ArrowRight } from 'lucide-svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
@@ -19,7 +22,6 @@
   const diags = $derived(bennuRunStore.diagnostics);
   const lines = $derived(bennuRunStore.lines);
   const building = $derived(bennuRunStore.building);
-  const running = $derived(bennuRunStore.running);
   const ok = $derived(bennuRunStore.ok);
 
   const errorCount = $derived(diags.filter((d) => d.severity === 'error').length);
@@ -104,8 +106,6 @@
           <span class="st-progress">{validateProgress.done} / {validateProgress.total} ({validatePct}%)</span>
         {/if}
         <button type="button" class="st-cancel" onclick={() => void bennuRunStore.cancelValidation()}>Cancel</button>
-      {:else if running}
-        <Spinner size={13} /><span class="st-text">Running…</span>
       {:else if vres}
         {#if failed}
           <span class="st-fail"><CircleAlert size={13} /></span>
