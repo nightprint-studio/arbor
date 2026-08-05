@@ -110,7 +110,7 @@ fn normalize_type(type_text: &str) -> String {
 /// `root`, inclusive of intermediate dirs) that holds a `pom.xml`, expressed relative to
 /// `root` with forward slashes. `None` when that dir is `root` itself (the root module)
 /// or nothing matches.
-fn module_of(root: &Path, file: &Path) -> Option<String> {
+pub(crate) fn module_of(root: &Path, file: &Path) -> Option<String> {
     let mut dir = file.parent()?;
     loop {
         // Stop once we've climbed above the project root.

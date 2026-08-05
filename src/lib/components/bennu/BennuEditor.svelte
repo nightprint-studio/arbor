@@ -607,6 +607,8 @@
   /** The editor's current selection text ('' when nothing selected) — used by the window to
    *  seed Find-in-project / Go-to navigator fields from what the user highlighted. */
   export function getSelectedText(): string { return editorComp?.getSelectionText() ?? ''; }
+  /** The 1-based line the caret is on — what "run the test at the caret" resolves against. */
+  export function getCaretLine(): number { return caretLine; }
 
   /** Toolbar action on a Java action class: resolve its `<Class>-validation.xml` (naming
    *  convention), create it from a skeleton if missing, open it, and pop the validator chain

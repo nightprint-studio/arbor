@@ -1,0 +1,20 @@
+[package]
+name         = "bennu-test"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Unit-test support for Bennu: which classes and methods are tests (JUnit 3/4/5, TestNG), the Maven command that runs a chosen scope of them, and the Surefire XML report read back into per-case results. Pure — it parses text and builds argument lists; spawning the build and streaming its output is the backend's job."
+
+[dependencies]
+# The annotation-shaped Java scan discovery reads. A test is an annotation on a method
+# (`@Test`) plus, for JUnit 3, what the class extends — which is exactly the shape
+# `JavaFacts` carries, spans included.
+bennu-facts = { path = "../facts" }
+# Byte-offset → line number, so a discovered method can be pointed at from a gutter.
+bennu-complete = { path = "../complete" }
+
+# The report reader. Same version the other XML consumers in the workspace pin.
+roxmltree = "0.20"
+serde = { workspace = true }

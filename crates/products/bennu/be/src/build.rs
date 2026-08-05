@@ -51,8 +51,10 @@ use serde_json::json;
 
 use crate::index_service::IndexService;
 
-/// The JDK level to resolve `JAVA_HOME` against when the project declares none (the
-/// target stack is JDK 8 — Struts2/Entando).
+/// The JDK level to resolve `JAVA_HOME` against as a LAST resort — when the project isn't open
+/// and has no override, so nothing has read its pom (the target stack is JDK 8 —
+/// Struts2/Entando). A project that declares its level gets that level; see
+/// [`project_jdk_level`].
 const DEFAULT_JDK: &str = "1.8";
 
 // ── event topics (the wire contract for the FE) ────────────────────────────────
@@ -122,7 +124,7 @@ fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String>
         finish_compile("cargo", ok, raw, &sink)
     } else {
         let java_home = resolve_java_home(&args.root);
-        compile(&root, &resolve_mvn(), java_home.as_deref(), &sink)?
+        compile(&root, &resolve_mvn(&root), java_home.as_deref(), &sink)?
     };
 
     sink.emit(EVT_BUILD_DONE, json!({
@@ -390,7 +392,7 @@ fn run_classpath(root: &Path, java_home: Option<&Path>) -> String {
     let mut parts: Vec<String> = vec![root.join("target").join("classes").display().to_string()];
 
     let mut opts = MavenResolveOpts::default();
-    opts.mvn_path = resolve_mvn();
+    opts.mvn_path = resolve_mvn(root);
     opts.offline = true;
     if let Some(jh) = java_home {
         opts.java_home = Some(jh.to_path_buf());
@@ -614,19 +616,55 @@ fn spawn_pump<R: std::io::Read + Send + 'static>(
 
 // ── program / path resolution ──────────────────────────────────────────────────
 
-/// Resolve `JAVA_HOME` for the project: its configured/pom JDK level → an installed JDK
-/// home; else the default (JDK 8). `None` when no matching JDK is installed (the child
-/// then inherits the ambient `JAVA_HOME` / `PATH`).
-fn resolve_java_home(root: &str) -> Option<PathBuf> {
-    let cfg = bennu_core::config::load();
-    let version = cfg.jdk_overrides.get(root).cloned().unwrap_or_else(|| DEFAULT_JDK.to_string());
-    find_jdk_home(&version).or_else(|| find_jdk_home(DEFAULT_JDK))
+/// Resolve `JAVA_HOME` for the project: [its own JDK level](project_jdk_level) → an installed
+/// JDK home. `None` when no JDK of that level is installed — the child then inherits the
+/// ambient `JAVA_HOME` / `PATH`, which on a developer machine is very likely the right one.
+///
+/// It used to read ONLY the config override and default to JDK 8 whenever there wasn't one —
+/// so a project declaring Java 21 in its pom had `JAVA_HOME` forced to an installed JDK 8 and
+/// Maven answered `invalid target release: 21`, on a machine whose own `JAVA_HOME` was 21.
+/// Two resolutions of the same question, and the build used the one that never looked at the
+/// project.
+///
+/// The `None` matters as much as the match: falling back to *some other* JDK when the requested
+/// one is absent (as this did, to 8) guarantees a wrong compile with a confusing error, whereas
+/// deferring to the environment at least fails the way running `mvn` by hand would.
+pub(crate) fn resolve_java_home(root: &str) -> Option<PathBuf> {
+    let version = project_jdk_level(root);
+    let home = find_jdk_home(&version);
+    if home.is_none() {
+        // Not fatal — the child inherits the ambient JAVA_HOME — but worth a line, because the
+        // failure it leads to (a version error from javac) never names the JDK that caused it.
+        eprintln!("bennu-be: no installed JDK for level {version:?}; leaving JAVA_HOME to the environment");
+    }
+    home
 }
 
-/// The `mvn` launcher: `mvn` on `PATH` (Windows resolves `mvn.cmd`). A configured path
-/// is a follow-up; the Phase-2 resolver uses the same default.
-fn resolve_mvn() -> String {
-    "mvn".to_string()
+/// The Java language level the project at `root` targets, from the open project's slot — the
+/// same answer the index was built with and the titlebar badge shows (override → pom
+/// `maven.compiler.release`/`source`/`target` → `java.version` → the compiler plugin). Falls
+/// back to the config override, then to the target stack's JDK 8, for the window where no slot
+/// exists yet.
+fn project_jdk_level(root: &str) -> String {
+    if let Some(v) = IndexService::global().jdk_version_of(root).filter(|v| !v.is_empty()) {
+        return v;
+    }
+    let cfg = bennu_core::config::load();
+    cfg.jdk_overrides.get(root).cloned().unwrap_or_else(|| DEFAULT_JDK.to_string())
+}
+
+/// The `mvn` launcher for `root` — the SAME resolution the dependency tier uses
+/// ([`crate::dep_classpath::find_mvn_launcher`]): `PATH` preferring the Windows batch
+/// launchers, then the well-known install dirs, then the project's `mvnw`.
+///
+/// It used to return the bare `"mvn"`, and on Windows that is not a launcher: Maven ships
+/// `mvn.cmd`, and `Command::new("mvn")` only ever locates `mvn.exe`. The spawn therefore
+/// failed on every Windows machine — invisibly, because [`compile`] treats a failed spawn as
+/// "fall back to `javac`". The Build button appeared to work while quietly compiling without
+/// the dependency classpath, and the bug only surfaced from the test runner, which has no
+/// fallback to hide behind. Two ways of finding the same program, one of them wrong.
+pub(crate) fn resolve_mvn(root: &Path) -> String {
+    crate::dep_classpath::find_mvn_launcher(root)
 }
 
 /// The `cargo` launcher: `cargo` on `PATH`. A rustup install puts it there on every

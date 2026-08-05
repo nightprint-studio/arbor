@@ -936,6 +936,20 @@ impl IndexService {
         Some(jdk_status_of(bennu_classpath::prelude::jdk_status(&jdk_version)))
     }
 
+    /// The Java language level the project at `root` was opened with — its explicit override,
+    /// else what its pom declares, else the target stack's JDK 8 (the resolution in
+    /// [`bennu_project::jdk::detect`], performed once at open time). `None` when no slot owns
+    /// `root`.
+    ///
+    /// This is the single answer to "which Java is this project": the index, the titlebar badge
+    /// and the build/test shell-out all read it here, so a project cannot be analysed at one
+    /// level and compiled at another.
+    pub fn jdk_version_of(&self, root: &str) -> Option<String> {
+        let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        let v = slots.get(&PathBuf::from(root)).map(|s| s.jdk_version.clone());
+        v
+    }
+
     /// Serve completion at `file`:`offset` from the owning project's provider (matched
     /// by longest root prefix). Returns `[]` when no project owns the file, or its
     /// index is still building.

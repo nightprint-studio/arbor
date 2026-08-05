@@ -18,14 +18,14 @@
   import {
     FolderOpen, FolderPlus, LogOut, Settings, Keyboard, FlaskConical,
     Play, Bug, MoreVertical, Palette, SlidersHorizontal, Info, Hammer, Square, TriangleAlert,
-    ListChecks, ChevronDown,
+    ListChecks, ChevronDown, RotateCw, ListRestart,
   } from 'lucide-svelte';
   import type { BuildType } from '$lib/stores/bennu/run.svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
-  import ArborLogo from '$lib/components/shared/internal/ArborLogo.svelte';
+  import ProductIcon from '$lib/components/shared/internal/ProductIcon.svelte';
   import WindowControls from '$lib/components/shared/WindowControls.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import BennuWorkspaceSwitcher from './BennuWorkspaceSwitcher.svelte';
@@ -38,6 +38,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
+  import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
   import ThemeEditorModal from '$lib/components/shared/ThemeEditorModal.svelte';
@@ -66,6 +67,12 @@
     void bennuRunStore.runActive(root).then((ran) => {
       if (!ran) bennuUiStore.openRunConfig();
     });
+  }
+  /** Run every unit test in the project (the run menu + Ctrl+Shift+F5). Opens the Tests
+   *  panel; everything after that streams into it. */
+  function runAllTests() {
+    const root = projectStore.project?.root;
+    if (root) void bennuTestStore.runAll(root);
   }
   /** Run the preferred build type (Maven compile or whole-project validation) — the split-button
    *  main action + Ctrl+F9. */
@@ -115,6 +122,21 @@
       ? []
       : [{ kind: 'item', id: 'validate', label: 'Validate project', icon: ListChecks, disabled: busy, onclick: () => selectBuild('validate') } as DropdownItem]),
     { kind: 'item', id: 'stop',    label: 'Stop',            icon: Square, disabled: !bennuRunStore.running, onclick: () => void bennuRunStore.stop() },
+    // Tests. A Cargo project's tests are `cargo test`, which this runner does not speak, so
+    // the entries are out rather than failing when pressed.
+    ...(isCargo
+      ? []
+      : [
+          { kind: 'separator', label: 'Tests' } as DropdownItem,
+          { kind: 'item', id: 'testall', label: 'Run all tests', icon: FlaskConical, shortcut: 'Ctrl+Shift+F5',
+            disabled: busy || bennuTestStore.running || !hasProject, onclick: runAllTests } as DropdownItem,
+          { kind: 'item', id: 'testrerun', label: 'Rerun tests', icon: RotateCw, shortcut: 'Ctrl+F5',
+            disabled: busy || bennuTestStore.running || !bennuTestStore.hasResults, onclick: () => void bennuTestStore.rerun() } as DropdownItem,
+          { kind: 'item', id: 'testrerunfailed', label: 'Rerun failed tests', icon: ListRestart,
+            disabled: busy || bennuTestStore.running || !bennuTestStore.hasFailures, onclick: () => void bennuTestStore.rerunFailed() } as DropdownItem,
+          { kind: 'item', id: 'teststop', label: 'Stop the test run', icon: Square,
+            disabled: !bennuTestStore.running, onclick: () => void bennuTestStore.stop() } as DropdownItem,
+        ]),
     { kind: 'separator' },
     { kind: 'item', id: 'debug',   label: 'Debug…',          icon: Bug,  onclick: () => notImplemented('Debug') },
     ...(isCargo
@@ -206,7 +228,7 @@
   settings={{ menu: settingsMenu, menuWidth: '260px', tooltip: 'Settings' }}
 >
   {#snippet logo()}
-    <ArborLogo size={22} />
+    <ProductIcon id="bennu" size={22} />
   {/snippet}
 
   <!-- Project/workspace switcher — Corvus-tree: workspace headers + nested projects. -->

@@ -10,7 +10,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
-  import ArborLogo from '$lib/components/shared/internal/ArborLogo.svelte';
+  import ProductIcon from '$lib/components/shared/internal/ProductIcon.svelte';
   import WindowControls from '$lib/components/shared/WindowControls.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   // Titlebar sits at the very top — tooltips fly downward so they aren't clipped.
@@ -78,7 +78,7 @@
   settings={{ menu: settingsMenu, menuWidth: '260px', tooltip: 'Settings' }}
 >
   {#snippet logo()}
-    <ArborLogo size={22} />
+    <ProductIcon id="tyto" size={22} />
   {/snippet}
 
   <!-- Reduced mode switcher, right after the hamburger. -->

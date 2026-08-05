@@ -16,7 +16,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
-  import ArborLogo from '$lib/components/shared/internal/ArborLogo.svelte';
+  import ProductIcon from '$lib/components/shared/internal/ProductIcon.svelte';
   import WindowControls from '$lib/components/shared/WindowControls.svelte';
   import Monogram from '$lib/components/shared/ui/Monogram.svelte';
   import ThemeEditorModal from '$lib/components/shared/ThemeEditorModal.svelte';
@@ -144,7 +144,7 @@
   settings={{ menu: settingsMenu, menuWidth: '260px', tooltip: 'Settings' }}
 >
   {#snippet logo()}
-    <ArborLogo size={22} />
+    <ProductIcon id="picus" size={22} />
   {/snippet}
 
   {#snippet center()}

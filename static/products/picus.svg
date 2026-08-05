@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    Picus · option 4 — "P through the strata"
+    None of the first three convinced you, so this one is built the new way round: the letter
+    first, and the domain arranged to hold it.
+    The bands are the strata of a trunk in section — tables — and the P's stem is driven
+    straight down through every one of them, which is what a query does: you name the layers
+    you want and go through everything in between. The stem is the bore.
+    The bowl is crimson and the stem olive, because that is how the bird is coloured: a green
+    woodpecker is olive all over with a crimson crown, and the crown is the top of the head —
+    which on a P is exactly where the bowl is.
+  -->
+  <defs>
+    <linearGradient id="pc4-bg" x1="256" y1="0" x2="256" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#123020"/><stop offset="55%" stop-color="#0b2016"/><stop offset="100%" stop-color="#05120c"/>
+    </linearGradient>
+    <linearGradient id="pc4-w1" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#2f9e44"/><stop offset="100%" stop-color="#8ce99a"/></linearGradient>
+    <linearGradient id="pc4-w2" x1="1" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#b2f2bb"/><stop offset="100%" stop-color="#40a02b"/></linearGradient>
+    <linearGradient id="pc4-w3" x1="1" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#c92a2a"/><stop offset="100%" stop-color="#ff8787"/></linearGradient>
+    <linearGradient id="pc4-w4" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#e8590c"/><stop offset="100%" stop-color="#ffd8a8"/></linearGradient>
+    <linearGradient id="pc4-stem" x1="190" y1="392" x2="190" y2="130" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2f9e44"/><stop offset="60%" stop-color="#69db7c"/><stop offset="100%" stop-color="#b2f2bb"/>
+    </linearGradient>
+    <linearGradient id="pc4-bowl" x1="190" y1="130" x2="314" y2="254" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ff8787"/><stop offset="100%" stop-color="#a51111"/>
+    </linearGradient>
+    <linearGradient id="pc4-tip" x1="190" y1="360" x2="190" y2="426" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffe9c9"/><stop offset="55%" stop-color="#ffd8a8"/><stop offset="100%" stop-color="#e8590c"/>
+    </linearGradient>
+    <filter id="pc4-glow" x="-45%" y="-45%" width="190%" height="190%">
+      <feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <clipPath id="pc4-card"><rect x="0" y="0" width="512" height="512" rx="112" ry="112"/></clipPath>
+  <rect x="0" y="0" width="512" height="512" rx="112" ry="112" fill="url(#pc4-bg)"/>
+  <g clip-path="url(#pc4-card)">
+    <polygon points="0,0 260,0 0,260" fill="url(#pc4-w1)"/>
+    <polygon points="512,0 512,260 252,0" fill="url(#pc4-w2)"/>
+    <polygon points="0,512 0,252 260,512" fill="url(#pc4-w3)"/>
+    <polygon points="512,512 252,512 512,252" fill="url(#pc4-w4)"/>
+    <rect x="68" y="68" width="376" height="376" rx="56" ry="56" fill="#08190f"/>
+    <rect x="68" y="68" width="376" height="80" rx="56" ry="56" fill="#ffffff" fill-opacity="0.04"/>
+  </g>
+
+  <!-- The strata. Varying heights so they read as material rather than as a bar chart, and
+       faint enough that the letter is unambiguously the subject. -->
+  <g>
+    <rect x="112" y="146" width="288" height="40" rx="14" fill="#8ce99a" opacity="0.2"/>
+    <rect x="112" y="198" width="288" height="30" rx="12" fill="#40a02b" opacity="0.3"/>
+    <rect x="112" y="240" width="288" height="48" rx="16" fill="#69db7c" opacity="0.22"/>
+    <rect x="112" y="300" width="288" height="28" rx="11" fill="#2f9e44" opacity="0.32"/>
+    <rect x="112" y="340" width="288" height="42" rx="15" fill="#51cf66" opacity="0.24"/>
+  </g>
+
+  <!--
+    P. Stem from cap-height down through every band; bowl a semicircle of r=62 hung off the
+    top. One stroke width throughout.
+    The stem ends FLAT rather than rounded, because the point that finishes it is the drill
+    tip carried over from option 2 — and a rounded cap under a triangle would show as a bulge
+    at the joint. The bowl keeps its round caps; the stem's flat top is covered by the bowl's.
+  -->
+  <g fill="none" stroke-width="44" filter="url(#pc4-glow)">
+    <path d="M 190 130 V 364" stroke="url(#pc4-stem)" stroke-linecap="butt"/>
+    <path d="M 190 130 H 252 A 62 62 0 0 1 252 254 H 190"
+          stroke="url(#pc4-bowl)" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- The tip: the P's stem sharpened into the bore. It clears the last band, so what you
+       see is the point coming out the far side of the material it went through. -->
+  <path d="M 168 360 L 212 360 L 190 426 Z" fill="url(#pc4-tip)" filter="url(#pc4-glow)"/>
+
+  <!-- The chips it threw on the way down. -->
+  <g stroke="#ffd8a8" stroke-width="9" stroke-linecap="round" opacity="0.8">
+    <path d="M 236 372 L 264 358"/>
+    <path d="M 242 400 L 274 396"/>
+  </g>
+</svg>

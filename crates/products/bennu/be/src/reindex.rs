@@ -31,6 +31,10 @@ pub struct ReindexArgs {
 fn bennu_reindex(ctx: &BennuState, args: ReindexArgs) -> Result<(), String> {
     // Keep the reverse channel current so the rebuild's warm-up job still tracks.
     IndexService::global().set_host(ctx.host_caller());
+    // Test discovery is its own cached scan of the same sources, so it goes stale in exactly
+    // the same circumstances. Rebuilding one and not the other is how a newly written test
+    // class ends up needing a restart to appear in the Tests panel.
+    crate::tests::forget_discovery(&args.root);
     IndexService::global().reindex(&args.root, ctx.event_sink());
     Ok(())
 }

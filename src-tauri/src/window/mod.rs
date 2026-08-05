@@ -127,6 +127,39 @@ pub fn native_titlebar<'a, R: Runtime, M: Manager<R>>(
     }
 }
 
+/// Give a product window its OWN icon, so the taskbar and Alt-Tab tell Arbor's windows
+/// apart instead of showing seven copies of the same mark.
+///
+/// One PNG per product under `icons/products/`, rasterised from the marks in
+/// `design/icons/` and embedded at compile time — deliberately NOT the app icon in
+/// `icons/`, which is Arbor's own and stays on the launcher and the tabbed container
+/// (that one hosts several products at once, so no single product's mark is right for it).
+///
+/// Set AFTER the build rather than on the builder, for a reason worth writing down:
+/// `WebviewWindowBuilder::icon` **consumes** the builder and returns a `Result`, so a
+/// failure there leaves nothing to carry on with and the whole window has to be abandoned
+/// over a decoration. `set_icon` takes `&self`, so a failure is just a window that keeps
+/// the default icon. Every product window is built `.visible(false)` and revealed once its
+/// shell has painted, so this lands long before the icon is ever on screen.
+///
+/// An unknown product is a silent no-op: the caller passes a literal, so there is no
+/// runtime input to validate, and a window with the suite icon is a correct fallback.
+pub fn apply_product_icon<R: Runtime>(window: &WebviewWindow<R>, product: &str) {
+    let bytes: &[u8] = match product {
+        "corvus" => include_bytes!("../../icons/products/corvus.png"),
+        "merula" => include_bytes!("../../icons/products/merula.png"),
+        "sitta" => include_bytes!("../../icons/products/sitta.png"),
+        "bennu" => include_bytes!("../../icons/products/bennu.png"),
+        "picus" => include_bytes!("../../icons/products/picus.png"),
+        "tyto" => include_bytes!("../../icons/products/tyto.png"),
+        "garrulus" => include_bytes!("../../icons/products/garrulus.png"),
+        _ => return,
+    };
+    if let Err(e) = tauri::image::Image::from_bytes(bytes).and_then(|img| window.set_icon(img)) {
+        tracing::warn!("could not set the {product} window icon: {e}");
+    }
+}
+
 /// Bring a window to the foreground: undo a minimize, show it, take focus. The
 /// idempotent three-step every "focus the existing window" path repeats.
 pub fn show_and_focus(w: &WebviewWindow) {

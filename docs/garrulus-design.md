@@ -110,8 +110,9 @@ accepted (§11.4).
   dynamically imported so no other window pays for it.
 - `src/lib/components/garrulus/`, `stores/garrulus/`, `ipc/garrulus.ts`.
 - One FE helper: `garrulus(method, params)` → `invoke('rpc', { program: 'garrulus', … })`.
-- Canopy roster entry in `src/lib/components/launcher/canopy.ts` + a glyph in
-  `canopyGlyphs.ts`. Accent: **`#3fb6d9`** proposed — the jay's barred wing-flash cyan-blue,
+- Canopy roster entry in `src/lib/components/launcher/canopy.ts` + a mark in
+  `src/lib/utils/product-marks.ts` (the shared per-product table — the launcher, the tab strip
+  and anywhere else a product needs a face all draw from it). Accent: **`#3fb6d9`** proposed — the jay's barred wing-flash cyan-blue,
   picked to read apart from Corvus's periwinkle `#7c9cf5` and Picus's teal `#4fbfa8`.
   *TODO(user): confirm.*
 

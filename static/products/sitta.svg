@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    Sitta · option 4 — "S of nodes"
+    Third attempt, and the first one where the letter and the tree are the same object rather
+    than two things sharing a frame. There is no separate tree behind it any more: the nodes
+    and their connectors ARE the S.
+
+    Drawn with **orthogonal elbows** — a run across, a drop, a run back — because that is how
+    every file tree on earth draws its guides, and it is what keeps this from being read as
+    Corvus's constellation a second time. Same idea, different vocabulary: Corvus joins its
+    stars with straight lines through open space, Sitta turns square corners like a directory
+    listing.
+
+    Not oblique this time. A skew would have bent the right angles, and right angles are the
+    whole reason it reads as a tree. The descent is already in the path — it starts top right
+    and ends bottom left, which is the direction a nuthatch works a trunk.
+  -->
+  <defs>
+    <linearGradient id="st4-bg" x1="256" y1="0" x2="256" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#173049"/><stop offset="55%" stop-color="#0f2135"/><stop offset="100%" stop-color="#081321"/>
+    </linearGradient>
+    <linearGradient id="st4-w1" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#2b6ca8"/><stop offset="100%" stop-color="#8ecae6"/></linearGradient>
+    <linearGradient id="st4-w2" x1="1" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#a8dadc"/><stop offset="100%" stop-color="#457b9d"/></linearGradient>
+    <linearGradient id="st4-w3" x1="1" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#c96f3f"/><stop offset="100%" stop-color="#f0a868"/></linearGradient>
+    <linearGradient id="st4-w4" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#e07a3f"/><stop offset="100%" stop-color="#ffd9a0"/></linearGradient>
+    <linearGradient id="st4-path" x1="352" y1="150" x2="160" y2="362" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#e8f6ff"/><stop offset="45%" stop-color="#8ecae6"/><stop offset="100%" stop-color="#2b6ca8"/>
+    </linearGradient>
+    <filter id="st4-glow" x="-45%" y="-45%" width="190%" height="190%">
+      <feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="st4-bright" x="-110%" y="-110%" width="320%" height="320%">
+      <feGaussianBlur stdDeviation="13" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <clipPath id="st4-card"><rect x="0" y="0" width="512" height="512" rx="112" ry="112"/></clipPath>
+  <rect x="0" y="0" width="512" height="512" rx="112" ry="112" fill="url(#st4-bg)"/>
+  <g clip-path="url(#st4-card)">
+    <polygon points="0,0 260,0 0,260" fill="url(#st4-w1)"/>
+    <polygon points="512,0 512,260 252,0" fill="url(#st4-w2)"/>
+    <polygon points="0,512 0,252 260,512" fill="url(#st4-w3)"/>
+    <polygon points="512,512 252,512 512,252" fill="url(#st4-w4)"/>
+    <rect x="68" y="68" width="376" height="376" rx="56" ry="56" fill="#0b1a2b"/>
+    <rect x="68" y="68" width="376" height="80" rx="56" ry="56" fill="#ffffff" fill-opacity="0.04"/>
+  </g>
+
+  <!--
+    The path: right→left across the top, down the left, left→right across the middle, down
+    the right, right→left across the bottom. Corners are 30-radius arcs — square enough to
+    read as tree guides, soft enough not to be a segmented display.
+  -->
+  <path d="M 352 150
+           H 190 A 30 30 0 0 0 160 180
+           V 226 A 30 30 0 0 0 190 256
+           H 322 A 30 30 0 0 1 352 286
+           V 332 A 30 30 0 0 1 322 362
+           H 160"
+        fill="none" stroke="url(#st4-path)" stroke-width="22" stroke-linecap="round"
+        filter="url(#st4-glow)"/>
+
+  <!-- The nodes. Three big ones — the two terminals and the junction at the waist — so the
+       eye travels the letter in order instead of seeing seven equal dots. -->
+  <g fill="#0b1a2b">
+    <circle cx="352" cy="150" r="26" stroke="#e8f6ff" stroke-width="10" filter="url(#st4-glow)"/>
+    <circle cx="256" cy="256" r="26" stroke="#bfe4f5" stroke-width="10" filter="url(#st4-glow)"/>
+    <circle cx="160" cy="362" r="26" stroke="#7ab6dd" stroke-width="10" filter="url(#st4-glow)"/>
+    <circle cx="256" cy="150" r="16" stroke="#a8dadc" stroke-width="8"/>
+    <circle cx="160" cy="213" r="14" stroke="#8ecae6" stroke-width="7"/>
+    <circle cx="352" cy="309" r="14" stroke="#5aa0cd" stroke-width="7"/>
+    <circle cx="256" cy="362" r="16" stroke="#457b9d" stroke-width="8"/>
+  </g>
+
+  <!-- One node in the rust accent, the way the other Sitta marks carry it: the leaf at the
+       end of the walk. -->
+  <circle cx="160" cy="362" r="11" fill="#c96f3f" filter="url(#st4-bright)"/>
+</svg>

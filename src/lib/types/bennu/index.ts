@@ -5,6 +5,10 @@
  * commands live in `$lib/ipc/bennu`.
  */
 
+// The unit-test domain keeps its own file: its shapes come from `bennu-test` rather than
+// `bennu-proto`, and they carry enough of their own reasoning to be worth reading together.
+export type * from './tests';
+
 /** The JDK Bennu resolves classpath sources against (`ProjectInfo.jdk`). */
 export interface JdkInfo {
   /** Java language level as declared, e.g. `1.8` / `8` / `17`. */

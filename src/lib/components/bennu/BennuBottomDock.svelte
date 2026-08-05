@@ -17,6 +17,7 @@
    * would burn an include-graph walk for nothing.
    */
   import BennuBuildProblemsPanel from './BennuBuildProblemsPanel.svelte';
+  import BennuTestPanel from './BennuTestPanel.svelte';
   import BennuTerminalView from './BennuTerminalView.svelte';
   import BennuTodoPanel from './BennuTodoPanel.svelte';
   import BennuFormsPanel from './BennuFormsPanel.svelte';
@@ -35,6 +36,11 @@
 <div class="dock">
   <div class="dock-section" class:hidden={!buildish}>
     <BennuBuildProblemsPanel />
+  </div>
+  <!-- Stays mounted: a test run is minutes long and streams into it, and looking at the
+       TODOs mid-run must not be the thing that throws the results away. -->
+  <div class="dock-section" class:hidden={active !== 'tests'}>
+    <BennuTestPanel />
   </div>
   <div class="dock-section" class:hidden={active !== 'todos'}>
     <BennuTodoPanel />

@@ -8,26 +8,29 @@
    * container `surfaceStore.inContainer` is false and this renders nothing, so
    * the title bars can mount it unconditionally.
    */
-  import { X, Plus, GitBranch, Coffee, Music, Database, NotebookPen, LayoutGrid } from 'lucide-svelte';
-  import type { IconComponent } from '$lib/types/icon';
-  import { surfaceStore, surfaceDef, type SurfaceId } from '$lib/stores/surfaces.svelte';
+  import { X, Plus, LayoutGrid } from 'lucide-svelte';
+  import ProductMark from './ProductMark.svelte';
+  import { surfaceStore, surfaceDef } from '$lib/stores/surfaces.svelte';
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
 
-  const ICONS: Record<SurfaceId, IconComponent> = {
-    home:   LayoutGrid,
-    corvus: GitBranch,
-    bennu:  Coffee,
-    merula: Music,
-    picus:  Database,
-    garrulus: NotebookPen,
-  };
+  /*
+   * A tab wears its product's INITIAL, not a picture of what the product does.
+   *
+   * It used to be a lucide glyph each — a branch, a coffee cup, a musical note, a database —
+   * and the problem is the size: this strip gives its icons 13px. At that size a picture has
+   * lost the detail that made it specific, and what is left is a generic shape you have to
+   * already know the answer to read. A letter loses nothing, and the six of them cannot
+   * collide.
+   *
+   * `home` keeps a picture, because it is the one tab that is not a product and has no
+   * initial to wear — a letter there would imply a seventh product.
+   */
 </script>
 
 {#if surfaceStore.inContainer}
   <div class="wt-strip" role="tablist" aria-label="Open products">
     {#each surfaceStore.tabs as id (id)}
       {@const def = surfaceDef(id)}
-      {@const Icon = ICONS[id]}
       {@const isActive = surfaceStore.isActive(id)}
       <div class="wt-tab" class:active={isActive}>
         <button
@@ -38,7 +41,11 @@
           onclick={() => surfaceStore.show(id)}
           onauxclick={(e) => { if (e.button === 1) surfaceStore.close(id); }}
         >
-          <Icon size={13} />
+          {#if id === 'home'}
+            <LayoutGrid size={13} />
+          {:else}
+            <ProductMark {id} size={15} />
+          {/if}
           <span class="wt-label">{def.label}</span>
         </button>
         {#if surfaceStore.tabs.length > 1}
@@ -92,7 +99,10 @@
     transition: background var(--anim-dur-fast), color var(--anim-dur-fast);
     min-width: 0;
   }
-  .wt-tab:hover { background: var(--bg-hover); color: var(--text-secondary); }
+  /* Translucent hover, so a tab passing over the product tint lightens it instead of
+     cutting a grey rectangle out of it. The ACTIVE tab keeps its opaque `--bg-base`: that
+     one is meant to be a solid card continuing into the body below. */
+  .wt-tab:hover { background: color-mix(in srgb, var(--text-primary) 8%, transparent); color: var(--text-secondary); }
   .wt-tab.active {
     background: var(--bg-base);
     color: var(--text-primary);
@@ -132,7 +142,7 @@
     opacity: 0.55;
     cursor: pointer;
   }
-  .wt-close:hover { opacity: 1; background: var(--bg-overlay); }
+  .wt-close:hover { opacity: 1; background: color-mix(in srgb, var(--text-primary) 12%, transparent); }
 
   .wt-new {
     display: flex;
@@ -148,5 +158,5 @@
     color: var(--text-muted);
     cursor: pointer;
   }
-  .wt-new:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .wt-new:hover { background: color-mix(in srgb, var(--text-primary) 9%, transparent); color: var(--text-primary); }
 </style>

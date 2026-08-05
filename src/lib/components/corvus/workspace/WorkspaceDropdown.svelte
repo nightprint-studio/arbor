@@ -158,8 +158,12 @@
     -webkit-app-region: no-drag;
     max-width: 220px;
   }
-  .ws-trigger:hover    { background: var(--bg-hover); }
-  .ws-trigger.open     { background: var(--bg-hover); border-color: var(--border-subtle); }
+  /* Translucent, not the opaque `--bg-hover`: this trigger sits in the title bar, over the
+     product tint, and an opaque fill would punch a grey hole in the colour. A translucent
+     overlay lightens what is behind it instead, and looks the same where there is no tint.
+     (The rows inside the dropdown keep `--bg-hover` — the popup has its own solid surface.) */
+  .ws-trigger:hover    { background: color-mix(in srgb, var(--text-primary) 9%, transparent); }
+  .ws-trigger.open     { background: color-mix(in srgb, var(--text-primary) 9%, transparent); border-color: var(--border-subtle); }
   .ws-trigger-name {
     flex: 1;
     min-width: 0;

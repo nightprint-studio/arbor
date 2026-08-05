@@ -11,7 +11,7 @@
    * SVG is scaled well below 1×, which would shrink in-SVG text to illegible.
    */
   import { buildScene, RUN, lerpColor, hexA, CANOPY_W, CANOPY_H, type Geometry, type DecoratedTool, type FilterKey } from './canopy';
-  import CanopyGlyph from './CanopyGlyph.svelte';
+  import ProductMark from '$lib/components/shared/internal/ProductMark.svelte';
 
   interface Props {
     geo: Geometry;
@@ -144,7 +144,7 @@
             <circle cx={n.x} cy={n.y} r={n.r} fill="rgba(8,13,19,.95)" stroke={n.accent}
                     stroke-width={n.sel ? 2.8 : 2.2} />
             <g transform="translate({n.x - (n.sel ? 25 : 21)} {n.y - (n.sel ? 25 : 21)})" style="color:{n.accent}">
-              <CanopyGlyph id={n.glyphId} size={n.sel ? 50 : 42} />
+              <ProductMark id={n.id} size={n.sel ? 50 : 42} />
             </g>
             {#if n.isUpd}
               <circle cx={n.x + n.r * 0.72} cy={n.y - n.r * 0.72} r="6.5" fill={n.accent} />

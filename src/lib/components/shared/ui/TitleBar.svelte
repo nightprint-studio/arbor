@@ -260,6 +260,47 @@
     padding-left: var(--mac-traffic-gutter, 0);
   }
 
+  /*
+   * The product tint — half of a corner glow. It is strongest at the top-left and dies out
+   * to the right; the activity rail continues the same colour downward, so the two read as
+   * one corner rather than as a stripe and a stripe.
+   *
+   * `--product-tint` is set on the document root (see `routes/+page.svelte`), which is why
+   * there is no class and no prop here: with the variable unset the mixes resolve to
+   * transparent and the whole treatment costs nothing. One variable also cannot drift from
+   * itself, which two components each told their own colour eventually would.
+   *
+   * Two BACKGROUND LAYERS rather than pseudo-elements, which matters here: `.tb` is the
+   * `data-tauri-drag-region`, and an overlay would have to be excluded from hit-testing to
+   * avoid eating the window drag. A background cannot intercept anything, needs no stacking
+   * order against the children, and costs no DOM.
+   *
+   * The hairline is deliberately well under full strength. At full strength it stops being
+   * a hint and becomes a rule ruled across the window — the eye goes to it instead of to
+   * the content, which is the opposite of what an ambient signal is for.
+   */
+  .tb {
+    /* Stops in PIXELS, not percentages: a corner glow is a fixed physical size, and a
+       percentage would stretch it across a wide window until it reached the tab strip in
+       the middle — where it would sit behind the tabs' own opaque backgrounds. */
+    background-image:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--product-tint, transparent) 42%, transparent) 0px,
+        color-mix(in srgb, var(--product-tint, transparent) 14%, transparent) 150px,
+        transparent 400px
+      ),
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--product-tint, transparent) 11%, transparent) 0px,
+        color-mix(in srgb, var(--product-tint, transparent) 3%, transparent) 140px,
+        transparent 380px
+      );
+    background-size: 100% 2px, 100% 100%;
+    background-position: top left, top left;
+    background-repeat: no-repeat;
+  }
+
   /* Each interactive cluster opts out of the window-drag region and lays its
      children out inline. (Plain flex, not `display: contents`, so the wrapper
      keeps a measurable box for the Dropdown anchor + its own padding.) */
@@ -339,9 +380,21 @@
     transition: background var(--transition-fast), color var(--transition-fast);
     -webkit-app-region: no-drag;
   }
+  /*
+   * Hover states in this bar are TRANSLUCENT, not a solid fill.
+   *
+   * `--bg-hover` / `--bg-overlay` are opaque, and an opaque rectangle painted over a tinted
+   * bar punches a hole in the tint — the button reads as a grey patch cut out of the colour,
+   * which is worse than having no tint at all. A translucent overlay lightens whatever is
+   * behind it, so it composes with the tint instead of replacing it, and it behaves
+   * identically on an untinted bar.
+   *
+   * Mixed from `--text-primary` rather than hard-coded white: on a light theme that resolves
+   * near-black, so the same rule darkens instead of lightening.
+   */
   .tb-hamburger:hover,
   .tb-hamburger.active {
-    background: var(--bg-overlay);
+    background: color-mix(in srgb, var(--text-primary) 12%, transparent);
     color: var(--text-primary);
   }
 
@@ -360,7 +413,11 @@
     transition: background var(--transition-fast), color var(--transition-fast);
     -webkit-app-region: no-drag;
   }
-  .tb-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+  /* Translucent for the same reason as the hamburger above. */
+  .tb-icon:hover {
+    background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+    color: var(--text-primary);
+  }
   .tb-icon.active { color: var(--accent); }
 
   .tb-sep {

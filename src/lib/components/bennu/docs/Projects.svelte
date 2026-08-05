@@ -82,6 +82,13 @@
   carries a <strong>No JDK</strong> warning, because without one nothing — not even
   <code>String</code> — resolves.
 </p>
+<p>
+  <strong>Builds and test runs use that same install</strong>: it is handed to Maven as
+  <code>JAVA_HOME</code>, so the level your code is analysed at is the level it is compiled at. If no
+  JDK of that level is installed, the build inherits whatever <code>JAVA_HOME</code> your environment
+  already sets rather than being pointed at a different one — a compiler of the wrong version fails
+  with a message about the target release, which says nothing about the JDK that caused it.
+</p>
 
 <h2>Dependencies</h2>
 <p>

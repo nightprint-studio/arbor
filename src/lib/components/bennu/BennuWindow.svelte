@@ -24,7 +24,7 @@
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info,
     Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck,
-    TextCursorInput, ListChecks, BookOpen,
+    TextCursorInput, ListChecks, BookOpen, FlaskConical, ListRestart,
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -86,6 +86,7 @@
   import { isJavaFile, isJspFile, supportsCodeNav } from './file-kind';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
+  import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
@@ -97,6 +98,7 @@
   import { springStore } from '$lib/stores/bennu/spring.svelte';
   import { availableCatalogs } from './framework-catalogs';
   import { hotswapJsp } from '$lib/ipc/bennu/tomcat';
+  import { discoverTests } from '$lib/ipc/bennu/tests';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 
   onMount(() => {
@@ -143,7 +145,9 @@
     let detachIndex: (() => void) | undefined;
     let detachSpell: (() => void) | undefined;
     let detachDecompiled: (() => void) | undefined;
+    let detachTests: (() => void) | undefined;
     void bennuRunStore.attach().then((d) => { detachRun = d; });
+    void bennuTestStore.attach().then((d) => { detachTests = d; });
     void bennuIndexStore.attach().then((d) => { detachIndex = d; });
     void bennuSpellStore.attach().then((d) => { detachSpell = d; });
     // Reload a decompiled tab when its dependency sources finish downloading.
@@ -155,7 +159,8 @@
       window.removeEventListener('focus', onWindowFocus);
       window.removeEventListener('blur', stopPolling);
       stopPolling();
-      detachRun?.(); detachIndex?.(); detachSpell?.(); detachDecompiled?.(); bennuIndexStore.reset();
+      detachRun?.(); detachIndex?.(); detachSpell?.(); detachDecompiled?.(); detachTests?.();
+      bennuIndexStore.reset();
     };
   });
 
@@ -191,6 +196,9 @@
     if (root !== lastIndexedRoot) {
       lastIndexedRoot = root;
       bennuIndexStore.onProjectOpen(root);
+      // The test tree and its results belong to the project that produced them. Carrying
+      // them into the next one would show green rows for classes this project doesn't have.
+      untrack(() => bennuTestStore.reset());
     }
   });
 
@@ -228,8 +236,58 @@
     void bennuRunStore.runActive(root).then((ran) => { if (!ran) bennuUiStore.openRunConfig(); });
   }
 
+  // ── Tests ─────────────────────────────────────────────────────────────────────
+  /** Run every test in the project (Ctrl+Shift+F5 / palette). */
+  function triggerRunAllTests() {
+    const root = projectStore.project?.root;
+    if (root) void bennuTestStore.runAll(root);
+  }
+
+  /**
+   * Run the test **at the caret** (Ctrl+Shift+F10 — IntelliJ's "run context configuration").
+   *
+   * Resolves against a fresh scan of the file on disk rather than the cached project-wide
+   * discovery: this is the one path where being one save out of date means running the wrong
+   * thing. The method chosen is the last one declared at or above the caret — which is what
+   * "the test I am inside" means, since a method's body follows its signature. With the
+   * caret above the first test (in the imports, in a field) there is no method to mean, so
+   * the whole class runs.
+   */
+  async function triggerRunTestAtCaret() {
+    const root = projectStore.project?.root;
+    const file = projectStore.activeFilePath;
+    if (!root || !file) return;
+    const line = editor?.getCaretLine() ?? 1;
+    const classes = await discoverTests(root, { file }).catch(() => []);
+    // A file may declare several test classes (a nested `@Nested`, a helper beside the main
+    // one); the one that owns the caret is the last one that starts at or above it.
+    const owner = classes
+      .filter((c) => c.line <= line && !c.is_abstract)
+      .sort((a, b) => a.line - b.line)
+      .pop();
+    if (!owner) {
+      if (classes.length) toastStore.show('No runnable test class at the caret', 'info');
+      else toastStore.show('This file declares no tests', 'info');
+      return;
+    }
+    const method = owner.methods
+      .filter((m) => m.line <= line)
+      .sort((a, b) => a.line - b.line)
+      .pop();
+    if (method) void bennuTestStore.runCase(root, owner.selector, method.name);
+    else void bennuTestStore.runClass(root, owner.selector);
+  }
+
+  /** Whether the active file declares any test — gates the caret-run verb + its shortcut, so
+   *  the key is silent on a file where it could only ever say "nothing here". */
+  const activeFileHasTests = $derived(
+    !!projectStore.activeFilePath &&
+      bennuTestStore.classesInFile(projectStore.activeFilePath).length > 0,
+  );
+
   let editor = $state<{
     openGoto: () => void;
+    getCaretLine: () => number;
     openSearch: () => void;
     focusEditor: () => void;
     openIntentions: () => void;
@@ -336,6 +394,22 @@
     void springStore.loadOverview(root, true);
   });
 
+  /**
+   * Load the project's test classes once the index has settled.
+   *
+   * At the window level rather than inside the Tests panel, because the tree's "Run tests
+   * in…" entry has to know whether a folder contains any *before* it is clicked — and the
+   * panel may never have been opened. Deferred until indexing stops for the same reason the
+   * framework overview is: the walk parses every `.java` in the tree, and racing it against
+   * the indexer buys nothing.
+   */
+  $effect(() => {
+    const root = projectStore.project?.root ?? null;
+    const busyIndexing = bennuIndexStore.indexing;
+    if (!root || projectStore.isDemo || projectStore.isCargo || busyIndexing) return;
+    void bennuTestStore.discover(root);
+  });
+
   const leftTop = $derived<ActivityRailItem[]>([
     { id: 'project',   tooltip: 'Project',   shortcut: 'Alt+1', icon: FolderTree, active: bennuUiStore.leftPanel === 'project',   onclick: () => bennuUiStore.toggleLeft('project') },
     ...(javaTools
@@ -351,6 +425,11 @@
   // state mirrors the dock's open tab.
   const leftBottom = $derived<ActivityRailItem[]>([
     { id: 'build',    tooltip: 'Build', shortcut: 'Alt+0',      icon: Hammer,         active: bennuUiStore.bottomPanel === 'build',    onclick: () => bennuUiStore.toggleBottom('build') },
+    // Tests is Java-only, exactly like Structure and Dependencies: on a Cargo root the panel
+    // could only ever be empty, and its toggle would be the only way to close it again.
+    ...(javaTools
+      ? [{ id: 'tests', tooltip: 'Tests', shortcut: 'Alt+5', icon: FlaskConical, active: bennuUiStore.bottomPanel === 'tests', onclick: () => bennuUiStore.toggleBottom('tests') }]
+      : []),
     { id: 'problems', tooltip: 'Problems', shortcut: 'Alt+6',   icon: AlertTriangle,  active: bennuUiStore.bottomPanel === 'problems', onclick: () => bennuUiStore.toggleBottom('problems') },
     { id: 'todos',    tooltip: 'TODO', shortcut: 'Alt+7',       icon: ListTodo,       active: bennuUiStore.bottomPanel === 'todos',    onclick: () => bennuUiStore.toggleBottom('todos') },
     { id: 'terminal', tooltip: 'Terminal', shortcut: 'Alt+F12', icon: TerminalSquare, active: bennuUiStore.bottomPanel === 'terminal', onclick: () => bennuUiStore.toggleBottom('terminal') },
@@ -401,6 +480,7 @@
         right: java ? ['maven', 'services'] : [],
         bottom: [
           'problems', 'terminal', 'build', 'todos',
+          ...(java ? ['tests' as const] : []),
           ...(jsp ? ['forms' as const] : []),
           // Most framework catalogs have no rail button, so one left open after switching to a
           // project that doesn't offer it would be unclosable from the rail.
@@ -446,6 +526,8 @@
     'hammer': Hammer as unknown as IconComponent,
     'list-checks': ListChecks as unknown as IconComponent,
     'play': Play as unknown as IconComponent,
+    'flask': FlaskConical as unknown as IconComponent,
+    'rerun': ListRestart as unknown as IconComponent,
     'todo': ListTodo as unknown as IconComponent,
     'box': Box as unknown as IconComponent,
     'server': Server as unknown as IconComponent,
@@ -540,6 +622,7 @@
       { id: 'structure', title: 'Toggle Structure', icon: 'list-tree',   shortcut: 'Alt+2', action: () => run(() => bennuUiStore.toggleLeft('structure')), when: javaTools },
       { id: 'forms',     title: 'Toggle Forms',     icon: 'list',        shortcut: 'Alt+3', action: () => run(() => bennuUiStore.toggleBottom('forms')), when: jspTools },
       { id: 'dependencies', title: 'Dependencies',  icon: 'library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: javaTools },
+      { id: 'tests',     title: 'Toggle Tests',     icon: 'flask',       shortcut: 'Alt+5', action: () => run(() => bennuUiStore.toggleBottom('tests')), when: javaTools },
       { id: 'problems',  title: 'Toggle Problems',  icon: 'alert',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
       { id: 'todos',     title: 'Toggle TODO',      icon: 'todo',        shortcut: 'Alt+7', action: () => run(() => bennuUiStore.toggleBottom('todos')), when: true },
       { id: 'terminal',  title: 'Toggle Terminal',  icon: 'terminal',    shortcut: 'Alt+F12', action: () => run(() => bennuUiStore.toggleBottom('terminal')), when: true },
@@ -571,6 +654,9 @@
       })),
     ];
     const idle = !!projectStore.project && !bennuRunStore.active;
+    // A test run shares the backend's single-run lock with the build, so a test verb offered
+    // while either is in flight would only be refused.
+    const testsIdle = idle && javaTools && !bennuTestStore.running;
     const runItems = [
       { id: 'build', title: javaTools ? 'Build project' : 'Check project (cargo check)', icon: 'hammer', shortcut: 'Ctrl+F9',
         action: () => run(triggerBuild), when: idle },
@@ -582,6 +668,20 @@
         action: () => run(() => void bennuRunStore.stop()), when: bennuRunStore.running },
       { id: 'runcfg', title: 'Edit run configuration…', icon: 'sliders',
         action: () => run(() => bennuUiStore.openRunConfig()), when: !!projectStore.project && javaTools },
+      // Tests. Every one of these is also a button in the panel — but the panel has to be
+      // open to press one, and the point of the palette is to reach a verb from wherever you
+      // are. The caret verb is gated on the file actually declaring a test, so it is absent
+      // rather than present-and-useless everywhere else.
+      { id: 'test-all', title: 'Run all tests', icon: 'flask', shortcut: 'Ctrl+Shift+F5',
+        action: () => run(triggerRunAllTests), when: testsIdle },
+      { id: 'test-caret', title: 'Run test at caret', icon: 'play', shortcut: 'Ctrl+Shift+F10',
+        action: () => run(() => void triggerRunTestAtCaret()), when: testsIdle && activeFileHasTests },
+      { id: 'test-rerun', title: 'Rerun tests', icon: 'refresh-cw', shortcut: 'Ctrl+F5',
+        action: () => run(() => void bennuTestStore.rerun()), when: testsIdle && bennuTestStore.hasResults },
+      { id: 'test-rerun-failed', title: 'Rerun failed tests', icon: 'rerun',
+        action: () => run(() => void bennuTestStore.rerunFailed()), when: testsIdle && bennuTestStore.hasFailures },
+      { id: 'test-stop', title: 'Stop the test run', icon: 'hammer',
+        action: () => run(() => void bennuTestStore.stop()), when: bennuTestStore.running },
       { id: 'hotswap-all', title: 'Deploy all JSPs to Tomcat', icon: 'server',
         action: () => run(() => void deployToTomcat(true)), when: !!projectStore.project && javaTools },
     ];
@@ -688,10 +788,31 @@
       if (!projectStore.project || !javaTools || bennuRunStore.active) return;
       e.preventDefault(); triggerRun(); return;
     }
-    // Deploy current JSP to Tomcat (Ctrl+Shift+F10) — the JSP hot-swap.
+    /*
+     * Ctrl+Shift+F10 — IntelliJ's "run the thing in front of me". Which thing depends on
+     * what is open, and the two readings are disjoint: on a JSP it deploys the page, on a
+     * Java file that declares tests it runs the test at the caret. Anywhere else the key
+     * stays silent rather than picking one of the two at random.
+     */
     if (mod && e.shiftKey && !e.altKey && e.key === 'F10') {
       if (!projectStore.project || !javaTools) return;
+      if (isJspFile(projectStore.activeFilePath)) {
+        e.preventDefault(); void deployToTomcat(false); return;
+      }
+      if (activeFileHasTests && !bennuTestStore.running && !bennuRunStore.active) {
+        e.preventDefault(); void triggerRunTestAtCaret(); return;
+      }
+      // A Java file with no tests: keep the historical behaviour (deploy) so the key still
+      // does its old job everywhere it used to.
       e.preventDefault(); void deployToTomcat(false); return;
+    }
+    // Rerun the last test run (Ctrl+F5) / run them all (Ctrl+Shift+F5) — IntelliJ's Rerun.
+    if (mod && !e.altKey && e.key === 'F5') {
+      if (!projectStore.project || !javaTools || bennuTestStore.running || bennuRunStore.active) return;
+      e.preventDefault();
+      if (e.shiftKey) triggerRunAllTests();
+      else void bennuTestStore.rerun();
+      return;
     }
 
     // Find in project (Ctrl+Shift+F) — a modal, replacing the old Search rail.
@@ -735,6 +856,9 @@
       // digit like every other tool there, and only when the rail has it.
       if (e.key === '4' && catalogIds.includes('endpoints')) { e.preventDefault(); bennuUiStore.toggleBottom('endpoints'); return; }
       if (e.key === '6') { e.preventDefault(); bennuUiStore.toggleBottom('problems'); return; }
+      // Tests (Alt+5) — Java-only, like its rail icon: on a Cargo project the panel has
+      // nothing to show and no toggle on screen to close it again.
+      if (e.key === '5' && javaTools) { e.preventDefault(); bennuUiStore.toggleBottom('tests'); return; }
       if (e.key === '7') { e.preventDefault(); bennuUiStore.toggleBottom('todos'); return; }
       if (e.key === '0') { e.preventDefault(); bennuUiStore.toggleBottom('build'); return; }
       // The Java-only tools. Gated on `javaTools` for the same reason their rail icons and

@@ -21,7 +21,7 @@
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
-  import ArborLogo from '$lib/components/shared/internal/ArborLogo.svelte';
+  import ProductIcon from '$lib/components/shared/internal/ProductIcon.svelte';
   import WindowControls from '$lib/components/shared/WindowControls.svelte';
   import RecentProjectsModal from './RecentProjectsModal.svelte';
   // Profiles are a global Arbor concept (shared vault/settings across windows);
@@ -197,7 +197,7 @@
   settings={{ menu: settingsMenu, menuWidth: '260px', tooltip: 'Settings' }}
 >
   {#snippet logo()}
-    <ArborLogo size={22} />
+    <ProductIcon id="merula" size={22} />
   {/snippet}
 
   <!-- Project fast-swap -->

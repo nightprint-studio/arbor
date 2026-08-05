@@ -19,7 +19,7 @@
   import WorkspaceTabs from '$lib/components/shared/internal/WorkspaceTabs.svelte';
   import ArborLogo from '$lib/components/shared/internal/ArborLogo.svelte';
   import Kbd from '$lib/components/shared/internal/Kbd.svelte';
-  import Monogram from '$lib/components/shared/ui/Monogram.svelte';
+  import ProductIcon from '$lib/components/shared/internal/ProductIcon.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
@@ -69,9 +69,6 @@
   /** The two universal entry points; both are Git flows, so they go to Corvus. */
   function openProject() { void openProduct('corvus'); }
   function cloneRepo()   { void openProduct('corvus'); }
-
-  const accentOf = (product: string) =>
-    tools.find(t => t.id === product)?.accent ?? 'var(--accent)';
 
   /** Compact "when", the way a welcome screen wants it. */
   function whenLabel(openedAt: number): string {
@@ -177,7 +174,12 @@
           <div class="rgrid">
             {#each shownRecents as r (r.product + r.path)}
               <button type="button" class="rcard" onclick={() => openRecent(r)} title={r.path}>
-                <Monogram name={r.name} color={accentOf(r.product)} size={26} />
+                <!-- The PRODUCT's icon, not a monogram of the project name. A row already
+                     spells the project out in full on the next line, so a letter derived
+                     from it added nothing; what the row could not say was which application
+                     opens it — that was left to a tint, which is not something you can read.
+                     Same choice Toolbox makes for its recents, for the same reason. -->
+                <ProductIcon id={r.product} size={26} />
                 <span class="r-body">
                   <span class="r-name">{r.name}</span>
                   <span class="r-path">{r.path}</span>

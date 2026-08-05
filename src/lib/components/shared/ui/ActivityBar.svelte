@@ -159,6 +159,20 @@
      wouldn't match scoped descendant selectors written here. The class
      names are unique to ActivityBar so global scoping is safe. */
 
+  /*
+   * The rail carries the second half of the product's corner glow: the title bar's tint
+   * runs across the top, and this one turns it down the left edge, so the two read as one
+   * corner instead of as two unrelated stripes.
+   *
+   * Driven by `--product-tint` on the document root (see `routes/+page.svelte`) — with the
+   * variable unset the mix resolves to transparent and this costs nothing, which is why
+   * there is no prop and no class to keep in step.
+   *
+   * Stops in PIXELS so the glow is a fixed physical size: on a tall window a percentage
+   * would run the colour most of the way down the rail, which is a coloured sidebar, not a
+   * corner. Only the LEFT rail is tinted — the right one is nowhere near the corner, and
+   * colouring both would just be two stripes again.
+   */
   :global(.activity-bar) {
     display: flex;
     flex-direction: column;
@@ -168,6 +182,15 @@
     background: var(--bg-elevated);
     overflow: hidden;
     user-select: none;
+  }
+  :global(.activity-bar[data-side='left']) {
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--product-tint, transparent) 13%, transparent) 0px,
+      color-mix(in srgb, var(--product-tint, transparent) 4%, transparent) 70px,
+      transparent 190px
+    );
+    background-repeat: no-repeat;
   }
 
   :global(.activity-bar .ab-group) {
@@ -196,8 +219,11 @@
     position: relative;
   }
 
+  /* Translucent, like the title bar's: the top of this rail carries the product tint, and
+     an opaque hover fill would cut a grey square out of it. Mixed from `--text-primary`, so
+     the same rule lightens on a dark theme and darkens on a light one. */
   :global(.activity-bar .ab-btn:hover) {
-    background: var(--bg-hover);
+    background: color-mix(in srgb, var(--text-primary) 9%, transparent);
     color: var(--text-primary);
   }
 

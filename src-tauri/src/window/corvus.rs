@@ -74,7 +74,8 @@ fn build_corvus_window(app: &AppHandle) {
     let res = super::native_titlebar(builder).build();
 
     match res {
-        Ok(_) => {
+        Ok(w) => {
+            super::apply_product_icon(&w, "corvus");
             super::arm_ready_reveal(app, CORVUS_WINDOW_LABEL);
             tracing::info!("build_corvus_window: build() OK");
         }

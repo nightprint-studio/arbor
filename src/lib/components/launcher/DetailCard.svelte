@@ -8,8 +8,8 @@
    * product identity + action row overlay it. Together with the hill it reads as
    * a cross-section of the earth.
    */
-  import { hexA, RUN, type DecoratedTool } from './canopy';
-  import CanopyGlyph from './CanopyGlyph.svelte';
+  import { RUN, type DecoratedTool } from './canopy';
+  import ProductIcon from '$lib/components/shared/internal/ProductIcon.svelte';
   import CanopyVersionMenu from './CanopyVersionMenu.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
 
@@ -26,9 +26,9 @@
   // primary (Launch) / run (Open) → soft tonal; update (Update) → solid accent.
   const actionVariant = $derived(tool.kind === 'update' ? 'primary' : 'tonal');
   const actionColor = $derived(tool.kind === 'run' ? RUN : A);
-  const tileStyle = $derived(
-    `width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;flex:none;color:${A};background:${hexA(A, 0.13)};border:1px solid ${hexA(A, 0.24)};box-shadow:inset 0 0 18px ${hexA(A, 0.10)}`,
-  );
+  // The tinted tile that used to hold a glyph here is gone: the card now shows the product's
+  // REAL icon, which brings its own card and its own palette. Wrapping it in a second tinted
+  // square would have been a card inside a card.
 </script>
 
 <div class="card">
@@ -58,7 +58,7 @@
 
   <div class="card-content">
     <div class="head">
-      <div class="tile" style={tileStyle}><CanopyGlyph id={tool.glyphId} size={22} /></div>
+      <ProductIcon id={tool.id} size={40} />
       <div class="ident">
         <div class="name-row">
           <span class="name">{tool.name}</span>

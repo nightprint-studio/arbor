@@ -16,7 +16,7 @@
   import {
     FolderOpen, Folder, FileCode2, FolderTree, Plus, Crosshair,
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
-    Copy, LocateFixed, ChevronDown, ChevronRight, FileText,
+    Copy, LocateFixed, ChevronDown, ChevronRight, FileText, FlaskConical,
   } from 'lucide-svelte';
   import { tick } from 'svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
@@ -32,6 +32,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
+  import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import type { TreeNode } from '$lib/types/bennu';
@@ -240,13 +241,46 @@
     { id: 'new-file',  label: 'File',       icon: FileText },
   ];
 
+  /**
+   * The test classes a tree node stands for: everything under a directory, or the ones a
+   * file declares. Abstract bases are excluded — Surefire instantiates concrete classes, and
+   * naming one only makes the run report that it matched nothing.
+   */
+  function testsFor(node: TreeNode) {
+    return node.is_dir
+      ? bennuTestStore.classesUnder(node.path)
+      : bennuTestStore.classesInFile(node.path).filter((c) => !c.is_abstract);
+  }
+
+  /** Run every test the node stands for. */
+  function runTestsFor(node: TreeNode) {
+    const root = projectStore.project?.root;
+    const classes = testsFor(node);
+    if (!root || !classes.length) return;
+    void bennuTestStore.runClasses(root, classes.map((c) => c.selector));
+  }
+
   function onRowContextMenu(node: TreeNode, e: MouseEvent) {
     // "New file…" creates in this directory (dir node) or the file's directory (file node).
     const newDir = node.is_dir ? node.path : parentDir(node.path);
+    // Offered only where there is something to run — an entry that can only report "matched
+    // nothing" is worse than no entry, and on a source tree most folders have no tests.
+    const testCount = testsFor(node).length;
+    const runItem: MenuItem[] = testCount
+      ? [
+          {
+            id: 'run-tests',
+            label: testCount === 1 ? 'Run test' : `Run ${testCount} tests`,
+            icon: FlaskConical,
+          },
+          { separator: true, id: 'sep-tests', label: '' },
+        ]
+      : [];
     const items: MenuItem[] = node.is_dir
       ? [
           { id: 'new', label: 'New', icon: Plus, children: NEW_SUBMENU },
           { separator: true, id: 'sep-new', label: '' },
+          ...runItem,
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
           { separator: true, id: 'sep-dir', label: '' },
@@ -258,6 +292,7 @@
           { id: 'open',          label: 'Open',               icon: FolderOpen },
           { id: 'new', label: 'New', icon: Plus, children: NEW_SUBMENU },
           { separator: true, id: 'sep-file', label: '' },
+          ...runItem,
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
           { id: 'reveal',        label: 'Reveal in Project',  icon: LocateFixed },
@@ -268,6 +303,7 @@
         // kind list, or a plain file that only wants a name.
         case 'new-class': newFileKind = 'class'; newFileDir = newDir; break;
         case 'new-file':  newFileKind = 'file';  newFileDir = newDir; break;
+        case 'run-tests': runTestsFor(node); break;
         case 'open':      void projectStore.openFile(node.path); break;
         case 'copy-path': copyText(node.path); break;
         case 'copy-rel':  copyText(relativePath(node.path)); break;

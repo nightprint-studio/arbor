@@ -8,6 +8,7 @@
   <li><kbd>Alt</kbd> + <kbd>2</kbd> — toggle <strong>Structure</strong> (symbols)</li>
   <li><kbd>Alt</kbd> + <kbd>N</kbd> — toggle <strong>Dependencies</strong> (by module)</li>
   <li><kbd>Alt</kbd> + <kbd>0</kbd> — toggle <strong>Build</strong> (bottom dock)</li>
+  <li><kbd>Alt</kbd> + <kbd>5</kbd> — toggle <strong>Tests</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>6</kbd> — toggle <strong>Problems</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>7</kbd> — toggle <strong>TODO</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>3</kbd> — toggle <strong>Forms</strong> — JSP form analysis (bottom dock)</li>
@@ -45,9 +46,23 @@
 <ul>
   <li><kbd>Ctrl</kbd> + <kbd>F9</kbd> — <strong>build</strong> the project — runs the type chosen on the Build split-button: a Maven compile (<code>javac</code> fallback), or a whole-project <strong>validation without compiling</strong>. In a Cargo project it runs <code>cargo check</code> over the workspace</li>
   <li><kbd>Shift</kbd> + <kbd>F10</kbd> — <strong>run</strong> (builds first, then launches the main class) — Maven projects only</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd> — <strong>deploy the current JSP</strong> to the linked Tomcat (hot-swap)</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd> — <strong>run what is in front of you</strong>: the test at the caret in a Java test file, or a hot-swap deploy of the current JSP</li>
 </ul>
 <p>In a Maven project the <strong>Build</strong> button is a split-button: click it to run the current type, or open its chevron to pick <em>Maven build</em> or <em>Validate (no compile)</em> — the choice is remembered and becomes what <kbd>Ctrl</kbd> + <kbd>F9</kbd> runs. In a Cargo project there is one build and the button is plain. Validation checks every <code>.java</code> file with the editor's diagnostics, reports timing statistics (total, average, slowest file) in the Build tool window, and lists every problem it finds in the <strong>Problems</strong> panel, grouped by file. Only one build or validation runs at a time. Output streams to the <strong>Build</strong> tool window; problems there are clickable and jump to the offending line. The main class is set once per project from the run configuration (▷ menu → <em>Edit configurations…</em>).</p>
+
+<h2>Tests</h2>
+<ul>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd> — run the <strong>test at the caret</strong>: the method you are inside, or the whole class when the caret is above the first test</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F5</kbd> — run <strong>every test</strong> in the project</li>
+  <li><kbd>Ctrl</kbd> + <kbd>F5</kbd> — <strong>rerun</strong> exactly what ran last</li>
+  <li>Command palette — <strong>Rerun failed tests</strong>, and <strong>Stop the test run</strong></li>
+</ul>
+<p>
+  Inside the Tests panel the tree is driven from the keyboard: <kbd>↑</kbd> <kbd>↓</kbd> move,
+  <kbd>→</kbd> <kbd>←</kbd> expand and collapse a class, <kbd>Enter</kbd> jumps to the source and
+  <kbd>Ctrl</kbd> + <kbd>Enter</kbd> runs whatever the cursor is on. See
+  <em>Testing</em> for what the panel shows.
+</p>
 
 <h2>Frameworks</h2>
 <ul>

@@ -12,7 +12,7 @@
    *
    * Scaffolding: the vault chip has no picker behind it yet.
    */
-  import ArborLogo from '$lib/components/shared/internal/ArborLogo.svelte';
+  import ProductIcon from '$lib/components/shared/internal/ProductIcon.svelte';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import Monogram from '$lib/components/shared/ui/Monogram.svelte';
@@ -51,7 +51,7 @@
   menuWidth="250px"
 >
   {#snippet logo()}
-    <ArborLogo size={22} />
+    <ProductIcon id="garrulus" size={22} />
   {/snippet}
 
   {#snippet center()}

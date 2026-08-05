@@ -11,24 +11,20 @@
  * Svelte rendering and interaction; this file has no Svelte/Tauri imports.
  */
 
+import { PRODUCTS, type ProductIdentity } from '$lib/utils/products';
+
 // Runtime status — derived per render from real signals (window open? version
 // behind?), not stored on the product. `installed` here means "installed and
 // up-to-date".
 export type ToolStatus = 'installed' | 'running' | 'update';
 
 /** Static identity of a Canopy product (the dynamic bits — running, versions —
- *  come from the launcher at runtime; see `ToolRuntime` / `decorate`). */
-export interface Product {
-  id: string;
-  name: string;
-  bird: string;
-  /** One-line label, for tight spots (the tree's footer, a tooltip). */
-  role: string;
-  accent: string;
-  /** A sentence or two on what the product actually does — the welcome page has
-   *  the room for it, and "Git & CI client" tells a newcomer nothing. */
-  blurb?: string;
-}
+ *  come from the launcher at runtime; see `ToolRuntime` / `decorate`).
+ *
+ *  Defined in `$lib/utils/products` and aliased here: the roster is the whole suite's, not
+ *  the launcher's. It used to be declared in this file, which is how the accent here and the
+ *  palette on the icons drifted into two different answers for the same product. */
+export type Product = ProductIdentity;
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 export const GREEN = '#8fce6a';   // brand / installed
@@ -41,28 +37,11 @@ export const CANOPY_H = 600;
 // The three products that actually exist today, each mapping to a real Arbor
 // window (`PRODUCT_WINDOW_OPENERS` in `ipc/app.ts`). Identity only — version and
 // running state are resolved at runtime (see `versions.ts` + `decorate`).
-export const BASE: Product[] = [
-  { id: 'corvus', name: 'Corvus', bird: 'crow',        role: 'Git & CI client',     accent: '#7c9cf5',
-    blurb: 'Branches, commits and diffs, merge requests, pipelines and issues — the whole day-to-day of a repository in one window.' },
-  { id: 'merula', name: 'Merula', bird: 'blackbird',   role: 'Music synthesizer',   accent: '#e8a857',
-    blurb: 'Live-coding DAW: write patterns in a text DSL and hear them immediately, with sample banks, a mixer and audio export.' },
-  { id: 'sitta',  name: 'Sitta',  bird: 'treecreeper', role: 'File explorer',       accent: '#b58cf0',
-    blurb: 'A file manager that knows about git: status overlays while you browse, plus preview, search and the usual file operations.' },
-  { id: 'tyto',   name: 'Tyto',   bird: 'barn owl',    role: 'Screen recorder',     accent: '#f28b82',
-    blurb: 'Screen capture from the tray: record a region or a window, or grab a still, without hunting for the app first.' },
-  // TODO(user): confirm bird label + accent — Bennu is a mythical firebird (not a
-  // real species like the others), so `bird: 'firebird'` is a placeholder.
-  { id: 'bennu',  name: 'Bennu',  bird: 'firebird',    role: 'Java editor',         accent: '#f2c14e',
-    blurb: 'Editor and semantic engine for legacy Java: navigation, live validation, refactors and run configurations.' },
-  // TODO(user): confirm accent — picked to read as distinct from Corvus's blue
-  // and Merula's amber on the canopy.
-  { id: 'picus',  name: 'Picus',  bird: 'woodpecker',  role: 'SQL studio',          accent: '#4fbfa8',
-    blurb: 'Oracle and PostgreSQL client, and maintainer of the SQL scripts they install from: it keeps the two dialect branches in step and generates the changes that keep them there.' },
-  // The jay caches acorns in a thousand places and remembers every one — the
-  // bird the product is named for, and the behaviour it is for.
-  { id: 'garrulus', name: 'Garrulus', bird: 'jay',     role: 'Note e appunti',      accent: '#3fb6d9',
-    blurb: 'A vault of plain markdown notes — links, tags, tasks and templates per note kind — that keeps itself in step across your machines. The files stay yours: any other markdown editor opens the same folder.' },
-];
+//
+// The roster itself is `PRODUCTS` — the suite's, not the launcher's, so the tree's node
+// colour and the tint on that product's window cannot disagree. The order here is the order
+// the branches fan out in.
+export const BASE: Product[] = PRODUCTS;
 
 // ── Colour helpers ───────────────────────────────────────────────────────────
 export function hexA(h: string, a: number): string {
@@ -127,7 +106,6 @@ export interface DecoratedTool extends Product {
   isUpd: boolean;
   isRun: boolean;
   verMenu: { v: string; active: boolean }[];
-  glyphId: string;
 }
 
 /** Compare two dotted version strings; true when `a` is strictly newer than `b`. */
@@ -172,7 +150,6 @@ export function decorate(t: Product, rt: ToolRuntime, green = GREEN): DecoratedT
     isUpd: status === 'update',
     isRun: status === 'running',
     verMenu: versions.map(vv => ({ v: vv, active: vv === rt.installed })),
-    glyphId: t.id, // CanopyGlyph falls back to the generic mark for unknown ids
   };
 }
 
@@ -266,7 +243,7 @@ export interface DotEl { cx: number; cy: number; r: number; fill: string; stroke
 export interface NodeEl {
   id: string; x: number; y: number; accent: string; r: number;
   sel: boolean; op: number; isUpd: boolean; isRun: boolean;
-  showLabel: boolean; name: string; glyphId: string;
+  showLabel: boolean; name: string;
 }
 export interface Scene {
   glow: TraceEl[]; trace: TraceEl[]; dots: DotEl[]; nodes: NodeEl[];
@@ -315,7 +292,7 @@ export function buildScene(geo: Geometry, tools: DecoratedTool[], selId: string,
       r: sel ? 32 : 27,
       sel, op: (filter !== 'all' && !match) ? 0.16 : 1,
       isUpd: tool.isUpd, isRun: tool.isRun,
-      showLabel: true, name: tool.name, glyphId: tool.glyphId,
+      showLabel: true, name: tool.name,
     });
   });
 

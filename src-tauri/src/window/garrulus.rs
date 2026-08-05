@@ -74,7 +74,10 @@ fn build_garrulus_window(app: &AppHandle) {
     let res = super::native_titlebar(builder).build();
 
     match res {
-        Ok(_) => super::arm_ready_reveal(app, GARRULUS_WINDOW_LABEL),
+        Ok(w) => {
+            super::apply_product_icon(&w, "garrulus");
+            super::arm_ready_reveal(app, GARRULUS_WINDOW_LABEL)
+        }
         Err(e) => tracing::error!("failed to open garrulus window: {e}"),
     }
 }

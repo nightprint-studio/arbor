@@ -26,7 +26,7 @@
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import Contribution from '$lib/components/corvus/Contribution.svelte';
   import PluginIcon   from '$lib/components/plugins/PluginIcon.svelte';
-  import ArborLogo    from '$lib/components/shared/internal/ArborLogo.svelte';
+  import ProductIcon  from '$lib/components/shared/internal/ProductIcon.svelte';
   import WorkspaceTabs from '$lib/components/shared/internal/WorkspaceTabs.svelte';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import WindowControls from './WindowControls.svelte';
@@ -180,7 +180,7 @@
   }}
 >
   {#snippet logo()}
-    <ArborLogo size={22} />
+    <ProductIcon id="corvus" size={22} />
   {/snippet}
 
   {#snippet center()}

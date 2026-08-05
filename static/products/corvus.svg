@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    Corvus · option 7 — "C constellation"
+    The constellation idea, bent into the initial. Seven stars laid on a circular arc and
+    joined by straight lines: straight, because that is how a constellation is drawn — a
+    curve between two stars would be an illustration of a C, and what makes this one work is
+    that it is a real figure that happens to spell one.
+    The two terminals and the far-left star are the bright ones, so the eye travels the C in
+    order instead of seeing seven equal dots. One edge runs off past the top terminal: the
+    branch keeps going.
+  -->
+  <defs>
+    <linearGradient id="cv7-bg" x1="256" y1="0" x2="256" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#241a47"/><stop offset="55%" stop-color="#171132"/><stop offset="100%" stop-color="#0d0a1e"/>
+    </linearGradient>
+    <linearGradient id="cv7-w1" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4c3af5"/><stop offset="100%" stop-color="#a99bff"/></linearGradient>
+    <linearGradient id="cv7-w2" x1="1" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c7a6ff"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient>
+    <linearGradient id="cv7-w3" x1="1" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#7c3aed"/><stop offset="100%" stop-color="#b98cff"/></linearGradient>
+    <linearGradient id="cv7-w4" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#a21caf"/><stop offset="100%" stop-color="#f0abfc"/></linearGradient>
+    <linearGradient id="cv7-edge" x1="335" y1="150" x2="150" y2="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#f0abfc"/><stop offset="50%" stop-color="#a855f7"/><stop offset="100%" stop-color="#6d4bff"/>
+    </linearGradient>
+    <radialGradient id="cv7-star" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#ffffff"/><stop offset="40%" stop-color="#e9d5ff"/><stop offset="100%" stop-color="#a855f7"/>
+    </radialGradient>
+    <filter id="cv7-glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="cv7-bright" x="-110%" y="-110%" width="320%" height="320%">
+      <feGaussianBlur stdDeviation="14" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <clipPath id="cv7-card"><rect x="0" y="0" width="512" height="512" rx="112" ry="112"/></clipPath>
+  <rect x="0" y="0" width="512" height="512" rx="112" ry="112" fill="url(#cv7-bg)"/>
+  <g clip-path="url(#cv7-card)">
+    <polygon points="0,0 260,0 0,260" fill="url(#cv7-w1)"/>
+    <polygon points="512,0 512,260 252,0" fill="url(#cv7-w2)"/>
+    <polygon points="0,512 0,252 260,512" fill="url(#cv7-w3)"/>
+    <polygon points="512,512 252,512 512,252" fill="url(#cv7-w4)"/>
+    <rect x="68" y="68" width="376" height="376" rx="56" ry="56" fill="#120e26"/>
+    <rect x="68" y="68" width="376" height="80" rx="56" ry="56" fill="#ffffff" fill-opacity="0.04"/>
+  </g>
+
+  <!-- Background sky, well away from the figure so it never competes with it. -->
+  <g fill="#c7a6ff" opacity="0.3">
+    <circle cx="392" cy="404" r="4"/><circle cx="410" cy="240" r="3.2"/>
+    <circle cx="368" cy="122" r="3"/><circle cx="120" cy="150" r="3.4"/>
+    <circle cx="128" cy="404" r="3"/><circle cx="392" cy="300" r="2.6"/>
+  </g>
+
+  <!--
+    The figure. Seven stars on a circle of radius 118 about the centre, from 48° round
+    through 180° to 312° — the arc that leaves the gap on the right and makes it a C.
+  -->
+  <g stroke="url(#cv7-edge)" stroke-linecap="round" fill="none" filter="url(#cv7-glow)">
+    <path d="M 335 168 L 246 138" stroke-width="14"/>
+    <path d="M 246 138 L 166 180" stroke-width="14"/>
+    <path d="M 166 180 L 138 256" stroke-width="14"/>
+    <path d="M 138 256 L 166 332" stroke-width="14"/>
+    <path d="M 166 332 L 246 374" stroke-width="14"/>
+    <path d="M 246 374 L 335 344" stroke-width="14"/>
+    <!-- The edge that leaves the frame. -->
+    <path d="M 335 168 L 404 140" stroke-width="10" opacity="0.5"/>
+  </g>
+
+  <!-- The stars, as commit nodes. Size follows brightness, which here means "where the eye
+       should start and stop". -->
+  <g fill="#120e26">
+    <circle cx="335" cy="168" r="25" stroke="#e9d5ff" stroke-width="9" filter="url(#cv7-glow)"/>
+    <circle cx="138" cy="256" r="24" stroke="#d8b4fe" stroke-width="9" filter="url(#cv7-glow)"/>
+    <circle cx="335" cy="344" r="25" stroke="#e9d5ff" stroke-width="9" filter="url(#cv7-glow)"/>
+    <circle cx="246" cy="138" r="16" stroke="#c084fc" stroke-width="7"/>
+    <circle cx="166" cy="180" r="14" stroke="#a855f7" stroke-width="7"/>
+    <circle cx="166" cy="332" r="14" stroke="#a855f7" stroke-width="7"/>
+    <circle cx="246" cy="374" r="16" stroke="#c084fc" stroke-width="7"/>
+  </g>
+
+  <g filter="url(#cv7-bright)">
+    <circle cx="335" cy="168" r="10" fill="url(#cv7-star)"/>
+    <circle cx="138" cy="256" r="9" fill="url(#cv7-star)"/>
+    <circle cx="335" cy="344" r="10" fill="url(#cv7-star)"/>
+  </g>
+</svg>

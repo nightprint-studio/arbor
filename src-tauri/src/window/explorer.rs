@@ -140,7 +140,11 @@ fn build_explorer_window(app: &AppHandle, label: &str) {
     let res = super::native_titlebar(builder).build();
 
     match res {
-        Ok(_) => super::arm_ready_reveal(app, label),
+        // The explorer window IS Sitta — the label predates the product name.
+        Ok(w) => {
+            super::apply_product_icon(&w, "sitta");
+            super::arm_ready_reveal(app, label)
+        }
         Err(e) => tracing::error!("failed to open explorer window: {e}"),
     }
 }

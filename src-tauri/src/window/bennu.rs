@@ -65,7 +65,10 @@ fn build_bennu_window(app: &AppHandle) {
     let res = super::native_titlebar(builder).build();
 
     match res {
-        Ok(_) => super::arm_ready_reveal(app, BENNU_WINDOW_LABEL),
+        Ok(w) => {
+            super::apply_product_icon(&w, "bennu");
+            super::arm_ready_reveal(app, BENNU_WINDOW_LABEL)
+        }
         Err(e) => tracing::error!("failed to open bennu window: {e}"),
     }
 }

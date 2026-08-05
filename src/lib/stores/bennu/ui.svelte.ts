@@ -7,9 +7,9 @@
  *
  * Tool-window layout (IntelliJ New UI):
  *   • LEFT rail (top)     — Project (tree), Structure (symbols), Dependencies.
- *   • LEFT rail (bottom)  — bottom-dock toggles: Build, Problems, TODO, Terminal.
+ *   • LEFT rail (bottom)  — bottom-dock toggles: Build, Tests, Problems, TODO, Terminal.
  *   • RIGHT rail          — Maven (top); Services + the Forms toggle (bottom).
- *   • BOTTOM dock         — Build · Problems · TODO · Forms · Terminal, tabbed.
+ *   • BOTTOM dock         — Build · Tests · Problems · TODO · Forms · Terminal, tabbed.
  *                           Toggles live in the left rail (+ Forms in the right rail bottom).
  * Find-in-project is a modal (Ctrl+Shift+F), not a rail tool.
  *
@@ -35,6 +35,7 @@ export type BottomPanel =
   | 'problems'
   | 'terminal'
   | 'build'
+  | 'tests'
   | 'todos'
   | 'forms'
   | 'beans'

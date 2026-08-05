@@ -186,6 +186,11 @@ mod frameworks;
 // `bennu_detect_tomcat` (validate a Tomcat root + resolve the deployed context) + `bennu_hotswap_jsp`
 // (copy one/all JSPs into the exploded webapp so Jasper recompiles them — no redeploy/restart).
 mod tomcat;
+// Unit tests (`bennu-test`): `bennu_discover_tests` (what in the project IS a test) +
+// `bennu_run_tests` / `bennu_cancel_tests` (run a scope of them through Maven, streaming
+// per-class results as Surefire writes its reports). Shares the build's single-run lock —
+// two Maven processes on one tree fight over `target/`.
+mod tests;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, `bennu_config_dir()` /

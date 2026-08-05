@@ -70,6 +70,10 @@ bennu-jpa = { path = "../jpa" }
 # Unlike the other two it is not capability-gated — the resolved grammar is its gate, and a
 # document nothing describes costs one scan and one map lookup.
 bennu-xml = { path = "../xml" }
+# The unit-test half: what in the sources IS a test, the `mvn` arguments for a chosen scope,
+# and the Surefire XML read back into per-case results. Pure — the spawn, the streaming and
+# the report watch are this crate's `tests` domain.
+bennu-test = { path = "../test" }
 # What the project depends on, read out of its poms and matched against the classpath the
 # index service already resolved. Not an extension — it answers about the build, not about a
 # buffer — so it hangs off its own domain rather than the registry.

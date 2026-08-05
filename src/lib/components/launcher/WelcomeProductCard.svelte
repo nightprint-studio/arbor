@@ -8,7 +8,7 @@
    * accent is the product's own, used only on the tile, the running edge and
    * the action, so five cards read as a family.
    */
-  import Monogram from '$lib/components/shared/ui/Monogram.svelte';
+  import ProductIcon from '$lib/components/shared/internal/ProductIcon.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
@@ -29,7 +29,14 @@
 
 <article class="pc" class:running={tool.isRunning} style="--pc:{tool.accent}">
   <div class="pc-top">
-    <Monogram name={tool.name} color={tool.accent} size={46} />
+    <!-- The product's REAL icon — the one the OS shows in the taskbar — not a generic
+         monogram. `Monogram` derives a letter from whatever name it is handed, which is
+         right for a repository or a workspace (things with no artwork of their own) and
+         wrong here. The card has the room for the actual thing, and this screen exists to
+         answer "which of these do I open": the answer should look like what you will be
+         looking at afterwards.
+         No tinted tile around it either — the icon brings its own card and its own palette. -->
+    <ProductIcon id={tool.id} size={46} />
     <div class="pc-ident">
       <div class="pc-name">{tool.name}</div>
       <div class="pc-role">{tool.role}</div>

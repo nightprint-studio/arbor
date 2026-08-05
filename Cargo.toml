@@ -85,6 +85,7 @@ members = [
     "crates/products/bennu/deps",
     "crates/products/bennu/query",
     "crates/products/bennu/check",
+    "crates/products/bennu/test",
     "crates/products/bennu/intel",
     "crates/products/bennu/be",
     "crates/products/picus/types",

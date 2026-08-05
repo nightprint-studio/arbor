@@ -163,7 +163,10 @@ fn build_tyto_window(app: &AppHandle) {
     let res = super::native_titlebar(builder).build();
 
     match res {
-        Ok(_) => super::arm_ready_reveal(app, TYTO_WINDOW_LABEL),
+        Ok(w) => {
+            super::apply_product_icon(&w, "tyto");
+            super::arm_ready_reveal(app, TYTO_WINDOW_LABEL)
+        }
         Err(e) => tracing::error!("failed to open tyto window: {e}"),
     }
 }

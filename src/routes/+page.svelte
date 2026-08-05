@@ -3,6 +3,8 @@
   import type { Component } from 'svelte';
   import { signalWindowReady } from '$lib/ipc/window';
   import { applyOsAttribute, watchFullscreen } from '$lib/utils/platform';
+  import { productAccent, productForWindowLabel } from '$lib/utils/products';
+  import { surfaceStore } from '$lib/stores/surfaces.svelte';
 
   // Stamp `<html data-os>` before any shell mounts so title-bar chrome reserves
   // the macOS traffic-light gutter on its very first paint. Runs in every window.
@@ -75,6 +77,31 @@
   $effect(() => {
     if (!Shell || OWNS_REVEAL) return;
     requestAnimationFrame(() => requestAnimationFrame(() => void signalWindowReady().catch(() => {})));
+  });
+
+  /**
+   * The product tint — set once here, on the document root, and read by every piece of
+   * chrome that wants it (`var(--product-tint)`): the title bar and the activity rail.
+   *
+   * Here rather than as a prop on each of them, because the two have to be visually
+   * CONTINUOUS — the colour runs across the top and turns down the left, and two components
+   * each told their own colour would eventually be told different ones. One variable cannot
+   * drift from itself.
+   *
+   * In the tabbed container the tint follows the ACTIVE TAB rather than the window: that
+   * window is not a product, it is whichever product you are looking at, and its title bar
+   * is that product's own. Everywhere else it is the window's label. `home`, the launcher
+   * and the overlays resolve to nothing, and nothing is the correct answer — they are Arbor,
+   * not a product.
+   */
+  const tintFor = $derived(
+    surfaceStore.inContainer ? (surfaceStore.active ?? '') : (productForWindowLabel(label) ?? ''),
+  );
+  $effect(() => {
+    const accent = productAccent(tintFor);
+    const root = document.documentElement.style;
+    if (accent) root.setProperty('--product-tint', accent);
+    else root.removeProperty('--product-tint');
   });
 </script>
 
