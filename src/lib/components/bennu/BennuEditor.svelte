@@ -69,6 +69,11 @@
   import { applyByteEdits } from './rename-apply';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
+  // The gutter's breakpoints and the paused line — both are the debugger's state seen from
+  // the editor, and both are read-only here: the store owns them and persists them.
+  import { bennuDebugStore, canonFile } from '$lib/stores/bennu/debug.svelte';
+  // Which lines compile to bytecode — the gutter offers a breakpoint only on those.
+  import { breakpointableLines } from './breakpoint-lines';
   import { spellcheck as ipcSpellcheck, type SpellHit } from '$lib/ipc/bennu/spell';
   import { mojibakeCheck as ipcMojibakeCheck } from '$lib/ipc/bennu/mojibake';
   import { intentionsAt as ipcIntentionsAt } from '$lib/ipc/bennu/intentions';
@@ -438,6 +443,134 @@
       if (t) openDefinitionFile(t.file, t.offset);
     });
   }
+
+  // ── Breakpoints (the flag gutter) ─────────────────────────────────────────────
+
+  /** Whether this file can hold a breakpoint at all. A decompiled view has no line numbers
+   *  that mean anything to the VM, and a `.properties` file compiles to nothing — offering a
+   *  gutter there is offering a click that can only ever be pending. */
+  const canBreak = $derived(!!activePath && isJavaFileOf(activePath) && !isDecompiledView);
+
+  /**
+   * The gutter's dots: solid where the VM accepted the breakpoint, hollow where it is waiting
+   * for a class to load, muted where it is disabled.
+   *
+   * The distinction is the whole value of showing verification: "waiting for the class to
+   * load" resolves itself the moment the program touches it, and "that line has no code"
+   * never will — and staring at a breakpoint that will never be hit is the single most
+   * expensive way to misread a debugger.
+   */
+  const breakpointMarks = $derived.by(() => {
+    const root = projectStore.project?.root;
+    if (!root || !activePath || !canBreak) return [];
+    return bennuDebugStore.breakpointsIn(root, activePath).map((b) => {
+      const status = bennuDebugStore.statusOf(b.file, b.line);
+      const classes = ['cm-bp'];
+      if (!b.enabled) classes.push('cm-bp-off');
+      else if (status && !status.verified) classes.push('cm-bp-pending');
+      return {
+        line: b.line,
+        className: classes.join(' '),
+        tooltip: !b.enabled
+          ? 'Breakpoint (disabled) — right-click for more'
+          : (status?.message || 'Breakpoint — click to remove, right-click for more'),
+      };
+    });
+  });
+
+  /**
+   * The lines a breakpoint may be set on — those that compile to bytecode.
+   *
+   * Recomputed off the live buffer on a debounce, like the framework marks above: it is a scan
+   * of one file, but it is not worth doing per keystroke, and being a beat stale only means the
+   * line you are halfway through typing does not offer a dot yet.
+   */
+  let breakpointable = $state<Set<number>>(new Set());
+  $effect(() => {
+    if (!canBreak || !activePath) {
+      breakpointable = new Set();
+      return;
+    }
+    const src = projectStore.sourceOf(activePath);
+    const t = setTimeout(() => { breakpointable = breakpointableLines(src); }, 200);
+    return () => clearTimeout(t);
+  });
+
+  /** A new identity per recomputation, which is what tells the editor its column has changed. */
+  const canFlagLine = $derived.by(() => {
+    const lines = breakpointable;
+    return (line: number) => lines.has(line);
+  });
+
+  function onBreakpointClick(line: number) {
+    const root = projectStore.project?.root;
+    if (root && activePath && canBreak) bennuDebugStore.toggleBreakpoint(root, activePath, line);
+  }
+
+  /**
+   * Set or clear a breakpoint on the caret's line (Ctrl+F8).
+   *
+   * Here rather than in the window's key handler because the rule about *where* a breakpoint
+   * may go is a property of the buffer, and the buffer is here — routing the shortcut through
+   * the store directly would be a second answer to the same question.
+   */
+  export function toggleBreakpointAtCaret(): boolean {
+    const root = projectStore.project?.root;
+    if (!root || !activePath || !canBreak) return false;
+    if (!breakpointable.has(caretLine)) {
+      const existing = bennuDebugStore
+        .breakpointsIn(root, activePath)
+        .some((b) => b.line === caretLine);
+      if (!existing) return false;
+    }
+    bennuDebugStore.toggleBreakpoint(root, activePath, caretLine);
+    return true;
+  }
+
+  /** Right-click a breakpoint: enable/disable it, or drop it. On a line with none it just
+   *  offers to set one, so the menu is never empty and never lies about what is there. */
+  function onBreakpointContext(line: number, e: MouseEvent) {
+    const root = projectStore.project?.root;
+    if (!root || !activePath || !canBreak) return;
+    const path = activePath;
+    const existing = bennuDebugStore.breakpointsIn(root, path).find((b) => b.line === line);
+    const items: MenuItem[] = existing
+      ? [
+          { id: 'toggle', label: existing.enabled ? 'Disable breakpoint' : 'Enable breakpoint' },
+          { id: 'remove', label: 'Remove breakpoint' },
+          { id: 'sep', separator: true },
+          { id: 'clear', label: 'Remove all breakpoints in this project' },
+        ]
+      : [{ id: 'add', label: 'Set breakpoint' }];
+    bennuContextMenuStore.show(e.clientX, e.clientY, items, (id) => {
+      if (id === 'add') bennuDebugStore.toggleBreakpoint(root, path, line);
+      else if (id === 'remove') bennuDebugStore.removeBreakpoint(root, path, line);
+      else if (id === 'clear') bennuDebugStore.clearBreakpoints(root);
+      else if (id === 'toggle' && existing) {
+        bennuDebugStore.setBreakpointEnabled(root, path, line, !existing.enabled);
+      }
+    });
+  }
+
+  /** Editing moved lines the gutter had dots on — follow them (see the store). */
+  function onBreakpointsMoved(moves: readonly { from: number; to: number }[]) {
+    const root = projectStore.project?.root;
+    if (root && activePath) bennuDebugStore.moveBreakpoints(root, activePath, moves);
+  }
+
+  /**
+   * The line the debugger is stopped on — a whole-line band, not a mark over the text.
+   *
+   * Only when the *selected frame* is in this file: the panel drives which frame you are
+   * looking at, and highlighting frame 0's line in a file you are not looking at would put a
+   * marker where nothing is happening.
+   */
+  const pausedLine = $derived.by(() => {
+    const frame = bennuDebugStore.currentFrame;
+    if (!frame?.file || !frame.line || !activePath) return [];
+    if (canonFile(frame.file).toLowerCase() !== canonFile(activePath).toLowerCase()) return [];
+    return [{ line: frame.line, className: 'cm-paused-line' }];
+  });
 
   /** Map backend byte spans to the editor's UTF-16 offsets + a CSS class per kind. */
   function toSpringMarks(src: string, hs: ExtHighlight[]) {
@@ -1700,8 +1833,14 @@
           readOnly={isDecompiledView}
           diagnostics={allDiags}
           marks={springMarks}
+          lineHighlights={pausedLine}
           gutterMarks={springGutterMarks}
           onGutterClick={onSpringGutterClick}
+          flagMarks={canBreak ? breakpointMarks : undefined}
+          canFlag={canFlagLine}
+          onFlagClick={onBreakpointClick}
+          onFlagContext={onBreakpointContext}
+          onFlagsMoved={onBreakpointsMoved}
           rulerColumn={bennuSettingsStore.rightMargin}
           minimap={false}
           scrollbarOverview={bennuSettingsStore.minimap}
@@ -1891,7 +2030,7 @@
     pointer-events: auto;
   }
   .ed-health-item { display: inline-flex; align-items: center; gap: 3px; }
-  .ed-health-item.err { color: var(--danger); }
+  .ed-health-item.err { color: var(--error); }
   .ed-health-item.warn { color: var(--warning); }
   .ed-health-item.ok { color: var(--success); }
 
@@ -2062,4 +2201,24 @@
     color: var(--text-muted); font-family: var(--font-code); font-weight: 600;
   }
   :global(.cm-fw-gutter-usage:hover) { color: var(--accent); }
+
+  /* Breakpoints. Solid = the VM accepted it. Hollow = it is waiting for the class to load,
+     which resolves itself. Muted = disabled. The three read differently at a glance because
+     the difference between them is what tells you whether to keep waiting. */
+  :global(.cm-flag-icon.cm-bp-pending) {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px var(--error);
+  }
+  :global(.cm-flag-icon.cm-bp-off) {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px var(--text-muted);
+  }
+
+  /* Where the program is stopped, on the frame you are looking at. A full-width band with a
+     bar down its left edge — the band says WHICH row and the bar says it is the execution
+     point rather than a selection, which is the distinction IntelliJ draws the same way. */
+  :global(.cm-paused-line) {
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
 </style>

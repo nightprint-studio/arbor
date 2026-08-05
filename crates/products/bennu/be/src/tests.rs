@@ -235,6 +235,9 @@ fn bennu_run_tests(ctx: &BennuState, args: RunTestsArgs) -> Result<TestRunHandle
         LiveRun { child: child.clone(), cancelled: Arc::new(Mutex::new(false)) },
     );
 
+    // One lookup for the whole run — every frame of every failure resolves through it.
+    let classes = crate::log::class_map(&args.root);
+
     let thread_id = run_id.clone();
     let thread_totals = totals.clone();
     std::thread::Builder::new()
@@ -245,10 +248,24 @@ fn bennu_run_tests(ctx: &BennuState, args: RunTestsArgs) -> Result<TestRunHandle
             let _guard = guard;
             let mut pumps = Vec::new();
             if let Some(out) = stdout {
-                pumps.push(spawn_pump(out, "stdout", thread_id.clone(), sink.clone(), thread_totals.clone()));
+                pumps.push(spawn_pump(
+                    out,
+                    "stdout",
+                    thread_id.clone(),
+                    sink.clone(),
+                    thread_totals.clone(),
+                    classes.clone(),
+                ));
             }
             if let Some(err) = stderr {
-                pumps.push(spawn_pump(err, "stderr", thread_id.clone(), sink.clone(), thread_totals.clone()));
+                pumps.push(spawn_pump(
+                    err,
+                    "stderr",
+                    thread_id.clone(),
+                    sink.clone(),
+                    thread_totals.clone(),
+                    classes,
+                ));
             }
 
             let dirs = report_dirs(&root);
@@ -341,14 +358,20 @@ fn next_run_id() -> String {
 
 /// Read `reader` line by line: every line goes to the log, a `Running …` line also raises
 /// the class it names, and the summary line is kept for the exit event.
+///
+/// The log is interpreted on the way out, like the Run console's ([`crate::log`]) — a test
+/// run is the log most worth reading as something other than text, since what you are
+/// looking for in it is a stack trace, and the frames of one are links.
 fn spawn_pump<R: std::io::Read + Send + 'static>(
     reader: R,
     stream: &'static str,
     run_id: String,
     sink: Arc<dyn EventSink>,
     totals: Arc<Mutex<Option<RunTotals>>>,
+    classes: crate::log::ClassMap,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
+        let mut log = crate::log::LogAnnotator::new(classes);
         let buf = BufReader::new(reader);
         for line in buf.lines().map_while(Result::ok) {
             if let Some(class) = running_class(&line) {
@@ -357,7 +380,12 @@ fn spawn_pump<R: std::io::Read + Send + 'static>(
             if let Some(t) = run_totals(&line) {
                 *totals.lock().unwrap_or_else(|p| p.into_inner()) = Some(t);
             }
-            sink.emit(EVT_TEST_OUTPUT, json!({ "run_id": run_id, "stream": stream, "text": line }));
+            let mut payload = log.line(&line);
+            if let Some(map) = payload.as_object_mut() {
+                map.insert("run_id".into(), json!(run_id));
+                map.insert("stream".into(), json!(stream));
+            }
+            sink.emit(EVT_TEST_OUTPUT, payload);
         }
     })
 }

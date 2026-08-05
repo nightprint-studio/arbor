@@ -17,7 +17,7 @@
    */
   import {
     FolderOpen, FolderPlus, LogOut, Settings, Keyboard, FlaskConical,
-    Play, Bug, MoreVertical, Palette, SlidersHorizontal, Info, Hammer, Square, TriangleAlert,
+    Play, Bug, Unplug, MoreVertical, Palette, SlidersHorizontal, Info, Hammer, Square, TriangleAlert,
     ListChecks, ChevronDown, RotateCw, ListRestart,
   } from 'lucide-svelte';
   import type { BuildType } from '$lib/stores/bennu/run.svelte';
@@ -35,11 +35,11 @@
   import WorkspaceTabs from '$lib/components/shared/internal/WorkspaceTabs.svelte';
   import BennuRunConfigSelect from './BennuRunConfigSelect.svelte';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
-  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
+  import { bennuDebugStore } from '$lib/stores/bennu/debug.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
   import ThemeEditorModal from '$lib/components/shared/ThemeEditorModal.svelte';
@@ -56,9 +56,6 @@
   /** A Cargo project has no Java model: `cargo check` is its only build, and "Validate
    *  (no compile)" / the JDK warning are statements about a Java stack that isn't there. */
   const isCargo = $derived(projectStore.isCargo);
-  function notImplemented(what: string) {
-    toastStore.show(`${what} isn't implemented yet.`, 'info');
-  }
 
   /** ▶ Run — build then launch the ACTIVE run configuration; if the project has no
    *  active config yet, open the run-config editor to create/pick one. */
@@ -66,6 +63,21 @@
     const root = projectStore.project?.root;
     if (!root) return;
     void bennuRunStore.runActive(root).then((ran) => {
+      if (!ran) bennuUiStore.openRunConfig();
+    });
+  }
+  /**
+   * 🐞 Debug — the same launch as ▶, with the JDWP agent attached.
+   *
+   * The Debug panel opens with it, because a debug launch you cannot see the state of is just
+   * a slower run: whether it attached, whether the breakpoints took, and where it stopped all
+   * live there.
+   */
+  function debugProject() {
+    const root = projectStore.project?.root;
+    if (!root) return;
+    bennuUiStore.showBottom('run');
+    void bennuRunStore.runActive(root, true).then((ran) => {
       if (!ran) bennuUiStore.openRunConfig();
     });
   }
@@ -143,7 +155,16 @@
             disabled: !bennuTestStore.running, onclick: () => void bennuTestStore.stop() } as DropdownItem,
         ]),
     { kind: 'separator' },
-    { kind: 'item', id: 'debug',   label: 'Debug…',          icon: Bug,  onclick: () => notImplemented('Debug') },
+    ...(isCargo
+      ? []
+      : [
+          { kind: 'item', id: 'debug', label: 'Debug', icon: Bug, shortcut: 'Shift+F9',
+            disabled: busy, onclick: debugProject } as DropdownItem,
+          // Detach, not stop: the program keeps running. Stopping it is `Stop`, above.
+          { kind: 'item', id: 'detach', label: 'Detach the debugger', icon: Unplug,
+            disabled: !bennuDebugStore.live,
+            onclick: () => void bennuDebugStore.detachSession() } as DropdownItem,
+        ]),
     ...(isCargo
       ? []
       : [
@@ -303,9 +324,10 @@
         </button>
         <button
           class="btb-run-btn"
-          onclick={() => notImplemented('Debug')}
-          disabled={!hasProject}
-          use:tooltip={'Debug'}
+          class:btb-debugging={bennuDebugStore.live}
+          onclick={debugProject}
+          disabled={!hasProject || busy}
+          use:tooltip={{ content: 'Debug', shortcut: 'Shift+F9' }}
           aria-label="Debug"
         >
           <Bug size={16} />
@@ -380,6 +402,8 @@
   .btb-run-btn:disabled { opacity: 0.4; cursor: default; }
   .btb-run-primary:not(:disabled) { color: var(--success); }
   .btb-run-primary:hover:not(:disabled) { background: var(--success-subtle); color: var(--success); }
+  /* A session is attached — the button says so, the way ▶ says a program is running. */
+  .btb-debugging:not(:disabled) { color: var(--error); }
   /* Split build control: the caret reads as attached to the Build button (tight pair, then a little
      breathing room before Run). */
   .btb-build-main { border-top-right-radius: 0; border-bottom-right-radius: 0; padding-right: 0; }

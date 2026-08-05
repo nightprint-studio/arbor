@@ -156,6 +156,24 @@ export function decompiledSource(
   return bennu('bennu_decompiled_source', { args: { file, source, name } });
 }
 
+/** Resolve a **stack-trace frame** in a library / JDK class (one the console could not resolve
+ *  from the project's class index) to a source view: the real `.java` from the JDK's `src.zip`
+ *  or a downloaded `-sources.jar` when there is one, else a stub decompiled from the bytecode.
+ *
+ *  Where it lands depends on which of the two it got: against real source the frame's `line` is
+ *  a fact and is used; against a stub the line numbers are fiction, so it lands on `method`.
+ *  `root` is the open project (it picks the classpath resolver). Resolves to `null` when
+ *  nothing resolves — the caller then leaves the click alone.
+ *  Wire: `bennu_frame_source` — `{ root, class, method?, line? }`. */
+export function frameSource(
+  root: string,
+  cls: string,
+  method?: string,
+  line?: number,
+): Promise<DecompiledLocation | null> {
+  return bennu('bennu_frame_source', { args: { root, class: cls, method, line } });
+}
+
 /** Download the `-sources.jar` for the dependency that owns the library type `name` (resolved via
  *  `file`'s buffer `source`), via `mvn dependency:get`, as a tracked background job. `viewPath` is
  *  the open decompiled tab's path, echoed back in `arbor://bennu/sources-ready { path, ok }` so the

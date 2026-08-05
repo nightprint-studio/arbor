@@ -13,6 +13,7 @@
    */
   import { CircleAlert, AlertTriangle, Info, Hammer, CircleCheckBig, ListChecks, ArrowRight } from 'lucide-svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import BennuConsole from './BennuConsole.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -51,14 +52,6 @@
   const errors = $derived(vres ? vres.error_count : errorCount);
   const warnings = $derived(vres ? vres.warning_count : warnCount);
   const failed = $derived(errors > 0 || ok === false);
-
-  // Auto-scroll the log to the bottom as new lines stream in.
-  let logEl = $state<HTMLDivElement | null>(null);
-  $effect(() => {
-    void lines.length;
-    const el = logEl;
-    if (el) queueMicrotask(() => { el.scrollTop = el.scrollHeight; });
-  });
 
   function iconFor(sev: string) {
     return sev === 'error' ? CircleAlert : sev === 'warning' ? AlertTriangle : Info;
@@ -195,12 +188,10 @@
       </div>
     {/if}
 
-    <!-- Raw streamed log -->
-    <div class="log" bind:this={logEl}>
-      {#each lines as l, i (i)}
-        <div class="log-line stream-{l.stream}">{l.text}</div>
-      {/each}
-    </div>
+    <!-- The streamed log, interpreted: Maven's own `[ERROR]`s, the paths in a compiler
+         diagnostic and the frames of a plugin's stack trace all read as what they are.
+         The parsed diagnostics above only cover the compiler's own lines. -->
+    <BennuConsole {lines} emptyMessage="No build output yet." />
   {/if}
 </div>
 
@@ -286,8 +277,4 @@
   .diag-msg { flex: 1; min-width: 0; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .diag-loc { font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted); flex-shrink: 0; }
 
-  .log { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 12px; font-family: var(--font-code); font-size: var(--font-size-xs); line-height: 1.5; }
-  .log-line { white-space: pre-wrap; word-break: break-word; color: var(--text-secondary); }
-  .log-line.stream-err { color: var(--error); }
-  .log-line.stream-meta { color: var(--text-muted); font-style: italic; }
 </style>

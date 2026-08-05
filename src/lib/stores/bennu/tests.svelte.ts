@@ -29,8 +29,10 @@ import type {
 import { bennuUiStore } from './ui.svelte';
 import type { RunLogLine } from './run.svelte';
 
-/** Cap the retained log so a chatty Maven run can't grow the buffer unbounded. */
-const MAX_LINES = 5000;
+/** Cap the retained log so a chatty Maven run can't grow the buffer unbounded. What this
+ *  bounds is memory: the console renders only what is on screen ({@link BennuConsole}), so the
+ *  old, much lower cap was paying for a DOM that no longer exists. */
+const MAX_LINES = 10_000;
 
 /** What a row in the tree is showing. `pending` = declared but not run (yet). */
 export type RowStatus = 'passed' | 'failed' | 'error' | 'skipped' | 'running' | 'pending';
@@ -142,9 +144,15 @@ function createBennuTestStore() {
   let attached = false;
   let unlisteners: UnlistenFn[] = [];
 
-  function push(text: string, stream: RunLogLine['stream'] = 'out') {
+  /** Append a line. `log` is the backend's interpretation of it (level + pieces), absent on
+   *  the status lines this store writes itself. */
+  function push(
+    text: string,
+    stream: RunLogLine['stream'] = 'out',
+    log?: Pick<RunLogLine, 'level' | 'pieces'>,
+  ) {
     const next = lines.length >= MAX_LINES ? lines.slice(lines.length - MAX_LINES + 1) : lines.slice();
-    next.push({ text, stream });
+    next.push({ text, stream, ...log });
     lines = next;
   }
 
@@ -169,11 +177,20 @@ function createBennuTestStore() {
     const add = (f: UnlistenFn) => unlisteners.push(f);
     const mine = (id: string) => runId === null || id === runId;
 
-    add(await listen<{ run_id: string; stream: string; text: string }>(
+    add(await listen<{
+      run_id: string;
+      stream: string;
+      text: string;
+      level?: RunLogLine['level'];
+      pieces?: RunLogLine['pieces'];
+    }>(
       'arbor://bennu/test-output',
       (e) => {
         if (!mine(e.payload.run_id)) return;
-        push(e.payload.text, e.payload.stream === 'stderr' ? 'err' : 'out');
+        push(e.payload.text, e.payload.stream === 'stderr' ? 'err' : 'out', {
+          level: e.payload.level,
+          pieces: e.payload.pieces,
+        });
       },
     ));
     add(await listen<{ run_id: string; classname: string }>(
@@ -258,7 +275,8 @@ function createBennuTestStore() {
     startedAt = Date.now();
     elapsedMs = 0;
     startTicker();
-    bennuUiStore.showBottom('tests');
+    // The Run console, on its Tests tab — starting a run brings the thing you started forward.
+    bennuUiStore.showTestRun();
     try {
       const handle = await runTests(root, scope);
       runId = handle.run_id;

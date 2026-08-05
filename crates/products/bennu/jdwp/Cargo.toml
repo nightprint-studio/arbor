@@ -1,0 +1,13 @@
+[package]
+name         = "bennu-jdwp"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "A client for the Java Debug Wire Protocol: handshake, packet framing, the negotiated ID sizes every other field depends on, the typed commands a breakpoint debugger needs, and the event stream a suspended VM sends back. Transport and protocol only — no debugger, no UI, no opinion about what a session is."
+
+[dependencies]
+# None, deliberately. JDWP is a big-endian binary protocol over a socket: `std::net` and
+# `std::io` are the whole of what it needs, and a debugger's transport is the last place to
+# take a dependency whose version someone else controls.

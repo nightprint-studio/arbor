@@ -28,6 +28,15 @@ export interface BennuConfig {
   /** Autosave a modified buffer to disk automatically (after a short idle, on tab switch, and on
    *  window blur). `true` by default; off saves only on Ctrl+S. */
   autosave: boolean;
+  /** Fold runs of library frames in the debugger's call stack into one expandable row. */
+  collapse_library_frames: boolean;
+  /** Offer the classes and files inside the dependency jars in the Go-to navigator, as two extra
+   *  categories searched in the backend. `false` by default. */
+  search_dependencies: boolean;
+  /** Class-name patterns a debugger step passes straight through (`java.*`,
+   *  `org.springframework.*`). Empty = the backend defaults. A `*` is allowed at one end
+   *  only; anything else is dropped rather than sent to the VM. */
+  step_excludes: string[];
   /** Auto-import on accepting a type-name completion whose simple name resolves to a SINGLE class.
    *  `true` by default; off inserts just the name (import later with Alt+Enter). */
   auto_import: boolean;

@@ -21,6 +21,16 @@ shapes of the Phase-0 methods.
 | `bennu_set_run_config`| `()` (persists `RunConfigSet` into `<repo>/.arbor/config.toml`) |
 | `bennu_main_classes`  | `Vec<MainClassEntry>` (types declaring `public static void main(String[])`) |
 | `bennu_index_entries` | `Vec<IndexEntry>` (index-inspector per-kind list: members / jars / jdk / beans / actions / relations) |
+| `bennu_get_debug_config` | `DebugConfig` (per-repo `[bennu.debug]`: breakpoints + exception breakpoints + watches) |
+| `bennu_set_debug_config` | `()` (persists it, and pushes the breakpoints to any live session) |
+| `bennu_debug_variables`  | `Vec<DebugValue>` (what is in scope at one frame of the stopped thread) |
+| `bennu_debug_expand`     | `Vec<DebugValue>` (an object's fields, or an array's elements) |
+| `bennu_debug_watch`      | `DebugValue` (a watch path evaluated against a frame) |
+
+The debugger's **events** carry `DebugStatus` (`arbor://bennu/debug-status`), `DebugPause`
+(`…/debug-paused`, with its `StackFrame`s) and `BreakpointStatus` (`…/debug-breakpoints`) —
+a breakpoint is identified by **file and line**, which is what the user set and what survives
+a rebuild; turning it into a location a VM understands is `bennu-be`'s job, redone per launch.
 
 The `CapabilitySet` bitset is *produced* by `bennu-project` (the Spike D
 capability-detection ruleset); this crate only carries its serialized view.

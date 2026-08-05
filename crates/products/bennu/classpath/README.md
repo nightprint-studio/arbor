@@ -67,6 +67,19 @@ stack plus a homegrown Signature decoder.
   jar carrying none of the wanted entries costs one seek; failures are per-jar skips, because one
   corrupt dependency out of three hundred must not cost the rest.
 
+  Two more, for the case where the caller does not know what it is looking for:
+  `jar_entry_names(&jar)` lists everything a jar holds in one pass, split into binary class names
+  and everything else that is not a directory — the raw material behind "go to a class or a file
+  in a dependency" — and `read_jar_entry_bytes(&jar, entry)` reads one of them back.
+
+  **Entries come back as bytes, never as text.** A jar is full of text that is not UTF-8: a
+  `.properties` is ISO-8859-1 by the `Properties.load` specification, and a descriptor written on
+  a Windows box in 2009 is Windows-1252 whatever its XML prolog says. Decoding here would mean
+  either destroying information at the lowest layer (a lossy decode turns an accent into `U+FFFD`,
+  and nothing above can get it back) or keeping a second copy of an encoding policy that
+  `bennu-project` already owns. `bennu-be`'s `jar_entry_text` is the one place that decides, and
+  it applies the same UTF-8-then-Windows-1252 recovery a legacy `.java` gets.
+
 - **Dependency-jar sourcing from `~/.m2`** (`maven.rs`) —
   `resolve_maven_classpath(project_dir, &opts)` runs
   `mvn dependency:build-classpath` for a Maven project, reads the resolved classpath,

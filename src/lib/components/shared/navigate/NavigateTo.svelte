@@ -19,6 +19,21 @@
    * cheapest possible way to make a search box feel slow. A category whose items
    * arrive over IPC returns a promise and the tab shows as loading.
    *
+   * ## Categories too large to hold
+   *
+   * Some sources cannot be handed over whole — a Java classpath is hundreds of
+   * thousands of classes, and serialising all of them to answer a question about
+   * twenty is not a trade worth making. Such a category supplies {@link
+   * NavigateCategory.search} instead of `items`: the query goes to the host, which
+   * returns candidates, and everything after that — the scoring, the ordering, the
+   * lit characters, the grouping — happens here on that subset exactly as it does
+   * for a local category. The host's job is to *narrow*, not to rank; two answers
+   * to "which of these is the best match" is how the two start disagreeing.
+   *
+   * A remote category is only asked while it is on screen (its own tab, or All),
+   * is debounced, and drops the answer to a superseded query — so typing eight
+   * characters is not eight round-trips whose results race each other.
+   *
    * ## Why "All" is a real tab and not a union
    *
    * It searches every category and keeps each one's best few, grouped under its
@@ -34,6 +49,7 @@
    * refining a query after looking at the results is the normal case, not the
    * exception.
    */
+  import { untrack } from 'svelte';
   import type { IconComponent } from '$lib/types/icon';
   import { Search, CornerDownLeft } from 'lucide-svelte';
   import Modal from '../Modal.svelte';
@@ -88,8 +104,17 @@
   export interface NavigateCategory {
     id: string;
     label: string;
-    /** Called once per opening. May be async. */
-    items: () => NavigateItem[] | Promise<NavigateItem[]>;
+    /** Called once per opening. May be async. Omit when the category is {@link search}-backed. */
+    items?: () => NavigateItem[] | Promise<NavigateItem[]>;
+    /**
+     * Host-side search, for a source too large to hand over whole. Called with the
+     * query's text (directives already stripped), debounced, and only while this
+     * category is showing. Return **candidates**, not a ranking — the scoring and
+     * the highlighting happen here.
+     *
+     * Takes precedence over {@link items} when both are given.
+     */
+    search?: (query: string) => Promise<NavigateItem[]>;
     /** Shown when this category has nothing at all, before any filtering. */
     emptyMessage?: string;
   }
@@ -133,11 +158,20 @@
     ...categories.map((c) => ({ id: c.id, label: c.label })),
   ]);
 
+  /** Items per category id, for the {@link NavigateCategory.search}-backed ones. Kept apart
+   *  from `loaded` so a remote answer landing never disturbs the local lists. */
+  let remote = $state<Record<string, NavigateItem[]>>({});
+  /** Whether a remote category has a request in flight — the field's spinner. */
+  let searching = $state(false);
+
+  const localCategories = $derived(categories.filter((c) => !c.search));
+  const remoteCategories = $derived(categories.filter((c) => !!c.search));
+
   // Pulled once, on mount. `$effect` rather than `onMount` so a host that swaps
   // the category list — a repository closing, a second connection opening —
   // re-pulls rather than showing the previous repository's files.
   $effect(() => {
-    const list = categories;
+    const list = localCategories;
     let live = true;
     loading = true;
     void (async () => {
@@ -145,7 +179,7 @@
       await Promise.all(
         list.map(async (category) => {
           try {
-            next[category.id] = await category.items();
+            next[category.id] = (await category.items?.()) ?? [];
           } catch {
             // A category that cannot answer contributes nothing rather than
             // taking the overlay down with it — the others are still useful.
@@ -163,6 +197,58 @@
   $effect(() => { field?.focus(); });
 
   const parsed = $derived<ParsedQuery>(parseQuery(query));
+
+  /** How long to wait after the last keystroke before asking a remote category. */
+  const SEARCH_DEBOUNCE_MS = 140;
+
+  /**
+   * Ask each visible remote category, debounced, and drop the answer to a superseded query.
+   *
+   * Only the ones on screen: a category nobody is looking at costs a round-trip for a list
+   * nobody will read. An empty query asks nothing — "everything on the classpath" is not an
+   * answer, and the host would have to refuse it anyway.
+   */
+  $effect(() => {
+    const list = remoteCategories;
+    const text = parsed.text.trim();
+    const showing = active;
+    if (!list.length) return;
+
+    const wanted = list.filter((c) => showing === 'all' || showing === c.id);
+    if (!wanted.length || !text) {
+      searching = false;
+      // Cleared rather than kept: rows from the previous query would otherwise sit under a
+      // field that no longer says what produced them.
+      //
+      // `untrack`, because this effect WRITES `remote` — reading it as a dependency would make
+      // the write re-run the effect, which is the read-modify-write loop the runes docs warn
+      // about. What this effect depends on is the query and the tab, and nothing else.
+      if (Object.keys(untrack(() => remote)).length) remote = {};
+      return;
+    }
+
+    let live = true;
+    searching = true;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const next: Record<string, NavigateItem[]> = {};
+        await Promise.all(
+          wanted.map(async (category) => {
+            try {
+              next[category.id] = (await category.search?.(text)) ?? [];
+            } catch {
+              next[category.id] = [];
+            }
+          }),
+        );
+        if (!live) return;
+        remote = next;
+        searching = false;
+      })();
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => { live = false; clearTimeout(timer); };
+  });
 
   interface Scored extends NavigateItem {
     category: string;
@@ -189,7 +275,10 @@
   const prepared = $derived.by<Record<string, Prepared[]>>(() => {
     const out: Record<string, Prepared[]> = {};
     for (const category of categories) {
-      out[category.id] = (loaded[category.id] ?? []).map((item) => {
+      // A remote category's list already IS the answer to this query, so preparing it costs
+      // the few hundred candidates that came back rather than the source they came from.
+      const source = category.search ? (remote[category.id] ?? []) : (loaded[category.id] ?? []);
+      out[category.id] = source.map((item) => {
         const detail = item.detail ?? '';
         return {
           item,
@@ -300,7 +389,7 @@
         aria-expanded={rows.length > 0}
         aria-controls="nv-results"
       />
-      {#if loading}<Spinner size={13} />{/if}
+      {#if loading || searching}<Spinner size={13} />{/if}
     </div>
 
     <div class="nv-tabs">
@@ -326,6 +415,10 @@
     <div class="nv-list" id="nv-results" role="listbox" aria-label="Results" bind:this={list}>
       {#if loading}
         <p class="nv-note">Reading…</p>
+      {:else if !rows.length && searching}
+        <!-- Only when there is nothing else to read: a remote answer landing under results
+             that are already useful must not blank them out first. -->
+        <p class="nv-note">Searching…</p>
       {:else if !rows.length}
         <p class="nv-note">
           {#if query.trim()}

@@ -3,9 +3,9 @@
  * project (each: main class + program/VM args + working dir + env vars), plus the
  * notion of an ACTIVE config that the titlebar ▶ / Shift+F10 path launches.
  *
- * **Persisted per repo**, in `<root>/.arbor/config.toml` under `[bennu.run]` — a
- * per-repo preference, on the filesystem (CLAUDE.md rule 11), in the file corvus
- * already shares for the same repo. {@link load} hydrates when a project opens;
+ * **Persisted per repo**, in `<root>/.arbor/bennu/config.toml` under `[run]` — a
+ * per-repo preference, on the filesystem (CLAUDE.md rule 11), in bennu's own file
+ * under the `.arbor/` directory the repository already has. {@link load} hydrates when a project opens;
  * every mutation funnels through `commit`, which writes back on a short debounce so
  * a keystroke in the name field doesn't mean a file write per character.
  *
@@ -114,6 +114,12 @@ export interface RunConfig {
   testScope: TestScopeKind;
   /** `junit` only — the module directory or the class selector, per {@link testScope}. */
   testTarget: string;
+  /** Hold the VM before `main` when this configuration is launched with 🐞.
+   *
+   *  Off by default. It is the only way to stop in start-up code (a static initializer, a
+   *  Spring context being built), and it means every debug launch begins frozen until you
+   *  press Resume — which is not what the launch you press fifty times a day wants. */
+  debugSuspend: boolean;
 }
 
 /** The per-project run-config bundle — the ordered list plus which one is active. */
@@ -146,6 +152,7 @@ function toDto(c: RunConfig): RunConfigDto {
     profiles: c.profiles,
     test_scope: c.testScope,
     test_target: c.testTarget,
+    debug_suspend: c.debugSuspend,
   };
 }
 
@@ -167,6 +174,7 @@ function fromDto(d: RunConfigDto): RunConfig {
     profiles: d.profiles ?? '',
     testScope: scope === 'module' || scope === 'class' ? scope : 'all',
     testTarget: d.test_target ?? '',
+    debugSuspend: d.debug_suspend ?? false,
   };
 }
 
@@ -185,6 +193,7 @@ export function emptyConfig(name = 'Unnamed', kind: RunConfigKind = 'application
     profiles: '',
     testScope: 'all',
     testTarget: '',
+    debugSuspend: false,
   };
 }
 
@@ -233,7 +242,7 @@ function createRunConfigStore() {
     return set;
   }
 
-  /** Write the bundle for `root` to `<root>/.arbor/config.toml`, debounced. Best-effort: a
+  /** Write the bundle for `root` to `<root>/.arbor/bennu/config.toml`, debounced. Best-effort: a
    *  failed write leaves the session's configs intact and is not worth a modal — the next
    *  edit retries. */
   function persist(root: string) {
@@ -266,7 +275,7 @@ function createRunConfigStore() {
 
   return {
     /**
-     * Hydrate `root`'s configurations from its `.arbor/config.toml`. Called when a project
+     * Hydrate `root`'s configurations from its `.arbor/bennu/config.toml`. Called when a project
      * opens. Idempotent per root: a second call is a no-op rather than a re-read, because
      * the effect that calls it re-runs on things that are not "a different project" and
      * re-reading would silently drop edits made since.

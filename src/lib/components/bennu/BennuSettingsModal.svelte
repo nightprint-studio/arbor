@@ -14,9 +14,9 @@
    * gear submenu.
    */
   import {
-    Settings, Coffee, Boxes, FileType, TextCursorInput, ListTree,
+    Settings, Coffee, Boxes, FileType, TextCursorInput, ListTree, Bug,
     FoldVertical, Braces, RotateCcw, Wand2, Plus, Trash2, TriangleAlert, FolderOpen,
-    Database,
+    Database, Package,
   } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -39,6 +39,7 @@
   } from '$lib/stores/bennu/settings.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { getBennuConfig, setBennuConfig, type BennuConfig } from '$lib/ipc/bennu/config';
+  import { getStepExcludes } from '$lib/ipc/bennu/debug';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -60,6 +61,51 @@
     if (!cur) return;
     cfg = { ...cur, ...patch };
     await setBennuConfig(cfg).catch(() => {});
+  }
+
+  // ── Debugger: what a step passes straight through ────────────────────────────
+  /** The patterns actually in force, from the backend: the configured list, or its defaults.
+   *  Never assembled here — a copy of the default list on this side would be a second answer
+   *  that drifts from the one doing the stepping. */
+  let stepExcludes = $state<string[]>([]);
+  /** Whether the list on screen is the backend's default rather than one of your own — what
+   *  makes "Reset" meaningful and what the hint says. */
+  const usingDefaults = $derived((cfg?.step_excludes ?? []).length === 0);
+  let excludeDraft = $state('');
+
+  async function loadExcludes() {
+    stepExcludes = await getStepExcludes().catch(() => []);
+  }
+  $effect(() => { void loadExcludes(); });
+
+  /** Whether the VM will accept this pattern: a `*` at one end, or none. One bad entry makes
+   *  the VM refuse the whole step request, which shows up as stepping having quietly stopped
+   *  working — so it is refused here, where there is somewhere to say so. */
+  function validPattern(p: string): boolean {
+    const inner = p.trim().replace(/^\*/, '').replace(/\*$/, '');
+    return inner.length > 0 && !inner.includes('*');
+  }
+  const draftValid = $derived(!excludeDraft.trim() || validPattern(excludeDraft));
+
+  /** Persist a new list and re-read what the backend made of it. Writing the *effective* list
+   *  is what turns the defaults into a list of your own — adding one pattern to an empty
+   *  config would otherwise mean stepping into the JDK from then on. */
+  async function commitExcludes(next: string[]) {
+    await saveConfigPatch({ step_excludes: next });
+    await loadExcludes();
+  }
+  async function addExclude() {
+    const p = excludeDraft.trim();
+    if (!p || !validPattern(p) || stepExcludes.includes(p)) return;
+    excludeDraft = '';
+    await commitExcludes([...stepExcludes, p]);
+  }
+  async function removeExclude(p: string) {
+    await commitExcludes(stepExcludes.filter((x) => x !== p));
+  }
+  /** Back to the backend's list — an empty array, which is what "use the defaults" means. */
+  async function resetExcludes() {
+    await commitExcludes([]);
   }
 
   async function commitJdkPaths(paths: string[]) {
@@ -131,6 +177,7 @@
       ...(projectStore.isCargo ? [] : [
         { id: 'style',    label: 'Java Style', icon: Wand2 },
         { id: 'java',     label: 'Java',       icon: Braces },
+        { id: 'debugger', label: 'Debugger',   icon: Bug },
       ]),
     ] },
     ...(projectStore.isCargo ? [] : [{
@@ -441,6 +488,16 @@
                    onchange={(v) => s.setExcludedDirs(v)} ariaLabel="Excluded directories" />
           </FormRow>
         </div>
+        <div class="card">
+          <div class="card-section-title"><Package size={12} /> Navigation</div>
+          <FormRow
+            label="Search the dependencies too"
+            description="Add two categories to Go to (Ctrl+N / Ctrl+Shift+N) for the classes and files inside the dependency jars — a framework annotation, a struts-default.xml, a schema. They are searched as you type rather than listed, so they cost nothing until you use them; the first search after opening a project spends a moment reading the jars."
+          >
+            <Toggle checked={s.searchDependencies} onchange={(v) => void s.setSearchDependencies(v)}
+                    ariaLabel="Search the dependencies too" />
+          </FormRow>
+        </div>
         {#if s.excludedDirList.length}
           <div class="card">
             <div class="card-section-title"><Braces size={12} /> Parsed exclusions ({s.excludedDirList.length})</div>
@@ -454,6 +511,52 @@
 
       {:else if !project}
         <EmptyState message="Open a project to see its resolved settings." />
+      {:else if active === 'debugger'}
+        <div class="section-header">
+          <h2>Debugger</h2>
+          <p>What a step walks through, and what it walks past.</p>
+        </div>
+        <div class="card">
+          <div class="card-section-title"><Bug size={12} /> Step-through packages</div>
+          <p class="bs-hint">
+            Classes a <strong>step into</strong> passes straight through instead of stopping in.
+            Without them, stepping into <code>service.place(order)</code> walks the proxy, then
+            <code>ReflectiveMethodInvocation.proceed</code>, then every interceptor in the chain —
+            a dozen stops in code you have no source for. Remove <code>org.springframework.*</code>
+            to be able to step into Spring itself.
+            A <code>*</code> is allowed at <strong>one end only</strong>.
+          </p>
+          {#if usingDefaults}
+            <p class="bs-none">These are the defaults. Adding or removing one makes the list yours.</p>
+          {/if}
+          <div class="bs-paths">
+            {#each stepExcludes as p (p)}
+              <div class="bs-path">
+                <span class="bs-path-txt bs-mono" title={p}>{p}</span>
+                <button class="bs-path-del" type="button" onclick={() => void removeExclude(p)} aria-label="Remove pattern"><Trash2 size={13} /></button>
+              </div>
+            {/each}
+          </div>
+          <div class="bs-exclude-add">
+            <Input
+              bind:value={excludeDraft}
+              placeholder="com.acme.generated.*"
+              size="sm"
+              error={draftValid ? null : 'A * is allowed at one end only'}
+              onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') void addExclude(); }}
+            />
+            <Button variant="ghost" size="sm" disabled={!excludeDraft.trim() || !draftValid} onclick={() => void addExclude()}>
+              {#snippet iconStart()}<Plus size={13} />{/snippet}
+              Add
+            </Button>
+            <Button variant="ghost" size="sm" disabled={usingDefaults} onclick={() => void resetExcludes()}>
+              Reset
+            </Button>
+          </div>
+          {#if !draftValid}
+            <p class="bs-invalid">A pattern may carry a <code>*</code> at one end only — the VM refuses anything else, and one bad entry stops stepping working at all.</p>
+          {/if}
+        </div>
       {:else if active === 'jdk'}
         <div class="section-header">
           <h2>JDK</h2>
@@ -645,6 +748,11 @@
   }
   .bs-path-del:hover { color: var(--error); background: var(--bg-hover); }
   .bs-path-add { padding: 6px 2px 2px; }
+  /* The pattern editor: a field that takes the width, then Add and Reset. */
+  .bs-exclude-add { display: flex; align-items: center; gap: 6px; padding: 6px 2px 2px; }
+  .bs-exclude-add :global(.input-wrap) { flex: 1; min-width: 0; }
+  .bs-mono { font-family: var(--font-code); }
+  .bs-invalid { font-size: var(--font-size-xs); color: var(--error); padding: 2px 2px 4px; }
   .bs-kv { display: flex; align-items: center; gap: 10px; padding: 6px 2px; font-size: var(--font-size-sm); }
   /* Same row shape as `.bs-kv`, but the value is an editable field that has to take the
      remaining width — a coordinate list is long and reading it half-clipped is useless. */

@@ -172,6 +172,13 @@ export interface RunOptions {
   workingDir?: string;
   /** Extra environment, merged over the inherited one. */
   env?: Record<string, string>;
+  /** Launch under the debugger: the JVM gets the JDWP agent, connecting back to a port the
+   *  backend opens first, and the debug session carries this run's id. */
+  debug?: boolean;
+  /** Hold the VM before `main` until the debugger has installed everything. Off unless the
+   *  run configuration asked for it — it is the only way to stop in start-up code, and it
+   *  means the launch begins frozen. */
+  debugSuspend?: boolean;
 }
 
 /** Launch `java <vm…> -cp <target/classes:deps> <mainClass> <args…>`, streaming stdout/stderr
@@ -188,6 +195,8 @@ export function run(root: string, mainClass: string, opts: RunOptions = {}): Pro
       vm_args: opts.vmArgs ?? [],
       working_dir: opts.workingDir ?? '',
       env: opts.env ?? {},
+      debug: opts.debug ?? false,
+      debug_suspend: opts.debugSuspend ?? false,
     },
   });
 }
@@ -258,7 +267,16 @@ export function indexStats(root: string): Promise<IndexStats> {
 export function findInFiles(
   root: string,
   query: string,
-  opts: { regex: boolean; caseSensitive: boolean; wholeWord: boolean; extraRoots?: string[] },
+  opts: {
+    regex: boolean;
+    caseSensitive: boolean;
+    wholeWord: boolean;
+    extraRoots?: string[];
+    /** Also search the text entries of the project's dependency jars. Off by default: every
+     *  candidate entry has to be decompressed to be read, so it is a different order of cost
+     *  from walking the tree. Those hits arrive last, and their `file` is `<jar>!/<entry>`. */
+    includeDependencies?: boolean;
+  },
   searchId: string,
 ): Promise<void> {
   return bennu('bennu_find_in_files', {
@@ -269,6 +287,7 @@ export function findInFiles(
       regex: opts.regex,
       case_sensitive: opts.caseSensitive,
       whole_word: opts.wholeWord,
+      include_dependencies: opts.includeDependencies ?? false,
       search_id: searchId,
     },
   });

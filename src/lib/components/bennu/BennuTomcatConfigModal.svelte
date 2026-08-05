@@ -5,7 +5,7 @@
    * The user picks the Tomcat root (CATALINA_BASE, the folder holding `webapps/`); Bennu validates
    * it, lists the deployed web apps, and auto-selects the one this project maps to (by <finalName> /
    * artifactId / dir name, or the single deployed app). The link persists per-repo in
-   * `<repo>/.arbor/config.toml` `[bennu.tomcat]` (CLAUDE.md rule #11) via `bennuTomcatStore`.
+   * `<repo>/.arbor/bennu/config.toml` `[tomcat]` (CLAUDE.md rule #11) via `bennuTomcatStore`.
    *
    * Keyboard-first: <Modal> auto-focuses + owns Esc; Ctrl/Cmd+Enter saves; the folder pick uses the
    * shared FileExplorerModal (folder mode), no native dialog.

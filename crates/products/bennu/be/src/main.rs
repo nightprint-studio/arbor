@@ -113,6 +113,11 @@ mod web_discovery;
 // Class index (Go to Class): `bennu_class_index` — a fresh scan of the project's `.java`
 // sources, one entry per declared type (fqcn + simple + file + decl line).
 mod class_index;
+// The same two questions asked of the DEPENDENCY jars: `bennu_library_classes` /
+// `bennu_library_files` search the classpath's hundreds of thousands of entries here rather
+// than shipping them across the seam, and `bennu_library_file` extracts one to a read-only
+// view the editor opens.
+mod library_search;
 // Manual index invalidation: `bennu_reindex` — drop + rebuild the whole semantic index for
 // an open project (fresh generation dir, off-thread), the escape hatch behind the Index
 // Inspector's "Rebuild" button. No compilation (that's `bennu_build`), just a re-scan.
@@ -136,6 +141,24 @@ mod build;
 // Killing a child and everything it started (`taskkill /T` on Windows) — shared by the two
 // domains that launch long-lived children, `build`'s run and `tests`' `mvn test`.
 mod child;
+// The debugger (`bennu-jdwp`): launch with the agent connecting back to a port we opened first,
+// install the project's breakpoints, and serve the stopped program — `bennu_get/set_breakpoints`,
+// `bennu_debug_resume` / `_step` / `_detach` / `_variables` / `_expand` / `_watch`.
+mod debug;
+// Reading a stopped program: a frame's variables, what is inside an object or an array, and
+// watches (which are paths — `order.customer.name` — and deliberately not an expression
+// language). Split from `debug` because the session lifecycle and the value tree are two jobs.
+mod debug_value;
+// One definition of "a bennu setting that belongs to this repository": the sections of
+// `<repo>/.arbor/bennu/config.toml` — run configurations, breakpoints, the Tomcat link. Bennu's own
+// file rather than the shared `.arbor/config.toml` these used to sit in, with a read-only
+// fallback to the old location so nothing already configured disappears.
+mod repo_config;
+// Interpreting a child's output on its way to the console: `arbor-logscan` says what each
+// line IS (level, timestamp, thread, url, path, exception, stack frame), and this layer
+// resolves the frames' classes to project files through the index — the one half of the job
+// a general-purpose log interpreter cannot do.
+mod log;
 // Dependency-classpath sourcing for the index: resolve a Maven project's `~/.m2` dep jars (cached
 // across sessions by pom mtime) into a `ClassSource`, so validation/completion resolve library
 // types (Spring, servlet, …), not just the JDK + project. Non-fatal — degrades to JDK-only.

@@ -386,6 +386,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbor-logscan"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "arbor-plugin-api"
 version = "0.3.0"
 dependencies = [
@@ -861,6 +869,7 @@ dependencies = [
  "arbor-core",
  "arbor-feedback",
  "arbor-ipc",
+ "arbor-logscan",
  "arbor-process-ext",
  "arbor-rpc",
  "bennu-check",
@@ -872,6 +881,7 @@ dependencies = [
  "bennu-intel",
  "bennu-intentions",
  "bennu-java",
+ "bennu-jdwp",
  "bennu-jpa",
  "bennu-project",
  "bennu-proto",
@@ -998,6 +1008,10 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-java",
 ]
+
+[[package]]
+name = "bennu-jdwp"
+version = "0.3.0"
 
 [[package]]
 name = "bennu-jpa"

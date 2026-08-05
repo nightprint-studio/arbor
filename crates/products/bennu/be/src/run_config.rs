@@ -2,25 +2,18 @@
 //!
 //! Per-repo persistence for the IntelliJ-style run configurations (the FE's
 //! run-configuration editor: `BennuRunConfigModal` + the `run-config` store). The
-//! bundle lives in `<repo>/.arbor/config.toml` under a `[bennu.run]` section — a
-//! *per-repo* preference (CLAUDE.md rule 11: filesystem, never localStorage), NOT the
-//! per-profile product config (`…/bennu/config.toml`) the `config_cmds` domain owns.
+//! bundle lives in `<repo>/.arbor/bennu/config.toml` under a `[run]` section — a *per-repo*
+//! preference (CLAUDE.md rule 11: filesystem, never localStorage), NOT the per-profile
+//! product config (`…/bennu/config.toml`) the `config_cmds` domain owns.
 //!
-//! We follow the same `.arbor/config.toml` precedent corvus uses (`repo_config`), but
-//! bennu handlers key off `root` directly (the FE passes the project root), so there's
-//! no `tab_id → workdir` resolution step.
-//!
-//! **Coexistence**: `.arbor/config.toml` is a shared file — a repo opened in corvus has
-//! corvus's own top-level keys there. So we never rewrite the whole file from a typed
-//! struct; we parse it into a dynamic `toml::Table`, replace *only* the `bennu.run`
-//! sub-tree, and write it back — every unrelated section survives byte-for-byte (the
-//! same merge discipline corvus's `tickets` domain uses for `[ticket_links]`).
+//! Handlers key off `root` directly (the FE passes the project root), so there is no
+//! `tab_id → workdir` resolution step. The file itself — where it is, how a section is
+//! merged into it, and how a project configured before bennu had a file of its own is still
+//! read — is [`crate::repo_config`], which every per-repo section goes through.
 //!
 //! IDs are STABLE across restarts: the FE generates them, we persist them verbatim, and
 //! never re-assign. The [`RunConfigSet`] serde round-trip is the unit-tested core; the
 //! FS read/write is the thin glue around it.
-
-use std::path::PathBuf;
 
 use bennu_core::prelude::BennuState;
 use bennu_proto::prelude::RunConfigSet;
@@ -29,7 +22,7 @@ use serde::Deserialize;
 /// Args for [`bennu_get_run_config`] / [`bennu_set_run_config`]'s `root`.
 #[derive(Deserialize)]
 pub struct GetRunConfigArgs {
-    /// Absolute path to the project root (the dir whose `.arbor/config.toml` holds it).
+    /// Absolute path to the project root (the dir whose `.arbor/bennu/config.toml` holds it).
     pub root: String,
 }
 
@@ -42,7 +35,7 @@ pub struct SetRunConfigArgs {
     pub config_set: RunConfigSet,
 }
 
-/// Read the per-repo run configurations from `<root>/.arbor/config.toml` `[bennu.run]`.
+/// Read the per-repo run configurations from `<root>/.arbor/bennu/config.toml` `[run]`.
 /// A fresh repo (no file / no section) yields `{ configs: [], active_id: null }` — never
 /// an error, so the editor opens cleanly on a project that's never had a run config.
 #[arbor_rpc::handler]
@@ -50,7 +43,7 @@ fn bennu_get_run_config(_ctx: &BennuState, args: GetRunConfigArgs) -> Result<Run
     Ok(load_run_config(&args.root))
 }
 
-/// Persist the per-repo run configurations into `<root>/.arbor/config.toml` `[bennu.run]`,
+/// Persist the per-repo run configurations into `<root>/.arbor/bennu/config.toml` `[run]`,
 /// preserving every other section of the file. Env vars serialize as a TOML
 /// array-of-tables, args as strings — the round-trip inverse of [`load_run_config`].
 #[arbor_rpc::handler]
@@ -58,59 +51,17 @@ fn bennu_set_run_config(_ctx: &BennuState, args: SetRunConfigArgs) -> Result<(),
     save_run_config(&args.root, &args.config_set)
 }
 
-// ── persistence (the pure-ish core: TOML-table merge over the shared file) ──────
+// ── persistence ────────────────────────────────────────────────────────────────
 
-/// `<repo>/.arbor/config.toml`.
-fn config_path(root: &str) -> PathBuf {
-    PathBuf::from(root).join(".arbor").join("config.toml")
-}
-
-/// Read the whole `.arbor/config.toml` as a dynamic table (empty when absent/corrupt),
-/// then decode `bennu.run` into a [`RunConfigSet`]. A missing section → the default
-/// (empty) set. Corruption self-heals to the default, matching the config-read
-/// philosophy elsewhere (an editor pref never hard-fails a read).
+/// Read `[run]`. A fresh repo (no file / no section) yields the empty default rather
+/// than an error — see [`crate::repo_config::load`].
 fn load_run_config(root: &str) -> RunConfigSet {
-    let table = read_table(root);
-    match table.get("bennu").and_then(|b| b.get("run")) {
-        Some(run) => run.clone().try_into().unwrap_or_default(),
-        None => RunConfigSet::default(),
-    }
+    crate::repo_config::load(root, "run")
 }
 
-/// Merge `set` into `bennu.run` of the on-disk table (creating `.arbor/` as needed) and
-/// write the whole file back, so unrelated sections (e.g. corvus's own keys) survive.
+/// Persist `[run]`, leaving every other section of the file intact.
 fn save_run_config(root: &str, set: &RunConfigSet) -> Result<(), String> {
-    let mut table = read_table(root);
-    let run_value = toml::Value::try_from(set).map_err(|e| e.to_string())?;
-
-    // Ensure `[bennu]` is a table, then set its `run` sub-tree.
-    let bennu = table
-        .entry("bennu".to_string())
-        .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
-    let bennu_tbl = bennu
-        .as_table_mut()
-        .ok_or_else(|| "`.arbor/config.toml` `[bennu]` is not a table".to_string())?;
-    bennu_tbl.insert("run".to_string(), run_value);
-
-    let path = config_path(root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let text = toml::to_string_pretty(&table).map_err(|e| e.to_string())?;
-    std::fs::write(&path, text).map_err(|e| e.to_string())
-}
-
-/// Parse `<root>/.arbor/config.toml` into a dynamic TOML table; a missing or unparseable
-/// file yields an empty table (a corrupt sibling section shouldn't strand run configs).
-fn read_table(root: &str) -> toml::value::Table {
-    let path = config_path(root);
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return toml::value::Table::new();
-    };
-    text.parse::<toml::Value>()
-        .ok()
-        .and_then(|v| v.as_table().cloned())
-        .unwrap_or_default()
+    crate::repo_config::save(root, "run", set)
 }
 
 #[cfg(test)]
@@ -198,52 +149,51 @@ env = []
         assert_eq!(set.configs[0].test_scope, "");
     }
 
-    /// A fresh repo — no `bennu.run` section at all — decodes to the empty default,
-    /// exactly what the FE binds `{ configs: [], active_id: null }` against.
-    #[test]
-    fn missing_section_is_empty_default() {
-        let table: toml::value::Table = "[corvus]\ndisplay_name = \"x\"\n"
-            .parse::<toml::Value>()
-            .unwrap()
-            .as_table()
-            .unwrap()
-            .clone();
-        let set = match table.get("bennu").and_then(|b| b.get("run")) {
-            Some(run) => run.clone().try_into().unwrap_or_default(),
-            None => RunConfigSet::default(),
-        };
-        assert!(set.configs.is_empty());
-        assert!(set.active_id.is_none());
+    /// A scratch project root, cleaned on the way in.
+    fn scratch(tag: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("bennu-runcfg-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.display().to_string()
     }
 
-    /// Merging `bennu.run` into a table that already has an unrelated section leaves that
-    /// section intact (coexistence with corvus's own `.arbor/config.toml` keys).
+    /// A fresh repo — no file at all — decodes to the empty default, exactly what the FE binds
+    /// `{ configs: [], active_id: null }` against.
     #[test]
-    fn merge_preserves_unrelated_sections() {
-        let mut table: toml::value::Table = "[corvus]\ndisplay_name = \"keepme\"\n"
-            .parse::<toml::Value>()
-            .unwrap()
-            .as_table()
-            .unwrap()
-            .clone();
+    fn a_repo_with_no_config_is_the_empty_default() {
+        let root = scratch("fresh");
+        let set = load_run_config(&root);
+        assert!(set.configs.is_empty());
+        assert!(set.active_id.is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
-        let run_value = toml::Value::try_from(sample_set()).unwrap();
-        let bennu = table
-            .entry("bennu".to_string())
-            .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
-        bennu.as_table_mut().unwrap().insert("run".to_string(), run_value);
+    /// The real save/load pair, through the file the FE's editor writes.
+    #[test]
+    fn the_bundle_round_trips_through_the_repo_file() {
+        let root = scratch("roundtrip");
+        save_run_config(&root, &sample_set()).unwrap();
+        assert_eq!(load_run_config(&root), sample_set());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
-        let text = toml::to_string_pretty(&table).unwrap();
-        // The corvus section survives the rewrite…
-        assert!(text.contains("keepme"));
-        // …and the bennu.run round-trips back.
-        let reparsed: toml::Value = text.parse().unwrap();
-        let set: RunConfigSet =
-            reparsed.get("bennu").unwrap().get("run").unwrap().clone().try_into().unwrap();
-        assert_eq!(set.active_id.as_deref(), Some("rc-abc"));
-        assert_eq!(
-            reparsed.get("corvus").unwrap().get("display_name").unwrap().as_str(),
-            Some("keepme")
-        );
+    /// A project whose run configurations were written before bennu had a file of its own
+    /// still opens with them. Losing somebody's run configurations to a relocation is the one
+    /// outcome the fallback exists to prevent.
+    #[test]
+    fn configurations_written_before_the_move_are_still_found() {
+        let root = scratch("legacy");
+        let legacy = std::path::PathBuf::from(&root).join(".arbor");
+        std::fs::create_dir_all(&legacy).unwrap();
+        let mut table = toml::value::Table::new();
+        let mut bennu = toml::value::Table::new();
+        bennu.insert("run".into(), toml::Value::try_from(sample_set()).unwrap());
+        table.insert("corvus".into(), toml::Value::String("x".into()));
+        table.insert("bennu".into(), toml::Value::Table(bennu));
+        std::fs::write(legacy.join("config.toml"), toml::to_string_pretty(&table).unwrap())
+            .unwrap();
+
+        assert_eq!(load_run_config(&root), sample_set());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

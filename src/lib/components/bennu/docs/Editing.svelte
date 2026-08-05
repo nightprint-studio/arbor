@@ -476,6 +476,14 @@
   <code>*.jsp, *.tag</code>. If a word is <strong>selected</strong> in the editor, it pre-fills the
   search field (both here and in Find-in-file).
 </p>
+<p>
+  The <strong>📦 toggle</strong> also searches inside the <strong>dependency jars</strong> — their
+  XML, schemas, tag libraries and property files — which is how you find which artifact declares the
+  interceptor or the bean you are looking at. Those hits arrive after the project's own, and opening
+  one extracts it read-only. It is off by default and per-search rather than a setting: every
+  candidate entry has to be decompressed to be read, so it is a cost you take for the question you
+  are asking now.
+</p>
 
 <h2>Go to class / file / symbol</h2>
 <p>
@@ -500,6 +508,27 @@
   ↑/↓ move, <kbd>Enter</kbd> opens — a class or symbol jumps straight to its declaration line. A word
   selected in the editor pre-fills the field. Files work in any project; Classes and Symbols read the
   Java index, so they aren't offered in a Cargo one.
+</p>
+
+<h3>Reaching what is inside the dependencies</h3>
+<p>
+  <strong>Search the dependencies too</strong> (Settings → Java) adds two more tabs:
+  <strong>Library classes</strong> and <strong>Library files</strong> — everything on the
+  dependency classpath that is nowhere in the tree. The framework annotation whose package you are
+  trying to remember, the <code>struts-default.xml</code> that declares the interceptor stack, the
+  schema an XML file is validated against. Each row says which <strong>artifact</strong> it came
+  from, because a classpath is where four versions of the same name live.
+</p>
+<p>
+  Opening a library <em>class</em> shows its source the same way a stack-trace frame does: the real
+  <code>.java</code> when the JDK ships sources or a <code>-sources.jar</code> has been downloaded,
+  otherwise the decompiled stub. A library <em>file</em> is extracted from the jar and opened
+  read-only, keeping its extension — so an XML still reads as XML.
+</p>
+<p>
+  These two are searched as you type rather than listed: a classpath is hundreds of thousands of
+  entries, and nothing is fetched until there is a query. The first search after opening a project
+  spends a moment reading the jars, and is instant after that.
 </p>
 
 <h2>Mojibake check</h2>
@@ -781,7 +810,7 @@
   (<kbd>Ctrl</kbd> + <kbd>K</kbd>) lists the editor and tool-window actions; the tool windows toggle
   with <kbd>Alt</kbd> + <kbd>1</kbd> / <kbd>2</kbd> (Project · Structure), <kbd>Alt</kbd> +
   <kbd>0</kbd> / <kbd>6</kbd> / <kbd>7</kbd> / <kbd>F12</kbd> (Build · Problems · TODO · Terminal), and
-  <kbd>Alt</kbd> + <kbd>8</kbd> / <kbd>9</kbd> (Maven · Services). Build the project with
+  <kbd>Alt</kbd> + <kbd>8</kbd> (Maven). Build the project with
   <kbd>Ctrl</kbd> + <kbd>F9</kbd> and run it with <kbd>Shift</kbd> + <kbd>F10</kbd>. In a Cargo
   project the Java-only tools and Run are hidden, and <kbd>Ctrl</kbd> + <kbd>F9</kbd> runs
   <code>cargo check</code>.

@@ -13,7 +13,7 @@
    *   • LEFT rail top     — Project (tree), Structure (symbols), Dependencies — left side panels.
    *   • LEFT rail bottom  — the bottom-dock toggles (Build, Problems, TODO, Terminal). Docs &
    *                         Settings live in the titlebar's right cluster.
-   *   • RIGHT rail        — Maven (top); Services + the Forms toggle (bottom).
+   *   • RIGHT rail        — Maven (top); the Forms toggle (bottom).
    *   • BOTTOM dock       — one panel per rail button, each owning its header and its actions:
    *                         Build+Problems (two views of one run, sharing a panel) · TODO ·
    *                         Forms · Terminal.
@@ -24,7 +24,7 @@
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info,
     Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck,
-    TextCursorInput, ListChecks, BookOpen, FlaskConical, ListRestart,
+    TextCursorInput, ListChecks, BookOpen, FlaskConical, ListRestart, Bug,
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -51,8 +51,9 @@
   import BennuStructurePanel from './BennuStructurePanel.svelte';
   import BennuDependenciesPanel from './BennuDependenciesPanel.svelte';
   import BennuMavenPanel from './BennuMavenPanel.svelte';
+  import BennuTestsCatalogPanel from './BennuTestsCatalogPanel.svelte';
   import MavenIcon from './MavenIcon.svelte';
-  import BennuServicesPanel from './BennuServicesPanel.svelte';
+  import JUnitIcon from './JUnitIcon.svelte';
   import BennuBottomDock from './BennuBottomDock.svelte';
   import BennuEditor from './BennuEditor.svelte';
   import BennuDocsPanel from './BennuDocsPanel.svelte';
@@ -68,6 +69,7 @@
   import BennuIntentionsOverlay from './BennuIntentionsOverlay.svelte';
   import BennuExternalChangeModal from './BennuExternalChangeModal.svelte';
   import BennuRunConfigModal from './BennuRunConfigModal.svelte';
+  import BennuBreakpointsModal from './BennuBreakpointsModal.svelte';
   import BennuRenameModal from './BennuRenameModal.svelte';
   import BennuUsagesPopover from './BennuUsagesPopover.svelte';
   import BennuGotoModal from './BennuGotoModal.svelte';
@@ -88,6 +90,10 @@
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { bennuRunConfigStore } from '$lib/stores/bennu/run-config.svelte';
+  import { bennuDebugStore } from '$lib/stores/bennu/debug.svelte';
+  // Opening a stack frame's source — the same resolution the consoles' stack traces use, so a
+  // frame in a dependency lands in its source view rather than nowhere.
+  import { openLogLink } from './log-link';
   import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
@@ -148,8 +154,12 @@
     let detachSpell: (() => void) | undefined;
     let detachDecompiled: (() => void) | undefined;
     let detachTests: (() => void) | undefined;
+    let detachDebug: (() => void) | undefined;
     void bennuRunStore.attach().then((d) => { detachRun = d; });
     void bennuTestStore.attach().then((d) => { detachTests = d; });
+    // The debugger's three streams: where the session is, where the program stopped, and what
+    // the VM made of each breakpoint.
+    void bennuDebugStore.attach().then((d) => { detachDebug = d; });
     void bennuIndexStore.attach().then((d) => { detachIndex = d; });
     void bennuSpellStore.attach().then((d) => { detachSpell = d; });
     // Reload a decompiled tab when its dependency sources finish downloading.
@@ -162,6 +172,7 @@
       window.removeEventListener('blur', stopPolling);
       stopPolling();
       detachRun?.(); detachIndex?.(); detachSpell?.(); detachDecompiled?.(); detachTests?.();
+      detachDebug?.();
       bennuIndexStore.reset();
     };
   });
@@ -183,6 +194,39 @@
   // Canopy asking for a specific project: open it. Once on mount for a request
   // parked before this window existed, then on every later request.
   onMount(() => onOpenIntent('bennu', (path) => { void projectStore.openProject(path); }));
+
+  /**
+   * Follow the debugger: whenever the selected frame changes, open its file at its line.
+   *
+   * ONE place, and it is why the frames list only selects. Every way of arriving at a frame —
+   * hitting a breakpoint, stepping into a method, stepping out of it, clicking a row — is the
+   * same event as far as "show me where that is" is concerned, and a debugger that stops
+   * without opening the code leaves you to find the file yourself every single time.
+   *
+   * Here rather than in the Frames column because that column only exists while the program is
+   * stopped: an effect inside it would be mounted and torn down on every resume, and would fire
+   * on the remount rather than on the stop.
+   */
+  let shownFrame = '';
+  $effect(() => {
+    const frame = bennuDebugStore.currentFrame;
+    if (!frame) {
+      shownFrame = '';
+      return;
+    }
+    // Keyed by what would make it a different *place*, so a re-render or a variables refresh
+    // does not re-open (and re-scroll) the file you are already reading.
+    const key = `${bennuDebugStore.sessionId}:${frame.index}:${frame.class}:${frame.line ?? ''}`;
+    if (key === shownFrame) return;
+    shownFrame = key;
+    // A project frame carries its file; a library one is resolved on the way — the same path
+    // the console's stack traces take, so a step into the JDK lands in its source view.
+    void openLogLink(
+      frame.file
+        ? { kind: 'file', path: frame.file, line: frame.line ?? undefined }
+        : { kind: 'source', class: frame.class, method: frame.method, line: frame.line ?? undefined },
+    );
+  });
 
   // When a real (non-demo) **Java** project opens, kick off the indexing status + job. The BE
   // rebuilds the index on every open, so this fires each time the root changes.
@@ -237,6 +281,32 @@
     // With none, the store looks for the project's entry points and runs the one it finds;
     // the editor opens only when there is a real question to answer (several, or none).
     void bennuRunStore.runActive(root).then((ran) => { if (!ran) bennuUiStore.openRunConfig(); });
+  }
+  /**
+   * Shift+F9 / palette Debug — the same launch, under the debugger.
+   *
+   * The panel opens with it, because a debug launch you cannot see the state of is just a
+   * slower run: whether it attached, whether the breakpoints took, and where it stopped are
+   * all in there.
+   */
+  function triggerDebug() {
+    const root = projectStore.project?.root;
+    if (!root) return;
+    bennuUiStore.showBottom('run');
+    void bennuRunStore.runActive(root, true).then((ran) => {
+      if (!ran) bennuUiStore.openRunConfig();
+    });
+  }
+  /**
+   * Ctrl+F8 — set or clear a breakpoint on the caret's line, without reaching for the gutter.
+   *
+   * The editor answers, because *where a breakpoint may go* is a property of the buffer: only a
+   * line that compiles to bytecode can hold one, and asking the store directly would be a
+   * second answer to a question the gutter already answers. `false` means the caret is not on
+   * such a line — the key then does nothing, exactly as the gutter offers nothing there.
+   */
+  function toggleBreakpointAtCaret() {
+    editor?.toggleBreakpointAtCaret();
   }
 
   // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -343,7 +413,7 @@
   // ── Left/right rail items ────────────────────────────────────────────────────
   //
   // Java-only tools are absent — not disabled — on a Cargo project. Structure, Maven,
-  // Dependencies, Services and Forms are each backed by the Java symbol index or by the
+  // Dependencies and Forms are each backed by the Java symbol index or by the
   // Struts/Spring config graph, and neither exists for a Rust root (see
   // `bennu_open_project`): a rail icon that always opens an empty panel teaches the wrong
   // thing about the tool. Project, Build, Problems, TODO and Terminal all mean something
@@ -414,7 +484,7 @@
   });
 
   /**
-   * Hydrate the project's run configurations from its `.arbor/config.toml`. Cheap (one small
+   * Hydrate the project's run configurations from its `.arbor/bennu/config.toml`. Cheap (one small
    * file) and needed before the titlebar ▶ can mean anything, so it does not wait for the
    * index the way test discovery does. The store makes it idempotent per root — this effect
    * re-runs on more than "a different project", and a re-read would discard edits.
@@ -423,6 +493,9 @@
     const root = projectStore.project?.root ?? null;
     if (!root || projectStore.isDemo) return;
     void bennuRunConfigStore.load(root);
+    // The breakpoints live beside them, in the same file and for the same reason: the gutter
+    // has to draw them the moment a file opens, long before anything is launched.
+    void bennuDebugStore.load(root);
   });
 
   const leftTop = $derived<ActivityRailItem[]>([
@@ -445,8 +518,23 @@
     // would be the only way to close it again.
     ...(javaTools
       ? [
-          { id: 'run', tooltip: 'Run', shortcut: 'Alt+R', icon: Play, dot: bennuRunStore.running ? ('accent' as const) : undefined, active: bennuUiStore.bottomPanel === 'run', onclick: () => bennuUiStore.toggleBottom('run') },
-          { id: 'tests', tooltip: 'Tests', shortcut: 'Alt+5', icon: FlaskConical, active: bennuUiStore.bottomPanel === 'tests', onclick: () => bennuUiStore.toggleBottom('tests') },
+          // ONE button for running and debugging, because they are one activity: the same
+          // launch with more to look at. The icon says which it currently is, and the dot is a
+          // WARNING while the program is stopped — a suspended VM holds its locks and its
+          // port, and a debug session you forgot about looks exactly like a hang.
+          {
+            id: 'run',
+            tooltip: bennuDebugStore.live ? 'Run / Debug' : 'Run',
+            shortcut: 'Alt+R',
+            icon: bennuDebugStore.live ? Bug : Play,
+            dot: bennuDebugStore.paused
+              ? ('warning' as const)
+              : bennuRunStore.running
+                ? ('accent' as const)
+                : undefined,
+            active: bennuUiStore.bottomPanel === 'run',
+            onclick: () => bennuUiStore.toggleBottom('run'),
+          },
         ]
       : []),
     { id: 'problems', tooltip: 'Problems', shortcut: 'Alt+6',   icon: AlertTriangle,  active: bennuUiStore.bottomPanel === 'problems', onclick: () => bennuUiStore.toggleBottom('problems') },
@@ -455,7 +543,12 @@
   ]);
   const rightTop = $derived<ActivityRailItem[]>(
     javaTools
-      ? [{ id: 'maven', tooltip: 'Maven', shortcut: 'Alt+8', icon: MavenIcon, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') }]
+      ? [
+          { id: 'maven', tooltip: 'Maven', shortcut: 'Alt+8', icon: MavenIcon, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') },
+          // The CATALOGUE of tests, not the runs — those are tabs of the Run console. Its own
+          // brand mark for the same reason Maven has one: this button names a product.
+          { id: 'tests', tooltip: 'Tests', shortcut: 'Alt+5', icon: JUnitIcon, active: bennuUiStore.rightPanel === 'tests', onclick: () => bennuUiStore.toggleRight('tests') },
+        ]
       : [],
   );
   // Forms drives the BOTTOM dock (wide, horizontal data), not a side panel — its toggle sits
@@ -478,9 +571,6 @@
         active: bennuUiStore.bottomPanel === c.id,
         onclick: () => bennuUiStore.toggleBottom(c.id),
       })),
-    ...(javaTools
-      ? [{ id: 'services', tooltip: 'Services', shortcut: 'Alt+9', icon: Server, active: bennuUiStore.rightPanel === 'services', onclick: () => bennuUiStore.toggleRight('services') }]
-      : []),
   ]);
 
   // Switching projects can take rail icons away — a Cargo root loses the Java tools, a
@@ -496,10 +586,10 @@
     untrack(() =>
       bennuUiStore.dropUnavailablePanels({
         left: java ? ['project', 'structure', 'dependencies'] : ['project'],
-        right: java ? ['maven', 'services'] : [],
+        right: java ? ['maven', 'tests'] : [],
         bottom: [
           'problems', 'terminal', 'build', 'todos',
-          ...(java ? ['run' as const, 'tests' as const] : []),
+          ...(java ? ['run' as const] : []),
           ...(jsp ? ['forms' as const] : []),
           // Most framework catalogs have no rail button, so one left open after switching to a
           // project that doesn't offer it would be unclosable from the rail.
@@ -544,8 +634,10 @@
     'terminal': TerminalSquare as unknown as IconComponent,
     'hammer': Hammer as unknown as IconComponent,
     'maven': MavenIcon as unknown as IconComponent,
+    'junit': JUnitIcon as unknown as IconComponent,
     'list-checks': ListChecks as unknown as IconComponent,
     'play': Play as unknown as IconComponent,
+    'bug': Bug as unknown as IconComponent,
     'flask': FlaskConical as unknown as IconComponent,
     'rerun': ListRestart as unknown as IconComponent,
     'todo': ListTodo as unknown as IconComponent,
@@ -643,12 +735,11 @@
       { id: 'forms',     title: 'Toggle Forms',     icon: 'list',        shortcut: 'Alt+3', action: () => run(() => bennuUiStore.toggleBottom('forms')), when: jspTools },
       { id: 'dependencies', title: 'Dependencies',  icon: 'library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: javaTools },
       { id: 'runpanel',  title: 'Toggle Run',       icon: 'play',        shortcut: 'Alt+R', action: () => run(() => bennuUiStore.toggleBottom('run')), when: javaTools },
-      { id: 'tests',     title: 'Toggle Tests',     icon: 'flask',       shortcut: 'Alt+5', action: () => run(() => bennuUiStore.toggleBottom('tests')), when: javaTools },
+      { id: 'tests',     title: 'Toggle Tests',     icon: 'junit',       shortcut: 'Alt+5', action: () => run(() => bennuUiStore.toggleRight('tests')), when: javaTools },
       { id: 'problems',  title: 'Toggle Problems',  icon: 'alert',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
       { id: 'todos',     title: 'Toggle TODO',      icon: 'todo',        shortcut: 'Alt+7', action: () => run(() => bennuUiStore.toggleBottom('todos')), when: true },
       { id: 'terminal',  title: 'Toggle Terminal',  icon: 'terminal',    shortcut: 'Alt+F12', action: () => run(() => bennuUiStore.toggleBottom('terminal')), when: true },
       { id: 'maven',     title: 'Toggle Maven',     icon: 'maven',       shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: javaTools },
-      { id: 'services',  title: 'Toggle Services',  icon: 'server',      shortcut: 'Alt+9', action: () => run(() => bennuUiStore.toggleRight('services')), when: javaTools },
       // The framework catalogs. Palette-only by design (see `framework-catalogs.ts`) and gated
       // on the project having something in them, so they are absent — not empty — everywhere
       // else. Same list the rail is built from: a verb the palette offers must have somewhere to
@@ -685,6 +776,30 @@
         action: () => run(triggerValidate), when: idle && javaTools },
       { id: 'run', title: 'Run', icon: 'play', shortcut: 'Shift+F10',
         action: () => run(triggerRun), when: idle && javaTools },
+      { id: 'debug', title: 'Debug', icon: 'bug', shortcut: 'Shift+F9',
+        action: () => run(triggerDebug), when: idle && javaTools },
+      // The three that only mean anything while the program is standing still. Offered from
+      // the palette as well as the panel because the panel has to be open to press one, and
+      // reaching a verb from wherever you are is what the palette is for.
+      { id: 'dbgresume', title: 'Resume the program', icon: 'play', shortcut: 'F9',
+        action: () => run(() => void bennuDebugStore.resume()), when: bennuDebugStore.paused },
+      { id: 'dbgstepover', title: 'Step over', icon: 'play', shortcut: 'F8',
+        action: () => run(() => void bennuDebugStore.step('over')), when: bennuDebugStore.paused },
+      { id: 'dbgstepinto', title: 'Step into', icon: 'play', shortcut: 'F7',
+        action: () => run(() => void bennuDebugStore.step('into')), when: bennuDebugStore.paused },
+      { id: 'dbgstepout', title: 'Step out', icon: 'play', shortcut: 'Shift+F8',
+        action: () => run(() => void bennuDebugStore.step('out')), when: bennuDebugStore.paused },
+      { id: 'dbgbreak', title: 'Toggle breakpoint', icon: 'bug', shortcut: 'Ctrl+F8',
+        action: () => run(toggleBreakpointAtCaret),
+        when: javaTools && supportsCodeNav(projectStore.activeFilePath) },
+      { id: 'dbglist', title: 'Breakpoints…', icon: 'bug', shortcut: 'Ctrl+Shift+F8',
+        action: () => run(() => bennuUiStore.openBreakpoints()),
+        when: javaTools && !!projectStore.project },
+      { id: 'dbgmute', title: bennuDebugStore.muted ? 'Arm breakpoints' : 'Mute breakpoints',
+        icon: 'bug',
+        action: () => run(() => void bennuDebugStore.toggleMute()), when: bennuDebugStore.live },
+      { id: 'dbgdetach', title: 'Detach the debugger', icon: 'bug',
+        action: () => run(() => void bennuDebugStore.detachSession()), when: bennuDebugStore.live },
       { id: 'rerun', title: 'Rerun', icon: 'rerun',
         action: () => run(() => void bennuRunStore.rerunApp()), when: idle && javaTools && bennuRunStore.canRerun },
       { id: 'stoprun', title: 'Stop the program', icon: 'hammer',
@@ -811,6 +926,39 @@
       if (!projectStore.project || !javaTools || bennuRunStore.active) return;
       e.preventDefault(); triggerRun(); return;
     }
+
+    /*
+     * The debugger, on IntelliJ's keys.
+     *
+     * F9 is two verbs one modifier apart, and deliberately so: Ctrl+F9 builds, plain F9
+     * resumes. They can never be ambiguous because resume only exists while the program is
+     * stopped, and the build guard above already took Ctrl+F9.
+     */
+    if (!mod && e.shiftKey && !e.altKey && e.key === 'F9') {
+      if (!projectStore.project || !javaTools || bennuRunStore.active) return;
+      e.preventDefault(); triggerDebug(); return;
+    }
+    if (!mod && !e.shiftKey && !e.altKey && e.key === 'F9' && bennuDebugStore.paused) {
+      e.preventDefault(); void bennuDebugStore.resume(); return;
+    }
+    // Ctrl+Shift+F8 — the breakpoint list, IntelliJ's key. Before the step handlers, which
+    // also claim F8 but never with Ctrl.
+    if (mod && e.shiftKey && !e.altKey && e.key === 'F8') {
+      if (!javaTools || !projectStore.project) return;
+      e.preventDefault(); bennuUiStore.openBreakpoints(); return;
+    }
+    if (!mod && !e.altKey && e.key === 'F8' && bennuDebugStore.paused) {
+      e.preventDefault(); void bennuDebugStore.step(e.shiftKey ? 'out' : 'over'); return;
+    }
+    if (!mod && !e.shiftKey && !e.altKey && e.key === 'F7' && bennuDebugStore.paused) {
+      e.preventDefault(); void bennuDebugStore.step('into'); return;
+    }
+    // Ctrl+F8 works whether or not anything is running: a breakpoint is a property of the
+    // project, and setting one before you launch is the ordinary case.
+    if (mod && !e.shiftKey && !e.altKey && e.key === 'F8') {
+      if (!javaTools || !supportsCodeNav(projectStore.activeFilePath)) return;
+      e.preventDefault(); toggleBreakpointAtCaret(); return;
+    }
     /*
      * Ctrl+Shift+F10 — IntelliJ's "run the thing in front of me". Which thing depends on
      * what is open, and the two readings are disjoint: on a JSP it deploys the page, on a
@@ -879,9 +1027,9 @@
       // digit like every other tool there, and only when the rail has it.
       if (e.key === '4' && catalogIds.includes('endpoints')) { e.preventDefault(); bennuUiStore.toggleBottom('endpoints'); return; }
       if (e.key === '6') { e.preventDefault(); bennuUiStore.toggleBottom('problems'); return; }
-      // Tests (Alt+5) — Java-only, like its rail icon: on a Cargo project the panel has
-      // nothing to show and no toggle on screen to close it again.
-      if (e.key === '5' && javaTools) { e.preventDefault(); bennuUiStore.toggleBottom('tests'); return; }
+      // Tests (Alt+5) — the CATALOGUE, on the right rail. A test RUN is a tab of the Run
+      // console; this is where you go to start one. Java-only, like its rail icon.
+      if (e.key === '5' && javaTools) { e.preventDefault(); bennuUiStore.toggleRight('tests'); return; }
       if (e.key === '7') { e.preventDefault(); bennuUiStore.toggleBottom('todos'); return; }
       if (e.key === '0') { e.preventDefault(); bennuUiStore.toggleBottom('build'); return; }
       // The Java-only tools. Gated on `javaTools` for the same reason their rail icons and
@@ -896,8 +1044,9 @@
         // Endpoints here, and moving an existing tool's shortcut to make room would cost
         // more than it buys.
         if (e.key.toLowerCase() === 'r') { e.preventDefault(); bennuUiStore.toggleBottom('run'); return; }
+        // Debug, beside Run for the same reason: every digit the rail could want is already
+        // spoken for, and the two panels are read together.
         if (e.key === '8') { e.preventDefault(); bennuUiStore.toggleRight('maven'); return; }
-        if (e.key === '9') { e.preventDefault(); bennuUiStore.toggleRight('services'); return; }
       }
       if (e.key === 'Enter') {
         if (!isJavaFile(projectStore.activeFilePath)) return;
@@ -965,8 +1114,8 @@
 
         {#if showRight}
           <PanelCard orientation="right" initialSize={280} minSize={200} maxSize={520}>
-            {#if bennuUiStore.rightPanel === 'maven'}<BennuMavenPanel />
-            {:else if bennuUiStore.rightPanel === 'services'}<BennuServicesPanel />{/if}
+            {#if bennuUiStore.rightPanel === 'maven'}<BennuMavenPanel />{/if}
+            {#if bennuUiStore.rightPanel === 'tests'}<BennuTestsCatalogPanel />{/if}
           </PanelCard>
         {/if}
       {/snippet}
@@ -1007,6 +1156,10 @@
 
 {#if bennuUiStore.runConfigOpen}
   <BennuRunConfigModal onClose={() => bennuUiStore.closeRunConfig()} />
+{/if}
+
+{#if bennuUiStore.breakpointsOpen}
+  <BennuBreakpointsModal onClose={() => bennuUiStore.closeBreakpoints()} />
 {/if}
 
 {#if bennuUiStore.navOpen}

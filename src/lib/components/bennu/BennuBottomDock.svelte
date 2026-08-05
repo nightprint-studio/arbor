@@ -18,7 +18,6 @@
    */
   import BennuBuildProblemsPanel from './BennuBuildProblemsPanel.svelte';
   import BennuRunPanel from './BennuRunPanel.svelte';
-  import BennuTestPanel from './BennuTestPanel.svelte';
   import BennuTerminalView from './BennuTerminalView.svelte';
   import BennuTodoPanel from './BennuTodoPanel.svelte';
   import BennuFormsPanel from './BennuFormsPanel.svelte';
@@ -39,14 +38,10 @@
     <BennuBuildProblemsPanel />
   </div>
   <!-- Stays mounted for the same reason the terminal does: there is a LIVE PROCESS behind it.
-       Unmounting would drop the console's scroll, its buffer and the input box mid-run. -->
+       Unmounting would drop the console's scroll, its buffer and the input box mid-run — and a
+       test run, which lives in here too, is minutes long and streaming. -->
   <div class="dock-section" class:hidden={active !== 'run'}>
     <BennuRunPanel />
-  </div>
-  <!-- Stays mounted: a test run is minutes long and streams into it, and looking at the
-       TODOs mid-run must not be the thing that throws the results away. -->
-  <div class="dock-section" class:hidden={active !== 'tests'}>
-    <BennuTestPanel />
   </div>
   <div class="dock-section" class:hidden={active !== 'todos'}>
     <BennuTodoPanel />

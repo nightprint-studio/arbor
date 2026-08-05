@@ -396,7 +396,10 @@ fn schema_cache(jars: &[PathBuf]) -> Vec<ScannedFile> {
     )
     .into_iter()
     .map(|r| {
-        let text = normalize_newlines(&r.text);
+        // A schema shipped by a framework of that era is as likely to be Latin-1 as UTF-8 —
+        // decoded by the one rule that reads every jar entry (`jar_entry_text`), so a `<xs:documentation>`
+        // with an accent in it is not a row of replacement characters when someone opens it.
+        let text = normalize_newlines(&crate::dep_classpath::jar_entry_text(&r.bytes));
         // Unlike the Spring descriptors, a schema is something the user will want to *open*:
         // ctrl+clicking the URL a document names it by is the first thing anyone tries. So it is
         // materialised into the cache and identified by that real path, rather than by the
@@ -434,7 +437,10 @@ fn descriptor_cache(jars: &[PathBuf]) -> Vec<ScannedFile> {
     .into_iter()
     // `id` is `<jar>!/<entry>` — a display identity, not a path to open. The extension only
     // ever matches on it, and it is what a hover shows as the provenance of a key.
-    .map(|r| ScannedFile { path: PathBuf::from(r.id), text: r.text })
+    // These two are JSON, which is UTF-8 by specification — but they go through the same decode as
+    // everything else read out of a jar, because "the one that is different" is how a rule stops
+    // being one.
+    .map(|r| ScannedFile { path: PathBuf::from(r.id), text: crate::dep_classpath::jar_entry_text(&r.bytes) })
     .collect();
 
     let shared = Arc::new(read);

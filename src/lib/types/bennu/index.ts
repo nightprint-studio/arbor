@@ -276,6 +276,8 @@ export interface RunConfigDto {
   test_scope: string;
   /** junit only — the module directory or class selector `test_scope` names. */
   test_target: string;
+  /** Hold the VM before `main` when launched under the debugger. */
+  debug_suspend?: boolean;
 }
 
 /** The per-repo run-config bundle stored in `<root>/.arbor/config.toml`. */

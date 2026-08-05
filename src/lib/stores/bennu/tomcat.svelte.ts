@@ -1,7 +1,7 @@
 /**
  * Bennu Tomcat link — the per-project association to a local Tomcat used for JSP hot-swap.
  *
- * Real persistence (unlike run-config's mock): the link lives in `<repo>/.arbor/config.toml`
+ * Real persistence (unlike run-config's mock): the link lives in `<repo>/.arbor/bennu/config.toml`
  * `[bennu.tomcat]` on the BE. This rune store is a per-root cache — `load(root)` hydrates it from
  * `get_tomcat_config`, `save(root, cfg)` writes through `set_tomcat_config`. Keyed by project root
  * via SvelteMap so `configFor` / `isLinked` stay reactive across project switches.

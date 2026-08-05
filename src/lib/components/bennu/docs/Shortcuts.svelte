@@ -8,14 +8,13 @@
   <li><kbd>Alt</kbd> + <kbd>2</kbd> — toggle <strong>Structure</strong> (symbols)</li>
   <li><kbd>Alt</kbd> + <kbd>N</kbd> — toggle <strong>Dependencies</strong> (by module)</li>
   <li><kbd>Alt</kbd> + <kbd>0</kbd> — toggle <strong>Build</strong> (bottom dock)</li>
-  <li><kbd>Alt</kbd> + <kbd>R</kbd> — toggle <strong>Run</strong> — the launched program's console (bottom dock)</li>
-  <li><kbd>Alt</kbd> + <kbd>5</kbd> — toggle <strong>Tests</strong> (bottom dock)</li>
+  <li><kbd>Alt</kbd> + <kbd>R</kbd> — toggle <strong>Run</strong> — the launched program's console, and the debugger when it is one (bottom dock)</li>
+  <li><kbd>Alt</kbd> + <kbd>5</kbd> — toggle <strong>Tests</strong> (the catalogue, right rail)</li>
   <li><kbd>Alt</kbd> + <kbd>6</kbd> — toggle <strong>Problems</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>7</kbd> — toggle <strong>TODO</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>3</kbd> — toggle <strong>Forms</strong> — JSP form analysis (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>F12</kbd> — toggle <strong>Terminal</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>8</kbd> — toggle <strong>Maven</strong> (right rail)</li>
-  <li><kbd>Alt</kbd> + <kbd>9</kbd> — toggle <strong>Services</strong> (right rail)</li>
 </ul>
 
 <h2>Navigate</h2>
@@ -49,6 +48,23 @@
   <li><kbd>Shift</kbd> + <kbd>F10</kbd> — <strong>run</strong> the active configuration (builds first, then launches) — Maven projects only</li>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd> — <strong>run what is in front of you</strong>: the test at the caret in a Java test file, or a hot-swap deploy of the current JSP</li>
 </ul>
+
+<h2>Debug</h2>
+<ul>
+  <li><kbd>Shift</kbd> + <kbd>F9</kbd> — <strong>debug</strong> the active configuration (the same launch as ▶, with a debugger attached)</li>
+  <li><kbd>Ctrl</kbd> + <kbd>F8</kbd> — set or clear a <strong>breakpoint</strong> on the caret's line</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F8</kbd> — the <strong>breakpoint list</strong>: disable, remove, or add an exception breakpoint</li>
+  <li><kbd>F9</kbd> — <strong>resume</strong> the stopped program</li>
+  <li><kbd>F8</kbd> — <strong>step over</strong></li>
+  <li><kbd>F7</kbd> — <strong>step into</strong></li>
+  <li><kbd>Shift</kbd> + <kbd>F8</kbd> — <strong>step out</strong></li>
+</ul>
+<p>
+  <kbd>F9</kbd> is <em>build</em> with <kbd>Ctrl</kbd> and <em>resume</em> without it; they can
+  never collide, because resume only exists while the program is stopped. Breakpoints can also be
+  set by clicking the left margin, outside the line numbers, and right-clicking one offers to
+  disable rather than delete it. See <em>Building &amp; running</em>.
+</p>
 <p>In a Maven project the <strong>Build</strong> button is a split-button: click it to run the current type, or open its chevron to pick <em>Maven build</em> or <em>Validate (no compile)</em> — the choice is remembered and becomes what <kbd>Ctrl</kbd> + <kbd>F9</kbd> runs. In a Cargo project there is one build and the button is plain. Validation checks every <code>.java</code> file with the editor's diagnostics, reports timing statistics (total, average, slowest file) in the Build tool window, and lists every problem it finds in the <strong>Problems</strong> panel, grouped by file. Only one build or validation runs at a time. Build output streams to the <strong>Build</strong> tool window; problems there are clickable and jump to the offending line. A launched program's own output goes to the <strong>Run</strong> console instead, where you can type back to it and stop it. What ▷ launches is the active run configuration (▷ menu → <em>Edit configurations…</em>); on a project with exactly one entry point there is nothing to configure — ▷ finds it. See <em>Building &amp; running</em>.</p>
 
 <h2>Tests</h2>
@@ -59,7 +75,7 @@
   <li>Command palette — <strong>Rerun failed tests</strong>, and <strong>Stop the test run</strong></li>
 </ul>
 <p>
-  Inside the Tests panel the tree is driven from the keyboard: <kbd>↑</kbd> <kbd>↓</kbd> move,
+  Inside a test run the tree is driven from the keyboard: <kbd>↑</kbd> <kbd>↓</kbd> move,
   <kbd>→</kbd> <kbd>←</kbd> expand and collapse a class, <kbd>Enter</kbd> jumps to the source and
   <kbd>Ctrl</kbd> + <kbd>Enter</kbd> runs whatever the cursor is on. See
   <em>Testing</em> for what the panel shows.

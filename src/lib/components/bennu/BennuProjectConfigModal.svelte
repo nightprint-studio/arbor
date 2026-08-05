@@ -6,7 +6,7 @@
    * source encoding, source/output roots, excluded dirs) and inspect the
    * read-only facts (modules). Overrides route through
    * `bennuProjectConfigStore`, the SEAM that will map onto a future `[bennu]`
-   * section in the per-repo `<repo>/.arbor/config.toml` (CLAUDE.md rule #11).
+   * section in the per-repo `<repo>/.arbor/bennu/config.toml` (CLAUDE.md rule #11).
    *
    * Structure/scaffold phase: the config store is in-memory (MOCK). Every mock is
    * marked inline. Dependencies live in their own left tool window
@@ -77,7 +77,7 @@
   // ── Actions ────────────────────────────────────────────────────────────────
   function apply() {
     // MOCK — persists only to the in-memory store; wire to per-project
-    // `<repo>/.arbor/config.toml` when the BE lands.
+    // `<repo>/.arbor/bennu/config.toml` when the BE lands.
     if (root) bennuProjectConfigStore.apply(root, draft);
     onClose();
   }

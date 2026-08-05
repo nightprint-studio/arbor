@@ -97,12 +97,17 @@ fn index_base_for(root: &str) -> PathBuf {
 /// dirs>/<Simple>.java`. Laying it out by package + simple name (not the raw binary) keeps the file
 /// stem matching the declared type, so the editor opens it as a normal `.java` (no name-mismatch
 /// noise). `$`-nested types collapse to their innermost simple name (a rare cosmetic case).
-/// Whether `file` is a generated decompiled-from-bytecode stub (under `bennu_data_dir()/decompiled/`).
-/// Such files are read-only JDK/dependency views, never validated. `Path::starts_with` matches
-/// component-wise, so a forward-slashed FE path and the native data dir still compare correctly.
+/// Whether `file` is a view of something that lives inside a jar rather than in the project: a
+/// decompiled-from-bytecode stub (`bennu_data_dir()/decompiled/`) or a resource extracted from a
+/// dependency (`bennu_data_dir()/library/`, written by [`crate::library_search`]).
+///
+/// Both are read-only and neither is ever validated — a diagnostic on a copy of someone else's
+/// `web.xml` is noise about a file you cannot fix. `Path::starts_with` matches component-wise, so
+/// a forward-slashed FE path and the native data dir still compare correctly.
 fn is_decompiled_stub(file: &str) -> bool {
-    let root = arbor_core::prelude::bennu_data_dir().join("decompiled");
-    Path::new(file).starts_with(&root)
+    let data = arbor_core::prelude::bennu_data_dir();
+    let path = Path::new(file);
+    path.starts_with(data.join("decompiled")) || path.starts_with(data.join("library"))
 }
 
 fn decompiled_cache_path(binary: &str) -> PathBuf {
@@ -160,6 +165,25 @@ fn member_jump_offset(
     }
     let simple = file_binary.rsplit(['/', '$']).next().unwrap_or(file_binary);
     find_type_name_span(text, simple).map(|(s, _)| s).unwrap_or(0)
+}
+
+/// The byte offset where 1-based `line` starts in `text`. `None` when the text has fewer lines —
+/// which is the answer that matters: it is how a caller learns the line number it was given does
+/// not describe this file, and falls back to something that does.
+fn line_start_offset(text: &str, line: u32) -> Option<usize> {
+    if line <= 1 {
+        return Some(0);
+    }
+    let mut togo = line - 1;
+    for (i, c) in text.char_indices() {
+        if c == '\n' {
+            togo -= 1;
+            if togo == 0 {
+                return Some(i + 1);
+            }
+        }
+    }
+    None
 }
 
 /// The result of resolving a library/JDK type to an on-disk source view (real source or a decompiled
@@ -1661,6 +1685,67 @@ impl IndexService {
         })
     }
 
+    /// The source view for a **stack-trace frame** naming a library / JDK class — the click
+    /// target behind a frame in the Run, Build or Test console that this project does not
+    /// declare (those resolve to a real file straight from the class index).
+    ///
+    /// Where it lands is decided by what the view IS, which is the whole reason this is not
+    /// just "open the file at the line":
+    ///
+    /// * **real source** (the JDK's `src.zip`, a downloaded `-sources.jar`) — the frame's line
+    ///   number is a fact about that exact artifact, so it is used. An inner class lives in
+    ///   its outer's compilation unit, and the frame's line is a line of that same unit, so
+    ///   this stays right for nested classes.
+    /// * **a decompiled stub** — the line numbers are fiction: the stub is a synthesized list
+    ///   of signatures, and line 118 of it means nothing. So it lands on the METHOD the frame
+    ///   named, which is the most precise honest answer, and the tab offers "Download
+    ///   sources" — after which the lines are real.
+    ///
+    /// `root` is the project's root (which is also a path under itself, so it picks the slot
+    /// like any file would). `None` when nothing resolves — a project type, an undecodable
+    /// class, or no open project.
+    pub fn frame_source(
+        &self,
+        root: &str,
+        class: &str,
+        method: Option<&str>,
+        line: Option<u32>,
+    ) -> Option<DecompiledView> {
+        let slot = self.slot_for_file(root)?;
+        let root_path = norm_path(&slot.root);
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        // A frame names a binary class (`com.acme.Order$Line`), which the resolver takes as
+        // written. A nested one whose own bytecode we cannot serve falls back to its outer
+        // type — the file that declares it.
+        let outer = arbor_logscan::prelude::outer_class(class);
+        let served = [class, outer].into_iter().find_map(|name| {
+            let binary = provider.library_binary("", name)?;
+            let view = self.serve_source_view(&provider, &root_path, &binary)?;
+            Some((binary, view))
+        });
+        let (binary, (text, file_binary, is_stub)) = served?;
+
+        let member = method.map(|name| bennu_intel::prelude::LibraryMember {
+            name: name.to_string(),
+            is_field: false,
+        });
+        let by_member = || member_jump_offset(&text, &file_binary, member.as_ref());
+        let jump = if is_stub {
+            by_member()
+        } else {
+            line.and_then(|n| line_start_offset(&text, n)).unwrap_or_else(by_member)
+        };
+        let path = write_view(&file_binary, &text)?;
+        Some(DecompiledView {
+            file: path,
+            offset: jump,
+            can_download: self.can_download_sources(&slot, &binary, is_stub),
+        })
+    }
+
     /// The dependency jars resolved for `root`, or empty when no project is open there / Maven
     /// never resolved. The classpath as it actually is, which is what any per-artifact reading
     /// (the library-bean scan) has to walk.
@@ -3106,6 +3191,18 @@ mod tests {
         assert_eq!(bean_property_name("Username"), "username");
         assert_eq!(bean_property_name("URL"), "URL");
         assert_eq!(bean_property_name("X"), "x");
+    }
+
+    #[test]
+    fn a_line_number_becomes_the_offset_that_line_starts_at() {
+        let text = "package a;\nclass Foo {\n  int x;\n}\n";
+        assert_eq!(line_start_offset(text, 1), Some(0));
+        assert_eq!(line_start_offset(text, 2), Some(11));
+        assert_eq!(line_start_offset(text, 3), Some(23));
+        assert!(text[23..].starts_with("  int x;"));
+        // A line the file does not have is how a caller learns the number describes some
+        // other artifact — a stub, say — and falls back to jumping by member.
+        assert_eq!(line_start_offset(text, 99), None);
     }
 
     #[test]

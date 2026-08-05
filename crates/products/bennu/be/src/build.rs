@@ -71,6 +71,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::index_service::IndexService;
+use crate::log::{class_map, ClassMap, LogAnnotator};
 
 /// The JDK level to resolve `JAVA_HOME` against as a LAST resort — when the project isn't open
 /// and has no override, so nothing has read its pom (the target stack is JDK 8 —
@@ -150,7 +151,7 @@ fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String>
 
     let outcome = if is_cargo_root(&root) {
         let (ok, raw) = run_cargo_check(&root)?;
-        finish_compile("cargo", ok, raw, &sink)
+        finish_compile("cargo", ok, raw, &sink, &root)
     } else {
         let java_home = resolve_java_home(&args.root);
         let module = args.module.as_deref().map(str::trim).filter(|m| !m.is_empty());
@@ -244,6 +245,18 @@ pub struct RunArgs {
     /// Extra environment variables applied to the child (merged over the inherited env).
     #[serde(default)]
     pub env: Option<std::collections::HashMap<String, String>>,
+    /// Launch under the debugger: the JVM gets the JDWP agent and connects back to a port
+    /// opened here first (see [`crate::debug`]), and the session carries this run's id.
+    #[serde(default)]
+    pub debug: bool,
+    /// Hold the VM before `main` until the debugger has attached and installed everything.
+    ///
+    /// Off unless the run configuration says otherwise, and deliberately: it is the only way to
+    /// stop in start-up code, and it means every launch begins frozen. Without it a breakpoint
+    /// the program has already run past is simply missed, which is the right trade for the
+    /// launch you press fifty times a day.
+    #[serde(default)]
+    pub debug_suspend: bool,
 }
 
 /// Launch `java <vm_args…> -cp <target/classes:deps> <main_class> <args...>` and stream
@@ -274,8 +287,20 @@ fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
 
     let mut cmd = Command::new(&java);
     cmd.current_dir(&cwd);
-    // VM args come BEFORE -cp / main class (JVM options must precede the class).
-    let vm_args = args.vm_args.clone().unwrap_or_default();
+
+    // Under the debugger, the port has to be listening BEFORE the process exists: the agent
+    // connects back during VM initialization and aborts the launch if nothing answers. A port
+    // that cannot be bound degrades to an ordinary run — a program that starts without the
+    // debugger beats one that does not start.
+    let launch = args.debug.then(crate::debug::prepare).flatten();
+
+    // VM args come BEFORE -cp / main class (JVM options must precede the class). The agent goes
+    // in with them rather than beside them, so the command line the console prints is the whole
+    // truth about what ran.
+    let mut vm_args = args.vm_args.clone().unwrap_or_default();
+    if let Some(l) = &launch {
+        vm_args.insert(0, crate::debug::agent_arg(l.port, args.debug_suspend));
+    }
     for a in &vm_args {
         cmd.arg(a);
     }
@@ -323,6 +348,16 @@ fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
     let child = Arc::new(Mutex::new(child));
     RunRegistry::global().register(&run_id, child.clone(), stdin);
 
+    // The session is keyed by the RUN id, so the console tab and the debugger are the same
+    // thing to everything that has to correlate them (Stop, the frames panel, the gutter).
+    if let Some(launch) = launch {
+        crate::debug::start(run_id.clone(), args.root.clone(), launch, sink.clone());
+    }
+
+    // Resolved once for the whole run, not once per line: the class index answers "which
+    // file declares com.acme.Order" for every frame of every trace this program prints.
+    let classes = class_map(&args.root);
+
     let run_id_thread = run_id.clone();
     let child_thread = child.clone();
     std::thread::Builder::new()
@@ -332,10 +367,16 @@ fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
             // full stdout pipe (or vice-versa).
             let mut pumps = Vec::new();
             if let Some(out) = stdout {
-                pumps.push(spawn_pump(out, "stdout", run_id_thread.clone(), sink.clone()));
+                pumps.push(spawn_pump(
+                    out,
+                    "stdout",
+                    run_id_thread.clone(),
+                    sink.clone(),
+                    classes.clone(),
+                ));
             }
             if let Some(err) = stderr {
-                pumps.push(spawn_pump(err, "stderr", run_id_thread.clone(), sink.clone()));
+                pumps.push(spawn_pump(err, "stderr", run_id_thread.clone(), sink.clone(), classes));
             }
             // POLLED, not `wait()`: the canceller needs the same handle to kill the tree, and
             // a thread parked inside `wait()` holds the lock for the entire run.
@@ -476,24 +517,31 @@ fn compile(
     sink: &Arc<dyn EventSink>,
 ) -> Result<CompileOutcome, String> {
     match run_mvn_compile(root, module, mvn_path, java_home) {
-        Ok((ok, raw)) => Ok(finish_compile("mvn", ok, raw, sink)),
+        Ok((ok, raw)) => Ok(finish_compile("mvn", ok, raw, sink, root)),
         Err(spawn_err) => {
             let (ok, raw) = run_javac(root, java_home)
                 .map_err(|javac_err| format!("mvn: {spawn_err}; javac: {javac_err}"))?;
-            Ok(finish_compile("javac", ok, raw, sink))
+            Ok(finish_compile("javac", ok, raw, sink, root))
         }
     }
 }
 
 /// Stream the raw log line-by-line, parse it, and assemble the outcome.
+///
+/// The log is interpreted on the way out, the same way a run's output is: Maven's
+/// `[ERROR]`s, the absolute paths in a compiler diagnostic and the qualified names in a
+/// plugin's stack trace are all worth reading as what they are, and the parsed diagnostics
+/// above the log only cover the compiler's own lines.
 fn finish_compile(
     tool: &str,
     ok: bool,
     raw: String,
     sink: &Arc<dyn EventSink>,
+    root: &Path,
 ) -> CompileOutcome {
+    let mut log = LogAnnotator::for_root(&root.display().to_string());
     for line in raw.lines() {
-        sink.emit(EVT_BUILD_OUTPUT, json!({ "text": line }));
+        sink.emit(EVT_BUILD_OUTPUT, log.line(line));
     }
     CompileOutcome { tool: tool.to_string(), ok, diagnostics: parse_diagnostics(&raw), stamp: None }
 }
@@ -1063,18 +1111,32 @@ fn next_run_id() -> String {
 
 // ── streaming pump ─────────────────────────────────────────────────────────────
 
-/// Spawn a thread that reads `reader` line-by-line and emits each as a `run-output`
-/// event tagged with the stream name. Lossy on non-UTF-8 (a run's stdout is text).
+/// Spawn a thread that reads `reader` line-by-line, **interprets** each line and emits it as
+/// a `run-output` event tagged with the stream name. Lossy on non-UTF-8 (a run's stdout is
+/// text).
+///
+/// The interpretation ([`LogAnnotator`]) travels with the line rather than being done in the
+/// frontend: the level, the URLs and the paths are the same work whoever does them, and the
+/// stack frames are not — resolving `com.acme.Order` to a file needs the class index, which
+/// lives here. Each pump gets its own annotator (level inheritance is per stream) over the
+/// shared class map.
 fn spawn_pump<R: std::io::Read + Send + 'static>(
     reader: R,
     stream: &'static str,
     run_id: String,
     sink: Arc<dyn EventSink>,
+    classes: ClassMap,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
+        let mut log = LogAnnotator::new(classes);
         let buf = BufReader::new(reader);
         for line in buf.lines().map_while(Result::ok) {
-            sink.emit(EVT_RUN_OUTPUT, json!({ "run_id": run_id, "stream": stream, "text": line }));
+            let mut payload = log.line(&line);
+            if let Some(map) = payload.as_object_mut() {
+                map.insert("run_id".into(), json!(run_id));
+                map.insert("stream".into(), json!(stream));
+            }
+            sink.emit(EVT_RUN_OUTPUT, payload);
         }
     })
 }

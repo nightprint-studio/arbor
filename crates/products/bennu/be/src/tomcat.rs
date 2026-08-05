@@ -7,10 +7,9 @@
 //! source dir (`src/main/webapp` &co.). The next browser refresh picks it up.
 //!
 //! Two moving parts:
-//!   * **config** — a per-repo `[bennu.tomcat]` section in `<repo>/.arbor/config.toml` (CLAUDE.md
-//!     rule #11: filesystem, never localStorage). Same merge discipline as [`crate::run_config`]:
-//!     parse the shared file into a dynamic table, replace only `bennu.tomcat`, write it back, so
-//!     corvus's own keys in that file survive.
+//!   * **config** — a per-repo `[tomcat]` section in `<repo>/.arbor/bennu/config.toml` (CLAUDE.md
+//!     rule #11: filesystem, never localStorage), through [`crate::repo_config`] like every
+//!     other per-repo section.
 //!   * **smart resolution** — from the Tomcat root we auto-detect the deployed context directory
 //!     (the single non-system exploded webapp, or the one whose name matches the project /
 //!     `<finalName>` / artifactId), so the user picks only the Tomcat folder, not the context.
@@ -31,7 +30,7 @@ use crate::web_discovery::{discover_jsp_files, is_jsp_family, source_webapp_dir}
 /// they're excluded from auto-detection.
 const SYSTEM_WEBAPPS: &[&str] = &["ROOT", "manager", "host-manager", "docs", "examples"];
 
-// ── config (`<repo>/.arbor/config.toml` `[bennu.tomcat]`) ────────────────────────
+// ── config (`<repo>/.arbor/bennu/config.toml` `[tomcat]`) ──────────────────────────────
 
 /// Per-repo Tomcat link. `webapp_name` empty = auto-detect the deployed context at swap time.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -102,14 +101,14 @@ pub struct HotSwapResult {
 
 // ── handlers ─────────────────────────────────────────────────────────────────────
 
-/// Read the per-repo Tomcat link from `<root>/.arbor/config.toml` `[bennu.tomcat]`. A project that
+/// Read the per-repo Tomcat link from `<root>/.arbor/bennu/config.toml` `[tomcat]`. A project that
 /// was never linked yields the default (empty) config — never an error.
 #[arbor_rpc::handler]
 fn bennu_get_tomcat_config(_ctx: &BennuState, args: RootArgs) -> Result<TomcatConfig, String> {
     Ok(load_tomcat_config(&args.root))
 }
 
-/// Persist the per-repo Tomcat link, preserving every other section of `.arbor/config.toml`.
+/// Persist the per-repo Tomcat link, preserving every other section of the file.
 #[arbor_rpc::handler]
 fn bennu_set_tomcat_config(_ctx: &BennuState, args: SetTomcatConfigArgs) -> Result<(), String> {
     save_tomcat_config(&args.root, &args.config)
@@ -331,52 +330,17 @@ fn xml_first_tag(xml: &str, tag: &str) -> Option<String> {
     (!val.is_empty()).then(|| val.to_string())
 }
 
-// ── persistence (TOML-table merge over the shared `.arbor/config.toml`) ────────────
+// ── persistence ────────────────────────────────────────────────────────────────────
 
-/// `<repo>/.arbor/config.toml`.
-fn config_path(root: &str) -> PathBuf {
-    PathBuf::from(root).join(".arbor").join("config.toml")
-}
-
-/// Read `bennu.tomcat` from `<root>/.arbor/config.toml`, or the empty default (missing/corrupt).
+/// Read `[tomcat]`, or the empty default (missing/corrupt) — see [`crate::repo_config`], which
+/// owns where the file is and how a section is merged into it.
 fn load_tomcat_config(root: &str) -> TomcatConfig {
-    let table = read_table(root);
-    match table.get("bennu").and_then(|b| b.get("tomcat")) {
-        Some(t) => t.clone().try_into().unwrap_or_default(),
-        None => TomcatConfig::default(),
-    }
+    crate::repo_config::load(root, "tomcat")
 }
 
-/// Merge `cfg` into `bennu.tomcat` of the on-disk table (creating `.arbor/` as needed) and write the
-/// whole file back, so unrelated sections (corvus's, bennu.run's) survive byte-for-byte.
+/// Persist `[tomcat]`, leaving every other section of the file alone.
 fn save_tomcat_config(root: &str, cfg: &TomcatConfig) -> Result<(), String> {
-    let mut table = read_table(root);
-    let value = toml::Value::try_from(cfg).map_err(|e| e.to_string())?;
-    let bennu = table
-        .entry("bennu".to_string())
-        .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
-    let bennu_tbl = bennu
-        .as_table_mut()
-        .ok_or_else(|| "`.arbor/config.toml` `[bennu]` is not a table".to_string())?;
-    bennu_tbl.insert("tomcat".to_string(), value);
-
-    let path = config_path(root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let text = toml::to_string_pretty(&table).map_err(|e| e.to_string())?;
-    std::fs::write(&path, text).map_err(|e| e.to_string())
-}
-
-/// Parse `<root>/.arbor/config.toml` into a dynamic table (empty on missing/unparseable file).
-fn read_table(root: &str) -> toml::value::Table {
-    let Ok(text) = std::fs::read_to_string(config_path(root)) else {
-        return toml::value::Table::new();
-    };
-    text.parse::<toml::Value>()
-        .ok()
-        .and_then(|v| v.as_table().cloned())
-        .unwrap_or_default()
+    crate::repo_config::save(root, "tomcat", cfg)
 }
 
 // ── small helpers ──────────────────────────────────────────────────────────────────
@@ -417,19 +381,20 @@ mod tests {
     }
 
     #[test]
-    fn config_round_trips_and_merge_preserves_siblings() {
+    fn config_round_trips_and_leaves_the_shared_file_alone() {
         let root = tmp("cfg");
-        // Seed a sibling corvus section — it must survive our write.
+        // A repo that is also open in corvus. Its file is not ours to rewrite — which is the
+        // whole reason bennu's per-repo settings moved out of it.
         std::fs::create_dir_all(root.join(".arbor")).unwrap();
-        std::fs::write(root.join(".arbor/config.toml"), "[corvus]\ndisplay_name = \"keep\"\n").unwrap();
+        let shared = "[corvus]\ndisplay_name = \"keep\"\n";
+        std::fs::write(root.join(".arbor/config.toml"), shared).unwrap();
 
         let cfg = TomcatConfig { tomcat_root: "/opt/tomcat".into(), webapp_name: "app".into() };
         save_tomcat_config(root.to_str().unwrap(), &cfg).unwrap();
-        let back = load_tomcat_config(root.to_str().unwrap());
-        assert_eq!(back, cfg);
+        assert_eq!(load_tomcat_config(root.to_str().unwrap()), cfg);
 
-        let text = std::fs::read_to_string(root.join(".arbor/config.toml")).unwrap();
-        assert!(text.contains("keep"), "sibling corvus section clobbered:\n{text}");
+        assert_eq!(std::fs::read_to_string(root.join(".arbor/config.toml")).unwrap(), shared);
+        assert!(root.join(".arbor/bennu/config.toml").is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
 

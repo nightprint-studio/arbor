@@ -22,6 +22,7 @@
     placeholder as cmPlaceholder,
     type DecorationSet,
     type KeyBinding,
+    type ViewUpdate,
   } from '@codemirror/view';
   import { RangeSet } from '@codemirror/state';
   import { indentUnit as cmIndentUnit } from '@codemirror/language';
@@ -51,8 +52,14 @@
     wrap = false,
     keyBindings,
     marks = [],
+    lineHighlights = [],
     gutterMarks = [],
     onGutterClick,
+    flagMarks,
+    canFlag,
+    onFlagClick,
+    onFlagContext,
+    onFlagsMoved,
     oninput,
     oncaret,
     onViewState,
@@ -125,6 +132,15 @@
      */
     marks?: readonly { from: number; to: number; className: string }[];
     /**
+     * Whole-line highlights — a class applied to the ROW, so the band spans the full width
+     * however short the line is. For "execution is here", "this is the hunk", and anything
+     * else whose subject is the line rather than the text on it.
+     *
+     * Distinct from {@link marks} on purpose: a mark paints the glyphs it covers and stops at
+     * the last character, which reads as a patch rather than as a band.
+     */
+    lineHighlights?: readonly { line: number; className: string }[];
+    /**
      * Icons for the left gutter, one per line — the affordance that makes a relationship
      * visible without being asked for it.
      *
@@ -138,6 +154,45 @@
     /** A gutter icon was clicked: its 1-based line, plus the event — so a host that has more
      *  than one thing to offer can anchor a menu where the pointer is instead of guessing. */
     onGutterClick?: (line: number, event: MouseEvent) => void;
+    /**
+     * A second gutter, for a per-line **toggle** the host owns: breakpoints, bookmarks.
+     *
+     * Separate from {@link gutterMarks} because the two answer different clicks. A mark opens
+     * what it points at, and only lines that have one are clickable; a flag is *set and unset*,
+     * so every line is a target and an unset line has to show that it is one. Sharing a column
+     * would make one click mean two things on the lines that have both.
+     *
+     * Present but empty is meaningful: pass `[]` for a gutter with nothing in it yet (the column
+     * still reserves its width and offers the hover affordance), and leave it undefined for no
+     * second gutter at all.
+     */
+    flagMarks?: readonly { line: number; className?: string; tooltip?: string }[];
+    /**
+     * Which lines may carry a flag. Omit for "any of them".
+     *
+     * A host that knows some lines cannot hold one — a breakpoint needs a line that compiles to
+     * bytecode — says so here, and those lines get no affordance and ignore the click. The
+     * absence of the dot is the explanation: there is nothing to press, rather than a press
+     * that quietly does something else.
+     *
+     * A line that already carries a flag is always offered, whatever this answers, or an edit
+     * that invalidated the line underneath would leave a flag nobody can remove.
+     */
+    canFlag?: (line: number) => boolean;
+    /** A line of the flag gutter was clicked — toggle it. */
+    onFlagClick?: (line: number, event: MouseEvent) => void;
+    /** Right-click on the flag gutter, for a host that offers more than on/off. */
+    onFlagContext?: (line: number, event: MouseEvent) => void;
+    /**
+     * Editing moved some flagged lines.
+     *
+     * A flag is remembered by line number, and a line number is only true until someone types
+     * above it: insert a line at the top of a file and every breakpoint in it is off by one.
+     * CodeMirror knows where each position went, so the mapping is done here and reported once
+     * per change — the host updates its own model and the new numbers come back through
+     * {@link flagMarks}.
+     */
+    onFlagsMoved?: (moves: readonly { from: number; to: number }[]) => void;
     oninput?: (text: string) => void;
     /** Live caret position (1-based line/col) — drives a host footer Ln/Col. */
     oncaret?: (line: number, col: number) => void;
@@ -252,6 +307,33 @@
   }
   $effect(() => { void marks; pushMarks(); });
 
+  // ── Whole-line highlights ─────────────────────────────────────────────────────
+  //
+  // A LINE decoration, not a mark: a mark paints the glyphs it covers, so a "current line"
+  // drawn that way ends at the last character and leaves the rest of the row bare — which
+  // reads as a patch of colour rather than as a band, and is exactly wrong for the one thing
+  // it is meant to say (*this* row). A line decoration puts the class on the row itself.
+  const setLineMarks = StateEffect.define<DecorationSet>();
+  const lineMarkField = StateField.define<DecorationSet>({
+    create: () => Decoration.none,
+    update(current, tr) {
+      for (const effect of tr.effects) if (effect.is(setLineMarks)) return effect.value;
+      return current.map(tr.changes);
+    },
+    provide: (field) => EditorView.decorations.from(field),
+  });
+
+  function pushLineHighlights() {
+    if (!view) return;
+    const lines = view.state.doc.lines;
+    const ranges = lineHighlights
+      .filter((h) => h.line >= 1 && h.line <= lines)
+      .sort((a, b) => a.line - b.line)
+      .map((h) => Decoration.line({ class: h.className }).range(view!.state.doc.line(h.line).from));
+    view.dispatch({ effects: setLineMarks.of(Decoration.set(ranges, true)) });
+  }
+  $effect(() => { void lineHighlights; pushLineHighlights(); });
+
   // ── Host-supplied gutter icons ────────────────────────────────────────────────
   //
   // Same shape as the marks above and for the same reason: the host recomputes them from
@@ -333,6 +415,124 @@
     }),
   ];
 
+  // ── The flag gutter (a per-line toggle: breakpoints, bookmarks) ───────────────
+  //
+  // Rendered with `lineMarker` rather than from a RangeSet, because unlike the icon gutter
+  // EVERY line is a target here: a line with no flag still has to say it can have one, which
+  // it does by showing a faint dot under the pointer. So each rendered line gets a marker —
+  // set or empty — and the CSS decides which of the two you can see.
+  class FlagMarker extends GutterMarker {
+    on: boolean;
+    tooltip: string;
+    markerClass: string;
+
+    constructor(on: boolean, tooltip: string, markerClass: string) {
+      super();
+      this.on = on;
+      this.tooltip = tooltip;
+      this.markerClass = markerClass;
+    }
+
+    eq(other: FlagMarker) {
+      return (
+        this.on === other.on
+        && this.tooltip === other.tooltip
+        && this.markerClass === other.markerClass
+      );
+    }
+
+    toDOM() {
+      const el = document.createElement('span');
+      el.className = `cm-flag-icon ${this.on ? 'cm-flag-on' : ''} ${this.markerClass}`.trim();
+      if (this.tooltip) el.title = this.tooltip;
+      return el;
+    }
+  }
+
+  /** Bump this and the gutter re-renders its line markers — the effect a host's new
+   *  {@link flagMarks} rides in on, since `lineMarker` reads them out of the closure. */
+  const flagsChanged = StateEffect.define<null>();
+
+  function flagAt(line: number) {
+    return flagMarks?.find((f) => f.line === line);
+  }
+
+  /** Whether this line is a target at all. A line that already carries one always is — see
+   *  {@link canFlag} — so an edit can never strand a flag on a line that has stopped
+   *  qualifying. */
+  function flaggable(line: number): boolean {
+    return !!flagAt(line) || !canFlag || canFlag(line);
+  }
+
+  /**
+   * The gutter extension. **Always installed**, never conditional on the props as they stand at
+   * mount — the same rule the icon gutter above states, and for a sharper reason here: a host's
+   * flags are typically hydrated from a backend *after* the editor exists, so deciding at mount
+   * whether to have this column would mean never having it.
+   *
+   * What decides whether the column is *visible* is `flagMarks` being defined at all. Undefined
+   * → no marker on any line → the column has no content and collapses to nothing, so an editor
+   * that does not use flags pays no horizontal space. Defined (even empty) → every line gets a
+   * marker, visible or not, which is what gives a line with no flag something to hover.
+   */
+  const flagGutter = gutter({
+    class: 'cm-flag-gutter',
+    lineMarker: (v, block) => {
+      if (!flagMarks) return null;
+      const line = v.state.doc.lineAt(block.from).number;
+      // No marker at all on a line that cannot take one — not an invisible one. The gutter
+      // then has nothing to hover there, which is the whole of how the rule is communicated.
+      if (!flaggable(line)) return null;
+      const found = flagAt(line);
+      return new FlagMarker(!!found, found?.tooltip ?? '', found?.className ?? '');
+    },
+    lineMarkerChange: (u) =>
+      u.docChanged || u.transactions.some((tr) => tr.effects.some((e) => e.is(flagsChanged))),
+    domEventHandlers: {
+      mousedown(v, block, event) {
+        const e = event as MouseEvent;
+        // Left button only: a right-click is the context menu below, and a middle-click
+        // pasting a breakpoint in is nobody's intent.
+        if (e.button !== 0 || !onFlagClick) return false;
+        const line = v.state.doc.lineAt(block.from).number;
+        if (!flaggable(line)) return true; // swallowed: the line showed no affordance
+        onFlagClick(line, e);
+        return true;
+      },
+      contextmenu(v, block, event) {
+        if (!onFlagContext) return false;
+        const e = event as MouseEvent;
+        const line = v.state.doc.lineAt(block.from).number;
+        if (!flaggable(line)) return true;
+        e.preventDefault();
+        onFlagContext(line, e);
+        return true;
+      },
+    },
+  });
+
+  // Both are read out of the closure by `lineMarker`, so a new set of either has to be
+  // announced to the gutter — a host recomputing which lines qualify (a re-parse of the buffer)
+  // changes what the column offers just as much as a new flag does.
+  $effect(() => {
+    void flagMarks;
+    void canFlag;
+    view?.dispatch({ effects: flagsChanged.of(null) });
+  });
+
+  /** Where each flagged line ended up after an edit. Empty when nothing moved, which is the
+   *  overwhelming majority of keystrokes — typing inside a line moves no line at all. */
+  function movedFlags(u: ViewUpdate): { from: number; to: number }[] {
+    const moves: { from: number; to: number }[] = [];
+    for (const flag of flagMarks ?? []) {
+      if (flag.line < 1 || flag.line > u.startState.doc.lines) continue;
+      const at = u.startState.doc.line(flag.line).from;
+      const to = u.state.doc.lineAt(u.changes.mapPos(at, 1)).number;
+      if (to !== flag.line) moves.push({ from: flag.line, to });
+    }
+    return moves;
+  }
+
   function mount(target: HTMLDivElement) {
     const { extensions } = createCodeEditorExtensions(language, {
       readOnly, onGoto, rulerColumn, emmet, indentGuides, stickyScroll, scrollbarOverview,
@@ -344,6 +544,10 @@
         const text = u.state.doc.toString();
         lastEmitted = text;
         oninput?.(text);
+      }
+      if (u.docChanged && onFlagsMoved) {
+        const moves = movedFlags(u);
+        if (moves.length) onFlagsMoved(moves);
       }
       if (u.focusChanged && u.view.hasFocus) onfocus?.();
       if (u.selectionSet || u.docChanged) {
@@ -359,8 +563,13 @@
     const state = EditorState.create({
       doc: value,
       extensions: [
+        // First, so the toggle column sits OUTSIDE the line numbers — furthest from the text
+        // and hardest to hit by accident, which is where every IDE puts breakpoints. Gutter
+        // order follows extension precedence, and earlier is further left.
+        flagGutter,
         extensions,
         markField,
+        lineMarkField,
         hostGutter,
         indentCompartment.of(indentExtensions()),
         minimapCompartment.of(minimap ? minimapExtension() : []),
@@ -372,6 +581,7 @@
     view = new EditorView({ state, parent: target });
     pushDiagnostics();
     pushMarks();
+    pushLineHighlights();
     pushGutter();
 
     // Restore the host-provided cursor + scroll (per-tab position). The scroll is set
@@ -753,4 +963,27 @@
     transition: color var(--transition-fast);
   }
   .code-editor :global(.cm-host-gutter-icon:hover) { color: var(--accent); }
+
+  /* The flag gutter (breakpoints). Every line carries a marker, set or not, because an
+     unset line still has to say it can be clicked — which it does by showing a faint dot
+     under the pointer and nothing at all otherwise. */
+  .code-editor :global(.cm-flag-gutter) { min-width: 0; cursor: pointer; }
+  .code-editor :global(.cm-flag-gutter .cm-gutterElement) {
+    padding: 0 3px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  /* `display: block` explicitly: a `<span>` is inline, and an inline box ignores width and
+     height — which would leave a correctly-classed marker rendering nothing at all. */
+  .code-editor :global(.cm-flag-icon) {
+    display: block;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--error);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+  }
+  .code-editor :global(.cm-flag-gutter .cm-gutterElement:hover .cm-flag-icon) { opacity: 0.35; }
+  .code-editor :global(.cm-flag-icon.cm-flag-on) { opacity: 1; }
+  .code-editor :global(.cm-flag-gutter .cm-gutterElement:hover .cm-flag-icon.cm-flag-on) {
+    opacity: 0.7;
+  }
 </style>

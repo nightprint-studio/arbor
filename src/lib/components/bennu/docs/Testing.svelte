@@ -23,11 +23,28 @@
   have written but not saved is one the runner could not run anyway.
 </p>
 
+<h2>Two places, and why</h2>
+<p>
+  <strong>The Tests tool window</strong> (<kbd>Alt</kbd> + <kbd>5</kbd>, right rail) is the
+  <em>catalogue</em>: every test class the project declares, sortable by name, package, module,
+  framework or size, with a filter and a ▷ on every row. It is a property of your sources — stable,
+  browsable, and where a run starts.
+</p>
+<p>
+  <strong>A run</strong> lands in the <strong>Run</strong> console (<kbd>Alt</kbd> + <kbd>R</kbd>),
+  as a tab beside the programs you have launched, because a test run <em>is</em> a launch: a
+  command, a live transcript, a Stop button, an outcome. The tab appears when you start one and
+  closes when you are done with it, like every other tab there. Its transcript is the console's own
+  — interpreted, with clickable stack frames, and rendering only what is on screen however long the
+  run gets.
+</p>
+
 <h2>Starting a run</h2>
 <ul>
-  <li><strong>The Tests panel</strong> (<kbd>Alt</kbd> + <kbd>5</kbd>) — every row has a ▷ that runs
-    just that class or just that method. Before anything has run, the tree lists what the project
-    declares, so the panel is where a run starts as well as where it lands.</li>
+  <li><strong>The Tests tool window</strong> (<kbd>Alt</kbd> + <kbd>5</kbd>) — every row has a ▷
+    that runs just that class, and expanding one gives a ▷ per method. An abstract or disabled
+    class is listed but has no ▷: Surefire cannot instantiate the first, and the second would
+    report as skipped.</li>
   <li><strong>The editor</strong> — <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd> runs the test
     the caret is inside; with the caret above the first test method it runs the whole class.</li>
   <li><strong>The project tree</strong> — right-click a folder or a file and pick <em>Run tests</em>.
@@ -41,7 +58,9 @@
   The tree fills in class by class, as each one finishes, rather than all at once at the end — a
   class currently executing shows a spinner. Select any row and the right-hand pane shows its
   failure message, the exception type and the full stack trace; select nothing and it shows the
-  raw Maven output, which is what you want while the run is still going.
+  Maven output, which is what you want while the run is still going. That output is interpreted
+  the way the Run console's is — levels coloured, and a stack frame in a class of this project
+  is a link to the line it names.
 </p>
 <p>
   A ✓ passed, a ✗ failed, a ⚠ errored and a – was skipped. <strong>Failed</strong> and

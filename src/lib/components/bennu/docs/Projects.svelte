@@ -11,7 +11,7 @@
 <p>
   <strong>Maven</strong> projects get the whole of Bennu: the symbol index, completion, go-to
   declaration, find usages, rename, capability detection, JDK resolution, validation, Generate, the
-  Structure / Maven / Dependencies / Services / Forms tool windows, and Tomcat hot-swap.
+  Structure / Maven / Dependencies / Forms tool windows, and Tomcat hot-swap.
 </p>
 <p>
   <strong>Cargo</strong> projects get the <strong>editor</strong>: the file tree, go-to file,

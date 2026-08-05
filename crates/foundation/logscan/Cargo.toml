@@ -1,0 +1,20 @@
+[package]
+name         = "arbor-logscan"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "A log interpreter: a line of program output in, its level and its annotated pieces out — levels, timestamps, threads, URLs, filesystem paths, qualified names, exceptions and stack-trace frames, with the frames carrying the source location they name. ANSI-aware, rule-driven, host-agnostic."
+
+[dependencies]
+# The only dependency, and deliberately so: this crate is a scanner, and every host
+# (Bennu's Run console, a build log, a job panel) has to be able to take it without
+# taking anything else. `serde` is here because a `Piece` crosses an IPC seam on its way
+# to a frontend that does the rendering — the whole point of producing pieces rather
+# than markup.
+serde = { workspace = true }
+
+[dev-dependencies]
+# `Piece` is a wire contract, so its JSON is asserted as one. Test-only.
+serde_json = { workspace = true }

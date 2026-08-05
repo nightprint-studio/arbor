@@ -24,6 +24,36 @@ use bennu_classpath::prelude::{
     find_jdk_home, resolve_maven_classpath, source_from_jars, ClassSource, MavenResolveOpts,
 };
 
+/// Read a **text** entry out of a dependency jar the way the JVM would.
+///
+/// `bennu-classpath` hands back bytes on purpose — it opens zips, it does not hold opinions about
+/// encodings — and this is the one place that turns them into text, so every reader of a jar
+/// entry gets the same answer.
+///
+/// The rule is UTF-8, falling back to Windows-1252, and it is neither a guess nor a new policy:
+///
+///   * it is what the JVM itself does for a `.properties` since Java 9 (`PropertyResourceBundle`
+///     reads UTF-8 and falls back to the single-byte encoding), which matters because a
+///     `.properties` written before that is **ISO-8859-1 by specification** and is exactly the
+///     entry most likely to carry an accent;
+///   * Windows-1252 is a superset of ISO-8859-1 over every printable character, so it recovers a
+///     Latin-1 file *and* the typographic quotes a file written on a Windows box actually
+///     contains, where plain Latin-1 would give C1 control codes;
+///   * it is byte-for-byte the recovery `bennu-project` already applies to a source file that is
+///     not valid UTF-8, so a jar entry and a `.java` in a legacy tree are read by one rule rather
+///     than by two that drift.
+///
+/// Never lossy — which was the point. Windows-1252 decodes every possible byte, so nothing
+/// becomes `U+FFFD` and an accent in a library's error message arrives as the accent it is.
+///
+/// Not covered: an entry in an encoding neither of those recovers — a Shift_JIS descriptor, an
+/// XML prolog declaring something exotic. Honouring a declared encoding would mean parsing the
+/// prolog and is worth doing the day such a jar turns up; today it would be machinery for a case
+/// nobody has hit.
+pub fn jar_entry_text(bytes: &[u8]) -> String {
+    bennu_project::prelude::decode_for_index(bytes, bennu_project::prelude::UTF8).text
+}
+
 /// The dependency tier for a project: an opened dep-jars source + the per-project memo path its
 /// decoded members persist to. Handed to `NativeJavaProvider::for_project`.
 pub struct DepClasspath {
@@ -344,6 +374,40 @@ fn fnv(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A modern jar. Nothing to recover, and the fast path must not touch it.
+    #[test]
+    fn a_utf8_entry_is_read_as_utf8() {
+        assert_eq!(jar_entry_text("citt\u{e0} = city".as_bytes()), "citt\u{e0} = city");
+        assert_eq!(jar_entry_text(b"plain ascii"), "plain ascii");
+    }
+
+    /// The bug this rule exists for: a `.properties` inside a library is ISO-8859-1 by the
+    /// `Properties.load` specification, so byte `0xE0` is an `a`-grave and not a broken UTF-8
+    /// sequence. Reading it as lossy UTF-8 put a replacement character where the accent was.
+    #[test]
+    fn a_latin1_entry_keeps_its_accents_instead_of_losing_them() {
+        // `citta` + U+00E0, as a single byte — invalid UTF-8, valid ISO-8859-1.
+        assert_eq!(jar_entry_text(b"city=citt\xe0"), "city=citt\u{e0}");
+        assert!(!jar_entry_text(b"city=citt\xe0").contains('\u{fffd}'), "never lossy");
+    }
+
+    /// Windows-1252 over ISO-8859-1 as the fallback: the 0x80-0x9F block is where a file written
+    /// on a Windows box keeps its typographic characters, and plain Latin-1 would decode those to
+    /// invisible C1 control codes.
+    #[test]
+    fn the_fallback_recovers_windows_typography_not_control_codes() {
+        // 0x92 is a right single quotation mark in Cp1252; in ISO-8859-1 it is a control code.
+        assert_eq!(jar_entry_text(b"it\x92s \x80"), "it\u{2019}s \u{20ac}");
+    }
+
+    /// Every byte sequence decodes to something. There is no input for which this loses data,
+    /// which is the property that makes it safe to apply to entries of unknown provenance.
+    #[test]
+    fn no_byte_sequence_is_undecodable() {
+        let every_byte: Vec<u8> = (0u8..=255).collect();
+        assert!(!jar_entry_text(&every_byte).is_empty());
+    }
 
     /// A project with no `pom.xml` has no Maven tier — and that must stay SILENT (a Cargo or plain
     /// source project isn't broken), which is the distinction `DepOutcome` exists to keep.

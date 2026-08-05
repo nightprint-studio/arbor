@@ -25,7 +25,7 @@
    * hit (flattened across groups), PageUp/PageDown jump, Enter opens it and closes, Esc
    * cancels (Modal owns Esc). Replace is intentionally out of scope (no affordance).
    */
-  import { Search, FileCode2, FolderTree, CornerDownLeft, Filter } from 'lucide-svelte';
+  import { Search, FileCode2, FolderTree, CornerDownLeft, Filter, Package } from 'lucide-svelte';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -36,6 +36,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { findInFiles, readFile } from '$lib/ipc/bennu';
+  import { isJarEntry, openLibraryFile } from '$lib/ipc/bennu/library';
   import type { FindHit } from '$lib/types/bennu';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -49,6 +50,10 @@
   let wholeWord = $state(false);
   // Search scope in a multi-project workspace: the active project only, or every member.
   let scope = $state<'project' | 'workspace'>('project');
+  /** Also search the text entries of the dependency jars. Per-search rather than a setting:
+   *  every candidate entry has to be decompressed to be read, so it is a cost you opt into for
+   *  the question you are asking now, not one you turn on and forget. */
+  let inDeps = $state(false);
 
   let hits = $state<FindHit[]>([]);
   let loading = $state(false);
@@ -112,7 +117,12 @@
     const extraRoots = scope === 'workspace'
       ? projectStore.workspaceProjects.map((p) => p.root).filter((r) => r !== root)
       : [];
-    findInFiles(root, q, { regex, caseSensitive, wholeWord, extraRoots }, id).catch(() => {
+    findInFiles(
+      root,
+      q,
+      { regex, caseSensitive, wholeWord, extraRoots, includeDependencies: inDeps },
+      id,
+    ).catch(() => {
       if (id !== currentId) return;
       // BE absent / rejected query (e.g. bad regex) → graceful empty state.
       hits = [];
@@ -124,7 +134,8 @@
   // Re-run on any input change (query text or a toggle), debounced. The mask is NOT a
   // dependency — it filters what came back, so re-scanning for it would be pure waste.
   $effect(() => {
-    void query; void regex; void caseSensitive; void wholeWord; void scope; void projectStore.project;
+    void query; void regex; void caseSensitive; void wholeWord; void scope; void inDeps;
+    void projectStore.project;
     if (debounceTimer !== undefined) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(runSearch, 250);
     return () => { if (debounceTimer !== undefined) clearTimeout(debounceTimer); };
@@ -186,7 +197,11 @@
       let lines = fileCache.get(hit.file);
       if (!lines) {
         try {
-          const res = await readFile(root, hit.file);
+          // Keyed by the hit's own id, not the resolved path — a jar entry is extracted once
+          // and then read like anything else, and the cache must not miss on the second visit.
+          const path = await resolveHitPath(hit.file);
+          if (!path) throw new Error('unresolvable');
+          const res = await readFile(root, path);
           lines = res.text.split(/\r?\n/);
           fileCache.set(hit.file, lines);
         } catch {
@@ -238,9 +253,30 @@
   }
 
   async function openHit(h: FindHit) {
-    await projectStore.openFile(h.file);
+    const path = await resolveHitPath(h.file);
+    if (!path) return;
+    await projectStore.openFile(path);
     bennuUiStore.requestGoto(h.line);
     onClose();
+  }
+
+  /**
+   * A hit's file as something the editor can open.
+   *
+   * A hit in the project already is one. A hit inside a dependency is `<jar>!/<entry>` — text
+   * in a zip, with no path of its own — so it is extracted to the read-only cache first. Doing
+   * it here rather than at search time means the three thousand jar hits nobody clicked cost
+   * nothing.
+   */
+  async function resolveHitPath(file: string): Promise<string | null> {
+    if (!isJarEntry(file)) return file;
+    const root = projectStore.project?.root;
+    if (!root) return null;
+    try {
+      return await openLibraryFile(root, file);
+    } catch {
+      return null;
+    }
   }
 
   function move(delta: number) {
@@ -333,6 +369,17 @@
             onclick={() => (scope = scope === 'workspace' ? 'project' : 'workspace')}
           ><FolderTree size={13} /></button>
         {/if}
+        <button
+          type="button"
+          class="ff-tgl"
+          class:on={inDeps}
+          aria-pressed={inDeps}
+          aria-label="Search dependencies"
+          title={inDeps
+            ? 'Also searching inside the dependency jars (click to search this project only)'
+            : 'Search inside the dependency jars too — their XML, schemas and properties'}
+          onclick={() => (inDeps = !inDeps)}
+        ><Package size={13} /></button>
       </div>
     </div>
 

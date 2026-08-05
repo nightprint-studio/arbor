@@ -2,9 +2,9 @@
  * Bennu per-project configuration — the SEAM for user overrides of the resolved
  * project facts (JDK level, source encoding, source/output roots, excluded
  * directories). Shaped field-for-field to map onto a future `[bennu]` section in
- * the per-repo `<repo>/.arbor/config.toml`.
+ * the per-repo `<repo>/.arbor/bennu/config.toml`.
  *
- * MOCK — persist to per-project `<repo>/.arbor/config.toml` later. For now this
+ * MOCK — persist to per-project `<repo>/.arbor/bennu/config.toml` later. For now this
  * is an in-memory rune store keyed by project root, so overrides survive tab
  * switches within a session but are NOT written to disk. When the BE lands, swap
  * the in-memory map for `get_bennu_project_config` / `set_bennu_project_config`
@@ -73,7 +73,7 @@ function createProjectConfigStore() {
 
     /**
      * Apply a full config document for `root`.
-     * MOCK — persist to `<repo>/.arbor/config.toml` later (this only mutates the
+     * MOCK — persist to `<repo>/.arbor/bennu/config.toml` later (this only mutates the
      * in-memory map). Returns the stored copy.
      */
     apply(root: string, cfg: BennuProjectConfig): BennuProjectConfig {

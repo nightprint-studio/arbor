@@ -74,12 +74,22 @@ bennu-xml = { path = "../xml" }
 # and the Surefire XML read back into per-case results. Pure — the spawn, the streaming and
 # the report watch are this crate's `tests` domain.
 bennu-test = { path = "../test" }
+# The debugger's transport: a JDWP client (handshake, framing, negotiated id widths, the
+# breakpoint/step/exception command set, the event stream). Zero external dependencies of its
+# own — this crate's `debug` module is what makes it a debugger, by deciding what a session is
+# and turning the VM's locations back into this project's files.
+bennu-jdwp = { path = "../jdwp" }
 # What the project depends on, read out of its poms and matched against the classpath the
 # index service already resolved. Not an extension — it answers about the build, not about a
 # buffer — so it hangs off its own domain rather than the registry.
 bennu-deps = { path = "../deps" }
 # `NoWindowExt` — suppress the console window on the short-lived mvn/javac/java children.
 arbor-process-ext = { path = "../../../platform/process-ext" }
+# The log interpreter behind the Run/Build consoles: a line of a child's output → its level
+# and its annotated pieces (ANSI, levels, timestamps, threads, URLs, paths, exceptions, stack
+# frames). Language-agnostic by construction — resolving a frame's class to a project file is
+# this crate's `log` module, over the index.
+arbor-logscan = { path = "../../../foundation/logscan" }
 # Shared job model (`JobSpec` / `JobStatus`): the whole-project analysis warm-up registers itself
 # as a tracked job in the shell registry over the reverse channel, so it shows in the bennu Jobs
 # overlay. Workspace-internal crate (same one corvus/merula use), not a new external dependency.

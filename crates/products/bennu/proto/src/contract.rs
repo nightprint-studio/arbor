@@ -942,6 +942,13 @@ pub struct RunConfig {
     /// `junit` only — the module directory or the class selector [`test_scope`] names.
     /// Unused for `"all"`.
     pub test_target: String,
+    /// Hold the VM before `main` when this configuration is launched under the debugger.
+    ///
+    /// Off by default, and per-configuration rather than global: it is the only way to stop in
+    /// start-up code — a static initializer, a Spring context being built — and it means every
+    /// debug launch of this configuration begins frozen until you press Resume. The launch you
+    /// press fifty times a day should not.
+    pub debug_suspend: bool,
 }
 
 impl Default for RunConfig {
@@ -961,6 +968,7 @@ impl Default for RunConfig {
             profiles: String::new(),
             test_scope: String::new(),
             test_target: String::new(),
+            debug_suspend: false,
         }
     }
 }
@@ -999,4 +1007,150 @@ pub struct MainClassEntry {
     /// asking a question with one possible answer.
     #[serde(default)]
     pub spring_boot: bool,
+}
+
+// ── the debugger (JDWP session: breakpoints, frames, variables) ───────────────
+
+/// A line breakpoint, as the editor's gutter holds it.
+///
+/// Identified by **file and line**, not by a class and a bytecode index: that is what the user
+/// set, it survives a rebuild, and it is what has to be persisted. Turning it into a location
+/// the VM understands is the debugger's job and is redone on every launch, because the same
+/// line compiles to a different index every time the file changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Breakpoint {
+    /// Absolute path of the source file, forward slashes.
+    pub file: String,
+    /// 1-based line.
+    pub line: u32,
+    /// A disabled breakpoint is remembered but not installed — the alternative to deleting one
+    /// you will want back in ten minutes.
+    pub enabled: bool,
+}
+
+impl Default for Breakpoint {
+    fn default() -> Self {
+        Breakpoint { file: String::new(), line: 0, enabled: true }
+    }
+}
+
+/// A breakpoint on a **throw** rather than on a line.
+///
+/// `caught` and `uncaught` are separate questions and not a nicety: an uncaught throw is a
+/// crash and is worth stopping on always, while a caught one is ordinary control flow in any
+/// framework that uses exceptions for flow. Asking for caught throws of `Throwable` under
+/// Spring stops thousands of times before `main` reaches your code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExceptionBreakpoint {
+    /// The fully-qualified throwable to stop on. Empty = any.
+    pub class: String,
+    /// Stop on throws that some frame will catch.
+    pub caught: bool,
+    /// Stop on throws that nothing catches.
+    pub uncaught: bool,
+    pub enabled: bool,
+}
+
+impl Default for ExceptionBreakpoint {
+    fn default() -> Self {
+        // The default that is useful the first time and never noisy: a throw nobody catches.
+        ExceptionBreakpoint {
+            class: String::new(),
+            caught: false,
+            uncaught: true,
+            enabled: true,
+        }
+    }
+}
+
+/// The per-repo `[bennu.debug]` section: what the gutter and the exception list hold, kept
+/// across restarts the way run configurations are.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct DebugConfig {
+    pub breakpoints: Vec<Breakpoint>,
+    pub exceptions: Vec<ExceptionBreakpoint>,
+    /// Watch expressions, in the order they were added. Persisted for the same reason a
+    /// breakpoint is: a watch is something you set up once and want back on the next launch.
+    /// Evaluated per frame, so nothing about the value is stored — only the question.
+    pub watches: Vec<String>,
+}
+
+/// What became of a breakpoint once a VM was asked about it — what the gutter draws solid,
+/// hollow, or crossed out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BreakpointStatus {
+    pub file: String,
+    pub line: u32,
+    /// The VM accepted it at a real location.
+    pub verified: bool,
+    /// Why not, when it isn't — "the class isn't loaded yet" (which resolves itself) reads very
+    /// differently from "that line has no code" (which never will).
+    pub message: String,
+}
+
+/// One frame of a suspended thread's stack.
+///
+/// The same shape a stack-trace frame in the console has, deliberately: clicking either one
+/// means the same thing, and a frame in a library resolves through the same path
+/// (`bennu_frame_source`) rather than through a second one that drifts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StackFrame {
+    /// 0 = the innermost frame, where execution is.
+    pub index: u32,
+    /// Fully-qualified declaring class, `$` and all.
+    pub class: String,
+    pub method: String,
+    /// The source line, when the class carries a line table.
+    pub line: Option<u32>,
+    /// Absolute path, when this project declares the class. Absent for a library or JDK frame,
+    /// which is resolved on click.
+    pub file: Option<String>,
+    /// Whether it is this project's own code — what the panel renders in full rather than
+    /// muted, and what "step into" is trying to reach.
+    pub project: bool,
+}
+
+/// A variable, a field, or an array element — one row of the variables tree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DebugValue {
+    pub name: String,
+    /// `argument` · `local` · `this` · `field` · `static` · `element`.
+    pub kind: String,
+    /// The declared type, simple-named (`String`, `List`, `int[]`).
+    pub type_name: String,
+    /// Already rendered — `42`, `"hello"`, `null`, `Order@1f3c`, `int[12]`.
+    pub value: String,
+    /// The object handle, when there is more inside it. Absent = a leaf. A string, because a
+    /// JDWP identifier is 64 bits and JSON numbers are not.
+    pub object: Option<String>,
+}
+
+/// Where a debug session is, as a whole.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DebugStatus {
+    /// The run id the session belongs to — the same id the Run console tab carries.
+    pub session_id: String,
+    /// `starting` · `running` · `paused` · `terminated`.
+    pub status: String,
+    /// The VM's own description, for the status line.
+    pub vm: String,
+    /// Why it ended, or what went wrong. Empty when nothing did.
+    pub message: String,
+}
+
+/// The program stopped: which thread, why, and where it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DebugPause {
+    pub session_id: String,
+    /// The suspended thread's identifier, as a string (see [`DebugValue::object`]).
+    pub thread: String,
+    pub thread_name: String,
+    /// `breakpoint` · `step` · `exception`.
+    pub reason: String,
+    /// The throwable's type, when `reason` is `exception`.
+    pub exception: Option<String>,
+    pub frames: Vec<StackFrame>,
 }

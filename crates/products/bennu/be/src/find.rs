@@ -102,6 +102,16 @@ pub struct FindInFilesArgs {
     /// Bound the match on `[A-Za-z0-9_]` word boundaries.
     #[serde(default)]
     pub whole_word: bool,
+    /// Also search the **text entries of the project's dependency jars** — the `struts-default.xml`
+    /// that declares an interceptor stack, a schema, a bundled `.properties`.
+    ///
+    /// Opt-in, and off by default, because it is a different order of cost from walking the
+    /// project tree: every candidate entry is decompressed to be read (see [`scan_jars`]). It is
+    /// also a different kind of answer — a hit in a dependency is something to understand, never
+    /// something to go and change — so it runs **after** the project's own files and its results
+    /// arrive underneath them.
+    #[serde(default)]
+    pub include_dependencies: bool,
     /// The FE-minted id correlating this search's `find-progress` events. Every batch and
     /// the terminal `done` carry it under `"id"`, so the FE ignores events from a
     /// superseded (older) scan.
@@ -200,6 +210,13 @@ fn bennu_find_in_files(ctx: &BennuState, args: FindInFilesArgs) -> Result<(), St
     let extra_roots = args.extra_roots.clone();
     let search_id = args.search_id.clone();
     let query = args.query.clone();
+    // Resolved on the calling thread: it reads the project slot's jar list, which is cheap, and
+    // doing it here keeps the scan thread from touching the index service at all.
+    let jars = if args.include_dependencies {
+        crate::index_service::IndexService::global().dep_jars_of(&args.root)
+    } else {
+        Vec::new()
+    };
 
     // A plain background std thread (not a tokio worker): the scan does no reverse-channel
     // round-trips, so this mirrors `index_service`'s background build — it just walks the
@@ -216,6 +233,8 @@ fn bennu_find_in_files(ctx: &BennuState, args: FindInFilesArgs) -> Result<(), St
                 }
                 scan_dir(Path::new(r), &matcher, &mut batch);
             }
+            // Dependencies last, so the files you can actually edit arrive first.
+            scan_jars(&jars, &matcher, &mut batch);
             let capped = batch.capped;
             batch.finish(); // flush any trailing hits before the terminal event
             if capped {
@@ -346,6 +365,60 @@ fn collect_text_paths_into(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Cap on the text entries taken from any ONE dependency jar. A jar of ten thousand generated
+/// schemas must not turn a search into a stall; a real artifact is far under this.
+const MAX_JAR_ENTRIES: usize = 500;
+
+/// Search the **text entries of dependency jars**, streaming hits into the same batch as the
+/// project's own files.
+///
+/// Only the entries the project scan would have read ([`is_scannable_entry`]) — the bytecode is
+/// most of a jar and searching it for text would produce nothing but noise from the constant
+/// pool.
+///
+/// A hit's `file` is `<jar file name>!/<entry>` and not a path, because there is no path: the
+/// thing matched lives inside a zip. That is the same identity `bennu_library_files` hands out,
+/// so the frontend opens one exactly as it opens the other.
+///
+/// One archive open per jar rather than one per entry — [`read_jar_entries_matching`] walks the
+/// central directory once and reads everything wanted from it, which is the difference between
+/// a few hundred file opens and a few tens of thousands.
+fn scan_jars(jars: &[String], matcher: &Matcher, sink: &mut BatchSink) {
+    for jar in jars {
+        if sink.is_full() {
+            return;
+        }
+        let path = PathBuf::from(jar);
+        let entries = bennu_classpath::prelude::read_jar_entries_matching(
+            std::slice::from_ref(&path),
+            |name| is_scannable_entry(name),
+            MAX_JAR_ENTRIES,
+        );
+        for resource in entries {
+            if sink.is_full() {
+                sink.flush_file();
+                return;
+            }
+            // Decoded by the rule every jar entry is read with — a Latin-1 `.properties` scanned
+            // as lossy UTF-8 would match on a line whose preview shows `U+FFFD` where the accent
+            // was, and would MISS a query containing that accent entirely.
+            let text = crate::dep_classpath::jar_entry_text(&resource.bytes);
+            scan_text(&resource.id, &text, matcher, sink);
+        }
+    }
+}
+
+/// Whether a jar entry is one of the text files a search should read. The same extension
+/// allow-list as the project walk, minus the dotfile rule — a jar has no `.gitignore` worth
+/// finding, and `META-INF/` is full of names that begin with nothing useful.
+fn is_scannable_entry(name: &str) -> bool {
+    let file = name.rsplit('/').next().unwrap_or(name);
+    match file.rsplit_once('.') {
+        Some((_, ext)) => SCAN_EXTS.contains(&ext) || ext == "dtd" || ext == "xsd" || ext == "tld",
+        None => false,
+    }
+}
+
 /// Whether `path` is a text file we scan: a known extension, or an extension-less dotfile
 /// (`.gitignore`, `.editorconfig`, …).
 fn is_scannable(path: &Path) -> bool {
@@ -365,7 +438,16 @@ fn scan_file(path: &Path, matcher: &Matcher, sink: &mut BatchSink) {
     let Ok(source) = std::fs::read_to_string(path) else {
         return; // unreadable / non-UTF-8 — skip
     };
-    let file = path.to_string_lossy().replace('\\', "/");
+    scan_text(&path.to_string_lossy().replace('\\', "/"), &source, matcher, sink);
+}
+
+/// Scan already-read text line by line, pushing each match into `sink` and flushing the batch at
+/// the end (so one file's matches stream out together).
+///
+/// `id` is what a hit says it was found in — a forward-slashed path for a file on disk, or
+/// `<jar>!/<entry>` for something inside a dependency. This half is separate from [`scan_file`]
+/// precisely because the second kind never was a file and cannot be read as one.
+fn scan_text(id: &str, source: &str, matcher: &Matcher, sink: &mut BatchSink) {
     for (idx, line) in source.lines().enumerate() {
         if sink.is_full() {
             sink.flush_file();
@@ -376,7 +458,7 @@ fn scan_file(path: &Path, matcher: &Matcher, sink: &mut BatchSink) {
             // multi-byte chars reports a caret-friendly column).
             let col = line[..byte_col].chars().count() + 1;
             let preview: String = line.trim().chars().take(MAX_PREVIEW_LEN).collect();
-            sink.push(FindHit { file: file.clone(), line: idx + 1, col, preview });
+            sink.push(FindHit { file: id.to_string(), line: idx + 1, col, preview });
         }
     }
     // Flush this file's matches promptly (a partial batch < BATCH_SIZE otherwise waits for
@@ -396,8 +478,23 @@ mod tests {
             regex,
             case_sensitive,
             whole_word,
+            include_dependencies: false,
             search_id: "test".to_string(),
         }
+    }
+
+    #[test]
+    fn a_jar_entry_is_scanned_when_it_is_the_kind_of_text_a_project_is_configured_by() {
+        assert!(is_scannable_entry("struts-default.xml"));
+        assert!(is_scannable_entry("META-INF/spring-beans-4.3.xsd"));
+        assert!(is_scannable_entry("struts-2.5.dtd"));
+        assert!(is_scannable_entry("META-INF/c.tld"));
+        assert!(is_scannable_entry("messages.properties"));
+        // The bytecode is most of a jar, and searching it for text finds constant-pool noise.
+        assert!(!is_scannable_entry("org/apache/struts2/Dispatcher.class"));
+        // A dotfile inside a jar is not the `.gitignore` case the project walk covers.
+        assert!(!is_scannable_entry("META-INF/MANIFEST.MF"));
+        assert!(!is_scannable_entry("META-INF/no-extension"));
     }
 
     #[test]

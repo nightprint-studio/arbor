@@ -6,9 +6,10 @@
 //! canonical call-site path.
 
 pub use crate::contract::{
-    BuildDiagnostic, BuildResult, CapabilityHit, CapabilitySet, ClassEntry, CompletionItem,
-    DeclarationTarget, Diagnostic, EncodingIssue, EnvVar, FileContents, FileDiagnostics,
-    FileStamp, FileValidationStat, FindHit, FormAnalysis,
+    Breakpoint, BreakpointStatus, BuildDiagnostic, BuildResult, CapabilityHit, CapabilitySet,
+    ClassEntry, CompletionItem, DebugConfig, DebugPause, DebugStatus, DebugValue,
+    DeclarationTarget, Diagnostic, EncodingIssue, EnvVar, ExceptionBreakpoint, FileContents,
+    FileDiagnostics, FileStamp, FileValidationStat, FindHit, FormAnalysis, StackFrame,
     ERR_EXTERNALLY_MODIFIED,
     FormFieldInfo, FormInfo, HoverInfo, IndexEntry, IndexStats,
     JdkStatus, JspActionBinding, JspActionOption, JspNav, PropertyLintHit,

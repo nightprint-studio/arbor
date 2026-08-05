@@ -57,6 +57,40 @@ pub struct BennuConfig {
     /// tabs, and when the window loses focus. `true` by default (IntelliJ-style); turn it off to save
     /// only explicitly (Ctrl+S).
     pub autosave: bool,
+    /// **Fold runs of library frames** in the debugger's call stack: consecutive frames outside this
+    /// project collapse into one expandable row. `true` by default — a stop inside a framework is
+    /// forty frames of Spring and reflection around the three that are yours, and scrolling past
+    /// them to find your own is what the fold exists to remove. Turn it off to see every frame.
+    ///
+    /// Here rather than per-repo because it is a preference about how *you* read a stack, not
+    /// something about a project.
+    pub collapse_library_frames: bool,
+    /// **Packages a debugger step passes straight through**, as JDWP class-name patterns
+    /// (`java.*`, `org.springframework.*`). Empty means "use the defaults" — see
+    /// `bennu_be`'s `DEFAULT_STEP_EXCLUDES`, which is the JDK plus the machinery that sits
+    /// between a caller and an injected bean.
+    ///
+    /// A pattern may carry a `*` at **one end only** — that is all the protocol accepts, and one
+    /// with a star in the middle makes the VM refuse the whole step request, which reads as
+    /// stepping having silently stopped working. Invalid entries are dropped rather than sent.
+    ///
+    /// Editable because the defaults are a judgement about whose code you are debugging: they
+    /// make stepping into your own service usable and stepping into Spring impossible, and
+    /// which of those you want is not something a default can know.
+    pub step_excludes: Vec<String>,
+    /// **Search the dependency jars too** in the Go-to navigator: two extra categories offering
+    /// the classes and the files that are on the classpath but nowhere in the project tree —
+    /// the `struts-default.xml` that declares an interceptor stack, a schema, a framework
+    /// annotation whose package you are trying to remember.
+    ///
+    /// Off by default, and a setting rather than always-on, because it changes what the box
+    /// *is*: with it on, the answer to a two-letter query includes a hundred thousand things
+    /// you did not write. On a legacy project it is the difference between reading the
+    /// framework and guessing at it; on a small one it is noise.
+    ///
+    /// It costs nothing until you type — those categories are searched in the backend, not
+    /// shipped — but the first search after opening a project pays for listing the jars.
+    pub search_dependencies: bool,
     /// **Auto-import on completion**: when accepting a type-name completion whose simple name resolves
     /// to a SINGLE class, add its `import` line automatically. `true` by default; off inserts just the
     /// name (import it later with Alt+Enter).
@@ -145,6 +179,11 @@ impl Default for BennuConfig {
             preferred_build_type: "mvn".to_string(),
             validate_on_open: true,
             autosave: true,
+            collapse_library_frames: true,
+            // Empty = the backend's defaults. Writing the list here would freeze a user's
+            // config to whatever the defaults were the day they first saved it.
+            step_excludes: Vec::new(),
+            search_dependencies: false,
             auto_import: true,
             validation_threads: 0,
             jdk_paths: Vec::new(),

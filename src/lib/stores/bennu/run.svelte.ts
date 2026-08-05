@@ -39,6 +39,7 @@ import { getBennuConfig, setBennuConfig } from '$lib/ipc/bennu/config';
 import type {
   BuildResult, BuildDiagnostic, ProjectValidationResult,
 } from '$lib/types/bennu';
+import type { LogLevel, LogPiece } from '$lib/types/log';
 import { bennuUiStore } from './ui.svelte';
 import { bennuDiagnosticsStore } from './diagnostics.svelte';
 import {
@@ -65,10 +66,30 @@ export interface RunLogLine {
   /** `out` = stdout / mvn log · `err` = stderr · `meta` = our own status lines ·
    *  `in` = a line YOU typed, echoed back the way a terminal echoes it. */
   stream: 'out' | 'err' | 'meta' | 'in';
+  /** The interpreted severity (`arbor-logscan`, backend), when the line said so or
+   *  inherited it from the one above. Absent on lines this store wrote itself. */
+  level?: LogLevel | null;
+  /** The line already cut into what its parts ARE — levels, timestamps, paths, stack
+   *  frames. Absent means "render the text": a line nobody interpreted still shows. */
+  pieces?: LogPiece[];
 }
 
-// Cap the retained log so a chatty build/run can't grow the buffer unbounded.
-const MAX_LINES = 3000;
+/** What the backend adds to an output event beyond the text — see {@link RunLogLine}. */
+interface LogAnnotation {
+  level?: LogLevel | null;
+  pieces?: LogPiece[];
+}
+
+/**
+ * Cap the retained log so a chatty build/run can't grow the buffer unbounded.
+ *
+ * It used to be 3000, which was really a cap on the DOM: every retained line was a rendered
+ * row, and a Tomcat or Spring Boot startup reached it in seconds — so the beginning of the
+ * run, which is where the interesting failures are, had already scrolled out of existence by
+ * the time you looked. The console renders only what is on screen now
+ * ({@link BennuConsole}), so what this bounds is memory, and memory affords a great deal more.
+ */
+const MAX_LINES = 10_000;
 
 /** Render a millisecond duration compactly (`340ms` / `1.2s` / `1m 05s`). */
 export function formatMs(ms: number): string {
@@ -91,6 +112,12 @@ interface RunSpec {
   env: Record<string, string>;
   /** The run configuration's name, for the console header. Empty for an ad-hoc launch. */
   label: string;
+  /** Launch under the debugger. Part of the spec, so a tab's ⟳ repeats the run it *was* —
+   *  re-running a debug session as a plain run would be a different thing wearing the same
+   *  label. */
+  debug: boolean;
+  /** Hold the VM before `main`. The configuration's choice; see `RunConfig.debugSuspend`. */
+  debugSuspend: boolean;
 }
 
 /**
@@ -165,10 +192,11 @@ function createBennuRunStore() {
   let attached = false;
   let unlisteners: UnlistenFn[] = [];
 
-  /** Append to the BUILD log (mvn/javac/validation). */
-  function push(text: string, stream: RunLogLine['stream'] = 'out') {
+  /** Append to the BUILD log (mvn/javac/validation). `log` is the backend's interpretation
+   *  of the line, absent on the status lines this store writes itself. */
+  function push(text: string, stream: RunLogLine['stream'] = 'out', log?: LogAnnotation) {
     const next = lines.length >= MAX_LINES ? lines.slice(lines.length - MAX_LINES + 1) : lines.slice();
-    next.push({ text, stream });
+    next.push({ text, stream, ...log });
     lines = next;
   }
 
@@ -188,12 +216,17 @@ function createBennuRunStore() {
   }
 
   /** Append a line to a tab's transcript, capped. */
-  function pushTo(id: string, text: string, stream: RunLogLine['stream'] = 'out') {
+  function pushTo(
+    id: string,
+    text: string,
+    stream: RunLogLine['stream'] = 'out',
+    log?: LogAnnotation,
+  ) {
     const i = tabs.findIndex((t) => t.id === id);
     if (i === -1) return;
     const prev = tabs[i].lines;
     const kept = prev.length >= MAX_LINES ? prev.slice(prev.length - MAX_LINES + 1) : prev.slice();
-    kept.push({ text, stream });
+    kept.push({ text, stream, ...log });
     patchTab(id, { lines: kept });
   }
 
@@ -226,7 +259,9 @@ function createBennuRunStore() {
       });
     const add = (f: UnlistenFn) => unlisteners.push(f);
     add(
-      await listen<{ text: string }>('arbor://bennu/build-output', (e) => push(e.payload.text, 'out')),
+      await listen<{ text: string } & LogAnnotation>('arbor://bennu/build-output', (e) =>
+        push(e.payload.text, 'out', { level: e.payload.level, pieces: e.payload.pieces }),
+      ),
     );
     add(
       await listen<{ done: number; total: number }>('arbor://bennu/validate-progress', (e) => {
@@ -234,12 +269,15 @@ function createBennuRunStore() {
       }),
     );
     add(
-      await listen<{ run_id: string; stream: string; text: string }>(
+      await listen<{ run_id: string; stream: string; text: string } & LogAnnotation>(
         'arbor://bennu/run-output',
         (e) => {
           const tab = tabForRun(e.payload.run_id);
           if (!tab) return;
-          pushTo(tab.id, e.payload.text, e.payload.stream === 'stderr' ? 'err' : 'out');
+          pushTo(tab.id, e.payload.text, e.payload.stream === 'stderr' ? 'err' : 'out', {
+            level: e.payload.level,
+            pieces: e.payload.pieces,
+          });
         },
       ),
     );
@@ -466,6 +504,8 @@ function createBennuRunStore() {
         vmArgs: spec.vmArgs,
         workingDir: spec.workingDir,
         env: spec.env,
+        debug: spec.debug,
+        debugSuspend: spec.debugSuspend,
       });
       patchTab(id, {
         runId: handle.run_id,
@@ -489,7 +529,7 @@ function createBennuRunStore() {
    * Tests panel. Callers (▷, the selector, the editor) say "run this configuration" and are
    * not each required to know the difference.
    */
-  async function runConfig(root: string, cfg: RunConfig): Promise<void> {
+  async function runConfig(root: string, cfg: RunConfig, debug = false): Promise<void> {
     if (!isRunKind(cfg.kind)) {
       // Written by a newer Bennu. Say so rather than launching some approximation of it.
       bennuUiStore.showBottom('run');
@@ -497,6 +537,13 @@ function createBennuRunStore() {
       return;
     }
     if (cfg.kind === 'junit') {
+      if (debug) {
+        // Maven forks its own JVM for Surefire, so the agent would have to go through
+        // `argLine` rather than onto our command line — a different launch path, not a flag.
+        // Saying so beats silently running the tests without a debugger attached.
+        bennuUiStore.showBottom('run');
+        pushRun('Debugging a JUnit configuration is not supported yet — running it instead.', 'err');
+      }
       await bennuTestStore.run(root, testScopeOf(cfg));
       return;
     }
@@ -522,6 +569,10 @@ function createBennuRunStore() {
       workingDir: cfg.workingDir.trim(),
       env: envRecord(cfg.env),
       label: cfg.name,
+      debug,
+      // Only meaningful under the debugger, and only when the configuration asked: a launch
+      // that begins frozen is the exception, not the default.
+      debugSuspend: debug && cfg.debugSuspend,
     });
   }
 
@@ -573,12 +624,12 @@ function createBennuRunStore() {
    * does anything is a button that does not work. Several entry points is a real question,
    * so that returns false and the caller opens the editor.
    */
-  async function runActive(root: string): Promise<boolean> {
+  async function runActive(root: string, debug = false): Promise<boolean> {
     const cfg = bennuRunConfigStore.activeFor(root);
     // A Spring Boot configuration is runnable without a class of its own — `runConfig`
     // resolves the module's `@SpringBootApplication`.
     if (cfg && (cfg.mainClass.trim() || cfg.kind !== 'application')) {
-      await runConfig(root, cfg);
+      await runConfig(root, cfg, debug);
       return true;
     }
     if (bennuRunConfigStore.configsFor(root).length) return false;
@@ -599,7 +650,7 @@ function createBennuRunStore() {
     );
     bennuRunConfigStore.setActive(root, id);
     const created = bennuRunConfigStore.activeFor(root);
-    if (created) await runConfig(root, created);
+    if (created) await runConfig(root, created, debug);
     return true;
   }
 

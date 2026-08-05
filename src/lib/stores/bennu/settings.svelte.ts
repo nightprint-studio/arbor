@@ -60,6 +60,13 @@ export interface BennuSettingsSnapshot {
   /** Autosave a modified buffer to disk (after a short idle, on tab switch, on window blur).
    *  Config-backed (persists to `…/bennu/config.toml`). */
   autosave: boolean;
+  /** Fold runs of library frames in the debugger's call stack into one expandable row.
+   *  Config-backed — a preference about how you read a stack, not about a project. */
+  collapseLibraryFrames: boolean;
+  /** Offer the classes and files inside the DEPENDENCY jars in the Go-to navigator, as two
+   *  extra categories. Config-backed. Off by default: it changes what the box is, and on a
+   *  small project the classpath is noise around the answer. */
+  searchDependencies: boolean;
   // Completion
   autoPopup: boolean;
   popupDelayMs: number;
@@ -96,6 +103,8 @@ const DEFAULTS: BennuSettingsSnapshot = {
   rightMargin: 120,
   sqlDialect: 'portable',
   autosave: true,
+  collapseLibraryFrames: true,
+  searchDependencies: false,
   autoPopup: true,
   popupDelayMs: 150,
   caseSensitive: false,
@@ -127,6 +136,8 @@ function createSettingsStore() {
   let rightMargin = $state(DEFAULTS.rightMargin);
   let sqlDialect = $state<SqlDialectSetting>(DEFAULTS.sqlDialect);
   let autosave = $state(DEFAULTS.autosave);
+  let collapseLibraryFrames = $state(DEFAULTS.collapseLibraryFrames);
+  let searchDependencies = $state(DEFAULTS.searchDependencies);
   // Completion
   let autoPopup = $state(DEFAULTS.autoPopup);
   let popupDelayMs = $state(DEFAULTS.popupDelayMs);
@@ -151,7 +162,7 @@ function createSettingsStore() {
     return {
       fontSize, tabSize, indentStyle, wordWrap, showWhitespace,
       highlightCurrentLine, showLineNumbers, minimap, indentGuides, stickyScroll, rightMargin,
-      sqlDialect, autosave,
+      sqlDialect, autosave, collapseLibraryFrames, searchDependencies,
       autoPopup, popupDelayMs, caseSensitive, autoImport,
       foldingEnabled, foldBlockComments,
       finalParams, useLombokVal, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
@@ -175,7 +186,14 @@ function createSettingsStore() {
   async function persistConfigBacked() {
     try {
       const cur = await getBennuConfig();
-      await setBennuConfig({ ...cur, autosave, auto_import: autoImport, sql_dialect: sqlDialect });
+      await setBennuConfig({
+        ...cur,
+        autosave,
+        auto_import: autoImport,
+        sql_dialect: sqlDialect,
+        collapse_library_frames: collapseLibraryFrames,
+        search_dependencies: searchDependencies,
+      });
     } catch {
       /* non-critical — the in-memory value still applies for this session */
     }
@@ -216,6 +234,18 @@ function createSettingsStore() {
     setSqlDialect(v: SqlDialectSetting) { sqlDialect = v; void persistConfigBacked(); },
     get autosave() { return autosave; },
     setAutosave(v: boolean) { autosave = v; void persistConfigBacked(); },
+    get collapseLibraryFrames() { return collapseLibraryFrames; },
+    get searchDependencies() { return searchDependencies; },
+    async setSearchDependencies(v: boolean) {
+      searchDependencies = v;
+      await persistConfigBacked();
+    },
+    /** Awaited by its one caller, so a failed write shows up as the toggle not sticking rather
+     *  than as a preference that quietly forgets itself on the next launch. */
+    async setCollapseLibraryFrames(v: boolean) {
+      collapseLibraryFrames = v;
+      await persistConfigBacked();
+    },
 
     // ── Completion ────────────────────────────────────────────────────────
     get autoPopup() { return autoPopup; },
@@ -265,6 +295,8 @@ function createSettingsStore() {
       try {
         const cfg = await getBennuConfig();
         autosave = cfg.autosave;
+        collapseLibraryFrames = cfg.collapse_library_frames ?? DEFAULTS.collapseLibraryFrames;
+        searchDependencies = cfg.search_dependencies ?? DEFAULTS.searchDependencies;
         autoImport = cfg.auto_import;
         // An unknown / empty label from a hand-edited config falls back to the default rather
         // than reaching the editor as an undefined dialect.
@@ -305,6 +337,8 @@ function createSettingsStore() {
       defaultEncoding = DEFAULTS.defaultEncoding;
       rebuildIndexOnOpen = DEFAULTS.rebuildIndexOnOpen;
       excludedDirs = DEFAULTS.excludedDirs;
+      collapseLibraryFrames = DEFAULTS.collapseLibraryFrames;
+      searchDependencies = DEFAULTS.searchDependencies;
       persist();
       void persistConfigBacked(); // autosave / auto-import / SQL dialect are config-backed
     },

@@ -20,7 +20,7 @@
    * is in.
    *
    * Every edit funnels straight into {@link bennuRunConfigStore}, which persists to
-   * `<root>/.arbor/config.toml` on a short debounce — so there's no separate "Apply",
+   * `<root>/.arbor/bennu/config.toml` on a short debounce — so there's no separate "Apply",
    * and the configurations are still there tomorrow. "Run" builds then launches the
    * SELECTED config; the ● (Set active) button makes it the default target.
    *
@@ -41,6 +41,7 @@
   import FormField from '$lib/components/shared/ui/FormField.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
   import RadioGroup from '$lib/components/shared/ui/RadioGroup.svelte';
+  import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
@@ -711,6 +712,22 @@
             />
           </FormField>
 
+          <!-- Off by default and per-configuration, because it is the only way to stop in
+               start-up code AND it means every 🐞 launch of this configuration begins frozen.
+               The launch you press fifty times a day should not. -->
+          <FormField
+            label="Debugger"
+            hint="Only applies to 🐞 Debug. Without it, a breakpoint the program has already run past is missed."
+          >
+            <label class="rc-check">
+              <Toggle
+                checked={selected.debugSuspend}
+                onchange={(v) => patch({ debugSuspend: v })}
+              />
+              <span>Suspend the VM until the debugger has attached</span>
+            </label>
+          </FormField>
+
           <FormField label="Environment variables">
             {#snippet actions()}
               <button
@@ -923,6 +940,12 @@
     background: var(--bg-overlay);
     color: var(--text-muted);
     font-size: var(--font-size-2xs);
+  }
+
+  .rc-check {
+    display: flex; align-items: center; gap: 8px;
+    font-size: var(--font-size-sm); color: var(--text-secondary);
+    cursor: pointer; padding: 2px 0;
   }
 
   .env-empty { font-size: var(--font-size-xs); color: var(--text-muted); padding: 2px 0; }

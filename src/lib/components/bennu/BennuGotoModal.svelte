@@ -23,8 +23,14 @@
    * - **Symbols** — the `members` index: every method and field the project declares, with
    *   its owner and signature as the detail. Entries with no navigable site are dropped for
    *   the same reason.
+   * - **Library classes / Library files** — what is on the **dependency classpath** but
+   *   nowhere in the tree. Present only when the setting asks for them, and unlike the three
+   *   above they are *searched in the backend* rather than fetched: a legacy classpath is
+   *   hundreds of thousands of entries, and handing that over to filter in the page would cost
+   *   tens of megabytes to answer a question about twenty of them. The backend narrows, this
+   *   side still ranks and highlights — see {@link NavigateTo}'s `search`.
    */
-  import { Braces } from 'lucide-svelte';
+  import { Braces, FileArchive, Package } from 'lucide-svelte';
   import NavigateTo, {
     type NavigateCategory,
     type NavigateItem,
@@ -35,7 +41,10 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
+  import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { indexEntries } from '$lib/ipc/bennu/inspect';
+  import { libraryClasses, libraryFiles, openLibraryFile } from '$lib/ipc/bennu/library';
+  import { openLibraryClass } from './log-link';
   import type { TreeNode } from '$lib/types/bennu';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -100,6 +109,65 @@
     return cut < 0 ? '' : fqcn.slice(0, cut);
   }
 
+  /**
+   * The two backend-searched categories. Separate from the list above because they are a
+   * different kind of source — `search` instead of `items` — and because reading them in one
+   * place is what makes it obvious that only these two leave the page per keystroke.
+   */
+  const libraryCategories = $derived<NavigateCategory[]>([
+    {
+      id: 'lib-classes',
+      label: 'Library classes',
+      emptyMessage: 'Type to search the dependency classpath.',
+      search: async (text) => {
+        const root = projectStore.project?.root;
+        if (!root) return [];
+        const found = await libraryClasses(root, text);
+        return found.map((c) => ({
+          id: `${c.fqcn}@${c.jar}`,
+          name: c.simple,
+          detail: c.package,
+          icon: Package,
+          // The artifact, on the right — which of four versions of the same class you are
+          // about to open is the question a classpath makes you ask.
+          tag: c.jar,
+          onOpen: () => void openLibraryClass(c.fqcn),
+        }));
+      },
+    },
+    {
+      id: 'lib-files',
+      label: 'Library files',
+      emptyMessage: 'Type to search the files inside the dependency jars.',
+      search: async (text) => {
+        const root = projectStore.project?.root;
+        if (!root) return [];
+        const found = await libraryFiles(root, text);
+        return found.map((f) => ({
+          id: f.id,
+          name: f.name,
+          // The path INSIDE the jar: two `web.xml`s from two artifacts are told apart by it.
+          detail: f.entry,
+          icon: FileArchive,
+          tag: f.jar,
+          onOpen: () => void openJarEntry(f.id),
+        }));
+      },
+    },
+  ]);
+
+  /** Extract a jar entry to the read-only cache and open it. A resource inside a jar has no
+   *  path until something writes it out — that is what the backend call is for. */
+  async function openJarEntry(id: string) {
+    const root = projectStore.project?.root;
+    if (!root) return;
+    try {
+      await projectStore.openFile(await openLibraryFile(root, id));
+    } catch {
+      /* a classpath that changed under a stale id — nothing worth a dialog over */
+    }
+  }
+
   const categories = $derived<NavigateCategory[]>([
     {
       id: 'classes',
@@ -153,7 +221,13 @@
           }));
       },
     },
+    // ── the classpath ─────────────────────────────────────────────────────────
+    // Opt-in, and last: with them on, a two-letter query reaches a hundred thousand things
+    // nobody in this project wrote, and what you were looking for is usually one of the three
+    // above. Kept behind the setting so the default box stays a box about YOUR code.
+    ...(bennuSettingsStore.searchDependencies ? libraryCategories : []),
   ]);
+
 </script>
 
 <NavigateTo

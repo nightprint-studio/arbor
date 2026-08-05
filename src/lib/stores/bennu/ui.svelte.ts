@@ -7,10 +7,13 @@
  *
  * Tool-window layout (IntelliJ New UI):
  *   • LEFT rail (top)     — Project (tree), Structure (symbols), Dependencies.
- *   • LEFT rail (bottom)  — bottom-dock toggles: Build, Run, Tests, Problems, TODO, Terminal.
- *   • RIGHT rail          — Maven (top); Services + the Forms toggle (bottom).
- *   • BOTTOM dock         — Build · Run · Tests · Problems · TODO · Forms · Terminal, one
- *                           panel per rail button (Build and Problems share one).
+ *   • LEFT rail (bottom)  — bottom-dock toggles: Build, Run, Problems, TODO, Terminal.
+ *   • RIGHT rail          — Maven, Tests (top); the Forms toggle (bottom).
+ *   • BOTTOM dock         — Build · Run · Problems · TODO · Forms · Terminal, one panel per
+ *                           rail button (Build and Problems share one).
+ *
+ * Running something — a program, a debug session, a test run — is all one panel (Run), one tab
+ * each. The Tests tool window on the right is the *catalogue*, not the runs.
  * Find-in-project is a modal (Ctrl+Shift+F), not a rail tool.
  *
  * Rune store — private `$state`, returned getters + methods (CLAUDE.md).
@@ -21,8 +24,14 @@ import type { GenerateMode } from '$lib/components/bennu/bennu-intentions';
 
 /** Left tool windows (activity bar, top group). */
 export type LeftPanel = 'project' | 'structure' | 'dependencies';
-/** Right tool windows (activity bar) — mock tool panels for now. */
-export type RightPanel = 'maven' | 'services';
+/**
+ * Right tool windows (activity bar).
+ *
+ * `tests` is the **catalogue** — every test the project declares, sortable and filterable, with
+ * a run button per row. What a run *did* is deliberately not here: that is an event, and it
+ * lives as a tab of the Run console beside the other things you have launched.
+ */
+export type RightPanel = 'maven' | 'tests';
 /** Bottom tool windows — one panel per rail button, except Build and Problems which share
  *  one. The Forms inspector lives here (wide, horizontal data) rather than in a narrow side
  *  panel; its toggle sits in the right rail's bottom cluster.
@@ -36,9 +45,13 @@ export type BottomPanel =
   | 'terminal'
   | 'build'
   /** The launched program's console — its own tool window, not a section of Build: a build
-   *  log is finished when you read it, a program's output is live, typed into and stopped. */
+   *  log is finished when you read it, a program's output is live, typed into and stopped.
+   *
+   *  This is where **tests** and the **debugger** live too. All three are the same activity —
+   *  you started something and you are watching it — so they share one panel, one Stop button
+   *  and one transcript, and the tab strip says which of them you are looking at. See
+   *  {@link RunTab}. */
   | 'run'
-  | 'tests'
   | 'todos'
   | 'forms'
   | 'beans'
@@ -53,11 +66,30 @@ export type BottomPanel =
 /** Which tab the Go-to navigator opens on. */
 export type NavMode = 'class' | 'file' | 'symbol' | 'all';
 
+/**
+ * Which tab of the Run console is showing.
+ *
+ * `'tests'` is the test run's tree; anything else is a run id from `bennuRunStore` — one tab per
+ * launched program, the debugger's session being one of them. Both kinds appear because you ran
+ * something and go away when you close them.
+ *
+ * There is one test tab rather than one per test run, because `bennuTestStore` holds one run:
+ * its tree, its filters and its counters are singletons. When it grows a run history this
+ * becomes several ids and nothing else here has to change.
+ *
+ * It lives in this store rather than in the panel because it is addressable from outside —
+ * starting a test run means "the Run console, on that tab", and a panel-local variable cannot
+ * be told that.
+ */
+export type RunTab = 'tests' | (string & {});
+
 function createBennuUiStore() {
   // Default the Project tool open so the shell shows the tree on launch.
   let leftPanel = $state<LeftPanel | null>('project');
   let rightPanel = $state<RightPanel | null>(null);
   let bottomPanel = $state<BottomPanel | null>(null);
+  /** `'tests'`, or a `bennuRunStore` run id. `null` = whichever run tab is active. */
+  let runTab = $state<RunTab | null>(null);
 
   let settingsOpen = $state(false);
   let docsOpen = $state(false);
@@ -74,6 +106,9 @@ function createBennuUiStore() {
   // Run-configuration modal (main class for `java -cp … <mainClass>`) — there's no
   // main-class discovery yet, so ▶ Run without a remembered class opens this.
   let runConfigOpen = $state(false);
+  // The breakpoint list — every breakpoint of the project in one place: disable one, drop one,
+  // or add an exception breakpoint, which the gutter has nowhere to express.
+  let breakpointsOpen = $state(false);
   // Go-to navigator — one overlay over classes / files / symbols; the shortcut that opened it
   // picks the starting tab (Ctrl+N = class, Ctrl+Shift+N = file, Ctrl+Shift+Y = symbol).
   let navOpen = $state(false);
@@ -158,6 +193,7 @@ function createBennuUiStore() {
     get findOpen()     { return findOpen; },
     get projectConfigOpen() { return projectConfigOpen; },
     get runConfigOpen() { return runConfigOpen; },
+    get breakpointsOpen() { return breakpointsOpen; },
     get navOpen()      { return navOpen; },
     get navMode()      { return navMode; },
     /** Query to pre-fill the Find-in-project field with (from a selection), or ''. */
@@ -189,6 +225,17 @@ function createBennuUiStore() {
     toggleBottom(p: BottomPanel) { bottomPanel = bottomPanel === p ? null : p; },
     /** Switch the bottom dock to a section (opening the dock if closed). */
     showBottom(p: BottomPanel) { bottomPanel = p; },
+
+    /** Which tab of the Run console is showing — see {@link RunTab}. `null` = the active run. */
+    get runTab() { return runTab; },
+    /** Show a tab of the Run console. Pass `null` to follow the active run again. */
+    showRunTab(t: RunTab | null) { runTab = t; },
+    /**
+     * Open the Run console on the test run's tab — what starting a run means. Not what
+     * <kbd>Alt</kbd>+<kbd>5</kbd> means: that opens the **catalogue** (`toggleRight('tests')`),
+     * which is where a run is started from and exists whether or not one has ever happened.
+     */
+    showTestRun() { bottomPanel = 'run'; runTab = 'tests'; },
     /** Close the bottom dock entirely. */
     closeBottom() { bottomPanel = null; },
     /** Ensure a specific left tool is showing (used by "reveal in project"). */
@@ -198,7 +245,7 @@ function createBennuUiStore() {
      * Close any open tool window whose rail icon has just disappeared.
      *
      * Called when the active project switches to one that doesn't offer a tool (a Cargo
-     * project has no Structure / Maven / Dependencies / Services / Forms — see
+     * project has no Structure / Maven / Dependencies / Forms — see
      * `BennuWindow`'s `javaTools`). Without this a panel opened on a Java project would
      * survive the switch with no way left to close it: its toggle is gone from both the
      * rail and the palette. Left falls back to Project rather than to nothing, so the
@@ -224,6 +271,8 @@ function createBennuUiStore() {
     closeProjectConfig() { projectConfigOpen = false; },
     openRunConfig()      { runConfigOpen = true; },
     closeRunConfig()     { runConfigOpen = false; },
+    openBreakpoints()    { breakpointsOpen = true; },
+    closeBreakpoints()   { breakpointsOpen = false; },
     /** Open the Go-to navigator on `mode`'s tab, optionally pre-filling the query (e.g. the
      *  editor selection). Every tab is reachable with Tab once it is open. */
     openNav(mode: NavMode, initial = '') { navMode = mode; navInitial = initial; navOpen = true; },
