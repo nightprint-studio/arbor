@@ -37,7 +37,11 @@ impl JspExtension {
 
     /// The catalog, when there is one worth answering from. Named apart from the trait's
     /// `catalog(kind)` so the two are never confused at a call site.
-    fn resolved(&self) -> Option<Arc<TaglibCatalog>> {
+    ///
+    /// Public because the model tab reads it directly: it is not answering *about* a caret, it
+    /// is rendering the whole page, so it goes around the `FrameworkExtension` seam rather than
+    /// pushing a shape onto it that only one framework could ever fill.
+    pub fn resolved(&self) -> Option<Arc<TaglibCatalog>> {
         let cat = self.catalog.read().ok()?;
         (!cat.is_empty()).then(|| Arc::clone(&cat))
     }

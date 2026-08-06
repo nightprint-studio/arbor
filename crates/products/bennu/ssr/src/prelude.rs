@@ -13,7 +13,8 @@ pub use crate::query::{
 // Running one: compiling the alternatives, searching a file, and the name resolution this crate
 // asks the caller for.
 pub use crate::engine::{
-    compile, glob_matches, search_file, Denotation, Hit, HitCapture, NoTypes, Subject, TypeOracle,
+    compile, glob_matches, line_of, preview_of, search_file, Denotation, Hit, HitCapture, NoTypes,
+    Subject, TypeOracle,
 };
 
 // The table `group` asks for.

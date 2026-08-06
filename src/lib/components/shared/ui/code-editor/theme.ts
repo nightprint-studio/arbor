@@ -36,6 +36,9 @@ const lezerHighlightStyle = HighlightStyle.define([
   { tag: t.definition(t.variableName), color: 'var(--syntax-function, #ffc66d)', fontWeight: '600' },
   { tag: t.variableName, color: 'var(--text-primary)' },
   { tag: t.tagName, color: 'var(--syntax-keyword, #cc7832)' },
+  // `this` / `super`. A keyword in weight, italic in shape — it names something rather than
+  // doing something, and the same two rules apply to `cm-tok-self` on the tree-sitter path.
+  { tag: t.self, color: 'var(--syntax-keyword, #cc7832)', fontStyle: 'italic' },
   { tag: [t.meta, t.annotation, t.processingInstruction], color: 'var(--syntax-annotation, #bbb529)' },
   { tag: t.constant(t.variableName), color: 'var(--syntax-constant, #9876aa)', fontStyle: 'italic' },
   { tag: [t.operator, t.punctuation, t.separator, t.bracket], color: 'var(--text-secondary)' },

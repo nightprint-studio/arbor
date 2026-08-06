@@ -885,6 +885,7 @@ dependencies = [
  "bennu-jdwp",
  "bennu-jpa",
  "bennu-jsp",
+ "bennu-jsp-grammar",
  "bennu-project",
  "bennu-proto",
  "bennu-query",
@@ -1034,9 +1035,19 @@ version = "0.3.0"
 dependencies = [
  "bennu-complete",
  "bennu-ext",
+ "bennu-jsp-grammar",
  "bennu-proto",
  "bennu-xml",
  "roxmltree",
+ "tree-sitter",
+]
+
+[[package]]
+name = "bennu-jsp-grammar"
+version = "0.3.0"
+dependencies = [
+ "cc",
+ "tree-sitter",
 ]
 
 [[package]]

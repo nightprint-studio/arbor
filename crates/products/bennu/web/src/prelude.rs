@@ -75,9 +75,15 @@ pub use crate::include_cache::{file_stamp, IncludeGraphCache};
 // variable's usages must count), while a go-to on `ordine.cliente.nome` is a question about a
 // segment the root does not carry.
 pub use crate::jsp_vars::{
-    line_col, ognl_path_at, parse_jsp_vars, parse_jsp_vars_file, var_declaration, var_name_at,
-    var_usages, JspVarDecl, JspVarRef, JspVars, OgnlPath,
+    line_col, ognl_path_at, parse_jsp_vars, parse_jsp_vars_file, path_in_range, var_declaration,
+    var_name_at, var_usages, JspVarDecl, JspVarRef, JspVars, OgnlPath,
 };
+
+// The two Struts facts a page never spells out: which attributes are OGNL without saying so, and
+// which regions have an iterator's element on top of the value stack. See `jsp_ognl`'s own doc —
+// the first is go-to-only by design, the second is what keeps the checks quiet inside a loop
+// whose element type nothing could resolve.
+pub use crate::jsp_ognl::{iterator_scopes, ognl_attr_path_at, scopes_at, IteratorScope};
 
 // Struts wildcard support (candidate matching / backref expansion — docs §7).
 pub use crate::struts::{join_ns, WildcardPattern};

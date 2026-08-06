@@ -280,9 +280,14 @@ mod tests {
     #[test]
     fn an_edit_that_would_split_a_character_is_skipped() {
         let source = "città";
-        // Byte 4 is the middle of the two-byte `à`.
-        let edits = vec![Edit { range: ByteRange::new(0, 4), text: "X".to_string() }];
+        // `citt` is four bytes, so the `à` occupies 4..6 — byte **5** is its middle. (Byte 4 is
+        // a perfectly good boundary, which is why the edit this test used to make was applied
+        // and produced `Xà`: the test was arithmetically wrong, not the guard.)
+        let edits = vec![Edit { range: ByteRange::new(0, 5), text: "X".to_string() }];
         assert_eq!(apply(source, &edits), "città", "unchanged rather than mangled");
+        // …and the boundary next to it is still an ordinary edit.
+        let ok = vec![Edit { range: ByteRange::new(0, 4), text: "X".to_string() }];
+        assert_eq!(apply(source, &ok), "Xà");
     }
 
     #[test]

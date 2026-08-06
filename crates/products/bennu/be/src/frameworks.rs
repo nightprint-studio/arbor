@@ -61,6 +61,7 @@ struct Slot {
     registry: ExtensionRegistry,
     spring: Option<Arc<SpringExtension>>,
     jpa: Option<Arc<JpaExtension>>,
+    jsp: Option<Arc<JspExtension>>,
 }
 
 /// Process-wide extension host, one slot per project root.
@@ -158,6 +159,7 @@ impl FrameworkService {
             spring.set_active_property_file(Some(f));
         }
         let jpa = Arc::new(JpaExtension::new());
+        let jsp = Arc::new(JspExtension::new());
         // The whole registration surface. A third framework is one more entry here — and the
         // XML one arriving as exactly that entry is the claim the seam was built on, now made
         // twice.
@@ -166,13 +168,13 @@ impl FrameworkService {
                 Arc::clone(&spring) as Arc<dyn FrameworkExtension>,
                 Arc::clone(&jpa) as Arc<dyn FrameworkExtension>,
                 Arc::new(XmlExtension::new()) as Arc<dyn FrameworkExtension>,
-                Arc::new(JspExtension::new()) as Arc<dyn FrameworkExtension>,
+                Arc::clone(&jsp) as Arc<dyn FrameworkExtension>,
             ],
             &caps,
         );
         // Nothing applies → no walk, no parse, no model.
         if registry.is_empty() {
-            return Some(Slot { registry, spring: None, jpa: None });
+            return Some(Slot { registry, spring: None, jpa: None, jsp: None });
         }
 
         // Reading the Java tree is by far the most expensive part of a scan, and the XML
@@ -222,6 +224,7 @@ impl FrameworkService {
         Some(Slot {
             spring: active.contains(&"spring").then_some(spring),
             jpa: active.contains(&"jpa").then_some(jpa),
+            jsp: active.contains(&"jsp").then_some(jsp),
             registry,
         })
     }
@@ -707,6 +710,17 @@ fn with_file<T: Default>(
     let path = PathBuf::from(&args.file);
     let ctx = FileCtx { path: &path, source: &text };
     f(&slot.registry, &ctx)
+}
+
+/// The tag-library catalog of the project `file` belongs to, when the JSP extension applies to
+/// it and found libraries to resolve.
+///
+/// The model tab's one dependency on the project. Every other JSP answer travels the
+/// `FrameworkExtension` seam because it is *about a caret*; a model of the whole page is not,
+/// and inventing a trait method that only one framework could implement would be the wrong
+/// generalisation of exactly one case.
+pub fn taglib_catalog_for(file: &str) -> Option<Arc<bennu_jsp::prelude::TaglibCatalog>> {
+    FrameworkService::global().slot_for_file(file)?.jsp.as_ref()?.resolved()
 }
 
 /// Framework-contributed diagnostics for a file. Called by the `intel` domain as part of

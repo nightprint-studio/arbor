@@ -50,6 +50,7 @@ pub mod include_graph;
 pub mod interceptors;
 pub mod jsp;
 pub mod jsp_includes;
+pub mod jsp_ognl;
 pub mod jsp_vars;
 pub mod model;
 pub mod mybatis;

@@ -1,0 +1,23 @@
+[package]
+name         = "bennu-jsp-grammar"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The JSP Tree-sitter grammar, linked natively. One `grammar.js` and one generated `src/parser.c` serve both consumers: the frontend loads the wasm build of it, and this crate compiles the same C so the backend reads a page with the parser the editor is colouring it with."
+
+# `tree-sitter` only to name the `Language` the generated C exports. The version is a
+# workspace-wide fact (`links = "tree-sitter"` — one runtime, everywhere), so it matches
+# `bennu-java`, `picus-parse` and `merula-lang`.
+[dependencies]
+tree-sitter = "0.25"
+
+# Compiles the committed `src/parser.c`. Same arrangement as `picus-parse` and
+# `merula-lang`: no Node and no Tree-sitter CLI at build time, only a C compiler — the
+# one the workspace already needs for vendored libgit2 and mlua.
+[build-dependencies]
+cc = "1"
+
+[lints.rust]
+missing_debug_implementations = "warn"

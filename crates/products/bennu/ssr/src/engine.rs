@@ -453,12 +453,20 @@ fn named_child_text(node: Node<'_>, source: &str) -> Option<String> {
     source.get(name.start_byte()..name.end_byte()).map(str::to_string)
 }
 
-fn line_of(source: &str, at: usize) -> usize {
+/// The 1-based line an offset sits on.
+///
+/// Public because a caller that produces hits from a **fragment** — a `<% … %>` body cut out of a
+/// page and parsed as Java — has to re-express them against the file the fragment came from, and
+/// two implementations of "which line is this" would drift into two different previews for the
+/// same match depending on which dialect found it.
+pub fn line_of(source: &str, at: usize) -> usize {
     source.get(..at).map(|head| head.lines().count().max(1)).unwrap_or(1)
 }
 
 /// The matched text as a row shows it: one line, collapsed whitespace, bounded.
-fn preview_of(source: &str, range: ByteRange) -> String {
+///
+/// Public for the same reason as [`line_of`].
+pub fn preview_of(source: &str, range: ByteRange) -> String {
     const MAX: usize = 200;
     let text = range.slice(source).unwrap_or_default();
     let mut out = String::with_capacity(text.len().min(MAX));
@@ -500,7 +508,11 @@ mod tests {
 
     fn run(query_text: &str, source: &str, types: &dyn TypeOracle) -> Vec<Hit> {
         let query = parse_query(query_text).expect("query parses");
-        let compiled = compile(&language(), &query, WRAP).expect("pattern compiles");
+        // Named in the message: a table-driven test that fails on `.expect("pattern compiles")`
+        // reports a byte range into text nobody wrote, and finding out *which row* meant doing
+        // the arithmetic by hand.
+        let compiled = compile(&language(), &query, WRAP)
+            .unwrap_or_else(|e| panic!("`{query_text}` does not compile — {e}"));
         search_file(
             &language(),
             &query,
@@ -529,17 +541,39 @@ mod tests {
     fn every_parse_context_admits_its_shape() {
         for (pattern, source) in [
             // a compilation unit
-            ("class $c$ extends $b$ { $body...$ }", "class A extends B { int x; }"),
-            // a class member
-            ("void $m$($args...$) { $body...$ }", "class A { void go(int i) { f(); } }"),
+            ("import $p$;", "import com.acme.Foo;"),
             // a statement
             ("return $x$;", "class A { int m() { return 7; } }"),
             // an expression — the case that needs the appended `;`
             ("log.debug($x$)", "class A { void m() { log.debug(\"a\"); } }"),
+            // an argument list, which is where a run of siblings actually works
+            ("f($args...$)", "class A { void m() { f(1, 2); } }"),
         ] {
             let hits = run(pattern, source, &NoTypes);
             assert_eq!(hits.len(), 1, "`{pattern}` should match in `{source}`");
         }
+    }
+
+    /// **A known limit, pinned so it cannot be rediscovered by accident.**
+    ///
+    /// A placeholder is substituted with an ordinary **identifier** before the pattern is
+    /// parsed, so a hole can only sit where a name is legal. A run of *arguments* is a run of
+    /// expressions and works; a run of **class members**, of **statements** or of **parameters**
+    /// is not, because none of those may be a bare name — `class A { body }` and `void m(args)`
+    /// are not Java.
+    ///
+    /// The practical cost is that a **class-shaped pattern cannot be written at all**: there is
+    /// no way to say "a class extending X, whatever its body". Closing that needs a placeholder
+    /// that is recognised through a wrapper rather than by its own text, which is a change to
+    /// how patterns are compiled and not a context that can be added here.
+    #[test]
+    fn a_run_hole_only_works_where_a_bare_name_is_legal() {
+        let compiles = |text: &str| {
+            compile(&language(), &parse_query(text).expect("parses"), WRAP).is_ok()
+        };
+        assert!(compiles("f($args...$)"), "arguments are expressions");
+        assert!(!compiles("class $c$ extends $b$ { $body...$ }"), "members are not names");
+        assert!(!compiles("void $m$($args...$) { $body...$ }"), "parameters are not names either");
     }
 
     /// The appended `;` must stay outside the matched range, or the pattern would match the
@@ -648,13 +682,21 @@ mod tests {
         }
     }
 
+    /// The constraint decides the receiver it can decide, and says so about the one it cannot.
+    ///
+    /// `other` is not a *non*-match — the oracle answered `None`, which is "I do not know" and
+    /// never "no". So it is kept and flagged, exactly like
+    /// [`a_type_that_cannot_be_resolved_is_flagged_rather_than_dropped`] says. Asserting one hit
+    /// here asserted the opposite of the crate's contract.
     #[test]
     fn a_type_constraint_keeps_the_receiver_it_names() {
         let src = "class A { void m() { svc.place(o); other.place(o); } }";
         let hits = run("$o: com.acme.OrderService$.place($a$)", src, &Fake("com.acme.OrderService"));
-        assert_eq!(hits.len(), 1);
+        assert_eq!(hits.len(), 2, "the one it named, and the one it could not decide");
         assert_eq!(hits[0].capture("o").map(|c| c.text.as_str()), Some("svc"));
-        assert!(!hits[0].unresolved);
+        assert!(!hits[0].unresolved, "decided, and it is the type asked for");
+        assert_eq!(hits[1].capture("o").map(|c| c.text.as_str()), Some("other"));
+        assert!(hits[1].unresolved, "undecided — kept and marked, never silently dropped");
     }
 
     #[test]

@@ -18,8 +18,24 @@
 //! Conservative by construction (never a false positive): a lint hit needs the action to resolve to a
 //! project class whose accessor set (own + inherited project supers) is non-empty; only OGNL `%{…}`
 //! value-stack roots are linted (EL `${…}` scoped attributes and `#…` context/iterator vars are not).
+//!
+//! ## The value stack is a stack, and inside a loop it is deeper
+//!
+//! `<s:iterator value="comunicazioni.dati">` pushes the current element on top, so a bare name
+//! written underneath it is a property of **that element** before it is anything of the action's.
+//! Everything here therefore resolves top down — innermost element, each enclosing one, then the
+//! action — and stops at the level that actually declares the name.
+//!
+//! For the check the same fact cuts the other way and has to be handled deliberately: a name
+//! inside a loop whose element type could **not** be resolved is a name about which nothing is
+//! known, so the check goes silent there rather than reporting it against the action it does not
+//! belong to. "I cannot see that type" is not evidence that a property is missing, and the page
+//! full of yellow that came of pretending otherwise is what taught this rule.
+//!
+//! Where the scopes and the bare-attribute expressions come from — and why the second is
+//! go-to-only — is [`bennu_web::jsp_ognl`].
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use bennu_core::prelude::BennuState;
@@ -28,8 +44,8 @@ use bennu_proto::prelude::{
     PropertyLintHit,
 };
 use bennu_web::prelude::{
-    line_col, ognl_path_at, parse_jsp_fields, parse_jsp_forms, parse_jsp_vars,
-    parse_validation_text,
+    iterator_scopes, line_col, ognl_attr_path_at, ognl_path_at, parse_jsp_fields, parse_jsp_forms,
+    parse_jsp_vars, parse_validation_text, scopes_at,
 };
 use serde::Deserialize;
 
@@ -240,6 +256,7 @@ fn expr_segments(expr: &str) -> Vec<&str> {
 fn chain_for_page_var(
     svc: &IndexService,
     file: &str,
+    source: &str,
     decl: &bennu_web::prelude::JspVarDecl,
     action: &str,
 ) -> Option<(String, Vec<(String, String)>)> {
@@ -251,8 +268,72 @@ fn chain_for_page_var(
         ));
         return None;
     }
-    let (simple, chain) = resolve_bound_action(svc, file, action)?;
+    // From whatever is on top of the stack **where the declaration is written**, not from the
+    // action: `<s:iterator value="celle" var="cella">` nested inside `<s:iterator value="righe">`
+    // walks `righe`'s element's `celle`, and resolving `celle` on the action would type `cella`
+    // as something the page never said. The declaration's own tag has not pushed yet — its
+    // `var=` sits in the opening tag, before the body its scope covers — so this is the
+    // enclosing scopes and only them.
+    let all = iterator_scopes(source);
+    let scopes = scopes_at(&all, decl.start);
+    let (simple, chain) = chain_for_scopes(svc, file, action, &scopes)?;
     descend_path(svc, chain, simple, &segments)
+}
+
+/// The class chain of the element an iterator's body sees, walking the scopes outermost first.
+///
+/// `<s:iterator value="comunicazioni.dati">` pushes an element of `comunicazioni.dati` onto the
+/// value stack, so inside it a bare name is a property of **that** class. And a nested loop's own
+/// expression is relative to its parent's element — `<s:iterator value="celle">` inside
+/// `<s:iterator value="righe">` walks `righe`'s element's `celle` — which is why the scopes are
+/// folded in order rather than each resolved against the action.
+///
+/// `None` the moment one link cannot be typed: a scope whose expression is a call, or whose class
+/// lives in a jar. That answer is load-bearing for the check — see [`stack_property_sets`].
+fn chain_for_scopes(
+    svc: &IndexService,
+    file: &str,
+    action: &str,
+    scopes: &[&bennu_web::prelude::IteratorScope],
+) -> Option<(String, Vec<(String, String)>)> {
+    let (mut simple, mut chain) = resolve_bound_action(svc, file, action)?;
+    for scope in scopes {
+        let segments = expr_segments(&scope.source_expr);
+        if segments.is_empty() {
+            goto_log(format_args!(
+                "chain_for_scopes: <s:{}> value={:?} is not a path — the scope stays untyped",
+                scope.tag, scope.source_expr
+            ));
+            return None;
+        }
+        let (next_simple, next_chain) = descend_path(svc, chain, simple, &segments)?;
+        simple = next_simple;
+        chain = next_chain;
+    }
+    Some((simple, chain))
+}
+
+/// The property sets the value stack offers at `offset`, **top first**: the innermost element,
+/// then each enclosing one, then the action itself.
+///
+/// `None` when any level could not be typed, and that is the whole point of the return type. A
+/// name that is not on any *known* level is a name the check can flag; a name on a stack whose
+/// top nobody could read is a name the check knows nothing about, and flagging it would be
+/// guessing. The two cases have to be distinguishable, so they are different values rather than
+/// an empty list.
+fn stack_property_sets(
+    svc: &IndexService,
+    file: &str,
+    action: &str,
+    scopes: &[&bennu_web::prelude::IteratorScope],
+) -> Option<Vec<(String, BTreeSet<String>)>> {
+    let mut out = Vec::new();
+    // Innermost first: `for depth in (1..=n).rev()` is the stack read from the top down.
+    for depth in (1..=scopes.len()).rev() {
+        let (simple, chain) = chain_for_scopes(svc, file, action, &scopes[..depth])?;
+        out.push((simple, chain_property_set(&chain)));
+    }
+    Some(out)
 }
 
 /// Whether `root` is a plain Java identifier we can look up (a computed `%{…}`/`${…}` name is not).
@@ -749,7 +830,10 @@ fn resolve_property_at(
         // than something wrong.
         let vars = parse_jsp_vars(source);
         let declared: HashSet<&str> = vars.decls.iter().map(|d| d.name.as_str()).collect();
-        let hit = ognl_path_at(source, offset);
+        // Delimited first, then the bare Struts attribute. In that order because a `%{…}` inside
+        // an attribute value is both, and the delimited scanner is the one that owns it — see
+        // `bennu_web::jsp_ognl` for why the bare form exists at all.
+        let hit = ognl_path_at(source, offset).or_else(|| ognl_attr_path_at(source, offset));
         goto_log(format_args!(
             "resolve_property_at: OGNL branch, caret path={:?}",
             hit.as_ref().map(|p| (
@@ -779,7 +863,7 @@ fn resolve_property_at(
                 if let (Some(action), Some(decl)) =
                     (&bound, vars.decls.iter().find(|d| d.name == path.root().name))
                 {
-                    if let Some((simple, chain)) = chain_for_page_var(svc, file, decl, action)
+                    if let Some((simple, chain)) = chain_for_page_var(svc, file, source, decl, action)
                         .and_then(|(simple, chain)| {
                             descend_path(svc, chain, simple, &before[1..])
                         })
@@ -794,20 +878,40 @@ fn resolve_property_at(
             }
             if !is_declared && plain {
                 match &bound {
-                    Some(action) => match resolve_bound_action(svc, file, action)
-                        .and_then(|(simple, chain)| descend_path(svc, chain, simple, &before))
-                    {
-                        Some((simple, chain)) => {
+                    Some(action) => {
+                        // The value stack, read top down: inside `<s:iterator value="rows">` a
+                        // bare name is a property of a `rows` ELEMENT before it is anything of
+                        // the action's, because that is the order Struts resolves it in. Outside
+                        // a loop the list is empty and this is the plain action lookup it always
+                        // was.
+                        let all = iterator_scopes(source);
+                        let scopes = scopes_at(&all, path.root().start);
+                        for depth in (0..=scopes.len()).rev() {
+                            let Some((simple, chain)) =
+                                chain_for_scopes(svc, file, action, &scopes[..depth])
+                                    .and_then(|(s, c)| descend_path(svc, c, s, &before))
+                            else {
+                                continue;
+                            };
+                            // Only the level that actually declares it — otherwise the innermost
+                            // element would answer for every name, and go-to on an action
+                            // property inside a loop would land nowhere.
+                            if !chain_property_set(&chain).contains(seg) {
+                                continue;
+                            }
                             goto_log(format_args!(
-                                "resolve_property_at: OK -> property '{seg}' on '{simple}' (chain of {})",
+                                "resolve_property_at: OK -> property '{seg}' on '{simple}' \
+                                 ({depth} iterator scope(s) deep, chain of {})",
                                 chain.len()
                             ));
                             return Some((seg.to_string(), simple, chain));
                         }
-                        None => goto_log(format_args!(
-                            "resolve_property_at: bound action '{action}' did not resolve to a project class"
-                        )),
-                    },
+                        goto_log(format_args!(
+                            "resolve_property_at: '{seg}' is on no level of the value stack for \
+                             action '{action}' ({} iterator scope(s) here)",
+                            scopes.len()
+                        ));
+                    }
                     None => goto_log(format_args!(
                         "resolve_property_at: no bound action for this JSP -> cannot resolve OGNL"
                     )),
@@ -902,14 +1006,45 @@ fn bennu_action_property_lint(
                     let vars = parse_jsp_vars(&args.source);
                     let declared: HashSet<&str> =
                         vars.decls.iter().map(|d| d.name.as_str()).collect();
+                    // Where an `<s:iterator>` (or `push`/`bean`) has an element on top of the
+                    // stack. Inside one, a bare name is that element's property before it is the
+                    // action's, and a check that did not know it reported every name in every
+                    // loop — a page of yellow, which is a warning nobody reads twice.
+                    let scopes = iterator_scopes(&args.source);
+                    // Keyed by the innermost scope's body start, which names one loop exactly:
+                    // two sibling iterators are both "depth 1" and walk different classes, so a
+                    // depth-keyed cache would answer one of them with the other's properties.
+                    let mut stack_cache: HashMap<usize, Option<Vec<(String, BTreeSet<String>)>>> =
+                        HashMap::new();
                     for r in &vars.refs {
                         if declared.contains(r.name.as_str()) {
                             continue;
                         }
                         let (ognl, scoped) = ognl_ref_kind(&args.source, r.start);
-                        if ognl && !scoped {
-                            push_if_unknown(&mut out, &props, &simple, &r.name, r.start, r.end);
+                        if !ognl || scoped {
+                            continue;
                         }
+                        let here = scopes_at(&scopes, r.start);
+                        if here.is_empty() {
+                            push_if_unknown(&mut out, &props, &simple, &r.name, r.start, r.end);
+                            continue;
+                        }
+                        // Every reference inside the same loop asks the same question, and a
+                        // legacy table has hundreds of them.
+                        let key = here.last().map(|s| s.body_start).unwrap_or(0);
+                        let levels = stack_cache
+                            .entry(key)
+                            .or_insert_with(|| stack_property_sets(svc, &args.file, action, &here))
+                            .clone();
+                        // A level nobody could type is not evidence that a property is missing —
+                        // so the check goes quiet here, and only here.
+                        let Some(levels) = levels else { continue };
+                        let root = property_root(&r.name);
+                        if levels.iter().any(|(_, p)| p.contains(root)) {
+                            continue;
+                        }
+                        // On no element and not on the action either: a real one.
+                        push_if_unknown(&mut out, &props, &simple, &r.name, r.start, r.end);
                     }
                 }
             }

@@ -70,6 +70,14 @@ export interface SsrDone {
   /** Whether the pre-filter applied at all. */
   prefiltered: boolean;
   capped: boolean;
+  /**
+   * Why the walk produced nothing, when the reason is the query rather than the project.
+   *
+   * A pattern that does not compile finds nothing, and so does a project that contains none of
+   * it. The two must never render the same: one means *look somewhere else*, the other means
+   * *your pattern is wrong*.
+   */
+  error: string | null;
 }
 
 /** What a query means, without running it. */
@@ -107,9 +115,23 @@ export interface SsrApplied {
   refused: { file: string; reason: string }[];
 }
 
+/**
+ * Which language a query is written in — and therefore which grammar reads it and which files
+ * it runs over.
+ *
+ * A choice the user makes and never a guess: `<s:property value="$x$"/>` is a page pattern and
+ * `log.debug($x$)` is a Java one, and there is no reading of the text that tells them apart
+ * reliably enough to bet a search on.
+ *
+ * `jsp-java` is the third: a **Java** query run over the `<% … %>` blocks of the pages. To the
+ * page grammar a scriptlet is one token — deliberately, since a `<` inside Java is not markup —
+ * so a `jsp` query can see that Java is there and nothing about it.
+ */
+export type SsrDialect = 'java' | 'jsp' | 'jsp-java';
+
 /** Read a query and say what it means. No files are touched. Wire: `bennu_ssr_explain`. */
-export function explainQuery(query: string): Promise<SsrExplained> {
-  return bennu('bennu_ssr_explain', { args: { query } });
+export function explainQuery(query: string, dialect: SsrDialect = 'java'): Promise<SsrExplained> {
+  return bennu('bennu_ssr_explain', { args: { query, dialect } });
 }
 
 /**
@@ -119,8 +141,13 @@ export function explainQuery(query: string): Promise<SsrExplained> {
  *
  * Resolves once the scan is scheduled, not when it finishes. Wire: `bennu_ssr_search`.
  */
-export function ssrSearch(root: string, query: string, searchId: string): Promise<void> {
-  return bennu('bennu_ssr_search', { args: { root, query, search_id: searchId } });
+export function ssrSearch(
+  root: string,
+  query: string,
+  searchId: string,
+  dialect: SsrDialect = 'java',
+): Promise<void> {
+  return bennu('bennu_ssr_search', { args: { root, query, search_id: searchId, dialect } });
 }
 
 /** What a replacement would do, file by file. Nothing is written. Wire: `bennu_ssr_preview`. */
@@ -128,8 +155,9 @@ export function ssrPreview(
   root: string,
   query: string,
   replacement: string,
+  dialect: SsrDialect = 'java',
 ): Promise<SsrPreview> {
-  return bennu('bennu_ssr_preview', { args: { root, query, replacement } });
+  return bennu('bennu_ssr_preview', { args: { root, query, replacement, dialect } });
 }
 
 /**

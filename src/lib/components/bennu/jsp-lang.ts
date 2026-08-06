@@ -10,6 +10,11 @@
  * `${…}` / `#{…}` and Struts OGNL `%{…}` — including inside attribute values. Highlighting
  * is leaf-driven by {@link classify} (no `.scm` query), exactly like `java-lang.ts`.
  *
+ * The expression languages are **decomposed by the grammar** rather than lexed here: a path is
+ * a subtree, and operators, literals and whitespace are its siblings. That is what lets a
+ * structural search say `%{#session.$prop$}`, and it is why the EL/OGNL stream parser this file
+ * used to inject is gone.
+ *
  * Taglib tags are coloured **per library** rather than all alike, each matching its own
  * `<%@ taglib %>` declaration — see `jsp-taglibs.ts` for why and how.
  *
@@ -18,13 +23,11 @@
  */
 
 import { Parser, Language, type Node } from 'web-tree-sitter';
-import { javascript } from '@codemirror/legacy-modes/mode/javascript';
 import { css } from '@codemirror/legacy-modes/mode/css';
 import type { StreamParser } from '@codemirror/language';
 import type { LanguageDescriptor, TokenClassName } from '$lib/components/shared/ui/code-editor';
-import { namespaceTokenClass } from '$lib/components/shared/ui/code-editor';
+import { javascriptStream, namespaceTokenClass } from '$lib/components/shared/ui/code-editor';
 import { directiveSlot, tagSlot } from './jsp-taglibs';
-import { elOgnlStream } from './jsp-el';
 import { makeHoverSource } from './bennu-hover';
 import { markupCompletionSource, markupExtHover } from './markup-intel';
 import { actionPropertyHover } from '$lib/ipc/bennu/nav';
@@ -68,7 +71,25 @@ const SCRIPTLET_TYPES = new Set([
 ]);
 
 /** Punctuation leaves (anonymous). */
-const PUNCT = new Set(['<', '>', '</', '/>', '=', '/']);
+const PUNCT = new Set([
+  '<', '>', '</', '/>', '=', '/',
+  // The expression languages: their delimiters, their grouping and their separators.
+  '${', '#{', '%{', '}', '[', ']', '(', ')', ',',
+]);
+
+/** Anonymous leaves inside an expression that join rather than separate. */
+const EL_OPERATOR_PUNCT = new Set(['.', ':', '@']);
+
+/** The words EL and OGNL reserve. They are `el_identifier` nodes to the grammar — telling a
+ *  keyword from a name is a job for a vocabulary, not for a parser, and putting the vocabulary
+ *  here keeps the grammar from having to guess whether `${empty}` is a name. */
+const EL_KEYWORDS = new Set([
+  'and', 'or', 'not', 'eq', 'ne', 'lt', 'gt', 'le', 'ge', 'div', 'mod', 'empty', 'instanceof',
+  'in', 'new',
+]);
+
+/** …and the ones that are values. */
+const EL_ATOMS = new Set(['true', 'false', 'null']);
 
 function classify(
   node: Node,
@@ -87,9 +108,25 @@ function classify(
     const slot = directiveSlot(node);
     return slot === undefined ? 'annotation' : namespaceTokenClass(slot);
   }
-  // `el_expression` / `ognl_expression` are tokenized INSIDE by the EL/OGNL injection
-  // (below), not flattened to one `field` colour — leaving a classify here would win only
-  // if the injection were removed, so it's intentionally omitted.
+  // ── inside `${…}` / `#{…}` / `%{…}` ──────────────────────────────────────────
+  //
+  // The grammar decomposes an expression now (a path is a subtree; operators, literals and
+  // whitespace are its siblings), so these are real nodes rather than one token handed to a
+  // stream lexer. Same colours as that lexer produced — the point of the change is what can be
+  // *asked* of the tree, not a new palette.
+  if (type === 'el_identifier') {
+    const word = node.text;
+    if (EL_ATOMS.has(word)) return 'constant';
+    if (EL_KEYWORDS.has(word.toLowerCase())) return 'keyword';
+    return 'ident';
+  }
+  if (type === 'el_property') return 'field';
+  if (type === 'el_number') return 'number';
+  if (type === 'el_string') return 'string';
+  if (type === 'el_operator') return 'operator';
+  // A character the expression language has no meaning for. Left plain rather than guessed at —
+  // it is what a half-typed line is made of.
+  if (type === 'el_other') return null;
 
   // A namespaced tag whose prefix this page declares is coloured by LIBRARY (`<s:…>`
   // apart from `<c:…>` apart from `<wp:…>`), matching its own `<%@ taglib %>` line.
@@ -108,6 +145,10 @@ function classify(
   // Anonymous leaves (quotes, brackets, `=`).
   if (!named) {
     if (type === '"' || type === "'") return 'string';
+    // The OGNL context sigil. Its own colour, so `#session` reads as "not a property of the
+    // action" at a glance — which is exactly what the `#` means.
+    if (type === '#') return 'annotation';
+    if (EL_OPERATOR_PUNCT.has(type)) return 'operator';
     if (PUNCT.has(type)) return 'punctuation';
   }
 
@@ -141,16 +182,17 @@ export const jspLanguage: LanguageDescriptor = {
   // JSP comments (`<%-- … --%>`) are the safe universal toggle: unlike an HTML comment
   // they're stripped server-side, so commenting a line never ships markup to the client.
   commentTokens: { block: { open: '<%--', close: '--%>' } },
-  // Embedded highlighting via legacy-mode stream parsers (highlight only, no autocomplete):
-  //  - `<script>` body → JavaScript, `<style>` body → CSS;
-  //  - EL `${…}` / `#{…}` and OGNL `%{…}` bodies → a small EL/OGNL lexer, so identifiers,
-  //    property accesses, strings, numbers, operators and delimiters each get their own
-  //    colour instead of a single flat purple blob.
+  // Embedded highlighting via stream parsers, for the two bodies the grammar hands over as raw
+  // text: `<script>` → JavaScript, `<style>` → CSS.
+  //
+  // EL and OGNL are **not** here any more. They used to be, because they were single tokens and
+  // a lexer was the only way to see inside one; the grammar decomposes them now, so `classify`
+  // colours their real nodes. Which is not merely tidier: an injection fires on a **leaf**, so
+  // leaving these listed would have been an injection that never runs and an expression that
+  // renders plain.
   injections: {
-    script_content: javascript as unknown as StreamParser<unknown>,
+    script_content: javascriptStream as unknown as StreamParser<unknown>,
     style_content: css as unknown as StreamParser<unknown>,
-    el_expression: elOgnlStream as unknown as StreamParser<unknown>,
-    ognl_expression: elOgnlStream as unknown as StreamParser<unknown>,
   },
   // Completion + hover come from the page's own tag libraries — the TLDs its `<%@ taglib %>`
   // directives resolve to, read out of the project and out of the dependency jars. The

@@ -239,8 +239,8 @@ impl Pattern {
             return false;
         }
 
-        let pattern_children = significant_children(pattern);
-        let subject_children = significant_children(subject);
+        let pattern_children = significant_children(pattern, &self.text);
+        let subject_children = significant_children(subject, source);
 
         if pattern_children.is_empty() {
             // A leaf: the kinds agreeing is not enough. `T` and `U` are both
@@ -347,7 +347,7 @@ fn capture_run(placeholder: &Placeholder, nodes: &[Node<'_>], captures: &mut Vec
 /// The children that take part in a match: everything the grammar produced except
 /// its **extras** — comments and whitespace. Skipping those is what makes a
 /// pattern survive a comment somebody left in the middle of a statement.
-fn significant_children<'a>(node: Node<'a>) -> Vec<Node<'a>> {
+fn significant_children<'a>(node: Node<'a>, text: &str) -> Vec<Node<'a>> {
     let mut out = vec![];
     let mut cursor = node.walk();
     if !cursor.goto_first_child() {
@@ -355,7 +355,7 @@ fn significant_children<'a>(node: Node<'a>) -> Vec<Node<'a>> {
     }
     loop {
         let child = cursor.node();
-        if !child.is_extra() {
+        if !child.is_extra() && !is_layout(child, text) {
             out.push(child);
         }
         if !cursor.goto_next_sibling() {
@@ -363,6 +363,25 @@ fn significant_children<'a>(node: Node<'a>) -> Vec<Node<'a>> {
         }
     }
     out
+}
+
+/// An anonymous leaf that is nothing but whitespace.
+///
+/// Most grammars declare whitespace as an `extra`, so it never reaches the tree
+/// and this never fires. A few do not: tree-sitter-html and the JSP grammar
+/// modelled on it make the space between a tag name and its attributes an
+/// explicit token, because that is what keeps `<a href` and `<ahref` apart.
+///
+/// Either way it is **layout**, and a matcher that counted it would make
+/// `<s:property value="$x$"/>` miss the same tag written across three lines —
+/// which is the one thing this whole module exists to do. Restricted to
+/// *anonymous* leaves so a named node that happens to hold only spaces (a run of
+/// page text) stays a node: it is content that is currently blank, not absent
+/// punctuation.
+fn is_layout(node: Node<'_>, text: &str) -> bool {
+    !node.is_named()
+        && node.child_count() == 0
+        && text.get(node.start_byte()..node.end_byte()).is_some_and(|t| t.trim().is_empty())
 }
 
 fn first_error(node: Node<'_>) -> Option<Node<'_>> {
@@ -447,6 +466,17 @@ fn substitute(pattern: &str) -> Result<(String, Vec<Placeholder>), SyntaxError> 
             i += 2;
             continue;
         }
+        // `${` is never a placeholder — a name cannot begin with a brace — and it is EL, which
+        // is most of what a JSP pattern is made of. Reading it as an opener made
+        // `${$x$ sessionScope.$p$ $rest$}` fail with a complaint about `{` not being a usable
+        // name, and left `$${` as the incantation. A language that needs an incantation for its
+        // commonest construct is one nobody will write correctly twice, so the `$` is simply
+        // literal here. `$$` still escapes, for the dollar-quoted bodies that wanted it.
+        if bytes.get(i + 1) == Some(&'{') {
+            out.push('$');
+            i += 1;
+            continue;
+        }
         let Some(close) = (i + 1..bytes.len()).find(|&j| bytes[j] == '$') else {
             return Err(SyntaxError::Placeholder(format!(
                 "the placeholder starting at character {} is never closed — write $name$, or \
@@ -503,6 +533,29 @@ mod tests {
     /// method — which is also what exercises `compile_in`.
     fn in_a_method(pattern: &str) -> Result<Pattern, SyntaxError> {
         Pattern::compile_in(&java(), pattern, "class C { void m() { ", " } }")
+    }
+
+    /// `${` is EL, not a hole — a placeholder name cannot begin with a brace, and reading the
+    /// `$` as an opener made the commonest construct of a JSP pattern fail with a complaint
+    /// about `{` not being a usable name.
+    #[test]
+    fn a_dollar_before_a_brace_is_literal() {
+        let (text, holes) = substitute("${$pre...$ user.$prop$ $post...$}").expect("substitutes");
+        assert!(text.starts_with("${"), "the EL delimiter survives: {text}");
+        assert_eq!(
+            holes.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            ["pre", "prop", "post"],
+            "and the holes after it are still holes",
+        );
+    }
+
+    /// The escape that was there first still works, for anyone who already wrote it — and for
+    /// the dollar-quoted bodies it was added for.
+    #[test]
+    fn a_doubled_dollar_is_still_one_literal_dollar() {
+        let (text, holes) = substitute("$${x$$y}").expect("substitutes");
+        assert_eq!(text, "${x$y}");
+        assert!(holes.is_empty());
     }
 
     fn matched<'a>(source: &'a str, m: &Match) -> &'a str {

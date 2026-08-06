@@ -157,7 +157,11 @@ class TreeSitterHighlighter {
 // nested tree-sitter grammar. Tokens are added in ascending order within the region, so
 // the single global RangeSetBuilder stays sorted.
 
-/** Map a legacy-mode (CM5-style) token type onto our {@link TokenClass}. */
+/** Map a legacy-mode (CM5-style) token type onto our {@link TokenClass}.
+ *
+ *  The last three are not CM5 names. The theme has classes CM5's vocabulary never had — a call
+ *  site apart from a declaration, `this` apart from a keyword — and a mode written here
+ *  (`js-mode.ts`) can say so. A legacy mode that never emits them is unaffected. */
 function mapStreamToken(type: string): TokenClass | null {
   switch (type.split(' ')[0]) {
     case 'keyword': return 'keyword';
@@ -174,6 +178,9 @@ function mapStreamToken(type: string): TokenClass | null {
     case 'tag': return 'keyword';
     case 'attribute': return 'field';
     case 'bracket': case 'punctuation': return 'punctuation';
+    case 'callee': return 'function';
+    case 'self': return 'self';
+    case 'label': return 'label';
     default: return null;
   }
 }
@@ -197,6 +204,12 @@ function addInjectedTokens(
     let guard = 0;
     while (!stream.eol() && guard++ < 20000) {
       const start = stream.pos;
+      // `StringStream.current()` is `slice(start, pos)`, and a stream parser reads the word it
+      // just ate with it — every one of them does, it is how a keyword is recognised. CodeMirror's
+      // own `StreamLanguage` sets this before each token; this loop is a second driver for the
+      // same interface and has to do the same. Without it only the FIRST token of each line reads
+      // correctly and every later one sees the whole line up to itself.
+      stream.start = start;
       let tok: string | null = null;
       try { tok = parser.token(stream, state); } catch { break; }
       if (stream.pos <= start) { stream.pos = start + 1; continue; } // no-progress guard

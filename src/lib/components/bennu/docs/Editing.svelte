@@ -640,6 +640,39 @@
   complete and untyped rather than absent, and fills in as the index lands.
 </p>
 
+<h3>Model — a JSP</h3>
+<p>
+  A page has its own vocabulary and the tab reads it in that: the <strong>libraries</strong> the
+  page declares and what each <code>uri</code> resolved to, the <strong>tags</strong> with the
+  library each one came from, their <strong>attributes</strong> with the declared type the TLD
+  gives them, the expressions, the scriptlets and the includes.
+</p>
+<p>Three things it shows that the parse cannot:</p>
+<ul>
+  <li>
+    <strong>Nesting.</strong> The JSP grammar is deliberately flat — an opening tag and its
+    closing tag are siblings, which is what keeps a page with unbalanced markup colouring
+    correctly instead of collapsing into one error. The model pairs them up, tolerantly: a close
+    with no open, or a tag the page never closes, costs the rows below it nothing.
+  </li>
+  <li>
+    <strong>Which library a tag is from.</strong> <code>&lt;s:iterator&gt;</code> is a name until
+    the page’s own <code>&lt;%@ taglib %&gt;</code> line says what <code>s</code> is. A prefix
+    nobody declared says so in that column, which is the most common reason a taglib “stops
+    working”.
+  </li>
+  <li>
+    <strong>What is an expression.</strong> <code>value="%&#123;codice&#125;"</code> and
+    <code>value="Codice"</code> are the same shape to a grammar and opposite things to a reader,
+    so the flavour — <em>OGNL</em>, <em>EL</em> — is a column rather than something to squint at
+    the quotes for.
+  </li>
+</ul>
+<p>
+  Page text is left out on purpose: a page is mostly prose and markup, and listing every run of
+  it would bury the rows that carry meaning. The Syntax tab has them all.
+</p>
+
 <h3>Both tabs</h3>
 <p>
   They follow the <strong>buffer</strong>, not the file on disk, because the moment you want a
@@ -650,10 +683,12 @@
   once, so “the method called <code>place</code>” is one query rather than two.
 </p>
 <p>
-  Both draw whatever Bennu can read — <strong>Java</strong> today. For a file it edits but does
-  not parse, each says so in its own words (“no grammar for XML yet”, “no declaration model for
-  XML yet”) instead of showing you an empty panel, because the first is a fact about the tool and
-  the second reads as one about your file.
+  Both draw whatever Bennu can read — <strong>Java</strong> and <strong>JSP</strong> (pages,
+  fragments and tag files). The page tree comes from the same grammar that is colouring the file
+  in front of you, so the panel and the colours can never disagree about what it is. For a file
+  Bennu edits but does not parse, each tab says so in its own words (“no grammar for XML yet”,
+  “no declaration model for XML yet”) instead of showing you an empty panel, because the first is
+  a fact about the tool and the second reads as one about your file.
 </p>
 
 <h2>Mojibake check</h2>
@@ -825,9 +860,42 @@
 <p>
   JSP files are highlighted by a dedicated grammar — namespaced taglib tags (<code>&lt;s:iterator&gt;</code>,
   <code>&lt;c:if&gt;</code>), scriptlets, EL <code>$&lbrace;…&rbrace;</code> and OGNL <code>%&lbrace;…&rbrace;</code> all colour
-  correctly, and the <strong>inside</strong> of an EL/OGNL expression is tokenized too —
-  identifiers, property accesses, strings, numbers, operators and keywords each get their own
-  colour instead of one flat block.
+  correctly, and an EL/OGNL expression is <strong>parsed</strong> rather than treated as one
+  block: a <em>path</em> — a name and what is read off it, <code>#session.currentUser</code>,
+  <code>items[0].price</code> — is a construct of its own, with identifiers, property accesses,
+  strings, numbers, operators and keywords each getting their own colour. The <code>#</code> of
+  an OGNL context reference is marked apart from the name after it, because <code>#session</code>
+  is precisely <em>not</em> a property of the action and that is worth seeing at a glance.
+</p>
+<p>
+  That structure is what the rest of the editor reads: the syntax tree shows it, and a structural
+  search can put a hole inside an expression (<code>%&#123;#session.$prop$&#125;</code>). An
+  expression that does not parse — the state of every line while it is being typed — is left
+  plain and, crucially, <strong>stops at the next tag</strong>: an unclosed
+  <code>$&#123;</code> never swallows the rest of the page.
+</p>
+<p>
+  A <code>&lt;script&gt;</code> body is read as real JavaScript, not just keywords-and-strings:
+  object keys, member accesses and call sites are each their own colour, numbers in every form
+  (hex, binary, exponents, separators) are numbers, template literals colour their
+  <code>$&lbrace;…&rbrace;</code> holes as code, <code>this</code> stands out, and a regular
+  expression is told apart from a division — which is what keeps one <code>/</code> from painting
+  the rest of the line as a literal. The same tokenizer colours a standalone <code>.js</code> file.
+</p>
+<p>
+  It also knows the script body is a <strong>template that produces JavaScript</strong> rather
+  than JavaScript. A scriptlet, a <code>&lt;%= … %&gt;</code>, an EL or OGNL expression and a
+  whole namespaced taglib tag are recognised as what they are — including
+  <strong>inside a string</strong>, which is where it matters:
+</p>
+<pre><code>errore = "&lt;wp:i18n key="LABEL_REQUIRED_COMUNE" /&gt;";</code></pre>
+<p>
+  read as plain JavaScript, the tag's own quote closes the string and the rest of the line is
+  coloured as something it is not. The marker wins instead, which is both what the server does —
+  substitution happens before there is any JavaScript to quote — and the rule the page's grammar
+  already applies to attribute values. The whole marker takes the JSP colour rather than being
+  coloured inside: within a block of JavaScript, <em>this part is not JavaScript</em> is the
+  useful thing to say. A marker spanning several lines is followed across them.
 </p>
 <p>
   <strong>Each taglib gets its own colour</strong>, and its <code>&lt;%@ taglib %&gt;</code> line wears
@@ -920,6 +988,30 @@
   accessor in sight — so go-to lands on the field's declaration and the warning leaves it alone.
 </p>
 <p>
+  <strong>Not every <code>name=</code> is a property.</strong> Struts spells several unrelated
+  ideas the same way, and only the form controls bind one:
+</p>
+<table class="doc-table">
+  <thead><tr><th>Tag</th><th>What <code>name=</code> is</th></tr></thead>
+  <tbody>
+    <tr><td><code>&lt;s:textfield&gt;</code>, <code>&lt;s:select&gt;</code>, <code>&lt;s:hidden&gt;</code>, …</td><td>a <strong>property</strong> of the action</td></tr>
+    <tr><td><code>&lt;s:text name="label.user"/&gt;</code></td><td>a key in a <strong>resource bundle</strong></td></tr>
+    <tr><td><code>&lt;s:i18n name="…"&gt;</code></td><td>the <strong>bundle</strong> itself</td></tr>
+    <tr><td><code>&lt;s:action name="…"/&gt;</code></td><td>an <strong>action</strong> to invoke</td></tr>
+    <tr><td><code>&lt;s:bean name="com.acme.X"&gt;</code></td><td>a <strong>class</strong></td></tr>
+    <tr><td><code>&lt;s:param name="…"/&gt;</code></td><td>the parameter's own name — its <code>value=</code> is the expression</td></tr>
+    <tr><td><code>&lt;s:form name="…"&gt;</code></td><td>the HTML element's name</td></tr>
+  </tbody>
+</table>
+<p>
+  The one that forces the distinction is <code>text</code>: Struts 1 writes
+  <code>&lt;html:text property="user"/&gt;</code>, a text input, and Struts 2 writes
+  <code>&lt;s:text name="label.user"/&gt;</code>, a lookup — one local name, opposite meanings. So
+  which prefix a page bound to Struts is read from the page's own
+  <code>&lt;%@ taglib %&gt;</code> lines rather than assumed, and a tag from a library Bennu does
+  not recognise is left alone rather than guessed at.
+</p>
+<p>
   For a <strong>view JSP</strong> with no form — just OGNL (<code>%&lbrace;customer&rbrace;</code>,
   <code>&lt;s:property value="…"/&gt;</code>) — the editor works out which action renders it from the
   Struts result mappings (the reverse of action → view). When the mappings settle on one answer it's
@@ -959,6 +1051,35 @@
   something that is not a plain path — a call, a comparison — stays untyped rather than guessed.
   Holding <kbd>Ctrl</kbd> underlines the <em>segment</em> under the pointer rather than the whole
   chain, so what a click will open is what is underlined.
+</p>
+<p>
+  <strong>Most Struts attributes are expressions without saying so.</strong>
+  <code>&lt;s:iterator value="comunicazioni.dati"&gt;</code> and
+  <code>&lt;s:if test="showRiferimento"&gt;</code> carry no <code>%&lbrace;…&rbrace;</code> and are
+  OGNL all the same — the wrapper is only needed on the attributes Struts declares as strings,
+  which is backwards from what a reader expects and is why so much legacy markup has none. So
+  go-to follows those too: <kbd>Ctrl</kbd> + <kbd>B</kbd> on <code>comunicazioni</code> or on
+  <code>dati</code> lands on the property, on the class the segment before it leads to. Only for
+  tags from a library the page bound to Struts, and only for the attributes Struts actually
+  evaluates — <code>&lt;c:if test="…"&gt;</code> is JSTL, a different language, and is left alone.
+  The <em>warning</em> stays on <code>%&lbrace;…&rbrace;</code> only: a go-to that resolves nothing
+  does nothing, while a warning is a claim.
+</p>
+<p>
+  <strong>Inside a loop, the value stack is deeper.</strong>
+  <code>&lt;s:iterator value="comunicazioni.dati"&gt;</code> pushes the current element on top, so
+  a bare name written underneath it — <code>%&lbrace;codice&rbrace;</code> — is a property of
+  <em>that element</em> before it is anything of the action's. Go-to resolves top down: the
+  innermost element, then each enclosing one, then the action, stopping at the level that actually
+  declares the name. Nested loops work the same way, and a nested iterator's own expression is
+  read against its parent's element, which is what it means.
+</p>
+<p>
+  The same fact makes the check quieter, deliberately. A name inside a loop whose element type
+  <em>could not</em> be resolved is a name about which nothing is known, so nothing is said about
+  it — “I cannot see that type” is not evidence that a property is missing. Where the element type
+  does resolve, the check keeps working inside the loop and judges the name against every level of
+  the stack.
 </p>
 <p>
   This follows <strong>includes</strong>: an included fragment (<code>.jspf</code>) that a view page

@@ -20,3 +20,9 @@ bennu-xml      = { path = "../xml" }
 # A TLD is well-formed XML on disk (never a buffer mid-edit), so it is read with the same
 # parser the rest of the workspace reads its descriptors with.
 roxmltree      = "0.20"
+# The page grammar — the SAME generate the editor loads as wasm — for `model.rs` alone. Every
+# other answer in this crate goes through the tolerant tag scan, which wants no parse; a model
+# of what Bennu understood has to start from what Bennu actually read.
+bennu-jsp-grammar = { path = "../jsp-grammar" }
+# Pinned to the workspace's single `links = "tree-sitter"` version, like every other consumer.
+tree-sitter    = "0.25"

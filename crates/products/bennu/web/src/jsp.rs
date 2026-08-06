@@ -235,6 +235,22 @@ pub(crate) fn tag_local_name(source: &str, start: usize, close: usize) -> Option
     }
 }
 
+/// The **prefix** of a tag whose inner span starts at `start`, lowercased — `s` for
+/// `<s:textfield>`, `None` for `<input>`.
+///
+/// The counterpart to [`tag_local_name`], and needed for the same reason that one is not enough:
+/// `<html:text property="user"/>` is a text input and `<s:text name="label.user"/>` is a resource
+/// lookup. One local name, two opposite meanings, and only the prefix tells them apart.
+pub(crate) fn tag_prefix(source: &str, start: usize, close: usize) -> Option<String> {
+    let inner = source.get(start..close)?;
+    let trimmed = inner.trim_start();
+    let end = trimmed
+        .find(|c: char| c.is_whitespace() || c == '/' || c == '>')
+        .unwrap_or(trimmed.len());
+    let (prefix, _) = trimmed[..end].split_once(':')?;
+    (!prefix.is_empty()).then(|| prefix.to_ascii_lowercase())
+}
+
 /// Find attribute `attr` (case-insensitive) within a tag's inner span `[start, close)` and
 /// return `(raw_value, value_start_offset, value_end_offset)` — byte offsets into the whole
 /// `source`, pointing inside the quotes. `None` if the attribute is absent or unquoted.

@@ -45,6 +45,7 @@ export {
 export { highlightToHtml } from './mini-highlight';
 export { sqlHighlight, type SqlDialect } from './sql-modes';
 export { dtdLanguage, dtdMode } from './dtd-mode';
+export { javascriptStream } from './js-mode';
 export { createCodeEditorExtensions, refTextAt, type CodeEditorExtensionsOptions } from './extensions';
 export { createHighlightPlugin, makeByteToU16, makeU16ToByte, parserReady } from './highlight';
 export { hoverCardDom, parseDoc, type HoverCard } from './hover-card';

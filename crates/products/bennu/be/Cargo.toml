@@ -87,6 +87,10 @@ bennu-xml = { path = "../xml" }
 # checks, hover and go-to). Gated on the project having any, and fed by the `.tld`s this crate
 # collects — from the tree and from inside the dependency jars.
 bennu-jsp = { path = "../jsp" }
+# The JSP grammar itself — the SAME generate the editor loads as wasm. Named here for the two
+# features that compare or display a real parse rather than a tolerant scan: the syntax-tree
+# panel (`ast.rs`) and structural search (`ssr.rs`).
+bennu-jsp-grammar = { path = "../jsp-grammar" }
 # The unit-test half: what in the sources IS a test, the `mvn` arguments for a chosen scope,
 # and the Surefire XML read back into per-case results. Pure — the spawn, the streaming and
 # the report watch are this crate's `tests` domain.

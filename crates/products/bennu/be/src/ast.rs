@@ -10,11 +10,12 @@
 //!
 //! ## One registry, and it tells the truth about what it cannot do
 //!
-//! Bennu edits Java, XML, JSP, properties, SQL. It *parses* Java — that is the grammar the
-//! workspace links. So this domain answers two things at once: which language a file is in, and
-//! whether there is a grammar for it. A file whose language has no grammar is not an error and
-//! must not read as one: the panel says "XML has no grammar yet" rather than showing a failure,
-//! which is a true statement about the tool rather than an implied one about the file.
+//! Bennu edits Java, XML, JSP, properties, SQL. It *parses* Java and JSP — those are the
+//! grammars the workspace links. So this domain answers two things at once: which language a
+//! file is in, and whether there is a grammar for it. A file whose language has no grammar is
+//! not an error and must not read as one: the panel says "XML has no grammar yet" rather than
+//! showing a failure, which is a true statement about the tool rather than an implied one about
+//! the file.
 //!
 //! Adding a language is one arm of [`grammar_for`]. That is deliberately the whole cost: the
 //! grammars this workspace links are a build-level fact (`tree-sitter` is a `links` native
@@ -41,8 +42,18 @@ use tree_sitter::Language;
 fn grammar_for(ext: &str) -> Option<Language> {
     match ext {
         "java" => Some(bennu_java::prelude::java_language()),
+        // The same generate the editor loads as wasm, so the panel and the colours in front of
+        // it can never disagree about what the file is.
+        e if is_jsp_ext(e) => Some(bennu_jsp_grammar::prelude::jsp_language()),
         _ => None,
     }
+}
+
+/// The JSP family. A `.tag` file is a page written in the same language, and a fragment
+/// (`.jspf`) is a page that happens to be included — one list, because every place that asks
+/// this question means all of them.
+fn is_jsp_ext(ext: &str) -> bool {
+    matches!(ext, "jsp" | "jspf" | "jspx" | "tag" | "tagx")
 }
 
 /// What to call the language of `ext`, whether or not there is a grammar for it.
@@ -53,7 +64,7 @@ fn language_name(ext: &str) -> &'static str {
     match ext {
         "java" => "Java",
         "xml" | "xsd" | "dtd" | "tld" | "pom" => "XML",
-        "jsp" | "jspf" | "jspx" | "tag" => "JSP",
+        e if is_jsp_ext(e) => "JSP",
         "properties" => "Properties",
         "sql" => "SQL",
         "html" | "htm" => "HTML",
@@ -78,10 +89,15 @@ pub fn language_name_of(path: &str) -> &'static str {
     language_name(&ext_of(path))
 }
 
-/// Whether `path` is Java. The one language with a grammar **and** a declaration model, which is
-/// why both halves of the panel ask the same question.
+/// Whether `path` is Java.
 pub fn is_java(path: &str) -> bool {
     ext_of(path) == "java"
+}
+
+/// Whether `path` is a JSP-family page. The second language with a grammar **and** a model, and
+/// the reason [`crate::model_tree`] asks rather than assuming Java.
+pub fn is_jsp(path: &str) -> bool {
+    is_jsp_ext(&ext_of(path))
 }
 
 /// The lowercased extension of `path`, or `""` — `pom.xml` reads as `xml`, and a file with no
@@ -200,6 +216,27 @@ mod tests {
         assert_eq!(tree.root.kind, "program");
         assert!(!tree.has_errors);
         assert!(tree.node_count > 1);
+    }
+
+    /// The second grammar the workspace links, and the one a legacy project spends its day in.
+    #[test]
+    fn a_jsp_buffer_yields_its_tree() {
+        let source = "<%@ taglib prefix=\"s\" uri=\"/struts-tags\" %>\n<s:property value=\"%{x}\"/>";
+        let answer = tree_of(source, "/p/list.jsp", None).expect("an answer");
+        assert_eq!(answer.language, "JSP");
+        let tree = answer.tree.expect("a tree");
+        assert_eq!(tree.root.kind, "document");
+        assert!(tree.node_count > 1);
+    }
+
+    /// A fragment and a tag file are the same language as the page that includes them.
+    #[test]
+    fn the_whole_jsp_family_parses() {
+        for path in ["/p/a.jspf", "/p/b.jspx", "/p/c.tag", "/p/d.tagx", "/p/E.JSP"] {
+            let answer = tree_of("<p>hi</p>", path, None).expect("an answer");
+            assert_eq!(answer.language, "JSP", "{path}");
+            assert!(answer.tree.is_some(), "{path}");
+        }
     }
 
     /// The case the panel must not render as a failure: Bennu edits XML and does not parse it.

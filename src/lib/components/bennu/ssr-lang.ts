@@ -95,6 +95,45 @@ const NODE_KINDS = [
   ['annotation', 'an @Annotation'],
 ] as const;
 
+/**
+ * The same list for a page. A JSP grammar has a couple of dozen kinds and almost all of them are
+ * worth offering, because unlike Java nobody has them memorised.
+ */
+const JSP_NODE_KINDS = [
+  ['start_tag', 'an opening <tag …>'],
+  ['end_tag', 'a closing </tag>'],
+  ['self_closing_tag', 'a <tag …/>'],
+  ['tag_name', 'the name in a tag'],
+  ['attribute', 'a name="value" pair'],
+  ['attribute_name', 'the name half of one'],
+  ['attribute_fragment', 'literal text inside a value'],
+  ['el_expression', 'a ${…}'],
+  ['ognl_expression', 'a %{…}'],
+  ['jsp_directive', 'a <%@ … %>'],
+  ['jsp_scriptlet', 'a <% … %>'],
+  ['jsp_expression', 'a <%= … %>'],
+  ['jsp_declaration', 'a <%! … %>'],
+  ['jsp_comment', 'a <%-- … --%>'],
+  ['html_comment', 'an <!-- … -->'],
+  ['script_element', 'a <script> and its body'],
+  ['style_element', 'a <style> and its body'],
+  ['text', 'a run of page text'],
+] as const;
+
+/**
+ * Which language the query field is currently reading.
+ *
+ * Module-level for the same reason the replacement's captures are: a `LanguageDescriptor` is
+ * taken once at mount and its completion source is a plain function, and exactly one structural
+ * search is open at a time. It changes only what is *offered* — the field never restricts what
+ * you type.
+ */
+let queryDialect: 'java' | 'jsp' = 'java';
+
+export function setQueryDialect(dialect: 'java' | 'jsp'): void {
+  queryDialect = dialect;
+}
+
 /** Every `$name$` / `$name...$` the text binds, in order, deduplicated. */
 export function capturesIn(text: string): string[] {
   const out: string[] = [];
@@ -173,6 +212,9 @@ const parser: StreamParser<{ atLineStart: boolean; inConstraint: boolean }> = {
     if (stream.peek() === '$') {
       stream.next();
       if (stream.eat('$')) return 'variableName.special'; // a literal `$$`, not a hole
+      // `${` is EL, not a hole — a name cannot begin with a brace. The compiler reads it as a
+      // literal `$`, so the field must not paint it as a mistake.
+      if (stream.peek() === '{') return null;
       // `+`, not `*`: an unnamed `$$` is not a capture, and colouring it as one would hide a
       // typo the parser is about to refuse.
       const named = stream.match(/^[A-Za-z0-9_]+(\.\.\.)?/);
@@ -268,7 +310,9 @@ async function complete(context: CompletionContext): Promise<CompletionResult | 
     case 'node':
       return {
         from: where.from,
-        options: NODE_KINDS.map(([label, detail]) => ({ label, type: 'class', detail })),
+        options: (queryDialect === 'jsp' ? JSP_NODE_KINDS : NODE_KINDS).map(
+          ([label, detail]) => ({ label, type: 'class', detail }),
+        ),
       };
 
     case 'denote':

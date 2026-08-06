@@ -55,14 +55,18 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
+  import RadioGroup from '$lib/components/shared/ui/RadioGroup.svelte';
   import Kbd from '$lib/components/shared/internal/Kbd.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuSsrStore } from '$lib/stores/bennu/ssr.svelte';
+  import type { SsrDialect } from '$lib/ipc/bennu/ssr';
   import { SSR_EXAMPLES } from './ssr-examples';
   import { CodeEditor } from '$lib/components/shared/ui/code-editor';
-  import { capturesIn, setReplacementCaptures, ssrQueryLanguage, ssrReplacementLanguage } from './ssr-lang';
+  import {
+    capturesIn, setQueryDialect, setReplacementCaptures, ssrQueryLanguage, ssrReplacementLanguage,
+  } from './ssr-lang';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -78,6 +82,9 @@
   // pushed to the module as the query changes. One structural-search modal is open at a time,
   // which is what makes a module-level value the right shape rather than a shortcut.
   $effect(() => { setReplacementCaptures(capturesIn(store.query)); });
+  // The node kinds `#` offers are the grammar's vocabulary, so they follow the language the
+  // query is written in — pushed to the module for the same reason as the captures above.
+  $effect(() => { setQueryDialect(store.dialect); });
 
   /** Open a hit. Closes the modal — you asked to go somewhere. */
   function open(file: string, line: number) {
@@ -105,13 +112,56 @@
    * being a list of titles you have to try one by one.
    */
   const templateItems = $derived<DropdownItem[]>(
-    SSR_EXAMPLES.map((ex) => ({
+    SSR_EXAMPLES.filter((ex) => (ex.dialect ?? 'java') === store.dialect).map((ex) => ({
       kind: 'item' as const,
       id: ex.query,
       label: ex.title,
       subtitle: ex.why,
       onclick: () => store.load(ex.query),
     })),
+  );
+
+  /**
+   * The three languages a query can be written in. Java first: it is what most queries are.
+   *
+   * The third is not a third language — it is Java again, pointed at the `<% … %>` blocks of the
+   * pages. Given its own entry because *which files are walked* is as much a part of the choice
+   * as which grammar reads the pattern, and "Java, in the pages" is a question people have.
+   */
+  const DIALECTS = [
+    { value: 'java', label: 'Java', description: 'Search .java sources' },
+    { value: 'jsp', label: 'JSP', description: 'Search the tags of .jsp / .jspf / .tag pages' },
+    {
+      value: 'jsp-java',
+      label: 'Java in JSP',
+      description: 'A Java query, run over the <% … %> blocks of the pages',
+    },
+  ];
+
+  /** The placeholder is a working query in the current language — the field's shortest possible
+   *  lesson, and a Java one shown over a page search would teach the wrong shape. */
+  const queryPlaceholder = $derived(
+    store.dialect === 'jsp'
+      ? '<s:property $pre...$ value="$x$" $post...$/>\ngroup $x$'
+      : store.dialect === 'jsp-java'
+        ? 'session.getAttribute($key$)\ngroup $key$'
+        : '$o: com.acme.OrderService$.$m$($args...$)\ngroup $m$',
+  );
+
+  /**
+   * What "no results" actually means, which is two different things.
+   *
+   * A query that read every file and matched none of them is a statement about the project. A
+   * query that found **no files to read** is a statement about the scope — the wrong language
+   * picked, or a scope naming a directory that is not there — and telling someone their project
+   * contains none of what they asked for, when nothing was ever opened, is how an hour goes.
+   */
+  const nothingFound = $derived(
+    store.scanned === 0
+      ? store.dialect === 'java'
+        ? 'No .java files were found to search. Check the language picker and any in scope.'
+        : 'No .jsp, .jspf, .jspx or .tag files were found to search. Check the language picker and any in scope.'
+      : `Nothing in this project matches that — ${store.scanned} file${store.scanned === 1 ? '' : 's'} read.`,
   );
 
   /** How long the scan took, in the unit that reads: `840ms`, `4.2s`. */
@@ -250,6 +300,18 @@
     <div class="ss-query">
       <div class="ss-query-bar">
         <span class="ss-label">Query</span>
+        <!-- The language is asked, never inferred. A pattern compiled under the wrong grammar
+             does not fail loudly — it matches nothing, which reads as "the project contains
+             none of this", and that is the one wrong answer a search must not be able to give
+             silently. It also decides which files are walked, so it is a scope as much as a
+             syntax. -->
+        <RadioGroup
+          value={store.dialect}
+          options={DIALECTS}
+          size="sm"
+          onchange={(v) => store.setDialect(v as SsrDialect)}
+        />
+        <span class="ss-bar-sep"></span>
         <!-- The templates are a menu, not a column. They are read once, when you are learning
              what the language can be asked; leaving them permanently on screen spent a third of
              the panel on something nobody looks at twice. -->
@@ -285,7 +347,7 @@
           language={ssrQueryLanguage}
           value={store.query}
           oninput={(text) => store.setQuery(text)}
-          placeholder={'$o: com.acme.OrderService$.$m$($args...$)\ngroup $m$'}
+          placeholder={queryPlaceholder}
           lineNumbers={false}
           wrap
         />
@@ -454,7 +516,7 @@
           </div>
         </div>
       {:else if report}
-        <EmptyState message="Nothing in this project matches that." />
+        <EmptyState message={nothingFound} />
       {:else}
         <EmptyState message="Write a query and press Ctrl+Enter. The examples on the left are a good place to start." />
       {/if}
@@ -533,6 +595,12 @@
   }
   .ss-query-bar { display: flex; align-items: center; gap: 10px; }
   .ss-bar-spacer { flex: 1; }
+  /* Separates the language — which decides what a query even means — from the actions beside
+     it, so the bar reads as "this query, in this language" and then "things you can do". */
+  .ss-bar-sep {
+    width: 1px; align-self: stretch; margin: 2px 2px;
+    background: var(--border-subtle);
+  }
   .ss-label {
     font-size: var(--font-size-2xs); text-transform: uppercase; letter-spacing: 0.05em;
     color: var(--text-muted);

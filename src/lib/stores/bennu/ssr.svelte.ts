@@ -21,7 +21,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 import {
   explainQuery, ssrApply, ssrPreview, ssrSearch,
-  type SsrExplained, type SsrHit, type SsrPreview, type SsrReport,
+  type SsrDialect, type SsrExplained, type SsrHit, type SsrPreview, type SsrReport,
 } from '$lib/ipc/bennu/ssr';
 
 /** How long the query field sits still before it is read. Short: this is string work. */
@@ -37,10 +37,19 @@ interface Progress {
   parsed?: number;
   prefiltered?: boolean;
   capped?: boolean;
+  error?: string | null;
 }
 
 function createSsrStore() {
   let query = $state('');
+  /**
+   * Which language the query is written in.
+   *
+   * A choice, never a guess. `<s:property value="$x$"/>` and `log.debug($x$)` are both plausible
+   * text, and a wrong guess does not fail loudly — it compiles a pattern that matches nothing,
+   * which reads as "the project contains none of this". So the panel asks.
+   */
+  let dialect = $state<SsrDialect>('java');
   let replacement = $state('');
   /** Whether the replacement half is showing at all. Off by default: most queries are questions. */
   let replacing = $state(false);
@@ -111,6 +120,13 @@ function createSsrStore() {
         parsed = p.parsed ?? 0;
         prefiltered = p.prefiltered ?? true;
         capped = p.capped ?? false;
+        // A walk that refused the query says so. Without this the panel showed "nothing in this
+        // project matches that" — which is a statement about the project, for a problem in the
+        // pattern.
+        if (p.error) {
+          error = p.error;
+          report = null;
+        }
         searching = false;
         stopClock();
       }
@@ -120,6 +136,7 @@ function createSsrStore() {
 
   return {
     get query() { return query; },
+    get dialect() { return dialect; },
     get replacement() { return replacement; },
     get replacing() { return replacing; },
     get explained() { return explained; },
@@ -154,6 +171,19 @@ function createSsrStore() {
       explainTimer = setTimeout(() => void explain(), EXPLAIN_DEBOUNCE_MS);
     },
 
+    /** Switch language. The results answered the OTHER question, so they go — and the query is
+     *  re-read, because what compiles under one grammar rarely compiles under the other. */
+    setDialect(next: SsrDialect) {
+      if (next === dialect) return;
+      dialect = next;
+      hits = [];
+      report = null;
+      preview = null;
+      applyResult = null;
+      if (explainTimer) clearTimeout(explainTimer);
+      explainTimer = setTimeout(() => void explain(), EXPLAIN_DEBOUNCE_MS);
+    },
+
     setReplacement(text: string) {
       replacement = text;
       preview = null;
@@ -180,7 +210,7 @@ function createSsrStore() {
       startClock();
       await attach();
       try {
-        await ssrSearch(root, query, id);
+        await ssrSearch(root, query, id, dialect);
       } catch (e) {
         if (id !== currentId) return;
         searching = false;
@@ -196,7 +226,7 @@ function createSsrStore() {
       error = null;
       applyResult = null;
       try {
-        preview = await ssrPreview(root, query, replacement);
+        preview = await ssrPreview(root, query, replacement, dialect);
       } catch (e) {
         preview = null;
         error = String(e);
@@ -237,6 +267,7 @@ function createSsrStore() {
       elapsedMs = 0;
       currentId = '';
       query = '';
+      dialect = 'java';
       replacement = '';
       replacing = false;
       explained = null;
@@ -253,7 +284,7 @@ function createSsrStore() {
     if (!query.trim()) { explained = null; return; }
     const mine = ++explainSeq;
     try {
-      const answer = await explainQuery(query);
+      const answer = await explainQuery(query, dialect);
       if (mine !== explainSeq) return;
       explained = answer;
     } catch {

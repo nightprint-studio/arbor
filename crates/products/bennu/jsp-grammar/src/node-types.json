@@ -107,6 +107,105 @@
     }
   },
   {
+    "type": "el_context",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "el_identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "el_expression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "el_number",
+          "named": true
+        },
+        {
+          "type": "el_operator",
+          "named": true
+        },
+        {
+          "type": "el_other",
+          "named": true
+        },
+        {
+          "type": "el_path",
+          "named": true
+        },
+        {
+          "type": "el_string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "el_identifier",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "el_path",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "el_context",
+          "named": true
+        },
+        {
+          "type": "el_identifier",
+          "named": true
+        },
+        {
+          "type": "el_number",
+          "named": true
+        },
+        {
+          "type": "el_operator",
+          "named": true
+        },
+        {
+          "type": "el_other",
+          "named": true
+        },
+        {
+          "type": "el_path",
+          "named": true
+        },
+        {
+          "type": "el_property",
+          "named": true
+        },
+        {
+          "type": "el_string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "el_property",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "end_tag",
     "named": true,
     "fields": {},
@@ -116,6 +215,37 @@
       "types": [
         {
           "type": "tag_name",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ognl_expression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "el_number",
+          "named": true
+        },
+        {
+          "type": "el_operator",
+          "named": true
+        },
+        {
+          "type": "el_other",
+          "named": true
+        },
+        {
+          "type": "el_path",
+          "named": true
+        },
+        {
+          "type": "el_string",
           "named": true
         }
       ]
@@ -304,11 +434,43 @@
     "named": false
   },
   {
+    "type": "#",
+    "named": false
+  },
+  {
+    "type": "#{",
+    "named": false
+  },
+  {
+    "type": "${",
+    "named": false
+  },
+  {
+    "type": "%{",
+    "named": false
+  },
+  {
     "type": "'",
     "named": false
   },
   {
+    "type": "(",
+    "named": false
+  },
+  {
+    "type": ")",
+    "named": false
+  },
+  {
+    "type": ".",
+    "named": false
+  },
+  {
     "type": "/>",
+    "named": false
+  },
+  {
+    "type": ":",
     "named": false
   },
   {
@@ -325,6 +487,14 @@
   },
   {
     "type": ">",
+    "named": false
+  },
+  {
+    "type": "[",
+    "named": false
+  },
+  {
+    "type": "]",
     "named": false
   },
   {
@@ -348,7 +518,19 @@
     "named": true
   },
   {
-    "type": "el_expression",
+    "type": "el_number",
+    "named": true
+  },
+  {
+    "type": "el_operator",
+    "named": true
+  },
+  {
+    "type": "el_other",
+    "named": true
+  },
+  {
+    "type": "el_string",
     "named": true
   },
   {
@@ -373,10 +555,6 @@
   },
   {
     "type": "jsp_scriptlet",
-    "named": true
-  },
-  {
-    "type": "ognl_expression",
     "named": true
   },
   {
@@ -410,5 +588,9 @@
   {
     "type": "unquoted_value",
     "named": true
+  },
+  {
+    "type": "}",
+    "named": false
   }
 ]

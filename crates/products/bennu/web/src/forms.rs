@@ -15,7 +15,10 @@
 
 use std::path::Path;
 
-use crate::jsp::{attr_value, find_from, masked_regions, normalize_action_ref, region_covering, tag_local_name};
+use crate::jsp::{
+    attr_value, find_from, masked_regions, normalize_action_ref, region_covering, tag_local_name,
+    tag_prefix,
+};
 use crate::model::{FormControl, JspForm, JspFormField};
 
 /// Field tag local-names (after any `prefix:`) collected as form inputs: the HTML controls
@@ -39,6 +42,9 @@ const FIELD_TAGS: &[&str] = &[
 pub fn parse_jsp_forms(source: &str) -> Vec<JspForm> {
     let bytes = source.as_bytes();
     let masked = masked_regions(source);
+    // Resolved once for the file: which prefixes this page bound to Struts decides whether
+    // `<x:text>` is a text input or a resource lookup. See `jsp_ognl::STRUTS_CONTROL_TAGS`.
+    let struts = crate::jsp_ognl::struts_tag_prefixes(source);
 
     let mut forms: Vec<JspForm> = Vec::new();
     // Index into `forms` of the form currently open (accepting fields), if any.
@@ -57,7 +63,7 @@ pub fn parse_jsp_forms(source: &str) -> Vec<JspForm> {
             i += 1;
             continue;
         }
-        match classify_tag(source, i) {
+        match classify_tag(source, i, &struts) {
             Some(Tag::FormOpen { form, tag_end }) => {
                 // A new form conservatively closes any still-open one (forms don't nest).
                 forms.push(form);
@@ -115,6 +121,9 @@ pub fn parse_jsp_forms_file(path: &Path) -> Vec<JspForm> {
 pub fn parse_jsp_fields(source: &str) -> Vec<JspFormField> {
     let bytes = source.as_bytes();
     let masked = masked_regions(source);
+    // Resolved once for the file: which prefixes this page bound to Struts decides whether
+    // `<x:text>` is a text input or a resource lookup. See `jsp_ognl::STRUTS_CONTROL_TAGS`.
+    let struts = crate::jsp_ognl::struts_tag_prefixes(source);
 
     let mut fields: Vec<JspFormField> = Vec::new();
     let mut cond_stack: Vec<String> = Vec::new();
@@ -129,7 +138,7 @@ pub fn parse_jsp_fields(source: &str) -> Vec<JspFormField> {
             i += 1;
             continue;
         }
-        match classify_tag(source, i) {
+        match classify_tag(source, i, &struts) {
             Some(Tag::CondOpen { test, tag_end }) => {
                 cond_stack.push(test);
                 i = tag_end;
@@ -180,7 +189,7 @@ enum Tag {
 
 /// Classify the tag starting at `open` (`source[open] == '<'`). `None` for a `<%…`/`<!…`
 /// block or an unterminated tag.
-fn classify_tag(source: &str, open: usize) -> Option<Tag> {
+fn classify_tag(source: &str, open: usize, struts: &[String]) -> Option<Tag> {
     let bytes = source.as_bytes();
     let after = open + 1;
     if after >= bytes.len() {
@@ -230,7 +239,17 @@ fn classify_tag(source: &str, open: usize) -> Option<Tag> {
         });
     }
 
-    if FIELD_TAGS.contains(&name.as_str()) {
+    // Whether this tag's `name=` is a property of the action at all.
+    //
+    // Under a **Struts** prefix only the form controls bind one: `<s:text name="label.user"/>` is
+    // a resource-bundle key, `<s:action name>` an action, `<s:bean name>` a class. `text` is the
+    // collision that forces the question — Struts 1's `<html:text property="user"/>` is an input
+    // and Struts 2's `<s:text>` is a lookup, one local name and opposite meanings.
+    let binds_property = match tag_prefix(source, after, close) {
+        Some(p) if struts.iter().any(|s| *s == p) => crate::jsp_ognl::struts_name_is_property(&name),
+        _ => FIELD_TAGS.contains(&name.as_str()),
+    };
+    if binds_property {
         if let Some(field) = field_from_tag(source, after, close, &name) {
             return Some(Tag::Field { field, tag_end: close + 1 });
         }
@@ -424,6 +443,52 @@ mod tests {
         // `<html:text>` has local-name `text` (in FIELD_TAGS) and uses `property=` for its
         // name → mapped to a Text control.
         assert_eq!(forms[0].fields[0].control, FormControl::Text);
+    }
+
+    /// **`<s:text>` is not a text input.** Its `name` is a key in a resource bundle, and reading
+    /// it as an action property put a warning under a string that was never meant to be one.
+    /// `text` is the collision: Struts 1 writes `<html:text property="user"/>`, an input.
+    #[test]
+    fn a_struts_text_tag_is_a_resource_lookup_and_not_a_field() {
+        let src = concat!(
+            "<%@ taglib prefix=\"s\" uri=\"/struts-tags\"%>\n",
+            "<s:form action=\"login\">\n",
+            "  <s:text name=\"note.login.expiredPassword.intro\"/>\n",
+            "  <s:textfield name=\"username\"/>\n",
+            "</s:form>",
+        );
+        let forms = parse_jsp_forms(src);
+        assert_eq!(forms.len(), 1);
+        let names: Vec<&str> = forms[0].fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["username"], "the bundle key is not a field");
+        assert!(parse_jsp_fields(src).iter().all(|f| f.name == "username"));
+    }
+
+    /// The other spellings of `name=` a Struts page is full of, none of which is a property.
+    #[test]
+    fn the_other_struts_names_are_not_properties_either() {
+        let src = concat!(
+            "<%@ taglib prefix=\"s\" uri=\"/struts-tags\"%>\n",
+            "<s:i18n name=\"messages\">\n",
+            "  <s:action name=\"listUsers\"/>\n",
+            "  <s:bean name=\"com.acme.Helper\"/>\n",
+            "  <s:param name=\"id\" value=\"%{userId}\"/>\n",
+            "</s:i18n>",
+        );
+        assert!(parse_jsp_fields(src).is_empty());
+    }
+
+    /// …and the same local name under a Struts 1 prefix still is one. The prefix is what decides,
+    /// which is why it is resolved from the page's own directives rather than assumed.
+    #[test]
+    fn a_struts_one_text_tag_is_still_a_field() {
+        let src = concat!(
+            "<%@ taglib prefix=\"html\" uri=\"/WEB-INF/struts-html.tld\"%>\n",
+            "<html:form action=\"/x.do\"><html:text property=\"user\"/></html:form>",
+        );
+        let forms = parse_jsp_forms(src);
+        assert_eq!(forms[0].fields.len(), 1);
+        assert_eq!(forms[0].fields[0].name, "user");
     }
 
     #[test]

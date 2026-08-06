@@ -20,12 +20,13 @@
  */
 
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor';
-import { sqlHighlight, dtdLanguage, type SqlDialect } from '$lib/components/shared/ui/code-editor';
+import {
+  sqlHighlight, dtdLanguage, javascriptStream, type SqlDialect,
+} from '$lib/components/shared/ui/code-editor';
 import type { Extension } from '@codemirror/state';
 import { StreamLanguage, type StreamParser } from '@codemirror/language';
 import { xml } from '@codemirror/legacy-modes/mode/xml';
 import { css, sCSS, less } from '@codemirror/legacy-modes/mode/css';
-import { javascript } from '@codemirror/legacy-modes/mode/javascript';
 import { properties } from '@codemirror/legacy-modes/mode/properties';
 import { yaml } from '@codemirror/legacy-modes/mode/yaml';
 import { rust } from '@codemirror/legacy-modes/mode/rust';
@@ -75,7 +76,9 @@ const dtdLang = cmLang('dtd', dtdLanguage);
 const cssLang = streamLang('css', css);
 const scssLang = streamLang('scss', sCSS);
 const lessLang = streamLang('less', less);
-const jsLang = streamLang('javascript', javascript);
+// The same tokenizer the JSP `<script>` bodies get — object keys, members, call sites, `this`
+// and every shape of number, which the CM5 port left flat. See `js-mode.ts`.
+const jsLang = streamLang('javascript', javascriptStream as unknown as StreamParser<unknown>);
 const propsLang = streamLang('properties', properties);
 const yamlLang = streamLang('yaml', yaml);
 // Same colouring, plus the intelligence a Spring config file can have and a generic one

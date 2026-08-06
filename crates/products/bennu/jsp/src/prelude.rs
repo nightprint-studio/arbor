@@ -20,3 +20,6 @@ pub use crate::tld::{parse_tld, AttrDecl, FunctionDecl, TagDecl, Taglib};
 
 // The editor's answers.
 pub use crate::intel::{completions, diagnostics, hover, navigate};
+
+// The page as Bennu understood it — the syntax-tree panel's model tab.
+pub use crate::model::{model, JspModelNode};

@@ -321,7 +321,7 @@ pub fn ognl_path_at(source: &str, offset: usize) -> Option<OgnlPath> {
             continue;
         }
         if i + 1 < bytes.len() && matches!(bytes[i], b'$' | b'#' | b'%') && bytes[i + 1] == b'{' {
-            let (end, found) = scan_expr_paths(source, i + 2, offset);
+            let (end, found) = scan_expr_paths(source, i + 2, source.len(), offset);
             if found.is_some() {
                 return found;
             }
@@ -337,14 +337,30 @@ pub fn ognl_path_at(source: &str, offset: usize) -> Option<OgnlPath> {
 /// `offset`. Mirrors [`scan_expr`]'s rules — strings skipped whole, whitespace kept transparent
 /// so `foo . bar` is one chain — and adds two: an index (`items[0]`) does not break a chain, and
 /// a property access with no root before it (`.foo` after a call) starts none.
-fn scan_expr_paths(source: &str, start: usize, offset: usize) -> (usize, Option<OgnlPath>) {
+/// The dotted path under `offset` inside `source[start..end]`, read as a **bare** expression —
+/// one with no `${…}`/`%{…}` of its own around it.
+///
+/// That is what a Struts attribute value is: `<s:iterator value="comunicazioni.dati">` holds an
+/// OGNL expression that the page never marked as one (see [`crate::jsp_ognl`]). The rules are
+/// the delimited scanner's, unchanged — which is the point of sharing it rather than writing a
+/// second one that would drift on the first edge case.
+pub fn path_in_range(source: &str, start: usize, end: usize, offset: usize) -> Option<OgnlPath> {
+    scan_expr_paths(source, start, end.min(source.len()), offset).1
+}
+
+fn scan_expr_paths(
+    source: &str,
+    start: usize,
+    end: usize,
+    offset: usize,
+) -> (usize, Option<OgnlPath>) {
     let bytes = source.as_bytes();
     let mut i = start;
     let mut chain: Vec<JspVarRef> = Vec::new();
     let mut prev_access = false;
     let mut found: Option<OgnlPath> = None;
 
-    while i < bytes.len() {
+    while i < end {
         let c = bytes[i];
         if c == b'}' {
             take_chain(&mut chain, offset, &mut found);
@@ -363,7 +379,10 @@ fn scan_expr_paths(source: &str, start: usize, offset: usize) -> (usize, Option<
         if is_ident_start(c) {
             let id_start = i;
             i += 1;
-            while i < bytes.len() && is_ident_char(bytes[i]) {
+            // Bounded by `end`, not by the file: a bare attribute value is a slice, and an
+            // identifier that ran past its closing quote would capture the quote and everything
+            // after it as one name.
+            while i < end && is_ident_char(bytes[i]) {
                 i += 1;
             }
             let name = source[id_start..i].to_string();

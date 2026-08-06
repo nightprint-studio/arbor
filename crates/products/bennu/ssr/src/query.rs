@@ -295,8 +295,20 @@ pub fn parse(text: &str) -> Result<Query, QueryError> {
                     0,
                 ));
             }
+            // `trim_end`, and it is load-bearing rather than tidiness. The lines of an
+            // alternative are accumulated with a `\n` after each, so every pattern ends with a
+            // separator that was never part of it.
+            //
+            // In a language whose grammar discards whitespace — Java, SQL — that newline lands
+            // in an `extra` and disappears, which is why this was invisible for as long as those
+            // were the only two. **JSP declares no extras**: its whitespace is explicit, so the
+            // trailing newline is swallowed by the last token instead. `$a$` compiles to a text
+            // node reading `ARBOR_PLACEHOLDER_0\n`, which is not the placeholder's token, so the
+            // hole stops being a hole — and the query matches nothing, anywhere, silently.
+            // Both ends: `or` on a line of its own leaves a leading separator the same way the
+            // accumulation leaves a trailing one.
             Ask::Patterns(
-                alternatives.iter().map(|a| peel(a)).collect::<Result<Vec<_>, _>>()?,
+                alternatives.iter().map(|a| peel(a.trim())).collect::<Result<Vec<_>, _>>()?,
             )
         }
     };
@@ -316,6 +328,14 @@ fn clause_of(line: &str) -> Option<(&'static str, &str)> {
         if let Some(rest) = line.strip_prefix(word) {
             if rest.starts_with(char::is_whitespace) {
                 return Some((word, rest.trim_start()));
+            }
+            // `or` **alone on its line**, with the alternative under it. It is how anybody lays
+            // out two shapes of the same question, and it used to read as pattern *text* — the
+            // whole query became one alternative containing the word `or`, which then matched
+            // nothing and said nothing. The other three take an argument, so a bare one of those
+            // is a typo, and leaving it to fail as a pattern is the report it already gets.
+            if word == "or" && rest.is_empty() {
+                return Some(("or", ""));
             }
         }
     }
@@ -403,10 +423,15 @@ fn check_group(query: &Query, line: usize) -> Result<(), QueryError> {
         Ask::Patterns(alts) => {
             for (i, alt) in alts.iter().enumerate() {
                 if !binds(&alt.pattern, name) {
+                    // The options are listed, and that is the point of the sentence rather than
+                    // decoration: somebody who typed `group flie` did not mean a capture at all,
+                    // and telling them their pattern does not bind `$flie$` answers a question
+                    // they were not asking.
                     return Err(err(
                         format!(
                             "every alternative has to bind ${name}$ to group by it — the {} one \
-                             does not",
+                             does not. Group by a capture the pattern binds, or by `file`, \
+                             `module` or `enclosing`.",
                             ordinal(i)
                         ),
                         line,
@@ -558,11 +583,56 @@ mod tests {
         parse(text).expect("parses")
     }
 
+    /// The alternatives **exactly as they will be compiled**.
+    ///
+    /// This used to `trim()`, which is precisely how a trailing separator survived in the real
+    /// value for as long as it did: every assertion below was made against a cleaned-up copy of
+    /// something that was not clean. A helper that tidies its subject cannot fail on it.
     fn patterns(query: &Query) -> Vec<String> {
         match &query.ask {
-            Ask::Patterns(alts) => alts.iter().map(|a| a.pattern.trim().to_string()).collect(),
+            Ask::Patterns(alts) => alts.iter().map(|a| a.pattern.clone()).collect(),
             _ => panic!("not a pattern query"),
         }
+    }
+
+    /// A pattern is the text that was typed and not one character more.
+    ///
+    /// The lines are accumulated with a `\n` after each, so an alternative used to end with a
+    /// separator nobody wrote. Java and SQL discard whitespace in their grammars and never
+    /// noticed; JSP declares no extras, so the newline was swallowed by the pattern's last token
+    /// — `$a$` became a text node reading `ARBOR_PLACEHOLDER_0\n`, which is not a placeholder at
+    /// all, and every JSP query silently matched nothing.
+    #[test]
+    fn an_alternative_carries_no_trailing_separator() {
+        assert_eq!(patterns(&q("$a$")), ["$a$"]);
+        assert_eq!(patterns(&q("<s:property value=\"$x$\"/>")), ["<s:property value=\"$x$\"/>"]);
+        assert_eq!(patterns(&q("log.debug($x$)\ngroup file")), ["log.debug($x$)"]);
+        assert_eq!(patterns(&q("a($x$)\nor b($x$)")), ["a($x$)", "b($x$)"]);
+    }
+
+    /// …and the newlines *inside* one are still its own, because a pattern is written the way
+    /// the code is.
+    #[test]
+    fn a_multi_line_pattern_keeps_its_own_newlines() {
+        assert_eq!(patterns(&q("if ($c$) {\n$body...$\n}")), ["if ($c$) {\n$body...$\n}"]);
+    }
+
+    /// `or` on a line of its own, which is how anybody lays out two shapes of one question. It
+    /// used to read as pattern *text*: the three lines became a single alternative containing
+    /// the word `or`, which then matched nothing and explained nothing.
+    #[test]
+    fn or_alone_on_its_line_still_opens_an_alternative() {
+        assert_eq!(patterns(&q("session[$a$]\nor\nsession.$b$")), ["session[$a$]", "session.$b$"]);
+        // …and the same query written on two lines means the same thing.
+        assert_eq!(patterns(&q("session[$a$]\nor session.$b$")), ["session[$a$]", "session.$b$"]);
+    }
+
+    /// The other three take an argument, so a bare one is a typo rather than a clause — left to
+    /// fail as a pattern, which is a report, instead of being silently accepted as a clause with
+    /// nothing in it.
+    #[test]
+    fn a_bare_argument_taking_clause_is_not_a_clause() {
+        assert_eq!(patterns(&q("$x$.close()\ngroup")), ["$x$.close()\ngroup"]);
     }
 
     #[test]

@@ -295,12 +295,16 @@ fn parse(expression: &str) -> Result<Vec<Step>, String> {
     while let Some(c) = chars.next() {
         match c {
             c if c.is_whitespace() => continue,
-            '.' => {
-                if name.is_empty() {
-                    return Err("an empty name in the path".to_string());
-                }
-                steps.push(Step::Name(std::mem::take(&mut name)));
-            }
+            // A `.` ends the step before it. What that step is depends on what came before:
+            // a pending name (`order.total`), or a subscript that is already complete
+            // (`items[2].price`). Only a dot with genuinely nothing in front of it — a leading
+            // one, or a second in a row — is the error, and treating "no pending name" as that
+            // made every path through an array index unwatchable.
+            '.' => match (name.is_empty(), steps.last()) {
+                (false, _) => steps.push(Step::Name(std::mem::take(&mut name))),
+                (true, Some(Step::Index(_))) => {}
+                (true, _) => return Err("an empty name in the path".to_string()),
+            },
             '[' => {
                 if !name.is_empty() {
                     steps.push(Step::Name(std::mem::take(&mut name)));
@@ -515,6 +519,24 @@ mod tests {
         );
         // Whitespace is noise, not structure.
         assert_eq!(parse(" order . total ").unwrap().len(), 2);
+        // Two subscripts in a row, and a name after them.
+        assert_eq!(
+            parse("grid[1][2].label").unwrap(),
+            vec![
+                Step::Name("grid".into()),
+                Step::Index(1),
+                Step::Index(2),
+                Step::Name("label".into())
+            ]
+        );
+    }
+
+    /// A dot with nothing in front of it. The check exists for these two and not for the
+    /// `items[2].price` it used to reject along with them.
+    #[test]
+    fn a_dot_with_nothing_before_it_is_refused() {
+        assert!(parse(".order").is_err());
+        assert!(parse("order..total").is_err());
     }
 
     /// A watch that is not a path is refused by name. Quietly evaluating something adjacent to
