@@ -113,6 +113,21 @@ mod web_discovery;
 // Class index (Go to Class): `bennu_class_index` — a fresh scan of the project's `.java`
 // sources, one entry per declared type (fqcn + simple + file + decl line).
 mod class_index;
+// The syntax tree of the buffer in front of the user: `bennu_syntax_tree_of` /
+// `bennu_syntax_path_at`. Answers "why did the parser read it that way" — the node kinds, the
+// fields, and the punctuation that is so often the reason. Language-agnostic (`arbor-syntax`);
+// a grammar registry decides what it can read, and it names what it cannot.
+mod ast;
+// The other half of that panel: `bennu_symbol_tree_of` renders the **declaration model** Bennu
+// derives from the parse — types, members, signatures — in the same tree shape, so one panel
+// draws both and the difference between "what the grammar built" and "what Bennu understood" is
+// a tab rather than two components.
+mod model_tree;
+// Structural search & replace: `bennu_ssr_search` / `bennu_ssr_preview` / `bennu_ssr_apply` /
+// `bennu_ssr_explain`. Finds code by its SHAPE rather than its text, counts it (`group`) and
+// rewrites it — the language and the matching are `bennu-ssr`, this is the walk, the type
+// oracle and the files.
+mod ssr;
 // The same two questions asked of the DEPENDENCY jars: `bennu_library_classes` /
 // `bennu_library_files` search the classpath's hundreds of thousands of entries here rather
 // than shipping them across the seam, and `bennu_library_file` extracts one to a read-only
@@ -217,6 +232,10 @@ mod tomcat;
 // per-class results as Surefire writes its reports). Shares the build's single-run lock —
 // two Maven processes on one tree fight over `target/`.
 mod tests;
+// What is inside a type (`bennu_type_shape`) — a DTO's fields, an interface's properties, one
+// level per call. Asked by the framework panels when a row names a type worth opening; never by
+// a catalog build, which would resolve hundreds of them to show two.
+mod type_shape;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, `bennu_config_dir()` /

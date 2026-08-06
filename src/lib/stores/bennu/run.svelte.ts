@@ -118,6 +118,9 @@ interface RunSpec {
   debug: boolean;
   /** Hold the VM before `main`. The configuration's choice; see `RunConfig.debugSuspend`. */
   debugSuspend: boolean;
+  /** Which Maven scopes the run classpath is resolved at. Part of the spec so a tab's ⟳
+   *  repeats the classpath it *ran with*; see `RunConfig.classpathScope`. */
+  classpathScope: string;
 }
 
 /**
@@ -506,6 +509,7 @@ function createBennuRunStore() {
         env: spec.env,
         debug: spec.debug,
         debugSuspend: spec.debugSuspend,
+        classpathScope: spec.classpathScope,
       });
       patchTab(id, {
         runId: handle.run_id,
@@ -573,6 +577,7 @@ function createBennuRunStore() {
       // Only meaningful under the debugger, and only when the configuration asked: a launch
       // that begins frozen is the exception, not the default.
       debugSuspend: debug && cfg.debugSuspend,
+      classpathScope: cfg.classpathScope,
     });
   }
 

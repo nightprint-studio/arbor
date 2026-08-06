@@ -13,7 +13,16 @@ pub use crate::infer::{
 };
 pub use crate::symbols::{extract_symbols, extract_symbols_from_root};
 
+// The AST: the same parse read in Java's vocabulary, bodies included, typed where the resolver
+// can say. Derived on demand and never stored — see `ast`'s module doc for why that is what makes
+// it safe to have beside the declaration model rather than a second thing to keep in sync.
+pub use crate::ast::{lower as lower_ast, AstNode};
+
 // "Import class" detection: the simple type name under the caret that needs an import.
+// The grammar itself, for callers that walk a parse rather than ask a question of it —
+// the syntax-tree panel. One pin for the whole workspace (see `grammar.rs`).
+pub use crate::grammar::language as java_language;
+
 pub use crate::import_hint::simple_type_needing_import;
 
 // Static-import targets — `import static …` parsed into (owner, member) for inference + undefined-var.
@@ -21,7 +30,7 @@ pub use crate::static_import::{static_import_targets, StaticImportTarget};
 
 // The structural model produced by `extract_symbols`.
 pub use crate::symbols::{
-    Annotation, FieldDecl, FileSymbols, Import, MethodDecl, ParamDecl, TypeDecl, TypeKind,
+    Annotation, FieldDecl, FileSymbols, Import, MethodDecl, ParamDecl, Span, TypeDecl, TypeKind,
 };
 
 // The resolver seam the type-walk consumes + the member shapes it resolves against.

@@ -48,6 +48,10 @@ export interface FrameworkCatalogSpec {
   empty: string;
   /** Groupings this catalog offers, in menu order. The first is the default. */
   groups: { id: GroupMode; label: string }[];
+  /** What this catalog's two main columns are called when its rows are exported. A `path` and a
+   *  `handler` are not a `name` and a `detail`, and a spreadsheet somebody else opens is exactly
+   *  where that stops being a detail. Defaults to `name` / `detail`. */
+  columns?: { primary: string; secondary: string };
   /** Whether this panel carries the "resolve against" property-file picker. */
   picker?: boolean;
   /** Give this catalog a button in the right activity rail. */
@@ -71,6 +75,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
       { id: 'kind', label: 'Group by method' },
       { id: 'none', label: 'No grouping' },
     ],
+    columns: { primary: 'path', secondary: 'handler' },
     rail: true,
     shortcut: 'Alt+4',
   },
@@ -304,6 +309,92 @@ export function kindClass(kind: string): string {
     default:
       return 'k-neutral';
   }
+}
+
+/**
+ * Short names for the media types a mapping produces or consumes.
+ *
+ * `{MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_EVENT_STREAM_VALUE}` is what the source
+ * says and it is thirty characters of ceremony around two facts: JSON, and SSE. In a list of two
+ * hundred routes it is also the widest thing on the row, so it pushes the path — the thing you
+ * are reading — into an ellipsis.
+ *
+ * Both spellings are recognised, the constant and the literal (`"application/json"`), because a
+ * project uses whichever its author preferred and often both. Anything unrecognised keeps its
+ * own last segment rather than being dropped: an unusual media type is exactly the one worth
+ * seeing, and inventing a name for it would be worse than showing it.
+ */
+export function mediaAliases(text: string): string[] {
+  const ALIASES: Record<string, string> = {
+    APPLICATION_JSON: 'JSON',
+    APPLICATION_PROBLEM_JSON: 'JSON+problem',
+    APPLICATION_XML: 'XML',
+    TEXT_XML: 'XML',
+    TEXT_EVENT_STREAM: 'SSE',
+    TEXT_PLAIN: 'text',
+    TEXT_HTML: 'HTML',
+    TEXT_MARKDOWN: 'markdown',
+    APPLICATION_PDF: 'PDF',
+    APPLICATION_OCTET_STREAM: 'binary',
+    APPLICATION_FORM_URLENCODED: 'form',
+    MULTIPART_FORM_DATA: 'multipart',
+    APPLICATION_NDJSON: 'NDJSON',
+    APPLICATION_STREAM_JSON: 'JSON stream',
+    ALL: 'any',
+  };
+  const MIME: Record<string, string> = {
+    'application/json': 'JSON',
+    'application/problem+json': 'JSON+problem',
+    'application/xml': 'XML',
+    'text/xml': 'XML',
+    'text/event-stream': 'SSE',
+    'text/plain': 'text',
+    'text/html': 'HTML',
+    'text/markdown': 'markdown',
+    'text/csv': 'CSV',
+    'application/pdf': 'PDF',
+    'application/octet-stream': 'binary',
+    'application/x-www-form-urlencoded': 'form',
+    'multipart/form-data': 'multipart',
+    'application/x-ndjson': 'NDJSON',
+    '*/*': 'any',
+  };
+  const out: string[] = [];
+  for (const raw of text.split(',')) {
+    const piece = raw.trim().replace(/^[{[]|[}\]]$/g, '').replace(/^"|"$/g, '').trim();
+    if (!piece) continue;
+    const constant = piece.replace(/^MediaType\./, '').replace(/_VALUE$/, '');
+    const mime = piece.toLowerCase();
+    const alias =
+      ALIASES[constant] ??
+      MIME[mime] ??
+      // An unknown mime keeps its subtype (`application/vnd.acme+json` → `vnd.acme+json`); an
+      // unknown constant keeps its own words.
+      (mime.includes('/') ? mime.slice(mime.indexOf('/') + 1) : constant.toLowerCase().replace(/_/g, ' '));
+    if (alias && !out.includes(alias)) out.push(alias);
+  }
+  return out;
+}
+
+/**
+ * Whether a type is worth offering to open — a first, **display-side** filter over the obviously
+ * scalar, so a `String` and a `boolean` do not wear an expander that would answer "nothing".
+ *
+ * Deliberately not the whole answer: what a name resolves to is the backend's to know (see
+ * `bennu_type_shape`), and this side never claims a type *has* fields — only that asking would be
+ * absurd. A name that gets past this and turns out to be a leaf simply expands to nothing once.
+ */
+export function looksComposite(typeText: string): boolean {
+  const bare = typeText.replace(/<.*>/, '').replace(/\[\]$/, '').trim();
+  const simple = bare.split('.').pop() ?? bare;
+  const SCALAR = new Set([
+    'void', 'boolean', 'byte', 'char', 'short', 'int', 'long', 'float', 'double',
+    'Boolean', 'Byte', 'Character', 'Short', 'Integer', 'Long', 'Float', 'Double',
+    'String', 'CharSequence', 'Object', 'Number', 'BigDecimal', 'BigInteger',
+    'Date', 'LocalDate', 'LocalDateTime', 'Instant', 'UUID', 'Class', 'Enum',
+  ]);
+  // A lower-case first letter is a type variable or a primitive, never a DTO.
+  return !!simple && /^[A-Z]/.test(simple) && !SCALAR.has(simple);
 }
 
 /** Text a row is matched against by the filter — including its children, so filtering by a

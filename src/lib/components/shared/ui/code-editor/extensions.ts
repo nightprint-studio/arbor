@@ -101,6 +101,15 @@ export function editorRuler(column: number) {
 
 export interface CodeEditorExtensionsOptions {
   readOnly?: boolean;
+  /**
+   * Show the line-number gutter. `true` by default — a buffer is navigated by line.
+   *
+   * Turned off for a **short input** that happens to want an editor: a structural query is two
+   * or three lines of code with holes in it, and it wants the highlighting and the completion
+   * without the chrome. A gutter numbering three lines is a column of noise beside a field, and
+   * "line 2" is not how anyone refers to a part of a query they can see all of.
+   */
+  lineNumbers?: boolean;
   /** Draw a vertical margin guide at this 1-based character column (IntelliJ-style).
    *  Omitted / ≤ 0 → no ruler. */
   rulerColumn?: number;
@@ -161,7 +170,8 @@ export function createCodeEditorExtensions(
   const exts: Extension[] = [
     codeEditorTheme,
     codeEditorHighlightStyle,
-    lineNumbers(),
+    // Absent, not empty: an unwanted gutter still costs its horizontal column.
+    ...(opts.lineNumbers === false ? [] : [lineNumbers()]),
     history(),
     drawSelection(),
     indentOnInput(),

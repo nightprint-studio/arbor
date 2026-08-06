@@ -65,11 +65,23 @@ pub struct MavenResolveOpts {
     /// and deterministic, no network. Defaults to `true`; set `false` for a first-time
     /// resolve that may need to download.
     pub offline: bool,
+    /// Maven scope to resolve (`-Dmdep.includeScope`), or `None` for **every** scope.
+    ///
+    /// `None` is the default and is what the *index* wants: completion and navigation should
+    /// reach into test and provided classes, because you edit those too.
+    ///
+    /// A **launch** wants something narrower. `dependency:build-classpath` with no scope
+    /// resolves test and provided along with the rest, so a run started from here gets a
+    /// classpath the JVM would never see under `mvn spring-boot:run` — and that is not a
+    /// cosmetic difference: a `@ConditionalOnClass` guarding a bean on the presence of a
+    /// test-scoped library then fires in the IDE and not in production, which is the kind of
+    /// divergence that costs an afternoon to find.
+    pub scope: Option<String>,
 }
 
 impl Default for MavenResolveOpts {
     fn default() -> Self {
-        Self { mvn_path: "mvn".to_string(), java_home: None, offline: true }
+        Self { mvn_path: "mvn".to_string(), java_home: None, offline: true, scope: None }
     }
 }
 
@@ -212,6 +224,10 @@ pub fn resolve_maven_classpath(
         .arg("-Dmdep.ignoreMissing=true")
         .arg("--fail-never")
         .arg("--batch-mode");
+    if let Some(scope) = &opts.scope {
+        // Absent by default — the goal then resolves every scope, which is what the index wants.
+        cmd.arg(format!("-Dmdep.includeScope={scope}"));
+    }
     if opts.offline {
         cmd.arg("-o");
     }
@@ -382,12 +398,17 @@ fn split_entries(raw: &str) -> Vec<String> {
 
 // ── caching by pom mtime ─────────────────────────────────────────────────────
 
-/// A per-session cache of resolved Maven classpaths, keyed by the project's pom path
-/// and invalidated when the pom's mtime changes. `build-classpath` costs seconds; this
+/// A per-session cache of resolved Maven classpaths, keyed by the project's pom path **and the
+/// scope**, invalidated when the pom's mtime changes. `build-classpath` costs seconds; this
 /// makes a re-resolve within a session free until the pom is edited.
+///
+/// The scope is part of the key and that is not a detail: the same pom resolves to a *different*
+/// classpath per scope, and one cache slot would mean whichever caller ran first decides what
+/// everyone else gets — a launch resolving `runtime` would hand the index a classpath with the
+/// test dependencies missing, and completion would stop working inside every test in the project.
 #[derive(Default)]
 pub struct MavenClasspathCache {
-    entries: HashMap<PathBuf, CacheEntry>,
+    entries: HashMap<(PathBuf, String), CacheEntry>,
 }
 
 struct CacheEntry {
@@ -411,8 +432,9 @@ impl MavenClasspathCache {
         let mtime = fs::metadata(&pom)
             .and_then(|m| m.modified())
             .map_err(|e| format!("stat {}: {e}", pom.display()))?;
+        let key = (pom.clone(), opts.scope.clone().unwrap_or_default());
 
-        if let Some(hit) = self.entries.get(&pom) {
+        if let Some(hit) = self.entries.get(&key) {
             if hit.pom_mtime == mtime {
                 return Ok(hit.classpath.clone());
             }
@@ -420,17 +442,25 @@ impl MavenClasspathCache {
 
         let classpath = resolve_maven_classpath(project_dir, opts)?;
         self.entries
-            .insert(pom.clone(), CacheEntry { pom_mtime: mtime, classpath: classpath.clone() });
+            .insert(key, CacheEntry { pom_mtime: mtime, classpath: classpath.clone() });
         Ok(classpath)
     }
 
-    /// Whether a fresh (mtime-valid) entry is cached for this project.
-    pub fn is_cached(&self, project_dir: &Path) -> bool {
+    /// Whether a fresh (mtime-valid) entry is cached for this project **at `scope`** — `None`
+    /// meaning the every-scope resolve, the same key [`Self::get`] uses.
+    pub fn is_cached_at(&self, project_dir: &Path, scope: Option<&str>) -> bool {
         let pom = project_dir.join("pom.xml");
-        match (self.entries.get(&pom), fs::metadata(&pom).and_then(|m| m.modified())) {
+        let key = (pom.clone(), scope.unwrap_or_default().to_string());
+        match (self.entries.get(&key), fs::metadata(&pom).and_then(|m| m.modified())) {
             (Some(hit), Ok(mtime)) => hit.pom_mtime == mtime,
             _ => false,
         }
+    }
+
+    /// Whether the every-scope resolve is cached — the common question, and what every caller
+    /// before scopes existed was asking.
+    pub fn is_cached(&self, project_dir: &Path) -> bool {
+        self.is_cached_at(project_dir, None)
     }
 }
 

@@ -278,6 +278,9 @@ export interface RunConfigDto {
   test_target: string;
   /** Hold the VM before `main` when launched under the debugger. */
   debug_suspend?: boolean;
+  /** Maven scopes on the run classpath: `"runtime"` (default), `"compile"`, `"test"`, or `""`
+   *  for every scope. */
+  classpath_scope?: string;
 }
 
 /** The per-repo run-config bundle stored in `<root>/.arbor/config.toml`. */

@@ -615,7 +615,7 @@ mod tests {
     #[test]
     fn resolves_type_via_non_static_star_import() {
         let r = empty_resolver_with_jdk(FakeJdk);
-        let imports = vec![Import { path: "java.util".into(), star: true, static_: false }];
+        let imports = vec![Import { span: None, path: "java.util".into(), star: true, static_: false }];
         assert_eq!(
             r.resolve_simple_name("LinkedHashMap", &imports).as_deref(),
             Some("java/util/LinkedHashMap"),
@@ -623,7 +623,7 @@ mod tests {
         // Without the star import, java.util.LinkedHashMap isn't implicitly available → None.
         assert!(r.resolve_simple_name("LinkedHashMap", &[]).is_none());
         // A STATIC star import doesn't bind a type name → still None.
-        let static_star = vec![Import { path: "java.util".into(), star: true, static_: true }];
+        let static_star = vec![Import { span: None, path: "java.util".into(), star: true, static_: true }];
         assert!(r.resolve_simple_name("LinkedHashMap", &static_star).is_none());
     }
 
@@ -882,7 +882,8 @@ mod tests {
         assert!(deps.misses.contains("Widget"));
         // An import-bound name is project-independent → NOT recorded (neither hit nor miss).
         let (_o2, deps2) = crate::dep_record::record(|| {
-            let imports = vec![Import { path: "com.other.Order".into(), star: false, static_: false }];
+            let imports =
+                vec![Import { span: None, path: "com.other.Order".into(), star: false, static_: false }];
             let _ = r.resolve_simple_name("Order", &imports);
         });
         assert!(deps2.simple_hits.is_empty(), "import-bound name not recorded as a project hit");

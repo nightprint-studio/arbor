@@ -34,6 +34,16 @@
    * is debounced, and drops the answer to a superseded query — so typing eight
    * characters is not eight round-trips whose results race each other.
    *
+   * ## Sources, and why they are not more tabs
+   *
+   * A category can declare {@link NavigateSource}s — named places its rows come from, chosen
+   * from one picker on the header row. The alternative is what this replaced: a *Classes* tab
+   * and a *Library classes* tab, a *Files* tab and a *Library files* tab. That makes the
+   * overlay's top-level structure answer "where might it be" instead of "what am I looking
+   * for", and it forces the user to check two tabs for one question. A source that supplies
+   * both `items` and `search` unions them, so "the project and its dependencies" is a single
+   * list scored together rather than two lists to compare by eye.
+   *
    * ## Why "All" is a real tab and not a union
    *
    * It searches every category and keeps each one's best few, grouped under its
@@ -49,12 +59,15 @@
    * refining a query after looking at the results is the normal case, not the
    * exception.
    */
-  import { untrack } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
   import type { IconComponent } from '$lib/types/icon';
   import { Search, CornerDownLeft } from 'lucide-svelte';
   import Modal from '../Modal.svelte';
   import Tabs, { type TabItem } from '../ui/Tabs.svelte';
   import Spinner from '../ui/Spinner.svelte';
+  import CodePreview from '../ui/CodePreview.svelte';
+  import Select from '../ui/Select.svelte';
+  import type { LanguageDescriptor } from '../ui/code-editor';
   import Kbd from '../internal/Kbd.svelte';
   import {
     fuzzyMatchPrepared,
@@ -98,12 +111,87 @@
     iconProps?: Record<string, unknown>;
     /** A short word on the right — the object kind, the engine, the role. */
     tag?: string;
+    /**
+     * Where this row comes from, shown as a chip on the right: the module that compiles it, the
+     * project it belongs to, the artifact it was read out of.
+     *
+     * Separate from {@link facet} because they answer to different things — the facet is what the
+     * dropdown *filters* by, and there are origins nobody would filter by (an artifact) and
+     * facets not worth repeating on the row. On a reactor "which of these four is mine" is the
+     * question the name alone cannot answer.
+     */
+    origin?: string;
+    /**
+     * This row is **not the user's own** — it comes from a dependency, a vendored copy, a
+     * read-only source.
+     *
+     * Tinted rather than badged, because the fact it warns about — that opening this lands you
+     * somewhere you cannot edit — matters every time the row is looked at, and a badge is read
+     * once and then stops being noticed. Same tone the editor's tab strip uses for the same
+     * meaning.
+     */
+    external?: boolean;
+    /**
+     * An extra dimension this item belongs to — a Maven module, a schema, a connection.
+     *
+     * Deliberately unnamed by this component: it renders whatever the host calls it (see
+     * {@link NavigateCategory.facetLabel}) as a dropdown beside the field, and filters on
+     * equality. A reactor with forty modules is the case it exists for — "the `OrderDao` in
+     * *this* module" is a question the fuzzy score cannot be asked.
+     */
+    facet?: string;
     onOpen: () => void;
+  }
+
+  /**
+   * A file, for the preview column.
+   *
+   * The **whole** file plus a line to point at, rather than a pre-sliced window: the column is a
+   * real read-only editor, so it wants the document its line numbers, its multi-line constructs
+   * and its scrolling all come from. The host resolves the language — `shared/` does not know
+   * that `.jsp` is a thing.
+   */
+  export interface NavigatePreview {
+    /** Shown above it — usually the path. */
+    title: string;
+    text: string;
+    language: LanguageDescriptor;
+    /** The line to band and scroll to — the declaration. */
+    activeLine?: number | null;
+  }
+
+  /**
+   * One place a category's rows can come from.
+   *
+   * A source may supply `items`, `search`, or **both** — and both at once is the interesting
+   * case: it is how "the project *and* its dependencies" becomes one list that is scored and
+   * ranked together, rather than two tabs the user has to check in turn. The two halves keep
+   * their own economics (items are pulled once per opening, a search is asked per query and
+   * debounced); all this decides is which of them feed the pool.
+   */
+  export interface NavigateSource {
+    id: string;
+    label: string;
+    items?: () => NavigateItem[] | Promise<NavigateItem[]>;
+    search?: (query: string) => Promise<NavigateItem[]>;
+    /** Shown instead of the category's own when this source has nothing to show yet — a
+     *  search-only source is empty *until you type*, which is not the same as being empty. */
+    emptyMessage?: string;
   }
 
   export interface NavigateCategory {
     id: string;
     label: string;
+    /**
+     * Named alternatives for where this category's rows come from, offered as a picker on the
+     * header row. When present they replace {@link items} / {@link search}.
+     *
+     * The picker is **one control for the whole overlay**: sources are matched across categories
+     * by id, so choosing "dependencies" on Classes means the same thing when you Tab to Files.
+     * A category that does not declare that id falls back to its own first source, and one with
+     * no sources at all is simply unaffected.
+     */
+    sources?: NavigateSource[];
     /** Called once per opening. May be async. Omit when the category is {@link search}-backed. */
     items?: () => NavigateItem[] | Promise<NavigateItem[]>;
     /**
@@ -117,6 +205,21 @@
     search?: (query: string) => Promise<NavigateItem[]>;
     /** Shown when this category has nothing at all, before any filtering. */
     emptyMessage?: string;
+    /**
+     * The selected item's surroundings, for the preview column.
+     *
+     * Optional, and its absence is the whole story: a host that supplies none gets exactly the
+     * list it had before, no column and no extra width. It answers the question the list cannot
+     * — *is this the `OrderDao` I meant* — which on a legacy tree with four classes of the same
+     * name is the only question that matters.
+     *
+     * Called for the highlighted row, debounced by the selection settling rather than by a
+     * timer; a walk down the list with the arrow keys must not fire one read per row it passes.
+     */
+    preview?: (item: NavigateItem) => Promise<NavigatePreview | null>;
+    /** What this category's {@link NavigateItem.facet} is called — `Module`, `Schema`. Absent
+     *  means no facet dropdown, however many items happen to carry one. */
+    facetLabel?: string;
   }
 
   interface Props {
@@ -125,7 +228,22 @@
     initialCategory?: string;
     /** Seed text — e.g. the editor's selection. */
     initialQuery?: string;
+    /** Which {@link NavigateSource} to open on. A host with an "also search the classpath"
+     *  preference passes it here, so the setting decides the default and the picker still
+     *  decides this search. */
+    initialSource?: string;
+    /** What the source picker is called — `Source`, `Where`. */
+    sourceLabel?: string;
     title?: string;
+    /**
+     * Rendered at the end of the **field row**, where a search bar keeps its keys.
+     *
+     * A host's own one-bit switches go here — anything that re-runs the search on the spot and
+     * has no name worth a dropdown. Deliberately a snippet rather than a declared list: what
+     * those bits *mean* is the host's business, and the alternative is this component growing a
+     * vocabulary of them one product at a time.
+     */
+    fieldActions?: Snippet;
     onClose: () => void;
   }
 
@@ -133,7 +251,10 @@
     categories,
     initialCategory = 'all',
     initialQuery = '',
+    initialSource = '',
+    sourceLabel = 'Source',
     title = 'Go to',
+    fieldActions,
     onClose,
   }: Props = $props();
 
@@ -164,14 +285,77 @@
   /** Whether a remote category has a request in flight — the field's spinner. */
   let searching = $state(false);
 
-  const localCategories = $derived(categories.filter((c) => !c.search));
-  const remoteCategories = $derived(categories.filter((c) => !!c.search));
+  // ── sources ─────────────────────────────────────────────────────────────────
+  // svelte-ignore state_referenced_locally
+  let sourceId = $state(initialSource);
+
+  /** The source in play for a category: the chosen id, else its own first — a category that does
+   *  not offer what is selected shows what it has rather than nothing. */
+  function sourceOf(c: NavigateCategory): NavigateSource | undefined {
+    if (!c.sources?.length) return undefined;
+    return c.sources.find((s) => s.id === sourceId) ?? c.sources[0];
+  }
+  function itemsOf(c: NavigateCategory) { return sourceOf(c)?.items ?? (c.sources ? undefined : c.items); }
+  function searchOf(c: NavigateCategory) { return sourceOf(c)?.search ?? (c.sources ? undefined : c.search); }
+
+  /** The picker's options, from whichever categories are on screen. Union rather than the active
+   *  category's own, so the control does not change shape as you Tab across the strip. */
+  const sourceOptions = $derived.by<{ value: string; label: string }[]>(() => {
+    const seen = new Map<string, string>();
+    for (const c of categories) {
+      if (active !== 'all' && c.id !== active) continue;
+      for (const s of c.sources ?? []) if (!seen.has(s.id)) seen.set(s.id, s.label);
+    }
+    return [...seen].map(([value, label]) => ({ value, label }));
+  });
+
+  const localCategories = $derived(categories.filter((c) => !!itemsOf(c)));
+  const remoteCategories = $derived(categories.filter((c) => !!searchOf(c)));
+
+  // ── the facet, when the showing category has one ─────────────────────────────
+  /** The chosen facet value, or `''` for "any". Reset when the tab changes, because a module
+   *  that exists for classes need not exist for files. */
+  let facet = $state('');
+
+  /** The category whose facet is in play — only a single-category tab has one, since two
+   *  categories could name the same dimension differently. */
+  const facetCategory = $derived(
+    active === 'all' ? undefined : categories.find((c) => c.id === active && c.facetLabel),
+  );
+
+  /** The distinct values present, in sorted order. Taken from the items rather than declared by
+   *  the host: a dropdown offering a module with nothing in it is a dead end you have to try to
+   *  find out. */
+  const facetValues = $derived.by<string[]>(() => {
+    const category = facetCategory;
+    if (!category) return [];
+    const seen = new Set<string>();
+    for (const item of pool(category.id)) if (item.facet) seen.add(item.facet);
+    return [...seen].sort((a, b) => a.localeCompare(b));
+  });
+
+  /**
+   * Everything a category has to offer for the current source: what was pulled once, plus
+   * whatever the host searched for.
+   *
+   * The **union** is what makes "the project and its dependencies" a single ranked list instead
+   * of two. A source supplying only one of the two simply contributes an empty other half.
+   */
+  function pool(id: string): NavigateItem[] {
+    const local = loaded[id];
+    const found = remote[id];
+    if (!found?.length) return local ?? [];
+    if (!local?.length) return found;
+    return [...local, ...found];
+  }
 
   // Pulled once, on mount. `$effect` rather than `onMount` so a host that swaps
-  // the category list — a repository closing, a second connection opening —
-  // re-pulls rather than showing the previous repository's files.
+  // the category list — a repository closing, a second connection opening, the
+  // source changing under it — re-pulls rather than showing the previous list.
   $effect(() => {
-    const list = localCategories;
+    // Resolved here, synchronously, rather than inside the `await`: that is what makes the
+    // effect depend on the chosen source, since a read after the first await tracks nothing.
+    const list = localCategories.map((c) => ({ id: c.id, items: itemsOf(c)! }));
     let live = true;
     loading = true;
     void (async () => {
@@ -179,7 +363,7 @@
       await Promise.all(
         list.map(async (category) => {
           try {
-            next[category.id] = (await category.items?.()) ?? [];
+            next[category.id] = (await category.items()) ?? [];
           } catch {
             // A category that cannot answer contributes nothing rather than
             // taking the overlay down with it — the others are still useful.
@@ -209,12 +393,13 @@
    * answer, and the host would have to refuse it anyway.
    */
   $effect(() => {
-    const list = remoteCategories;
     const text = parsed.text.trim();
     const showing = active;
-    if (!list.length) return;
-
-    const wanted = list.filter((c) => showing === 'all' || showing === c.id);
+    // Resolved synchronously, like the local pull above, so switching source re-asks — and so a
+    // source with nothing remote about it clears what the previous one had found.
+    const wanted = remoteCategories
+      .filter((c) => showing === 'all' || showing === c.id)
+      .map((c) => ({ id: c.id, search: searchOf(c)! }));
     if (!wanted.length || !text) {
       searching = false;
       // Cleared rather than kept: rows from the previous query would otherwise sit under a
@@ -222,7 +407,7 @@
       //
       // `untrack`, because this effect WRITES `remote` — reading it as a dependency would make
       // the write re-run the effect, which is the read-modify-write loop the runes docs warn
-      // about. What this effect depends on is the query and the tab, and nothing else.
+      // about. What this effect depends on is the query, the tab and the source, nothing else.
       if (Object.keys(untrack(() => remote)).length) remote = {};
       return;
     }
@@ -235,7 +420,7 @@
         await Promise.all(
           wanted.map(async (category) => {
             try {
-              next[category.id] = (await category.search?.(text)) ?? [];
+              next[category.id] = (await category.search(text)) ?? [];
             } catch {
               next[category.id] = [];
             }
@@ -275,10 +460,9 @@
   const prepared = $derived.by<Record<string, Prepared[]>>(() => {
     const out: Record<string, Prepared[]> = {};
     for (const category of categories) {
-      // A remote category's list already IS the answer to this query, so preparing it costs
-      // the few hundred candidates that came back rather than the source they came from.
-      const source = category.search ? (remote[category.id] ?? []) : (loaded[category.id] ?? []);
-      out[category.id] = source.map((item) => {
+      // A remote answer already IS the answer to this query, so preparing it costs the few
+      // hundred candidates that came back rather than the source they came from.
+      out[category.id] = pool(category.id).map((item) => {
         const detail = item.detail ?? '';
         return {
           item,
@@ -293,7 +477,11 @@
   /** Score and filter one category's items against the current query. */
   function rank(category: NavigateCategory): Scored[] {
     const out: Scored[] = [];
+    // Applied before the scoring, not after: filtering a ranked list would leave the "best few"
+    // of `All` chosen from rows the facet then removed, and the tab would look emptier than it is.
+    const wantFacet = category.id === facetCategory?.id ? facet : '';
     for (const p of prepared[category.id] ?? []) {
+      if (wantFacet && p.item.facet !== wantFacet) continue;
       if (!passesFilters(p.path, parsed)) continue;
       const hit = fuzzyMatchPrepared(p.candidate, parsed.text);
       if (!hit) continue;
@@ -344,11 +532,75 @@
     queueMicrotask(() => row.onOpen());
   }
 
+  /** What the empty list says. The showing category's own words when there is exactly one — "no
+   *  classes indexed yet" and "type to search the jars" are different situations, and a single
+   *  generic sentence for both is how an overlay comes to look broken while working correctly. */
+  const emptyNote = $derived.by<string>(() => {
+    const fallback = 'There is nothing here to search yet.';
+    if (active === 'all') return fallback;
+    const category = categories.find((c) => c.id === active);
+    if (!category) return fallback;
+    return sourceOf(category)?.emptyMessage ?? category.emptyMessage ?? fallback;
+  });
+
+  function selectTab(id: string) {
+    active = id;
+    cursor = 0;
+    // A module that exists for classes need not exist for files, and a filter still applied
+    // under a tab that cannot show it is an empty list with no visible reason.
+    facet = '';
+  }
+
   function cycleTab(delta: number) {
     const i = tabs.findIndex((t) => t.id === active);
-    active = tabs[(i + delta + tabs.length) % tabs.length].id;
-    cursor = 0;
+    selectTab(tabs[(i + delta + tabs.length) % tabs.length].id);
   }
+
+  // ── the preview of the highlighted row ───────────────────────────────────────
+  const anyPreview = $derived(categories.some((c) => c.preview));
+  let preview = $state<NavigatePreview | null>(null);
+  let previewing = $state(false);
+
+  /** The highlighted row's identity — what the preview keys off, so a re-render that produced
+   *  an equal-but-new row object does not re-read the file. */
+  const currentKey = $derived(rows[selected] ? `${rows[selected].category}:${rows[selected].id}` : '');
+
+  /**
+   * How long the selection must sit still before the preview is asked for.
+   *
+   * Walking a list with the arrow key passes over rows nobody wants to read, and what a preview
+   * costs is not knowable from here: a project file is a read, a library class can be a
+   * decompile. Without this, holding ↓ queues one of those per row it passes.
+   */
+  const PREVIEW_SETTLE_MS = 120;
+
+  $effect(() => {
+    void currentKey;
+    const row = untrack(() => rows[selected]);
+    const category = row ? categories.find((c) => c.id === row.category) : undefined;
+    if (!row || !category?.preview) {
+      preview = null;
+      previewing = false;
+      return;
+    }
+    let live = true;
+    previewing = true;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const answer = await category.preview!(row);
+          if (!live) return;
+          preview = answer;
+        } catch {
+          // Unreadable is not an error worth a message: the row itself still says what it is.
+          if (live) preview = null;
+        } finally {
+          if (live) previewing = false;
+        }
+      })();
+    }, PREVIEW_SETTLE_MS);
+    return () => { live = false; clearTimeout(timer); };
+  });
 
   function onKeydown(e: KeyboardEvent) {
     switch (e.key) {
@@ -371,9 +623,65 @@
   });
 </script>
 
-<Modal {onClose} width="700px" height="520px" padBody={false} ariaLabel={title}>
+<Modal
+  {onClose}
+  width={anyPreview ? '1000px' : '700px'}
+  height={anyPreview ? '600px' : '520px'}
+  padBody={false}
+  ariaLabel={title}
+>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div class="nv" role="group" onkeydown={onKeydown}>
+    <!-- The tabs come FIRST: they say what is being searched, and a control that changes the
+         meaning of the field below it belongs above that field, not under it. -->
+    <div class="nv-tabs">
+      <Tabs
+        items={tabs}
+        value={active}
+        variant="pill"
+        size="sm"
+        ariaLabel="What to search"
+        onSelect={selectTab}
+      />
+      <span class="nv-spacer"></span>
+      {#if parsed.directives.length}
+        <!-- Shown back, because a directive that silently did nothing is worse
+             than one that was never typed. -->
+        {#each parsed.directives as d (d.key + d.value)}
+          <span class="nv-directive">{d.key}:{d.value}</span>
+        {/each}
+      {/if}
+      <span class="nv-count">{rows.length}</span>
+      <!-- On the header row rather than beside the field: both narrow the same thing the tabs
+           do — which slice of the project is on the table — so they belong with them, and the
+           field row stays a field row. -->
+      {#if sourceOptions.length > 1}
+        <Select
+          value={sourceId}
+          options={sourceOptions}
+          size="sm"
+          highlight={sourceId !== sourceOptions[0]?.value}
+          ariaLabel={sourceLabel}
+          onchange={(v) => (sourceId = v)}
+        />
+      {/if}
+      {#if facetCategory && facetValues.length}
+        <Select
+          value={facet}
+          options={[
+            { value: '', label: `All ${facetCategory.facetLabel?.toLowerCase()}s` },
+            ...facetValues.map((v) => ({ value: v, label: v })),
+          ]}
+          size="sm"
+          highlight={!!facet}
+          searchable={facetValues.length > 12}
+          searchPlaceholder={`Filter ${facetCategory.facetLabel?.toLowerCase()}s…`}
+          ariaLabel={facetCategory.facetLabel}
+          onchange={(v) => (facet = v)}
+        />
+      {/if}
+    </div>
+
     <div class="nv-search">
       <Search size={14} />
       <input
@@ -390,28 +698,10 @@
         aria-controls="nv-results"
       />
       {#if loading || searching}<Spinner size={13} />{/if}
+      {#if fieldActions}<div class="nv-actions">{@render fieldActions()}</div>{/if}
     </div>
 
-    <div class="nv-tabs">
-      <Tabs
-        items={tabs}
-        value={active}
-        variant="pill"
-        size="sm"
-        ariaLabel="What to search"
-        onSelect={(id) => { active = id; cursor = 0; }}
-      />
-      <span class="nv-spacer"></span>
-      {#if parsed.directives.length}
-        <!-- Shown back, because a directive that silently did nothing is worse
-             than one that was never typed. -->
-        {#each parsed.directives as d (d.key + d.value)}
-          <span class="nv-directive">{d.key}:{d.value}</span>
-        {/each}
-      {/if}
-      <span class="nv-count">{rows.length}</span>
-    </div>
-
+    <div class="nv-body" class:nv-split={anyPreview}>
     <div class="nv-list" id="nv-results" role="listbox" aria-label="Results" bind:this={list}>
       {#if loading}
         <p class="nv-note">Reading…</p>
@@ -424,7 +714,7 @@
           {#if query.trim()}
             Nothing matches <b>{query.trim()}</b>.
           {:else}
-            There is nothing here to search yet.
+            {emptyNote}
           {/if}
         </p>
         {#if !query.trim()}
@@ -447,6 +737,7 @@
             <button
               type="button"
               class="nv-row"
+              class:nv-ext={row.external}
               class:nv-on={index === selected}
               data-row={index}
               role="option"
@@ -472,11 +763,35 @@
                 </span>
               {/if}
               <span class="nv-spacer"></span>
+              <!-- Where the row came from, always in the same slot: the module for something
+                   this build compiles, the project for a sibling of it, the artifact for
+                   something it merely depends on. -->
+              {#if row.origin}<span class="nv-origin">{row.origin}</span>{/if}
               {#if row.tag}<span class="nv-tag">{row.tag}</span>{/if}
             </button>
           {/each}
         {/each}
       {/if}
+    </div>
+
+    {#if anyPreview}
+      <div class="nv-preview">
+        {#if preview}
+          <div class="nv-pv-head" title={preview.title}>{preview.title}</div>
+          <div class="nv-pv-body">
+            <CodePreview
+              text={preview.text}
+              language={preview.language}
+              activeLine={preview.activeLine ?? null}
+            />
+          </div>
+        {:else if previewing}
+          <p class="nv-note">Reading…</p>
+        {:else}
+          <p class="nv-note">Nothing to preview.</p>
+        {/if}
+      </div>
+    {/if}
     </div>
 
     <div class="nv-foot">
@@ -511,6 +826,7 @@
     font-size: var(--font-size-lg);
   }
   .nv-field::placeholder { color: var(--text-disabled); }
+  .nv-actions { display: flex; gap: 4px; flex-shrink: 0; }
 
   .nv-tabs {
     display: flex;
@@ -538,7 +854,30 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* One column without a preview, two with it — so a host that supplies none gets exactly the
+     layout it had, and the split never appears as an empty half. */
+  .nv-body { flex: 1; min-height: 0; display: flex; }
+  .nv-body.nv-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .nv-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; }
+  .nv-body.nv-split .nv-list { border-right: 1px solid var(--border-subtle); }
+
+  .nv-preview { min-height: 0; display: flex; flex-direction: column; background: var(--bg-base); }
+  .nv-pv-head {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    font-family: var(--font-code);
+    font-size: var(--font-size-2xs);
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
+  }
+  /* No `overflow` of its own: the editor inside scrolls, and a second scroller around it is two
+     scrollbars for one document. */
+  .nv-pv-body { flex: 1; min-height: 0; }
 
   .nv-group {
     padding: 8px 14px 3px;
@@ -597,6 +936,36 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     padding: 0 4px;
+  }
+  /* Where the row is from. Filled rather than outlined, so it reads as a label on the row and
+     not as a second kind tag beside `nv-tag`. */
+  .nv-origin {
+    flex-shrink: 0;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--font-size-2xs);
+    color: var(--text-muted);
+    background: var(--bg-elevated);
+    border-radius: var(--radius-sm);
+    padding: 0 5px;
+  }
+
+  /* Not the user's own — a row that opens something read-only. Tinted in the same hue and for
+     the same reason the editor's tab strip tints an external tab: not an error (nothing is
+     wrong), but not an ordinary row of your project either. The bar on the left edge is what
+     makes a run of them legible as a block while scrolling. */
+  .nv-row.nv-ext {
+    background: color-mix(in srgb, var(--warning) 7%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in srgb, var(--warning) 45%, transparent);
+  }
+  .nv-row.nv-ext:hover { background: color-mix(in srgb, var(--warning) 12%, transparent); }
+  /* The selection has to win over the tint, and equal specificity would leave that to source
+     order — which is exactly the kind of thing that breaks when a rule moves. */
+  .nv-row.nv-ext.nv-on, .nv-row.nv-ext.nv-on:hover {
+    background: var(--bg-selected);
+    box-shadow: inset 2px 0 0 var(--warning);
   }
 
   .nv-note { padding: 14px; font-size: var(--font-size-sm); line-height: 1.55; color: var(--text-muted); }

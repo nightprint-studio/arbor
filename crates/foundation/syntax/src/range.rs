@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// takes; a conversion anywhere in between is a place for an off-by-one to hide
 /// in a file with accents in it. Frontends that need character offsets convert
 /// once, at the edge, against the same string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ByteRange {
     pub start: usize,

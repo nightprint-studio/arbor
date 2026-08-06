@@ -465,24 +465,34 @@
   <kbd>Ctrl</kbd> + <kbd>F</kbd> searches the current file. <kbd>Ctrl</kbd> + <kbd>Shift</kbd> +
   <kbd>F</kbd> opens <strong>Find in project</strong> — a backend-powered search across the whole
   project with <strong>Match case</strong>, <strong>Whole word</strong> and <strong>Regex</strong>
-  toggles, grouping hits by file with the match highlighted. Results stream in as the scan finds
-  them, so a large project fills the list instead of making you wait for it.
+  toggles beside the field (and, on a workspace, a fourth reaching into every member project),
+  grouping hits by file with the match highlighted. Results stream in as the scan finds them, so a
+  large project fills the list instead of making you wait for it.
 </p>
 <p>
   The selected hit is shown <strong>in context</strong> beside the list — the lines around it, with
   the match highlighted — which is what tells four identical-looking lines apart without opening
   four files. ↑/↓ move the selection (and the preview follows), <kbd>Enter</kbd> opens the hit.
-  A <strong>file mask</strong> narrows what is listed: <code>*.java</code>, or several at once as
-  <code>*.jsp, *.tag</code>. If a word is <strong>selected</strong> in the editor, it pre-fills the
-  search field (both here and in Find-in-file).
+  If a word is <strong>selected</strong> in the editor, it pre-fills the search field (both here and
+  in Find-in-file).
 </p>
 <p>
-  The <strong>📦 toggle</strong> also searches inside the <strong>dependency jars</strong> — their
-  XML, schemas, tag libraries and property files — which is how you find which artifact declares the
-  interceptor or the bean you are looking at. Those hits arrive after the project's own, and opening
-  one extracts it read-only. It is off by default and per-search rather than a setting: every
-  candidate entry has to be decompressed to be read, so it is a cost you take for the question you
-  are asking now.
+  The header row is everything that decides <strong>what is searched</strong>. The
+  <strong>Source</strong> picker — <strong>Project</strong>, <strong>Project &amp;
+  dependencies</strong>, <strong>Dependencies</strong> — says whose text is read. Then the two
+  narrowings: the <strong>module</strong>, on a multi-module build, and a <strong>file
+  mask</strong> (<code>*.java</code>, or several at once as <code>*.jsp, *.tag</code>). Those two
+  filter what came back rather than what is scanned, so changing either re-lists instantly instead
+  of re-running the search, and both are <strong>remembered per project</strong>. The count
+  between them says how many of the matches survived them.
+</p>
+<p>
+  Reading the <strong>dependency jars</strong> — their XML, schemas, tag libraries and property
+  files — is how you find which artifact declares the interceptor or the bean you are looking at.
+  Those hits are <strong>tinted</strong> and named by their <strong>artifact</strong>, arrive
+  after the project's own, and opening one extracts it read-only. It is per-search rather than a
+  setting: every candidate entry has to be decompressed to be read, so it is a cost you take for
+  the question you are asking now.
 </p>
 
 <h2>Go to class / file / symbol</h2>
@@ -492,7 +502,29 @@
   <strong>All</strong> tab that searches them together and keeps each one's best few under its own
   heading. <kbd>Ctrl</kbd> + <kbd>N</kbd>, <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> and
   <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Y</kbd> open it on Classes, Files and Symbols
-  respectively; <kbd>Tab</kbd> moves between them without reopening.
+  respectively; <kbd>Tab</kbd> moves between them without reopening. The tabs sit above the field
+  because they decide what it searches.
+</p>
+<p>
+  The selected entry is shown <strong>in context</strong> on the right — the declaration with the
+  lines around it, or a file’s head — syntax-coloured. A list of names says where there is an
+  <code>OrderDao</code>; it does not say whether it is <em>the</em> one you meant, and on a legacy
+  tree with four classes of that name that is the only question left. Walking with ↑/↓ re-reads as
+  you go; nothing is opened until <kbd>Enter</kbd>.
+</p>
+<p>
+  On a multi-module project a <strong>module</strong> dropdown appears on the header row of the
+  Classes and Files tabs. It lists only the modules that actually have something in them, and a
+  nested module wins over the parent that lists it — a class under <code>modules/core</code> is
+  filed there, not under <code>modules</code>. Switching tab clears it, since a module that exists
+  for classes need not exist for files. Every row also carries where it came from: the
+  <strong>module</strong> for something this build compiles, the <strong>project</strong> for a
+  sibling of it, the <strong>artifact</strong> for something it only depends on.
+</p>
+<p>
+  On a workspace, the toggle beside the field — the same one Find in project has — makes Classes
+  and Files read <strong>every member project</strong>, not just the active one. A member's class
+  index is built the first time you search it and reused after that.
 </p>
 <p>
   Matching is by <strong>subsequence</strong>, not substring: <code>agpo</code> finds
@@ -512,12 +544,25 @@
 
 <h3>Reaching what is inside the dependencies</h3>
 <p>
-  <strong>Search the dependencies too</strong> (Settings → Java) adds two more tabs:
-  <strong>Library classes</strong> and <strong>Library files</strong> — everything on the
-  dependency classpath that is nowhere in the tree. The framework annotation whose package you are
-  trying to remember, the <code>struts-default.xml</code> that declares the interceptor stack, the
-  schema an XML file is validated against. Each row says which <strong>artifact</strong> it came
-  from, because a classpath is where four versions of the same name live.
+  The <strong>Source</strong> picker on the header row decides whose code the Classes and Files
+  tabs are about: <strong>Project</strong>, <strong>Dependencies</strong>, or
+  <strong>Project &amp; dependencies</strong> — which ranks the two into one list rather than
+  making you check two tabs for one question. That is how you reach what is on the classpath and
+  nowhere in the tree: the framework annotation whose package you are trying to remember, the
+  <code>struts-default.xml</code> that declares the interceptor stack, the schema an XML file is
+  validated against.
+</p>
+<p>
+  A row from a dependency is <strong>tinted</strong> and says which <strong>artifact</strong> it
+  came from — a classpath is where four versions of the same name live, and what you can read is
+  not what you can change. The same picker is on <strong>Find in project</strong>, where
+  <em>Dependencies</em> alone is often what you want: the schema or the interceptor stack some
+  artifact declares, with every hit in your own tree being noise.
+</p>
+<p>
+  <strong>Search the dependencies too</strong> (Settings → Java) moves the <em>default</em> to
+  <em>Project &amp; dependencies</em>. It no longer decides whether the classpath is reachable —
+  that is one pick away, in front of you.
 </p>
 <p>
   Opening a library <em>class</em> shows its source the same way a stack-trace frame does: the real
@@ -526,9 +571,81 @@
   read-only, keeping its extension — so an XML still reads as XML.
 </p>
 <p>
-  These two are searched as you type rather than listed: a classpath is hundreds of thousands of
+  Classpath rows are searched as you type rather than listed: it is hundreds of thousands of
   entries, and nothing is fetched until there is a query. The first search after opening a project
   spends a moment reading the jars, and is instant after that.
+</p>
+
+<h2>Trees</h2>
+<p>
+  <kbd>Alt</kbd> + <kbd>9</kbd> opens <strong>Trees</strong> on the right — two readings of the
+  file in front of you, on two tabs.
+</p>
+
+<h3>Syntax</h3>
+<p>
+  What the parser actually built. It answers one question — <em>why did it read it that way?</em>
+  — which is why the anonymous nodes, the commas and the keywords, are shown by default: they are
+  noisy, and they are very often the answer. The ⧩ button hides them for the reading where they
+  are not. Each row shows the <strong>field</strong> a node fills in its parent when it has one,
+  which is the difference between “an identifier” and “the name of the method”. A node the parser
+  had to invent to keep going is marked <em>invented</em>, and a subtree that was cut short says
+  <em>truncated</em> rather than pretending the file ends there.
+</p>
+
+<h3>Model</h3>
+<p>
+  The <strong>AST</strong> — the same parse read in Java’s vocabulary, all the way down. Types,
+  members, and the <strong>bodies</strong>: every statement and every expression, as
+  <code>if</code>, <code>for each</code>, <code>call</code>, <code>local variable</code>,
+  <code>binary</code> rather than as the grammar’s node names.
+</p>
+<p>Four things separate it from the Syntax tab, and all four are the point:</p>
+<ul>
+  <li><strong>Punctuation is gone.</strong> Commas, brackets and semicolons are not concepts.</li>
+  <li><strong>Wrappers are unwrapped.</strong> A call statement is a call, not an
+    <code>expression_statement</code> containing one; <code>(a + b)</code> is an addition, not a
+    parenthesis around one.</li>
+  <li><strong>Every child says what part it plays</strong> — <code>condition</code>,
+    <code>then</code>, <code>receiver</code>, <code>argument</code>, <code>returns</code>. A
+    signature is <em>rows</em>, not a rendered string: each parameter has its own line, its own
+    span, and can be filtered and clicked like anything else.</li>
+  <li><strong>Resolved types are shown</strong>, which a parse tree cannot hold at all:
+    <code>conn : java.sql.Connection</code>. Where a bare name turns out to be a
+    <em>class</em> rather than a value the row says <code>Files → java.nio.file.Files</code> with
+    an arrow instead of a colon — that is the static-versus-instance distinction, visible.</li>
+</ul>
+<p>
+  Types and their annotations are shown, modifiers get their own column, and a member nobody
+  wrote is marked <em>generated</em>: a record’s accessors and canonical constructor. Those are
+  genuinely part of what Bennu understands, so leaving them out would make the tree disagree with
+  completion; selecting one takes you to the declaration that owes it rather than pretending it
+  has source of its own.
+</p>
+<p>
+  Nothing is dropped silently. A construct the lowering has no entry for keeps its grammar name
+  and its children rather than disappearing — the tree is never wrong, only occasionally less
+  pretty.
+</p>
+<p>
+  Type annotations need the classpath, so on a project that is still indexing the tree is
+  complete and untyped rather than absent, and fills in as the index lands.
+</p>
+
+<h3>Both tabs</h3>
+<p>
+  They follow the <strong>buffer</strong>, not the file on disk, because the moment you want a
+  tree is the moment you have typed something that read differently than you expected. Selection
+  travels both ways: clicking a node selects its bytes in the editor, and moving the caret opens
+  the tree down to what holds it — and scrolls to it, since a node revealed below the fold is a
+  reveal you cannot see. The filter box matches on kind, on the field column and on the text at
+  once, so “the method called <code>place</code>” is one query rather than two.
+</p>
+<p>
+  Both draw whatever Bennu can read — <strong>Java</strong> today. For a file it edits but does
+  not parse, each says so in its own words (“no grammar for XML yet”, “no declaration model for
+  XML yet”) instead of showing you an empty panel, because the first is a fact about the tool and
+  the second reads as one about your file.
 </p>
 
 <h2>Mojibake check</h2>

@@ -50,6 +50,7 @@
     initialState,
     placeholder,
     wrap = false,
+    lineNumbers = true,
     keyBindings,
     marks = [],
     lineHighlights = [],
@@ -110,6 +111,15 @@
      * of the thing you were typing. Static at mount, like the rest of the set.
      */
     wrap?: boolean;
+    /**
+     * Show the line-number gutter. `true` by default, because a buffer is navigated by line.
+     *
+     * Turn it off for a **short input** that wants an editor for the highlighting and the
+     * completion rather than for the chrome — a structural query is two or three lines, and a
+     * gutter numbering them is a column of noise beside a field. Static at mount, like the rest
+     * of the set.
+     */
+    lineNumbers?: boolean;
     /**
      * Keys this host claims back from CodeMirror, e.g. `Mod-Enter` to run a
      * statement. Installed above every built-in binding — see the option of the
@@ -536,7 +546,7 @@
   function mount(target: HTMLDivElement) {
     const { extensions } = createCodeEditorExtensions(language, {
       readOnly, onGoto, rulerColumn, emmet, indentGuides, stickyScroll, scrollbarOverview,
-      keyBindings,
+      keyBindings, lineNumbers,
     });
 
     const updateListener = EditorView.updateListener.of((u) => {
@@ -764,6 +774,24 @@
       effects: EditorView.scrollIntoView(pos, { y: 'center' }),
     });
     view.focus();
+  }
+
+  /**
+   * Bring a line into view **without taking the focus**, and without moving the caret.
+   *
+   * The counterpart of {@link scrollToLineCol}, which exists to *go* somewhere and therefore
+   * ends by focusing. This one is for an editor the user is **looking at rather than working
+   * in** — a preview beside a search field. There, focusing is not a detail: every arrow key
+   * would pull the caret out of the field being typed into, and the field is the whole point.
+   *
+   * No selection change either: a selection the user did not make is a selection they then have
+   * to undo if they do click in.
+   */
+  export function revealLine(line: number) {
+    if (!view) return;
+    const doc = view.state.doc;
+    const ln = Math.max(1, Math.min(line, doc.lines));
+    view.dispatch({ effects: EditorView.scrollIntoView(doc.line(ln).from, { y: 'center' }) });
   }
 
   /** Imperatively replace the diagnostics (byte spans → lint), e.g. after a fresh

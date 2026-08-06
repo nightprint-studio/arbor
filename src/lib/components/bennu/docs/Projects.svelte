@@ -51,8 +51,9 @@
   <em>Manage workspaces…</em> in the dropdown) is where you create, rename, recolor and delete
   workspaces and add or remove their member projects. <strong>Open project</strong>
   (<kbd>Ctrl</kbd> + <kbd>O</kbd>) resets the active workspace to a single project; the whole set is
-  remembered and reopened on the next launch. <strong>Find in project</strong> gains a scope toggle
-  to search the active project only or the <strong>entire workspace</strong>.
+  remembered and reopened on the next launch. <strong>Find in project</strong> and <strong>Go
+  to</strong> both gain a toggle beside their field that reaches into every member project at
+  once, and a row from another one says which.
 </p>
 
 <h2>New files</h2>
@@ -321,8 +322,32 @@
   by controller or by method — filters across paths, handlers, return types <em>and</em> parameter
   names, and each route expands to show what it takes: which values come from the path, the query
   string or the body, which are optional, and what each is called when the annotation renames it.
-  Verbs are coloured the way an API console colours them, so the list is skimmable rather than
-  readable.
+  Verbs are coloured the way an API console colours them and the <code>{'{'}variables{'}'}</code>
+  in a path are lit apart from its literal segments, so the list is skimmable rather than readable.
+  The count beside the filter says how much of it survived what you typed.
+</p>
+<p>
+  <strong>A type is a door.</strong> Any chip naming a composite type — the return type of a route,
+  the type of a parameter — expands into that class's <strong>fields</strong>, and each field that
+  is itself composite expands in turn, as deep as you keep clicking. An interface, or a class read
+  out of a jar, is listed by the <strong>properties its getters expose</strong> and says so.
+  Wrappers are seen through: a handler declared to return <code>ResponseEntity&lt;OrderDto&gt;</code>
+  opens on the <code>OrderDto</code>. Nothing is resolved until you ask — a catalog of two hundred
+  routes names two hundred types and you came to look at one.
+</p>
+<p>
+  <strong>Export</strong> (the ⭳ in the panel header) takes the list out of Bennu as
+  <strong>CSV</strong>, <strong>JSON</strong> or a <strong>Markdown table</strong>, to the
+  clipboard or to a file you name. What leaves is <em>what is on screen</em> — the filter and the
+  grouping applied — with each route's parameters flattened onto its row, so the spreadsheet you
+  hand to somebody else does not send them back to the panel to see what a route takes.
+</p>
+<p>
+  The media types a mapping produces are shown by their <strong>short names</strong> —
+  <code>JSON</code>, <code>SSE</code>, <code>XML</code>, <code>form</code> — rather than as
+  <code>MediaType.APPLICATION_JSON_VALUE</code>, which is thirty characters of ceremony around one
+  fact and was the widest thing on the row. An unfamiliar one keeps its own spelling: an unusual
+  media type is exactly the one worth seeing.
 </p>
 <p>
   <strong>The panels</strong>, all but Endpoints from the command palette:

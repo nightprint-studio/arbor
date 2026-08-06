@@ -8,7 +8,7 @@
  * Tool-window layout (IntelliJ New UI):
  *   • LEFT rail (top)     — Project (tree), Structure (symbols), Dependencies.
  *   • LEFT rail (bottom)  — bottom-dock toggles: Build, Run, Problems, TODO, Terminal.
- *   • RIGHT rail          — Maven, Tests (top); the Forms toggle (bottom).
+ *   • RIGHT rail          — Maven, Tests, Trees (top); the Forms toggle (bottom).
  *   • BOTTOM dock         — Build · Run · Problems · TODO · Forms · Terminal, one panel per
  *                           rail button (Build and Problems share one).
  *
@@ -30,8 +30,11 @@ export type LeftPanel = 'project' | 'structure' | 'dependencies';
  * `tests` is the **catalogue** — every test the project declares, sortable and filterable, with
  * a run button per row. What a run *did* is deliberately not here: that is an event, and it
  * lives as a tab of the Run console beside the other things you have launched.
+ *
+ * `ast` is the syntax tree of the buffer in front of you — what the grammar actually built,
+ * which is the only thing that answers "why did it parse that way".
  */
-export type RightPanel = 'maven' | 'tests';
+export type RightPanel = 'maven' | 'tests' | 'ast';
 /** Bottom tool windows — one panel per rail button, except Build and Problems which share
  *  one. The Forms inspector lives here (wide, horizontal data) rather than in a narrow side
  *  panel; its toggle sits in the right rail's bottom cluster.
@@ -109,6 +112,10 @@ function createBennuUiStore() {
   // The breakpoint list — every breakpoint of the project in one place: disable one, drop one,
   // or add an exception breakpoint, which the gutter has nowhere to express.
   let breakpointsOpen = $state(false);
+  // Structural search & replace (Ctrl+Shift+M) — find code by its SHAPE, count it, rewrite it.
+  // A modal rather than a panel: it is a thing you go and do, with a wide answer, and it does not
+  // belong open beside the editor the way a tool window does.
+  let ssrOpen = $state(false);
   // Go-to navigator — one overlay over classes / files / symbols; the shortcut that opened it
   // picks the starting tab (Ctrl+N = class, Ctrl+Shift+N = file, Ctrl+Shift+Y = symbol).
   let navOpen = $state(false);
@@ -194,6 +201,7 @@ function createBennuUiStore() {
     get projectConfigOpen() { return projectConfigOpen; },
     get runConfigOpen() { return runConfigOpen; },
     get breakpointsOpen() { return breakpointsOpen; },
+    get ssrOpen() { return ssrOpen; },
     get navOpen()      { return navOpen; },
     get navMode()      { return navMode; },
     /** Query to pre-fill the Find-in-project field with (from a selection), or ''. */
@@ -273,6 +281,8 @@ function createBennuUiStore() {
     closeRunConfig()     { runConfigOpen = false; },
     openBreakpoints()    { breakpointsOpen = true; },
     closeBreakpoints()   { breakpointsOpen = false; },
+    openSsr()            { ssrOpen = true; },
+    closeSsr()           { ssrOpen = false; },
     /** Open the Go-to navigator on `mode`'s tab, optionally pre-filling the query (e.g. the
      *  editor selection). Every tab is reachable with Tab once it is open. */
     openNav(mode: NavMode, initial = '') { navMode = mode; navInitial = initial; navOpen = true; },

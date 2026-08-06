@@ -245,6 +245,15 @@ pub struct RunArgs {
     /// Extra environment variables applied to the child (merged over the inherited env).
     #[serde(default)]
     pub env: Option<std::collections::HashMap<String, String>>,
+    /// The Maven scope the dependencies are resolved at — `"runtime"` (what a packaged
+    /// application sees), `"compile"`, `"test"`, or `""` for every scope.
+    ///
+    /// `None` from an older caller means **runtime**, not "every scope": the every-scope
+    /// classpath is the *index's*, and launching with it puts test- and provided-scoped
+    /// libraries in front of the JVM that Maven would never have supplied. See
+    /// [`bennu_proto::prelude::RunConfig::classpath_scope`].
+    #[serde(default)]
+    pub classpath_scope: Option<String>,
     /// Launch under the debugger: the JVM gets the JDWP agent and connects back to a port
     /// opened here first (see [`crate::debug`]), and the session carries this run's id.
     #[serde(default)]
@@ -276,7 +285,10 @@ fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
     // The module the class lives in, if any — an empty string is "the root", not a directory
     // called "".
     let module = args.module.as_deref().map(str::trim).filter(|m| !m.is_empty());
-    let classpath = run_classpath(&root, module, java_home.as_deref());
+    // `None` is runtime, not every-scope: a caller that says nothing gets what Maven would give
+    // it, which is the safe direction to default in.
+    let scope = args.classpath_scope.as_deref().unwrap_or("runtime");
+    let classpath = run_classpath(&root, module, java_home.as_deref(), scope);
 
     // Working dir: an explicit non-empty override, else the module's own directory (the root
     // when there is none) — a program that reads `./config` means its module's.
@@ -821,7 +833,16 @@ pub(crate) fn forget_build_stamp(root: &str) {
 ///
 /// This used to take only the root, which on a multi-module project is the one directory
 /// that never contains anything: a reactor root is packaging `pom` and compiles nothing.
-fn run_classpath(root: &Path, module: Option<&str>, java_home: Option<&Path>) -> String {
+///
+/// `scope` is the Maven scope the dependencies are resolved at — `"runtime"` for what a
+/// packaged application sees, `""` for every scope (the index's own view). See
+/// [`bennu_proto::prelude::RunConfig::classpath_scope`].
+fn run_classpath(
+    root: &Path,
+    module: Option<&str>,
+    java_home: Option<&Path>,
+    scope: &str,
+) -> String {
     let sep = if cfg!(windows) { ";" } else { ":" };
     let base = module.map(|m| root.join(m)).unwrap_or_else(|| root.to_path_buf());
 
@@ -839,34 +860,61 @@ fn run_classpath(root: &Path, module: Option<&str>, java_home: Option<&Path>) ->
     }
     push_classes(root, &mut parts);
 
-    // The dependency jars the INDEX already resolved when the project was opened. Free: they
-    // are in memory, and they are the same jars completion and navigation resolve against, so
-    // a run cannot disagree with the editor about what is on the classpath.
+    // ── the dependency jars ────────────────────────────────────────────────────
     //
-    // This used to build a `MavenClasspathCache::new()` here — a cache with nothing in it, on
-    // every call — so pressing ▷ shelled out to `mvn dependency:build-classpath` and the run
-    // did not start until Maven had finished, every single time.
-    let mut jars = IndexService::global().dep_jars_of(&root.display().to_string());
+    // Which set depends on the scope asked for, and the distinction is the whole reason this
+    // parameter exists:
+    //
+    //   * **every scope** — the index's own list, already in memory and free. It is what
+    //     completion and navigation resolve against, so the run agrees with the editor.
+    //   * **a narrower scope** — a resolve of its own. The index's list cannot be filtered
+    //     down to it: it is a flat list of paths with the scopes already thrown away, and
+    //     guessing which jars are test-only from their names is how you drop a real dependency.
+    //
+    // The narrow one is the default (`runtime`) because launching with the editing classpath
+    // hands the JVM libraries Maven would never put there — see `RunConfig::classpath_scope`.
+    let mut jars = if scope.is_empty() {
+        IndexService::global().dep_jars_of(&root.display().to_string())
+    } else {
+        Vec::new()
+    };
+
     if jars.is_empty() {
-        // No project open on this root, or Maven never resolved for it. Shell out — slow, but
-        // it is that or a run with no dependencies at all.
         let mut opts = MavenResolveOpts::default();
         opts.mvn_path = resolve_mvn(root);
         opts.offline = true;
+        opts.scope = (!scope.is_empty()).then(|| scope.to_string());
         if let Some(jh) = java_home {
             opts.java_home = Some(jh.to_path_buf());
         }
-        let mut cache = MavenClasspathCache::new();
         // The MODULE's own dependencies when it has a pom of its own; the root's otherwise.
         // Chosen by asking whether the pom EXISTS rather than by letting the resolve fail —
         // a failed resolve is a Maven invocation, and falling back on it means paying twice.
         let dir = if base.join("pom.xml").is_file() { base.as_path() } else { root };
-        if let Ok(cp) = cache.get(dir, &opts) {
+        // A cache that OUTLIVES the call. It used to be built fresh here — a cache with nothing
+        // in it, on every launch — so pressing ▷ shelled out to Maven and the run did not start
+        // until it had finished, every single time. Keyed by pom **and scope**, so a runtime
+        // resolve for a launch never becomes the answer the index gets.
+        if let Ok(cp) = run_classpath_cache()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(dir, &opts)
+        {
             jars = cp.jars.iter().map(|j| j.display().to_string()).collect();
         }
     }
     parts.extend(jars);
     parts.join(sep)
+}
+
+/// The launch classpaths resolved so far, across launches.
+///
+/// Per session and per (pom, scope): the first ▷ of a configuration pays Maven once, every one
+/// after it is instant until the pom is edited.
+fn run_classpath_cache() -> &'static std::sync::Mutex<MavenClasspathCache> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<MavenClasspathCache>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(MavenClasspathCache::new()))
 }
 
 /// Every module directory of the Maven reactor rooted at `root`, absolute, in declaration
@@ -1388,7 +1436,7 @@ mod tests {
         // No mvn / no deps needed: a nonexistent project resolves no dep jars, so the
         // classpath is just target/classes — which is what we assert leads.
         let root = Path::new(if cfg!(windows) { r"C:\definitely\missing\proj" } else { "/definitely/missing/proj" });
-        let cp = run_classpath(root, None, None);
+        let cp = run_classpath(root, None, None, "runtime");
         let sep = if cfg!(windows) { ";" } else { ":" };
         let first = cp.split(sep).next().unwrap();
         assert!(first.ends_with("classes"), "target/classes must lead: {cp}");
@@ -1400,7 +1448,7 @@ mod tests {
     #[test]
     fn run_classpath_leads_with_the_module() {
         let root = Path::new(if cfg!(windows) { r"C:\definitely\missing\proj" } else { "/definitely/missing/proj" });
-        let cp = run_classpath(root, Some("services/core"), None);
+        let cp = run_classpath(root, Some("services/core"), None, "runtime");
         let sep = if cfg!(windows) { ";" } else { ":" };
         let entries: Vec<&str> = cp.split(sep).collect();
         assert!(

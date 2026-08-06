@@ -43,8 +43,21 @@ bennu-check = { path = "../check" }
 # so a single-file edit patches just the changed file's records in — no whole-project walk.
 bennu-index = { path = "../index" }
 # The structural symbol extractor (`extract_symbols`) — the fresh-scan class index
-# (`bennu_class_index`) parses each `.java` source into its declared types directly.
+# (`bennu_class_index`) parses each `.java` source into its declared types directly. Also the
+# Java `Language` itself (`java_language`), which the syntax-tree panel walks: the grammar's
+# version is a workspace-wide fact (`tree-sitter` is a `links` native lib), so it is pinned
+# there and asked for here rather than depended on twice.
 bennu-java = { path = "../java" }
+# The language-agnostic tree walk behind the syntax-tree panel (`ast.rs`). The same crate
+# Picus's panel uses — one shape across the seam, one component drawing both.
+arbor-syntax = { path = "../../../foundation/syntax" }
+# The structural search & replace language: parsing a query, matching it, grouping the hits,
+# rendering a replacement. Knows no Java and no filesystem — `ssr.rs` supplies the grammar, the
+# walk and a `TypeOracle` over the resolver.
+bennu-ssr = { path = "../ssr" }
+# Only to name `Language` in the grammar registry's signature — the grammar itself comes from
+# `bennu-java`. Pinned to the workspace's single `links = "tree-sitter"` version.
+tree-sitter = "0.25"
 # The Alt+Enter intention transforms (pure Java source rewrites: parameterize logging,
 # NP-safe equals) — thin `#[handler]` wrappers drive these.
 bennu-intentions = { path = "../intentions" }

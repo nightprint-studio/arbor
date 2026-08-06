@@ -101,6 +101,7 @@ mod tests {
     /// A type with the given annotations (name only, no value) and fqn.
     fn typed(name: &str, fqn: &str, annotations: Vec<Annotation>) -> TypeDecl {
         TypeDecl {
+            span: None, // built by hand, not read from a file
             name: name.to_string(),
             fqn: fqn.to_string(),
             kind: bennu_java::prelude::TypeKind::Class,

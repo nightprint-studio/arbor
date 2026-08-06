@@ -712,6 +712,26 @@
             />
           </FormField>
 
+          <!-- `runtime` is what `mvn spring-boot:run` and a packaged application see, and it is
+               the default because the alternative is a launch that quietly differs from
+               production. The other choices exist because the exceptions are real — a launcher
+               that wants a test-scoped H2 is a legitimate thing to want. -->
+          <FormField
+            label="Classpath"
+            hint="Which Maven scopes the launch sees. Editing and completion always see every scope — this is only the run."
+          >
+            <Select
+              value={selected.classpathScope}
+              options={[
+                { value: 'runtime', label: 'Runtime — what mvn spring-boot:run sees' },
+                { value: 'compile', label: 'Compile' },
+                { value: 'test', label: 'Test — adds the test-scoped dependencies' },
+                { value: '', label: 'Every scope — the same classpath the editor indexes' },
+              ]}
+              onchange={(v) => patch({ classpathScope: v })}
+            />
+          </FormField>
+
           <!-- Off by default and per-configuration, because it is the only way to stop in
                start-up code AND it means every 🐞 launch of this configuration begins frozen.
                The launch you press fifty times a day should not. -->

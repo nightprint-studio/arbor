@@ -143,6 +143,56 @@ export interface DecompiledLocation {
   can_download: boolean;
 }
 
+/** One member of a type — a declared field, or the property a getter exposes. */
+export interface TypeMember {
+  name: string;
+  /** As it reads: `List<Order>`, `String`. */
+  type_text: string;
+  /** `field` | `property`. A property is what an interface (or a bytecode-only class) exposes
+   *  instead of fields, and saying which keeps the reading honest. */
+  kind: string;
+  /** The qualified type to ask about next when this member holds something worth opening.
+   *  `null` for a `String`, an `int`, an enum — what makes a row expandable or not. */
+  expand: string | null;
+  inherited: boolean;
+}
+
+/** What a type is and what it holds. */
+export interface TypeShape {
+  /** The qualified name it resolved to. */
+  name: string;
+  simple: string;
+  /** `class` | `interface` | `enum` | `record` | `annotation`. */
+  kind: string;
+  /** Where the project declares it — absent for a library type. */
+  file: string | null;
+  line: number | null;
+  members: TypeMember[];
+}
+
+/**
+ * What is inside the type `typeText` names, resolved against `file`'s imports.
+ *
+ * **One level per call, and only when asked.** A catalog is hundreds of rows naming hundreds of
+ * types; resolving them to build the list would make the panel pay, on open, for the two you were
+ * going to look at. And a DTO graph can be deep and cyclic, so the recursion is the caller's —
+ * it stops when the user stops clicking.
+ *
+ * Wrappers are unwrapped first: `ResponseEntity<QFormDto>` is a `QFormDto`, and the envelope is
+ * never the thing you wanted to open.
+ *
+ * `null` is the ordinary answer for most types — a scalar, a type variable, a class the classpath
+ * cannot reach — and means "offer no expansion", not "something failed".
+ * Wire: `bennu_type_shape` — `{ root, file, type_text }`.
+ */
+export function typeShape(
+  root: string,
+  file: string,
+  typeText: string,
+): Promise<TypeShape | null> {
+  return bennu('bennu_type_shape', { args: { root, file, type_text: typeText } });
+}
+
 /** Resolve a **library/JDK type** `name` (a simple name resolved via `source`'s imports, or a dotted
  *  FQCN) to a source view on disk — the real `.java` (JDK `src.zip` / a downloaded dependency
  *  `-sources.jar`) when available, else a decompiled-from-bytecode stub. `null` when it doesn't

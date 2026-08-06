@@ -10,6 +10,8 @@
   <li><kbd>Alt</kbd> + <kbd>0</kbd> — toggle <strong>Build</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>R</kbd> — toggle <strong>Run</strong> — the launched program's console, and the debugger when it is one (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>5</kbd> — toggle <strong>Tests</strong> (the catalogue, right rail)</li>
+  <li><kbd>Alt</kbd> + <kbd>9</kbd> — toggle <strong>Trees</strong> — the parse and the declaration model (right rail)</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd> — <strong>structural search &amp; replace</strong></li>
   <li><kbd>Alt</kbd> + <kbd>6</kbd> — toggle <strong>Problems</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>7</kbd> — toggle <strong>TODO</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>3</kbd> — toggle <strong>Forms</strong> — JSP form analysis (bottom dock)</li>

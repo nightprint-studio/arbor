@@ -45,6 +45,13 @@ Three decisions worth knowing:
 cursor" needs. It walks the real tree rather than the outline, so it is correct even where the
 outline was truncated.
 
+`SyntaxNode` is also **constructible by hand**, deliberately. A product that derives a *semantic*
+model from its parse can express it in this shape and reuse the panel that draws trees rather than
+growing a second one — Bennu renders its Java declaration model beside the parse that way.
+`synthesized` exists only for such a tree: it marks a node no source backs (a record's accessors,
+a Lombok getter), whose range points at whatever declares it. `outline` never sets it, because a
+parse tree is all source by definition.
+
 ### Islands
 
 Some grammars hand back a region as **one token**: PostgreSQL's `$$ … $$` routine body is a single

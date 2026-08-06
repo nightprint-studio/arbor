@@ -1746,6 +1746,114 @@ impl IndexService {
         })
     }
 
+    /// The **dotted** static type of the expression spanning `[start, end)` in `source`.
+    ///
+    /// The bridge structural search uses for a `$x: com.acme.Order$` constraint. `None` means the
+    /// classpath does not reach far enough to say — which the caller must report as *undecided*,
+    /// never as "no": a filter that quietly drops what it could not read produces a count that
+    /// looks complete and is short by however much the project failed to resolve.
+    pub fn expression_type(
+        &self,
+        file: &str,
+        source: &str,
+        start: usize,
+        end: usize,
+    ) -> Option<String> {
+        let slot = self.slot_for_file(file).or_else(|| self.sole_slot())?;
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.infer_type_binary(source, start, end).map(|b| b.replace('/', "."))
+    }
+
+    /// The AST of `source`, typed against the project `file` belongs to.
+    ///
+    /// Falls back to an **untyped** tree rather than to nothing when no project is open: the
+    /// structure is the parse's, and only the type annotations need a classpath, so a file opened
+    /// on its own still gets a complete tree.
+    pub fn ast_of(&self, file: &str, source: &str) -> bennu_java::prelude::AstNode {
+        let Some(slot) = self.slot_for_file(file).or_else(|| self.sole_slot()) else {
+            return bennu_java::prelude::lower_ast(source, None);
+        };
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.ast_of(source)
+    }
+
+    /// The **dotted** name of the type that the text spanning `[start, end)` in `source` *names*,
+    /// or `None` when it names none.
+    ///
+    /// The companion of [`Self::expression_type`], and the pair is what answers structural
+    /// search's `@type` / `@value`: `Files.copy(a, b)` and `files.copy(a, b)` are the same shape,
+    /// and only asking both questions tells them apart. `None` here means "nothing on the
+    /// classpath answers to this name", which the caller must still report as *undecided* — the
+    /// classpath may simply not reach that far.
+    pub fn type_name_at(
+        &self,
+        file: &str,
+        source: &str,
+        start: usize,
+        end: usize,
+    ) -> Option<String> {
+        let text = source.get(start..end)?;
+        let slot = self.slot_for_file(file).or_else(|| self.sole_slot())?;
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.type_named(source, text).map(|b| b.replace('/', "."))
+    }
+
+    /// What a type **looks like inside** — its declared members, resolved.
+    ///
+    /// `type_text` is a type as *written* (`QFormDto`, `ResponseEntity<Order>`, `List<Item>`) or a
+    /// qualified name; `file` supplies the imports a bare name is resolved against. The wrapper is
+    /// unwrapped first, because a handler returning `ResponseEntity<Order>` is a handler that
+    /// returns an `Order` and the envelope is never what you wanted to look at.
+    ///
+    /// `None` when nothing resolves — a type parameter, a primitive, a class the classpath cannot
+    /// reach. That is a normal answer and not an error: the caller offers no expansion rather than
+    /// reporting a failure.
+    pub fn type_shape(&self, file: &str, type_text: &str) -> Option<ResolvedType> {
+        let element = element_type_of(type_text);
+        if element.is_empty() {
+            return None;
+        }
+        let slot = self.slot_for_file(file).or_else(|| self.sole_slot())?;
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        // Only a bare name needs the file's imports, and only then is it worth a read. A caller
+        // drilling down sends the qualified name it was handed, which resolves on its own.
+        let source = if element.contains('.') {
+            String::new()
+        } else {
+            std::fs::read_to_string(file).unwrap_or_default()
+        };
+        let binary = provider.type_named(&source, &element)?;
+        let members = provider.members_of(&binary)?;
+        Some(ResolvedType { binary, members })
+    }
+
+    /// Whether `candidate` is `wanted` or a subtype of it — the `+` in a type constraint.
+    ///
+    /// Both may be written in either form; the provider normalises. `false` when the hierarchy
+    /// cannot be read, for the reason spelled out on `NativeJavaProvider::is_subtype_of`.
+    pub fn is_subtype_of(&self, root: &str, candidate: &str, wanted: &str) -> bool {
+        let Some(slot) = self.slot_for_file(root).or_else(|| self.sole_slot()) else {
+            return false;
+        };
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.is_subtype_of(candidate, wanted)
+    }
+
     /// The dependency jars resolved for `root`, or empty when no project is open there / Maven
     /// never resolved. The classpath as it actually is, which is what any per-artifact reading
     /// (the library-bean scan) has to walk.
@@ -3133,6 +3241,58 @@ fn rel_kind_label(kind: bennu_web::prelude::RelKind) -> &'static str {
         RelKind::InterceptorRefToDef => "interceptor-ref",
         RelKind::InterceptorToClass => "interceptor-class",
         RelKind::MethodToStatement => "method-statement",
+    }
+}
+
+/// A type name resolved to what it actually holds — see [`IndexService::type_shape`].
+pub struct ResolvedType {
+    /// The binary name it resolved to (`com/acme/QFormDto`).
+    pub binary: String,
+    /// Its declared members plus the links to its supertypes.
+    pub members: Arc<bennu_java::prelude::ClassMembers>,
+}
+
+/// The type actually worth looking at inside a type as written.
+///
+/// A handler declared to return `ResponseEntity<QFormDto>` returns a `QFormDto`; the envelope is
+/// never the thing you wanted to open. Same for `List<Order>`, `Optional<Order>`, `Order[]` and
+/// the wrappers a reactive stack adds (`Mono`, `Flux`). Nesting is unwrapped repeatedly, so
+/// `ResponseEntity<List<Order>>` still lands on `Order`.
+///
+/// Deliberately textual and deliberately small: it runs on the type as *written* in the source,
+/// before anything has been resolved, and the alternative — resolving the wrapper and asking the
+/// classpath for its type argument — needs an answer to a question the caller has not asked yet.
+fn element_type_of(type_text: &str) -> String {
+    /// Wrappers whose single type argument is the interesting type.
+    const ENVELOPES: [&str; 10] = [
+        "ResponseEntity", "Optional", "List", "Set", "Collection", "Iterable", "Mono", "Flux",
+        "Callable", "CompletableFuture",
+    ];
+    let mut text = type_text.trim().trim_end_matches("[]").trim().to_string();
+    // Bounded rather than `loop`: a malformed or adversarial type text must not spin, and no
+    // real signature nests envelopes more than a few deep.
+    for _ in 0..4 {
+        let Some(open) = text.find('<') else { break };
+        if !text.ends_with('>') {
+            break;
+        }
+        let head = text[..open].trim();
+        let simple = head.rsplit('.').next().unwrap_or(head);
+        if !ENVELOPES.contains(&simple) {
+            break;
+        }
+        let inner = text[open + 1..text.len() - 1].trim();
+        // A two-argument envelope (`Map<K,V>`) has no single interesting type — stop rather than
+        // guess which half was meant.
+        if inner.contains(',') {
+            break;
+        }
+        text = inner.trim_end_matches("[]").trim().to_string();
+    }
+    // Whatever is left keeps its own generics off: the members of `List<Order>` are `List`'s.
+    match text.find('<') {
+        Some(cut) => text[..cut].trim().to_string(),
+        None => text,
     }
 }
 

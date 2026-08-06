@@ -179,6 +179,16 @@ export interface RunOptions {
    *  run configuration asked for it — it is the only way to stop in start-up code, and it
    *  means the launch begins frozen. */
   debugSuspend?: boolean;
+  /**
+   * Which Maven scopes reach the run classpath — `'runtime'` (the default), `'compile'`,
+   * `'test'`, or `''` for every scope.
+   *
+   * Omitted means **runtime**, not every scope. The every-scope classpath is the one the index
+   * uses so completion can see into tests; launching with it hands the JVM test- and
+   * provided-scoped libraries Maven would never supply, and a `@ConditionalOnClass` guarding a
+   * bean on one of them then fires here and nowhere else.
+   */
+  classpathScope?: string;
 }
 
 /** Launch `java <vm…> -cp <target/classes:deps> <mainClass> <args…>`, streaming stdout/stderr
@@ -197,6 +207,7 @@ export function run(root: string, mainClass: string, opts: RunOptions = {}): Pro
       env: opts.env ?? {},
       debug: opts.debug ?? false,
       debug_suspend: opts.debugSuspend ?? false,
+      classpath_scope: opts.classpathScope ?? 'runtime',
     },
   });
 }
@@ -254,6 +265,15 @@ export function indexStats(root: string): Promise<IndexStats> {
   return bennu('bennu_index_stats', { args: { root } });
 }
 
+/**
+ * Which text a search reads.
+ *
+ * `dependencies` — the jars alone — is the one a boolean could not express, and it is the shape
+ * of a real question: the schema or the interceptor stack that some artifact declares, where
+ * every hit in your own tree is noise.
+ */
+export type FindSources = 'project' | 'project_and_dependencies' | 'dependencies';
+
 /** Start a **progressive** project-wide search for `query`. Fire-and-forget: results
  *  stream back as `arbor://bennu/find-progress` events tagged with `searchId`
  *  (`{ id, hits?: FindHit[], done?: boolean, capped?: boolean }`) as the scan walks the
@@ -263,7 +283,7 @@ export function indexStats(root: string): Promise<IndexStats> {
  *  one per search) and ignores events from superseded ids. Resolves once the scan has
  *  been scheduled (not when it finishes — the terminal `done` event signals that).
  *  Wire: `bennu_find_in_files` — `FindInFilesArgs { root, query, regex, case_sensitive,
- *  whole_word, search_id }`. */
+ *  whole_word, sources, search_id }`. */
 export function findInFiles(
   root: string,
   query: string,
@@ -272,10 +292,10 @@ export function findInFiles(
     caseSensitive: boolean;
     wholeWord: boolean;
     extraRoots?: string[];
-    /** Also search the text entries of the project's dependency jars. Off by default: every
-     *  candidate entry has to be decompressed to be read, so it is a different order of cost
-     *  from walking the tree. Those hits arrive last, and their `file` is `<jar>!/<entry>`. */
-    includeDependencies?: boolean;
+    /** Which text is read. Reading the **dependency jars** is a different order of cost from
+     *  walking the tree — every candidate entry is decompressed — so `project` is the default;
+     *  when both are read the jars come last, and a jar hit's `file` is `<jar>!/<entry>`. */
+    sources?: FindSources;
   },
   searchId: string,
 ): Promise<void> {
@@ -287,8 +307,34 @@ export function findInFiles(
       regex: opts.regex,
       case_sensitive: opts.caseSensitive,
       whole_word: opts.wholeWord,
-      include_dependencies: opts.includeDependencies ?? false,
+      sources: opts.sources ?? 'project',
       search_id: searchId,
     },
   });
+}
+
+/** What Find in project remembers between openings, per project. */
+export interface FindPrefs {
+  /** The file mask (`*.java, *.jsp`). Empty means everything. */
+  mask: string;
+  /** The module the results are narrowed to, relative to the root (`modules/core`). Empty means
+   *  all of them. Dropped on load when it is no longer one of the build's modules. */
+  module: string;
+}
+
+/**
+ * The remembered preferences for `root`.
+ *
+ * The query is a question asked once; the **mask** and the **module** are shapes of project —
+ * "on this tree I only ever mean the JSPs", "this month I live in the web module" — so they are
+ * the parts of a search worth outliving it. Kept per repo in `<repo>/.arbor/bennu/config.toml`,
+ * beside the run configurations, because the answer differs per project. Defaults (no narrowing)
+ * on a missing file.
+ */
+export function getFindPrefs(root: string): Promise<FindPrefs> {
+  return bennu('bennu_get_find_prefs', { args: { root } });
+}
+
+export function setFindPrefs(root: string, prefs: FindPrefs): Promise<void> {
+  return bennu('bennu_set_find_prefs', { args: { root, prefs } });
 }

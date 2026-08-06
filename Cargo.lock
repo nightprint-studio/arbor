@@ -872,6 +872,7 @@ dependencies = [
  "arbor-logscan",
  "arbor-process-ext",
  "arbor-rpc",
+ "arbor-syntax",
  "bennu-check",
  "bennu-classpath",
  "bennu-core",
@@ -887,6 +888,7 @@ dependencies = [
  "bennu-proto",
  "bennu-query",
  "bennu-spring",
+ "bennu-ssr",
  "bennu-test",
  "bennu-web",
  "bennu-xml",
@@ -895,6 +897,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "toml 0.8.23",
+ "tree-sitter",
 ]
 
 [[package]]
@@ -1079,6 +1082,16 @@ dependencies = [
  "roxmltree",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "bennu-ssr"
+version = "0.3.0"
+dependencies = [
+ "arbor-syntax",
+ "serde",
+ "tree-sitter",
+ "tree-sitter-java",
 ]
 
 [[package]]

@@ -41,7 +41,8 @@
   import ScriptsPanel from './panels/ScriptsPanel.svelte';
   import GeneratePanel from './panels/GeneratePanel.svelte';
   import InventoryPanel from './panels/InventoryPanel.svelte';
-  import AstPanel from './panels/AstPanel.svelte';
+  import SyntaxTreePanel from '$lib/components/shared/internal/SyntaxTreePanel.svelte';
+  import { astStore } from '$lib/stores/picus/ast.svelte';
   import BufferRestructurePanel from './panels/BufferRestructurePanel.svelte';
   import PicusBottomDock from './panels/PicusBottomDock.svelte';
   import GenerateView from './views/GenerateView.svelte';
@@ -782,7 +783,7 @@
             maxSize={520}
             onResize={(px) => (toolWidth = px)}
           >
-            {#if picusUiStore.toolSection === 'ast'}<AstPanel />
+            {#if picusUiStore.toolSection === 'ast'}<SyntaxTreePanel source={astStore} emptyMessage="Open a script or a query and its syntax tree appears here." />
             {:else}<BufferRestructurePanel />{/if}
           </PanelCard>
         {/if}

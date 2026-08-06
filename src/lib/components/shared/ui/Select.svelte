@@ -15,6 +15,21 @@
     disabled?: boolean;
     narrow?: boolean;
     /**
+     * `sm` is the **chrome-row** size: the header of a search overlay, a panel toolbar — anywhere
+     * the picker sits above or beside the thing it acts on rather than in a form.
+     *
+     * It is a size and not a second component because the behaviour is identical, and the one
+     * thing a control on a chrome row must not do is weigh as much as the field under it.
+     */
+    size?: 'sm' | 'md';
+    /**
+     * Draw the trigger in the accent — for a value that is **narrowing something**, as opposed to
+     * the one that means "all of them".
+     *
+     * A filter you cannot see at a glance is how an empty result gets blamed on the search.
+     */
+    highlight?: boolean;
+    /**
      * Cap on the menu's visual height in pixels. Passed straight to the
      * underlying `Dropdown` — important when the dropdown might open
      * *upward* (`flipUp`), because Dropdown's positioning formula uses
@@ -51,6 +66,10 @@
     /** Shown inside the menu when there is nothing to choose from — far more
      *  useful than an empty box, which reads as a broken control. */
     emptyMessage?: string;
+    /** The control's accessible name. Needed wherever the picker stands on its own — a chrome
+     *  row has no `<label>` to be associated with, and "combobox, Project" is all a screen
+     *  reader can say without one. */
+    ariaLabel?: string;
     onchange?: (value: string) => void;
   }
 
@@ -59,12 +78,15 @@
     options,
     disabled  = false,
     narrow    = false,
+    size      = 'md',
+    highlight = false,
     maxHeight,
     searchable = false,
     searchPlaceholder = 'Search…',
     fill = false,
     placeholder = '',
     emptyMessage,
+    ariaLabel,
     onchange,
   }: Props = $props();
 
@@ -129,7 +151,7 @@
   const isEmpty = $derived(!matched && String(value ?? '') === '');
 </script>
 
-<div class="select-wrap" class:narrow class:fill>
+<div class="select-wrap" class:narrow class:fill class:sm={size === 'sm'}>
   <Dropdown
     position="fixed"
     direction="down"
@@ -145,11 +167,14 @@
       <button
         class="select-input"
         class:narrow
+        class:sm={size === 'sm'}
+        class:hl={highlight}
         onclick={toggle}
         {disabled}
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-label={ariaLabel}
       >
         <span class="select-input-label" class:select-placeholder={isEmpty}>
           {isEmpty ? placeholder : selectedLabel}
@@ -208,4 +233,23 @@
   /* Nothing chosen — as opposed to a value whose label has not loaded, which is
      rendered as the value itself and in the ordinary colour. */
   .select-placeholder { color: var(--text-disabled); }
+
+  /* ── size: sm — the chrome-row variant ──────────────────────────────────────
+     Sits on a header strip beside a count or a tab strip, so it takes the
+     elevated background those rows already have rather than the input well,
+     and it stops growing where a long label would start pushing the row
+     around. The menu it opens is the same one. */
+  .select-wrap.sm { max-width: 200px; }
+  .select-input.sm {
+    padding: 3px 6px;
+    gap: 4px;
+    background: var(--bg-elevated);
+    border-color: var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: var(--font-size-2xs);
+  }
+  .select-input.sm:hover { border-color: var(--border); color: var(--text-primary); }
+  /* Narrowing something — see the `highlight` prop. */
+  .select-input.hl { border-color: var(--accent); color: var(--accent); }
 </style>

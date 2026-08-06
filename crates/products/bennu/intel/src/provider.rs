@@ -196,6 +196,23 @@ fn ellipsize(s: &str, max: usize) -> String {
     format!("{cut}…")
 }
 
+/// Whether `text` even has the shape of a type name — a bare or dotted identifier.
+///
+/// The guard in front of [`NativeJavaProvider::type_named`]: its caller hands it the source text
+/// of whatever a placeholder matched, which can be `a.b().c`, a string literal, or a whole block.
+/// A resolver asked whether `"hello"` names a type has no honest way to say "that is not even a
+/// question", so the shape is checked before it is asked.
+fn reads_as_type_name(text: &str) -> bool {
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else { return false };
+    if !(first.is_alphabetic() || first == '_' || first == '$') {
+        return false;
+    }
+    text.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$' || c == '.')
+        && !text.contains("..")
+        && !text.ends_with('.')
+}
+
 /// Render a decompiled-from-bytecode **Java stub** (signatures only) for a type's members. A readable
 /// approximation of the class file's API surface — package, the type declaration with its
 /// `extends`/`implements`, then each field and method signature. Method bodies don't exist in
@@ -676,6 +693,17 @@ impl NativeJavaProvider {
         Some(render_stub(binary, &cm))
     }
 
+    /// The resolved members of `binary` — the class's own declared fields and methods, plus the
+    /// links to its supertypes.
+    ///
+    /// The raw answer, deliberately: callers that want a *rendering* of it have one
+    /// ([`stub_for`](Self::stub_for)), and callers that want to walk it — "what is inside this
+    /// DTO" — need the structure rather than a page of Java to parse back apart.
+    pub fn members_of(&self, binary: &str) -> Option<std::sync::Arc<bennu_java::prelude::ClassMembers>> {
+        use bennu_java::prelude::TypeResolver;
+        self.resolver.as_ref()?.members_of(binary)
+    }
+
     /// The binary name of the static type of the expression spanning `[start, end)` in `source`,
     /// against this provider's full (JDK + dependency + project) resolver. For navigation/hover
     /// INSIDE a library source view — e.g. inferring `list` in `list.add(x)` to know which type
@@ -684,6 +712,89 @@ impl NativeJavaProvider {
         let resolver = self.resolver.as_ref()?;
         let tr = bennu_java::prelude::infer_expression_type(source, start, end, resolver)?;
         Some(tr.binary_name)
+    }
+
+    /// The **AST** of `source`, typed against this provider's resolver.
+    ///
+    /// Without a resolver — the pre-index provider — the tree is still complete, just untyped:
+    /// the structure comes from the parse and only the type annotations need the classpath. That
+    /// is what lets the panel draw something useful on a project that is still indexing.
+    pub fn ast_of(&self, source: &str) -> bennu_java::prelude::AstNode {
+        bennu_java::prelude::lower_ast(
+            source,
+            self.resolver.as_ref().map(|r| r as &dyn bennu_java::prelude::TypeResolver),
+        )
+    }
+
+    /// The binary name of the type that `name` **names** in `source`, or `None` when nothing does.
+    ///
+    /// The other half of [`Self::infer_type_binary`]. That one asks "what is the type *of* this
+    /// expression"; this one asks "does this text name a type at all" — the question that
+    /// separates `Files.copy(a, b)` from `files.copy(a, b)`, which are the same shape and
+    /// different programs. Together they are what structural search's `@type` / `@value`
+    /// constraint resolves against.
+    ///
+    /// Unlike [`Self::library_binary`], a **project** type answers yes: the caller is deciding
+    /// what a name denotes, not where to find source for it.
+    ///
+    /// Guarded by shape first — anything that is not a bare or dotted identifier is not a type
+    /// name, and handing an arbitrary expression's text to the resolver would be asking it a
+    /// question it has no way to refuse.
+    pub fn type_named(&self, source: &str, name: &str) -> Option<String> {
+        use bennu_java::prelude::TypeResolver; // brings `resolve_simple_name`/`members_of` into scope
+        let resolver = self.resolver.as_ref()?;
+        if !reads_as_type_name(name) {
+            return None;
+        }
+        if name.contains('.') {
+            // Already qualified: it names a type exactly when the classpath holds one.
+            let binary = name.replace('.', "/");
+            return resolver.members_of(&binary).is_some().then_some(binary);
+        }
+        let imports = bennu_java::prelude::extract_symbols(source).imports;
+        resolver.resolve_simple_name(name, &imports)
+    }
+
+    /// Whether `candidate` is `wanted`, or extends/implements it — both **binary** names.
+    ///
+    /// Walks superclasses and interfaces breadth-first through this provider's resolver, so it
+    /// reaches through the JDK and the dependency jars, not only the project's own sources.
+    ///
+    /// **`false` on an unknown class**, unlike [`bennu_check`]'s conservative hierarchy walks. The
+    /// two want opposite defaults and it is worth being explicit about why: a *check* that cannot
+    /// see a supertype must stay silent rather than accuse, so an unknown class satisfies
+    /// everything. A *search* filter that did the same would answer "yes" for every type it could
+    /// not read, and a count of "uses of OrderService" would quietly include everything on the
+    /// classpath. Here, not-known is not-a-match — and the caller reports it as undecided rather
+    /// than as an absence (see `bennu-ssr`'s `TypeOracle`).
+    ///
+    /// Depth-bounded: a malformed index with a cycle in it must not spin.
+    pub fn is_subtype_of(&self, candidate: &str, wanted: &str) -> bool {
+        use bennu_java::prelude::TypeResolver; // brings `members_of` into scope
+        const MAX_DEPTH: usize = 40;
+
+        let normalise = |n: &str| n.replace('.', "/");
+        let wanted = normalise(wanted);
+        let Some(resolver) = self.resolver.as_ref() else { return false };
+
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut queue = vec![(normalise(candidate), 0usize)];
+        while let Some((binary, depth)) = queue.pop() {
+            if depth > MAX_DEPTH || !seen.insert(binary.clone()) {
+                continue;
+            }
+            if binary == wanted {
+                return true;
+            }
+            let Some(cm) = resolver.members_of(&binary) else { continue };
+            if let Some(sup) = &cm.superclass {
+                queue.push((sup.clone(), depth + 1));
+            }
+            for iface in &cm.interfaces {
+                queue.push((iface.clone(), depth + 1));
+            }
+        }
+        false
     }
 
     /// Classify the caret at `offset` in a library source view `source` into a go-to [`LibraryTarget`]
@@ -1247,8 +1358,20 @@ mod local_hover_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::render_stub;
+    use super::{reads_as_type_name, render_stub};
     use bennu_java::prelude::{ClassFlags, ClassMembers, Member, TypeRef, Visibility};
+
+    /// The guard exists so an arbitrary matched fragment never reaches the resolver as a
+    /// question. Its job is to say no to everything that is not a name.
+    #[test]
+    fn only_a_bare_or_dotted_identifier_reads_as_a_type_name() {
+        for yes in ["Files", "java.nio.file.Files", "_x", "Outer.Inner", "Map$Entry"] {
+            assert!(reads_as_type_name(yes), "{yes}");
+        }
+        for no in ["", "\"hello\"", "a.b()", "1", "a + b", "a..b", "a.", "new Foo()", "x[0]"] {
+            assert!(!reads_as_type_name(no), "{no}");
+        }
+    }
 
     #[test]
     fn stub_renders_package_decl_fields_and_methods() {

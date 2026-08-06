@@ -73,6 +73,23 @@
   boundary has to find the sibling's classes where they actually are.
 </p>
 <p>
+  The dependencies are resolved at the <strong>runtime</strong> scope — what
+  <code>mvn spring-boot:run</code> and a packaged application see. That is deliberately
+  <em>narrower</em> than what the editor uses: indexing, completion and navigation resolve every
+  scope, because you edit tests and they have dependencies of their own. Launching with that
+  wider classpath hands the JVM libraries Maven would never supply, and the difference is not
+  cosmetic — a <code>@ConditionalOnClass</code> guarding a bean on a test-scoped library then
+  fires here and nowhere else, and the application refuses to start in the IDE while Maven is
+  perfectly happy.
+</p>
+<p>
+  <strong>Classpath</strong> in the configuration changes it, per configuration: Compile, Test,
+  or every scope. The exceptions are real — a launcher that wants a test-scoped H2 or a provided
+  servlet API is a legitimate thing to want — so it is a choice rather than a reason to stop
+  using the run panel. The first launch of a configuration resolves its classpath through Maven;
+  every one after it is instant until the pom changes.
+</p>
+<p>
   The working directory defaults to the module's own directory, and the editor's list and the
   title-bar selector both show which module a configuration is for — otherwise four
   configurations called <em>Application</em> are the same row four times.

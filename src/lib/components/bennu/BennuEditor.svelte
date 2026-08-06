@@ -85,6 +85,7 @@
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import { bennuNavStore } from '$lib/stores/bennu/nav-history.svelte';
+  import { bennuAstStore } from '$lib/stores/bennu/ast.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import { collectIntentions, type GenerateMode, type IntentionItem } from './bennu-intentions';
   import { javaOutline } from './java-outline';
@@ -117,6 +118,8 @@
     wordAtCaret: () => string | null;
     refAtCaret: () => string | null;
     caretByteOffset: () => number;
+    /** Select a byte range — what a click in the syntax-tree panel does over here. */
+    selectByteRange: (startByte: number, endByte: number) => void;
     insertAtCursor: (text: string) => void;
     copySelection: () => void;
     cutSelection: () => void;
@@ -207,6 +210,13 @@
     caretLine = line; caretCol = col;
     bennuUiStore.setCaret(line, col);
 
+    // The other direction of the syntax-tree panel: open it down to whatever the caret is in.
+    // This is what makes it a reading tool — you point at the construct you do not understand
+    // and it says what the grammar called it.
+    if (bennuUiStore.rightPanel === 'ast' && editorComp) {
+      void bennuAstStore.revealAt(editorComp.caretByteOffset());
+    }
+
     const path = activePath;
     if (!path) return;
     if (suppressNav) {
@@ -260,6 +270,33 @@
   function onInput(text: string) {
     if (activePath) projectStore.setSource(activePath, text);
   }
+
+  // ── The syntax-tree panel, both directions ───────────────────────────────────
+  /** Only while the panel is open. A tree costs a round trip per pause in typing, and one
+   *  computed for a panel nobody is looking at is a round trip spent on nothing. */
+  const astOpen = $derived(bennuUiStore.rightPanel === 'ast');
+
+  // Fed from the STORE's copy of the buffer rather than from `onInput`, so switching files
+  // re-parses too — an editor that only reacted to typing would keep showing the previous
+  // file's tree until you touched this one.
+  $effect(() => {
+    const path = activePath;
+    if (!astOpen || !path) {
+      if (!astOpen) bennuAstStore.clear();
+      return;
+    }
+    bennuAstStore.follow(projectStore.sourceOf(path) ?? '', path);
+  });
+
+  // A node was clicked over there: select its bytes here. Keyed on the request's timestamp so
+  // clicking the same node twice still re-selects — the second click means "show me again".
+  let lastAstSelect = 0;
+  $effect(() => {
+    const req = bennuAstStore.selectRequest;
+    if (!req || req.at === lastAstSelect) return;
+    lastAstSelect = req.at;
+    editorComp?.selectByteRange(req.start, req.end);
+  });
 
   // ── Diagnostics (byte spans) from the backend, re-fetched per active file ─────
   // For a JSP the backend extracts + checks the `action="…"` refs (unknown → warning

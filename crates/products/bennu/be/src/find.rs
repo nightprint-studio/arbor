@@ -41,7 +41,7 @@ use std::sync::Arc;
 use arbor_ipc::prelude::EventSink;
 use bennu_core::prelude::BennuState;
 use bennu_proto::prelude::FindHit;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 /// File extensions scanned for text matches. Files with no extension are scanned too when
@@ -80,6 +80,56 @@ const BATCH_SIZE: usize = 40;
 /// `{ "id": <string>, "done": true, "capped": <bool> }` when the scan finishes.
 const EVT_FIND_PROGRESS: &str = "arbor://bennu/find-progress";
 
+// ── remembered preferences ──────────────────────────────────────────────────────
+//
+// The parts of a search worth outliving it. The query is a question you asked once; the file mask
+// and the module are **shapes of project** — "on this tree I only ever mean the JSPs", "this month
+// I live in the web module" — and re-picking them at every opening is the kind of small friction
+// that makes people stop using the filters at all.
+//
+// Per repo, in bennu's own `<repo>/.arbor/bennu/config.toml`, beside the run configurations: the
+// answer differs per project, which is exactly what a per-repo file is for.
+
+/// What Find in project remembers between openings.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FindPrefs {
+    /// The file mask (`*.java, *.jsp`). Empty means everything, which is also the default.
+    pub mask: String,
+    /// The module the results are narrowed to, as its path relative to the root
+    /// (`modules/core`). Empty means all of them. Same reasoning as the mask: on a reactor,
+    /// which module you are working in is a property of the week, not of the search.
+    ///
+    /// The FE drops a value that is no longer one of the build's modules, so a rename here
+    /// cannot leave a filter behind that hides everything.
+    pub module: String,
+}
+
+#[derive(Deserialize)]
+pub struct FindPrefsArgs {
+    pub root: String,
+}
+
+#[derive(Deserialize)]
+pub struct SetFindPrefsArgs {
+    pub root: String,
+    pub prefs: FindPrefs,
+}
+
+/// The remembered preferences for `root`. Defaults on a missing or unreadable file — a filter
+/// nobody set is no filter, which is the safe direction to be wrong in.
+#[arbor_rpc::handler]
+fn bennu_get_find_prefs(_ctx: &BennuState, args: FindPrefsArgs) -> Result<FindPrefs, String> {
+    Ok(crate::repo_config::load(&args.root, "find"))
+}
+
+/// Remember them. Writes only the `[find]` section — the run configurations and breakpoints
+/// sharing the file keep their own last-known state.
+#[arbor_rpc::handler]
+fn bennu_set_find_prefs(_ctx: &BennuState, args: SetFindPrefsArgs) -> Result<(), String> {
+    crate::repo_config::save(&args.root, "find", &args.prefs)
+}
+
 /// Args for [`bennu_find_in_files`].
 #[derive(Deserialize)]
 pub struct FindInFilesArgs {
@@ -102,20 +152,48 @@ pub struct FindInFilesArgs {
     /// Bound the match on `[A-Za-z0-9_]` word boundaries.
     #[serde(default)]
     pub whole_word: bool,
-    /// Also search the **text entries of the project's dependency jars** — the `struts-default.xml`
-    /// that declares an interceptor stack, a schema, a bundled `.properties`.
-    ///
-    /// Opt-in, and off by default, because it is a different order of cost from walking the
-    /// project tree: every candidate entry is decompressed to be read (see [`scan_jars`]). It is
-    /// also a different kind of answer — a hit in a dependency is something to understand, never
-    /// something to go and change — so it runs **after** the project's own files and its results
-    /// arrive underneath them.
+    /// Which text this scan reads — see [`FindSources`].
     #[serde(default)]
-    pub include_dependencies: bool,
+    pub sources: FindSources,
     /// The FE-minted id correlating this search's `find-progress` events. Every batch and
     /// the terminal `done` carry it under `"id"`, so the FE ignores events from a
     /// superseded (older) scan.
     pub search_id: String,
+}
+
+/// Which text a scan reads.
+///
+/// Searching the **dependency jars** is a different order of cost from walking the project tree
+/// — every candidate entry is decompressed to be read (see [`scan_jars`]) — and a different kind
+/// of answer: a hit in a dependency is something to understand, never something to go and change.
+/// So when both are read the jars come **second**, and their results arrive underneath the
+/// project's own.
+///
+/// It was a `bool`, which could not say *only the jars* — and that is the question you have when
+/// you are looking for the schema or the interceptor stack that some artifact declares, where
+/// every hit in your own tree is noise.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FindSources {
+    /// The project's own files (plus `extra_roots`). The default: what you can edit.
+    #[default]
+    Project,
+    /// The project's files first, then its dependency jars.
+    ProjectAndDependencies,
+    /// The dependency jars only.
+    Dependencies,
+}
+
+impl FindSources {
+    /// Whether the project tree (and any `extra_roots`) is walked.
+    fn reads_project(self) -> bool {
+        matches!(self, Self::Project | Self::ProjectAndDependencies)
+    }
+
+    /// Whether the dependency jars are read.
+    fn reads_dependencies(self) -> bool {
+        matches!(self, Self::Dependencies | Self::ProjectAndDependencies)
+    }
 }
 
 /// The compiled matching policy for one search (derived once from the args, applied per
@@ -212,11 +290,12 @@ fn bennu_find_in_files(ctx: &BennuState, args: FindInFilesArgs) -> Result<(), St
     let query = args.query.clone();
     // Resolved on the calling thread: it reads the project slot's jar list, which is cheap, and
     // doing it here keeps the scan thread from touching the index service at all.
-    let jars = if args.include_dependencies {
+    let jars = if args.sources.reads_dependencies() {
         crate::index_service::IndexService::global().dep_jars_of(&args.root)
     } else {
         Vec::new()
     };
+    let scan_project = args.sources.reads_project();
 
     // A plain background std thread (not a tokio worker): the scan does no reverse-channel
     // round-trips, so this mirrors `index_service`'s background build — it just walks the
@@ -225,13 +304,15 @@ fn bennu_find_in_files(ctx: &BennuState, args: FindInFilesArgs) -> Result<(), St
         .name(format!("bennu-find-{search_id}"))
         .spawn(move || {
             let mut batch = BatchSink::new(sink.clone(), search_id.clone());
-            scan_dir(Path::new(&root), &matcher, &mut batch);
-            // Workspace scope: scan the other projects too (same stream / cap / search_id).
-            for r in &extra_roots {
-                if batch.is_full() {
-                    break;
+            if scan_project {
+                scan_dir(Path::new(&root), &matcher, &mut batch);
+                // Workspace scope: scan the other projects too (same stream / cap / search_id).
+                for r in &extra_roots {
+                    if batch.is_full() {
+                        break;
+                    }
+                    scan_dir(Path::new(r), &matcher, &mut batch);
                 }
-                scan_dir(Path::new(r), &matcher, &mut batch);
             }
             // Dependencies last, so the files you can actually edit arrive first.
             scan_jars(&jars, &matcher, &mut batch);
@@ -478,9 +559,28 @@ mod tests {
             regex,
             case_sensitive,
             whole_word,
-            include_dependencies: false,
+            sources: FindSources::Project,
             search_id: "test".to_string(),
         }
+    }
+
+    #[test]
+    fn each_source_says_which_halves_of_the_scan_run() {
+        assert!(FindSources::Project.reads_project());
+        assert!(!FindSources::Project.reads_dependencies());
+        assert!(FindSources::ProjectAndDependencies.reads_project());
+        assert!(FindSources::ProjectAndDependencies.reads_dependencies());
+        assert!(FindSources::Dependencies.reads_dependencies());
+        // The case a `bool` could not express: the tree must NOT be walked at all.
+        assert!(!FindSources::Dependencies.reads_project());
+    }
+
+    #[test]
+    fn a_payload_without_sources_reads_the_project() {
+        let args: FindInFilesArgs =
+            serde_json::from_value(json!({ "root": "/x", "query": "q", "search_id": "s" }))
+                .expect("the optional fields all default");
+        assert_eq!(args.sources, FindSources::Project);
     }
 
     #[test]

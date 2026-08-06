@@ -46,7 +46,7 @@ mod tests {
     use super::*;
 
     fn imp(path: &str, star: bool, static_: bool) -> Import {
-        Import { path: path.to_string(), star, static_ }
+        Import { span: None, path: path.to_string(), star, static_ }
     }
 
     #[test]

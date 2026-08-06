@@ -949,6 +949,25 @@ pub struct RunConfig {
     /// debug launch of this configuration begins frozen until you press Resume. The launch you
     /// press fifty times a day should not.
     pub debug_suspend: bool,
+    /// Which Maven scopes reach the **run** classpath: `"runtime"` (the default), `"compile"`,
+    /// `"test"`, or `""` for every scope.
+    ///
+    /// It exists because Bennu's other classpath — the one the index, completion and navigation
+    /// use — is deliberately *every* scope: you edit tests, so completion has to see their
+    /// dependencies. Launching with that same classpath hands the JVM libraries Maven would
+    /// never put there, and the difference is not academic: a `@ConditionalOnClass` guarding a
+    /// bean on a library that is only test-scoped then fires here and nowhere else, and the
+    /// application fails to start in the IDE while `mvn spring-boot:run` is perfectly happy.
+    ///
+    /// `runtime` is what `spring-boot:run` and a packaged application see, so it is the default
+    /// and the honest one. It is per-configuration because the exceptions are real — a launcher
+    /// that deliberately wants a test-scoped H2 or a provided servlet API is a legitimate thing
+    /// to want, and it should be a choice rather than a reason to stop using the run panel.
+    ///
+    /// `#[serde(default)]` on the struct fills a missing key from `Default` (→ `"runtime"`), so
+    /// configurations written before this existed change behaviour on the next launch — which
+    /// is the point: they were getting the wrong classpath.
+    pub classpath_scope: String,
 }
 
 impl Default for RunConfig {
@@ -969,6 +988,9 @@ impl Default for RunConfig {
             test_scope: String::new(),
             test_target: String::new(),
             debug_suspend: false,
+            // What `mvn spring-boot:run` and a packaged application see. See the field's doc for
+            // why the every-scope classpath the index uses is the wrong one to launch with.
+            classpath_scope: "runtime".to_string(),
         }
     }
 }

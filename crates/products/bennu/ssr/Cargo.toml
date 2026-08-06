@@ -1,0 +1,22 @@
+[package]
+name         = "bennu-ssr"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Structural search & replace for Bennu — a query language whose patterns are Java with holes in it (`$x$`, `$xs...$`), with alternation (`or`), scoping (`in`), aggregation (`group`) and a replacement template. Parsing, matching and reporting are pure; type constraints go through a `TypeOracle` the caller implements, so this crate stays resolver-free and exhaustively unit-testable."
+
+[dependencies]
+# The pattern engine and the tree walk. Language-agnostic by construction — this crate supplies
+# the grammar, and Picus supplies a different one to the same code.
+arbor-syntax = { path = "../../../foundation/syntax" }
+# Only to name `Language` where a query is run against one. Pinned to the workspace's single
+# `links = "tree-sitter"` version.
+tree-sitter = "0.25"
+serde = { workspace = true }
+
+[dev-dependencies]
+# The tests need *a* grammar to run a query against, and Java is the one Bennu points this at.
+# A dev-dependency, not a dependency: the crate itself takes the language as a parameter.
+tree-sitter-java = "0.23"

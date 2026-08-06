@@ -120,6 +120,22 @@ export interface RunConfig {
    *  Spring context being built), and it means every debug launch begins frozen until you
    *  press Resume — which is not what the launch you press fifty times a day wants. */
   debugSuspend: boolean;
+  /**
+   * Which Maven scopes reach the **run** classpath: `runtime` (the default), `compile`,
+   * `test`, or `''` for every scope.
+   *
+   * The index deliberately resolves *every* scope, because you edit tests and completion has
+   * to see their dependencies. Launching with that same classpath hands the JVM test- and
+   * provided-scoped libraries Maven would never supply — and a `@ConditionalOnClass` guarding
+   * a bean on one of them then fires here and nowhere else, so the application refuses to
+   * start in the IDE while `mvn spring-boot:run` is perfectly happy.
+   *
+   * `runtime` is what `spring-boot:run` and a packaged application see, so it is the default.
+   * The others are here because the exceptions are real — a launcher that wants a test-scoped
+   * H2 or a provided servlet API is a legitimate thing to want, and it should be a choice
+   * rather than a reason to stop using the run panel.
+   */
+  classpathScope: string;
 }
 
 /** The per-project run-config bundle — the ordered list plus which one is active. */
@@ -153,6 +169,7 @@ function toDto(c: RunConfig): RunConfigDto {
     test_scope: c.testScope,
     test_target: c.testTarget,
     debug_suspend: c.debugSuspend,
+    classpath_scope: c.classpathScope,
   };
 }
 
@@ -175,6 +192,10 @@ function fromDto(d: RunConfigDto): RunConfig {
     testScope: scope === 'module' || scope === 'class' ? scope : 'all',
     testTarget: d.test_target ?? '',
     debugSuspend: d.debug_suspend ?? false,
+    // A configuration written before scopes existed has no key, and it was getting the index's
+    // every-scope classpath. It now gets `runtime` — deliberately a change in behaviour on the
+    // next launch, because the old one was the wrong classpath.
+    classpathScope: d.classpath_scope ?? 'runtime',
   };
 }
 
@@ -194,6 +215,7 @@ export function emptyConfig(name = 'Unnamed', kind: RunConfigKind = 'application
     testScope: 'all',
     testTarget: '',
     debugSuspend: false,
+    classpathScope: 'runtime',
   };
 }
 

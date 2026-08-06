@@ -590,6 +590,7 @@ mod tests {
 
     fn field(name: &str, type_text: &str) -> bennu_java::prelude::FieldDecl {
         bennu_java::prelude::FieldDecl {
+            span: None, // built by hand, not read from a file
             name: name.to_string(),
             type_text: type_text.to_string(),
             is_static: false,
@@ -603,16 +604,17 @@ mod tests {
     /// A `import lombok.*;` wildcard — the standard test import so synthesis is enabled (the real
     /// gate: Lombok is only synthesized when the file imports it).
     fn lombok() -> Vec<Import> {
-        vec![Import { path: "lombok".to_string(), star: true, static_: false }]
+        vec![Import { span: None, path: "lombok".to_string(), star: true, static_: false }]
     }
 
     /// A specific import `import lombok.<name>;`.
     fn lombok_import(name: &str) -> Import {
-        Import { path: format!("lombok.{name}"), star: false, static_: false }
+        Import { span: None, path: format!("lombok.{name}"), star: false, static_: false }
     }
 
     fn type_with(annotations: &[&str], fields: Vec<bennu_java::prelude::FieldDecl>) -> TypeDecl {
         TypeDecl {
+            span: None,
             name: "Order".to_string(),
             fqn: "shop.Order".to_string(),
             kind: bennu_java::prelude::TypeKind::Class,
@@ -948,7 +950,7 @@ mod tests {
     fn wrong_package_same_name_is_not_lombok() {
         // A `@Data` imported from a NON-lombok package is the project's own annotation → no synthesis.
         let td = type_with(&["Data"], vec![field("id", "long")]);
-        let mine = Import { path: "com.acme.Data".to_string(), star: false, static_: false };
+        let mine = Import { span: None, path: "com.acme.Data".to_string(), star: false, static_: false };
         let m = synthesize(&td, &[mine], &BTreeMap::new(), &HashSet::new(), &|_: &str| false);
         assert!(m.methods.is_empty(), "com.acme.Data is not lombok.Data");
     }

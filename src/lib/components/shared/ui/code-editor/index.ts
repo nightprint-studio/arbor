@@ -32,6 +32,9 @@ export {
   inlineCompletionActive,
 } from './inline-completion';
 export { codeEditorTheme } from './theme';
+// Static code rendered OUTSIDE an editor instance — a search result's context, the sticky-scroll
+// header. Emits the editor's own `cm-tok-*` classes, so it takes the theme for free.
+export { highlightToHtml } from './mini-highlight';
 export { sqlHighlight, type SqlDialect } from './sql-modes';
 export { createCodeEditorExtensions, refTextAt, type CodeEditorExtensionsOptions } from './extensions';
 export { createHighlightPlugin, makeByteToU16, makeU16ToByte, parserReady } from './highlight';

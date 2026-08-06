@@ -100,7 +100,13 @@ impl Injection {
 }
 
 /// One node of the syntax tree.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Produced by [`outline`] from a parse — but also, deliberately, constructible by hand: a
+/// product that derives a **semantic** model from its parse (declarations, symbols) can express
+/// it in this same shape and get the panel that draws trees for free, rather than growing a
+/// second one. Every field below is meaningful for such a tree; [`SyntaxNode::synthesized`]
+/// exists only for it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyntaxNode {
     /// Tree-sitter's kind. For an anonymous node this **is** the literal text
@@ -139,6 +145,16 @@ pub struct SyntaxNode {
     /// reads this" and "we read this separately because the grammar would not".
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub injected: bool,
+    /// **Nothing in the file says this.** Never set by [`outline`] — a parse tree is
+    /// by definition all source. It is for a derived tree, where some of the model
+    /// is written by the language rather than by the author: a Java record's
+    /// accessors, a Lombok getter.
+    ///
+    /// Such a node's `range` points at whatever *declares* it, so selecting it still
+    /// goes somewhere true; the flag is what stops a panel from claiming those bytes
+    /// are the member.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub synthesized: bool,
 }
 
 /// A whole file's tree, with what it cost.
@@ -221,6 +237,8 @@ impl Walk<'_> {
             children: Vec::new(),
             elided: false,
             injected: false,
+            // A parse tree is all source, by definition — see the field's doc.
+            synthesized: false,
         };
 
         let deep_enough = self.options.max_depth.is_some_and(|max| depth >= max);

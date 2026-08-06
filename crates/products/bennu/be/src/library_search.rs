@@ -30,6 +30,12 @@
 //! project pays for it; the navigator shows the spinner it already has for a category that
 //! answers asynchronously.
 //!
+//! What runs **per keystroke** is a walk over that index, and it is written to allocate nothing
+//! until something matches: candidates are compared as borrowed byte slices, and the dot form of
+//! a class is built only for the few hundred that survive. Building it up front — the obvious way
+//! to write this — is two allocations per class per keystroke, which on a legacy classpath is
+//! over half a million of them to answer one letter, and is why this used to feel hung.
+//!
 //! ## Opening what you found
 //!
 //! A **class** goes through exactly the path a stack frame in a library already takes
@@ -154,22 +160,46 @@ fn file_name_of(path: &Path) -> String {
 
 // ── matching ────────────────────────────────────────────────────────────────────
 
-/// Whether `needle`'s characters appear in `hay`, in order, ignoring case.
+/// Lower-case one byte of a candidate.
+///
+/// Bytes and not `char`s: these are class and entry names, ASCII in every artifact that has ever
+/// shipped, and decoding UTF-8 per character over hundreds of thousands of names is work with no
+/// answer to show for it. A non-ASCII byte is never equal to an ASCII needle byte, so the worst a
+/// stray one can do is fail to match — never match something it should not.
+fn lower(b: u8) -> u8 {
+    b.to_ascii_lowercase()
+}
+
+/// The same, reading a **binary** class name as its dot form: `org/springframework/Service` and
+/// `Map$Entry` compare as `org.springframework.Service` and `Map.Entry`.
+///
+/// This is what lets the fully-qualified fallback match the binary name in place — without it the
+/// only way to answer `springframework.Service` was to build the dot form of every class on the
+/// classpath first, which is two allocations per class per keystroke.
+fn lower_dotted(b: u8) -> u8 {
+    match b {
+        b'/' | b'$' => b'.',
+        other => other.to_ascii_lowercase(),
+    }
+}
+
+/// Whether `needle`'s bytes appear in `hay`, in order, under `norm`.
 ///
 /// A subsequence and not a substring, because that is the relation the frontend's scorer uses:
-/// filtering here with anything stricter would drop rows that would have matched, which reads
-/// as the search being broken rather than as this being an optimisation. `needle` arrives
-/// already lowercased — it is the same for every candidate and lowering it per candidate is
-/// the one avoidable cost in the loop.
-fn subsequence(hay: &str, needle_lower: &str) -> bool {
-    let mut wanted = needle_lower.chars();
-    let Some(mut current) = wanted.next() else { return true };
-    for c in hay.chars() {
-        // `to_ascii_lowercase` and not the Unicode fold: these are class and entry names, which
-        // are ASCII in every artifact that has ever shipped, and the Unicode form allocates.
-        if c.to_ascii_lowercase() == current {
-            match wanted.next() {
-                Some(next) => current = next,
+/// filtering here with anything stricter would drop rows that would have matched, which reads as
+/// the search being broken rather than as this being an optimisation. `needle` arrives already
+/// lowercased — it is the same for every candidate, and lowering it per candidate is the one
+/// avoidable cost in the loop.
+fn subsequence(hay: &str, needle_lower: &str, norm: fn(u8) -> u8) -> bool {
+    let needle = needle_lower.as_bytes();
+    let Some(&first) = needle.first() else { return true };
+    let mut wanted = first;
+    let mut i = 0;
+    for &b in hay.as_bytes() {
+        if norm(b) == wanted {
+            i += 1;
+            match needle.get(i) {
+                Some(&next) => wanted = next,
                 None => return true,
             }
         }
@@ -183,9 +213,14 @@ fn subsequence(hay: &str, needle_lower: &str) -> bool {
 /// A prefix of the name beats a match somewhere inside it, and among equals the shorter name
 /// wins: typing `Servlet` should not have `AbstractAnnotationConfigDispatcherServletInitializer`
 /// crowd out `Servlet` itself before the frontend gets to see either.
-fn rank(name: &str, needle_lower: &str) -> usize {
-    let prefix = name.len() >= needle_lower.len()
-        && name[..needle_lower.len()].eq_ignore_ascii_case(needle_lower);
+fn rank(name: &str, needle_lower: &str, norm: fn(u8) -> u8) -> usize {
+    let hay = name.as_bytes();
+    let needle = needle_lower.as_bytes();
+    // Byte-wise rather than `name[..n].eq_ignore_ascii_case(..)`: slicing a `str` by a byte count
+    // panics when the cut lands inside a multi-byte character, which a class name from an
+    // unusual artifact could produce.
+    let prefix = hay.len() >= needle.len()
+        && hay.iter().zip(needle).all(|(&a, &b)| norm(a) == b);
     if prefix {
         name.len()
     } else {
@@ -202,8 +237,20 @@ fn take_best<T>(mut scored: Vec<(usize, T)>) -> Vec<T> {
 
 /// The dot-form name of a binary class name, with nested types read as members:
 /// `java/util/Map$Entry` → `java.util.Map.Entry`.
+///
+/// Called **only for the candidates that matched** — a few hundred of them. Calling it for every
+/// class first, to have something to match against, was two allocations per class per keystroke:
+/// on a legacy classpath that is over half a million allocations to answer one letter, and it is
+/// why searching the dependencies felt like it had hung.
 fn dot_form(binary: &str) -> String {
     binary.replace('/', ".").replace('$', ".")
+}
+
+/// The type's own name inside a **binary** name — after the last `/`, then after the last `$`,
+/// which is where `dot_form` + [`simple_of`] would have landed without building the dot form.
+fn simple_binary_of(binary: &str) -> &str {
+    let after_package = binary.rsplit('/').next().unwrap_or(binary);
+    after_package.rsplit('$').next().unwrap_or(after_package)
 }
 
 /// The part of a dot-form name after its last dot — the type's own name.
@@ -255,24 +302,28 @@ fn bennu_library_classes(
     let mut scored = Vec::new();
     for jar in &index.entries {
         for binary in &jar.classes {
+            // The order of the three tests is the whole performance story. Almost every class on
+            // the classpath fails the first one, so it has to be the cheapest thing that can say
+            // no — a byte walk over a borrowed slice. Everything that allocates, and the synthetic
+            // check that scans the name, happen only for what survived.
+            let simple = simple_binary_of(binary);
+            // Simple name first: it is what was typed in nine cases out of ten, and matching it
+            // ranks better than the same letters scattered through a package path.
+            let score = if subsequence(simple, &needle, lower) {
+                rank(simple, &needle, lower)
+            } else if subsequence(binary, &needle, lower_dotted) {
+                rank(binary, &needle, lower_dotted) + 100_000
+            } else {
+                continue;
+            };
             if is_uninteresting(binary) {
                 continue;
             }
             let fqcn = dot_form(binary);
-            let simple = simple_of(&fqcn);
-            // Simple name first: it is what was typed in nine cases out of ten, and matching it
-            // ranks better than the same letters scattered through a package path.
-            let score = if subsequence(simple, &needle) {
-                rank(simple, &needle)
-            } else if subsequence(&fqcn, &needle) {
-                rank(&fqcn, &needle) + 100_000
-            } else {
-                continue;
-            };
             scored.push((
                 score,
                 LibraryClass {
-                    simple: simple.to_string(),
+                    simple: simple_of(&fqcn).to_string(),
                     package: package_of(&fqcn).to_string(),
                     fqcn,
                     jar: jar.name.clone(),
@@ -315,10 +366,10 @@ fn bennu_library_files(
     for jar in &index.entries {
         for entry in &jar.resources {
             let name = entry.rsplit('/').next().unwrap_or(entry);
-            let score = if subsequence(name, &needle) {
-                rank(name, &needle)
-            } else if subsequence(entry, &needle) {
-                rank(entry, &needle) + 100_000
+            let score = if subsequence(name, &needle, lower) {
+                rank(name, &needle, lower)
+            } else if subsequence(entry, &needle, lower) {
+                rank(entry, &needle, lower) + 100_000
             } else {
                 continue;
             };
@@ -422,26 +473,46 @@ mod tests {
     fn a_subsequence_is_what_matches_not_a_substring() {
         // The relation the frontend's scorer uses — filtering with anything stricter would drop
         // rows before they could be scored.
-        assert!(subsequence("ServletActionContext", "sac"));
-        assert!(subsequence("ServletActionContext", "servlet"));
-        assert!(subsequence("ServletActionContext", "SERVLET"), "matching ignores case");
-        assert!(!subsequence("ServletActionContext", "xyz"));
-        assert!(!subsequence("Short", "shortish"), "the needle must fit");
+        assert!(subsequence("ServletActionContext", "sac", lower));
+        assert!(subsequence("ServletActionContext", "servlet", lower));
+        // The needle arrives lowercased from the handler; `lower` normalises the candidate.
+        assert!(subsequence("SERVLETACTIONCONTEXT", "servlet", lower), "matching ignores case");
+        assert!(!subsequence("ServletActionContext", "xyz", lower));
+        assert!(!subsequence("Short", "shortish", lower), "the needle must fit");
+    }
+
+    #[test]
+    fn a_binary_name_matches_as_its_dot_form_without_being_built() {
+        // What lets the fully-qualified fallback run over the classpath's own strings: the
+        // separators compare as dots, so nothing has to be allocated to be matched.
+        assert!(subsequence("org/springframework/stereotype/Service", "springframework.service", lower_dotted));
+        assert!(subsequence("java/util/Map$Entry", "map.entry", lower_dotted));
+        // Under the plain normaliser the same query cannot match — which is exactly why the
+        // fallback needs its own.
+        assert!(!subsequence("java/util/Map$Entry", "map.entry", lower));
     }
 
     #[test]
     fn an_empty_needle_matches_everything() {
         // Not reachable through a handler (an empty query returns early), but the loop must not
         // depend on that to be correct.
-        assert!(subsequence("anything", ""));
+        assert!(subsequence("anything", "", lower));
     }
 
     #[test]
     fn a_prefix_outranks_a_match_buried_inside() {
         // Typing `Servlet`: the type of that name must survive the cap, not be crowded out by
         // the forty framework classes that merely contain the letters.
-        assert!(rank("Servlet", "servlet") < rank("ServletActionContext", "servlet"));
-        assert!(rank("ServletContext", "servlet") < rank("HttpServlet", "servlet"));
+        assert!(rank("Servlet", "servlet", lower) < rank("ServletActionContext", "servlet", lower));
+        assert!(rank("ServletContext", "servlet", lower) < rank("HttpServlet", "servlet", lower));
+    }
+
+    #[test]
+    fn the_simple_name_of_a_binary_name_needs_no_dot_form() {
+        // The two must agree, because the search matches the first and shows the second.
+        for binary in ["java/util/Map$Entry", "java/util/List", "Unpackaged", "a/b/C$D$E"] {
+            assert_eq!(simple_binary_of(binary), simple_of(&dot_form(binary)));
+        }
     }
 
     #[test]

@@ -11,14 +11,30 @@ inference.
 ```rust
 // Structural model of one file.
 fn extract_symbols(source: &str) -> FileSymbols
-//   FileSymbols { package, imports, types }
-//   TypeDecl    { name, fqn, kind, is_abstract, is_final, is_sealed, methods, fields, extends, implements }
+//   FileSymbols { package, package_span, imports, types }
+//   TypeDecl    { span, name, fqn, kind, is_abstract, is_final, is_sealed, methods, fields, extends, implements }
 //   TypeKind    = Class | Interface | Enum | Record | Annotation
-//   MethodDecl  { name, return_type_text, params, is_static, is_abstract, is_default, is_final }
-//   FieldDecl   { name, type_text, is_static, is_final }
+//   MethodDecl  { span, name, return_type_text, params, is_static, is_abstract, is_default, is_final }
+//   FieldDecl   { span, name, type_text, is_static, is_final }
 // `kind` + the class modifiers + method `is_abstract`/`is_default` (a bodyless interface method is
 // implicitly abstract) are what `bennu-intel` maps into the seam `ClassFlags`/`Member` flags for
 // PROJECT types, so the inheritance / implement-abstract checks fire against project supertypes too.
+//
+// `span: Option<Span>` is BYTE offsets, and `None` means **nobody wrote it** — a record's
+// accessors and canonical constructor, its `Object` overrides, a Lombok getter. `0..0` would have
+// pointed at the package declaration; anything navigating to a member has to tell the two apart.
+
+// The AST: the same parse in Java's vocabulary, bodies included, typed where the resolver can say.
+fn lower_ast(source: &str, resolver: Option<&dyn TypeResolver>) -> AstNode
+//   AstNode { kind, role, label, modifiers, type_name, names_a_type, synthesized, span, children }
+// Derived on demand and NEVER stored — which is what makes it safe to have beside `extract_symbols`
+// rather than a second model to keep in sync. Four differences from the CST, and all four are the
+// point: punctuation gone; wrappers unwrapped (`expression_statement`, `parenthesized_expression`);
+// Java's words rather than the grammar's (`call`, `local variable`); and every child carries the
+// ROLE it plays (`condition`, `receiver`, `argument`, `returns`) — plus the two things a parse tree
+// cannot hold, the resolved type and whether a bare name denotes a class or a value.
+// A kind the lowering has no entry for keeps its grammar name and its children: never wrong, only
+// less pretty, which is the right failure for a table over someone else's grammar.
 
 // Static type of the expression immediately LEFT of the `.` at `byte_offset`.
 fn infer_receiver_type(source: &str, byte_offset: usize, resolver: &dyn TypeResolver)

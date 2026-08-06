@@ -40,9 +40,29 @@ impl TypeKind {
     }
 }
 
+/// Where a declaration sits in the source, in **bytes**.
+///
+/// Byte offsets throughout, never character ones — tree-sitter counts bytes, and a span that
+/// crossed a seam as "characters" would be a bug waiting for the first accented identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Span {
+    /// The span of a node.
+    pub fn of(node: &Node) -> Self {
+        Span { start: node.start_byte(), end: node.end_byte() }
+    }
+}
+
 /// A single import. `star` marks `import a.b.*;`; `static_` marks `import static`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Import {
+    /// Where the `import …;` is written. See [`FieldDecl::span`].
+    #[serde(default)]
+    pub span: Option<Span>,
     /// The dotted path exactly as written (`java.util.List`, or `java.util` for a
     /// star import).
     pub path: String,
@@ -93,6 +113,13 @@ pub struct Annotation {
 /// A field of a type: its name and its declared type (as written in source).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldDecl {
+    /// Where it is written. **`None` when nobody wrote it** — a record's backing field, a Lombok
+    /// getter: there is no source to point at, and a `0..0` would point at the package
+    /// declaration. Anything that navigates to a member has to be able to tell the two apart.
+    ///
+    /// `#[serde(default)]` so a symbol persisted before spans existed still deserializes.
+    #[serde(default)]
+    pub span: Option<Span>,
     pub name: String,
     /// The declared type text, e.g. `Map<String, Object>` or `HttpServletRequest`.
     pub type_text: String,
@@ -128,6 +155,11 @@ pub struct ParamDecl {
 /// A method of a type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MethodDecl {
+    /// Where it is written, or `None` for a member the language or a framework synthesizes — a
+    /// record's accessor and canonical constructor, its `Object` overrides, a Lombok getter. See
+    /// [`FieldDecl::span`].
+    #[serde(default)]
+    pub span: Option<Span>,
     pub name: String,
     /// Return type text (`void`, `HttpServletRequest`, `List<Foo>`).
     pub return_type_text: String,
@@ -157,6 +189,10 @@ pub struct MethodDecl {
 /// A type declaration (class / interface / enum).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TypeDecl {
+    /// Where the declaration is written. Always present for a parsed type; `None` only for one
+    /// built by hand (a test fixture, a synthesized shape). See [`FieldDecl::span`].
+    #[serde(default)]
+    pub span: Option<Span>,
     pub name: String,
     /// Fully-qualified name (`package.Outer.Inner` when nested).
     pub fqn: String,
@@ -202,6 +238,10 @@ impl TypeDecl {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileSymbols {
     pub package: Option<String>,
+    /// Where the `package …;` is written. Separate from [`Self::package`] rather than folded into
+    /// it, because the *name* is what every consumer wants and the location is what one does.
+    #[serde(default)]
+    pub package_span: Option<Span>,
     pub imports: Vec<Import>,
     pub types: Vec<TypeDecl>,
 }
@@ -215,7 +255,7 @@ pub fn extract_symbols(source: &str) -> FileSymbols {
         .set_language(&tree_sitter_java::LANGUAGE.into())
         .expect("load tree-sitter-java grammar");
     let Some(tree) = parser.parse(source, None) else {
-        return FileSymbols { package: None, imports: Vec::new(), types: Vec::new() };
+        return FileSymbols::default();
     };
     extract_symbols_from_root(&tree.root_node(), source)
 }
@@ -228,6 +268,7 @@ pub fn extract_symbols_from_root(root: &Node, source: &str) -> FileSymbols {
     let bytes = source.as_bytes();
 
     let mut package = None;
+    let mut package_span = None;
     let mut imports = Vec::new();
     let mut types = Vec::new();
 
@@ -239,6 +280,7 @@ pub fn extract_symbols_from_root(root: &Node, source: &str) -> FileSymbols {
                     .named_children(&mut child.walk())
                     .find(|n| n.kind() == "scoped_identifier" || n.kind() == "identifier")
                     .and_then(|n| node_text(&n, bytes));
+                package_span = Some(Span::of(&child));
             }
             "import_declaration" => {
                 if let Some(imp) = parse_import(&child, bytes) {
@@ -256,7 +298,7 @@ pub fn extract_symbols_from_root(root: &Node, source: &str) -> FileSymbols {
         }
     }
 
-    FileSymbols { package, imports, types }
+    FileSymbols { package, package_span, imports, types }
 }
 
 /// Parse an `import_declaration` node.
@@ -272,7 +314,7 @@ fn parse_import(node: &Node, bytes: &[u8]) -> Option<Import> {
         .named_children(&mut cur)
         .find(|n| matches!(n.kind(), "scoped_identifier" | "identifier"));
     let path = path_node.and_then(|n| node_text(&n, bytes))?;
-    Some(Import { path, star, static_ })
+    Some(Import { span: Some(Span::of(node)), path, star, static_ })
 }
 
 /// Collect a type declaration (recursing into nested types).
@@ -345,6 +387,7 @@ fn collect_type(
                 if let Some(cname) = m.child_by_field_name("name").and_then(|n| node_text(&n, bytes))
                 {
                     fields.push(FieldDecl {
+                        span: Some(Span::of(&m)),
                         name: cname,
                         type_text: name.clone(),
                         is_static: true,
@@ -369,6 +412,7 @@ fn collect_type(
     let annotations = collect_annotations(node, bytes);
     let type_params = type_param_names(node, bytes);
     out.push(TypeDecl {
+        span: Some(Span::of(node)),
         name,
         fqn,
         kind,
@@ -600,6 +644,7 @@ fn parse_method(node: &Node, bytes: &[u8], enclosing_is_interface: bool) -> Opti
     let is_final = has_modifier(node, bytes, "final");
     let throws = parse_throws(node, bytes);
     Some(MethodDecl {
+        span: Some(Span::of(node)),
         name,
         return_type_text,
         params,
@@ -737,6 +782,8 @@ fn synthesize_record_members(
         // also why a record can't declare instance fields of its own (checked in `bennu-check`).
         if !fields.iter().any(|f| f.name == c.name) {
             fields.push(FieldDecl {
+                // Nobody wrote it — the language did. See `FieldDecl::span`.
+                span: None,
                 name: c.name.clone(),
                 type_text: c.type_text.clone(),
                 is_static: false,
@@ -750,6 +797,7 @@ fn synthesize_record_members(
         // people reach for `p.x()`, and Java is on their side.
         if !is_declared(methods, &c.name, 0) {
             methods.push(MethodDecl {
+                span: None,
                 name: c.name.clone(),
                 return_type_text: c.type_text.clone(),
                 params: Vec::new(),
@@ -768,6 +816,7 @@ fn synthesize_record_members(
     // of the same arity — the canonical or compact form the user wrote themselves.
     if !is_declared(methods, "<init>", components.len()) {
         methods.push(MethodDecl {
+            span: None,
             name: "<init>".to_string(),
             return_type_text: "void".to_string(),
             params: components.clone(),
@@ -795,6 +844,7 @@ fn synthesize_record_members(
             continue;
         }
         methods.push(MethodDecl {
+            span: None,
             name: name.to_string(),
             return_type_text: ret.to_string(),
             params,
@@ -818,6 +868,7 @@ fn is_declared(methods: &[MethodDecl], name: &str, arity: usize) -> bool {
 fn parse_constructor(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
     node.child_by_field_name("name")?; // a real declaration names its class
     Some(MethodDecl {
+        span: Some(Span::of(node)),
         name: "<init>".to_string(),
         return_type_text: "void".to_string(),
         params: parse_params(node, bytes),
@@ -843,6 +894,7 @@ fn parse_annotation_element(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
         .and_then(|n| node_text(&n, bytes))
         .unwrap_or_else(|| "void".to_string());
     Some(MethodDecl {
+        span: Some(Span::of(node)),
         name,
         return_type_text,
         params: Vec::new(),
@@ -872,6 +924,9 @@ fn parse_field(node: &Node, bytes: &[u8], in_interface: bool, out: &mut Vec<Fiel
         if c.kind() == "variable_declarator" {
             if let Some(name) = c.child_by_field_name("name").and_then(|n| node_text(&n, bytes)) {
                 out.push(FieldDecl {
+                    // The DECLARATOR, not the whole `int a, b, c;` — two fields on one line are
+                    // two rows, and each has to select its own.
+                    span: Some(Span::of(&c)),
                     name,
                     type_text: type_text.clone(),
                     is_static,
@@ -1031,6 +1086,51 @@ mod tests {
 
     fn one_type(src: &str) -> TypeDecl {
         extract_symbols(src).types.into_iter().next().expect("one type")
+    }
+
+    // ── spans ────────────────────────────────────────────────────────────────────
+
+    /// A span has to point at the thing it belongs to, or every consumer of it (navigation, the
+    /// model panel) lands somewhere plausible and wrong.
+    #[test]
+    fn a_declarations_span_covers_its_own_text() {
+        let src = "package p;\nclass C {\n  private int total;\n  void go() {}\n}";
+        let t = one_type(src);
+        let span = t.span.expect("a parsed type has a span");
+        assert!(src[span.start..span.end].starts_with("class C"));
+
+        let field = t.fields.iter().find(|f| f.name == "total").expect("total");
+        assert_eq!(&src[field.span.expect("a span").start..field.span.unwrap().end], "total");
+
+        let method = t.methods.iter().find(|m| m.name == "go").expect("go");
+        let span = method.span.expect("a span");
+        assert!(src[span.start..span.end].starts_with("void go()"));
+    }
+
+    /// Two fields on one line are two rows, and each has to select its own — which is why the
+    /// span is the declarator and not the whole `int a, b;`.
+    #[test]
+    fn each_declarator_on_a_shared_line_gets_its_own_span() {
+        let src = "class C { int a, b; }";
+        let t = one_type(src);
+        let spans: Vec<&str> = t
+            .fields
+            .iter()
+            .map(|f| &src[f.span.expect("a span").start..f.span.unwrap().end])
+            .collect();
+        assert_eq!(spans, ["a", "b"]);
+    }
+
+    /// **Nobody wrote these.** A record's accessor has no source, and a `0..0` would point at the
+    /// package declaration — so it says "nowhere" instead.
+    #[test]
+    fn a_synthesized_member_has_no_span() {
+        let t = one_type("record P(int x) {}");
+        let accessor = t.methods.iter().find(|m| m.name == "x").expect("the accessor");
+        assert!(accessor.span.is_none());
+        assert!(t.fields.iter().find(|f| f.name == "x").expect("the backing field").span.is_none());
+        // ...while the record itself is very much written down.
+        assert!(t.span.is_some());
     }
 
     // ── record components (JLS §8.10) ────────────────────────────────────────────

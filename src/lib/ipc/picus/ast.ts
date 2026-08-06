@@ -8,42 +8,12 @@
 
 import { picus } from '../rpc';
 
-/** One node. Byte ranges, never character offsets — see `selectByteRange`. */
-export interface SyntaxNode {
-  /** Tree-sitter's kind. For an anonymous node this **is** its text (`","`). */
-  kind: string;
-  /** The field it fills in its parent (`name`, `body`) — the column that turns
-   *  "an identifier" into "the table being written to". */
-  field?: string;
-  named: boolean;
-  error?: boolean;
-  missing?: boolean;
-  range: { start: number; end: number };
-  /** 1-based. */
-  line: number;
-  text?: string;
-  children?: SyntaxNode[];
-  /** Has children that were not walked — the depth or node budget ran out. */
-  elided?: boolean;
-  /** Its children come from a second parse of its own text — a `$$ … $$` routine
-   *  body, which the SQL grammar hands back as one token. */
-  injected?: boolean;
-}
+// The shapes live in `$lib/types/syntax`: the crate that builds them (`arbor-syntax`) knows no
+// language, so Picus and Bennu get the same thing back and one panel draws both. Re-exported
+// here so a Picus call site still reads as one import.
+export type { SyntaxNode, SyntaxTree, TreeRequest } from '$lib/types/syntax';
+import type { SyntaxTree, TreeRequest } from '$lib/types/syntax';
 
-export interface SyntaxTree {
-  root: SyntaxNode;
-  nodeCount: number;
-  /** The walk stopped early. The panel says so rather than implying the file ends. */
-  truncated: boolean;
-  hasErrors: boolean;
-}
-
-export interface TreeRequest {
-  maxDepth?: number;
-  maxNodes?: number;
-  /** Hide the commas and the keywords. */
-  namedOnly?: boolean;
-}
 
 /** The tree of a saved script, from the text the repository was read with. */
 export function syntaxTree(

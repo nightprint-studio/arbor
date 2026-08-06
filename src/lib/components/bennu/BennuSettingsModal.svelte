@@ -492,7 +492,7 @@
           <div class="card-section-title"><Package size={12} /> Navigation</div>
           <FormRow
             label="Search the dependencies too"
-            description="Add two categories to Go to (Ctrl+N / Ctrl+Shift+N) for the classes and files inside the dependency jars — a framework annotation, a struts-default.xml, a schema. They are searched as you type rather than listed, so they cost nothing until you use them; the first search after opening a project spends a moment reading the jars."
+            description="Open Go to (Ctrl+N / Ctrl+Shift+N) and Find in project on Project & dependencies rather than on Project alone, so a framework annotation, a struts-default.xml or a schema is found without asking for it. Either way the Source picker still decides the search in front of you. The jars are searched as you type rather than listed, so they cost nothing until used; the first search after opening a project spends a moment reading them."
           >
             <Toggle checked={s.searchDependencies} onchange={(v) => void s.setSearchDependencies(v)}
                     ariaLabel="Search the dependencies too" />

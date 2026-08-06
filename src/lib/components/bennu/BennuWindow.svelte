@@ -24,7 +24,7 @@
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info,
     Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck,
-    TextCursorInput, ListChecks, BookOpen, FlaskConical, ListRestart, Bug,
+    TextCursorInput, ListChecks, BookOpen, FlaskConical, ListRestart, Bug, Braces,
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -52,6 +52,8 @@
   import BennuDependenciesPanel from './BennuDependenciesPanel.svelte';
   import BennuMavenPanel from './BennuMavenPanel.svelte';
   import BennuTestsCatalogPanel from './BennuTestsCatalogPanel.svelte';
+  import SyntaxTreePanel from '$lib/components/shared/internal/SyntaxTreePanel.svelte';
+  import { bennuAstStore } from '$lib/stores/bennu/ast.svelte';
   import MavenIcon from './MavenIcon.svelte';
   import JUnitIcon from './JUnitIcon.svelte';
   import BennuBottomDock from './BennuBottomDock.svelte';
@@ -70,6 +72,7 @@
   import BennuExternalChangeModal from './BennuExternalChangeModal.svelte';
   import BennuRunConfigModal from './BennuRunConfigModal.svelte';
   import BennuBreakpointsModal from './BennuBreakpointsModal.svelte';
+  import BennuSsrModal from './BennuSsrModal.svelte';
   import BennuRenameModal from './BennuRenameModal.svelte';
   import BennuUsagesPopover from './BennuUsagesPopover.svelte';
   import BennuGotoModal from './BennuGotoModal.svelte';
@@ -548,6 +551,9 @@
           // The CATALOGUE of tests, not the runs — those are tabs of the Run console. Its own
           // brand mark for the same reason Maven has one: this button names a product.
           { id: 'tests', tooltip: 'Tests', shortcut: 'Alt+5', icon: JUnitIcon, active: bennuUiStore.rightPanel === 'tests', onclick: () => bennuUiStore.toggleRight('tests') },
+          // The parse itself. Not gated on Java: it answers for every language there is a
+          // grammar for, and NAMES the one it has none for — which is the useful answer.
+          { id: 'ast', tooltip: 'Trees — the parse, and the model Bennu derives from it', shortcut: 'Alt+9', icon: Braces, active: bennuUiStore.rightPanel === 'ast', onclick: () => bennuUiStore.toggleRight('ast') },
         ]
       : [],
   );
@@ -586,7 +592,7 @@
     untrack(() =>
       bennuUiStore.dropUnavailablePanels({
         left: java ? ['project', 'structure', 'dependencies'] : ['project'],
-        right: java ? ['maven', 'tests'] : [],
+        right: java ? ['maven', 'tests', 'ast'] : ['ast'],
         bottom: [
           'problems', 'terminal', 'build', 'todos',
           ...(java ? ['run' as const] : []),
@@ -635,6 +641,7 @@
     'hammer': Hammer as unknown as IconComponent,
     'maven': MavenIcon as unknown as IconComponent,
     'junit': JUnitIcon as unknown as IconComponent,
+    'braces': Braces as unknown as IconComponent,
     'list-checks': ListChecks as unknown as IconComponent,
     'play': Play as unknown as IconComponent,
     'bug': Bug as unknown as IconComponent,
@@ -740,6 +747,8 @@
       { id: 'todos',     title: 'Toggle TODO',      icon: 'todo',        shortcut: 'Alt+7', action: () => run(() => bennuUiStore.toggleBottom('todos')), when: true },
       { id: 'terminal',  title: 'Toggle Terminal',  icon: 'terminal',    shortcut: 'Alt+F12', action: () => run(() => bennuUiStore.toggleBottom('terminal')), when: true },
       { id: 'maven',     title: 'Toggle Maven',     icon: 'maven',       shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: javaTools },
+      { id: 'ast',       title: 'Toggle Trees — syntax and model', icon: 'braces',    shortcut: 'Alt+9', action: () => run(() => bennuUiStore.toggleRight('ast')), when: true },
+      { id: 'ssr',       title: 'Structural search / replace…', icon: 'search', shortcut: 'Ctrl+Shift+M', action: () => run(() => bennuUiStore.openSsr()), when: javaTools },
       // The framework catalogs. Palette-only by design (see `framework-catalogs.ts`) and gated
       // on the project having something in them, so they are absent — not empty — everywhere
       // else. Same list the rail is built from: a verb the palette offers must have somewhere to
@@ -989,6 +998,12 @@
     // Find in project (Ctrl+Shift+F) — a modal, replacing the old Search rail.
     if (mod && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); bennuUiStore.openFind(editor?.getSelectedText() ?? ''); return; }
 
+    // Structural search (Ctrl+Shift+M) — the shape-aware sibling of the one above. Java-only:
+    // it needs a grammar, and on a Cargo project there is none to point it at.
+    if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'm' && javaTools) {
+      e.preventDefault(); bennuUiStore.openSsr(); return;
+    }
+
     // Workspace manager (Ctrl+Shift+W) — create / switch / manage named workspaces.
     if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'w') { e.preventDefault(); bennuUiStore.openWorkspaceManager(); return; }
 
@@ -1048,6 +1063,9 @@
         // spoken for, and the two panels are read together.
         if (e.key === '8') { e.preventDefault(); bennuUiStore.toggleRight('maven'); return; }
       }
+      // Outside the Java gate on purpose: the syntax tree answers for whatever the file is, and
+      // names the language it has no grammar for — which is useful on a Cargo project too.
+      if (e.key === '9') { e.preventDefault(); bennuUiStore.toggleRight('ast'); return; }
       if (e.key === 'Enter') {
         if (!isJavaFile(projectStore.activeFilePath)) return;
         e.preventDefault(); editor?.openIntentions(); return;
@@ -1116,6 +1134,16 @@
           <PanelCard orientation="right" initialSize={280} minSize={200} maxSize={520}>
             {#if bennuUiStore.rightPanel === 'maven'}<BennuMavenPanel />{/if}
             {#if bennuUiStore.rightPanel === 'tests'}<BennuTestsCatalogPanel />{/if}
+            {#if bennuUiStore.rightPanel === 'ast'}
+              <SyntaxTreePanel
+                title="Trees"
+                source={bennuAstStore.source}
+                tabs={bennuAstStore.views}
+                activeTab={bennuAstStore.activeView}
+                onTab={(id) => bennuAstStore.setActiveView(id)}
+                emptyMessage="Open a file and its trees appear here."
+              />
+            {/if}
           </PanelCard>
         {/if}
       {/snippet}
@@ -1160,6 +1188,10 @@
 
 {#if bennuUiStore.breakpointsOpen}
   <BennuBreakpointsModal onClose={() => bennuUiStore.closeBreakpoints()} />
+{/if}
+
+{#if bennuUiStore.ssrOpen}
+  <BennuSsrModal onClose={() => bennuUiStore.closeSsr()} />
 {/if}
 
 {#if bennuUiStore.navOpen}
