@@ -239,8 +239,15 @@
       // intent on opening. Always skip the close button: landing there
       // means Enter dismisses the modal immediately, which is jarring.
       const nonClose = focusables.filter(el => el.getAttribute('aria-label') !== 'Close');
+      // A content that knows where the caret belongs says so, and is believed. The heuristic
+      // below is a good guess about a form; it is a bad one about a panel whose first control
+      // is a filter dropdown and whose point is the search field three rows down. Without
+      // this, that content's own focus call and this one race — and this one, running in a
+      // microtask after the child effects, wins.
+      const declared = modalEl?.querySelector<HTMLElement>('[data-modal-autofocus]') ?? null;
       const initial =
-        nonClose.find(el => !isInHeader(el))
+        declared
+        ?? nonClose.find(el => !isInHeader(el))
         ?? nonClose[0]
         ?? focusables[0]
         ?? modalEl;

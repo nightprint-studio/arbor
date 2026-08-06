@@ -5,8 +5,18 @@ edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
-description  = "Bennu JSP model (skeleton) — our own JSP grammar (directive/scriptlet/expression/EL + Java+HTML injection), TLD/taglib model, and an EL/OGNL AST (resolver in a later phase). Phase-0 skeleton: role + prelude only, no logic yet."
+description  = "The JSP tag-library model: a TLD parser covering both the 1.2 and 2.1 generations, the page's own `<%@ taglib %>` declarations, the rule that decides which library a `uri` names, and the editor answers over them — tag/attribute completion, checks that stay silent without a library, hover carrying the TLD's own prose, and go-to onto the declaration."
 
 [dependencies]
-serde      = { workspace = true }
-serde_json = { workspace = true }
+# The extension seam this crate implements.
+bennu-ext      = { path = "../ext" }
+# The wire types a contribution is made of (Diagnostic / CompletionItem / CapabilitySet).
+bennu-proto    = { path = "../proto" }
+# The completion mechanics — the caret's prefix rule and the de-duplicated capped list.
+bennu-complete = { path = "../complete" }
+# The tolerant tag scan + the caret classification. A taglib tag IS an XML tag; writing a
+# third scanner for it would be writing the same bugs again.
+bennu-xml      = { path = "../xml" }
+# A TLD is well-formed XML on disk (never a buffer mid-edit), so it is read with the same
+# parser the rest of the workspace reads its descriptors with.
+roxmltree      = "0.20"

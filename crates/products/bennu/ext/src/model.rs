@@ -72,6 +72,17 @@ pub struct ProjectScan<'a> {
     /// resolved yet simply has no descriptors, and an extension is expected to degrade to
     /// whatever it knows on its own rather than go quiet.
     pub descriptors: &'a [ScannedFile],
+    /// **Tag library descriptors** — every `.tld` in the project, and every one extracted
+    /// from a dependency jar.
+    ///
+    /// Their own bucket rather than part of [`Self::xml`] for the reason the schemas have
+    /// theirs: a TLD describes another file rather than being one, and an extension looking
+    /// for configuration would read it as some. Like the schemas, the jar-sourced half has
+    /// already been written out by the host, so `path` is a real file an editor can open.
+    ///
+    /// Empty is normal and must stay harmless: a project whose dependencies are not resolved
+    /// yet has none, and an extension is expected to go quiet rather than guess a vocabulary.
+    pub taglibs: &'a [ScannedFile],
 }
 
 /// One file an extension is being asked about — the buffer as it is *right now*, which

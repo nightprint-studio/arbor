@@ -241,6 +241,7 @@ mod tests {
             resources: &[],
             schemas: &files,
             descriptors: &[],
+            taglibs: &[],
         });
         ext
     }

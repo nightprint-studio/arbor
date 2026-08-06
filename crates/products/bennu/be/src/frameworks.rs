@@ -37,6 +37,7 @@ use bennu_ext::prelude::{
 use bennu_project::prelude::{detect_capabilities, normalize_newlines, parse_pom};
 use bennu_proto::prelude::{CompletionItem, Diagnostic};
 use bennu_jpa::prelude::JpaExtension;
+use bennu_jsp::prelude::JspExtension;
 use bennu_spring::prelude::{is_property_file, SpringExtension};
 use bennu_xml::prelude::XmlExtension;
 use serde::{Deserialize, Serialize};
@@ -165,6 +166,7 @@ impl FrameworkService {
                 Arc::clone(&spring) as Arc<dyn FrameworkExtension>,
                 Arc::clone(&jpa) as Arc<dyn FrameworkExtension>,
                 Arc::new(XmlExtension::new()) as Arc<dyn FrameworkExtension>,
+                Arc::new(JspExtension::new()) as Arc<dyn FrameworkExtension>,
             ],
             &caps,
         );
@@ -177,7 +179,7 @@ impl FrameworkService {
         // extension has no use for it. Since that one applies to every project, skipping the
         // read when it is the *only* active extension is what keeps a plain Maven project from
         // paying a Spring-sized scan to get `pom.xml` completion.
-        let wants_java = registry.ids().iter().any(|id| *id != "xml");
+        let wants_java = registry.ids().iter().any(|id| !matches!(*id, "xml" | "jsp"));
         let java: Vec<ScannedFile> = if wants_java {
             let encoding = resolve_index_encoding(root);
             bennu_intel::prelude::read_java_sources(path, &encoding)
@@ -197,6 +199,13 @@ impl FrameworkService {
         let (xml_files, resources) = collect_config_files(path);
         let descriptors = collect_descriptors(path);
         let schemas = collect_schemas(path);
+        // Only walked when something asked for it: on a project with no tag libraries the JSP
+        // extension is not in the registry, and opening every dependency jar to find nothing
+        // would be a project scan spent on a feature that is off.
+        let taglibs = match registry.ids().contains(&"jsp") {
+            true => collect_taglibs(path),
+            false => Vec::new(),
+        };
 
         registry.reindex(&ProjectScan {
             root: path,
@@ -205,6 +214,7 @@ impl FrameworkService {
             resources: &resources,
             schemas: &schemas,
             descriptors: &descriptors,
+            taglibs: &taglibs,
         });
         // Each extension keeps only what its own `applies` admitted it to; a handle to one the
         // registry dropped would be a model nobody ever fills.
@@ -321,10 +331,10 @@ fn is_schema_entry(name: &str) -> bool {
     lower.ends_with(".dtd") || lower.ends_with(".xsd")
 }
 
-/// Cap on the schemas taken from any one jar. A framework ships a handful (one per version it
-/// has published); a jar with hundreds is a generated artifact, and reading all of them would
-/// cost a project scan for nothing.
-const MAX_SCHEMAS_PER_JAR: usize = 32;
+/// Cap on the grammars (schemas, tag libraries) taken from any one jar. A framework ships a
+/// handful (one per version it has published); a jar with hundreds is a generated artifact, and
+/// reading all of them would cost a project scan for nothing.
+const MAX_GRAMMARS_PER_JAR: usize = 32;
 
 /// The `.xsd` / `.dtd` files this project can resolve a document against.
 ///
@@ -392,7 +402,7 @@ fn schema_cache(jars: &[PathBuf]) -> Vec<ScannedFile> {
     let read: Vec<ScannedFile> = bennu_classpath::prelude::read_jar_entries_matching(
         jars,
         |name| is_schema_entry(name),
-        MAX_SCHEMAS_PER_JAR,
+        MAX_GRAMMARS_PER_JAR,
     )
     .into_iter()
     .map(|r| {
@@ -405,7 +415,83 @@ fn schema_cache(jars: &[PathBuf]) -> Vec<ScannedFile> {
         // materialised into the cache and identified by that real path, rather than by the
         // `<jar>!/<entry>` display form which nothing can open. Falls back to the display form
         // when the cache is not writable — a go-to that does nothing is better than a crash.
-        let path = cache_schema(&r.jar, &r.entry, &text).unwrap_or_else(|| PathBuf::from(&r.id));
+        let path =
+            cache_jar_entry("schemas", &r.jar, &r.entry, &text).unwrap_or_else(|| PathBuf::from(&r.id));
+        ScannedFile { path, text }
+    })
+    .collect();
+
+    let shared = Arc::new(read);
+    if let Ok(mut map) = cache.lock() {
+        map.insert(key, Arc::clone(&shared));
+    }
+    shared.as_ref().clone()
+}
+
+/// A jar entry that is a tag-library descriptor. The spec puts them under `META-INF`, and
+/// nothing else in a jar is a `.tld`, so the extension is the whole test.
+fn is_taglib_entry(name: &str) -> bool {
+    name.to_ascii_lowercase().ends_with(".tld")
+}
+
+/// The `.tld` files this project can resolve a `<%@ taglib %>` against.
+///
+/// Same two sources and the same restraints as [`collect_schemas`], for the same reason: the
+/// library a page declares by `uri="/struts-tags"` is not in the project at all, it is inside
+/// `struts2-core.jar`, and that is where 90% of the tags in a legacy page come from.
+///
+/// Jar-sourced ones are **materialised into the cache** and identified by that real path,
+/// because Ctrl+click on a `uri` is the whole point and `<jar>!/<entry>` opens nothing.
+fn collect_taglibs(root: &Path) -> Vec<ScannedFile> {
+    let mut out = taglib_cache(&crate::dep_classpath::cached_dep_jars(root));
+
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for e in entries.flatten() {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if p.is_dir() {
+                if !name.starts_with('.') && !SKIP_DIRS.contains(&name.as_str()) {
+                    stack.push(p);
+                }
+                continue;
+            }
+            if !is_taglib_entry(&name) || out.len() >= MAX_FILES {
+                continue;
+            }
+            if let Ok(bytes) = std::fs::read(&p) {
+                let text = normalize_newlines(&String::from_utf8_lossy(&bytes));
+                out.push(ScannedFile { path: p, text });
+            }
+        }
+    }
+    out
+}
+
+/// The jar-sourced tag libraries for a jar list, read once per distinct list.
+fn taglib_cache(jars: &[PathBuf]) -> Vec<ScannedFile> {
+    static CACHE: OnceLock<Mutex<HashMap<u64, Arc<Vec<ScannedFile>>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    let key = jar_set_key(jars);
+    if let Ok(map) = cache.lock() {
+        if let Some(hit) = map.get(&key) {
+            return hit.as_ref().clone();
+        }
+    }
+    let read: Vec<ScannedFile> = bennu_classpath::prelude::read_jar_entries_matching(
+        jars,
+        |name| is_taglib_entry(name),
+        MAX_GRAMMARS_PER_JAR,
+    )
+    .into_iter()
+    .map(|r| {
+        // A TLD of that era is as likely to be Latin-1 as UTF-8, and its `<description>`s are
+        // what the hover shows — decoded by the one rule that reads every jar entry.
+        let text = normalize_newlines(&crate::dep_classpath::jar_entry_text(&r.bytes));
+        let path =
+            cache_jar_entry("taglibs", &r.jar, &r.entry, &text).unwrap_or_else(|| PathBuf::from(&r.id));
         ScannedFile { path, text }
     })
     .collect();
@@ -539,17 +625,20 @@ fn sanitize(segment: &str) -> String {
         .collect()
 }
 
-/// Write a jar-shipped schema into the bennu cache and return where it landed.
+/// Write a jar-shipped grammar into the bennu cache and return where it landed.
 ///
-/// `<data dir>/schemas/<jar file name>/<entry path>` — the jar's name is kept in the path so two
+/// `<data dir>/<kind>/<jar file name>/<entry path>` — the jar's name is kept in the path so two
 /// artifacts shipping `struts-2.5.dtd` do not overwrite each other, and so the tab title a user
 /// ends up looking at says which dependency it came from.
 ///
-/// Idempotent: a schema inside a jar cannot change without the jar changing, so an existing file
+/// `kind` separates the two things extracted this way (`schemas`, `taglibs`) so a cache sweep can
+/// speak about one of them.
+///
+/// Idempotent: a file inside a jar cannot change without the jar changing, so an existing file
 /// of the same length is left alone rather than rewritten on every project scan.
-fn cache_schema(jar: &Path, entry: &str, text: &str) -> Option<PathBuf> {
+fn cache_jar_entry(kind: &str, jar: &Path, entry: &str, text: &str) -> Option<PathBuf> {
     let jar_name = jar.file_name()?.to_str()?;
-    let mut path = arbor_core::prelude::bennu_data_dir().join("schemas").join(jar_name);
+    let mut path = arbor_core::prelude::bennu_data_dir().join(kind).join(jar_name);
     for segment in entry.split('/').filter(|s| !s.is_empty() && *s != "." && *s != "..") {
         path.push(segment);
     }

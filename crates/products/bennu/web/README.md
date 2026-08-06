@@ -62,6 +62,13 @@ Call sites use `bennu_web::prelude::…`:
   `Relation` / `RelKind` (with `RelKind::into_index()` mapping onto the index'
   `RelationKind`) and `action_source()` / `bean_source()` for the `Source` tag.
 - Helpers: `WildcardPattern`, `resolve_bean_map`, `resolve_tiles_view`, `relations_of`.
+- `parse_jsp_vars(source) -> JspVars` — page-scoped variable declarations (`<c:set var>`, …)
+  and the **root** identifier of every EL/OGNL reference. Root-only on purpose: a variable's
+  find-usages must count `x` in `${x.name}` once and must never count `name`.
+- `ognl_path_at(source, offset) -> Option<OgnlPath>` — the other half of that question: the
+  whole dotted path under the caret (`ordine.cliente.nome`, indices seen through) and which
+  segment the caret is on. A go-to on `nome` is a real question about a real declaration, and
+  the root a reference carries cannot answer it.
 - `bean_class_value_spans(xml_text, fqcn) -> Vec<BeanClassSpan>` — the exact byte spans of
   every `<bean class="fqcn">` attribute value (matched exactly), for the class-rename
   config-aware edit (docs §5 #10). A Struts `<action class="beanId">` is a bean-id, not an

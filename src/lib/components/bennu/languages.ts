@@ -20,7 +20,7 @@
  */
 
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor';
-import { sqlHighlight, type SqlDialect } from '$lib/components/shared/ui/code-editor';
+import { sqlHighlight, dtdLanguage, type SqlDialect } from '$lib/components/shared/ui/code-editor';
 import type { Extension } from '@codemirror/state';
 import { StreamLanguage, type StreamParser } from '@codemirror/language';
 import { xml } from '@codemirror/legacy-modes/mode/xml';
@@ -66,6 +66,10 @@ function streamLang(id: string, parser: StreamParser<unknown>): LanguageDescript
 const xmlLang = xmlSchemaLang('xml', xml);
 // HTML: the real lang-html tree (embedded JS/CSS highlight + tag folding).
 const htmlLang = cmLang('html', html(), true);
+// A DTD is not XML — `<!ELEMENT` is a malformed tag to an XML mode — and it is exactly what
+// the `.tld`s and the `struts.xml`s of a legacy project are written against, so it gets its
+// own mode rather than the closest-looking one.
+const dtdLang = cmLang('dtd', dtdLanguage);
 // JSP/JSPF/tag files use the custom tree-sitter-jsp grammar (jsp-lang.ts) — namespaced
 // taglib tags, scriptlets, EL/OGNL all parse + colour natively.
 const cssLang = streamLang('css', css);
@@ -139,6 +143,8 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     case 'dig': return digLanguage;
     case 'xml': case 'xsd': case 'wsdl': case 'xsl': case 'xslt': case 'tld':
     case 'pom': case 'iml': case 'fxml': case 'svg': return xmlLang;
+    // `.ent` / `.mod` are the conventional names for a DTD split across files.
+    case 'dtd': case 'ent': case 'mod': return dtdLang;
     case 'jsp': case 'jspf': case 'tag': case 'tagx': return jspLanguage;
     case 'html': case 'htm': case 'xhtml': return htmlLang;
     case 'css': return cssLang;

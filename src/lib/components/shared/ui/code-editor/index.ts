@@ -14,6 +14,7 @@ export type {
   LanguageDescriptor,
   CodeEditorIntel,
   TokenClass,
+  TokenClassName,
   DiagnosticSeverity,
   EditorDiagnostic,
   EditorViewSnapshot,
@@ -32,10 +33,18 @@ export {
   inlineCompletionActive,
 } from './inline-completion';
 export { codeEditorTheme } from './theme';
+// A colour per namespace family (a taglib prefix, an XML namespace) — see the module.
+export {
+  NAMESPACE_COLORS,
+  NAMESPACE_SLOTS,
+  namespaceSlotFor,
+  namespaceTokenClass,
+} from './namespace-palette';
 // Static code rendered OUTSIDE an editor instance — a search result's context, the sticky-scroll
 // header. Emits the editor's own `cm-tok-*` classes, so it takes the theme for free.
 export { highlightToHtml } from './mini-highlight';
 export { sqlHighlight, type SqlDialect } from './sql-modes';
+export { dtdLanguage, dtdMode } from './dtd-mode';
 export { createCodeEditorExtensions, refTextAt, type CodeEditorExtensionsOptions } from './extensions';
 export { createHighlightPlugin, makeByteToU16, makeU16ToByte, parserReady } from './highlight';
 export { hoverCardDom, parseDoc, type HoverCard } from './hover-card';

@@ -11,6 +11,7 @@
 import { EditorView } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
+import { namespaceThemeSpec } from './namespace-palette';
 
 /**
  * Lezer highlight style for CodeMirror-built-in / legacy-mode languages (the ones a
@@ -29,6 +30,11 @@ const lezerHighlightStyle = HighlightStyle.define([
   { tag: [t.typeName, t.className, t.namespace], color: 'var(--syntax-type, #4d9be6)' },
   { tag: [t.function(t.variableName), t.function(t.propertyName)], color: 'var(--syntax-function, #ffc66d)' },
   { tag: [t.propertyName, t.attributeName], color: 'var(--syntax-field, #9876aa)' },
+  // A *declaration* — the name a line brings into existence, as opposed to the names it
+  // mentions. Legacy stream modes emit this as `def` (a DTD's `<!ELEMENT name`, a shell
+  // function, a `def` in the JS mode); without it a file of definitions reads as flat text.
+  { tag: t.definition(t.variableName), color: 'var(--syntax-function, #ffc66d)', fontWeight: '600' },
+  { tag: t.variableName, color: 'var(--text-primary)' },
   { tag: t.tagName, color: 'var(--syntax-keyword, #cc7832)' },
   { tag: [t.meta, t.annotation, t.processingInstruction], color: 'var(--syntax-annotation, #bbb529)' },
   { tag: t.constant(t.variableName), color: 'var(--syntax-constant, #9876aa)', fontStyle: 'italic' },
@@ -256,6 +262,13 @@ export const codeEditorTheme = EditorView.theme(
     '.cm-tok-ident':       { color: 'var(--text-primary)' },
     '.cm-tok-operator':    { color: 'var(--syntax-operator, var(--text-secondary))' },
     '.cm-tok-punctuation': { color: 'var(--text-muted)' },
+
+    // ── Namespace palette ──
+    //
+    // `.cm-tok-ns-0…N` — a colour per namespace FAMILY rather than per token kind (a
+    // JSP taglib prefix, an XML namespace). Categorical, not semantic: see
+    // `namespace-palette.ts` for what the hues do and do not mean.
+    ...namespaceThemeSpec,
 
     // ── Autocomplete + hover docs ──
     '.cm-tooltip-autocomplete': {

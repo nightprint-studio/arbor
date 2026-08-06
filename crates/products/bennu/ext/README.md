@@ -18,9 +18,9 @@ makes those indistinguishable to the caller.
 use bennu_ext::prelude::*;
 
 let registry = ExtensionRegistry::new(vec![Arc::new(SpringExtension::new())], &capabilities);
-// Off the request path. `descriptors` are the self-descriptions the host read out of the
-// project's dependency jars — the one input an extension cannot derive from the source tree.
-registry.reindex(&ProjectScan { root, java, xml, resources, descriptors });
+// Off the request path. `descriptors`, `schemas` and `taglibs` are what the host read out of
+// the project's dependency jars — the one input an extension cannot derive from the source tree.
+registry.reindex(&ProjectScan { root, java, xml, resources, schemas, descriptors, taglibs });
 
 let ctx = FileCtx { path, source };
 let diags  = registry.diagnostics(&ctx);

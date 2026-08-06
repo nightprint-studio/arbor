@@ -884,6 +884,7 @@ dependencies = [
  "bennu-java",
  "bennu-jdwp",
  "bennu-jpa",
+ "bennu-jsp",
  "bennu-project",
  "bennu-proto",
  "bennu-query",
@@ -1031,8 +1032,11 @@ dependencies = [
 name = "bennu-jsp"
 version = "0.3.0"
 dependencies = [
- "serde",
- "serde_json",
+ "bennu-complete",
+ "bennu-ext",
+ "bennu-proto",
+ "bennu-xml",
+ "roxmltree",
 ]
 
 [[package]]

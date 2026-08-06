@@ -35,6 +35,14 @@ pub struct JspVarDecl {
     pub start: usize,
     /// End byte offset (exclusive).
     pub end: usize,
+    /// The expression the variable takes its value FROM, as written and with its delimiters
+    /// still on (`%{elencoBandi}`, `${order.lines}`). Empty when the tag names none.
+    ///
+    /// This is what makes a page variable *typed*. `<s:iterator value="%{elencoBandi}"
+    /// var="bando">` says, in the only place the page says it, that `bando` is whatever
+    /// `elencoBandi` holds — and without that, everything written on `bando` below is a name
+    /// the editor can see and cannot follow.
+    pub source_expr: String,
 }
 
 /// A page-scoped variable **reference** — a root identifier inside an EL/OGNL expression.
@@ -133,6 +141,11 @@ fn decl_var_attrs(local: &str) -> Option<&'static [&'static str]> {
     })
 }
 
+/// Where a var-producing tag takes its value from, in priority order. One list for every tag:
+/// `value` is JSTL's and Struts's spelling, `items` is `<c:forEach>`'s, and no tag uses both, so
+/// a per-tag table would be three ways of saying the same thing.
+const SOURCE_ATTRS: &[&str] = &["value", "items"];
+
 /// Walk tags, emitting a [`JspVarDecl`] for each var-producing tag that carries its naming
 /// attribute. Masked regions (comments/scriptlets) are skipped.
 fn collect_decls(source: &str, masked: &[(usize, usize)], out: &mut Vec<JspVarDecl>) {
@@ -158,11 +171,15 @@ fn collect_decls(source: &str, masked: &[(usize, usize)], out: &mut Vec<JspVarDe
             if let Some(attrs) = decl_var_attrs(&local) {
                 if let Some((name, vstart, vend)) = first_attr(source, after, close, attrs) {
                     if !name.trim().is_empty() {
+                        let source_expr = first_attr(source, after, close, SOURCE_ATTRS)
+                            .map(|(v, _, _)| v)
+                            .unwrap_or_default();
                         out.push(JspVarDecl {
                             name,
                             tag: tag_full_name(source, after, close).unwrap_or(local),
                             start: vstart,
                             end: vend,
+                            source_expr,
                         });
                     }
                 }
@@ -260,6 +277,155 @@ fn scan_expr(source: &str, start: usize, out: &mut Vec<JspVarRef>) -> usize {
 
 /// Skip a quoted string starting at `open` (`bytes[open]` is the quote), honouring `\`
 /// escapes. Returns the index just past the closing quote (or EOF).
+// ── dotted paths (property chains) ─────────────────────────────────────────────────
+
+/// A dotted OGNL / EL **path** as written: `ordine.cliente.nome`, `items[0].nome`.
+///
+/// The counterpart to [`JspVarRef`], which is deliberately only the *root*: a page variable's
+/// find-usages must count `x` in `%{x.name}` once and must not count `name` at all. But a
+/// go-to on `name` is a real question about a real declaration, and answering it needs the
+/// segments the root does not carry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OgnlPath {
+    /// Every segment in order, each with its own span. Never empty.
+    pub segments: Vec<JspVarRef>,
+    /// Index into [`Self::segments`] of the one the caret is on.
+    pub at: usize,
+}
+
+impl OgnlPath {
+    /// The segment the caret is on.
+    pub fn segment(&self) -> &JspVarRef {
+        &self.segments[self.at]
+    }
+
+    /// The root of the path — what a page-variable check has to look at, whichever segment the
+    /// caret happens to be on.
+    pub fn root(&self) -> &JspVarRef {
+        &self.segments[0]
+    }
+}
+
+/// The dotted path under `offset`, if the caret is inside an EL/OGNL expression at all.
+///
+/// Only inside `${…}` / `#{…}` / `%{…}`, and never inside a string literal within one — the same
+/// two rules the reference scan follows, for the same reason: text that merely looks like a path
+/// is not one.
+pub fn ognl_path_at(source: &str, offset: usize) -> Option<OgnlPath> {
+    let masked = masked_regions(source);
+    let bytes = source.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if let Some(reg) = region_covering(&masked, i) {
+            i = reg.1;
+            continue;
+        }
+        if i + 1 < bytes.len() && matches!(bytes[i], b'$' | b'#' | b'%') && bytes[i + 1] == b'{' {
+            let (end, found) = scan_expr_paths(source, i + 2, offset);
+            if found.is_some() {
+                return found;
+            }
+            i = end;
+            continue;
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Walk one expression body collecting `ident (. ident)*` chains, and return the one covering
+/// `offset`. Mirrors [`scan_expr`]'s rules — strings skipped whole, whitespace kept transparent
+/// so `foo . bar` is one chain — and adds two: an index (`items[0]`) does not break a chain, and
+/// a property access with no root before it (`.foo` after a call) starts none.
+fn scan_expr_paths(source: &str, start: usize, offset: usize) -> (usize, Option<OgnlPath>) {
+    let bytes = source.as_bytes();
+    let mut i = start;
+    let mut chain: Vec<JspVarRef> = Vec::new();
+    let mut prev_access = false;
+    let mut found: Option<OgnlPath> = None;
+
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c == b'}' {
+            take_chain(&mut chain, offset, &mut found);
+            return (i + 1, found);
+        }
+        if c == b'\'' || c == b'"' {
+            take_chain(&mut chain, offset, &mut found);
+            i = skip_string(bytes, i);
+            prev_access = false;
+            continue;
+        }
+        if c.is_ascii_whitespace() {
+            i += 1; // keeps `prev_access`, so `foo . bar` stays one chain
+            continue;
+        }
+        if is_ident_start(c) {
+            let id_start = i;
+            i += 1;
+            while i < bytes.len() && is_ident_char(bytes[i]) {
+                i += 1;
+            }
+            let name = source[id_start..i].to_string();
+            if prev_access {
+                // A property access with nothing in front of it is not the start of a path.
+                if !chain.is_empty() {
+                    chain.push(JspVarRef { name, start: id_start, end: i });
+                }
+            } else {
+                take_chain(&mut chain, offset, &mut found);
+                if !is_el_keyword(&name) {
+                    chain.push(JspVarRef { name, start: id_start, end: i });
+                }
+            }
+            prev_access = false;
+            continue;
+        }
+        if c == b'[' {
+            // `items[0].nome` is one path: the index says which element, not which property.
+            i = skip_index(bytes, i);
+            continue;
+        }
+        if c == b'.' || c == b':' {
+            // The one character that must NOT end the chain — it is what joins it.
+            prev_access = true;
+            i += 1;
+            continue;
+        }
+        take_chain(&mut chain, offset, &mut found);
+        prev_access = false;
+        i += 1;
+    }
+    take_chain(&mut chain, offset, &mut found);
+    (i, found)
+}
+
+/// End the chain being built: keep it as the answer when it covers `offset`, drop it otherwise.
+/// The first covering chain wins — they cannot overlap.
+fn take_chain(chain: &mut Vec<JspVarRef>, offset: usize, found: &mut Option<OgnlPath>) {
+    if found.is_none() {
+        if let Some(at) = chain.iter().position(|s| offset >= s.start && offset <= s.end) {
+            *found = Some(OgnlPath { segments: std::mem::take(chain), at });
+            return;
+        }
+    }
+    chain.clear();
+}
+
+/// Past a `[ … ]` index, strings inside it skipped whole.
+fn skip_index(bytes: &[u8], open: usize) -> usize {
+    let mut i = open + 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b']' => return i + 1,
+            b'\'' | b'"' => i = skip_string(bytes, i),
+            b'}' => return i, // an unterminated index: let the caller see the expression end
+            _ => i += 1,
+        }
+    }
+    i
+}
+
 fn skip_string(bytes: &[u8], open: usize) -> usize {
     let quote = bytes[open];
     let mut i = open + 1;
@@ -296,6 +462,72 @@ fn is_el_keyword(word: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The path of the segment names under the caret, for the assertions below.
+    fn path(src: &str, needle: &str) -> Option<(Vec<String>, usize)> {
+        let at = src.find(needle).expect("needle") + 1;
+        ognl_path_at(src, at).map(|p| (p.segments.iter().map(|s| s.name.clone()).collect(), p.at))
+    }
+
+    #[test]
+    fn a_var_declaration_carries_the_expression_it_came_from() {
+        let src = r#"<s:iterator value="%{elencoBandi}" var="bando">
+              <c:set var="oggi" value="${today}"/>
+              <c:forEach items="${order.lines}" var="line"/>
+            </s:iterator>"#;
+        let decls = parse_jsp_vars(src).decls;
+        let of = |name: &str| {
+            decls.iter().find(|d| d.name == name).map(|d| d.source_expr.clone()).expect(name)
+        };
+        assert_eq!(of("bando"), "%{elencoBandi}");
+        assert_eq!(of("oggi"), "${today}");
+        // `<c:forEach>` says `items`, everyone else says `value`.
+        assert_eq!(of("line"), "${order.lines}");
+    }
+
+    #[test]
+    fn a_dotted_path_is_read_whole_from_any_of_its_segments() {
+        // The regression: the reference scan keeps only the ROOT, so a caret on `oraFine`
+        // matched nothing and nested go-to had nowhere to start.
+        let src = "<s:property value=\"%{jsp_param.element.datiGenerali.oraFine}\"/>";
+        let all = vec![
+            "jsp_param".to_string(),
+            "element".to_string(),
+            "datiGenerali".to_string(),
+            "oraFine".to_string(),
+        ];
+        assert_eq!(path(src, "jsp_param"), Some((all.clone(), 0)));
+        assert_eq!(path(src, "element"), Some((all.clone(), 1)));
+        assert_eq!(path(src, "oraFine"), Some((all, 3)));
+    }
+
+    #[test]
+    fn an_index_does_not_break_the_path() {
+        let src = "${items[0].nome}";
+        assert_eq!(path(src, "nome"), Some((vec!["items".into(), "nome".into()], 1)));
+    }
+
+    #[test]
+    fn only_inside_an_expression_and_never_inside_a_string() {
+        // Plain text that looks like a path is not one.
+        assert!(ognl_path_at("<p>ordine.cliente</p>", 6).is_none());
+        // A string literal inside an expression is not one either.
+        let src = "%{foo('ordine.cliente')}";
+        assert!(path(src, "ordine.cliente").is_none());
+    }
+
+    #[test]
+    fn a_property_access_with_nothing_in_front_starts_no_path() {
+        // `.trim()` after a call: there is no root to descend from, so nothing is offered.
+        let src = "%{'x'.trim()}";
+        assert!(path(src, "trim").is_none());
+    }
+
+    #[test]
+    fn whitespace_around_the_dot_keeps_one_path() {
+        let src = "%{ordine . cliente}";
+        assert_eq!(path(src, "cliente"), Some((vec!["ordine".into(), "cliente".into()], 1)));
+    }
 
     #[test]
     fn c_set_declaration_and_el_reference_resolve() {

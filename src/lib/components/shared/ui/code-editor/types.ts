@@ -51,6 +51,12 @@ export type TokenClass =
   /** `this` / `super` and other language self-references. */
   | 'self';
 
+/** A {@link TokenClass}, or any other class name a grammar wants to grow — rendered as
+ *  `cm-tok-<name>`, styled if the theme knows it and harmlessly plain if it doesn't. The
+ *  `string & {}` keeps the union's autocomplete alive while admitting the rest (a JSP
+ *  taglib prefix's `ns-3`, say). */
+export type TokenClassName = TokenClass | (string & {});
+
 /** Severity of an {@link EditorDiagnostic} (maps 1:1 onto CodeMirror's lint severities). */
 export type DiagnosticSeverity = 'error' | 'warning' | 'info' | 'hint';
 
@@ -140,7 +146,7 @@ export interface LanguageDescriptor {
     isNamed: boolean,
     field: string | null,
     parentType: string | null,
-  ) => TokenClass | null;
+  ) => TokenClassName | null;
 
   /** Optional: resolve the identifier under a Ctrl/Cmd+Click to a local target.
    *  Return a {@link GotoTarget} to jump within the buffer, or `null` to defer to

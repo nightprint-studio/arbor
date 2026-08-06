@@ -21,6 +21,12 @@
     <code>.properties</code>, CSS/SCSS/LESS, JavaScript/TypeScript, shell and SQL highlight.
     Colour only: navigation and completion in a Rust project want a language server, and until one
     is wired those actions are hidden rather than offered and silent.</li>
+  <li><strong>DTD</strong> (<code>.dtd</code>, and the <code>.ent</code> / <code>.mod</code>
+    fragments a large one is split into) has a mode of its own: a DTD is not XML —
+    <code>&lt;!ELEMENT</code> is a malformed tag to an XML highlighter — and it is what the
+    <code>struts.xml</code>s and <code>.tld</code>s of a legacy project are written against. The
+    declarations, the name each one <em>declares</em>, and the parameter entities
+    (<code>%common;</code>) a real DTD is mostly made of each read apart.</li>
 </ul>
 <p>
   <strong>SQL</strong> is highlighted per <strong>dialect</strong>, because the engines disagree
@@ -503,7 +509,9 @@
   heading. <kbd>Ctrl</kbd> + <kbd>N</kbd>, <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> and
   <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Y</kbd> open it on Classes, Files and Symbols
   respectively; <kbd>Tab</kbd> moves between them without reopening. The tabs sit above the field
-  because they decide what it searches.
+  because they decide what it searches. The field has the caret the moment it opens, and
+  <strong>nothing is read until you type</strong>: listing every class in a reactor is a wait
+  paid on every use for an answer nobody scrolls.
 </p>
 <p>
   The selected entry is shown <strong>in context</strong> on the right — the declaration with the
@@ -819,7 +827,56 @@
   <code>&lt;c:if&gt;</code>), scriptlets, EL <code>$&lbrace;…&rbrace;</code> and OGNL <code>%&lbrace;…&rbrace;</code> all colour
   correctly, and the <strong>inside</strong> of an EL/OGNL expression is tokenized too —
   identifiers, property accesses, strings, numbers, operators and keywords each get their own
-  colour instead of one flat block. <kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click) on an
+  colour instead of one flat block.
+</p>
+<p>
+  <strong>Each taglib gets its own colour</strong>, and its <code>&lt;%@ taglib %&gt;</code> line wears
+  the same one — so the declarations at the top of the page are the legend for everything below
+  them, and Struts, JSTL and Entando tags are told apart at a glance instead of all reading as
+  "a taglib tag". A prefix keeps its colour across every file that declares it; two prefixes in
+  one page never share one. A prefix the page never declared stays the plain tag colour — which
+  is also the quickest way to notice a missing directive, since the server won't render it either.
+</p>
+
+<h3>The tag libraries themselves</h3>
+<p>
+  Bennu reads the <code>.tld</code> files a page declares — the project's own, and the ones
+  inside the <strong>dependency jars</strong>, which is where the tags you actually write come
+  from. So a taglib tag stops being opaque text:
+</p>
+<ul>
+  <li><strong>Completion.</strong> <code>&lt;s:</code> lists that library's tags; inside a tag,
+    its own attributes, minus the ones already written. Typing a <code>uri="…"</code> in a
+    directive completes from every library the project can resolve.</li>
+  <li><strong>Hover</strong> carries the TLD's own prose — the tag's description, an attribute's
+    type, whether it is required, whether it accepts a runtime expression. On a legacy library
+    that is often the only documentation there is.</li>
+  <li><kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click) on the <code>uri</code> opens
+    the <strong>TLD</strong> — including one that lives inside a jar; on a tag name it lands on
+    that tag's <code>&lt;tag&gt;</code> declaration, and on an attribute name on the
+    <code>&lt;attribute&gt;</code>.</li>
+  <li><strong>Checks:</strong> a tag the library does not declare, an attribute it does not have,
+    a required attribute that is missing, a <code>uri</code> nothing on the classpath ships.</li>
+</ul>
+<p>
+  All of it stays silent where it cannot be sure. A project whose dependencies have not resolved
+  yet reports nothing rather than reporting everything; a prefix the page never declared is never
+  flagged, because it usually comes from an included fragment and the include is invisible from
+  the page; and a tag declaring <code>dynamic-attributes</code> — or one written as a
+  <code>.tag</code> file — has an attribute list that is <em>unknown</em> rather than empty.
+</p>
+<p>
+  A <code>.tld</code> is itself edited with completion and checks, against a tag-library grammar
+  that is <strong>built in</strong>: a TLD names its schema at <code>java.sun.com</code> and the
+  only copy sits inside a servlet container's jars, which are <code>provided</code> scope and
+  frequently absent — so the file defining a project's entire tag vocabulary was the one XML file
+  with no vocabulary of its own. Both generations are covered, the JSP 1.1 spellings
+  (<code>tagclass</code>, <code>bodycontent</code>) beside the modern ones.
+</p>
+
+<h3>Struts navigation</h3>
+<p>
+  <kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click) on an
   <code>action="…"</code> reference jumps to the Struts <code>&lt;action&gt;</code> config, its view
   JSP, or the action class. <kbd>Alt</kbd> + <kbd>F7</kbd> on an action reference lists every JSP
   that uses it. The same keys work on a <strong>page-scoped JSP variable</strong> — a
@@ -858,17 +915,50 @@
   <code>&lt;field name="…"&gt;</code> inside a <code>*-validation.xml</code> — go-to jumps to the
   bound action's property, and an unknown field name is flagged the same way. Properties inherited
   from a project <code>BaseAction</code> are resolved up the <code>extends</code> chain, so they are
-  never mis-flagged.
+  never mis-flagged. A <strong>public field</strong> counts as a property — OGNL reads fields, and
+  the parameter bags a legacy action carries are usually a nested class of public fields with no
+  accessor in sight — so go-to lands on the field's declaration and the warning leaves it alone.
 </p>
 <p>
   For a <strong>view JSP</strong> with no form — just OGNL (<code>%&lbrace;customer&rbrace;</code>,
   <code>&lt;s:property value="…"/&gt;</code>) — the editor works out which action renders it from the
-  Struts result mappings (the reverse of action → view). When exactly one action maps to the page it's
-  used automatically; when several do (or you want to override), an <strong>action picker</strong> in
-  the toolbar lets you pin one, remembered per file. The bound action drives <kbd>Ctrl</kbd> +
-  <kbd>B</kbd> on an OGNL root and its “unknown property” warning. Only plain
+  Struts result mappings (the reverse of action → view). When the mappings settle on one answer it's
+  used automatically — that means one action, and also <em>several actions sharing one implementation
+  class</em>, which is what a page reachable through three routes looks like and is not an ambiguity:
+  the properties come from the class. When they genuinely disagree (or you want to override), an
+  <strong>action picker</strong> in the toolbar lets you pin one, remembered per file; it lists one
+  row per class, with the routes that reach it underneath. The bound action drives <kbd>Ctrl</kbd> +
+  <kbd>B</kbd> on an OGNL reference and its “unknown property” warning. Only plain
   <code>%&lbrace;…&rbrace;</code> value-stack roots are checked — EL <code>$&lbrace;…&rbrace;</code>
   scoped attributes and <code>#</code>-prefixed context / iterator variables are left alone.
+</p>
+<p>
+  Go-to and hover <strong>follow the whole path</strong>, not just its head. On
+  <code>%&lbrace;ordine.cliente.nome&rbrace;</code> — or a field named the same way —
+  <kbd>Ctrl</kbd> + <kbd>B</kbd> on <code>cliente</code> opens it on <code>Ordine</code>, and on
+  <code>nome</code> it opens it on <code>Cliente</code>: each segment is resolved on the class the
+  one before it is declared to be, with <code>List&lt;T&gt;</code> and the other single-argument
+  wrappers seen through. A type name is resolved the way Java resolves it — the declaring file's
+  own <strong>nested classes</strong> first, then its imports, then its package — which is what
+  tells one action's inner <code>JspParam</code> from the nine others a legacy project declares.
+  The walk stops rather than guesses — at a property with no accessor, at a type the project has
+  no source for (a JDK or library class), at a name that means several things with nothing to say
+  which — and a stopped walk simply does nothing, never a jump to the wrong file.
+  The “unknown property” warning still only judges the <em>first</em> segment: the rest depend on
+  types a legacy tree often cannot resolve, and a warning is held to a stricter standard than a
+  jump you asked for.
+</p>
+<p>
+  This works from a <strong>page variable</strong> too. Inside
+  <code>&lt;s:iterator value="%&lbrace;elencoBandi&rbrace;" var="bando"&gt;</code> — or a
+  <code>&lt;c:forEach items="…" var="…"&gt;</code>, or a <code>&lt;c:set&gt;</code> — the
+  declaration is the only place the page says what the variable holds, so it is read: the
+  expression is resolved against the action, the container is seen through (a
+  <code>List&lt;Bando&gt;</code> makes the variable a <code>Bando</code>), and
+  <code>%&lbrace;bando.titolo&rbrace;</code> follows from there. A variable declared from
+  something that is not a plain path — a call, a comparison — stays untyped rather than guessed.
+  Holding <kbd>Ctrl</kbd> underlines the <em>segment</em> under the pointer rather than the whole
+  chain, so what a click will open is what is underlined.
 </p>
 <p>
   This follows <strong>includes</strong>: an included fragment (<code>.jspf</code>) that a view page

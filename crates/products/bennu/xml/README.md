@@ -28,7 +28,7 @@ the simpler language meant XSD dropped into a shape that already existed rather 
 | `caret.rs` | which of the four positions the caret is in |
 | `grammar.rs` | one model behind both languages, plus `from_dtd` / `from_xsd` |
 | `catalog.rs` | which schema a document is written against, and where to find it |
-| `builtin.rs` | the Maven POM, because nothing ships its schema |
+| `builtin.rs` | the Maven POM and the JSP tag-library descriptor, because nothing ships their schema |
 | `intel.rs` | completion, ghost text, hover, go-to-declaration, checks |
 | `ext.rs` | `FrameworkExtension` impl + the grammar cache |
 

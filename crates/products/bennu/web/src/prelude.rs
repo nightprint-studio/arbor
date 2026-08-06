@@ -71,9 +71,12 @@ pub use crate::include_cache::{file_stamp, IncludeGraphCache};
 
 // JSP page-scoped variable navigation (`<c:set>`/`<s:set>`/… declarations + `${var}`/`%{var}`
 // references) — go-to-declaration + find-usages for JSP-local variables.
+// `ognl_path_at` answers the other half: a reference is only ever its ROOT (which is what a page
+// variable's usages must count), while a go-to on `ordine.cliente.nome` is a question about a
+// segment the root does not carry.
 pub use crate::jsp_vars::{
-    line_col, parse_jsp_vars, parse_jsp_vars_file, var_declaration, var_name_at, var_usages,
-    JspVarDecl, JspVarRef, JspVars,
+    line_col, ognl_path_at, parse_jsp_vars, parse_jsp_vars_file, var_declaration, var_name_at,
+    var_usages, JspVarDecl, JspVarRef, JspVars, OgnlPath,
 };
 
 // Struts wildcard support (candidate matching / backref expansion — docs §7).

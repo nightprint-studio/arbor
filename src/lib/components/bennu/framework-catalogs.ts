@@ -28,7 +28,8 @@ export type FrameworkCatalogId =
   | 'springbindings'
   | 'springdocumented'
   | 'jpaentities'
-  | 'jparepositories';
+  | 'jparepositories'
+  | 'taglibs';
 
 /** How rows can be grouped. Which of these a catalog offers is per-catalog. */
 export type GroupMode = 'none' | 'path' | 'owner' | 'kind' | 'namespace';
@@ -179,6 +180,18 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
       { id: 'owner', label: 'Group by class' },
       { id: 'none', label: 'No grouping' },
     ],
+  },
+  {
+    id: 'taglibs',
+    kind: 'jsp.taglibs',
+    title: 'Tag libraries',
+    command: 'JSP tag libraries',
+    icon: 'list',
+    placeholder: 'Filter by URI or file…',
+    empty: 'No tag library descriptors were found in this project or its dependencies.',
+    // The answer to "why is my tag not completing": a library that did not resolve is not here.
+    columns: { primary: 'uri', secondary: 'file' },
+    groups: [{ id: 'none', label: 'No grouping' }],
   },
 ];
 

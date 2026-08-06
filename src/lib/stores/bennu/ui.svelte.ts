@@ -64,7 +64,8 @@ export type BottomPanel =
   | 'springbindings'
   | 'springdocumented'
   | 'jpaentities'
-  | 'jparepositories';
+  | 'jparepositories'
+  | 'taglibs';
 
 /** Which tab the Go-to navigator opens on. */
 export type NavMode = 'class' | 'file' | 'symbol' | 'all';

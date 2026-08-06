@@ -10,8 +10,10 @@
 //!     the reverse view→action candidates, and pinning which one the page's OGNL is checked against.
 //!
 //! Which action a JSP is bound to: a form's own `action=` for its fields; for a standalone OGNL
-//! reference (a `%{prop}` NOT scoped `#…` and NOT a page variable), the user's pinned action, else the
-//! SINGLE reverse-lookup candidate. Ambiguous (0 or >1 candidates, no pin) → OGNL stays silent.
+//! reference (a `%{prop}` NOT scoped `#…` and NOT a page variable), the user's pinned action, else
+//! whatever the reverse lookup settles on ([`sole_answer`] — one candidate, or several that share
+//! one implementation class, which is one answer written twice). Genuinely ambiguous (no pin, and
+//! candidates disagreeing about the class) → OGNL stays silent.
 //!
 //! Conservative by construction (never a false positive): a lint hit needs the action to resolve to a
 //! project class whose accessor set (own + inherited project supers) is non-empty; only OGNL `%{…}`
@@ -26,7 +28,8 @@ use bennu_proto::prelude::{
     PropertyLintHit,
 };
 use bennu_web::prelude::{
-    line_col, parse_jsp_fields, parse_jsp_forms, parse_jsp_vars, parse_validation_text,
+    line_col, ognl_path_at, parse_jsp_fields, parse_jsp_forms, parse_jsp_vars,
+    parse_validation_text,
 };
 use serde::Deserialize;
 
@@ -77,6 +80,181 @@ fn property_root(name: &str) -> &str {
     &name[..end]
 }
 
+/// One segment of a dotted name, with its `[0]` / `()` suffix removed: `items[0]` → `items`.
+fn segment_name(seg: &str) -> &str {
+    let end = seg.find(['[', '(', ':', ' ']).unwrap_or(seg.len());
+    &seg[..end]
+}
+
+/// Split a dotted OGNL / field name at the caret: the segments **before** the one the caret is
+/// on, and that segment.
+///
+/// `("ordine.cliente.nome", caret inside `cliente`)` → `(["ordine"], "cliente")`. A caret on the
+/// first segment gives `([], "ordine")`, which is the behaviour everything had before paths were
+/// followed at all.
+///
+/// `rel` is the caret's byte offset **within the name**. Out of range → the last segment, since a
+/// caret just past the end of a name is still on its tail.
+fn path_at(name: &str, rel: usize) -> (Vec<&str>, &str) {
+    // Clamped first: a caret past the end belongs to the last segment, and without this the walk
+    // below would fall off the end and answer with the whole path.
+    let rel = rel.min(name.len());
+    let mut before: Vec<&str> = Vec::new();
+    let mut at = 0usize;
+    let mut last = name;
+    for seg in name.split('.') {
+        let end = at + seg.len();
+        if rel <= end {
+            return (before, segment_name(seg));
+        }
+        before.push(segment_name(seg));
+        at = end + 1; // the '.'
+        last = seg;
+    }
+    // Unreachable for a clamped `rel` (the last segment always ends at `name.len()`), and an
+    // answer rather than a panic if that ever stops being true.
+    (before, segment_name(last))
+}
+
+/// Follow the leading segments of a dotted path from one class chain to the next, so the caret's
+/// own segment is looked up on the class that actually declares it.
+///
+/// `ordine.cliente.nome` on an action: `ordine` is a property of the action whose declared type is
+/// `Ordine`, `cliente` is a property of `Ordine` whose type is `Cliente`, and `nome` — the one under
+/// the caret — is a property of `Cliente`. Every step is the same two questions asked again, which
+/// is why this is a loop and not three cases.
+///
+/// Stops (returning `None`) the moment a step cannot be taken: a property with no accessor, a type
+/// the project has no source for (a JDK or library class — go-to has nowhere to land), a `Map`
+/// whose value type is anyone's guess. Stopping is the correct answer there; guessing which class a
+/// name belongs to is how a go-to lands in the wrong file.
+fn descend_path(
+    svc: &IndexService,
+    chain: Vec<(String, String)>,
+    simple: String,
+    before: &[&str],
+) -> Option<(String, Vec<(String, String)>)> {
+    let mut chain = chain;
+    let mut simple = simple;
+    // Bounded: a path is written by hand and `a.b.c.d.e.f` is already pathological, while a
+    // self-referential type (`node.parent.parent…`) could otherwise walk as long as it is typed.
+    // Every step logs its own outcome. A walk that stops has exactly four ways to stop, they are
+    // indistinguishable from the outside (the gesture just does nothing), and the difference
+    // between "that class has no such property" and "that class is in a jar" is the difference
+    // between a typo and a limitation.
+    for seg in before.iter().take(12) {
+        if !is_plain_identifier(seg) {
+            goto_log(format_args!("descend_path: '{seg}' is not a plain name — stop"));
+            return None;
+        }
+        // The FILE the accessor was found in, not just its text: the type it names is resolved in
+        // that file's context (its nested classes, its imports, its package), and a chain spans
+        // several files — the property may come from a superclass three modules away.
+        let Some((decl_file, decl_src, found)) = chain
+            .iter()
+            .find_map(|(f, src)| crate::action_props::find_property_type(src, seg).map(|t| (f, src, t)))
+        else {
+            goto_log(format_args!(
+                "descend_path: '{simple}' declares no accessor for '{seg}' (searched {} source(s) \
+                 in its chain) — stop",
+                chain.len()
+            ));
+            return None;
+        };
+        let type_text = found.type_text;
+        // `List<Ordine>` → `Ordine`: the interesting type inside the envelope, the same rule the
+        // rest of the backend uses to see through a wrapper.
+        let next = crate::index_service::element_type_of(&type_text);
+        if next.is_empty() {
+            goto_log(format_args!(
+                "descend_path: '{seg}' is declared '{type_text}', which reduced to nothing — stop"
+            ));
+            return None;
+        }
+        let Some(fqcn) = resolve_type_in_context(&svc.all_project_classes(), decl_file, decl_src, &next)
+        else {
+            goto_log(format_args!(
+                "descend_path: '{seg}' is a '{type_text}' -> '{next}', which no PROJECT class \
+                 declares (a jar/JDK type has nowhere to land) — stop"
+            ));
+            return None;
+        };
+        let next_chain = class_chain(svc, &fqcn);
+        if next_chain.is_empty() {
+            goto_log(format_args!(
+                "descend_path: '{seg}' resolved to '{fqcn}' but its source could not be read — stop"
+            ));
+            return None;
+        }
+        simple = fqcn.rsplit(['.', '$']).next().unwrap_or(&fqcn).to_string();
+        goto_log(format_args!(
+            "descend_path: '{seg}' : {type_text} -> '{fqcn}' ({} source(s))",
+            next_chain.len()
+        ));
+        chain = next_chain;
+    }
+    Some((simple, chain))
+}
+
+/// The segments of an expression as written in a `value=` / `items=` attribute:
+/// `%{elencoBandi}` → `["elencoBandi"]`, `${order.lines}` → `["order", "lines"]`.
+///
+/// Empty when the expression is not a plain path — a call, a literal, a comparison. Those are
+/// answers the resolver has no way to type, and an empty list stops the walk rather than
+/// starting it somewhere invented.
+fn expr_segments(expr: &str) -> Vec<&str> {
+    let inner = expr
+        .trim()
+        .trim_start_matches(['$', '%', '#'])
+        .trim_start_matches('{')
+        .trim_end_matches('}')
+        .trim();
+    // A path and nothing else. Checked on the WHOLE expression before it is split, because a
+    // split hides what disqualifies it: `a == b` has one segment whose first word is a perfectly
+    // good identifier, and reading `a` out of a comparison is how a resolver ends up confidently
+    // typing a variable from an expression that says something else entirely.
+    let is_path = !inner.is_empty()
+        && inner
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '$' | '.' | '[' | ']'));
+    if !is_path {
+        return Vec::new();
+    }
+    let segments: Vec<&str> = inner.split('.').map(segment_name).collect();
+    match segments.iter().all(|s| is_plain_identifier(s)) {
+        true => segments,
+        false => Vec::new(),
+    }
+}
+
+/// The class chain for a **page variable** — the type of whatever declared it.
+///
+/// `<s:iterator value="%{elencoBandi}" var="bando">` is the only place a page says what `bando`
+/// is, and everything written on `bando` underneath depends on reading it. The variable's
+/// expression is walked from the action exactly like any other path ([`descend_path`]), which
+/// also means the container is seen through: `elencoBandi` being a `List<Bando>` makes the
+/// variable a `Bando`, which is what an iterator variable is.
+///
+/// `None` when the declaration names no expression, when the expression is not a plain path, or
+/// when the walk stops — a variable whose type nothing states stays untyped rather than guessed.
+fn chain_for_page_var(
+    svc: &IndexService,
+    file: &str,
+    decl: &bennu_web::prelude::JspVarDecl,
+    action: &str,
+) -> Option<(String, Vec<(String, String)>)> {
+    let segments = expr_segments(&decl.source_expr);
+    if segments.is_empty() {
+        goto_log(format_args!(
+            "chain_for_page_var: '{}' is declared by <{}> with no path expression ({:?}) — untyped",
+            decl.name, decl.tag, decl.source_expr
+        ));
+        return None;
+    }
+    let (simple, chain) = resolve_bound_action(svc, file, action)?;
+    descend_path(svc, chain, simple, &segments)
+}
+
 /// Whether `root` is a plain Java identifier we can look up (a computed `%{…}`/`${…}` name is not).
 fn is_plain_identifier(root: &str) -> bool {
     !root.is_empty() && root.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$')
@@ -103,8 +281,27 @@ fn goto_log(args: std::fmt::Arguments) {
     }
 }
 
-/// The action a JSP's OGNL is bound to: the persisted pin, else the SINGLE reverse-lookup candidate.
-/// `None` for an ambiguous view (no pin and 0 or >1 candidates) → OGNL stays silent (no false hits).
+/// The one action a reverse-lookup settles on with no pin, or `None` when the view is genuinely
+/// ambiguous.
+///
+/// Not "exactly one candidate": several actions routinely share an implementation class — a legacy
+/// config declares the same class under three namespaces, and a page reached three ways lists three
+/// candidates — and the OGNL is checked against the **class**, so those are one answer written three
+/// times. Requiring a single candidate left exactly the well-travelled pages unchecked.
+///
+/// Classes unknown → ambiguous: `None == None` must not read as agreement.
+///
+/// One function because the answer is consumed twice, by the lint and by the picker's `effective`.
+/// Two copies of this rule means a toolbar that says which action it is checking against while the
+/// checker stays silent.
+fn sole_answer(cands: &[(String, Option<String>)]) -> Option<String> {
+    let (first_qname, first_class) = cands.first()?;
+    let one_class = first_class.is_some() && cands.iter().all(|(_, c)| c == first_class);
+    (cands.len() == 1 || one_class).then(|| first_qname.clone())
+}
+
+/// The action a JSP's OGNL is bound to: the persisted pin, else what the candidates settle on
+/// ([`sole_answer`]). `None` for a genuinely ambiguous view → OGNL stays silent (no false hits).
 fn jsp_bound_action(svc: &IndexService, file: &str, source: &str) -> Option<String> {
     let cfg = bennu_core::config::load();
     if let Some(a) = cfg.jsp_action_bindings.get(&binding_key(file)) {
@@ -118,8 +315,8 @@ fn jsp_bound_action(svc: &IndexService, file: &str, source: &str) -> Option<Stri
         cands.len(),
         cands.iter().map(|(q, _)| q.as_str()).collect::<Vec<_>>(),
     ));
-    if cands.len() == 1 {
-        return Some(cands[0].0.clone());
+    if let Some(qname) = sole_answer(&cands) {
+        return Some(qname);
     }
     // Fallback: the page's OWN form action. A self-posting `<form action="X">` (the norm in legacy
     // Struts) both renders FROM and submits TO action X, so the page's standalone OGNL `%{prop}` refs
@@ -153,6 +350,75 @@ fn resolve_super_fqcn(extends: &str, classes: &[ClassEntry]) -> Option<String> {
         .find(|c| c.fqcn == extends)
         .or_else(|| classes.iter().find(|c| c.simple == simple))
         .map(|c| c.fqcn.clone())
+}
+
+/// Resolve a type NAME **as written**, in the context of the file that wrote it.
+///
+/// A getter says `JspParam`, and what that means is a question about the file it is written in —
+/// not about the project. In a legacy tree the same simple name is declared a dozen times: every
+/// action carries its own nested `JspParam`, `Row`, `Item`, `Params`. Taking the first class in
+/// the index with that simple name is how a property chain walks into a *different action's*
+/// inner class and then reports, correctly and uselessly, that it has no such property.
+///
+/// So the ladder is Java's own, in Java's own order:
+///
+/// 1. the **same file** — a nested class, or a second top-level one. This is the case above, and
+///    the one a simple-name index can never get right on its own;
+/// 2. an explicit **import**;
+/// 3. the file's own **package**;
+/// 4. a **star import**;
+/// 5. finally the project-wide simple name — but only when it is **unique**. A name that means
+///    one thing everywhere is that thing; a name that means five is not guessable from here, and
+///    guessing is what this function exists to stop.
+fn resolve_type_in_context(
+    classes: &[ClassEntry],
+    decl_file: &str,
+    decl_src: &str,
+    name: &str,
+) -> Option<String> {
+    let simple = name.rsplit(['.', '$']).next().unwrap_or(name);
+    // Written qualified, and the index knows it: there is nothing to resolve.
+    if name.contains('.') {
+        if let Some(c) = classes.iter().find(|c| c.fqcn == name) {
+            return Some(c.fqcn.clone());
+        }
+    }
+    if let Some(c) = classes.iter().find(|c| c.simple == simple && same_file(&c.file, decl_file)) {
+        return Some(c.fqcn.clone());
+    }
+    let syms = bennu_java::prelude::extract_symbols(decl_src);
+    if let Some(imp) = syms.imports.iter().find(|i| !i.star && i.simple_name() == Some(simple)) {
+        if let Some(c) = classes.iter().find(|c| c.fqcn == imp.path) {
+            return Some(c.fqcn.clone());
+        }
+    }
+    if let Some(pkg) = &syms.package {
+        let qualified = format!("{pkg}.{simple}");
+        if let Some(c) = classes.iter().find(|c| c.fqcn == qualified) {
+            return Some(c.fqcn.clone());
+        }
+    }
+    for imp in syms.imports.iter().filter(|i| i.star && !i.static_) {
+        let qualified = format!("{}.{simple}", imp.path);
+        if let Some(c) = classes.iter().find(|c| c.fqcn == qualified) {
+            return Some(c.fqcn.clone());
+        }
+    }
+    let mut same_name = classes.iter().filter(|c| c.simple == simple);
+    let first = same_name.next()?;
+    if same_name.next().is_some() {
+        goto_log(format_args!(
+            "resolve_type_in_context: '{simple}' is declared by several project classes and \
+             nothing in {decl_file} says which — stop rather than pick one"
+        ));
+        return None;
+    }
+    Some(first.fqcn.clone())
+}
+
+/// Same file, whatever the OS wrote the separators as.
+fn same_file(a: &str, b: &str) -> bool {
+    a.replace('\\', "/").eq_ignore_ascii_case(&b.replace('\\', "/"))
 }
 
 /// The declared superclass FQCN of the type named `simple` in `src`, resolved to a project class.
@@ -389,14 +655,14 @@ fn bennu_action_property_target(
     args: PropertyTargetArgs,
 ) -> Result<Option<DeclarationTarget>, String> {
     let svc = IndexService::global();
-    let Some((root, simple, chain)) = resolve_property_at(svc, &args.file, &args.source, args.offset)
+    let Some((prop, simple, chain)) = resolve_property_at(svc, &args.file, &args.source, args.offset)
     else {
         return Ok(None);
     };
-    let target = target_in_chain(&chain, &simple, &root);
+    let target = target_in_chain(&chain, &simple, &prop);
     if target.is_none() {
         goto_log(format_args!(
-            "bennu_action_property_target: '{root}' resolved to action '{simple}' but NO accessor \
+            "bennu_action_property_target: '{prop}' resolved to class '{simple}' but NO accessor \
              (get/is/set) found for it in the class chain"
         ));
     }
@@ -412,17 +678,23 @@ fn bennu_action_property_hover(
     args: PropertyTargetArgs,
 ) -> Result<Option<HoverInfo>, String> {
     let svc = IndexService::global();
-    let Some((root, simple, chain)) = resolve_property_at(svc, &args.file, &args.source, args.offset)
+    let Some((prop, simple, chain)) = resolve_property_at(svc, &args.file, &args.source, args.offset)
     else {
         return Ok(None);
     };
-    Ok(hover_in_chain(&chain, &simple, &root))
+    Ok(hover_in_chain(&chain, &simple, &prop))
 }
 
-/// Resolve the field / OGNL root / validation `<field>` reference under the caret to
-/// `(property_root, action_simple_name, action_class_chain)`. The shared front half of go-to
-/// ([`bennu_action_property_target`]) and hover ([`bennu_action_property_hover`]) — they differ only
-/// in what they do with the resolved chain. `None` when the caret isn't on a resolvable reference.
+/// Resolve the field / OGNL reference / validation `<field>` under the caret to
+/// `(property_name, owner_simple_name, owner_class_chain)`.
+///
+/// **The caret's own segment**, not the head of the path: on `ordine.cliente.nome` the owner is
+/// whichever class the segments before it lead to ([`descend_path`]), so everything downstream —
+/// go-to, hover — asks the right class without knowing a path was walked at all.
+///
+/// The shared front half of go-to ([`bennu_action_property_target`]) and hover
+/// ([`bennu_action_property_hover`]) — they differ only in what they do with the resolved chain.
+/// `None` when the caret isn't on a resolvable reference.
 fn resolve_property_at(
     svc: &IndexService,
     file: &str,
@@ -435,12 +707,15 @@ fn resolve_property_at(
             .fields
             .iter()
             .find(|f| offset >= f.name_offset && offset <= f.name_offset + f.name.len())?;
-        let root = property_root(&field.name);
-        if !is_plain_identifier(root) {
+        // `<field name="ordine.cliente">` is a path like any other, and the caret's segment is
+        // the question — the same rule the JSP branches below follow.
+        let (before, seg) = path_at(&field.name, offset.saturating_sub(field.name_offset));
+        if !is_plain_identifier(seg) {
             return None;
         }
         let (simple, chain) = resolve_validation(svc, file)?;
-        return Some((root.to_string(), simple, chain));
+        let (simple, chain) = descend_path(svc, chain, simple, &before)?;
+        return Some((seg.to_string(), simple, chain));
     }
 
     if is_jsp(file) {
@@ -450,43 +725,84 @@ fn resolve_property_at(
         // into a parent's form (→ the inherited bound action).
         for (name, start, end, action) in jsp_fields_with_action(source, bound.as_deref()) {
             if offset >= start && offset <= end {
-                let root = property_root(&name);
+                // A field name is a PATH as often as it is a name — `ordine.cliente.nome` binds
+                // three classes deep — so the caret's own segment is what resolves, on the class
+                // the segments before it lead to.
+                let (before, seg) = path_at(&name, offset.saturating_sub(start));
                 goto_log(format_args!(
-                    "resolve_property_at: caret on FORM FIELD '{name}' (root '{root}') -> action '{action}'"
+                    "resolve_property_at: caret on FORM FIELD '{name}' (segment '{seg}', {} before) -> action '{action}'",
+                    before.len()
                 ));
-                if !is_plain_identifier(root) {
+                if !is_plain_identifier(seg) {
                     return None;
                 }
                 let (simple, chain) = resolve_action(svc, file, &action)?;
-                return Some((root.to_string(), simple, chain));
+                let (simple, chain) = descend_path(svc, chain, simple, &before)?;
+                return Some((seg.to_string(), simple, chain));
             }
         }
         // A standalone OGNL reference (a `%{prop}` that isn't a page variable) → the bound action.
+        //
+        // The **path**, not the reference: a reference is only ever the root identifier (that is
+        // what a page variable's find-usages must count), so on `%{a.b.c}` the only ref is `a` and
+        // a caret on `c` matched nothing at all — which is why nested go-to did nothing rather
+        // than something wrong.
         let vars = parse_jsp_vars(source);
         let declared: HashSet<&str> = vars.decls.iter().map(|d| d.name.as_str()).collect();
-        let hit = vars.refs.iter().find(|r| offset >= r.start && offset <= r.end);
+        let hit = ognl_path_at(source, offset);
         goto_log(format_args!(
-            "resolve_property_at: OGNL branch, {} ref(s), caret matched ref={:?}",
-            vars.refs.len(),
-            hit.map(|r| (r.name.as_str(), r.start, r.end)),
+            "resolve_property_at: OGNL branch, caret path={:?}",
+            hit.as_ref().map(|p| (
+                p.segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+                p.at
+            )),
         ));
-        if let Some(r) = hit {
-            let root = property_root(&r.name);
-            let is_declared = declared.contains(r.name.as_str());
-            let plain = is_plain_identifier(root);
+        if let Some(path) = &hit {
+            let before: Vec<&str> =
+                path.segments[..path.at].iter().map(|s| s.name.as_str()).collect();
+            let seg = path.segment().name.as_str();
+            // The ROOT decides whether this is a page variable, whichever segment is under the
+            // caret: `x` being a `<c:set>` makes `x.y` the page's business, not the action's.
+            let is_declared = declared.contains(path.root().name.as_str());
+            let plain = is_plain_identifier(seg);
             goto_log(format_args!(
-                "resolve_property_at: ref '{}' root='{root}' page_var={is_declared} plain_ident={plain} bound={bound:?}",
-                r.name
+                "resolve_property_at: segment='{seg}' ({} before) page_var={is_declared} plain_ident={plain} bound={bound:?}",
+                before.len(),
             ));
+            // The root is a page variable AND the caret is on a segment past it: the variable
+            // stands in for a class, and the segment is a property of THAT class. `bando.titolo`
+            // inside `<s:iterator value="%{elencoBandi}" var="bando">` is a question about
+            // `Bando`, and refusing it because `bando` is not an action property answers a
+            // question nobody asked. (The root itself stays the page's own business — go-to on
+            // `bando` belongs to the declaration, and `bennu_jsp_nav` already owns that.)
+            if is_declared && plain && path.at > 0 {
+                if let (Some(action), Some(decl)) =
+                    (&bound, vars.decls.iter().find(|d| d.name == path.root().name))
+                {
+                    if let Some((simple, chain)) = chain_for_page_var(svc, file, decl, action)
+                        .and_then(|(simple, chain)| {
+                            descend_path(svc, chain, simple, &before[1..])
+                        })
+                    {
+                        goto_log(format_args!(
+                            "resolve_property_at: OK -> property '{seg}' on '{simple}' via page var '{}'",
+                            decl.name
+                        ));
+                        return Some((seg.to_string(), simple, chain));
+                    }
+                }
+            }
             if !is_declared && plain {
                 match &bound {
-                    Some(action) => match resolve_bound_action(svc, file, action) {
+                    Some(action) => match resolve_bound_action(svc, file, action)
+                        .and_then(|(simple, chain)| descend_path(svc, chain, simple, &before))
+                    {
                         Some((simple, chain)) => {
                             goto_log(format_args!(
-                                "resolve_property_at: OK -> property '{root}' on '{simple}' (chain of {})",
+                                "resolve_property_at: OK -> property '{seg}' on '{simple}' (chain of {})",
                                 chain.len()
                             ));
-                            return Some((root.to_string(), simple, chain));
+                            return Some((seg.to_string(), simple, chain));
                         }
                         None => goto_log(format_args!(
                             "resolve_property_at: bound action '{action}' did not resolve to a project class"
@@ -508,7 +824,9 @@ fn resolve_property_at(
 fn hover_in_chain(chain: &[(String, String)], simple: &str, prop: &str) -> Option<HoverInfo> {
     for (_file, src) in chain {
         if let Some(pt) = crate::action_props::find_property_type(src, prop) {
-            let kind = if pt.read { "action property" } else { "action property (write-only)" };
+            // "property", not "action property": on a path (`ordine.cliente.nome`) the owner is
+            // whatever class the walk landed on, and `container` below already names it.
+            let kind = if pt.read { "property" } else { "property (write-only)" };
             return Some(HoverInfo {
                 signature: format!("{} {}", pt.type_text, prop),
                 kind: kind.to_string(),
@@ -607,8 +925,11 @@ fn bennu_action_property_lint(
 #[arbor_rpc::handler]
 fn bennu_jsp_actions(_ctx: &BennuState, args: JspActionsArgs) -> Result<JspActionBinding, String> {
     let svc = IndexService::global();
-    let candidates: Vec<JspActionOption> = svc
-        .jsp_action_candidates(&args.file)
+    let raw = svc.jsp_action_candidates(&args.file);
+    // Resolved off the raw list, before it becomes wire data, so the picker's "effective" and the
+    // lint's binding are the same decision made once.
+    let auto = sole_answer(&raw);
+    let candidates: Vec<JspActionOption> = raw
         .into_iter()
         .map(|(qname, class_fqcn)| {
             let simple = class_fqcn
@@ -620,9 +941,7 @@ fn bennu_jsp_actions(_ctx: &BennuState, args: JspActionsArgs) -> Result<JspActio
         .collect();
     let cfg = bennu_core::config::load();
     let bound = cfg.jsp_action_bindings.get(&binding_key(&args.file)).cloned();
-    let effective = bound.clone().or_else(|| {
-        (candidates.len() == 1).then(|| candidates[0].qname.clone())
-    });
+    let effective = bound.clone().or(auto);
     Ok(JspActionBinding { candidates, bound, effective })
 }
 
@@ -957,6 +1276,135 @@ mod tests {
 
     fn ce(fqcn: &str, simple: &str) -> ClassEntry {
         ClassEntry { fqcn: fqcn.into(), simple: simple.into(), file: "X.java".into(), line: 1, kind: "class".into() }
+    }
+
+    /// `(qname, class)` the way the reverse lookup hands them over.
+    fn cand(qname: &str, class: Option<&str>) -> (String, Option<String>) {
+        (qname.to_string(), class.map(str::to_string))
+    }
+
+    #[test]
+    fn several_routes_into_one_class_are_one_answer_not_an_ambiguity() {
+        // The reported shape: one page reachable through three actions, all the same class. The
+        // picker showed three identical rows and the checking stayed off until one was pinned.
+        let cands = [
+            cand("/do/a/dettaglio", Some("it.acme.DettaglioComunicazioniAction")),
+            cand("/do/b/dettaglio", Some("it.acme.DettaglioComunicazioniAction")),
+            cand("/do/c/dettaglio", Some("it.acme.DettaglioComunicazioniAction")),
+        ];
+        assert_eq!(sole_answer(&cands).as_deref(), Some("/do/a/dettaglio"));
+    }
+
+    #[test]
+    fn candidates_disagreeing_about_the_class_stay_ambiguous() {
+        let cands = [
+            cand("/do/a/x", Some("it.acme.OneAction")),
+            cand("/do/b/x", Some("it.acme.OtherAction")),
+        ];
+        assert!(sole_answer(&cands).is_none());
+        // And unknown classes are not agreement: `None == None` must not decide anything.
+        let unknown = [cand("/do/a/x", None), cand("/do/b/x", None)];
+        assert!(sole_answer(&unknown).is_none());
+        assert!(sole_answer(&[]).is_none());
+    }
+
+    #[test]
+    fn a_single_candidate_decides_even_with_no_class_resolved() {
+        assert_eq!(sole_answer(&[cand("/do/a/x", None)]).as_deref(), Some("/do/a/x"));
+    }
+
+    fn ce_in(fqcn: &str, simple: &str, file: &str) -> ClassEntry {
+        ClassEntry { file: file.into(), ..ce(fqcn, simple) }
+    }
+
+    /// Every action in a legacy tree carries its own nested `JspParam`. The index knows five of
+    /// them and the getter says `JspParam`; only the file it is written in says which.
+    #[test]
+    fn a_nested_class_resolves_to_the_one_in_its_own_file() {
+        let classes = [
+            ce_in("com.acme.a.VerificaAction.JspParam", "JspParam", "/p/a/VerificaAction.java"),
+            ce_in("com.acme.b.DetailAction.JspParam", "JspParam", "/p/b/DetailAction.java"),
+        ];
+        let src = "package com.acme.b;\npublic class DetailAction { public static class JspParam {} }";
+        assert_eq!(
+            resolve_type_in_context(&classes, "/p/b/DetailAction.java", src, "JspParam").as_deref(),
+            Some("com.acme.b.DetailAction.JspParam"),
+        );
+    }
+
+    #[test]
+    fn an_import_decides_when_the_file_itself_does_not() {
+        let classes = [
+            ce_in("com.acme.dto.Riga", "Riga", "/p/dto/Riga.java"),
+            ce_in("com.other.Riga", "Riga", "/p/other/Riga.java"),
+        ];
+        let src = "package com.acme.web;\nimport com.acme.dto.Riga;\npublic class A {}";
+        assert_eq!(
+            resolve_type_in_context(&classes, "/p/web/A.java", src, "Riga").as_deref(),
+            Some("com.acme.dto.Riga"),
+        );
+    }
+
+    #[test]
+    fn the_declaring_package_is_tried_before_a_project_wide_guess() {
+        let classes = [
+            ce_in("com.other.Riga", "Riga", "/p/other/Riga.java"),
+            ce_in("com.acme.web.Riga", "Riga", "/p/web/Riga.java"),
+        ];
+        let src = "package com.acme.web;\npublic class A {}";
+        assert_eq!(
+            resolve_type_in_context(&classes, "/p/web/A.java", src, "Riga").as_deref(),
+            Some("com.acme.web.Riga"),
+        );
+    }
+
+    #[test]
+    fn an_ambiguous_name_with_no_context_stops_instead_of_picking_one() {
+        let classes = [
+            ce_in("com.a.JspParam", "JspParam", "/p/a/JspParam.java"),
+            ce_in("com.b.JspParam", "JspParam", "/p/b/JspParam.java"),
+        ];
+        let src = "package com.elsewhere;\npublic class A {}";
+        assert!(resolve_type_in_context(&classes, "/p/A.java", src, "JspParam").is_none());
+
+        // One declaration project-wide is not a guess — it is the answer.
+        let one = [ce_in("com.a.JspParam", "JspParam", "/p/a/JspParam.java")];
+        assert_eq!(
+            resolve_type_in_context(&one, "/p/A.java", src, "JspParam").as_deref(),
+            Some("com.a.JspParam"),
+        );
+    }
+
+    #[test]
+    fn a_declaring_expression_is_read_as_a_path_or_not_at_all() {
+        assert_eq!(expr_segments("%{elencoBandi}"), vec!["elencoBandi"]);
+        assert_eq!(expr_segments("${order.lines}"), vec!["order", "lines"]);
+        assert_eq!(expr_segments("%{ bando.dati[0].righe }"), vec!["bando", "dati", "righe"]);
+        // Not a path: nothing to type the variable from, and nothing invented.
+        assert!(expr_segments("%{foo()}").is_empty());
+        assert!(expr_segments("plain text").is_empty());
+        assert!(expr_segments("%{a == b}").is_empty());
+        assert!(expr_segments("").is_empty());
+    }
+
+    #[test]
+    fn a_dotted_path_splits_at_the_caret() {
+        let name = "ordine.cliente.nome";
+        assert_eq!(path_at(name, 0), (vec![], "ordine"));
+        assert_eq!(path_at(name, 3), (vec![], "ordine"));
+        // On the '.' itself: still the segment it closes, which is where the caret looks to be.
+        assert_eq!(path_at(name, 6), (vec![], "ordine"));
+        assert_eq!(path_at(name, 9), (vec!["ordine"], "cliente"));
+        assert_eq!(path_at(name, 16), (vec!["ordine", "cliente"], "nome"));
+        // Past the end — a caret just after the last character is still on the last segment.
+        assert_eq!(path_at(name, 999), (vec!["ordine", "cliente"], "nome"));
+    }
+
+    #[test]
+    fn an_indexed_segment_keeps_only_its_name() {
+        assert_eq!(path_at("items[0].nome", 10), (vec!["items"], "nome"));
+        assert_eq!(segment_name("call()"), "call");
+        assert_eq!(segment_name("plain"), "plain");
     }
 
     #[test]

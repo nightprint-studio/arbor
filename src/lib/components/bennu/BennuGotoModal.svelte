@@ -469,6 +469,7 @@
   {initialSource}
   initialQuery={bennuUiStore.navInitial}
   title="Go to"
+  requireQuery
   {onClose}
 >
   {#snippet fieldActions()}

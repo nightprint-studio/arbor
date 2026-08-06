@@ -735,6 +735,7 @@ mod tests {
             resources: &res,
             schemas: &[],
             descriptors: &descriptors,
+            taglibs: &[],
         });
         ext
     }
@@ -854,6 +855,7 @@ mod tests {
             ],
             schemas: &[],
             descriptors: &[],
+            taglibs: &[],
         });
         assert_eq!(ext.model().props.lookup("app.mode").unwrap().1.value, "dev");
     }

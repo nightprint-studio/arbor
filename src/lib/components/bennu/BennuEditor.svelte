@@ -665,11 +665,39 @@
   const jspActionMenu: DropdownItem[] = $derived.by(() => {
     const b = jspBinding;
     if (!b || !b.candidates.length) return [];
-    const items: DropdownItem[] = [{ kind: 'separator', label: 'Check OGNL against action' }];
+    // Several actions routinely share one implementation class — a legacy config declares the
+    // same class under three namespaces — and for THIS question they are one answer: the
+    // properties OGNL is checked against come from the class. So one row per class. Three rows
+    // reading `DettaglioComunicazioniAction` are not duplicates, they are a choice with no
+    // difference, and the label was showing the one thing they have in common while hiding the
+    // one thing that separates them.
+    const groups = new Map<string, { simple: string; fqcn: string | null; qnames: string[] }>();
     for (const c of b.candidates) {
+      const key = c.class_fqcn ?? c.qname;
+      const group = groups.get(key);
+      if (group) group.qnames.push(c.qname);
+      else groups.set(key, { simple: c.simple, fqcn: c.class_fqcn ?? null, qnames: [c.qname] });
+    }
+    // Two classes of the same simple name in different packages would still read alike; there
+    // the package IS the distinguishing fact, so it goes on the row.
+    const seen = new Set<string>();
+    const ambiguous = new Set<string>();
+    for (const g of groups.values()) {
+      if (seen.has(g.simple)) ambiguous.add(g.simple);
+      seen.add(g.simple);
+    }
+    const items: DropdownItem[] = [{ kind: 'separator', label: 'Check OGNL against action' }];
+    for (const g of groups.values()) {
       items.push({
-        kind: 'item', id: c.qname, label: c.simple, active: b.effective === c.qname,
-        onclick: () => void selectJspAction(c.qname),
+        kind: 'item',
+        id: g.qnames[0],
+        label: ambiguous.has(g.simple) ? (g.fqcn ?? g.qnames[0]) : g.simple,
+        // Which action(s) the row stands for — the row is otherwise a class name with no
+        // route attached, and on a page reached three ways that is the interesting part.
+        subtitle: g.qnames.join(' · '),
+        active: g.qnames.some((q) => q === b.effective),
+        // Any of them pins the same class, so the first is as good an answer as the others.
+        onclick: () => void selectJspAction(g.qnames[0]),
       });
     }
     items.push({ kind: 'separator' });

@@ -481,23 +481,11 @@ const REF_CHAR = /[A-Za-z0-9_$/.\-]/;
  *  the offset. Language-agnostic (operates on line text, no CST), so the core stays
  *  app-neutral while still surfacing path/string references to the host's `onGoto`. */
 export function refTextAt(doc: Text, offset: number): string | null {
-  const clamped = Math.max(0, Math.min(offset, doc.length));
-  const line = doc.lineAt(clamped);
-  const text = line.text;
-  const rel = clamped - line.from;
-
-  // If the offset is inside a quoted string on this line, prefer its contents.
-  const quoted = quotedStringAround(text, rel);
-  if (quoted !== null) return quoted.length ? quoted : null;
-
-  // Otherwise expand a REF_CHAR run around the offset (tolerant of the caret sitting
-  // at the token's right edge, matching `wordAtCaret`).
-  let start = rel;
-  let end = rel;
-  while (start > 0 && REF_CHAR.test(text[start - 1])) start--;
-  while (end < text.length && REF_CHAR.test(text[end])) end++;
-  const tok = text.slice(start, end).trim();
-  return tok.length ? tok : null;
+  // The range decides; this only reads it. They must agree — the underline shown under the
+  // pointer is a promise about what a click will act on, and two implementations of "the
+  // token here" is how that promise gets broken.
+  const range = refRangeAt(doc, offset);
+  return range ? doc.sliceString(range.from, range.to) : null;
 }
 
 /** The document range of the reference-like token at UTF-16 `offset`, or null — the range
@@ -507,6 +495,18 @@ export function refRangeAt(doc: Text, offset: number): { from: number; to: numbe
   const line = doc.lineAt(clamped);
   const text = line.text;
   const rel = clamped - line.from;
+
+  // Inside an interpolation, one dotted chain is SEVERAL references. `a.b.c` is three names,
+  // each declared somewhere else, and treating the chain as one token both underlines the
+  // whole thing — telling the user nothing about where a click would land — and hands the
+  // resolver a string that names nothing.
+  //
+  // Only inside `${…}` / `%{…}` / `#{…}`, because outside one a dotted run is usually a single
+  // name: `com.acme.OrderDao` in a `class="…"`, `struts-default.xml`, `view.action`.
+  if (inInterpolation(text, rel)) {
+    const seg = dotSegmentAround(text, rel);
+    return seg && seg.to > seg.from ? { from: line.from + seg.from, to: line.from + seg.to } : null;
+  }
 
   const quoted = quotedRangeAround(text, rel);
   if (quoted) {
@@ -519,17 +519,35 @@ export function refRangeAt(doc: Text, offset: number): { from: number; to: numbe
   return end > start ? { from: line.from + start, to: line.from + end } : null;
 }
 
-/** If position `rel` (a column into `text`) falls within a single-line quoted string,
- *  return the string's inner contents; else null. Scans quotes left-to-right so an
- *  even count before `rel` means "outside", odd means "inside". Handles both quote
- *  styles independently (the first-opened wins). */
-function quotedStringAround(text: string, rel: number): string | null {
-  const r = quotedRangeAround(text, rel);
-  return r ? text.slice(r.from, r.to) : null;
+/** Is column `rel` inside a `${…}` / `%{…}` / `#{…}` on this line?
+ *
+ *  An unterminated one (the closing brace is on a later line, or is still being typed) counts
+ *  from its opener to the end of the line — a half-written expression is still an expression. */
+function inInterpolation(text: string, rel: number): boolean {
+  const open = Math.max(
+    text.lastIndexOf('${', rel),
+    text.lastIndexOf('%{', rel),
+    text.lastIndexOf('#{', rel),
+  );
+  if (open < 0) return false;
+  const close = text.indexOf('}', open);
+  return close < 0 || rel <= close;
+}
+
+/** The identifier segment around column `rel` — the run of name characters bounded by the
+ *  dots, brackets and operators on either side. `null` when there is none. */
+function dotSegmentAround(text: string, rel: number): { from: number; to: number } | null {
+  const NAME = /[A-Za-z0-9_$]/;
+  let from = Math.min(rel, text.length);
+  let to = from;
+  while (from > 0 && NAME.test(text[from - 1])) from--;
+  while (to < text.length && NAME.test(text[to])) to++;
+  return to > from ? { from, to } : null;
 }
 
 /** The inner range (`[open+1, close)`) of the single-line quoted string covering column
- *  `rel`, or null. Shared by {@link quotedStringAround} (text) and {@link refRangeAt} (range). */
+ *  `rel`, or null. Scans quotes left-to-right so an even count before `rel` means "outside",
+ *  odd means "inside". Handles both quote styles independently (the first-opened wins). */
 function quotedRangeAround(text: string, rel: number): { from: number; to: number } | null {
   for (const q of ['"', "'"]) {
     let i = 0;

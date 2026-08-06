@@ -24,6 +24,16 @@ pub fn bean_property_names(source: &str) -> BTreeSet<String> {
             out.insert(name);
         }
     }
+    // Public fields are readable from a page too, so a name backed by one is not a typo. Only
+    // public ones here — this set is what the "no such property" warning is judged against, and
+    // a private field is a name a page genuinely cannot read.
+    for t in bennu_java::prelude::extract_symbols(source).types {
+        for f in t.fields {
+            if f.visibility == bennu_java::prelude::Visibility::Public {
+                out.insert(f.name);
+            }
+        }
+    }
     out
 }
 
@@ -38,7 +48,25 @@ pub fn find_property_member(source: &str, prop: &str) -> Option<(usize, usize)> 
             }
         }
     }
-    None
+    // No accessor: a FIELD of that name. OGNL reads public fields — `%{jsp_param.element}` works
+    // on a `public Element element;` with no getter anywhere, and half the parameter-bag classes
+    // in a legacy tree are written exactly that way. An editor that only understands accessors is
+    // wrong about the language, and wrong in the direction that looks like "no such property".
+    field_named(source, prop).and_then(|f| f.span).map(|s| (s.start, s.end))
+}
+
+/// The field declared under `prop` anywhere in the file — a **nested** class's included, since
+/// that is where a parameter bag usually lives.
+///
+/// Any visibility. A private field with no accessor is not readable from a page, but if the
+/// caret is on that name the declaration is still what the user asked to see; refusing to
+/// navigate would be pedantry about a file they are looking at.
+fn field_named(source: &str, prop: &str) -> Option<bennu_java::prelude::FieldDecl> {
+    bennu_java::prelude::extract_symbols(source)
+        .types
+        .into_iter()
+        .flat_map(|t| t.fields)
+        .find(|f| f.name == prop)
 }
 
 /// A property's type + the accessor it was read from, for the JSP/OGNL hover card. Prefers the
@@ -66,7 +94,14 @@ pub fn find_property_type(source: &str, prop: &str) -> Option<PropertyType> {
             }
         }
     }
-    None
+    // No accessor at all: the FIELD's declared type. See `find_property_member` — OGNL reads
+    // public fields, and a property chain that stops at one stops on a page that works.
+    let field = field_named(source, prop)?;
+    (!field.type_text.trim().is_empty()).then(|| PropertyType {
+        type_text: field.type_text,
+        accessor: "field".to_string(),
+        read: true,
+    })
 }
 
 /// The resolved type of a JSP-bound action property (for the hover card).
@@ -83,10 +118,30 @@ pub struct PropertyType {
 /// enclosing statement boundary (the previous `;`/`{`/`}`) and the method name, with leading
 /// modifiers and marker annotations stripped. `None` when nothing plausible remains.
 fn getter_return_type(source: &str, name_start: usize) -> Option<String> {
+    // The boundary and the declaration text are both taken from **code only**.
+    //
+    // Reading them off the raw text was a real bug and a quiet one: a Javadoc holding a
+    // `{@link Foo}` — which is most generated DTO accessors — puts a `}` between the previous
+    // member and this one, so the boundary landed inside the comment and the "type" came out as
+    // `*/ public JspParamDTO`. Nothing rejects that: it is a non-empty string, so it travels as a
+    // type, resolves to no class, and the walk that needed it stops. Meanwhile the *name* lookup
+    // next door needs no type and kept working — which is why a property was reachable and
+    // anything past it was not.
+    let mask = code_mask(source);
     let pre = &source[..name_start];
-    let boundary = pre.rfind([';', '{', '}']).map(|p| p + 1).unwrap_or(0);
-    let decl = pre[boundary..].trim();
-    let ty = strip_leading_modifiers(decl);
+    let boundary = pre
+        .bytes()
+        .enumerate()
+        .rev()
+        .find(|&(i, b)| mask[i] && matches!(b, b';' | b'{' | b'}'))
+        .map(|(i, _)| i + 1)
+        .unwrap_or(0);
+    let decl: String = pre[boundary..]
+        .char_indices()
+        .filter(|(i, _)| mask[boundary + i])
+        .map(|(_, c)| c)
+        .collect();
+    let ty = strip_leading_modifiers(decl.trim());
     let ty: String = ty.split_whitespace().collect::<Vec<_>>().join(" ");
     (!ty.is_empty()).then_some(ty)
 }
@@ -244,6 +299,95 @@ fn accessors(source: &str, prefix: &str) -> Vec<(String, (usize, usize))> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shapes a real DTO accessor comes in. Each of these produced a *plausible* type string
+    /// before the boundary was taken from code only, and a plausible-but-wrong type is what makes
+    /// a property chain stop one hop in with nothing on screen to say why.
+    const DTO: &str = r#"
+        package com.acme;
+        public class Bando {
+            private JspParamDTO jsp_param;
+
+            /**
+             * The page parameters; see {@link JspParamDTO} and {@code Bando}.
+             * Historically this used a Map<String, Object>; do not.
+             */
+            public JspParamDTO getJsp_param() { return jsp_param; }
+
+            /** Lines of the order. */
+            @Override
+            @JsonProperty("righe")
+            public List<Riga> getRighe() { return righe; }
+
+            public Map<String, Foo> getIndice() { return indice; }
+
+            public void setNota(final String nota) { this.nota = nota; }
+        }
+    "#;
+
+    /// The shape this whole chain is for: an action whose parameter bag is a **nested class of
+    /// public fields**, which is how a legacy Struts action carries one. Nothing here declares an
+    /// accessor, and OGNL does not need one.
+    const NESTED: &str = r#"
+        package com.acme.front;
+        public class DetailAction extends BaseAction {
+            private JspParam jsp_param;
+            public JspParam getJsp_param() { return jsp_param; }
+
+            public static class JspParam {
+                public Element element;
+                public String codice;
+            }
+        }
+    "#;
+
+    #[test]
+    fn a_public_field_is_a_property_even_with_no_accessor() {
+        let ty = find_property_type(NESTED, "element").expect("element is a public field");
+        assert_eq!(ty.type_text, "Element");
+        assert!(ty.read, "a field is readable");
+        // And it is navigable: the span is the field's own declaration.
+        let (start, end) = find_property_member(NESTED, "element").expect("navigable");
+        assert!(NESTED[start..end].contains("element"), "{:?}", &NESTED[start..end]);
+    }
+
+    #[test]
+    fn an_accessor_still_wins_over_a_field_of_the_same_name() {
+        // `jsp_param` is both a private field and a getter; the getter is the canonical answer.
+        let ty = find_property_type(NESTED, "jsp_param").expect("jsp_param");
+        assert_eq!(ty.type_text, "JspParam");
+        assert_eq!(ty.accessor, "get…");
+    }
+
+    #[test]
+    fn the_warning_set_admits_public_fields_and_not_private_ones() {
+        let names = bean_property_names(NESTED);
+        assert!(names.contains("element"), "a page can read a public field");
+        assert!(names.contains("codice"));
+        // `jsp_param` is private, but its getter puts it in anyway.
+        assert!(names.contains("jsp_param"));
+    }
+
+    #[test]
+    fn a_javadoc_with_braces_does_not_become_part_of_the_type() {
+        let ty = find_property_type(DTO, "jsp_param").expect("jsp_param has a getter");
+        assert_eq!(ty.type_text, "JspParamDTO");
+        assert!(ty.read);
+    }
+
+    #[test]
+    fn annotations_and_generics_survive_the_extraction() {
+        assert_eq!(find_property_type(DTO, "righe").expect("righe").type_text, "List<Riga>");
+        // Two type arguments, and the space after the comma normalised away.
+        assert_eq!(find_property_type(DTO, "indice").expect("indice").type_text, "Map<String, Foo>");
+    }
+
+    #[test]
+    fn a_write_only_property_reads_its_type_from_the_setter() {
+        let ty = find_property_type(DTO, "nota").expect("nota");
+        assert_eq!(ty.type_text, "String");
+        assert!(!ty.read, "there is no getter, so it is not readable");
+    }
 
     const SRC: &str = r#"
         package com.acme;

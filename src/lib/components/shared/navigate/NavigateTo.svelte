@@ -244,6 +244,17 @@
      * vocabulary of them one product at a time.
      */
     fieldActions?: Snippet;
+    /**
+     * Read nothing until a character has been typed.
+     *
+     * Off by default, because for a host whose categories are already in memory — a schema's
+     * tables, a handful of open buffers — the list on opening *is* the feature. It is for the
+     * other kind: a category whose `items()` is a project-wide walk (every class in every
+     * module) pays that walk on every <kbd>Ctrl</kbd>+<kbd>N</kbd>, including the ones where
+     * the user knew what they were going to type before the overlay appeared. Nobody reads
+     * "every class in the project" as a list, so nobody should be made to wait for it.
+     */
+    requireQuery?: boolean;
     onClose: () => void;
   }
 
@@ -255,6 +266,7 @@
     sourceLabel = 'Source',
     title = 'Go to',
     fieldActions,
+    requireQuery = false,
     onClose,
   }: Props = $props();
 
@@ -349,10 +361,20 @@
     return [...local, ...found];
   }
 
+  /** Whether anything has been typed. A **derived** rather than a read of `query` inside the
+   *  effect below: this only changes on the empty↔non-empty edge, so the pull happens on the
+   *  first keystroke and not on every one after it. */
+  const typed = $derived(query.trim().length > 0);
+
   // Pulled once, on mount. `$effect` rather than `onMount` so a host that swaps
   // the category list — a repository closing, a second connection opening, the
   // source changing under it — re-pulls rather than showing the previous list.
   $effect(() => {
+    if (requireQuery && !typed) {
+      loaded = {};
+      loading = false;
+      return;
+    }
     // Resolved here, synchronously, rather than inside the `await`: that is what makes the
     // effect depend on the chosen source, since a read after the first await tracks nothing.
     const list = localCategories.map((c) => ({ id: c.id, items: itemsOf(c)! }));
@@ -536,7 +558,11 @@
    *  classes indexed yet" and "type to search the jars" are different situations, and a single
    *  generic sentence for both is how an overlay comes to look broken while working correctly. */
   const emptyNote = $derived.by<string>(() => {
-    const fallback = 'There is nothing here to search yet.';
+    // Nothing has been read yet, on purpose — say so, rather than "there is nothing here",
+    // which describes a project with no classes in it.
+    const fallback = requireQuery
+      ? 'Type to search.'
+      : 'There is nothing here to search yet.';
     if (active === 'all') return fallback;
     const category = categories.find((c) => c.id === active);
     if (!category) return fallback;
@@ -689,6 +715,7 @@
         bind:value={query}
         class="nv-field"
         type="text"
+        data-modal-autofocus
         spellcheck="false"
         autocomplete="off"
         placeholder="Type to search — try sort:new or ext:sql"

@@ -3262,7 +3262,7 @@ pub struct ResolvedType {
 /// Deliberately textual and deliberately small: it runs on the type as *written* in the source,
 /// before anything has been resolved, and the alternative — resolving the wrapper and asking the
 /// classpath for its type argument — needs an answer to a question the caller has not asked yet.
-fn element_type_of(type_text: &str) -> String {
+pub(crate) fn element_type_of(type_text: &str) -> String {
     /// Wrappers whose single type argument is the interesting type.
     const ENVELOPES: [&str; 10] = [
         "ResponseEntity", "Optional", "List", "Set", "Collection", "Iterable", "Mono", "Flux",

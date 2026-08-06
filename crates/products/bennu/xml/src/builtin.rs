@@ -211,9 +211,130 @@ const POM: &[(&str, &str, &str)] = &[
 /// having none.
 const OPEN: &[&str] = &["properties", "configuration"];
 
+/// The tag-library descriptor, whose grammar is unreachable for the same reason the POM's is.
+///
+/// A `.tld` names `web-jsptaglibrary_1_2.dtd` (or the 2.x XSD) at `java.sun.com`, and the copy
+/// lives inside a servlet container's jars — which are `provided` scope and often not on the
+/// classpath at all. So the file that *defines* a project's tag vocabulary was itself the one
+/// XML file with no vocabulary.
+///
+/// Both generations in one table: the 1.1 spellings (`tlibversion`, `tagclass`, `bodycontent`)
+/// sit beside the 1.2/2.x ones (`tlib-version`, `tag-class`, `body-content`), because both are in
+/// use in the same project and a table that knew only the modern half would report the older
+/// files as wrong.
+const TAGLIB: &[(&str, &str, &str)] = &[
+    (
+        "taglib",
+        "tlib-version tlibversion jsp-version jspversion short-name shortname uri info \
+         display-name description icon small-icon large-icon validator listener tag tag-file \
+         function taglib-extension",
+        "The root of a tag library descriptor.",
+    ),
+    ("tlib-version", "", "The tag library's own version."),
+    ("tlibversion", "", "The tag library's own version (JSP 1.1 spelling)."),
+    ("jsp-version", "", "The JSP version the library requires."),
+    ("jspversion", "", "The JSP version the library requires (JSP 1.1 spelling)."),
+    ("short-name", "", "The prefix a page is expected to bind. A hint, not a rule."),
+    ("shortname", "", "The prefix a page is expected to bind (JSP 1.1 spelling)."),
+    (
+        "uri",
+        "",
+        "The URI a page declares this library by. Absent in the older descriptors, which left the \
+         binding to a `<taglib>` entry in web.xml.",
+    ),
+    ("info", "", "The library's documentation (JSP 1.1 spelling of description)."),
+    ("display-name", "", ""),
+    ("description", "", ""),
+    ("icon", "small-icon large-icon", ""),
+    ("small-icon", "", ""),
+    ("large-icon", "", ""),
+    ("validator", "validator-class init-param description", ""),
+    ("validator-class", "", ""),
+    ("init-param", "param-name param-value description", ""),
+    ("param-name", "", ""),
+    ("param-value", "", ""),
+    ("listener", "listener-class description display-name icon", ""),
+    ("listener-class", "", ""),
+    (
+        "tag",
+        "name tag-class tagclass tei-class teiclass body-content bodycontent display-name \
+         description info icon small-icon large-icon variable attribute dynamic-attributes \
+         example tag-extension",
+        "One tag the library declares.",
+    ),
+    ("name", "", "The tag's, attribute's or function's own name — what a page writes."),
+    ("tag-class", "", "The class that implements the tag."),
+    ("tagclass", "", "The class that implements the tag (JSP 1.1 spelling)."),
+    ("tei-class", "", "The TagExtraInfo subclass, when the tag introduces scripting variables."),
+    ("teiclass", "", "The TagExtraInfo subclass (JSP 1.1 spelling)."),
+    (
+        "body-content",
+        "",
+        "What may go between the tags: empty, JSP, scriptless, or tagdependent.",
+    ),
+    ("bodycontent", "", "What may go between the tags (JSP 1.1 spelling)."),
+    ("dynamic-attributes", "", "true when the tag accepts attributes it does not declare."),
+    ("example", "", ""),
+    (
+        "attribute",
+        "name required rtexprvalue type description fragment deferred-value deferred-method",
+        "One attribute of a tag.",
+    ),
+    ("required", "", "true / yes when the tag cannot be written without it."),
+    (
+        "rtexprvalue",
+        "",
+        "true when the attribute accepts a runtime expression rather than only a literal.",
+    ),
+    ("type", "", "The Java type the attribute takes."),
+    ("fragment", "", "true when the attribute is a JSP fragment rather than a value."),
+    ("deferred-value", "type", ""),
+    ("deferred-method", "method-signature", ""),
+    ("method-signature", "", ""),
+    (
+        "variable",
+        "name-given name-from-attribute alias variable-class declare scope description",
+        "A scripting variable the tag introduces into the page.",
+    ),
+    ("name-given", "", ""),
+    ("name-from-attribute", "", ""),
+    ("alias", "", ""),
+    ("variable-class", "", ""),
+    ("declare", "", ""),
+    ("scope", "", "AT_BEGIN, AT_END or NESTED."),
+    ("tag-file", "name path description display-name icon example", "A tag written as a .tag file."),
+    ("path", "", "Where the .tag file is, web-app-relative."),
+    (
+        "function",
+        "name function-class function-signature description display-name icon example \
+         function-extension",
+        "An EL function the library declares.",
+    ),
+    ("function-class", "", ""),
+    ("function-signature", "", "The Java signature, return type included."),
+    ("taglib-extension", "", ""),
+    ("tag-extension", "", ""),
+    ("function-extension", "", ""),
+];
+
 /// The built-in grammar for a document, or `None`.
 pub fn grammar_for(scan: &Scan) -> Option<Grammar> {
-    is_pom(scan).then(pom)
+    if is_pom(scan) {
+        return Some(pom());
+    }
+    is_taglib(scan).then(taglib)
+}
+
+/// Whether this document is a tag library descriptor: a `<taglib>` root. Unlike `<project>`,
+/// which is a name anything could use, a root element called `taglib` in a Java project is one
+/// thing only.
+fn is_taglib(scan: &Scan) -> bool {
+    scan.tags.iter().find(|t| t.kind != TagKind::Close).is_some_and(|root| root.local() == "taglib")
+}
+
+/// The tag-library descriptor grammar.
+pub fn taglib() -> Grammar {
+    table("JSP tag library descriptor (built in)", "taglib", TAGLIB)
 }
 
 /// Whether this document is a Maven POM.
@@ -232,11 +353,17 @@ fn is_pom(scan: &Scan) -> bool {
 
 /// The Maven POM grammar.
 pub fn pom() -> Grammar {
+    table("Maven POM (built in)", "project", POM)
+}
+
+/// One of these tables as a [`Grammar`]. Shared by both built-ins so a third costs a table and
+/// a name rather than a copy of this.
+fn table(source: &str, root: &str, rows: &[(&str, &str, &str)]) -> Grammar {
     Grammar {
-        source: "Maven POM (built in)".to_string(),
+        source: source.to_string(),
         kind: Some(GrammarKind::Builtin),
-        roots: vec!["project".to_string()],
-        elements: POM
+        roots: vec![root.to_string()],
+        elements: rows
             .iter()
             .map(|(name, children, doc)| Element {
                 name: name.to_string(),
@@ -294,6 +421,25 @@ mod tests {
         assert!(g.element("properties").unwrap().open);
         assert!(g.element("configuration").unwrap().open);
         assert!(!g.element("dependencies").unwrap().open);
+    }
+
+    #[test]
+    fn a_tld_is_recognised_by_its_root_and_reads_both_generations() {
+        assert!(grammar_for(&scan("<taglib><tag><name>x</name></tag></taglib>")).is_some());
+        assert!(grammar_for(&scan("<web-app/>")).is_none());
+
+        let g = taglib();
+        let tag = g.element("tag").expect("declares <tag>");
+        // The 1.2 spelling and the 1.1 one, because both are open in the same project.
+        assert!(tag.children.contains(&"tag-class".to_string()));
+        assert!(tag.children.contains(&"tagclass".to_string()));
+        assert!(g.element("attribute").unwrap().children.contains(&"rtexprvalue".to_string()));
+        // Same rule as the POM's: a name offered must be a name the table knows.
+        for e in &g.elements {
+            for c in &e.children {
+                assert!(g.element(c).is_some(), "`{c}` is a child of `{}` but is not declared", e.name);
+            }
+        }
     }
 
     #[test]

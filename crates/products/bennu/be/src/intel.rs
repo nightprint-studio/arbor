@@ -155,6 +155,15 @@ fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Dia
     // gets a warning. Computed (`${…}`/`%{…}`) and external (`http(s)://`) references are never
     // flagged — same conservative stance as the action check.
     if is_jsp_file(&args.file) {
+        // The tag libraries the page declares: a tag its own TLD does not have, an attribute
+        // that does not exist, a required one that is missing, a `uri` nothing on the classpath
+        // ships. Same pipe as the action and include checks, and — like them — the live buffer
+        // rather than the file on disk, since a page is checked while it is being written.
+        // Skipped on the FAST tier for the same reason the Java framework checks are: this is a
+        // project-wide question and the fast pass exists to paint syntax within a keystroke.
+        if args.resolved.unwrap_or(true) {
+            out.extend(crate::frameworks::diagnostics_for(&args.file, args.source.as_deref()));
+        }
         for inc in bennu_web::prelude::unresolved_includes_file(std::path::Path::new(&args.file)) {
             out.push(Diagnostic {
                 message: format!("Included file `{}` was not found", inc.raw),

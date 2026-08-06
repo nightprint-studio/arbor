@@ -10,6 +10,9 @@
  * `${…}` / `#{…}` and Struts OGNL `%{…}` — including inside attribute values. Highlighting
  * is leaf-driven by {@link classify} (no `.scm` query), exactly like `java-lang.ts`.
  *
+ * Taglib tags are coloured **per library** rather than all alike, each matching its own
+ * `<%@ taglib %>` declaration — see `jsp-taglibs.ts` for why and how.
+ *
  * If the wasm is missing the parser factory rejects and the editor stays plain text
  * (graceful — no crash), like the Java + merula descriptors.
  */
@@ -18,9 +21,12 @@ import { Parser, Language, type Node } from 'web-tree-sitter';
 import { javascript } from '@codemirror/legacy-modes/mode/javascript';
 import { css } from '@codemirror/legacy-modes/mode/css';
 import type { StreamParser } from '@codemirror/language';
-import type { LanguageDescriptor, TokenClass } from '$lib/components/shared/ui/code-editor';
+import type { LanguageDescriptor, TokenClassName } from '$lib/components/shared/ui/code-editor';
+import { namespaceTokenClass } from '$lib/components/shared/ui/code-editor';
+import { directiveSlot, tagSlot } from './jsp-taglibs';
 import { elOgnlStream } from './jsp-el';
 import { makeHoverSource } from './bennu-hover';
+import { markupCompletionSource, markupExtHover } from './markup-intel';
 import { actionPropertyHover } from '$lib/ipc/bennu/nav';
 
 const RUNTIME_WASM = '/bennu/tree-sitter.wasm';
@@ -54,10 +60,11 @@ async function createJspParser(): Promise<Parser> {
 // literal text. The `<% … %>` family + comments are single leaf tokens, so their whole
 // span colours at once.
 
-/** The whole `<% … %>` scriptlet / directive / declaration / expression family — the
- *  JSP "meta" colour (olive), matching the previous overlay. */
+/** The whole `<% … %>` scriptlet / declaration / expression family — the JSP "meta"
+ *  colour (olive), matching the previous overlay. `jsp_directive` is handled apart: a
+ *  `taglib` one wears its prefix's colour instead (see `jsp-taglibs.ts`). */
 const SCRIPTLET_TYPES = new Set([
-  'jsp_scriptlet', 'jsp_directive', 'jsp_declaration', 'jsp_expression',
+  'jsp_scriptlet', 'jsp_declaration', 'jsp_expression',
 ]);
 
 /** Punctuation leaves (anonymous). */
@@ -68,16 +75,30 @@ function classify(
   named: boolean,
   _field: string | null,
   _parentType: string | null,
-): TokenClass | null {
+): TokenClassName | null {
   const type = node.type;
 
   // Named leaves (grammar rule names).
   if (type === 'jsp_comment' || type === 'html_comment') return 'comment';
   if (SCRIPTLET_TYPES.has(type)) return 'annotation';
+  // A `taglib` directive is the legend for every `<prefix:…>` below it, so it wears the
+  // prefix's own colour; every other directive (`page`, `include`) stays JSP-meta olive.
+  if (type === 'jsp_directive') {
+    const slot = directiveSlot(node);
+    return slot === undefined ? 'annotation' : namespaceTokenClass(slot);
+  }
   // `el_expression` / `ognl_expression` are tokenized INSIDE by the EL/OGNL injection
   // (below), not flattened to one `field` colour — leaving a classify here would win only
   // if the injection were removed, so it's intentionally omitted.
-  if (type === 'tag_name' || type === 'script_tag' || type === 'style_tag') return 'keyword';
+
+  // A namespaced tag whose prefix this page declares is coloured by LIBRARY (`<s:…>`
+  // apart from `<c:…>` apart from `<wp:…>`), matching its own `<%@ taglib %>` line.
+  // Plain HTML — and a prefix nobody declared — keeps the ordinary tag colour.
+  if (type === 'tag_name') {
+    const slot = tagSlot(node);
+    return slot === undefined ? 'keyword' : namespaceTokenClass(slot);
+  }
+  if (type === 'script_tag' || type === 'style_tag') return 'keyword';
   // `script_content` / `style_content` are highlighted by the JS/CSS injection (below),
   // not classify — leaving them here would flatten them to one colour.
   if (type === 'attribute_name') return 'field';
@@ -131,8 +152,16 @@ export const jspLanguage: LanguageDescriptor = {
     el_expression: elOgnlStream as unknown as StreamParser<unknown>,
     ognl_expression: elOgnlStream as unknown as StreamParser<unknown>,
   },
-  // Hover: an OGNL value-stack root / form-field name / validation `<field>` resolves to the bound
-  // action class's property — the card shows its TYPE (`String customer`, `List<Item> items`) and the
-  // owning action. EL/taglib completion is still reserved for a later wave.
-  intel: { hover: makeHoverSource((path, src, byteOffset) => actionPropertyHover(path, src, byteOffset)) },
+  // Completion + hover come from the page's own tag libraries — the TLDs its `<%@ taglib %>`
+  // directives resolve to, read out of the project and out of the dependency jars. The
+  // mechanics are shared with the XML descriptor (`markup-intel.ts`); the vocabulary is not.
+  //
+  // Hover asks the libraries first and falls back to the action-property resolver: the two
+  // answer disjoint positions (a tag or attribute NAME versus an OGNL root / form field), so
+  // the order only decides which of them gets asked about a token neither knows.
+  intel: {
+    completion: markupCompletionSource,
+    hover: makeHoverSource(async (path, src, byteOffset) =>
+      (await markupExtHover(path, src, byteOffset)) ?? (await actionPropertyHover(path, src, byteOffset))),
+  },
 };
