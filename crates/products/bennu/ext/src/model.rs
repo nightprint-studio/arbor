@@ -41,6 +41,18 @@ pub struct ProjectScan<'a> {
     pub xml: &'a [ScannedFile],
     /// Resource files that carry configuration: `.properties`, `.yml`, `.yaml`.
     pub resources: &'a [ScannedFile],
+    /// **Server-rendered pages** — every `.jsp` / `.jspf` / `.jspx` / `.tag` / `.tagx` in the
+    /// tree.
+    ///
+    /// Their own bucket rather than part of [`Self::xml`] because a JSP is not XML (a scriptlet
+    /// and an unclosed `<br>` both see to that), and because an extension that wants pages
+    /// almost never wants configuration in the same pass.
+    ///
+    /// Here for the questions a per-file query cannot answer. "Which message keys does this page
+    /// use" is a file question; "which keys does the project never use" is a project one, and in
+    /// a legacy app most of the answer is in the pages. Empty is normal and must stay harmless —
+    /// a service module with no views has none.
+    pub pages: &'a [ScannedFile],
     /// **Grammar files** — `.xsd` and `.dtd`, from the project and from inside the dependency
     /// jars.
     ///

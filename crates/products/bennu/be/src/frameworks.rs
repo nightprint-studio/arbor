@@ -36,9 +36,10 @@ use bennu_ext::prelude::{
 };
 use bennu_project::prelude::{detect_capabilities, normalize_newlines, parse_pom};
 use bennu_proto::prelude::{CompletionItem, Diagnostic};
+use bennu_i18n::prelude::MessagesExtension;
 use bennu_jpa::prelude::JpaExtension;
 use bennu_jsp::prelude::JspExtension;
-use bennu_spring::prelude::{is_property_file, SpringExtension};
+use bennu_spring::prelude::SpringExtension;
 use bennu_xml::prelude::XmlExtension;
 use serde::{Deserialize, Serialize};
 
@@ -160,15 +161,16 @@ impl FrameworkService {
         }
         let jpa = Arc::new(JpaExtension::new());
         let jsp = Arc::new(JspExtension::new());
-        // The whole registration surface. A third framework is one more entry here — and the
-        // XML one arriving as exactly that entry is the claim the seam was built on, now made
-        // twice.
+        // The whole registration surface. A further framework is one more entry here — and the
+        // XML, JSP and message-bundle ones arriving as exactly that entry is the claim the seam
+        // was built on, now made four times.
         let registry = ExtensionRegistry::new(
             vec![
                 Arc::clone(&spring) as Arc<dyn FrameworkExtension>,
                 Arc::clone(&jpa) as Arc<dyn FrameworkExtension>,
                 Arc::new(XmlExtension::new()) as Arc<dyn FrameworkExtension>,
                 Arc::clone(&jsp) as Arc<dyn FrameworkExtension>,
+                Arc::new(MessagesExtension::new()) as Arc<dyn FrameworkExtension>,
             ],
             &caps,
         );
@@ -198,7 +200,7 @@ impl FrameworkService {
         } else {
             Vec::new()
         };
-        let (xml_files, resources) = collect_config_files(path);
+        let walked = collect_config_files(path);
         let descriptors = collect_descriptors(path);
         let schemas = collect_schemas(path);
         // Only walked when something asked for it: on a project with no tag libraries the JSP
@@ -212,8 +214,9 @@ impl FrameworkService {
         registry.reindex(&ProjectScan {
             root: path,
             java: &java,
-            xml: &xml_files,
-            resources: &resources,
+            xml: &walked.xml,
+            resources: &walked.resources,
+            pages: &walked.pages,
             schemas: &schemas,
             descriptors: &descriptors,
             taglibs: &taglibs,
@@ -241,11 +244,33 @@ impl FrameworkService {
     }
 }
 
-/// Walk the project for the two config file kinds an extension is handed: XML (any of
-/// them — the extension decides which are its own) and property resources.
-fn collect_config_files(root: &Path) -> (Vec<ScannedFile>, Vec<ScannedFile>) {
-    let mut xml = Vec::new();
-    let mut resources = Vec::new();
+/// The buckets one walk of the project tree fills.
+#[derive(Default)]
+struct WalkedFiles {
+    xml: Vec<ScannedFile>,
+    resources: Vec<ScannedFile>,
+    pages: Vec<ScannedFile>,
+}
+
+/// Whether a file name is a server-rendered page — the JSP family, including the `.tag` files
+/// that are pages written as tags.
+fn is_page_file(lower: &str) -> bool {
+    [".jsp", ".jspf", ".jspx", ".tag", ".tagx"].iter().any(|e| lower.ends_with(e))
+}
+
+/// Whether a file name is a keyed resource: a `.properties` bundle or a YAML document.
+///
+/// Deliberately by extension alone. Naming the file is what tells you what it is FOR — Spring
+/// configuration, a message bundle, a validator's messages — and that is each extension's
+/// question, not the walk's.
+fn is_resource_file(lower: &str) -> bool {
+    [".properties", ".yml", ".yaml"].iter().any(|e| lower.ends_with(e))
+}
+
+/// Walk the project for the file kinds an extension is handed: XML (any of them — the extension
+/// decides which are its own), property resources, and pages.
+fn collect_config_files(root: &Path) -> WalkedFiles {
+    let mut out = WalkedFiles::default();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else { continue };
@@ -259,10 +284,16 @@ fn collect_config_files(root: &Path) -> (Vec<ScannedFile>, Vec<ScannedFile>) {
                 continue;
             }
             let lower = name.to_ascii_lowercase();
+            // EVERY `.properties` / `.yml`, not only the `application*` ones Spring reads: which
+            // of them are configuration is Spring's rule, and it applies it itself. A
+            // `messages_it.properties` is a resource too, and the extension that wants it should
+            // not have to ask the host to widen a filter written for somebody else.
             let bucket = if lower.ends_with(".xml") {
-                &mut xml
-            } else if is_property_file(&name) {
-                &mut resources
+                &mut out.xml
+            } else if is_resource_file(&lower) {
+                &mut out.resources
+            } else if is_page_file(&lower) {
+                &mut out.pages
             } else {
                 continue;
             };
@@ -284,7 +315,7 @@ fn collect_config_files(root: &Path) -> (Vec<ScannedFile>, Vec<ScannedFile>) {
             }
         }
     }
-    (xml, resources)
+    out
 }
 
 /// The framework descriptor files for `root`: the ones its **dependencies** ship inside their
@@ -1367,10 +1398,21 @@ fn bennu_ext_catalog(_ctx: &BennuState, args: CatalogArgs) -> Result<Vec<ExtEntr
     if args.kind == crate::library_beans::CATALOG_KIND {
         return Ok(crate::library_beans::catalog_entries(&args.root));
     }
-    Ok(FrameworkService::global()
+    if args.kind == crate::struts_endpoints::CATALOG_KIND {
+        return Ok(crate::struts_endpoints::catalog_entries(&args.root));
+    }
+    let mut rows = FrameworkService::global()
         .slot(&args.root)
         .map(|s| s.registry.catalog(&args.kind))
-        .unwrap_or_default())
+        .unwrap_or_default();
+    // A BARE kind is the concept, not one framework's version of it — so the host's own
+    // contributions join it too. `endpoints` is the case that matters: a half-migrated legacy
+    // application answers URLs through both Struts actions and `@GetMapping`s, and a panel that
+    // showed one of them would be lying about the other.
+    if args.kind == "endpoints" {
+        rows.extend(crate::struts_endpoints::catalog_entries(&args.root));
+    }
+    Ok(rows)
 }
 
 /// Args for [`bennu_ext_overview`] / [`bennu_spring_refresh`].
@@ -1425,6 +1467,11 @@ fn bennu_ext_overview(_ctx: &BennuState, args: RootArgs) -> Result<ExtOverview, 
     // or configured a coordinate that turns out to have none — gets no button rather than a
     // door onto an empty list.
     if let Some(stat) = crate::library_beans::stat(&args.root) {
+        out.stats.push(stat);
+    }
+    // Likewise the Struts actions: the config graph is the index build's, so the count comes
+    // from there rather than from an extension.
+    if let Some(stat) = crate::struts_endpoints::stat(&args.root) {
         out.stats.push(stat);
     }
     if let Some(ext) = &slot.spring {
@@ -1507,14 +1554,17 @@ mod tests {
         std::fs::write(res.join("beans.xml"), "<beans/>").unwrap();
         std::fs::write(res.join("application.yml"), "a: 1").unwrap();
         std::fs::write(res.join("messages.properties"), "x=1").unwrap();
+        std::fs::write(res.join("home.jsp"), "<html/>").unwrap();
         std::fs::write(target.join("application.yml"), "a: 2").unwrap();
 
-        let (xml, resources) = collect_config_files(&dir);
+        let walked = collect_config_files(&dir);
+        let (xml, resources) = (&walked.xml, &walked.resources);
         assert_eq!(xml.len(), 1);
-        assert_eq!(resources.len(), 1, "messages.properties is not a Spring config source");
-        assert!(resources[0].path.ends_with("application.yml"));
+        assert_eq!(resources.len(), 2, "a message bundle is a resource; Spring filters its own");
+        assert_eq!(walked.pages.len(), 1, "a page is neither xml nor a resource");
+        assert!(resources.iter().any(|r| r.path.ends_with("application.yml")));
         assert!(
-            !resources[0].path.to_string_lossy().contains("target"),
+            !resources.iter().any(|r| r.path.to_string_lossy().contains("target")),
             "build output must not shadow the real config"
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -1528,8 +1578,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("application.properties"), "a=1\r\nb=2\r\nc=3\r\n").unwrap();
 
-        let (_, resources) = collect_config_files(&dir);
-        let text = &resources[0].text;
+        let walked = collect_config_files(&dir);
+        let text = &walked.resources[0].text;
         assert!(!text.contains('\r'), "the editor's buffer has no CR either");
         assert_eq!(text.find("c=3"), Some(8), "3 lines of 4 bytes, not of 5");
         let _ = std::fs::remove_dir_all(&dir);

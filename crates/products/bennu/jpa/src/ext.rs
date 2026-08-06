@@ -325,6 +325,7 @@ mod tests {
             java: &java,
             xml: &[],
             resources: &[],
+            pages: &[],
             schemas: &[],
             descriptors: &[],
             taglibs: &[],

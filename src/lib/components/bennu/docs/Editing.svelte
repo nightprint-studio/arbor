@@ -706,6 +706,15 @@
   place it's used across the project in a popover — pick one to jump to it. It answers once the index
   is warm.
 </p>
+<p>
+  A field counts <strong>every</strong> read of it, whether or not the code wrote a receiver:
+  <code>this.count</code>, <code>other.count</code>, <code>Config.MAX</code> and the bare
+  <code>count</code> that means <code>this.count</code> are the same field. That last shape is the
+  usual one — and for a <code>static final</code> constant it is often the only one. A local
+  variable or parameter of the same name is that variable, not the field it hides, so a
+  <code>setValue(int value)</code> does not report its own parameter as a use of
+  <code>this.value</code>. A declaration is never a use of itself.
+</p>
 
 <h2>Save</h2>
 <p>

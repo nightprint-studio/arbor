@@ -58,6 +58,10 @@ Call sites use `bennu_web::prelude::…`:
   action → bean-id → real FQCN.
 - `resolve_action_view(&graph, action_qname) -> Option<String>` — the view chain:
   action → `<result type="tiles">` → Tiles def → JSP.
+- `endpoints(&graph) -> Vec<Endpoint>` — every action read as a **route**: the URL, the
+  handler (bean id resolved to its FQCN), the interceptors it declares for itself, and each
+  `<result>` with the page it finally renders. Pure over a parsed graph; the panel that shows
+  it lives in `bennu-be`.
 - Records: `ActionRecord`, `ResultRecord`, `BeanRecord`, `TilesDefRecord`, plus
   `Relation` / `RelKind` (with `RelKind::into_index()` mapping onto the index'
   `RelationKind`) and `action_source()` / `bean_source()` for the `Source` tag.

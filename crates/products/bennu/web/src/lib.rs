@@ -42,6 +42,7 @@
 //! Workspace convention: call sites reach this crate's surface through
 //! `bennu_web::prelude::...`.
 
+pub mod endpoints;
 pub mod form_expand;
 pub mod forms;
 pub mod graph;

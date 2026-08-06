@@ -1,0 +1,14 @@
+[package]
+name         = "bennu-i18n"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Message bundles for Bennu as a framework extension — the `.properties` files a legacy web app renders half its screens from, their locales, and every place a key is read: JSP tags, validator messages, `getText(…)`."
+
+[dependencies]
+# The extension seam this crate implements.
+bennu-ext   = { path = "../ext" }
+# The wire types a contribution is made of (Diagnostic / CapabilitySet / CompletionItem).
+bennu-proto = { path = "../proto" }

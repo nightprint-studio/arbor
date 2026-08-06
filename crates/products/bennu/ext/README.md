@@ -20,7 +20,7 @@ use bennu_ext::prelude::*;
 let registry = ExtensionRegistry::new(vec![Arc::new(SpringExtension::new())], &capabilities);
 // Off the request path. `descriptors`, `schemas` and `taglibs` are what the host read out of
 // the project's dependency jars — the one input an extension cannot derive from the source tree.
-registry.reindex(&ProjectScan { root, java, xml, resources, schemas, descriptors, taglibs });
+registry.reindex(&ProjectScan { root, java, xml, resources, pages, schemas, descriptors, taglibs });
 
 let ctx = FileCtx { path, source };
 let diags  = registry.diagnostics(&ctx);
@@ -57,9 +57,14 @@ throughout.
 
 `catalog(kind)` is the generic backing for every list panel: beans, endpoints, property
 keys. One uniform row shape (`ExtEntry`) means one virtualized, filterable list renders all
-of them and a new catalog costs no frontend work. Kinds are namespaced by extension id —
-`"spring.beans"` goes straight to Spring; a bare `"beans"` is offered to each extension in
-turn and the first non-empty answer wins.
+of them and a new catalog costs no frontend work.
+
+A kind namespaced by extension id — `"spring.beans"` — goes straight to that extension. A
+**bare** kind — `"endpoints"` — is answered by every extension at once, concatenated in
+registration order, because a bare kind names a *concept* rather than one framework's version
+of it. A Struts action and a `@GetMapping` are both the answer to "what URLs does this
+application answer", and a half-migrated codebase has both; taking the first non-empty answer
+would have shown whichever framework registered earlier and silently hidden the other.
 
 ## Dependencies
 

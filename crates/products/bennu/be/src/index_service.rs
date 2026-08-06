@@ -2206,6 +2206,21 @@ impl IndexService {
         self.slot_for_file(file).map(|s| norm_path(&s.root))
     }
 
+    /// The config resolver of the project rooted at `root`, if built.
+    ///
+    /// The by-root twin of [`config_for_file`](Self::config_for_file), for a PANEL rather than a
+    /// caret: the endpoints catalog is a question about the project, and re-parsing the struts
+    /// fragments to answer it would be a second copy of a graph this slot already holds
+    /// resolved. `None` while the index is still building, which the caller reports as "not
+    /// ready" rather than as "no endpoints".
+    pub fn config_for_root(&self, root: &str) -> Option<Arc<ConfigResolver>> {
+        let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        let slot = slots.get(&PathBuf::from(root))?;
+        let g = slot.config.read().unwrap_or_else(|p| p.into_inner());
+        let cfg = g.as_ref().map(Arc::clone);
+        cfg
+    }
+
     /// The config resolver of the project owning `file`, if built.
     fn config_for_file(&self, file: &str) -> Option<Arc<ConfigResolver>> {
         let slot = self.slot_for_file(file)?;

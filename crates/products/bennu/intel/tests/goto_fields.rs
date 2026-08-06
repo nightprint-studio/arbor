@@ -342,11 +342,11 @@ fn caret_on_field_declaration() {
 fn find_usages_of_inherited_field() {
     let p = chain();
     let pr = p.source("Parent.java").to_string();
-    // Child.sum() reads parentField BARE (no `this.`). Bare field references are not bucketed
-    // by the find-usages walk (documented limitation — see find_usages.rs), so this counts 0.
+    // Child.sum() reads parentField BARE (no `this.`) — which is how inherited fields are read
+    // in practice, and is counted.
     let off = at(&pr, "int parentField;") + "int ".len();
     let n = p.usage_count("Parent.java", off);
-    assert_eq!(n, 0, "bare inherited-field reads are not bucketed by find-usages");
+    assert_eq!(n, 1, "the bare read in Child.sum() is a use of Parent.parentField");
 }
 
 #[test]

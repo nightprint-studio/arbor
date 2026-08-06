@@ -74,6 +74,7 @@ members = [
     "crates/products/bennu/intentions",
     "crates/products/bennu/jsp-grammar",
     "crates/products/bennu/jsp",
+    "crates/products/bennu/i18n",
     "crates/products/bennu/web",
     "crates/products/bennu/spel",
     "crates/products/bennu/facts",

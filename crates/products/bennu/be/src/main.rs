@@ -110,6 +110,11 @@ mod index_service;
 // Config-graph input discovery: walk the project tree to find struts/spring/tiles files
 // (`WebInputs`) for the config-graph build.
 mod web_discovery;
+// Struts actions as rows of the generic Endpoints catalog, with the request chain — interceptors,
+// results, the page each one finally renders — nested underneath. Host-owned for the same reason
+// the library beans are: the config graph is discovered and parsed by the index build, and an
+// extension would only be a second copy of it.
+mod struts_endpoints;
 // Class index (Go to Class): `bennu_class_index` — a fresh scan of the project's `.java`
 // sources, one entry per declared type (fqcn + simple + file + decl line).
 mod class_index;

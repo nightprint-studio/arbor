@@ -878,6 +878,7 @@ dependencies = [
  "bennu-core",
  "bennu-deps",
  "bennu-ext",
+ "bennu-i18n",
  "bennu-index",
  "bennu-intel",
  "bennu-intentions",
@@ -967,6 +968,14 @@ version = "0.3.0"
 dependencies = [
  "tree-sitter",
  "tree-sitter-java",
+]
+
+[[package]]
+name = "bennu-i18n"
+version = "0.3.0"
+dependencies = [
+ "bennu-ext",
+ "bennu-proto",
 ]
 
 [[package]]

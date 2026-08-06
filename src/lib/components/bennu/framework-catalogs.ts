@@ -24,6 +24,7 @@ export type FrameworkCatalogId =
   | 'beans'
   | 'librarybeans'
   | 'endpoints'
+  | 'messages'
   | 'springconfig'
   | 'springbindings'
   | 'springdocumented'
@@ -36,7 +37,14 @@ export type GroupMode = 'none' | 'path' | 'owner' | 'kind' | 'namespace';
 
 export interface FrameworkCatalogSpec {
   id: FrameworkCatalogId;
-  /** Catalog kind asked of the backend, namespaced by extension id. */
+  /**
+   * Catalog kind asked of the backend.
+   *
+   * Namespaced by extension id (`spring.beans`) when the panel is about one framework's own
+   * model, and **bare** (`endpoints`) when it is about a concept several frameworks answer —
+   * the backend unions every contribution for a bare kind, and {@link availableCatalogs}
+   * matches a namespaced count against it by its tail.
+   */
   kind: string;
   /** Panel title + rail tooltip. */
   title: string;
@@ -63,22 +71,44 @@ export interface FrameworkCatalogSpec {
 
 export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
   {
+    // Every URL the application answers, whoever routes it. A Struts action and a
+    // `@GetMapping` are the same fact about an application — and a legacy codebase mid-migration
+    // has both, often for the same screen. Hence the BARE kind: the backend unions each
+    // framework's contribution instead of the panel belonging to whichever one registered first.
     id: 'endpoints',
-    kind: 'spring.endpoints',
+    kind: 'endpoints',
     title: 'Endpoints',
-    command: 'Spring endpoints',
+    command: 'Endpoints',
     icon: 'target',
-    placeholder: 'Filter by path, verb, handler, return type or parameter…',
-    empty: 'No request mappings found in this project.',
+    placeholder: 'Filter by path, verb, handler, result or interceptor…',
+    empty: 'No routes found in this project — no request mappings and no Struts actions.',
     groups: [
       { id: 'path', label: 'Group by path' },
-      { id: 'owner', label: 'Group by controller' },
+      { id: 'owner', label: 'Group by handler' },
       { id: 'kind', label: 'Group by method' },
       { id: 'none', label: 'No grouping' },
     ],
     columns: { primary: 'path', secondary: 'handler' },
     rail: true,
     shortcut: 'Alt+4',
+  },
+  {
+    // The other half of every screen: the text is not in the source, it is in a `.properties`
+    // file reached by a string. `unused` and `missing <locale>` are what you cannot see any
+    // other way.
+    id: 'messages',
+    kind: 'messages.keys',
+    title: 'Messages',
+    command: 'Message bundles',
+    icon: 'languages',
+    placeholder: 'Filter by key, text or bundle…',
+    empty: 'No message bundles found in this project.',
+    groups: [
+      { id: 'kind', label: 'Group by bundle' },
+      { id: 'namespace', label: 'Group by key prefix' },
+      { id: 'none', label: 'No grouping' },
+    ],
+    columns: { primary: 'key', secondary: 'text' },
   },
   {
     id: 'beans',
@@ -213,7 +243,27 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
  * that appears when the index lands is better than one that vanishes under the pointer.
  */
 export function availableCatalogs(stats: ExtStat[]): FrameworkCatalogSpec[] {
-  return FRAMEWORK_CATALOGS.filter((c) => stats.some((s) => s.catalog === c.kind && s.value > 0));
+  return FRAMEWORK_CATALOGS.filter((c) =>
+    stats.some((s) => countsToward(s.catalog, c.kind) && s.value > 0),
+  );
+}
+
+/**
+ * Whether a stat's (namespaced) catalog id counts toward a spec's kind.
+ *
+ * A namespaced spec matches only its own id — two frameworks with an `entities` catalog must
+ * never answer for each other. A **bare** spec matches every framework's version of that
+ * concept, which is what lets one Endpoints panel be lit by Spring, by Struts, or by both.
+ */
+export function countsToward(catalog: string | null | undefined, kind: string): boolean {
+  if (!catalog) return false;
+  if (kind.includes('.')) return catalog === kind;
+  return catalog === kind || catalog.endsWith(`.${kind}`);
+}
+
+/** How many rows a catalog's counts add up to across every framework that contributes. */
+export function catalogCount(stats: ExtStat[], kind: string): number {
+  return stats.reduce((n, s) => (countsToward(s.catalog, kind) ? n + s.value : n), 0);
 }
 
 /** Whether a bottom-dock id is one of the framework catalogs. */
@@ -273,6 +323,10 @@ export function kindClass(kind: string): string {
   if (k.includes('PUT') || k.includes('PATCH')) return 'k-put';
   if (k.includes('GET')) return 'k-get';
   if (k === 'ANY') return 'k-any';
+  // A Struts action answers every verb, so it gets the "any method" colour rather than a
+  // family of its own — in a mixed list that is the honest comparison to a `@RequestMapping`
+  // with no `method` element.
+  if (k === 'ACTION') return 'k-any';
   // Bean stereotypes and parameter bindings get their own families.
   switch (kind) {
     case '@Service':
@@ -319,6 +373,20 @@ export function kindClass(kind: string): string {
       return 'k-post';
     case 'arg':
       return 'k-any';
+    // The steps of a Struts request, coloured by what they do rather than by where they sit:
+    // an interceptor runs before the action, a result renders, a chain hands off elsewhere.
+    case 'interceptor':
+      return 'k-config';
+    case 'tiles':
+    case 'dispatcher':
+      return 'k-get';
+    case 'chain':
+    case 'redirect':
+    case 'redirectAction':
+      return 'k-put';
+    // A message key's translations.
+    case 'locale':
+      return 'k-service';
     default:
       return 'k-neutral';
   }

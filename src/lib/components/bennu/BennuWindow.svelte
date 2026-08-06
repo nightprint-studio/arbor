@@ -24,7 +24,7 @@
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info,
     Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck,
-    TextCursorInput, ListChecks, BookOpen, FlaskConical, ListRestart, Bug, Braces,
+    TextCursorInput, ListChecks, BookOpen, FlaskConical, ListRestart, Bug, Braces, Languages,
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -662,6 +662,7 @@
     // a bound-properties list and the property reference read out of the dependency jars.
     'list': ListTree as unknown as IconComponent,
     'book': BookOpen as unknown as IconComponent,
+    'languages': Languages as unknown as IconComponent,
   };
   function iconResolver(name: string): IconComponent { return ICONS[name] ?? ICONS.command; }
 

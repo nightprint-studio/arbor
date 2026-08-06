@@ -12,6 +12,9 @@ pub use crate::model::{
     ValidatorMessage, ValidatorParam, WebConfigGraph,
 };
 
+// Actions read as endpoints: the URL, the handler, and the chain the response takes.
+pub use crate::endpoints::{endpoints, Endpoint, ResultStep};
+
 // The graph builder + the load-bearing resolution chains (docs §10 C1).
 pub use crate::graph::{
     build as build_web_graph, interceptor_usages, methods_for_mapper, relations_of,

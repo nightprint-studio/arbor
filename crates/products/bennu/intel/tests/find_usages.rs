@@ -2,10 +2,11 @@
 //! multi-file index. Members and types are bucketed and counted across every use site (the
 //! declaration itself is NOT counted); locals are scope-exact and never bucketed.
 //!
-//! NOTE on FIELD accesses: the reference walk indexes QUALIFIED field accesses (`this.f`,
-//! `obj.f`, `Type.f`). A purely `this`-less bare field reference is NOT bucketed by find-usages
-//! (a documented limitation — see `bare_field_reference_is_not_bucketed`); go-to on a bare
-//! field still resolves. The counted-field cases below therefore use `this.`/receiver access.
+//! NOTE on FIELD accesses: the reference walk indexes both the QUALIFIED shapes (`this.f`,
+//! `obj.f`, `Type.f`) and the bare `f` that stands for `this.f` — which in ordinary Java, and
+//! especially in a `private static final` constant, is where most of the reads are. A bare name
+//! that a local or parameter binds in scope is the local, and counts for the field nowhere (see
+//! `a_local_shadowing_a_field_is_not_a_use_of_it`).
 
 mod common;
 use common::*;
@@ -201,10 +202,7 @@ fn field_with_zero_uses() {
 }
 
 #[test]
-fn bare_field_reference_is_not_bucketed() {
-    // DOCUMENTED LIMITATION: a `this`-less bare field reference is not indexed by the find-usages
-    // walk (only qualified `this.f` / `obj.f` accesses are), so a field read ONLY bare counts 0.
-    // (Go-to on the bare reference still resolves — see goto_fields.)
+fn bare_field_reference_is_counted() {
     let p = Project::new(&[(
         "Bare.java",
         "package z;\n\
@@ -215,7 +213,94 @@ fn bare_field_reference_is_not_bucketed() {
     )]);
     let s = p.source("Bare.java").to_string();
     let n = p.usage_count("Bare.java", at(&s, "int flag") + "int ".len());
-    assert_eq!(n, 0, "bare field references are not (yet) bucketed by find-usages");
+    assert_eq!(n, 1, "`return flag` is a read of the field, `this.` or not");
+}
+
+/// The shape the bare-identifier arm exists for: a constant nobody ever qualifies. Read bare in
+/// its own class and bare-but-qualified-by-the-type from another one.
+#[test]
+fn a_constant_is_counted_wherever_it_is_read() {
+    let p = Project::new(&[
+        (
+            "Limits.java",
+            "package z;\n\
+             public class Limits {\n\
+             \x20   public static final int MAX = 10;\n\
+             \x20   public int clamp(int v) { return v > MAX ? MAX : v; }\n\
+             }\n",
+        ),
+        (
+            "Other.java",
+            "package z;\n\
+             public class Other {\n\
+             \x20   public int top() { return Limits.MAX; }\n\
+             }\n",
+        ),
+    ]);
+    let s = p.source("Limits.java").to_string();
+    let n = p.usage_count("Limits.java", at(&s, "int MAX =") + "int ".len());
+    assert_eq!(n, 3, "twice bare in clamp(), once as Limits.MAX in Other");
+}
+
+/// A field's own declarator is the declaration find-usages is answering ABOUT, never one of the
+/// answers.
+#[test]
+fn a_field_declaration_is_not_a_use_of_itself() {
+    let p = Project::new(&[(
+        "Only.java",
+        "package z;\n\
+         public class Only {\n\
+         \x20   private int seen = 0;\n\
+         }\n",
+    )]);
+    let s = p.source("Only.java").to_string();
+    assert_eq!(p.usage_count("Only.java", at(&s, "int seen") + "int ".len()), 0);
+}
+
+/// A local (or parameter) of the same name IS the name — the field it hides is untouched. The
+/// setter shape below is the one every legacy codebase is full of.
+#[test]
+fn a_local_shadowing_a_field_is_not_a_use_of_it() {
+    let p = Project::new(&[(
+        "Shadow.java",
+        "package z;\n\
+         public class Shadow {\n\
+         \x20   private int value;\n\
+         \x20   public void setValue(int value) { this.value = value; }\n\
+         \x20   public int twice() { int value = 2; return value; }\n\
+         \x20   public int real() { return value; }\n\
+         }\n",
+    )]);
+    let s = p.source("Shadow.java").to_string();
+    let n = p.usage_count("Shadow.java", at(&s, "int value;") + "int ".len());
+    assert_eq!(n, 2, "only `this.value` in the setter and the bare read in real()");
+}
+
+/// Names that are not expressions at all: a label, an import segment, an annotation element.
+/// Each of them collides with a field name here, and none of them is a use of it.
+#[test]
+fn labels_imports_and_annotation_elements_are_not_field_uses() {
+    let p = Project::new(&[(
+        "Odd.java",
+        "package z;\n\
+         import java.util.List;\n\
+         public class Odd {\n\
+         \x20   private int util;\n\
+         \x20   private int outer;\n\
+         \x20   @SuppressWarnings(value = \"x\")\n\
+         \x20   private int value;\n\
+         \x20   public void loop() { outer: for (;;) { break outer; } }\n\
+         \x20   public List<String> keep() { return null; }\n\
+         }\n",
+    )]);
+    let s = p.source("Odd.java").to_string();
+    assert_eq!(p.usage_count("Odd.java", at(&s, "int util") + "int ".len()), 0, "`java.util` is a package");
+    assert_eq!(p.usage_count("Odd.java", at(&s, "int outer") + "int ".len()), 0, "`outer:` is a label");
+    assert_eq!(
+        p.usage_count("Odd.java", at(&s, "int value") + "int ".len()),
+        0,
+        "`value =` names an annotation element",
+    );
 }
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────

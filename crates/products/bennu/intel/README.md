@@ -74,10 +74,15 @@ Two impl slots:
 - **`refs`** — the cross-file reference index + the caret classifier both find-usages and
   rename key off:
   - `build_reference_index(files, resolver, project_types)` walks every use site in the
-    project (method invocation / field access / type reference), resolves each to its
-    declaring `DeclKey` (`Type` / `Method` / `Field`) via receiver inference + the
-    supertype walk, and buckets the `UsageLocation`s by declaration. Unresolved sites are
-    skipped, never fatal.
+    project (method invocation / field access / type reference / **bare field read**),
+    resolves each to its declaring `DeclKey` (`Type` / `Method` / `Field`) via receiver
+    inference + the supertype walk, and buckets the `UsageLocation`s by declaration.
+    Unresolved sites are skipped, never fatal.
+  - The bare arm — a `count` standing for `this.count` — mirrors `classify_caret`'s exactly,
+    because the index and the query must produce the same key or the lookup finds an empty
+    bucket. It is gated on a memoized `field name → declaring type` table per enclosing type,
+    which rejects nearly every identifier in a method body (they are locals) before the
+    per-scope shadowing walk runs at all.
   - `classify_caret(...)` → the `DeclKey` a caret references (declaration site or use
     site). `classify_target(...)` is the rename superset that also recognises a **local
     variable / parameter** (`RenameTarget::Local`), which find-usages doesn't bucket.

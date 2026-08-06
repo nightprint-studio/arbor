@@ -200,16 +200,23 @@ impl ExtensionRegistry {
         self.active.iter().flat_map(|e| e.actions(ctx)).collect()
     }
 
-    /// Rows of `kind` from the extension that owns it. Catalog kinds are namespaced by
-    /// the extension id (`"spring.beans"`); a bare kind is offered to every extension,
-    /// first non-empty answer wins.
+    /// Rows of `kind`. A **namespaced** kind (`"spring.beans"`) is answered by the extension
+    /// that owns it; a **bare** kind (`"endpoints"`) is answered by every extension at once,
+    /// concatenated in registration order.
+    ///
+    /// The bare form is what makes a panel a panel about the CONCEPT rather than about one
+    /// framework. A Struts action and a `@GetMapping` are both the answer to "what URLs does
+    /// this application answer", and an application that has both — which is what a half-migrated
+    /// legacy codebase is — wants them in one list. Taking the first non-empty answer, as this
+    /// used to, would have shown whichever framework registered earlier and silently hidden the
+    /// other.
     pub fn catalog(&self, kind: &str) -> Vec<ExtEntry> {
         if let Some((id, rest)) = kind.split_once('.') {
             if let Some(e) = self.get(id) {
                 return e.catalog(rest);
             }
         }
-        self.active.iter().map(|e| e.catalog(kind)).find(|v| !v.is_empty()).unwrap_or_default()
+        self.active.iter().flat_map(|e| e.catalog(kind)).collect()
     }
 
     /// Every active extension's headline numbers, each stat's catalog id **namespaced by the
@@ -287,8 +294,15 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "b", "the prefix selects the extension, not the first match");
         assert!(r.catalog("b.nope").is_empty());
-        // A bare kind falls back to the first extension that answers it.
-        assert_eq!(r.catalog("things")[0].id, "a");
+    }
+
+    /// A bare kind is the CONCEPT, not one framework's version of it: every extension that has
+    /// something to say is in the list, in registration order.
+    #[test]
+    fn a_bare_catalog_kind_unions_every_extension() {
+        let r = reg(vec![Arc::new(Stub("a", false)), Arc::new(Stub("b", false))], false);
+        let ids: Vec<String> = r.catalog("things").into_iter().map(|e| e.id).collect();
+        assert_eq!(ids, ["a", "b"]);
     }
 
     /// The id a stat carries is what the frontend matches a panel by, so it has to say which

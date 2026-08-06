@@ -159,6 +159,16 @@ impl FrameworkExtension for SpringExtension {
         let props = PropertySources::new(
             scan.resources
                 .iter()
+                // `resources` is every keyed resource in the tree; which of them are Spring
+                // CONFIGURATION is this crate's rule (`application*` / `bootstrap*`), applied
+                // here rather than by the host — a `messages_it.properties` is a resource, and
+                // it is not a place a `${…}` placeholder resolves.
+                .filter(|f| {
+                    f.path
+                        .file_name()
+                        .map(|n| crate::props::is_property_file(&n.to_string_lossy()))
+                        .unwrap_or(false)
+                })
                 .filter_map(|f| parse_property_file(&f.path.to_string_lossy(), &f.text))
                 .collect(),
         )
@@ -733,6 +743,7 @@ mod tests {
             java: &java,
             xml: &xml,
             resources: &res,
+            pages: &[],
             schemas: &[],
             descriptors: &descriptors,
             taglibs: &[],
@@ -853,6 +864,7 @@ mod tests {
                 file("/p/application.yml", "app:\n  mode: base\n"),
                 file("/p/application-dev.yml", "app:\n  mode: dev\n"),
             ],
+            pages: &[],
             schemas: &[],
             descriptors: &[],
             taglibs: &[],

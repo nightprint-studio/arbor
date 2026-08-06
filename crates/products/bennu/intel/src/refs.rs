@@ -445,6 +445,14 @@ struct FileWalker<'a> {
     /// The file's `import`s, set by [`walk`](Self::walk) before it starts. A dependency type
     /// is reachable by its simple name **only** through these — see `resolve_type_simple`.
     imports: Vec<bennu_java::prelude::Import>,
+    /// Every name bound by a local, parameter, catch, resource or pattern **anywhere in this
+    /// file**, set by [`walk`](Self::walk). The cheap half of the shadowing test in
+    /// [`on_bare_identifier`](Self::on_bare_identifier): a name nothing in the file binds cannot
+    /// be shadowed, so the precise scope walk never runs for it.
+    local_names: std::collections::HashSet<String>,
+    /// Per enclosing type, `field name → the type that declares it`. See
+    /// [`field_owners`](Self::field_owners).
+    field_owners: HashMap<String, HashMap<String, String>>,
 }
 
 impl<'a> FileWalker<'a> {
@@ -471,6 +479,8 @@ impl<'a> FileWalker<'a> {
             attempted: 0,
             resolved: 0,
             imports: Vec::new(),
+            local_names: std::collections::HashSet::new(),
+            field_owners: HashMap::new(),
         }
     }
 
@@ -483,6 +493,7 @@ impl<'a> FileWalker<'a> {
         // The file's imports, for the whole walk: they are what turns a bare `SharedService`
         // into `com/acme/SharedService` when the class lives in a dependency.
         self.imports = symbols.imports.clone();
+        self.local_names = collect_bound_names(root, self.bytes);
         let mut stack = vec![*root];
         while let Some(n) = stack.pop() {
             let mut cur = n.walk();
@@ -492,6 +503,7 @@ impl<'a> FileWalker<'a> {
             match n.kind() {
                 "method_invocation" => self.on_method_invocation(&n, root, symbols),
                 "field_access" => self.on_field_access(&n, root, symbols),
+                "identifier" => self.on_bare_identifier(&n),
                 "type_identifier" => self.on_type_identifier(&n),
                 _ => {}
             }
@@ -542,6 +554,82 @@ impl<'a> FileWalker<'a> {
         self.resolved += 1;
         let usage = self.usage_at(&field_node);
         self.edges.push((DeclKey::Field { owner, name }, usage));
+    }
+
+    /// A bare `identifier` standing for `this.<field>` — `count` where the source could equally
+    /// have written `this.count`.
+    ///
+    /// Without this arm a field was indexed **only** at the sites that spell a receiver
+    /// (`this.count`, `other.count`, `Config.MAX`). In ordinary Java that is the minority of
+    /// them, and for a `private static final` constant it is usually none at all: find-usages
+    /// answered "no usages" while the declaring class read it five lines down, and rename
+    /// quietly left every one of those behind.
+    ///
+    /// Mirrors [`classify_caret_at`]'s bare-identifier arm — the index and the query must
+    /// produce the same [`DeclKey`] or the lookup finds an empty bucket. The order of the tests
+    /// is about cost rather than correctness: the field lookup is one hashed probe and rejects
+    /// nearly every identifier in a method body (they are locals), so the scope walk that
+    /// decides shadowing only runs for the few names that really are fields.
+    fn on_bare_identifier(&mut self, node: &Node) {
+        if is_member_selector_node(node) || is_bound_name(node) {
+            return;
+        }
+        let Some(name) = self.node_text(node) else { return };
+        let Some(enclosing) = self.enclosing_type_binary(node) else { return };
+        let Some(owner) = self.field_owner(&enclosing, &name) else { return };
+        self.attempted += 1;
+        // A local or parameter of the same name shadows the field. `classify_caret` refuses to
+        // classify those at all, so indexing them here would file a local's reads under a field
+        // nobody touched.
+        if self.local_names.contains(&name)
+            && find_local_binding(node, self.bytes, &name, LangLevel(0)).is_some()
+        {
+            return;
+        }
+        self.resolved += 1;
+        let usage = self.usage_at(node);
+        self.edges.push((DeclKey::Field { owner, name }, usage));
+    }
+
+    /// The type that declares field `name`, starting at `binary` and walking its supertypes.
+    /// `None` — unlike [`declaring_owner`](Self::declaring_owner) — when nothing declares it.
+    ///
+    /// Strict because this is the gate a bare identifier passes to become an edge at all, and a
+    /// lenient answer would file every unresolvable name in the project under the class it
+    /// happened to sit in. Memoized per type: it is asked once per identifier in the project, so
+    /// each type's field table is resolved once and answered from a map afterwards.
+    fn field_owner(&mut self, binary: &str, name: &str) -> Option<String> {
+        if !self.field_owners.contains_key(binary) {
+            let table = self.build_field_owners(binary);
+            self.field_owners.insert(binary.to_string(), table);
+        }
+        self.field_owners.get(binary)?.get(name).cloned()
+    }
+
+    /// `field name → declaring type` for `start` and its supertypes.
+    ///
+    /// Walks in the same order [`declaring_owner`](Self::declaring_owner) does, keeping the
+    /// first declaration of each name — so the owner this names is byte-identical to the one the
+    /// query side computes for the same caret. A different answer would be a key that matches
+    /// nothing, which is the failure mode this whole arm exists to fix.
+    fn build_field_owners(&self, start: &str) -> HashMap<String, String> {
+        let mut out: HashMap<String, String> = HashMap::new();
+        let mut visited = std::collections::HashSet::new();
+        let mut stack = vec![start.to_string()];
+        while let Some(bn) = stack.pop() {
+            if !visited.insert(bn.clone()) {
+                continue;
+            }
+            let Some(cm) = self.resolver.members_of(&bn) else { continue };
+            for f in &cm.fields {
+                out.entry(f.name.clone()).or_insert_with(|| bn.clone());
+            }
+            if let Some(sc) = cm.superclass.clone() {
+                stack.push(sc);
+            }
+            stack.extend(cm.interfaces.iter().cloned());
+        }
+        out
     }
 
     fn on_type_identifier(&mut self, node: &Node) {
@@ -1117,6 +1205,89 @@ pub fn classify_target(
         }
         DeclKey::Method { .. } | DeclKey::Field { .. } => Some(RenameTarget::Member { key }),
     }
+}
+
+/// Whether an `identifier` is a name being **declared** (or a label, or an annotation element)
+/// rather than a reference to something.
+///
+/// Java exposes every declared name as its parent's `name` field, so that one test covers a
+/// field's own declarator, a parameter, a type, a method, an enum constant and an annotation's
+/// own type in one line. The three exceptions below are the shapes where a bare identifier is
+/// not an expression at all — and each of them is a place a legacy codebase reuses a field's
+/// name freely.
+///
+/// The two member-selector shapes (`x.f`, `f()`) also carry a `name` field; they are filtered
+/// ahead of this by [`is_member_selector_node`].
+fn is_bound_name(node: &Node) -> bool {
+    let Some(parent) = node.parent() else { return false };
+    match parent.kind() {
+        // Labels are a namespace of their own: `outer:`, `break outer`, `continue outer`.
+        "labeled_statement" | "break_statement" | "continue_statement" => true,
+        // Package / import / qualified names: every segment is an `identifier`, and a field
+        // called `com` would otherwise collect every import in the file.
+        "scoped_identifier" | "package_declaration" | "import_declaration" => true,
+        // `@Retention(value = RUNTIME)` — an annotation element is not a field of the enclosing
+        // class, however identically the two are named.
+        "element_value_pair" => {
+            parent.child_by_field_name("key").map(|n| n.id() == node.id()).unwrap_or(false)
+        }
+        _ => parent.child_by_field_name("name").map(|n| n.id() == node.id()).unwrap_or(false),
+    }
+}
+
+/// Every name bound by a local, parameter, catch, resource, loop variable or pattern anywhere in
+/// a file.
+///
+/// A coarse over-approximation on purpose — it ignores scope entirely, so a name bound in ONE
+/// method counts as bound for the whole file. That is the right shape for what it is used for:
+/// deciding whether the precise, per-scope [`find_local_binding`] walk is worth running at all.
+/// A name in this set gets the exact answer; a name outside it cannot be shadowed anywhere, and
+/// skipping the walk for it is what keeps indexing a field read 200 times in a 2000-line method
+/// from re-scanning that method 200 times.
+fn collect_bound_names(root: &Node, bytes: &[u8]) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    let mut stack = vec![*root];
+    while let Some(n) = stack.pop() {
+        let mut cur = n.walk();
+        for c in n.named_children(&mut cur) {
+            stack.push(c);
+        }
+        let bound = match n.kind() {
+            // A declarator under a `field_declaration` is a field, not a local.
+            "variable_declarator" => match n.parent().map(|p| p.kind()) {
+                Some("field_declaration") => None,
+                _ => n.child_by_field_name("name"),
+            },
+            "formal_parameter"
+            | "spread_parameter"
+            | "catch_formal_parameter"
+            | "resource"
+            | "enhanced_for_statement"
+            | "type_pattern"
+            | "instanceof_expression" => n.child_by_field_name("name"),
+            // `(x, y) -> …` and `x -> …`: inferred lambda parameters are bare identifiers with
+            // no `name` field to ask for.
+            "inferred_parameters" => {
+                let mut cw = n.walk();
+                for c in n.named_children(&mut cw) {
+                    if let Ok(t) = c.utf8_text(bytes) {
+                        out.insert(t.to_string());
+                    }
+                }
+                None
+            }
+            "lambda_expression" => n
+                .child_by_field_name("parameters")
+                .filter(|p| p.kind() == "identifier"),
+            _ => None,
+        };
+        if let Some(nm) = bound {
+            if let Ok(t) = nm.utf8_text(bytes) {
+                out.insert(t.to_string());
+            }
+        }
+    }
+    out
 }
 
 /// Whether an `identifier` is a member selector (`x.name`, `foo.bar()`) — a local rename

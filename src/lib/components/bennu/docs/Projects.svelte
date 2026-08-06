@@ -318,13 +318,30 @@
 </p>
 <p>
   <strong>The Endpoints panel</strong> (right activity bar, <kbd>Alt</kbd> + <kbd>4</kbd>) lists
-  every route with the class-level and method-level mappings already joined. It groups — by path,
-  by controller or by method — filters across paths, handlers, return types <em>and</em> parameter
-  names, and each route expands to show what it takes: which values come from the path, the query
-  string or the body, which are optional, and what each is called when the annotation renames it.
+  every URL the application answers, <em>whoever routes it</em>. A Spring route arrives with its
+  class-level and method-level mappings already joined; a <strong>Struts action</strong> arrives
+  as its URL — the package namespace joined to the action name — with the bean id resolved to the
+  class that actually runs. An application mid-migration has both, and they are one list. It
+  groups — by path, by handler or by method — filters across paths, handlers, return types
+  <em>and</em> parameter names, and each route expands to show what it takes: which values come
+  from the path, the query string or the body, which are optional, and what each is called when
+  the annotation renames it.
   Verbs are coloured the way an API console colours them and the <code>{'{'}variables{'}'}</code>
   in a path are lit apart from its literal segments, so the list is skimmable rather than readable.
   The count beside the filter says how much of it survived what you typed.
+</p>
+<p>
+  <strong>An action expands into the whole request.</strong> Under a Struts row are the
+  <code>&lt;interceptor-ref&gt;</code>s the action declares for itself, then one row per
+  <code>&lt;result&gt;</code>: its name, its type, what the config says the target is and — when
+  the two differ — the page it finally reaches. A <code>tiles</code> result reads
+  <code>admin.Cat.tree → /WEB-INF/jsp/tree.jsp</code>, because the definition name on its own
+  tells you nothing about which file you are about to open, and following it by hand means the
+  action fragment, then <code>tiles.xml</code>, then the parent definition it extends. Clicking
+  the row opens the page. A result that is a <code>chain</code> or a redirect names another
+  action rather than a view, and says so instead of pretending to a page. An action with no
+  interceptor rows is not an action with no interceptors — it is one that does not override its
+  package's default stack.
 </p>
 <p>
   <strong>A type is a door.</strong> Any chip naming a composite type — the return type of a route,
@@ -491,6 +508,41 @@
   <em>or</em> an interface nested inside the repository that returns it — both are idiomatic, and
   the dialog offers both. Every generator previews live, <kbd>Ctrl</kbd> + <kbd>Enter</kbd>
   commits, and nothing is written before that. Each is also in the command palette by name.
+</p>
+
+<h2>Message bundles</h2>
+<p>
+  Half of what a web application puts on screen is not in its source. It is in a
+  <code>.properties</code> file, reached by a string, and normally that string is checked by
+  nothing — not the compiler, not the tests, and, because Struts renders an unresolved key as the
+  key itself, often not by anyone looking at the page either. Bennu treats bundles as a model.
+</p>
+<p>
+  <strong>What counts as a key.</strong> By shape rather than by a list of tags, because every
+  framework in a legacy page spells it differently: an attribute called <code>key</code>, an
+  attribute whose name ends in <code>Key</code> (<code>titleKey</code>, <code>messageKey</code>),
+  the <code>name</code> of a <code>&lt;s:text&gt;</code> — the one tag where <code>name</code> is
+  a key rather than a field — and the first string argument of <code>getText</code>,
+  <code>getMessage</code> or <code>getString</code> in Java. A <strong>computed</strong> value
+  (<code>%&#123;keyName&#125;</code>, <code>$&#123;row.label&#125;</code>, a scriptlet) is not
+  treated as a key at all: it usually is one at runtime, but nothing can say which, and guessing
+  would flag every dynamic label in the project.
+</p>
+<p>
+  <strong>On a key</strong>, <kbd>Ctrl</kbd> + <kbd>B</kbd> opens the line that declares it — one
+  entry per translation, each showing what that language says, so choosing is reading rather than
+  guessing. Hovering shows the same thing without leaving the page, and names the locales that do
+  not have it yet. Typing inside a key attribute completes from the bundles, with each key's text
+  beside it. A key <strong>no bundle declares</strong> is underlined where it is written.
+</p>
+<p>
+  <strong>The Messages panel</strong> (command palette) lists every key with its default text, the
+  bundle it belongs to, and two things you cannot see any other way: how many places read it —
+  <code>unused</code> when the answer is none — and which locales are <code>missing</code> it.
+  Expanding a key shows every translation; each row opens its own file at its own line. Group by
+  bundle or by key prefix. Untranslated is counted per bundle, not project-wide: two bundles
+  having different locale sets is normal, and comparing across them would invent a debt nobody
+  has.
 </p>
 
 <h2>XML with a schema behind it</h2>
