@@ -42,9 +42,24 @@ mod project;
 // Capabilities: `bennu_capabilities` — re-detect the Spike-D capability bitset for a
 // project without re-opening it.
 mod capabilities;
+mod cargo_cmd;
+mod cargo_intel;
+// The crates.io index — the only part of the Cargo tooling that reaches the network. Its own module
+// because of that, not because of its size: the switch, the cache and the TTL all live with it.
+mod crates_io;
 // Code-intel: `bennu_completion` / `bennu_diagnostics` — completion serves from the
 // per-project index the `index_service` builds; diagnostics stay a stub for now.
 mod intel;
+// Language servers — the other half of the code-intel seam. `lsp_registry` owns the server
+// processes (one per workspace root + language), `lsp_route` is the per-language dispatch the
+// SHARED handlers above ask first, and `lsp` holds the handlers that only exist for a
+// server-backed language (semantic tokens, outline, format, code actions, lifecycle).
+//
+// Java never reaches these: `lsp_route::owns` is keyed on the file extension and a root marker,
+// and no catalogue entry claims `.java` — Bennu's own engine is the better answer for it.
+mod lsp;
+mod lsp_registry;
+mod lsp_route;
 // Refactor rename (docs §5 #10-12): `bennu_rename_plan` (preview) / `bennu_rename_apply`
 // (edits) — best-effort, config-aware, off the per-project rename engine.
 mod rename;
@@ -272,8 +287,23 @@ fn main() {
 
     // Serve over framed stdio until the shell disconnects. No plugin host means the
     // `App`'s default post-`Hello` hook is a clean no-op (nothing to reload).
-    if let Err(e) = app.run(dispatcher) {
+    let outcome = app.run(dispatcher);
+
+    // Stop the language servers before this process goes away.
+    //
+    // Not strictly required — each child's stdin is a pipe we hold, so it sees EOF and exits on
+    // its own — but doing it properly matters twice over: `shutdown` lets a server flush its
+    // caches (so the next start is warm rather than a cold rebuild), and it happens *now* instead
+    // of whenever the child notices. rust-analyzer is a gigabyte resident and a core busy; a
+    // window close should not leave one of those behind for even a moment.
+    //
+    // Before the `exit(1)` below on purpose: the error path is exactly when an orphan is most
+    // likely, since nothing else is going to clean up after a crashed backend.
+    lsp_registry::LspRegistry::global().shutdown_all();
+
+    if let Err(e) = outcome {
         eprintln!("bennu-be: serve loop ended with error: {e}");
+        let _ = io::stderr().flush();
         std::process::exit(1);
     }
     // Clean EOF: the shell exited.

@@ -34,7 +34,9 @@ export type LeftPanel = 'project' | 'structure' | 'dependencies';
  * `ast` is the syntax tree of the buffer in front of you — what the grammar actually built,
  * which is the only thing that answers "why did it parse that way".
  */
-export type RightPanel = 'maven' | 'tests' | 'ast';
+// `maven` and `cargo` share the rail slot and the Alt+8 keybinding: they are the same tool window
+// for two ecosystems, and a project is only ever one of them.
+export type RightPanel = 'maven' | 'cargo' | 'tests' | 'ast';
 /** Bottom tool windows — one panel per rail button, except Build and Problems which share
  *  one. The Forms inspector lives here (wide, horizontal data) rather than in a narrow side
  *  panel; its toggle sits in the right rail's bottom cluster.
@@ -56,6 +58,16 @@ export type BottomPanel =
    *  {@link RunTab}. */
   | 'run'
   | 'todos'
+  /** The call / type hierarchy — a tree of callers, callees, supertypes or implementors.
+   *
+   *  Here rather than in a side rail because of the shape of a row: a name, a file and the line of
+   *  source around it. That is wide data, like Problems and TODO, and in a narrow column it would
+   *  lose the preview — which is the part that lets a caller be recognised without opening it.
+   *
+   *  Deliberately without a rail button: it is opened by an action about the caret (there is nothing
+   *  to show until something has been asked), so it is reached from the palette and its shortcuts,
+   *  and closed from its own header. */
+  | 'hierarchy'
   | 'forms'
   | 'beans'
   | 'librarybeans'
@@ -97,6 +109,8 @@ function createBennuUiStore() {
   let runTab = $state<RunTab | null>(null);
 
   let settingsOpen = $state(false);
+  /** A specific Settings page to land on, when something opened it *for a reason*. */
+  let settingsSection = $state<string | null>(null);
   let docsOpen = $state(false);
   let paletteOpen = $state(false);
   // Find-in-project modal (Ctrl+Shift+F).
@@ -152,6 +166,9 @@ function createBennuUiStore() {
   let validationCreatorOpen = $state(false);
   // Workspace manager modal (create / rename / recolor / delete workspaces, manage members).
   let workspaceManagerOpen = $state(false);
+  // "Add dependency" (runs `cargo add`). In the store rather than in the Cargo panel because it is
+  // reachable from the palette, and the panel it is launched from need not be open for that.
+  let cargoAddOpen = $state(false);
   // The intentions overlay (Alt+Enter) owns its own visibility in
   // `bennuIntentionsStore`; the window mounts it unconditionally. No flag needed
   // here — the openers below delegate to that store.
@@ -222,6 +239,7 @@ function createBennuUiStore() {
     get generateMode() { return generateMode; },
     get validationCreatorOpen() { return validationCreatorOpen; },
     get workspaceManagerOpen() { return workspaceManagerOpen; },
+    get cargoAddOpen() { return cargoAddOpen; },
     get gotoTarget()   { return gotoTarget; },
     get gotoOffsetTarget() { return gotoOffsetTarget; },
     get revealNonce()  { return revealNonce; },
@@ -267,8 +285,20 @@ function createBennuUiStore() {
       if (bottomPanel && !keep.bottom.includes(bottomPanel)) bottomPanel = null;
     },
 
-    openSettings()  { settingsOpen = true; },
-    closeSettings() { settingsOpen = false; },
+    /** Open Settings, optionally landing on a specific page.
+     *
+     *  The section argument is what lets a failure report *be* its own fix: a status-bar pill
+     *  saying "rust-analyzer is not running" opens the page that can install or re-point it,
+     *  rather than the page the user last happened to be on. */
+    openSettings(section?: string) {
+      if (section) settingsSection = section;
+      settingsOpen = true;
+    },
+    closeSettings() { settingsOpen = false; settingsSection = null; },
+    /** The page Settings should land on, consumed once by the modal. */
+    get settingsSection() { return settingsSection; },
+    /** Clear the requested page, so re-opening Settings normally stays where the user was. */
+    consumeSettingsSection() { settingsSection = null; },
     toggleDocs()    { docsOpen = !docsOpen; },
     closeDocs()     { docsOpen = false; },
     togglePalette() { paletteOpen = !paletteOpen; },
@@ -321,6 +351,9 @@ function createBennuUiStore() {
     /** Open / close the workspace manager modal. */
     openWorkspaceManager()  { workspaceManagerOpen = true; },
     closeWorkspaceManager() { workspaceManagerOpen = false; },
+    /** Open / close the Add-dependency dialog (`cargo add`). */
+    openCargoAdd()  { cargoAddOpen = true; },
+    closeCargoAdd() { cargoAddOpen = false; },
 
     /** What go-to is currently resolving, or `null` when nothing is. Drives the status
      *  bar's "Opening …" item.

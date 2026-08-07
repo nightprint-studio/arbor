@@ -24,8 +24,16 @@
   import { languageForPath } from './languages';
   import {
     isJavaFile as isJavaFileOf, isJspFile as isJspFileOf,
+    isLspFile as isLspFileOf, hasPushedDiagnostics,
     supportsCodeNav, supportsDiagnostics,
   } from './file-kind';
+  import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
+  import {
+    lspSemanticTokens, lspCodeActions, lspCodeLenses, lspExecuteCommand, lspExpandMacro,
+    lspFormat, lspFolding, lspHighlights, lspLensLocations, lspSelectionRanges,
+    type LspAction, type LspLens, type LspMacroExpansion,
+  } from '$lib/ipc/bennu/lsp';
+  import type { SourceEdit } from '$lib/types/bennu';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
@@ -34,7 +42,7 @@
   // the lettered ring for a Java type's kind.
   import IconifyIconView from '@iconify/svelte';
   import { getFileIcon } from '$lib/utils/file-icons';
-  import JavaKindIcon from './JavaKindIcon.svelte';
+  import SymbolKindIcon from './SymbolKindIcon.svelte';
   import { javaKindStore } from '$lib/stores/bennu/java-kinds.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -57,16 +65,18 @@
     downloadSources as ipcDownloadSources,
     libraryDeclaration as ipcLibraryDeclaration,
     jspActions as ipcJspActions, setJspAction as ipcSetJspAction, type JspActionBinding,
-    renameApply as ipcRenameApply, type RenameEdit,
+    renameApply as ipcRenameApply,
   } from '$lib/ipc/bennu/nav';
   import {
     extNavigate, extHighlights, extGutter, extActions, extRefresh, springEnvVar, xmlFetchSchema,
     type ExtHighlight, type ExtGutterMark, type ExtTarget, type ExtAction, type EnvVarView,
   } from '$lib/ipc/bennu/ext';
   import { isSpringPropertyFile } from './spring-props-lang';
+  import { isCargoManifest } from './cargo-toml-lang';
+  import { cargoVersionHints, type CargoVersionHint } from '$lib/ipc/bennu/cargo';
   import BennuEnvVarModal from './BennuEnvVarModal.svelte';
-  import { makeByteToU16 } from '$lib/components/shared/ui/code-editor';
-  import { applyByteEdits } from './rename-apply';
+  import BennuMacroExpandModal from './BennuMacroExpandModal.svelte';
+  import { makeByteToU16, makeU16ToByte } from '$lib/components/shared/ui/code-editor';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
   // The gutter's breakpoints and the paused line — both are the debugger's state seen from
@@ -79,10 +89,13 @@
   import { intentionsAt as ipcIntentionsAt } from '$lib/ipc/bennu/intentions';
   import { validationTarget as ipcValidationTarget } from '$lib/ipc/bennu/validation';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
-  import type { EditorDiagnostic, EditorViewSnapshot } from '$lib/components/shared/ui/code-editor';
+  import type {
+    EditorDiagnostic, EditorViewSnapshot, SemanticToken,
+  } from '$lib/components/shared/ui/code-editor';
   import type { EditorView } from '@codemirror/view';
   import { bennuIntentionsStore } from '$lib/stores/bennu/intentions.svelte';
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
+  import { bennuHierarchyStore } from '$lib/stores/bennu/hierarchy.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import { bennuNavStore } from '$lib/stores/bennu/nav-history.svelte';
   import { bennuAstStore } from '$lib/stores/bennu/ast.svelte';
@@ -120,6 +133,35 @@
     caretByteOffset: () => number;
     /** Select a byte range — what a click in the syntax-tree panel does over here. */
     selectByteRange: (startByte: number, endByte: number) => void;
+    /** The primary selection, in UTF-16 document offsets. */
+    selectionRange: () => { from: number; to: number; head: number; empty: boolean };
+    /** Several byte-range replacements as ONE undo step — a formatter's edit list. */
+    replaceByteRanges: (
+      edits: readonly { startByte: number; endByte: number; text: string }[],
+    ) => number;
+    /** Replace the semantic-highlight layer (byte spans → token marks). */
+    setSemanticTokens: (tokens: SemanticToken[]) => void;
+    /** Replace the occurrence-highlight layer — where else the symbol under the caret appears. */
+    setDocumentHighlights: (
+      spans: readonly { start: number; end: number; kind: string }[],
+    ) => void;
+    /** Replace the fold ranges a provider supplied. */
+    setFoldRanges: (
+      ranges: readonly { start: number; end: number; placeholder?: string }[],
+    ) => void;
+    /** Replace the code lenses drawn above the items of the buffer. */
+    setCodeLenses: (
+      lenses: readonly {
+        start: number;
+        title: string;
+        actionable: boolean;
+        key: number;
+        tone?: 'muted' | 'accent';
+      }[],
+    ) => void;
+    /** Select a byte range WITHOUT scrolling — what expand-selection needs, since it grows a range
+     *  the caret is already inside. */
+    setSelectionBytes: (startByte: number, endByte: number) => void;
     insertAtCursor: (text: string) => void;
     copySelection: () => void;
     cutSelection: () => void;
@@ -176,7 +218,7 @@
       return {
         id: p,
         label: baseName(p),
-        icon: java ? JavaKindIcon : IconifyIconView,
+        icon: java ? SymbolKindIcon : IconifyIconView,
         iconProps: java
           ? { kind: javaKindStore.kindOf(p) }
           : { icon: getFileIcon(baseName(p)), width: 14, height: 14 },
@@ -223,6 +265,15 @@
   function onCaret(line: number, col: number) {
     caretLine = line; caretCol = col;
     bennuUiStore.setCaret(line, col);
+
+    // Occurrence highlighting keys off this, through a `$state` rather than a direct call so the
+    // effect owns the debounce and the cancellation in one place.
+    if (editorComp) highlightCaret = editorComp.caretByteOffset();
+
+    // An expand-selection run describes one document state and one starting caret. Moving the caret
+    // any other way ends it — otherwise the next press would apply a link computed for a position
+    // the caret has left, and select the wrong text.
+    if (!steppingSelection) forgetSelectionChain();
 
     // The other direction of the syntax-tree panel: open it down to whatever the caret is in.
     // This is what makes it a reading tool — you point at the construct you do not understand
@@ -385,6 +436,26 @@
         // `.then` above.
         .catch(() => {});
     };
+    if (hasPushedDiagnostics(path)) {
+      // A language server's diagnostics are PUSHED — they already exist by the time they are
+      // asked for, so the two-tier schedule below would buy nothing. One short-debounced read,
+      // plus a re-read whenever the server publishes for this file (which for Rust is when
+      // `cargo check` finishes, seconds after a save, long after any keystroke debounce).
+      const read = () => {
+        void ipcDiagnostics(path, src, true)
+          .then((ds) => {
+            if (cancelled) return;
+            diags = ds.map((d) => ({ from: d.start, to: d.end, severity: d.severity, message: d.message }));
+            bennuDiagnosticsStore.setActiveFileDiagnostics(path, ds);
+          })
+          .catch(() => {});
+      };
+      const t = setTimeout(read, 150);
+      const detach = bennuLspStore.onDiagnosticsPublished((file) => {
+        if (!cancelled && isSamePath(file, path)) read();
+      });
+      return () => { cancelled = true; clearTimeout(t); detach(); };
+    }
     if (isJava) {
       // Two-tier validation (IntelliJ's fast-syntax-then-semantic model) so a big file stays
       // responsive while typing: a FAST pure-AST pass (syntax / structure / unused imports) paints
@@ -425,6 +496,354 @@
   // buffer, debounced, re-run on index rebuild).
   let strutsDiags = $state<EditorDiagnostic[]>([]);
   const allDiags = $derived([...diags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags]);
+
+  // ── Semantic highlight (language-server backed languages) ───────────────────────
+  //
+  // A LAYER over the base highlight, not a replacement: the CodeMirror mode colours the file the
+  // instant it opens, and this refines it once the server answers — a struct told apart from a
+  // trait, a macro from a function, a `mut` binding from an immutable one.
+  //
+  // Debounced longer than the diagnostics read because the payload is every token in the file,
+  // and re-requested when the server *becomes* ready so a file opened during startup does not
+  // stay coarsely coloured until the next keystroke.
+  //
+  // Deliberately NOT gated on the server's advertised feature list. The request is cheap and the
+  // backend answers `[]` for a file no server serves — whereas gating meant this one feature
+  // depended on a chain (status → root match → feature list) that nothing else in the editor
+  // touches, so a break anywhere in it showed up as "everything is white" while go-to and
+  // completion carried on working. Ask, and tolerate an empty answer: the same shape as the rest.
+  //
+  // The re-fetch trigger is the server's `state` as a `$derived` **string**, not the statuses
+  // object: a server reports progress several times a second while it indexes, and an effect
+  // reading the statuses directly would re-request every token in the file on each of those ticks.
+  const lspState = $derived(bennuLspStore.statusFor(activePath)?.state ?? null);
+  $effect(() => {
+    const path = activePath;
+    if (!path || !isLspFileOf(path)) {
+      editorComp?.setSemanticTokens([]);
+      bennuLspStore.setTokenCount(0);
+      return;
+    }
+    void lspState; // re-request when the server becomes ready (or dies)
+    const src = projectStore.sourceOf(path);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void lspSemanticTokens(path, src)
+        .then((tokens) => {
+          // A late answer for a tab the user has already left must not paint over the new one.
+          if (cancelled || projectStore.activeFilePath !== path) return;
+          editorComp?.setSemanticTokens(tokens);
+          // Recorded so the footer can say how many landed. "All white" has two causes — none
+          // arrived, or they arrived and lost the colour fight — and they look identical.
+          bennuLspStore.setTokenCount(tokens.length);
+        })
+        .catch(() => {});
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
+  // ── Folding, from the server ────────────────────────────────────────────────────
+  //
+  // Same shape as the semantic tokens above and for the same reasons: pushed rather than pulled,
+  // debounced, keyed on the server's readiness, and dropped when a late answer belongs to a tab the
+  // user has left. Longer debounce than the tokens — a fold arrow appearing a beat late costs
+  // nothing, where a colour does.
+  $effect(() => {
+    const path = activePath;
+    if (!path || !isLspFileOf(path)) {
+      editorComp?.setFoldRanges([]);
+      return;
+    }
+    void lspState;
+    const src = projectStore.sourceOf(path);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void lspFolding(path, src)
+        .then((ranges) => {
+          if (cancelled || projectStore.activeFilePath !== path) return;
+          editorComp?.setFoldRanges(ranges);
+        })
+        .catch(() => {});
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
+  // ── Code lenses ─────────────────────────────────────────────────────────────────
+  //
+  // The counts a server draws above an item — "3 implementations", "12 references".
+  //
+  // The longest debounce of the pushed layers, because it is the most expensive answer: the backend
+  // resolves every lens individually (a server sends them with no title at all), so a file of a
+  // hundred items is a hundred round-trips inside one request. A count that lags a keystroke is
+  // worth having; one that re-queries per keystroke is a server permanently busy counting.
+  //
+  // Which lenses arrive is decided in the server's init options, not here — Bennu asks only for the
+  // ones it can honour when pressed (see `catalogue.rs`'s `lens_options`).
+  //
+  // Two kinds share the layer, because a lens is a *place plus a label plus an action* and where it
+  // came from is nobody's business but the press handler's:
+  //
+  //   * a **language server's** — the counts above an item;
+  //   * a **manifest version hint** — "1.0.219 available" above an outdated dependency, which is the
+  //     same shape and wants the same surface. A `Cargo.toml` has no language server at all, which is
+  //     exactly why the layer is gated on the host's press handler rather than on one.
+  type EditorLens =
+    | { kind: 'lsp'; lens: LspLens }
+    | { kind: 'version'; hint: CargoVersionHint };
+  let lenses: EditorLens[] = [];
+
+  /** Push the current list, keyed by index — the key only has to identify a lens within the list the
+   *  editor is showing right now, which is what comes back on a press. */
+  function pushLenses(next: EditorLens[]) {
+    lenses = next;
+    editorComp?.setCodeLenses(
+      next.map((entry, key) =>
+        entry.kind === 'lsp'
+          ? { start: entry.lens.start, title: entry.lens.title, actionable: !!entry.lens.command, key }
+          : {
+              start: entry.hint.offset,
+              // An arrow and the accent tone, because this one is an OFFER rather than a count: it
+              // has to survive being glanced past, and a grey line above a line of code reads as a
+              // comment. The word stays so the first one is unambiguous.
+              title: `↑ ${entry.hint.latest} available`,
+              actionable: true,
+              tone: 'accent' as const,
+              key,
+            },
+      ),
+    );
+  }
+
+  $effect(() => {
+    const path = activePath;
+    if (!path || !isLspFileOf(path)) {
+      // Not cleared for a manifest: that buffer's lenses come from the effect below, and clearing
+      // here would race it into an empty layer on every keystroke.
+      if (!isCargoManifest(path)) pushLenses([]);
+      return;
+    }
+    void lspState;
+    const src = projectStore.sourceOf(path);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void lspCodeLenses(path, src)
+        .then((found) => {
+          if (cancelled || projectStore.activeFilePath !== path) return;
+          pushLenses(found.map((lens) => ({ kind: 'lsp' as const, lens })));
+        })
+        .catch(() => {});
+    }, 600);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
+  // ── Version hints (Cargo.toml) ──────────────────────────────────────────────────
+  //
+  // "There is a newer release of this crate", above the dependency it is about.
+  //
+  // The longest debounce in the editor by some margin. Behind it is the crates.io index: cached on
+  // disk with a TTL of a day, so in the steady state this is a file read, but on a cold cache it is
+  // one small HTTP request per dependency. A dependency being one minor version behind does not
+  // become more true by being checked while you type.
+  //
+  // Only what is *certainly* outdated is drawn — a pin, a range, a `path` or an inherited dependency
+  // says nothing. See `requirement_admits` in `bennu-cargo` for why the test errs towards silence.
+  $effect(() => {
+    const path = activePath;
+    if (!path || !isCargoManifest(path)) return;
+    const src = projectStore.sourceOf(path);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void cargoVersionHints(path, src)
+        .then((hints) => {
+          if (cancelled || projectStore.activeFilePath !== path) return;
+          pushLenses(hints.map((hint) => ({ kind: 'version' as const, hint })));
+        })
+        .catch(() => {});
+    }, 900);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
+  /**
+   * A lens was pressed.
+   *
+   * Every lens rust-analyzer draws is a **client** command, so there is nothing to execute on the
+   * server: `showReferences` arrives with the locations it counted already in its arguments, because
+   * counting them meant querying them. So the first thing tried is reading that list — no request,
+   * and exactly the places the lens promised.
+   *
+   * The fallbacks are in order of how much they assume. A single location is a jump, because a list
+   * of one is a click for nothing. Several go to the usages popover, the same surface Alt+F7 fills.
+   * A command carrying no locations at all is something else entirely (a runnable), so it is handed
+   * to the server — and if the server does not own it either, the press says so rather than being
+   * swallowed, which is the difference between a control that failed and one that looks broken.
+   */
+  async function onLensPress(key: number) {
+    const entry = lenses[key];
+    if (!entry) return;
+    if (entry.kind === 'version') {
+      updateDependencyVersion(entry.hint);
+      return;
+    }
+    const path = activePath;
+    const lens = entry.lens;
+    if (!path || !lens.command || !editorComp) return;
+
+    const source = editorComp.getValue();
+    const anchor = editorComp.coordsAtByteOffset(lens.start);
+    const result = await lspLensLocations(path, source, lens.title, lens.arguments).catch(() => null);
+    const hits = result?.usages ?? [];
+
+    if (hits.length === 1) {
+      const hit = hits[0];
+      void projectStore.openFile(hit.file).then(() => bennuUiStore.requestGoto(hit.line));
+      return;
+    }
+    if (hits.length > 1) {
+      bennuRefactorStore.startUsages(anchor, lens.title);
+      bennuRefactorStore.setUsages(result?.target_label ?? lens.title, hits);
+      return;
+    }
+    const ran = await lspExecuteCommand(path, lens.command, lens.arguments).catch(() => false);
+    if (!ran) toastStore.show(`Nothing to show for “${lens.title}”`, 'info');
+  }
+
+  /**
+   * Write the newer version into the manifest.
+   *
+   * Through CodeMirror, so it is one undo step and the buffer stays the authority — the alternative,
+   * having the backend rewrite the file, would leave the open buffer disagreeing with the disk.
+   *
+   * The span the backend sent includes the quotes, so the replacement is a whole TOML value. Nothing
+   * else is touched: a bare `"1.0.150"` becomes `"1.0.219"` and a `{ version = "…" }` keeps its table.
+   * The lens list is left alone — the buffer changed, and the effect above is about to re-ask.
+   */
+  function updateDependencyVersion(hint: CargoVersionHint) {
+    if (!editorComp) return;
+    editorComp.replaceByteRange(hint.start, hint.end, `"${hint.latest}"`);
+    toastStore.show(`${hint.name} → ${hint.latest}`, 'success');
+  }
+
+  // ── Occurrence highlighting ─────────────────────────────────────────────────────
+  //
+  // Where else the symbol under the caret appears. Keyed on the CARET, which makes it the most
+  // frequently re-run effect in the editor — hence the shortest debounce that is still longer than a
+  // keypress, and a request the backend gives a two-second timeout: a highlight that arrives after
+  // the caret has moved on decorates the wrong thing, so late is worse than never.
+  let highlightCaret = $state(0);
+  $effect(() => {
+    const path = activePath;
+    const caret = highlightCaret;
+    if (!path || !isLspFileOf(path)) {
+      editorComp?.setDocumentHighlights([]);
+      return;
+    }
+    const src = editorComp?.getValue() ?? '';
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void lspHighlights(path, src, caret)
+        .then((spans) => {
+          // Both guards matter: the tab may have changed, and the caret may have moved to a
+          // position this answer says nothing about.
+          if (cancelled || projectStore.activeFilePath !== path) return;
+          editorComp?.setDocumentHighlights(spans);
+        })
+        .catch(() => {});
+    }, 220);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
+  // ── Expand / shrink selection ───────────────────────────────────────────────────
+  //
+  // The server answers with the WHOLE chain from the token under the caret out to the file, so
+  // expanding walks a list already in hand and shrinking walks back down it. One request per run,
+  // not one per keypress — which is the difference between this feeling instant and feeling remote.
+  //
+  // The chain is dropped as soon as the buffer changes or the caret is moved by anything other than
+  // an expand: it describes a document state, and applying a stale link would select the wrong text.
+  let selectionChain: [number, number][] = [];
+  let selectionDepth = 0;
+  /** Set while a chain step is dispatching, so the caret listener does not read its own selection
+   *  change as the user moving away and discard the chain. */
+  let steppingSelection = false;
+
+  function forgetSelectionChain() {
+    selectionChain = [];
+    selectionDepth = 0;
+  }
+
+  /** Grow or shrink the selection by one syntactic step. Returns false when there is nothing to do,
+   *  so the key can fall through. */
+  async function stepSelection(direction: 1 | -1): Promise<boolean> {
+    const path = activePath;
+    if (!path || !editorComp || !isLspFileOf(path)) return false;
+
+    if (selectionChain.length === 0) {
+      if (direction < 0) return false; // nothing to shrink back to
+      const src = editorComp.getValue();
+      const chain = await lspSelectionRanges(path, src, editorComp.caretByteOffset()).catch(
+        () => [] as [number, number][],
+      );
+      if (chain.length === 0 || projectStore.activeFilePath !== path) return false;
+      selectionChain = chain;
+      // The first link is the token the caret is in. Selecting it IS the first expansion, so the
+      // depth starts below it and the step below moves onto it.
+      selectionDepth = -1;
+    }
+
+    const next = selectionDepth + direction;
+    if (next < 0) {
+      // Shrunk past the innermost link: the run is over and the caret keeps what it has.
+      forgetSelectionChain();
+      return false;
+    }
+    if (next >= selectionChain.length) return false;
+
+    selectionDepth = next;
+    const [start, end] = selectionChain[next];
+    steppingSelection = true;
+    editorComp.setSelectionBytes(start, end);
+    // Cleared after the dispatch has been observed, not synchronously: the selection listener runs
+    // from CodeMirror's update cycle, which is a microtask away.
+    setTimeout(() => { steppingSelection = false; }, 0);
+    return true;
+  }
+
+  // ── Server-initiated edits (`workspace/applyEdit`) ──────────────────────────────
+  //
+  // Some refactorings are delivered this way: the server computes the edit only when its command
+  // runs, then asks the client to apply it. Applied through CodeMirror like every other edit, so
+  // it lands in the undo history — the backend never writes a buffer.
+  $effect(() => {
+    const detachEdit = bennuLspStore.onServerEdit((edits, fileOps) => {
+      if (fileOps.length) {
+        // Bennu edits buffers; it does not create, move or delete files for a server. Saying so
+        // is the point: a silently half-applied refactoring leaves a project that does not build
+        // with nothing on screen to explain why.
+        toastStore.show(
+          `This refactoring also needs: ${fileOps.join(', ')} — do it yourself and re-run`,
+          'warning',
+        );
+      }
+      if (!edits.length) return;
+      void applyServerEdits(edits);
+    });
+    const detachMessage = bennuLspStore.onServerMessage((level, text) => {
+      toastStore.show(text, level === 'error' ? 'error' : level === 'warning' ? 'warning' : 'info');
+    });
+    return () => { detachEdit(); detachMessage(); };
+  });
+
+  /** Apply a server's edits and say so when some file would not take them.
+   *
+   *  The splicing itself lives in the project store (`applyEdits`) — a file rename's implied edits
+   *  were the third caller of the same six lines, and the step they all need is "read what is there
+   *  now, splice byte spans, write it back through the save guard". */
+  async function applyServerEdits(edits: SourceEdit[]) {
+    const failed = await projectStore.applyEdits(edits);
+    if (failed) {
+      toastStore.show(`Could not apply the change in ${failed} file(s)`, 'error');
+    }
+  }
 
   // ── Framework syntax marks (Spring `${…}` / `#{…}` / `{pathVar}`) ────────────────
   // A property placeholder inside a Java string literal is, to the Java grammar, one
@@ -854,6 +1273,11 @@
   /** The 1-based line the caret is on — what "run the test at the caret" resolves against. */
   export function getCaretLine(): number { return caretLine; }
 
+  /** Grow the selection by one syntactic step (Alt+Shift+Right). */
+  export function expandSelection(): Promise<boolean> { return stepSelection(1); }
+  /** Shrink it back by one (Alt+Shift+Left). */
+  export function shrinkSelection(): Promise<boolean> { return stepSelection(-1); }
+
   /** Toolbar action on a Java action class: resolve its `<Class>-validation.xml` (naming
    *  convention), create it from a skeleton if missing, open it, and pop the validator chain
    *  builder so the user can add rules straight away. No-op (with a toast) off a Java file. */
@@ -924,6 +1348,27 @@
     }
   }
 
+  /**
+   * A server's code actions, in the order they should be read.
+   *
+   * Three tiers, and the reason is that they answer different questions. A **fix** answers "this is
+   * wrong, make it right" and is why you pressed the key — it goes first, and the one the server
+   * marked `preferred` goes first among those, since that is the server saying "this is the obvious
+   * one". A **refactoring** answers "this is fine, change its shape". A **disabled** row is neither:
+   * it is there to say why, so it sits at the bottom instead of pushing the actionable rows down.
+   *
+   * Stable within a tier, so the server's own ordering survives — it knows more about relevance at a
+   * caret than a sort here could.
+   */
+  function orderedActions(actions: readonly LspAction[]): LspAction[] {
+    const rank = (a: LspAction): number => {
+      if (a.disabled) return 3;
+      if (a.kind.startsWith('refactor') || a.kind.startsWith('source')) return 2;
+      return a.preferred ? 0 : 1;
+    };
+    return [...actions].sort((x, y) => rank(x) - rank(y));
+  }
+
   export async function openIntentions() {
     if (!activePath || !editorComp) return;
     const path = activePath;
@@ -951,22 +1396,107 @@
         }
       }
     }
-    const items = [
-      ...dynamic,
-      ...collectIntentions(
-        {
-          src: projectStore.sourceOf(path),
-          wordUnderCaret: editorComp.wordAtCaret(),
-          outline: javaOutline(projectStore.sourceOf(path)),
-        },
-        { onGenerate: (mode) => onGenerate?.(mode) },
-      ),
-    ];
+    // A language server's code actions ARE this language's Alt+Enter list: for Rust that is
+    // "import HashMap", "fill match arms", "add missing lifetime", each computed with full type
+    // knowledge. Offered in the same popup as the Java intentions rather than in a second menu —
+    // the user's gesture is "what can you do here", and which engine answers is not their problem.
+    if (isLspFileOf(path)) {
+      const src = editorComp.getValue();
+      const sel = editorComp.selectionRange();
+      const u2b = makeU16ToByte(src);
+      const start = u2b(sel.from);
+      const end = u2b(sel.to);
+      const actions = await lspCodeActions(path, src, start, end).catch(() => []);
+      if (projectStore.activeFilePath === path) {
+        for (const a of orderedActions(actions)) {
+          // A disabled action is shown with its reason rather than hidden: "cannot extract:
+          // selection crosses a block" tells you what to change, an absent menu item does not.
+          const label = a.disabled ? `${a.title} — ${a.disabled}` : a.title;
+          dynamic.push({
+            id: `lsp:${a.title}`,
+            label,
+            icon: a.kind.startsWith('refactor') ? Wand2 : Braces,
+            run: a.disabled ? () => {} : () => void runCodeAction(path, a),
+          });
+        }
+      }
+    }
+    // The editor's own two entries — the Generate flows — and Java-only, because that is what they
+    // write. Offering them on a `.rs` put "Generate constructor…" and "Generate getters and setters…"
+    // above a Rust function, which is not a thing that exists: everything a Rust buffer can be
+    // offered comes from the server, above.
+    const local = isJavaFileOf(path)
+      ? collectIntentions(
+          {
+            src: projectStore.sourceOf(path),
+            wordUnderCaret: editorComp.wordAtCaret(),
+            outline: javaOutline(projectStore.sourceOf(path)),
+          },
+          { onGenerate: (mode) => onGenerate?.(mode) },
+        )
+      : [];
+    const items = [...dynamic, ...local];
     if (!items.length) {
       toastStore.show('No context actions here', 'info');
       return;
     }
     bennuIntentionsStore.openWith(items, anchor);
+  }
+
+  /**
+   * Run a language server's code action.
+   *
+   * Two halves, and both can be present: inline `edits` are applied straight away, and a
+   * `command` asks the server to compute the rest — which comes back as a `workspace/applyEdit`
+   * and lands through the same path (see the `onServerEdit` effect). Some actions are edits-only,
+   * some are command-only, and rust-analyzer uses both.
+   */
+  async function runCodeAction(path: string, action: LspAction) {
+    if (action.file_ops.length) {
+      toastStore.show(
+        `This action also needs: ${action.file_ops.join(', ')} — Bennu won't move files for a server`,
+        'warning',
+      );
+    }
+    if (action.edits.length) {
+      await applyServerEdits(action.edits);
+    }
+    if (action.command) {
+      const ok = await lspExecuteCommand(path, action.command, action.arguments);
+      if (!ok) toastStore.show(`“${action.title}” could not be run`, 'error');
+    }
+  }
+
+  /**
+   * Format the buffer with the language's own formatter (`rustfmt`, for Rust).
+   *
+   * Byte-span edits applied through CodeMirror rather than a whole-document replace: the caret
+   * keeps its place, the change is one undo step, and a formatter that only touched three lines
+   * does not mark the whole file dirty.
+   */
+  export async function formatDocument() {
+    const path = activePath;
+    if (!path || !editorComp) return;
+    if (!isLspFileOf(path)) {
+      toastStore.show('No formatter for this file type', 'info');
+      return;
+    }
+    const src = editorComp.getValue();
+    const edits = await lspFormat(
+      path,
+      src,
+      bennuSettingsStore.tabSize,
+      bennuSettingsStore.indentStyle !== 'tabs',
+    ).catch(() => []);
+    if (!edits.length) {
+      // A formatter that returns nothing has nothing to change — which is the good outcome, and
+      // worth saying so the user does not press it again wondering.
+      toastStore.show('Already formatted', 'info');
+      return;
+    }
+    editorComp.replaceByteRanges(
+      edits.map((e) => ({ startByte: e.start, endByte: e.end, text: e.new_text })),
+    );
   }
 
   /** Insert text at the caret (Generate modal → editor). Mirrors merula's insert. */
@@ -1033,20 +1563,18 @@
     try {
       const edits = await ipcRenameApply(ctx.file, ctx.source, ctx.offset, target);
       if (!edits.length) { toastStore.show('Nothing to rename here', 'info'); closeInlineRename(); return; }
-      // Group by file, then splice each file's byte edits and persist.
-      const byFile = new Map<string, RenameEdit[]>();
-      for (const e of edits) {
-        const list = byFile.get(e.file);
-        if (list) list.push(e); else byFile.set(e.file, [e]);
+      // The splicing is the store's (see `applyEdits`) — this only counts what it was asked to do,
+      // for a message that says how far the rename reached.
+      const files = new Set(edits.map((e) => e.file)).size;
+      const failed = await projectStore.applyEdits(edits);
+      if (failed) {
+        toastStore.show(`Renamed, but ${failed} file(s) could not be written`, 'error');
+      } else {
+        toastStore.show(
+          `Renamed to “${target}” · ${edits.length} edit(s) in ${files} file(s)`,
+          'success',
+        );
       }
-      for (const [file, fileEdits] of byFile) {
-        const current = await projectStore.loadText(file);
-        await projectStore.saveText(file, applyByteEdits(current, fileEdits));
-      }
-      toastStore.show(
-        `Renamed to “${target}” · ${edits.length} edit(s) in ${byFile.size} file(s)`,
-        'success',
-      );
       closeInlineRename();
     } catch {
       toastStore.show('Rename failed', 'error');
@@ -1096,7 +1624,11 @@
       // JSP/XML: the Java reference index is meaningless here. Resolve a page-scoped JSP
       // variable first (a `<c:set var>`/`${var}` under the caret → all its references),
       // then fall back to a Struts action reference (`action="…"` → every JSP that uses it).
-      if (!isJavaFile) {
+      //
+      // A server-backed buffer skips this branch: `bennu_references` is the right call for it
+      // (the backend routes it to the server), and the JSP resolvers below would be asked about
+      // a page that does not exist.
+      if (!isJavaFile && !isLspBuffer) {
         const nav = await ipcJspNav(activePath, source, offset).catch(() => null);
         if (nav && nav.usages.length) {
           bennuRefactorStore.setUsages(nav.label, nav.usages);
@@ -1148,6 +1680,59 @@
     );
   }
 
+  // ── Macro expansion (Alt+Shift+M) ───────────────────────────────────────────────
+
+  /** The expansion on screen, or null. Editor-owned because it is about the caret. */
+  let macroView = $state<LspMacroExpansion | null>(null);
+
+  /**
+   * Expand the macro at the caret and show it.
+   *
+   * `quiet` is for the modal's own Re-expand: an explicit gesture deserves to be told when the caret
+   * is not in a macro, but a re-expand that finds nothing should leave what is on screen alone rather
+   * than replacing an expansion you were reading with an empty modal.
+   */
+  async function expandMacroAtCaret(quiet = false) {
+    const path = activePath;
+    if (!path || !editorComp || !isLspFileOf(path)) return;
+    const found = await lspExpandMacro(path, editorComp.getValue(), editorComp.caretByteOffset())
+      .catch(() => null);
+    if (!found) {
+      if (!quiet) toastStore.show('No macro call at the caret', 'info');
+      return;
+    }
+    macroView = found;
+  }
+
+  /** Show what the macro at the caret expands to (Alt+Shift+M). */
+  export function expandMacro() { void expandMacroAtCaret(); }
+
+  // ── Call / type hierarchy (Ctrl+Shift+H / Ctrl+H) ──────────────────────────────
+
+  /**
+   * Build a hierarchy from the caret and show it in the bottom dock.
+   *
+   * The panel is opened first, before the answer is in: the tree takes a round-trip to prepare and
+   * another per level, and a key that appears to do nothing for a second reads as a key that does
+   * nothing. It shows its own "building" state, and says so if the caret was not on something a
+   * hierarchy can be built from.
+   */
+  async function showHierarchy(kind: 'calls' | 'types') {
+    if (!activePath || !editorComp || !isLspFileOf(activePath)) return;
+    bennuUiStore.showBottom('hierarchy');
+    await bennuHierarchyStore.open(
+      kind,
+      activePath,
+      editorComp.getValue(),
+      editorComp.caretByteOffset(),
+    );
+  }
+
+  /** Who calls the function at the caret (and, by direction, what it calls). */
+  export function showCallHierarchy() { void showHierarchy('calls'); }
+  /** What implements the trait at the caret (and, by direction, what it is built on). */
+  export function showTypeHierarchy() { void showHierarchy('types'); }
+
   // ── Go to definition (Ctrl+B / Ctrl+Click) ────────────────────────────────────
   //
   // Resolves the JSP form/link **action reference** under the caret/click to its
@@ -1186,22 +1771,24 @@
     });
   }
 
-  /** Try the BE go-to-declaration for the symbol at `offset` (any Java symbol — class,
-   *  method, field, local). Resolves via `bennu_declaration` and jumps to the declaring
-   *  file + line. When the click/caret is **already on the declaration itself** (its name
-   *  token in this same file — a method signature, or a variable/class/record decl),
-   *  go-to-declaration would be a no-op, so we fall back to **find usages** at that offset
-   *  (IntelliJ's Ctrl+Click / Ctrl+B behaviour on a declaration). Returns true when it
-   *  handled the gesture; false (gracefully) when the BE isn't attached, the symbol is
-   *  JDK/dep-jar resident, or the caret isn't on a symbol. */
+  /** Try the BE go-to-declaration for the symbol at `offset`. Resolves via `bennu_declaration`
+   *  — which the backend answers with whichever engine owns the file, Bennu's Java index or a
+   *  language server — and jumps to the declaring file + line. When the click/caret is
+   *  **already on the declaration itself** (its name token in this same file — a method
+   *  signature, or a variable/class/record decl), go-to-declaration would be a no-op, so we
+   *  fall back to **find usages** at that offset (IntelliJ's Ctrl+Click / Ctrl+B behaviour on a
+   *  declaration). Returns true when it handled the gesture; false (gracefully) when the BE
+   *  isn't attached, the symbol is JDK/dep-jar resident, or the caret isn't on a symbol. */
   async function tryGoToDeclarationBE(offset: number, word: string | null): Promise<boolean> {
     const path = activePath;
     if (!path || !editorComp) return false;
-    // Java-symbol resolution only makes sense in a `.java` buffer. On a JSP/XML the Java
-    // resolver would parse the text as Java and could mis-fire on a coincidental symbol
-    // name (e.g. the `viewTree` inside `action="viewTree"` matching a Java method), hijacking
-    // the gesture before the config-graph resolver (`bennu_definition`) gets its turn.
-    if (!path.toLowerCase().endsWith('.java')) return false;
+    // Only in a buffer some engine can resolve. On a JSP/XML the Java resolver would parse the
+    // text as Java and could mis-fire on a coincidental symbol name (the `viewTree` inside
+    // `action="viewTree"` matching a Java method), hijacking the gesture before the
+    // config-graph resolver (`bennu_definition`) gets its turn — so those keep going through
+    // the chain below instead.
+    const resolvable = path.toLowerCase().endsWith('.java') || isLspFileOf(path);
+    if (!resolvable) return false;
     const source = editorComp.getValue();
     const target = await ipcDeclaration(path, source, offset).catch(() => null);
     if (!target) return false;
@@ -1497,6 +2084,27 @@
     // 1. BE go-to-declaration — any Java symbol (class/method/field/local) — when we have
     //    a byte offset to classify at. Authoritative + precise (jumps to the exact line).
     if (offset != null && (await tryGoToDeclarationBE(offset, action))) return;
+    // 1a. A server-backed buffer stops here. Everything below is a Java-stack resolver — a JSP
+    //     page variable, a Struts action, a MyBatis statement, a library class from the
+    //     classpath — and none of them has anything to say about a Rust file. Falling through
+    //     would spend five round-trips to reach the same "nothing", and the last of them
+    //     (`tryGoToDecompiled`) would ask the classpath for a type named after whatever word the
+    //     caret happened to be on.
+    if (isLspBuffer) {
+      if (!silent) {
+        const status = bennuLspStore.statusFor(path);
+        // The reason matters here: "nothing to go to" and "the server is still indexing" look
+        // identical to the user and mean completely different things.
+        if (status && status.state === 'starting') {
+          toastStore.show(`${status.name} is still starting — try again in a moment`, 'info');
+        } else if (status && status.state === 'failed') {
+          toastStore.show(status.message || `${status.name} is not running`, 'warning');
+        } else {
+          toastStore.show('Nothing to go to here', 'info');
+        }
+      }
+      return;
+    }
     // 1a-bis. Framework extensions (Spring): a `${property}` key → its `application*.yml`
     //     entry, a `@Qualifier` / SpEL `@bean` → the bean declaration, an injected field →
     //     its candidate beans, and in a bean XML a `class=`, a `ref=` or a
@@ -1600,6 +2208,10 @@
    *  outline, meaningless (and historically a freeze risk) on a `.jsp`/XML file. */
   const isJavaFile = $derived(isJavaFileOf(activePath));
   const isJspFile = $derived(isJspFileOf(activePath));
+  /** A buffer a language server owns. Its navigation goes through the shared handlers (which the
+   *  backend routes), so what this gates is the JSP/Struts/XML resolvers that must NOT be asked
+   *  about it. */
+  const isLspBuffer = $derived(isLspFileOf(activePath));
   /** Struts is on this project at all. The `*-validation.xml` tooling means nothing without it —
    *  a toolbar button that would create a file no framework reads is a button that teaches the
    *  wrong thing about the project. */
@@ -1965,6 +2577,7 @@
           oncaret={onCaret}
           onViewState={(s) => { if (activePath) viewStates.set(activePath, s); }}
           onGoto={onEditorGoto}
+          onLensPress={(key) => void onLensPress(key)}
         />
       {/key}
       <!-- IntelliJ-style file health badge, pinned top-right over the editor. -->
@@ -2042,6 +2655,17 @@
 
 {#if envVarView}
   <BennuEnvVarModal view={envVarView} onClose={() => { envVarView = null; editorComp?.focus(); }} />
+{/if}
+
+<!-- Mounted here rather than by the window, like the modal above and for the same reason: what it
+     shows is about the CARET, and the caret is this component's. -->
+{#if macroView}
+  <BennuMacroExpandModal
+    name={macroView.name}
+    expansion={macroView.expansion}
+    onReexpand={() => expandMacroAtCaret(true)}
+    onClose={() => { macroView = null; editorComp?.focus(); }}
+  />
 {/if}
 
 <style>

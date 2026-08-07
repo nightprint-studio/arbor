@@ -37,6 +37,9 @@ import {
   closeBrackets, closeBracketsKeymap,
 } from '@codemirror/autocomplete';
 
+import { documentHighlights, serverFolding } from './server-layers';
+import { codeLensLayer } from './code-lens';
+import { snippetStops } from './snippet-stops';
 import type { LanguageDescriptor, Tree, Node } from './types';
 import { createHighlightPlugin } from './highlight';
 import { createFoldingExtension } from './folding';
@@ -46,6 +49,7 @@ import { rainbowBrackets } from './rainbow-brackets';
 import { indentGuides } from './indent-guides';
 import { stickyScroll } from './sticky-scroll';
 import { scrollbarOverview } from './scrollbar-overview';
+import { semanticHighlight } from './semantic-tokens';
 import { codeEditorTheme, codeEditorHighlightStyle } from './theme';
 import {
   inlineCompletion, acceptInlineCompletion, dismissInlineCompletion,
@@ -147,6 +151,15 @@ export interface CodeEditorExtensionsOptions {
   /** Replace the native vertical scrollbar with the IntelliJ-style overview strip (diagnostic
    *  marks + hover preview). A host enables this INSTEAD of the minimap. */
   scrollbarOverview?: boolean;
+  /**
+   * A code lens was pressed — `key` is the identifier the host issued with the lens.
+   *
+   * The layer is installed only when this is given, because a lens is a *control*: a host that
+   * cannot answer a press should not be drawing something that invites one. The host owns what
+   * pressing it means (show a list of implementations, run a test), which is why the core hands back
+   * an opaque key rather than trying to interpret a command itself.
+   */
+  onLensPress?: (key: number) => void;
   /** Language-intelligence hook bag (reserved; opaque to the core today). */
   intel?: unknown;
   /**
@@ -166,6 +179,15 @@ export interface CodeEditorExtensionsOptions {
 /** Build the full extension set for one editor bound to `lang`. Returns the
  *  extensions plus the `getTree` reader (so a host component can implement
  *  go-to-decl / structure against the same live tree the highlighter maintains). */
+/** The fold gutter's arrow. Shared by the Lezer and the provider-driven folding, so the two look the
+ *  same — a fold is a fold, whoever found it. */
+function foldMarkerDOM(open: boolean): HTMLElement {
+  const el = document.createElement('span');
+  el.className = open ? 'cm-foldMarker cm-foldMarker-open' : 'cm-foldMarker cm-foldMarker-closed';
+  el.textContent = open ? '▾' : '▸';
+  return el;
+}
+
 export function createCodeEditorExtensions(
   lang: LanguageDescriptor,
   opts: CodeEditorExtensionsOptions = {},
@@ -211,6 +233,12 @@ export function createCodeEditorExtensions(
     highlightSelectionMatches(),
     search({ top: true }),
     useCm ? (lang.cmExtension as Extension) : highlight,
+    // Semantic highlighting, LAYERED over whichever highlighter ran above. Installed
+    // unconditionally: with no tokens pushed it is one state field holding an empty decoration
+    // set, and a language with no server never pushes any. Layering (rather than replacing) is
+    // what keeps a file coloured instantly on open and coloured while it is edited — the
+    // server's refinement arrives a round-trip later and lands on top.
+    semanticHighlight(),
     lintGutter(),
   ];
 
@@ -233,18 +261,27 @@ export function createCodeEditorExtensions(
   // bodies, `lang-json` folds objects). Tree-sitter descriptors fold via `foldNode`
   // above; legacy StreamLanguage modes stay gutter-free (they carry no fold info).
   if (useCm && lang.cmFold) {
-    exts.push(
-      codeFolding(),
-      foldGutter({
-        markerDOM(open) {
-          const el = document.createElement('span');
-          el.className = open ? 'cm-foldMarker cm-foldMarker-open' : 'cm-foldMarker cm-foldMarker-closed';
-          el.textContent = open ? '▾' : '▸';
-          return el;
-        },
-      }),
-    );
+    exts.push(codeFolding(), foldGutter({ markerDOM: foldMarkerDOM }));
   }
+
+  // Folding from a PROVIDER's ranges, for a language whose descriptor says its folds come from
+  // outside the buffer. A legacy stream mode carries no fold information at all — which is why a
+  // `.rs` file had no fold gutter — and brace matching would find the function bodies and nothing
+  // else, where a server folds by item. The ranges are pushed by the host; this installs the
+  // machinery that uses them.
+  if (lang.serverFold) {
+    exts.push(codeFolding(), foldGutter({ markerDOM: foldMarkerDOM }), serverFolding());
+  }
+
+  // Occurrence highlighting — where else the symbol under the caret appears. Installed whenever the
+  // descriptor is provider-backed, because that is exactly when there is something to push: it costs
+  // one state field holding an empty decoration set until the host pushes anything.
+  if (lang.intel) exts.push(documentHighlights());
+
+  // Code lenses — the counts a provider draws above an item. Gated on the HOST's press handler
+  // rather than on the descriptor: a lens is a control, and only the host knows what pressing one
+  // means.
+  if (opts.onLensPress) exts.push(codeLensLayer(opts.onLensPress));
 
   // Optional vertical margin guide (host opt-in via `rulerColumn`).
   if (opts.rulerColumn && opts.rulerColumn > 0) exts.push(editorRuler(opts.rulerColumn));
@@ -271,6 +308,11 @@ export function createCodeEditorExtensions(
         keymap.of([{ key: 'Tab', run: acceptCompletion }, ...completionKeymap]),
       ),
     );
+    // Tab stops of an accepted snippet. AFTER the completion keymap and at the same precedence, so
+    // within that group `acceptCompletion` is tried first: while the popup is open Tab accepts, and
+    // only once it has closed does Tab walk the stops. Every binding returns false with no run
+    // active, so Tab keeps its ordinary meaning the rest of the time.
+    exts.push(snippetStops());
     // Member-access trigger: CodeMirror's `activateOnTyping` only auto-opens the popup
     // on identifier characters, so a bare `receiver.` never queries the source. Fire
     // completion explicitly right after a `.` is typed (the source's dot branch returns

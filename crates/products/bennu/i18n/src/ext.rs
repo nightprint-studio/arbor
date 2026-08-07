@@ -183,6 +183,7 @@ impl FrameworkExtension for MessagesExtension {
                 kind: "text".to_string(),
                 detail: cat.declarations(k).first().map(|d| d.entry.value.clone()),
                 auto_import: None,
+                ..Default::default()
             })
             .collect()
     }

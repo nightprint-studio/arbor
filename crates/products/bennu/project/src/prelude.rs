@@ -14,6 +14,8 @@ pub use crate::encoding::{
 };
 pub use crate::error::ProjectError;
 pub use crate::jdk::detect as detect_jdk;
-pub use crate::model::{file_stamp, open_project, read_file, write_file, OpenOptions};
+pub use crate::model::{
+    file_stamp, open_project, read_file, rename_path, write_file, OpenOptions,
+};
 pub use crate::pom::{parse as parse_pom, Pom};
 pub use crate::tree::build as build_tree;

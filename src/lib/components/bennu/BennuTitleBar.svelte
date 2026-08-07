@@ -125,15 +125,11 @@
   );
 
   const runMenu = $derived<DropdownItem[]>([
-    // `Run` launches a run configuration, which is a Java main class — a Cargo project has
-    // none, so the entry is out rather than failing when pressed.
-    ...(isCargo
-      ? []
-      : [
-          { kind: 'item', id: 'run', label: 'Run', icon: Play, shortcut: 'Shift+F10', disabled: busy, onclick: runProject } as DropdownItem,
-          { kind: 'item', id: 'rerun', label: 'Rerun', icon: RotateCw, disabled: busy || !bennuRunStore.canRerun,
-            onclick: () => void bennuRunStore.rerunApp() } as DropdownItem,
-        ]),
+    // `Run` launches the active run configuration, whatever kind it is: a Java main class, or a
+    // cargo subcommand. Both stream into the same console, so Rerun means the same thing on either.
+    { kind: 'item', id: 'run', label: 'Run', icon: Play, shortcut: 'Shift+F10', disabled: busy, onclick: runProject },
+    { kind: 'item', id: 'rerun', label: 'Rerun', icon: RotateCw, disabled: busy || !bennuRunStore.canRerun,
+      onclick: () => void bennuRunStore.rerunApp() },
     { kind: 'item', id: 'build',   label: buildLabel,        icon: isCargo || buildType !== 'validate' ? Hammer : ListChecks, shortcut: 'Ctrl+F9', disabled: busy, onclick: buildProject },
     ...(isCargo
       ? []
@@ -155,6 +151,8 @@
             disabled: !bennuTestStore.running, onclick: () => void bennuTestStore.stop() } as DropdownItem,
         ]),
     { kind: 'separator' },
+    // Debugging stays JVM-only: it attaches JDWP to the child `bennu_run` spawned, and a cargo
+    // command forks its own compiler and its own program.
     ...(isCargo
       ? []
       : [
@@ -165,12 +163,8 @@
             disabled: !bennuDebugStore.live,
             onclick: () => void bennuDebugStore.detachSession() } as DropdownItem,
         ]),
-    ...(isCargo
-      ? []
-      : [
-          { kind: 'separator' } as DropdownItem,
-          { kind: 'item', id: 'editcfg', label: 'Edit configurations…', icon: SlidersHorizontal, disabled: !hasProject, onclick: () => bennuUiStore.openRunConfig() } as DropdownItem,
-        ]),
+    { kind: 'separator' },
+    { kind: 'item', id: 'editcfg', label: 'Edit configurations…', icon: SlidersHorizontal, disabled: !hasProject, onclick: () => bennuUiStore.openRunConfig() },
   ]);
 
   // Ctrl+O (window keybinding) → open the folder picker hosted here.
@@ -283,12 +277,10 @@
       </button>
     {/if}
     <div class="btb-run" role="group" aria-label="Run controls">
-      <!-- What ▷ will launch, named next to the button that launches it. Java only: a Cargo
-           project has no run configurations, and an empty selector beside a disabled ▷ would
-           be two controls saying the same nothing. -->
-      {#if !isCargo}
-        <BennuRunConfigSelect />
-      {/if}
+      <!-- What ▶ will launch, named next to the button that launches it. Both ecosystems now: a
+           Cargo project has run configurations too, and which command ▶ runs is exactly the thing
+           worth naming. -->
+      <BennuRunConfigSelect />
       <!-- `btb-build-main` squares off the right edge for the attached caret. Without the
            caret (Cargo: one build type, no split) the button must round on both sides. -->
       <button
@@ -313,15 +305,21 @@
             </button>
           {/snippet}
         </Dropdown>
-        <button
-          class="btb-run-btn btb-run-primary"
-          onclick={runProject}
-          disabled={!hasProject || busy}
-          use:tooltip={{ content: 'Run', shortcut: 'Shift+F10' }}
-          aria-label="Run"
-        >
-          <Play size={16} />
-        </button>
+      {/if}
+      <!-- ▶ on both ecosystems: it launches the active run configuration, and a Cargo one is a
+           cargo subcommand. With no configuration yet the store creates one for the workspace's
+           only binary, or opens the editor when there is a real question to answer. -->
+      <button
+        class="btb-run-btn btb-run-primary"
+        onclick={runProject}
+        disabled={!hasProject || busy}
+        use:tooltip={{ content: 'Run', shortcut: 'Shift+F10' }}
+        aria-label="Run"
+      >
+        <Play size={16} />
+      </button>
+      <!-- 🐞 stays JVM-only: it attaches JDWP to the child `bennu_run` spawned. -->
+      {#if !isCargo}
         <button
           class="btb-run-btn"
           class:btb-debugging={bennuDebugStore.live}

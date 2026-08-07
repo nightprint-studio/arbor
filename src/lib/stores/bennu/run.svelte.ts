@@ -43,8 +43,11 @@ import type { LogLevel, LogPiece } from '$lib/types/log';
 import { bennuUiStore } from './ui.svelte';
 import { bennuDiagnosticsStore } from './diagnostics.svelte';
 import {
-  bennuRunConfigStore, splitArgs, envRecord, isRunKind, type RunConfig,
+  bennuRunConfigStore, splitArgs, envRecord, isRunKind, cargoInvocationOf, type RunConfig,
 } from './run-config.svelte';
+import {
+  cargoRun as ipcCargoRun, cargoWorkspace, type CargoInvocation,
+} from '$lib/ipc/bennu/cargo';
 // A `junit` configuration is launched by the TEST runner, not by this one — see `runConfig`.
 // (`tests` imports only a TYPE from here, so the edge is erased at build and there is no
 // runtime cycle.)
@@ -100,8 +103,19 @@ export function formatMs(ms: number): string {
   return `${m}m ${String(Math.round(s % 60)).padStart(2, '0')}s`;
 }
 
-/** What a launch consists of — kept so Rerun can repeat it exactly. */
-interface RunSpec {
+/**
+ * What a launch consists of — kept so Rerun can repeat it exactly.
+ *
+ * A union because the two launchers have almost nothing in common: a JVM run needs a classpath
+ * built for it and is preceded by a compile, while a cargo command *is* the build and takes a
+ * command line. Keeping one flat shape with half its fields unused would mean every reader had to
+ * know which half applied, and `rerun` would have to guess.
+ */
+type RunSpec = JvmRunSpec | CargoRunSpec;
+
+/** A `java` launch. */
+interface JvmRunSpec {
+  kind: 'jvm';
   root: string;
   /** The Maven module, relative to the root. Empty = the root module. */
   module: string;
@@ -123,6 +137,20 @@ interface RunSpec {
   classpathScope: string;
 }
 
+/** A `cargo <subcommand>` launch. */
+interface CargoRunSpec {
+  kind: 'cargo';
+  root: string;
+  /** The whole command line, as the backend's `Invocation`. Held verbatim so ⟳ repeats the flags
+   *  the run actually had rather than re-deriving them from a configuration that may have been
+   *  edited since. */
+  invocation: CargoInvocation;
+  workingDir: string;
+  env: Record<string, string>;
+  /** The console tab's label. */
+  label: string;
+}
+
 /**
  * One run, with its own transcript — what the console shows as a tab.
  *
@@ -135,7 +163,9 @@ export interface RunTab {
   id: string;
   /** The run configuration's name — the tab's label. */
   label: string;
-  mainClass: string;
+  /** What was launched: a main class, or the cargo command. Shown when the backend has not yet
+   *  answered with the real command line. */
+  subject: string;
   /** The command the backend actually spawned; empty until it answers. */
   command: string;
   workingDir: string;
@@ -441,18 +471,20 @@ function createBennuRunStore() {
    * went wrong if it did) while Maven's own log goes where build logs go. Being sent to the
    * Build panel and then having to come back is the reason a Run tool window exists at all.
    */
-  async function launch(spec: RunSpec): Promise<void> {
-    if (building || running) return;
-    const cls = spec.mainClass.trim();
-    if (!cls) return;
-
-    // A new tab, not a cleared buffer: the previous run stays readable beside this one.
+  /**
+   * Open a console tab for a launch about to happen, and return its id.
+   *
+   * Shared by both launchers because everything here is about the *console* rather than about what
+   * is being run: the tab strip's capacity, which tab is in front, and the window that output can
+   * arrive in before the backend has answered with a run id.
+   */
+  function openTab(spec: RunSpec, label: string, subject: string): string {
     tabSeq += 1;
     const id = `rt-${tabSeq}`;
     const tab: RunTab = {
       id,
-      label: spec.label || cls.split('.').pop() || cls,
-      mainClass: cls,
+      label,
+      subject,
       command: '',
       workingDir: '',
       lines: [],
@@ -476,6 +508,16 @@ function createBennuRunStore() {
     activeTabId = id;
     pendingTabId = id;
     bennuUiStore.showBottom('run');
+    return id;
+  }
+
+  async function launch(spec: JvmRunSpec): Promise<void> {
+    if (building || running) return;
+    const cls = spec.mainClass.trim();
+    if (!cls) return;
+
+    // A new tab, not a cleared buffer: the previous run stays readable beside this one.
+    const id = openTab(spec, spec.label || cls.split('.').pop() || cls, cls);
     pushTo(id, 'Compiling…', 'meta');
 
     // Only the module being run (and what it is built from) — see `bennu_build`'s `module`.
@@ -525,6 +567,37 @@ function createBennuRunStore() {
   }
 
   /**
+   * Launch a cargo command, streaming into the Run console.
+   *
+   * No compile step, and that is the whole difference from {@link launch}: a cargo subcommand *is*
+   * the build, so prefixing it with one would compile the workspace twice. The console narrates the
+   * command instead, since `cargo check` on a cold workspace is a minute of silence otherwise.
+   */
+  async function launchCargo(spec: CargoRunSpec): Promise<void> {
+    if (building || running) return;
+    const id = openTab(spec, spec.label, spec.invocation.command);
+    patchTab(id, { live: true, startedAt: Date.now() });
+    try {
+      const handle = await ipcCargoRun(spec.root, spec.invocation, {
+        workingDir: spec.workingDir,
+        env: spec.env,
+      });
+      patchTab(id, {
+        runId: handle.run_id,
+        command: handle.command,
+        workingDir: handle.working_dir,
+      });
+      pendingTabId = null;
+    } catch (e) {
+      patchTab(id, { live: false, finished: true });
+      pendingTabId = null;
+      // The backend's message carries the install hint when a rustup component is what is missing —
+      // which is the difference between "clippy is broken" and "clippy is not installed".
+      pushTo(id, `Could not start: ${e instanceof Error ? e.message : String(e)}`, 'err');
+    }
+  }
+
+  /**
    * Launch a named run configuration — every field of it, which is the difference between a
    * run configuration and a main class.
    *
@@ -538,6 +611,24 @@ function createBennuRunStore() {
       // Written by a newer Bennu. Say so rather than launching some approximation of it.
       bennuUiStore.showBottom('run');
       pushRun(`“${cfg.name}” is a ${cfg.kind} configuration, which this version cannot run.`, 'err');
+      return;
+    }
+    if (cfg.kind === 'cargo') {
+      if (debug) {
+        // A cargo command forks its own compiler and, for `run`, its own program — so the
+        // JDWP-style "attach to the child we spawned" does not apply, and there is no Rust
+        // debugger wired up yet. Saying so beats silently running it without one.
+        bennuUiStore.showBottom('run');
+        pushRun('Debugging a Cargo configuration is not supported yet — running it instead.', 'err');
+      }
+      await launchCargo({
+        kind: 'cargo',
+        root,
+        invocation: cargoInvocationOf(cfg),
+        workingDir: cfg.workingDir.trim(),
+        env: envRecord(cfg.env),
+        label: cfg.name,
+      });
       return;
     }
     if (cfg.kind === 'junit') {
@@ -565,6 +656,7 @@ function createBennuRunStore() {
       return;
     }
     await launch({
+      kind: 'jvm',
       root,
       module: cfg.module.trim(),
       mainClass: cls,
@@ -632,12 +724,18 @@ function createBennuRunStore() {
   async function runActive(root: string, debug = false): Promise<boolean> {
     const cfg = bennuRunConfigStore.activeFor(root);
     // A Spring Boot configuration is runnable without a class of its own — `runConfig`
-    // resolves the module's `@SpringBootApplication`.
+    // resolves the module's `@SpringBootApplication`. So is a Cargo one, which has a command
+    // rather than a class.
     if (cfg && (cfg.mainClass.trim() || cfg.kind !== 'application')) {
       await runConfig(root, cfg, debug);
       return true;
     }
     if (bennuRunConfigStore.configsFor(root).length) return false;
+
+    // A Cargo project has no `main` class to scan for; its entry points are the workspace's binary
+    // targets. One of them is an answer; several is a real ambiguity `cargo run` itself refuses to
+    // resolve, so the editor opens instead of launching the wrong program.
+    if (projectStore.isCargo) return await runSoleCargoBinary(root, debug);
 
     const found = await bennuMainClassStore.load(root);
     if (found.length !== 1) return false;
@@ -660,6 +758,35 @@ function createBennuRunStore() {
   }
 
   /**
+   * Create and run a Cargo configuration for the workspace's ONLY binary, if there is one.
+   *
+   * The Cargo counterpart of the single-`main` shortcut above, and it exists for the same reason: a
+   * project with one binary should not need you to open a form and fill in a crate name before ▶
+   * does anything. Returns false when there is no single answer, and the caller opens the editor.
+   */
+  async function runSoleCargoBinary(root: string, debug: boolean): Promise<boolean> {
+    const ws = await cargoWorkspace(root).catch(() => null);
+    if (!ws) return false;
+    const bins = ws.crates.flatMap((c) =>
+      c.targets.filter((t) => t.kind === 'bin').map((t) => ({ crate: c.name, target: t.name })),
+    );
+    if (bins.length !== 1) return false;
+    const only = bins[0];
+    const id = bennuRunConfigStore.create(root, 'cargo', {
+      name: only.target,
+      module: only.crate,
+      cargoCommand: 'run',
+      cargoTargetKind: 'bin',
+      cargoTarget: only.target,
+      cargoWorkspace: false,
+    });
+    bennuRunConfigStore.setActive(root, id);
+    const created = bennuRunConfigStore.activeFor(root);
+    if (created) await runConfig(root, created, debug);
+    return true;
+  }
+
+  /**
    * Repeat a run, exactly — the ⟳ on a tab repeats THAT tab's run, not the most recent one.
    * Without a tab id it repeats the one you are looking at, which is what the header's ⟳
    * means. The result is a new tab: a rerun is another run, and overwriting the transcript
@@ -669,6 +796,10 @@ function createBennuRunStore() {
     const from = tabId ? tabs.find((t) => t.id === tabId) : activeTab;
     if (!from) return;
     if (running) await stop();
+    if (from.spec.kind === 'cargo') {
+      await launchCargo(from.spec);
+      return;
+    }
     await launch(from.spec);
   }
 
@@ -756,7 +887,6 @@ function createBennuRunStore() {
     get runWorkingDir() { return activeTab?.workingDir ?? ''; },
     /** The run configuration's name, or the class for an ad-hoc launch. */
     get runLabel() { return activeTab?.label ?? ''; },
-    get runMainClass() { return activeTab?.mainClass ?? ''; },
     get runExitCode() { return activeTab?.exitCode ?? null; },
     /** True once the active run has exited (however it exited). */
     get runFinished() { return activeTab?.finished ?? false; },
@@ -776,6 +906,27 @@ function createBennuRunStore() {
     runPreferred,
     setPreferredBuildType,
     runConfig,
+    /**
+     * Run a cargo command that is not a saved configuration — what the Cargo tool window's rows do.
+     *
+     * Ad-hoc on purpose: clicking `check` on a crate should not leave a configuration behind for
+     * every crate you have ever checked. The tab still carries the invocation, so ⟳ repeats it.
+     */
+    async runCargoCommand(
+      root: string,
+      invocation: CargoInvocation,
+      label: string,
+      opts: { workingDir?: string; env?: Record<string, string> } = {},
+    ): Promise<void> {
+      await launchCargo({
+        kind: 'cargo',
+        root,
+        invocation,
+        label,
+        workingDir: opts.workingDir ?? '',
+        env: opts.env ?? {},
+      });
+    },
     runActive,
     rerunApp,
     sendInput,

@@ -1,13 +1,25 @@
 <script lang="ts">
   /**
-   * The icon for a Java type kind — a filled disc with the letter that names it, the way
-   * IntelliJ marks a class from an interface from an enum.
+   * The icon for a **type kind** — a ring with the letter that names it, the way IntelliJ marks a
+   * class from an interface from an enum.
    *
    * A letter is the right mark here because the distinction being drawn is **nominal**: a
    * class is not a rounder or squarer kind of thing than an interface, so a glyph chosen to
    * suggest it is a picture of nothing. `C` / `I` / `E` / `R` / `@` are what these are
    * called, they are the letters IntelliJ trained everyone on, and they stay legible at the
    * 16px a tree row gives them, which few glyphs do.
+   *
+   * ## Why one component for every language
+   *
+   * The same argument holds in every language that has more than one kind of type, and the place it
+   * pays off is a list where **every row is a type** — the Go-to *Types* tab. There a shape carries
+   * no information (they are all types) and the letter is the only thing that tells a struct from a
+   * trait from an enum. So Rust's kinds are in the table beside Java's rather than in a second
+   * component with the same drawing and a table that would drift from this one.
+   *
+   * A **mixed** list is the other case and wants the opposite: in the Structure outline or a
+   * hierarchy, "type versus function versus field" is the distinction worth drawing, and that one is
+   * shape — see `symbol-kind-glyph.ts`.
    *
    * Drawn rather than imported: no icon set carries "letter in a ring" as a family, and
    * assembling one out of five unrelated glyphs is how the previous version ended up
@@ -26,22 +38,45 @@
    * weight on the letter and lets a column of them sit quietly next to the file names.
    */
 
-  /** Kind as the backend names it (`class`, `interface`, `enum`, `record`, `annotation`). */
+  /** Kind as the backend names it — Java's (`class`, `interface`, `enum`, `record`, `annotation`) or
+   *  a language server's, in that language's own vocabulary (`struct`, `trait`, `impl`). */
   let { kind, title }: { kind: string; title?: string } = $props();
 
-  /** Letter + colour per kind. The colours are the theme's semantic ones rather than
-   *  invented hues, so the whole set re-tints with a theme instead of drifting out of it —
-   *  and they are the assignments the rest of Bennu already uses for these kinds. */
+  /**
+   * Letter + colour per kind. The colours are the theme's semantic ones rather than invented hues, so
+   * the whole set re-tints with a theme instead of drifting out of it — and they are the assignments
+   * the rest of Bennu already uses for these kinds.
+   *
+   * The **hue carries the role and the letter carries the name**, which is what lets the two
+   * vocabularies sit in one table without either one being a translation of the other: a Rust `trait`
+   * is green because it is the interface-shaped thing, and it says `T` because that is what it is
+   * called. A struct is blue for the same reason a class is.
+   */
   const MARKS: Record<string, { letter: string; color: string; label: string }> = {
+    // ── Java ──
     class:      { letter: 'C', color: 'var(--info)',                 label: 'Class' },
     interface:  { letter: 'I', color: 'var(--success)',              label: 'Interface' },
     enum:       { letter: 'E', color: 'var(--warning)',              label: 'Enum' },
     record:     { letter: 'R', color: 'var(--color-tag, #c792ea)',   label: 'Record' },
     annotation: { letter: '@', color: 'var(--accent)',               label: 'Annotation' },
+    // ── from a language server, in the language's own words ──
+    // `S` also covers a union: the protocol sends both as `Struct`, so nothing downstream can tell
+    // them apart and inventing a `U` here would be a claim the data does not support.
+    struct:     { letter: 'S', color: 'var(--info)',                 label: 'Struct' },
+    trait:      { letter: 'T', color: 'var(--success)',              label: 'Trait' },
+    impl:       { letter: 'M', color: 'var(--color-tag, #c792ea)',   label: 'Impl block' },
+    'type alias': { letter: 'A', color: 'var(--text-secondary)',     label: 'Type alias' },
+    // A module and a namespace are containers rather than types, and read as one letter apart from
+    // the types they hold.
+    module:     { letter: 'N', color: 'var(--text-muted)',           label: 'Module' },
+    namespace:  { letter: 'N', color: 'var(--text-muted)',           label: 'Namespace' },
+    object:     { letter: 'O', color: 'var(--info)',                 label: 'Object' },
   };
 
   const mark = $derived(
-    MARKS[kind] ?? { letter: 'C', color: 'var(--text-muted)', label: 'Type' },
+    // The fallback is deliberately neutral and unlettered-by-name: an unfamiliar kind is a type
+    // whose name we do not have a letter for, not a class.
+    MARKS[kind.toLowerCase()] ?? { letter: '?', color: 'var(--text-muted)', label: kind || 'Type' },
   );
   // `@` is a wider glyph than a capital letter — set slightly smaller so it sits inside the
   // ring instead of touching it.

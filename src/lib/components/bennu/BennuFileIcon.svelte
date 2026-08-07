@@ -18,7 +18,7 @@
    */
   import IconifyIconView from '@iconify/svelte';
   import { getFileIcon } from '$lib/utils/file-icons';
-  import JavaKindIcon from './JavaKindIcon.svelte';
+  import SymbolKindIcon from './SymbolKindIcon.svelte';
   import { javaKindStore } from '$lib/stores/bennu/java-kinds.svelte';
 
   let { path, size = 13 }: { path: string; size?: number } = $props();
@@ -31,7 +31,7 @@
 {#if isJava}
   <!-- A `.java` whose kind isn't indexed yet reads as a class — the overwhelmingly common
        answer, and it settles the moment the index does. -->
-  <JavaKindIcon kind={javaKindStore.kindOf(norm)} />
+  <SymbolKindIcon kind={javaKindStore.kindOf(norm)} />
 {:else}
   <IconifyIconView icon={getFileIcon(name)} width={size} height={size} />
 {/if}

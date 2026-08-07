@@ -37,5 +37,12 @@ fn bennu_declaration(
     _ctx: &BennuState,
     args: DeclarationArgs,
 ) -> Result<Option<DeclarationTarget>, String> {
+    // A language-server-backed file (a `.rs` in a Cargo workspace) is answered by its server.
+    // The fall-through matters: routing a Rust buffer into the Java resolver would not fail
+    // quietly — that resolver parses anything as Java, so an identifier that happens to exist in
+    // the Java index becomes a confident jump into the wrong file.
+    if let Some(target) = crate::lsp_route::declaration(&args.file, &args.source, args.offset) {
+        return Ok(target);
+    }
     Ok(IndexService::global().declaration(&args.file, &args.source, args.offset))
 }

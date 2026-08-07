@@ -135,6 +135,12 @@
   let sel = $state(0);
   // The field keeps the focus throughout: refining a query after looking at the results is the
   // normal case, so the arrows drive the list without ever leaving the input.
+  //
+  // `data-modal-autofocus` on the input is what makes it focused *on opening* — and it is not
+  // belt-and-braces for the effect below. `Modal` runs its own initial-focus pass in a microtask,
+  // which is after the child effects, so it wins any race with them; its guess is "the first
+  // focusable that is not in the header", and this modal's body opens with the source picker and the
+  // file mask. Without the attribute the caret landed on a dropdown and the query had to be clicked.
   let field = $state<HTMLInputElement | null>(null);
   $effect(() => { field?.focus(); });
 
@@ -605,6 +611,7 @@
         autocomplete="off"
         placeholder="Find in project…"
         aria-label="Find in project"
+        data-modal-autofocus
       />
       {#if loading}<Spinner size={13} />{/if}
       <!-- The keys of a search bar: how a match is judged, and how far out of this project it

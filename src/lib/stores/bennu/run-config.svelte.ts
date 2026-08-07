@@ -20,6 +20,7 @@
 
 import { SvelteMap } from 'svelte/reactivity';
 import { getRunConfig, setRunConfig } from '$lib/ipc/bennu';
+import type { CargoInvocation } from '$lib/ipc/bennu/cargo';
 import type { RunConfigDto, RunConfigSetDto } from '$lib/types/bennu';
 
 /** One key/value environment-variable row. Empty keys are dropped on the way to
@@ -32,12 +33,13 @@ export interface EnvVar {
 
 /**
  * What a configuration LAUNCHES — the category the editor and the title-bar selector group
- * by. `application` runs a `main` class; `junit` runs a test scope through the test runner.
+ * by. `application` runs a `main` class; `junit` runs a test scope through the test runner;
+ * `cargo` runs a cargo subcommand.
  *
  * Kept deliberately small. A category belongs here when Bennu can actually run that thing;
  * inventing empty groups to look like IntelliJ would be a menu of dead ends.
  */
-export type RunConfigKind = 'application' | 'springboot' | 'junit';
+export type RunConfigKind = 'application' | 'springboot' | 'junit' | 'cargo';
 
 /** How much a `junit` configuration runs. */
 export type TestScopeKind = 'all' | 'module' | 'class';
@@ -47,27 +49,33 @@ export type TestScopeKind = 'all' | 'module' | 'class';
  * selector and the launcher, so the three cannot come to disagree about what a category is
  * called.
  *
- * `capability` names the project capability a kind needs to be OFFERED. A Spring Boot
- * configuration on a project with no Spring is a menu entry that can only disappoint;
- * existing ones are still listed and still run, because the file may be shared with someone
- * whose checkout has more in it.
+ * `capability` names what the project must be for a kind to be OFFERED. A Spring Boot
+ * configuration on a project with no Spring is a menu entry that can only disappoint, and a Cargo
+ * one on a Maven reactor has nothing to run; existing ones are still listed and still run, because
+ * the file may be shared with someone whose checkout has more in it.
  */
 export const RUN_KINDS: {
   id: RunConfigKind;
   label: string;
   newName: string;
-  capability?: 'spring';
+  capability?: 'spring' | 'cargo' | 'java';
 }[] = [
-  { id: 'application', label: 'Application', newName: 'Application' },
-  { id: 'springboot', label: 'Spring Boot', newName: 'Application', capability: 'spring' },
-  { id: 'junit', label: 'JUnit', newName: 'Tests' },
+  { id: 'application', label: 'Application', newName: 'Application', capability: 'java' },
+  {
+    id: 'springboot',
+    label: 'Spring Boot',
+    newName: 'Application',
+    capability: 'spring',
+  },
+  { id: 'junit', label: 'JUnit', newName: 'Tests', capability: 'java' },
+  { id: 'cargo', label: 'Cargo', newName: 'Cargo', capability: 'cargo' },
 ];
 
 /** Whether `s` names a kind this build can run. Anything else came from a newer Bennu: it is
  *  listed but not launchable, because the file is shared and dropping what we don't
  *  understand would silently delete someone's configuration. */
 export function isRunKind(s: string): s is RunConfigKind {
-  return s === 'application' || s === 'springboot' || s === 'junit';
+  return s === 'application' || s === 'springboot' || s === 'junit' || s === 'cargo';
 }
 
 /** Whether a kind launches a JVM main class (and so wears the class / args / environment
@@ -136,6 +144,39 @@ export interface RunConfig {
    * rather than a reason to stop using the run panel.
    */
   classpathScope: string;
+
+  // ── `cargo` only ──────────────────────────────────────────────────────────
+  //
+  // A Cargo configuration shares `name`, `module`, `programArgs`, `workingDir` and `env` with a
+  // JVM one and leaves the rest empty. The fields below map 1:1 onto the backend's `Invocation`,
+  // which is the single place a cargo command line is assembled — so a configuration cannot
+  // produce flags the Cargo panel would not.
+  //
+  // `module` holds the **crate name** here, not a directory: that is what `-p` takes. Reusing the
+  // field keeps "which part of the project is this for" in one place for both ecosystems.
+
+  /** The subcommand: `run` · `test` · `check` · `build` · `clippy` · `fmt` · `doc` · … */
+  cargoCommand: string;
+  /** The target selector's kind — `bin` · `example` · `test` · `bench` · `lib` · `all-targets`. */
+  cargoTargetKind: string;
+  /** The target's name, for the kinds that take one. */
+  cargoTarget: string;
+  /** Features to enable, comma-separated as cargo spells them (`std,derive`). */
+  cargoFeatures: string;
+  cargoAllFeatures: boolean;
+  cargoNoDefaultFeatures: boolean;
+  cargoRelease: boolean;
+  /** A named `--profile`, which wins over {@link cargoRelease}. */
+  cargoProfile: string;
+  /** `--workspace`, ignored when a crate is named. */
+  cargoWorkspace: boolean;
+  /**
+   * Extra cargo flags placed BEFORE the `--` (`--locked`, `--offline`).
+   *
+   * Distinct from {@link programArgs}, which goes AFTER it and reaches the program or the test
+   * harness. Conflating the two is how `--nocapture` ends up being handed to cargo.
+   */
+  cargoArgs: string;
 }
 
 /** The per-project run-config bundle — the ordered list plus which one is active. */
@@ -170,6 +211,16 @@ function toDto(c: RunConfig): RunConfigDto {
     test_target: c.testTarget,
     debug_suspend: c.debugSuspend,
     classpath_scope: c.classpathScope,
+    cargo_command: c.cargoCommand,
+    cargo_target_kind: c.cargoTargetKind,
+    cargo_target: c.cargoTarget,
+    cargo_features: c.cargoFeatures,
+    cargo_all_features: c.cargoAllFeatures,
+    cargo_no_default_features: c.cargoNoDefaultFeatures,
+    cargo_release: c.cargoRelease,
+    cargo_profile: c.cargoProfile,
+    cargo_workspace: c.cargoWorkspace,
+    cargo_args: c.cargoArgs,
   };
 }
 
@@ -196,6 +247,19 @@ function fromDto(d: RunConfigDto): RunConfig {
     // every-scope classpath. It now gets `runtime` — deliberately a change in behaviour on the
     // next launch, because the old one was the wrong classpath.
     classpathScope: d.classpath_scope ?? 'runtime',
+    // `check` rather than an empty string: it is the harmless subcommand, and it is what the
+    // backend falls back to anyway — so a hand-edited file with a `cargo` kind and no command
+    // still runs something rather than nothing.
+    cargoCommand: d.cargo_command || 'check',
+    cargoTargetKind: d.cargo_target_kind ?? '',
+    cargoTarget: d.cargo_target ?? '',
+    cargoFeatures: d.cargo_features ?? '',
+    cargoAllFeatures: d.cargo_all_features ?? false,
+    cargoNoDefaultFeatures: d.cargo_no_default_features ?? false,
+    cargoRelease: d.cargo_release ?? false,
+    cargoProfile: d.cargo_profile ?? '',
+    cargoWorkspace: d.cargo_workspace ?? false,
+    cargoArgs: d.cargo_args ?? '',
   };
 }
 
@@ -216,6 +280,18 @@ export function emptyConfig(name = 'Unnamed', kind: RunConfigKind = 'application
     testTarget: '',
     debugSuspend: false,
     classpathScope: 'runtime',
+    // A new Cargo configuration checks the whole workspace: the fastest command that always has
+    // something to say, and the one you can press without reading the form first.
+    cargoCommand: 'check',
+    cargoTargetKind: '',
+    cargoTarget: '',
+    cargoFeatures: '',
+    cargoAllFeatures: false,
+    cargoNoDefaultFeatures: false,
+    cargoRelease: false,
+    cargoProfile: '',
+    cargoWorkspace: kind === 'cargo',
+    cargoArgs: '',
   };
 }
 
@@ -230,6 +306,38 @@ export function splitArgs(raw: string): string[] {
     out.push(m[1] ?? m[2] ?? m[3] ?? '');
   }
   return out;
+}
+
+/**
+ * A `cargo` configuration as the backend's {@link CargoInvocation}.
+ *
+ * Lives here rather than in the run store because two callers need exactly the same translation:
+ * the launcher, and the editor's command preview. A preview that showed a different command line
+ * from the one that runs would be worse than no preview at all.
+ *
+ * Note which field goes where: `cargoArgs` are cargo's own flags (`extra`, before the `--`) and
+ * `programArgs` reach the program or the test harness (`args`, after it).
+ */
+export function cargoInvocationOf(cfg: RunConfig): CargoInvocation {
+  const crate = cfg.module.trim();
+  return {
+    command: cfg.cargoCommand.trim() || 'check',
+    package: crate,
+    // Asking for both a crate and the whole workspace is contradictory; the backend resolves it the
+    // same way, and sending it as written keeps the two agreeing.
+    workspace: !crate && cfg.cargoWorkspace,
+    target: { kind: cfg.cargoTargetKind.trim(), name: cfg.cargoTarget.trim() },
+    release: cfg.cargoRelease,
+    profile: cfg.cargoProfile.trim(),
+    features: cfg.cargoFeatures
+      .split(',')
+      .map((f) => f.trim())
+      .filter(Boolean),
+    all_features: cfg.cargoAllFeatures,
+    no_default_features: cfg.cargoNoDefaultFeatures,
+    extra: splitArgs(cfg.cargoArgs),
+    args: splitArgs(cfg.programArgs),
+  };
 }
 
 /** Collapse the env-var rows into a record, dropping rows with an empty key and

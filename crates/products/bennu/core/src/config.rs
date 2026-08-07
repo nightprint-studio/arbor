@@ -149,6 +149,148 @@ pub struct BennuConfig {
     /// note on this struct), and a scalar declared after this one would be read back as a
     /// key of it.
     pub library_beans: LibraryBeansConfig,
+    /// **Language servers** — which ones may run, where their binaries are, and any the user
+    /// added themselves. See [`LspConfig`].
+    ///
+    /// A table, so it must stay beside `library_beans` at the end of the struct.
+    pub lsp: LspConfig,
+    /// **Cargo / crates.io** — the one part of Bennu that reaches the network on its own. See
+    /// [`CargoConfig`].
+    ///
+    /// A table: it stays at the end with the others.
+    pub cargo: CargoConfig,
+}
+
+/// Cargo settings — specifically, Bennu's use of the crates.io index.
+///
+/// Everything else about a Rust project is read off the machine (the manifests, `Cargo.lock`, the
+/// unpacked sources in `$CARGO_HOME`). Two questions cannot be: "is there a newer version of this
+/// crate" and "what versions can I pick when adding one". Both are answered from
+/// `index.crates.io`, and that deserves a switch rather than being an unannounced fact about the
+/// editor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CargoConfig {
+    /// Whether Bennu may query the crates.io index.
+    ///
+    /// `true` by default: a Rust editor that cannot say a dependency is three minor versions behind
+    /// is missing something a Rust developer expects, and the traffic is one small text file per
+    /// crate per [`Self::index_ttl_hours`]. Off makes Bennu entirely local again — version hints
+    /// disappear, and adding a dependency still works, it just cannot offer the version list.
+    pub crates_io: bool,
+    /// How long a cached version list stays fresh, in hours.
+    ///
+    /// A day by default, which is the right order of magnitude for the question being asked: crates
+    /// publish weekly at most, and "your dependency is behind" does not become more true by being
+    /// checked hourly. `0` is read as the default rather than as "always refetch" — a TTL of zero
+    /// would mean a request per crate per manifest open, which is exactly what the cache exists to
+    /// prevent.
+    pub index_ttl_hours: u32,
+}
+
+impl Default for CargoConfig {
+    fn default() -> Self {
+        Self { crates_io: true, index_ttl_hours: 24 }
+    }
+}
+
+/// Language-server settings.
+///
+/// Bennu's Java intelligence is its own engine; every other language is served by an external
+/// language server. The built-in catalogue (`bennu_lsp`'s `BUILTIN_SERVERS`) knows how to run
+/// a handful of them, and [`servers`](Self::servers) is how a language nobody anticipated is
+/// added without a new release.
+///
+/// Field order matters for TOML: the scalar and inline-array values are declared before the
+/// map and the array-of-tables.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct LspConfig {
+    /// Master switch. `true` by default: a server is only ever started for a project whose
+    /// root carries the matching manifest *and* whose binary is installed, so "on" costs
+    /// nothing on a machine with nothing installed.
+    pub enabled: bool,
+    /// What rust-analyzer runs to produce **real** diagnostics on save: `check` or `clippy`.
+    ///
+    /// `check` by default, because it is what `cargo build` would have told you and it is the
+    /// faster of the two. `clippy` is a superset — every `cargo check` error plus several hundred
+    /// lints — and costs a slower build after each save, which on a large workspace is the
+    /// difference between diagnostics landing in two seconds and in ten.
+    ///
+    /// Server-specific in an otherwise generic struct, which is deliberate rather than
+    /// overlooked: it is the one such knob with a UI behind it, and the alternative — a free-form
+    /// per-server JSON blob — cannot be safely edited by a toggle that does not know what else is
+    /// in it. If a second one ever appears, a `[lsp.<server-id>]` section is its home, not a
+    /// second scalar here.
+    pub rust_check_command: String,
+    /// Server ids the user turned off (`rust-analyzer`, or a custom server's id).
+    ///
+    /// A denylist rather than an allowlist so that a server added to the catalogue later
+    /// works without the user editing anything — the same reason `step_excludes` is empty by
+    /// default.
+    pub disabled: Vec<String>,
+    /// Explicit executable path per server id, for a binary discovery does not find (or a
+    /// specific build the user wants). An absolute path wins over everything; a bare name is
+    /// looked up like any command.
+    pub server_paths: BTreeMap<String, String>,
+    /// **User-defined servers**, for a language the catalogue does not cover. See
+    /// [`CustomLspServer`]. An entry whose `id` matches a built-in replaces it, which is how
+    /// a server is reconfigured rather than merely re-pointed.
+    pub servers: Vec<CustomLspServer>,
+}
+
+impl Default for LspConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            rust_check_command: "check".to_string(),
+            disabled: Vec::new(),
+            server_paths: BTreeMap::new(),
+            servers: Vec::new(),
+        }
+    }
+}
+
+/// One language server the user configured by hand.
+///
+/// The same fields the built-in catalogue carries, because the two are interchangeable by
+/// design: anything Bennu can do for Rust it can do for a language whose server is described
+/// here, with no code change.
+///
+/// All fields are scalars or inline arrays, so this serializes as an
+/// `[[lsp.servers]]` array-of-tables.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct CustomLspServer {
+    /// Stable id — the key for a path override or a disable. Required; an entry without one
+    /// is ignored.
+    pub id: String,
+    /// Display name. Falls back to `id` when empty.
+    pub name: String,
+    /// The LSP `languageId` to send in `didOpen` (`"zig"`, `"ruby"`). Falls back to `id`.
+    ///
+    /// Worth setting correctly: some servers branch on it, and it is also Bennu's own key for
+    /// "which server owns this language".
+    pub language: String,
+    /// The executable. Looked up the same way a catalogue command is (an absolute path is
+    /// used as-is).
+    pub command: String,
+    /// Arguments. Several servers default to a socket and need `--stdio` here.
+    pub args: Vec<String>,
+    /// File extensions it serves, without dots (`["zig"]`). Required — an entry serving no
+    /// extension can never be selected.
+    pub extensions: Vec<String>,
+    /// Files whose presence marks a workspace root (`["build.zig"]`). Required, and the real
+    /// gate: without a marker above the file there is no workspace to open, so nothing starts
+    /// — which is what keeps a stray `.py` in a Java repo from spawning a Python server.
+    pub root_markers: Vec<String>,
+    /// `initializationOptions` as a **JSON string** (`'{"checkOnSave":true}'`).
+    ///
+    /// A string rather than a nested table because these are arbitrary server-defined JSON —
+    /// booleans, nested objects, arrays of objects — and TOML cannot express all of it without
+    /// a conversion whose edge cases would silently change what the server receives. Invalid
+    /// JSON is ignored and logged rather than failing the whole config.
+    pub initialization_options: String,
 }
 
 /// Which dependencies' beans are read. See [`BennuConfig::library_beans`].
@@ -192,6 +334,8 @@ impl Default for BennuConfig {
             spring_property_files: BTreeMap::new(),
             jsp_action_bindings: BTreeMap::new(),
             library_beans: LibraryBeansConfig::default(),
+            lsp: LspConfig::default(),
+            cargo: CargoConfig::default(),
         }
     }
 }

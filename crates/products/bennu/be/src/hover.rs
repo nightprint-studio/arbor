@@ -32,5 +32,10 @@ pub struct HoverArgs {
 /// the file, its index is still building, or the caret isn't on a classifiable symbol.
 #[arbor_rpc::handler]
 fn bennu_hover(_ctx: &BennuState, args: HoverArgs) -> Result<Option<HoverInfo>, String> {
+    // A server-backed file answers from its own server, whose hover is markdown — split into
+    // the card's signature / container / doc slots by `lsp_route`.
+    if let Some(card) = crate::lsp_route::hover(&args.file, &args.source, args.offset) {
+        return Ok(card);
+    }
     Ok(IndexService::global().hover(&args.file, &args.source, args.offset))
 }

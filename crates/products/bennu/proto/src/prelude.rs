@@ -2,8 +2,8 @@
 //!
 //! Workspace convention: call sites (in `bennu-be`, and any future in-process
 //! consumer) reach this crate's surface through `bennu_proto::prelude::...`. The
-//! `contract` submodule stays `pub` for rustdoc navigation, but the prelude is the
-//! canonical call-site path.
+//! `contract` and `lsp` submodules stay `pub` for rustdoc navigation, but the prelude is
+//! the canonical call-site path.
 
 pub use crate::contract::{
     Breakpoint, BreakpointStatus, BuildDiagnostic, BuildResult, CapabilityHit, CapabilitySet,
@@ -15,7 +15,12 @@ pub use crate::contract::{
     JdkStatus, JspActionBinding, JspActionOption, JspNav, PropertyLintHit,
     InheritedMember, InheritedSource, JdkInfo, MainClassEntry, ProjectInfo, ProjectKind,
     ProjectValidationResult,
-    RenameEdit, RenameFileEdits, RenamePreview, RunConfig, RunConfigSet, RunHandle, SpellHit,
+    RenameEdit, RenameFileEdits, RenamePreview, RunConfig, RunConfigSet, RunHandle, SnippetStop, SpellHit,
     SpellStatus,
     TodoItem, TreeNode, UsageHit, UsagesResult, ValidationContext, WriteResult,
+};
+pub use crate::lsp::{
+    LspAction, LspCallSite, LspDiagnostic, LspFold, LspHierarchyNode, LspHighlight, LspLens,
+    LspMacroExpansion, LspRelated, LspServerInfo, LspSignature, LspStatus, LspSymbol, LspToken,
+    SourceEdit,
 };

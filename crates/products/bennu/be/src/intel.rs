@@ -44,10 +44,34 @@ pub struct CompletionArgs {
     pub source: Option<String>,
 }
 
-/// Completion candidates at a position — served from the owning project's built index
-/// (empty while the index is still building, per the async lifecycle).
+/// Completion candidates at a position.
+///
+/// One handler, two engines: a language-server-backed file (a `.rs` in a Cargo workspace) is
+/// answered by [`crate::lsp_route`], everything else by the owning project's built index. The
+/// frontend has no per-language branch for this — which is the point of the provider seam.
+///
+/// Both engines answer the empty list while they are still warming up, so a project that has
+/// just been opened degrades the same way regardless of which one owns the file.
 #[arbor_rpc::handler]
 fn bennu_completion(_ctx: &BennuState, args: CompletionArgs) -> Result<Vec<CompletionItem>, String> {
+    // A language server needs the live buffer to answer at all — the caret offset is in its
+    // coordinates. Without one there is nothing to ask, and falling through to the Java index
+    // for a `.rs` file would be worse than answering nothing.
+    if let Some(source) = args.source.as_deref() {
+        if let Some(items) = crate::lsp_route::completion(&args.file, args.offset, source) {
+            return Ok(items);
+        }
+    } else if crate::lsp_route::owns(&args.file) {
+        return Ok(Vec::new());
+    }
+    // A `Cargo.toml` — answered from the manifest schema and this machine's crate catalogue. Routed
+    // before the index for the same reason a `.rs` file is: the Java engine has nothing to say about
+    // it, and letting it answer would offer Java members inside a manifest.
+    if let Some(items) =
+        crate::cargo_intel::completion(&args.file, args.offset, args.source.as_deref())
+    {
+        return Ok(items);
+    }
     Ok(IndexService::global().completion(&args.file, args.offset, args.source.as_deref()))
 }
 
@@ -92,6 +116,20 @@ pub struct DiagnosticsArgs {
 /// file, the empty stub (syntactic diagnostics land with tree-sitter in a later wave).
 #[arbor_rpc::handler]
 fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Diagnostic>, String> {
+    // A language-server-backed file first. Its diagnostics are **pushed** by the server (for
+    // Rust they arrive when `cargo check` finishes, seconds after a save), so this call reads the
+    // last publish rather than computing anything — which is why it is cheap enough to sit on the
+    // same debounce as the Java validation, and why it ignores the fast/full `resolved` tier: a
+    // server has only one answer.
+    if let Some(diags) = crate::lsp_route::diagnostics(&args.file, args.source.as_deref()) {
+        return Ok(diags);
+    }
+    // A `Cargo.toml`. Its own validator rather than a language server's: rust-analyzer reports very
+    // little about a manifest, and what it does report arrives only after a reload — whereas a typo
+    // in a key name is worth a squiggle the moment it is typed.
+    if let Some(diags) = crate::cargo_intel::diagnostics(&args.file, args.source.as_deref()) {
+        return Ok(diags);
+    }
     // Action refs to check: the FE's explicit list when present, else — for a JSP — the
     // refs the BE extracts itself (reusing `bennu-web`'s scan), so squiggles work with no
     // FE change. A plain Java file with no actions falls to the native syntactic stub.
@@ -411,6 +449,12 @@ pub struct DidChangeArgs {
 /// patch ran), `false` otherwise.
 #[arbor_rpc::handler]
 fn bennu_did_change(_ctx: &BennuState, args: DidChangeArgs) -> Result<bool, String> {
+    // A server-backed file syncs to its server instead of into the Java index. Not "as well
+    // as": the Java extractor would parse Rust as Java and patch nonsense into the symbol
+    // index, which then surfaces as phantom completions in real Java files.
+    if let Some(handled) = crate::lsp_route::did_change(&args.file, args.text.as_deref()) {
+        return Ok(handled);
+    }
     IndexService::global().patch_file(&args.file, args.text.as_deref());
     Ok(true)
 }

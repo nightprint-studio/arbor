@@ -1,4 +1,4 @@
-//! `bennu-deps` — what a Maven project depends on, and who decided each answer.
+//! `bennu-deps` — what a project depends on, and who decided each answer.
 //!
 //! ## Why this is not "list the jars"
 //!
@@ -19,11 +19,19 @@
 //! | the poms ([`pom`], [`graph`]) | modules, scopes, `optional`, profiles, the version and **its origin**, where it is written |
 //! | the resolved classpath ([`repo`]) | whether it is actually there, and what came in behind it |
 //!
+//! ## Two ecosystems, one report
+//!
+//! [`graph::read`] answers for a Maven reactor and [`cargo::read`] for a Cargo workspace, and both
+//! produce the same [`model::Report`] — one panel, one set of questions. The vocabularies differ
+//! (`scope` against `kind`, `groupId` against a crate name) and [`model`] documents exactly how they
+//! line up and which two fields belong to one ecosystem only.
+//!
 //! ## Nothing is executed
 //!
-//! No Maven, no network, no build. The classpath is whatever the index service already resolved —
-//! this crate reads files and matches names. A project that has never been built still lists its
-//! dependencies correctly; it just cannot say which of them resolved.
+//! No Maven, no Cargo, no network, no build. The Maven classpath is whatever the index service
+//! already resolved; the Cargo versions come from `Cargo.lock` — this crate reads files and matches
+//! names. A project that has never been built still lists its dependencies correctly; it just cannot
+//! say which of them resolved.
 //!
 //! ## Public API: use the [`prelude`]
 //!
@@ -31,6 +39,8 @@
 
 // One `pom.xml`, read structurally.
 pub mod pom;
+// The Cargo producer of the same report — see [`model`] for how the two ecosystems share a shape.
+pub mod cargo;
 // The reactor, assembled: inheritance, properties, management, and the jar match.
 pub mod graph;
 // A local-repository jar path, read back as a coordinate.

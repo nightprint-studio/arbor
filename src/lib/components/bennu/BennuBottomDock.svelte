@@ -20,6 +20,7 @@
   import BennuRunPanel from './BennuRunPanel.svelte';
   import BennuTerminalView from './BennuTerminalView.svelte';
   import BennuTodoPanel from './BennuTodoPanel.svelte';
+  import BennuHierarchyPanel from './BennuHierarchyPanel.svelte';
   import BennuFormsPanel from './BennuFormsPanel.svelte';
   import BennuCatalogPanel from './BennuCatalogPanel.svelte';
   import { isFrameworkCatalog } from './framework-catalogs';
@@ -45,6 +46,12 @@
   </div>
   <div class="dock-section" class:hidden={active !== 'todos'}>
     <BennuTodoPanel />
+  </div>
+  <!-- Stays mounted while hidden, like the two above: the tree cost several round-trips to build,
+       one level at a time, and unmounting it would throw that away — then looking at the Problems
+       list and coming back would mean building it again from the caret, which has since moved. -->
+  <div class="dock-section" class:hidden={active !== 'hierarchy'}>
+    <BennuHierarchyPanel />
   </div>
   {#if active === 'forms'}
     <div class="dock-section">

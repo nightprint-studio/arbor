@@ -135,7 +135,7 @@
     ...bennuRunStore.tabs.map((t) => ({
       id: t.id,
       label: t.label,
-      title: t.command || t.mainClass,
+      title: t.command || t.subject,
       closable: true,
       icon: t.live ? Play : undefined,
       iconSize: 11,

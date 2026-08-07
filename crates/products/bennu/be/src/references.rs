@@ -40,6 +40,12 @@ fn bennu_references(
     _ctx: &BennuState,
     args: ReferencesArgs,
 ) -> Result<Option<UsagesResult>, String> {
+    // A server-backed file answers from its own server. `origin_file` is a Java-only concern
+    // (a caret inside a decompiled library view, which has no equivalent here), so the plain
+    // path is the only one that needs routing.
+    if let Some(usages) = crate::lsp_route::references(&args.file, &args.source, args.offset) {
+        return Ok(usages);
+    }
     let service = IndexService::global();
     let result = match &args.origin_file {
         Some(origin) => service.find_usages_from(origin, &args.file, &args.source, args.offset),

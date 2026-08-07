@@ -938,7 +938,7 @@
   .nv-on, .nv-on:hover { background: var(--bg-selected); color: var(--text-primary); }
   .nv-on .nv-detail { color: var(--text-secondary); }
   /* On the selection fill the kind colours go muddy — hand the icon the row's own colour
-     (see JavaKindIcon's `--jki-color`). */
+     (see SymbolKindIcon's `--jki-color`). */
   .nv-on .nv-icon { color: var(--text-primary); --jki-color: currentColor; }
   .nv-icon { display: inline-flex; align-self: center; color: var(--text-muted); flex-shrink: 0; }
   .nv-icon-gap { width: 13px; }

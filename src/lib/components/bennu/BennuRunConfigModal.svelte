@@ -57,6 +57,8 @@
   } from '$lib/stores/bennu/run-config.svelte';
   import { springStore } from '$lib/stores/bennu/spring.svelte';
   import { runKindIcon } from './run-kinds';
+  import BennuCargoRunForm from './BennuCargoRunForm.svelte';
+  import BennuRunEnvField from './BennuRunEnvField.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -66,10 +68,24 @@
   const hasSpring = $derived(
     !!projectStore.capabilities?.spring_annotation_di || !!projectStore.capabilities?.spring_xml_di,
   );
+  /** Which ecosystem this project is — the gate on offering a JVM kind or a Cargo one. */
+  const isCargo = $derived(projectStore.isCargo);
   /** The kinds offered by the + menu. An existing configuration of a kind that is not
    *  offered still appears in the list and still runs — the project may have changed, or the
    *  file may be shared with someone whose checkout has more in it. */
-  const offeredKinds = $derived(RUN_KINDS.filter((k) => k.capability !== 'spring' || hasSpring));
+  const offeredKinds = $derived(
+    RUN_KINDS.filter((k) => {
+      switch (k.capability) {
+        // A Spring Boot configuration on a project with no Spring can only disappoint.
+        case 'spring': return hasSpring;
+        // `bennu_run` launches a JVM, so an Application or a JUnit run has nothing to do on a
+        // Cargo root — and `cargo` has nothing to do on a Maven one.
+        case 'java': return !isCargo;
+        case 'cargo': return isCargo;
+        default: return true;
+      }
+    }),
+  );
 
   // ── Selection ───────────────────────────────────────────────────────────────
   // Selected = which config the form edits (distinct from ACTIVE = what ▶ Run
@@ -257,20 +273,6 @@
   function patch(p: Partial<Omit<RunConfig, 'id'>>) {
     if (root && selectedId) bennuRunConfigStore.update(root, selectedId, p);
   }
-  function addEnv() {
-    if (!selected) return;
-    patch({ env: [...selected.env, { key: '', value: '' }] });
-  }
-  function updateEnv(idx: number, next: Partial<EnvVar>) {
-    if (!selected) return;
-    const env = selected.env.map((e, i) => (i === idx ? { ...e, ...next } : e));
-    patch({ env });
-  }
-  function removeEnv(idx: number) {
-    if (!selected) return;
-    patch({ env: selected.env.filter((_, i) => i !== idx) });
-  }
-
   // ── Run the SELECTED config (build then launch) ──────────────────────────────
   // A JVM configuration needs a class; a JUnit one is runnable as soon as it exists (an
   // empty scope means "everything", which is a legitimate thing to run).
@@ -282,6 +284,8 @@
       isRunKind(selected.kind) &&
       // A Spring Boot configuration is runnable with an empty class when the module has one
       // `@SpringBootApplication` — that IS the class, and typing it changes nothing.
+      // A Cargo configuration is runnable as soon as it exists: an empty command reads as
+      // `check`, which is a legitimate thing to run.
       (isJvmKind(selected.kind)
         ? selected.mainClass.trim().length > 0 ||
           (selected.kind === 'springboot' && !!detectedBootClass)
@@ -372,6 +376,10 @@
    *  only place it can be accurate about the JDK and the resolved classpath. */
   const cmdPreview = $derived.by(() => {
     if (!selected) return '';
+    // A Cargo configuration's preview comes from the backend — the same function that builds the
+    // real command line — and is shown by `BennuCargoRunForm`. Reconstructing it here would be the
+    // second assembler this codebase deliberately does not have.
+    if (selected.kind === 'cargo') return '';
     if (selected.kind === 'junit') {
       const target = selected.testTarget.trim();
       if (selected.testScope === 'module' && target) return `mvn -pl ${target} test`;
@@ -599,6 +607,10 @@
                 />
               </FormField>
             {/if}
+          {:else if selected.kind === 'cargo'}
+            <!-- Its own file: a cargo configuration shares almost nothing with a JVM one below the
+                 name field, and this modal is already the largest component in Bennu. -->
+            <BennuCargoRunForm config={selected} {patch} />
           {:else}
 
           <!-- Above the class, because it narrows what the class picker offers and it is the
@@ -748,52 +760,12 @@
             </label>
           </FormField>
 
-          <FormField label="Environment variables">
-            {#snippet actions()}
-              <button
-                class="icon-btn"
-                onclick={addEnv}
-                use:tooltip={'Add variable'}
-                aria-label="Add environment variable"
-              >
-                <Plus size={13} />
-              </button>
-            {/snippet}
-            {#if selected.env.length === 0}
-              <div class="env-empty">No environment variables.</div>
-            {:else}
-              <div class="env-rows">
-                {#each selected.env as row, i (i)}
-                  <div class="env-row">
-                    <Input
-                      value={row.key}
-                      placeholder="NAME"
-                      ariaLabel="Variable name"
-                      oninput={(v) => updateEnv(i, { key: v })}
-                    />
-                    <span class="env-eq">=</span>
-                    <Input
-                      value={row.value}
-                      placeholder="value"
-                      ariaLabel="Variable value"
-                      oninput={(v) => updateEnv(i, { value: v })}
-                    />
-                    <button
-                      class="icon-btn"
-                      onclick={() => removeEnv(i)}
-                      use:tooltip={'Remove'}
-                      aria-label="Remove variable"
-                    >
-                      <X size={13} />
-                    </button>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-          </FormField>
+          <BennuRunEnvField env={selected.env} onchange={(next) => patch({ env: next })} />
           {/if}
 
-          <p class="cmd-preview"><span class="cmd">{cmdPreview}</span></p>
+          {#if cmdPreview}
+            <p class="cmd-preview"><span class="cmd">{cmdPreview}</span></p>
+          {/if}
         {/if}
       </section>
     </div>
@@ -968,15 +940,6 @@
     cursor: pointer; padding: 2px 0;
   }
 
-  .env-empty { font-size: var(--font-size-xs); color: var(--text-muted); padding: 2px 0; }
-  .env-rows { display: flex; flex-direction: column; gap: 6px; }
-  .env-row {
-    display: grid;
-    grid-template-columns: 1fr auto 1.4fr auto;
-    align-items: center;
-    gap: 6px;
-  }
-  .env-eq { color: var(--text-muted); font-family: var(--font-code); }
 
   /* Shared small icon button — matches the list toolbar + field actions. */
   .icon-btn {

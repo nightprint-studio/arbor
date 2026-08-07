@@ -32,6 +32,14 @@ export {
   dismissInlineCompletion,
   inlineCompletionActive,
 } from './inline-completion';
+// Semantic highlighting — the token layer only something that knows the types can supply
+// (a language server). Painted OVER the base highlight, never instead of it.
+export {
+  semanticHighlight,
+  setSemanticTokens,
+  semanticTokenCount,
+  type SemanticToken,
+} from './semantic-tokens';
 export { codeEditorTheme } from './theme';
 // A colour per namespace family (a taglib prefix, an XML namespace) — see the module.
 export {
@@ -48,6 +56,18 @@ export { dtdLanguage, dtdMode } from './dtd-mode';
 export { javascriptStream } from './js-mode';
 export { createCodeEditorExtensions, refTextAt, type CodeEditorExtensionsOptions } from './extensions';
 export { createHighlightPlugin, makeByteToU16, makeU16ToByte, parserReady } from './highlight';
+// Tab stops of an inserted completion — see `snippet-stops.ts` for why this is not CodeMirror's own
+// `snippet()`.
+export { insertWithStops, snippetStops } from './snippet-stops';
+// Layers a provider supplies and the buffer cannot — occurrences of the symbol under the caret, and
+// where the file folds.
+export {
+  documentHighlights, serverFolding, setDocumentHighlights, setFoldRanges,
+  type FoldRange, type HighlightRange,
+} from './server-layers';
+// The counts a provider draws above an item — a pushed layer like the two above, and the only one
+// that is a control rather than a decoration.
+export { codeLensLayer, setCodeLenses, type LensEntry } from './code-lens';
 export { hoverCardDom, parseDoc, type HoverCard } from './hover-card';
 export {
   pasteIntoLiteral,

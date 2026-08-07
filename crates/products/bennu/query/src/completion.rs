@@ -217,6 +217,7 @@ fn add_matching(
             kind: kind_tag(m.kind).to_string(),
             detail: Some(render_detail(m)),
             auto_import: None, // a member has no import to add
+            ..Default::default()
         });
     }
 }

@@ -581,6 +581,7 @@ impl NativeJavaProvider {
                     // (which needs no import). Ambiguous names (several packages) are left to the
                     // Alt+Enter picker, so we never silently import the wrong `List`.
                     auto_import: single_import_candidate(candidates),
+                    ..Default::default()
                 }
             })
             .collect()

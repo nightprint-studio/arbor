@@ -35,6 +35,15 @@
   import { createCodeEditorExtensions, historyReset, refTextAt } from './extensions';
   import { minimapExtension } from './minimap';
   import { makeByteToU16 } from './highlight';
+  import {
+    setDocumentHighlights as cmSetDocumentHighlights,
+    setFoldRanges as cmSetFoldRanges,
+  } from './server-layers';
+  import {
+    setSemanticTokens as cmSetSemanticTokens,
+    type SemanticToken,
+  } from './semantic-tokens';
+  import { setCodeLenses as cmSetCodeLenses } from './code-lens';
 
   let {
     value,
@@ -68,6 +77,7 @@
     onViewState,
     onfocus,
     onGoto,
+    onLensPress,
   }: {
     value: string;
     language: LanguageDescriptor;
@@ -214,6 +224,11 @@
     /** Ctrl/Cmd+Click on an identifier the descriptor didn't resolve locally — the word
      *  plus the clicked position as a UTF-8 byte offset (for a BE go-to-declaration). */
     onGoto?: (word: string, view: EditorView, byteOffset: number) => void;
+    /** A code lens was pressed, identified by the `key` the host pushed with it.
+     *
+     *  Supplying this is what installs the lens layer: a lens is a control, and a host with nothing
+     *  to do with a press should not draw something that invites one. */
+    onLensPress?: (key: number) => void;
   } = $props();
 
   let hostEl: HTMLDivElement | undefined = $state();
@@ -547,8 +562,8 @@
 
   function mount(target: HTMLDivElement) {
     const { extensions } = createCodeEditorExtensions(language, {
-      readOnly, onGoto, rulerColumn, emmet, indentGuides, stickyScroll, scrollbarOverview,
-      keyBindings, lineNumbers,
+      readOnly, onGoto, onLensPress, rulerColumn, emmet, indentGuides, stickyScroll,
+      scrollbarOverview, keyBindings, lineNumbers,
     });
 
     const updateListener = EditorView.updateListener.of((u) => {
@@ -817,6 +832,104 @@
     if (!view) return;
     const src = view.state.doc.toString();
     view.dispatch(cmSetDiagnostics(view.state, toCmDiagnostics(errors, src)));
+  }
+
+  /**
+   * Imperatively replace the **semantic** highlight layer (byte spans → token marks).
+   *
+   * The counterpart of {@link setDiagnostics}, and pushed the same way for the same reason: the
+   * answer comes from a backend on its own schedule, so the host fetches it and hands it over
+   * rather than the editor pulling. An empty array clears the layer, which is what a host does
+   * when it switches to a language that has no server.
+   *
+   * Layered over the base highlight, never instead of it — see `semantic-tokens.ts`.
+   */
+  export function setSemanticTokens(tokens: SemanticToken[]) {
+    if (!view) return;
+    view.dispatch({ effects: cmSetSemanticTokens.of(tokens) });
+  }
+
+  /**
+   * Replace the **occurrence-highlight** layer — where else the symbol under the caret appears.
+   *
+   * Byte ranges, converted here against the live buffer for the same reason the semantic tokens are:
+   * only this component knows which text the offsets have to agree with. An empty array clears it,
+   * which is what the host does when the caret moves off a symbol.
+   */
+  export function setDocumentHighlights(
+    spans: readonly { start: number; end: number; kind: string }[],
+  ) {
+    if (!view) return;
+    const b2u = makeByteToU16(view.state.doc.toString());
+    view.dispatch({
+      effects: cmSetDocumentHighlights.of(
+        spans.map((s) => ({ from: b2u(s.start), to: b2u(s.end), kind: s.kind })),
+      ),
+    });
+  }
+
+  /**
+   * Replace the **fold ranges** a provider supplied.
+   *
+   * Only does anything for a descriptor with `serverFold` — the extension that reads them is
+   * installed by that flag. An empty array leaves the file unfoldable rather than folded.
+   */
+  export function setFoldRanges(
+    ranges: readonly { start: number; end: number; placeholder?: string }[],
+  ) {
+    if (!view) return;
+    const b2u = makeByteToU16(view.state.doc.toString());
+    view.dispatch({
+      effects: cmSetFoldRanges.of(
+        ranges.map((r) => ({ from: b2u(r.start), to: b2u(r.end), placeholder: r.placeholder })),
+      ),
+    });
+  }
+
+  /**
+   * Replace the **code lenses** — the counts a provider draws above an item.
+   *
+   * Only does anything when the host passed `onLensPress`, which is what installs the layer. Each
+   * entry's `key` comes back to that callback on a press, so the host can identify which lens it
+   * was without the editor having to understand what any of them mean.
+   */
+  export function setCodeLenses(
+    lenses: readonly {
+      start: number;
+      title: string;
+      actionable: boolean;
+      key: number;
+      tone?: 'muted' | 'accent';
+    }[],
+  ) {
+    if (!view) return;
+    const b2u = makeByteToU16(view.state.doc.toString());
+    view.dispatch({
+      effects: cmSetCodeLenses.of(
+        lenses.map((l) => ({
+          pos: b2u(l.start),
+          title: l.title,
+          actionable: l.actionable,
+          tone: l.tone,
+          key: l.key,
+        })),
+      ),
+    });
+  }
+
+  /**
+   * Select `[startByte, endByte)` — the byte-offset sibling of the selection commands.
+   *
+   * Separate from {@link selectByteRange} in intent: that one scrolls to the range because it is
+   * answering a jump. This one does not, because expand-selection grows a range the caret is already
+   * inside and scrolling would move the text out from under the reader.
+   */
+  export function setSelectionBytes(startByte: number, endByte: number) {
+    if (!view) return;
+    const b2u = makeByteToU16(view.state.doc.toString());
+    const anchor = b2u(startByte);
+    const head = b2u(endByte);
+    view.dispatch({ selection: { anchor, head } });
   }
 
   /** The caret's viewport coordinates (bottom-left of the primary selection head),

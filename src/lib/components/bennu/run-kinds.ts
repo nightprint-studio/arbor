@@ -7,7 +7,7 @@
  * icons are here, because a store should not be importing components.
  */
 
-import { AppWindow, Leaf, FlaskConical, CircleHelp } from 'lucide-svelte';
+import { AppWindow, Leaf, FlaskConical, Package, CircleHelp } from 'lucide-svelte';
 import type { IconComponent } from '$lib/types/icon';
 
 const ICONS: Record<string, unknown> = {
@@ -15,6 +15,10 @@ const ICONS: Record<string, unknown> = {
   // Spring's own mark is a leaf; it is the one kind with a symbol everyone already knows.
   springboot: Leaf,
   junit: FlaskConical,
+  // A crate. Cargo's own mark is a shipping crate, and `Package` is the closest lucide has — the
+  // same box the Cargo tool window and the crate rows in it use, so the category reads as one
+  // thing across the three surfaces.
+  cargo: Package,
 };
 
 /** The icon for `kind` — a question mark for one written by a newer Bennu, which is honest:

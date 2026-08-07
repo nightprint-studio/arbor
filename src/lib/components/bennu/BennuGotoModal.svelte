@@ -46,14 +46,16 @@
   import { frameSource } from '$lib/ipc/bennu/nav';
   import { languageForPath } from './languages';
   import { moduleIndex, relativeTo } from './modules';
+  import { kindGlyph } from './symbol-kind-glyph';
   import type { IconComponent } from '$lib/types/icon';
-  import JavaKindIconRaw from './JavaKindIcon.svelte';
+  import SymbolKindIconRaw from './SymbolKindIcon.svelte';
   import BennuFileIconRaw from './BennuFileIcon.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { indexEntries } from '$lib/ipc/bennu/inspect';
+  import { lspWorkspaceSymbols } from '$lib/ipc/bennu/lsp';
   import { libraryClasses, libraryFiles, openLibraryFile } from '$lib/ipc/bennu/library';
   import { openLibraryClass } from './log-link';
   import type { TreeNode } from '$lib/types/bennu';
@@ -62,7 +64,7 @@
 
   // The row's `icon` slot is typed for lucide's class-based components; a Svelte 5 `.svelte`
   // component is a function, so it needs the same cast the palette's icon map uses.
-  const JavaKindIcon = JavaKindIconRaw as unknown as IconComponent;
+  const SymbolKindIcon = SymbolKindIconRaw as unknown as IconComponent;
   const BennuFileIcon = BennuFileIconRaw as unknown as IconComponent;
 
   /** Which tab the shortcut that opened this asked for. */
@@ -281,7 +283,7 @@
               detail: packageOf(c.fqcn),
               // The lettered ring the tree and the editor tabs use — C / I / E / R / @ — rather
               // than a second vocabulary of lucide shapes for the same five kinds.
-              icon: JavaKindIcon,
+              icon: SymbolKindIcon,
               iconProps: { kind: c.kind },
               tag: c.kind && c.kind !== 'class' ? c.kind : undefined,
               // A foreign project has its own module list, which this one has not read — so its
@@ -401,6 +403,73 @@
     }
   }
 
+  // ── Types and symbols from a language server ────────────────────────────────────
+  //
+  // The Java categories above are backed by Bennu's own index, which a Cargo project does not
+  // have — so <kbd>Ctrl</kbd>+<kbd>N</kbd> found nothing there. A language server answers the same
+  // question through `workspace/symbol`, and the shape it needs is the category's `search` hook
+  // rather than `items`: the server does the matching, over a workspace far too large to hand over
+  // whole, and a rust-analyzer answer to an empty query is empty by design.
+
+  /** LSP symbol kinds that belong under **Types** — what <kbd>Ctrl</kbd>+<kbd>N</kbd> means in a
+   *  language with no classes: a struct, an enum, a trait, an impl, a type alias.
+   *
+   *  `interface` and `object` are here as well as `trait` and `impl` because the vocabulary is the
+   *  server's language's: a Rust trait arrives as `trait`, and a TypeScript interface as
+   *  `interface`. */
+  const TYPE_KINDS = new Set([
+    'struct', 'enum', 'interface', 'trait', 'class', 'namespace', 'module', 'object', 'impl',
+    'type alias',
+  ]);
+
+  /**
+   * One `workspace/symbol` search, kept to `kinds` (or to everything else when `invert`).
+   *
+   * The two tabs draw a row differently, and the difference is not decoration:
+   *
+   *   * **Types** — every row is a type, so a shape says nothing and the *letter* is the whole
+   *     answer: `S` struct, `T` trait, `E` enum, in the same lettered ring a Java class wears.
+   *   * **Symbols** — a mixed list, so the distinction worth drawing is function versus constant
+   *     versus field, and that one is shape.
+   */
+  async function lspSymbolSearch(
+    query: string,
+    kinds: Set<string>,
+    invert: boolean,
+  ): Promise<NavigateItem[]> {
+    const root = projectStore.project?.root;
+    // A one-character query against a large workspace is a lot of rows for no discrimination, and
+    // the server has to walk its whole index to produce them.
+    if (!root || query.trim().length < 2) return [];
+    const hits = await lspWorkspaceSymbols(root, query.trim()).catch(() => []);
+    return hits
+      .filter((s) => (invert ? !kinds.has(s.kind) : kinds.has(s.kind)))
+      .map((s, i) => {
+        const glyph = kindGlyph(s.kind);
+        return at(
+          {
+            id: `${s.name}@${s.file}:${s.line}:${i}`,
+            name: s.name,
+            detail: s.detail ?? relativeTo(root, s.file),
+            ...(invert
+              ? { icon: glyph.icon, iconProps: { color: glyph.color } }
+              : { icon: SymbolKindIcon, iconProps: { kind: s.kind } }),
+            tag: s.kind,
+            onOpen: () => go(s.file, s.line),
+          },
+          s.file,
+          s.line,
+        );
+      });
+  }
+
+  /** Whether this project's intelligence comes from a language server rather than the Java index.
+   *
+   *  Gated on the project *kind* rather than on a server being up: the categories are rebuilt from
+   *  this, and swapping them as a server starts and stops would change what <kbd>Ctrl</kbd>+<kbd>N</kbd>
+   *  does mid-session. A Java project is untouched by any of this. */
+  const lspBacked = $derived(projectStore.isCargo);
+
   const categories = $derived.by<NavigateCategory[]>(() => {
     // Read so that changing the reach produces a NEW category list. That identity is what the
     // overlay re-pulls its items on, and the suppliers close over `searchRoots` rather than
@@ -408,14 +477,24 @@
     // nothing, which is the worst way for a control to be wrong.
     void searchRoots;
     return [
-    {
-      id: 'classes',
-      label: 'Classes',
-      emptyMessage: 'No classes indexed yet.',
-      facetLabel: 'Module',
-      preview: previewOf,
-      sources: sourcesFor(projectClasses, classpathClasses, 'classes'),
-    },
+    lspBacked
+      ? {
+          id: 'classes',
+          // Not "Classes": the things it finds are structs, enums and traits, and a header that
+          // called them classes would be describing a language this project is not written in.
+          label: 'Types',
+          emptyMessage: 'Type at least two characters to search types.',
+          preview: previewOf,
+          search: (q) => lspSymbolSearch(q, TYPE_KINDS, false),
+        }
+      : {
+          id: 'classes',
+          label: 'Classes',
+          emptyMessage: 'No classes indexed yet.',
+          facetLabel: 'Module',
+          preview: previewOf,
+          sources: sourcesFor(projectClasses, classpathClasses, 'classes'),
+        },
     {
       id: 'files',
       label: 'Files',
@@ -426,27 +505,37 @@
       preview: previewOf,
       sources: sourcesFor(projectFiles, classpathFiles, 'files'),
     },
-    {
-      id: 'symbols',
-      label: 'Symbols',
-      emptyMessage: 'No symbols indexed yet.',
-      items: async () => {
-        const root = projectStore.project?.root;
-        if (!root) return [];
-        const members = await indexEntries(root, 'members');
-        // A member with no source site can be listed but not navigated to — drop it rather
-        // than offer a row that does nothing.
-        return members
-          .filter((m) => !!m.file)
-          .map((m, i) => ({
-            id: `${m.primary}@${m.file}:${m.line ?? 0}:${i}`,
-            name: m.primary,
-            detail: m.secondary,
-            icon: Braces,
-            onOpen: () => go(m.file as string, m.line ?? null),
-          }));
-      },
-    },
+    lspBacked
+      ? {
+          id: 'symbols',
+          label: 'Symbols',
+          emptyMessage: 'Type at least two characters to search symbols.',
+          preview: previewOf,
+          // Everything that is not a type: functions, methods, constants, statics, fields. The
+          // split mirrors the Java pair — Classes finds the declaration, Symbols finds the member.
+          search: (q) => lspSymbolSearch(q, TYPE_KINDS, true),
+        }
+      : {
+          id: 'symbols',
+          label: 'Symbols',
+          emptyMessage: 'No symbols indexed yet.',
+          items: async () => {
+            const root = projectStore.project?.root;
+            if (!root) return [];
+            const members = await indexEntries(root, 'members');
+            // A member with no source site can be listed but not navigated to — drop it rather
+            // than offer a row that does nothing.
+            return members
+              .filter((m) => !!m.file)
+              .map((m, i) => ({
+                id: `${m.primary}@${m.file}:${m.line ?? 0}:${i}`,
+                name: m.primary,
+                detail: m.secondary,
+                icon: Braces,
+                onOpen: () => go(m.file as string, m.line ?? null),
+              }));
+          },
+        },
     ];
   });
 

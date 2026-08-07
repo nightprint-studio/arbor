@@ -73,6 +73,7 @@ impl From<Proposal> for CompletionItem {
             kind: p.kind,
             detail: Some(p.detail).filter(|d| !d.is_empty()),
             auto_import: p.auto_import,
+            ..Default::default()
         }
     }
 }

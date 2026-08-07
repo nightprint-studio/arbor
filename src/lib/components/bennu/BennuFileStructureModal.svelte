@@ -23,6 +23,8 @@
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { javaOutline } from './java-outline';
   import { markupOutline, type MarkupNode } from './markup-outline';
+  import { lspDocumentSymbols, type LspSymbol } from '$lib/ipc/bennu/lsp';
+  import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -70,7 +72,52 @@
       walk(markupOutline(source), 0);
       return out;
     }
-    return [];
+    // A file a language server owns. Its outline is a round-trip, so it is not derivable here —
+    // `lspItems` below fetches it and this returns what has landed.
+    return lspItems;
+  });
+
+  // ── The server-supplied outline ──────────────────────────────────────────────
+  //
+  // Fetched rather than scanned, because for a `.rs` there is nothing local to scan. Without this
+  // branch the modal opened *empty* on a Rust file: the handler and the IPC wrapper both existed and
+  // nothing called them.
+  //
+  // Keyed on the path and the source, and sequence-numbered, so a slow answer for a file you have
+  // left cannot replace the outline of the one you are looking at.
+  let lspItems = $state<Item[]>([]);
+  let lspSeq = 0;
+  $effect(() => {
+    const path = activePath;
+    const src = source;
+    const ext = extOf(path);
+    if (!path || ext === 'java' || MARKUP_EXTS.has(ext) || !bennuLspStore.servesFile(path)) {
+      lspItems = [];
+      return;
+    }
+    const mine = ++lspSeq;
+    void lspDocumentSymbols(path, src)
+      .then((syms) => {
+        if (mine !== lspSeq) return;
+        const out: Item[] = [];
+        const walk = (nodes: LspSymbol[], depth: number) => {
+          for (const n of nodes) {
+            out.push({
+              label: n.name,
+              detail: n.detail ?? undefined,
+              line: n.line,
+              kind: n.kind,
+              depth,
+              k: n.name.toLowerCase(),
+            });
+            if (n.children?.length) walk(n.children, depth + 1);
+          }
+        };
+        walk(syms, 0);
+        lspItems = out;
+      })
+      // Silent: the server may still be loading the workspace, and reopening asks again.
+      .catch(() => { if (mine === lspSeq) lspItems = []; });
   });
 
   let query = $state('');

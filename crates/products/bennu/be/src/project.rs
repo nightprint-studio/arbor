@@ -12,9 +12,11 @@
 use std::path::Path;
 
 use bennu_core::prelude::BennuState;
-use bennu_proto::prelude::{FileContents, FileStamp, ProjectInfo, TreeNode, WriteResult};
+use bennu_proto::prelude::{
+    FileContents, FileStamp, ProjectInfo, SourceEdit, TreeNode, WriteResult,
+};
 use bennu_project::prelude::{
-    build_tree, file_stamp, open_project, read_file, write_file, OpenOptions,
+    build_tree, file_stamp, open_project, read_file, rename_path, write_file, OpenOptions,
 };
 use serde::{Deserialize, Serialize};
 
@@ -45,17 +47,32 @@ pub struct OpenProjectArgs {
 /// [`ProjectInfo`]. The default encoding + per-project JDK override come from the
 /// backend-owned config.
 ///
-/// The Java **symbol index** is built only for a Maven root. For a Cargo one there is
-/// nothing it could index — its sources aren't Java and its classpath doesn't exist —
-/// so starting it would spend a full tree walk to produce an empty index and light the
-/// FE's "Indexing…" status for a result no feature reads. Rust intelligence is an LSP
-/// job for later; today Bennu gives a Cargo project the editor, and says so.
+/// Two engines start here, and which one depends on the root:
+///
+/// * the Java **symbol index**, for a Maven root only. For a Cargo one there is nothing it
+///   could index — the sources aren't Java and the classpath doesn't exist — so starting it
+///   would spend a full tree walk to produce an empty index and light the FE's "Indexing…"
+///   status for a result no feature reads.
+/// * a **language server**, for any root carrying a manifest one of them claims (a
+///   `Cargo.toml` → rust-analyzer). Warm-started rather than started on the first request,
+///   because rust-analyzer needs tens of seconds to index and a user who opens a `.rs` file
+///   and gets nothing reads that as "Bennu has no Rust support" rather than as "the server is
+///   warming up". Starting at open moves the wait to before the first question.
+///
+/// Both are off-thread and neither blocks the other; a polyglot root gets both.
 #[arbor_rpc::handler]
 fn bennu_open_project(ctx: &BennuState, args: OpenProjectArgs) -> Result<ProjectInfo, String> {
     let cfg = bennu_core::config::load();
     let jdk_override = cfg.jdk_overrides.get(&args.root).map(|s| s.as_str());
     let opts = OpenOptions { default_encoding: &cfg.default_encoding, jdk_override };
     let info = open_project(Path::new(&args.root), &opts).map_err(String::from)?;
+
+    // The registry needs the sink before it can report its own progress, and `warm_start`
+    // itself only claims slots and spawns threads — the handshake happens on those, so this
+    // never blocks the open.
+    crate::lsp_registry::LspRegistry::global().set_sink(ctx.event_sink());
+    crate::lsp_registry::LspRegistry::global().warm_start(&args.root);
+
     if !info.kind.is_java() {
         return Ok(info);
     }
@@ -183,7 +200,7 @@ fn bennu_write_file(_ctx: &BennuState, args: WriteFileArgs) -> Result<WriteResul
         .get(&args.file)
         .or_else(|| cfg.encoding_overrides.get(&args.root))
         .map(|s| s.as_str());
-    write_file(
+    let result: WriteResult = write_file(
         Path::new(&args.root),
         Path::new(&args.file),
         &args.text,
@@ -191,7 +208,59 @@ fn bennu_write_file(_ctx: &BennuState, args: WriteFileArgs) -> Result<WriteResul
         override_label,
         args.expect_stamp.as_deref(),
     )
-    .map_err(Into::into)
+    .map_err(|e| -> String { e.into() })?;
+
+    // Tell a language server the file was saved. This is where the real diagnostics come from:
+    // rust-analyzer runs `cargo check` on save, so a type or borrow error only exists after
+    // this. Done here rather than in the frontend so autosave counts too — a user who never
+    // presses Ctrl+S would otherwise only ever see parse errors.
+    crate::lsp_route::did_save(&args.file, &args.text);
+
+    Ok(result)
+}
+
+/// Args for [`bennu_rename_path`].
+#[derive(Deserialize)]
+pub struct RenamePathArgs {
+    /// Absolute path of the file to rename.
+    pub file: String,
+    /// Its absolute path afterwards. The caller builds it, so this is also how a file is *moved*.
+    pub new_path: String,
+}
+
+/// A rename, and what it means for the code that referred to the file.
+#[derive(Serialize)]
+pub struct RenamePathResult {
+    /// Where the file now is.
+    pub new_path: String,
+    /// The edits the rename implies — a Rust `mod` declaration that names the file and every `use`
+    /// path through the module it declares. Empty when the language does not care (or no server
+    /// does): a `.txt` rename implies nothing.
+    ///
+    /// Returned rather than applied: Bennu applies edits through the editor so they land in the undo
+    /// history, and a backend that wrote them behind the frontend's back would leave open buffers
+    /// disagreeing with their files.
+    pub edits: Vec<SourceEdit>,
+}
+
+/// Rename a file, and answer with the code edits the rename implies.
+///
+/// The order is the whole subtlety, and it is dictated by the protocol: the server is asked
+/// **before** the file moves (`workspace/willRenameFiles` — it answers about the tree as it stands,
+/// and after the move the old path names nothing). Then the file moves. If the move fails, the edits
+/// are dropped on the floor, which is the correct outcome — they described a rename that did not
+/// happen.
+///
+/// Refuses rather than overwriting; see [`bennu_project::prelude::rename_path`] for which cases and
+/// why.
+#[arbor_rpc::handler]
+fn bennu_rename_path(_ctx: &BennuState, args: RenamePathArgs) -> Result<RenamePathResult, String> {
+    // Asked first: after `rename` the old path is gone, and a server asked about a file that no
+    // longer exists has nothing to say.
+    let edits = crate::lsp_route::will_rename(&args.file, &args.new_path);
+    rename_path(Path::new(&args.file), Path::new(&args.new_path))
+        .map_err(|e| -> String { e.into() })?;
+    Ok(RenamePathResult { new_path: args.new_path, edits })
 }
 
 /// Args for [`bennu_move_to_package`].

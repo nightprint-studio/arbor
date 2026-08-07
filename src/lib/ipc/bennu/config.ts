@@ -53,6 +53,61 @@ export interface BennuConfig {
   /** Which dependencies contribute their Spring beans to the Library beans view. Empty by
    *  default, and empty means no jar is ever opened. */
   library_beans: LibraryBeansConfig;
+  /** Language servers — which may run, where their binaries are, and any the user added. */
+  lsp: LspConfigDto;
+  /** Cargo / crates.io — the one part of Bennu that reaches the network on its own. */
+  cargo: CargoConfigDto;
+}
+
+/** Mirrors the BE `CargoConfig`. */
+export interface CargoConfigDto {
+  /** Whether Bennu may query the crates.io index — the version hints and the add dialog's version
+   *  list. `true` by default; off makes Bennu entirely local again. */
+  crates_io: boolean;
+  /** How long a cached version list stays fresh, in hours. A day by default; `0` reads as the
+   *  default rather than as "always refetch". */
+  index_ttl_hours: number;
+}
+
+/** Mirrors the BE `LspConfig`. */
+export interface LspConfigDto {
+  /** Master switch. `true` by default — a server only starts for a project whose root carries
+   *  the matching manifest AND whose binary is installed, so "on" costs nothing on a machine
+   *  with nothing installed. */
+  enabled: boolean;
+  /** What rust-analyzer runs to produce **real** diagnostics on save: `check` or `clippy`.
+   *
+   *  `check` by default — it is what `cargo build` would have told you, and it is the faster of the
+   *  two. `clippy` is a superset (every check error plus several hundred lints) at the cost of a
+   *  slower build after every save. */
+  rust_check_command: string;
+  /** Server ids the user turned off. A denylist, so a server added to the catalogue later works
+   *  without the user editing anything. */
+  disabled: string[];
+  /** Explicit executable path per server id, for a binary discovery does not find (or a specific
+   *  build the user wants). An absolute path wins over everything. */
+  server_paths: Record<string, string>;
+  /** User-defined servers, for a language the catalogue does not cover. */
+  servers: CustomLspServerDto[];
+}
+
+/** Mirrors the BE `CustomLspServer` — the same fields the built-in catalogue carries, because the
+ *  two are interchangeable by design. An entry whose `id` matches a built-in replaces it. */
+export interface CustomLspServerDto {
+  id: string;
+  name: string;
+  /** The LSP `languageId` (`'zig'`). Falls back to `id`. */
+  language: string;
+  command: string;
+  args: string[];
+  /** File extensions without dots. Required — an entry serving none can never be selected. */
+  extensions: string[];
+  /** Files marking a workspace root (`['build.zig']`). Required, and the real gate: without a
+   *  marker above the file there is no workspace to open, so nothing starts. */
+  root_markers: string[];
+  /** `initializationOptions` as a JSON string. A string because these are arbitrary
+   *  server-defined JSON and TOML cannot express all of it losslessly. */
+  initialization_options: string;
 }
 
 /** Which dependency coordinates are read for their beans. Four axes because that is how a

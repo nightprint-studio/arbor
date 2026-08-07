@@ -1,0 +1,29 @@
+[package]
+name         = "bennu-cargo"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "What a Cargo workspace IS, read off its manifests: the crate graph with its targets and features, the manifest schema that answers both 'is this key real' and 'what can I type here', and the cargo command catalogue the Rust tool window launches. Reads files; runs nothing."
+
+[dependencies]
+# The manifest reader is hand-rolled (see `manifest.rs`) for the same reason bennu-lsp's
+# protocol types are: what is needed is spans for every key and total tolerance of a
+# half-typed file, and a serde front-end gives neither. So there is deliberately no TOML
+# crate here.
+serde = { workspace = true }
+# JSON, for one thing only: the crates.io index serves one JSON object per line, and
+# `registry.rs` reads `vers` / `yanked` / `features` out of it. Hand-rolling that would mean
+# scanning for a quoted key in a document that legitimately contains user-chosen strings —
+# a feature may be named anything — which is the one place a real parser earns its keep.
+# Already a workspace dependency of every sibling crate here; nothing new enters the tree.
+serde_json = { workspace = true }
+# `Diagnostic` / `CompletionItem` — the wire shapes validation and completion answer in.
+# Emitted directly rather than through a private mirror plus a mapper in bennu-be: the
+# shapes ARE the contract, and every other analysis crate here (bennu-check, bennu-intel,
+# bennu-complete) reaches for them the same way.
+bennu-proto = { path = "../proto" }
+# `user_home()` — the offline crate/version catalogue is read out of `$CARGO_HOME`, which
+# defaults to `~/.cargo`, and a windowed app's environment does not reliably carry either.
+arbor-core = { path = "../../../foundation/core" }

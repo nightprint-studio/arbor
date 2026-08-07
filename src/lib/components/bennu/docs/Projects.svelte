@@ -14,14 +14,20 @@
   Structure / Maven / Dependencies / Forms tool windows, and Tomcat hot-swap.
 </p>
 <p>
-  <strong>Cargo</strong> projects get the <strong>editor</strong>: the file tree, go-to file,
-  find in files, TODOs, the terminal, Rust and TOML highlighting, and
-  <strong>Check project</strong> — <code>cargo check</code> over the workspace, whose errors and
-  warnings land in the Problems panel and on the editor gutter like any other build. What is
-  <em>not</em> there is everything that would need a Rust symbol index: completion, navigation,
-  rename. Those need a language server, and until one is wired the actions are hidden rather than
-  offered and silent. The Java-only tool windows and the JDK footer are hidden too, so the window
-  never shows a panel that can only ever be empty.
+  <strong>Cargo</strong> projects get the editor plus everything
+  <a href="#lsp"><strong>rust-analyzer</strong></a> supplies: completion, go-to declaration, find
+  usages, hover, rename, quick fixes, <code>rustfmt</code>, semantic colouring, and the compiler's
+  own diagnostics on save. On top of that the shared surface — the file tree, go-to file, find in
+  files, TODOs, the terminal, TOML highlighting — and <strong>Check project</strong>
+  (<code>cargo check</code> over the workspace, whose errors land in the Problems panel like any
+  other build).
+</p>
+<p>
+  The intelligence comes from the language server, so it depends on rust-analyzer being installed;
+  the footer says which server is serving the open file and whether it is ready. What stays hidden
+  on a Cargo project is the Java-specific machinery — the JDK footer, the capability count, the
+  Structure / Maven / Dependencies / Forms tool windows — so the window never shows a panel that
+  can only ever be empty. See <strong>Language servers</strong> for the whole picture.
 </p>
 <p>
   A folder holding <em>both</em> manifests opens as the Maven project: it is the model that has more
@@ -64,6 +70,25 @@
   <strong>inferred</strong> from the directory, following <code>src/main/java</code> and friends), a
   <strong>JSP</strong> or <strong>XML</strong> file with the right header, or a plain file. It opens
   the new file and reveals it in the tree; it never overwrites an existing one.
+</p>
+
+<h2>Renaming a file</h2>
+<p>
+  <kbd>F2</kbd> on a file in the Project tree — or <strong>Rename…</strong> from its right-click menu.
+  It refuses to overwrite an existing file, and a rename that changes only the letter case is a rename
+  rather than a collision.
+</p>
+<p>
+  For a language with a <strong>language server</strong> behind it, the rename also fixes the code that
+  referred to the file by name: renaming a Rust <code>parser.rs</code> rewrites the <code>mod
+  parser;</code> that declares it and every <code>use crate::parser::…</code> that goes through it. The
+  dialog says how many files that will be <em>before</em> you commit to it, and if the rename itself
+  cannot be performed nothing is changed at all. The edits are applied through the editor, so they are
+  one undo step.
+</p>
+<p>
+  Directories are deliberately not renamable this way: for a Rust project that moves a whole module
+  path, and offering it here would mean offering half of it.
 </p>
 
 <h2>The JDK</h2>

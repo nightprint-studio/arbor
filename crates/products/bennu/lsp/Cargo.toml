@@ -1,0 +1,23 @@
+[package]
+name         = "bennu-lsp"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Generic Language Server Protocol CLIENT for Bennu — the impl behind bennu-intel's predisposed LSP slot. Owns the base protocol (Content-Length framing, JSON-RPC routing), the protocol subset Bennu speaks, the server process lifecycle, and the coordinate translation between LSP line/character positions and Bennu's UTF-8 byte offsets. Language-agnostic: rust-analyzer is a catalogue entry, not a special case."
+
+[dependencies]
+# The protocol types are hand-rolled here (see `types.rs`): Bennu speaks a bounded
+# subset of LSP, the mapping onto Bennu's own wire types has to be written either
+# way, and a crate tracking the whole spec is a breaking-minor treadmill for surface
+# we never touch. So the only dependencies are the workspace's serde pair.
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# `NoWindowExt` — a language server is a long-lived child process, and on Windows a
+# bare `Command::spawn` flashes (and keeps) a console window.
+arbor-process-ext = { path = "../../../platform/process-ext" }
+# `user_home()` — server discovery has to look where the binaries actually are
+# (`~/.cargo/bin`, `~/.rustup/toolchains/*/bin`, the VS Code extension dir), and a
+# windowed app's PATH holds almost none of them.
+arbor-core = { path = "../../../foundation/core" }

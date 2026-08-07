@@ -338,6 +338,11 @@ pub fn source_from_jars(jars: &[PathBuf]) -> MultiSource {
 }
 
 /// Split a build-classpath string into existing jars vs non-existent entries.
+///
+/// Test-only since the multi-module union took over the production path: real callers dedup across
+/// modules first ([`union_entries`]) and then classify, so this composition survives only as the
+/// single-string shorthand the classification tests are written against.
+#[cfg(test)]
 fn split_classpath(raw: &str) -> (Vec<PathBuf>, Vec<PathBuf>) {
     classify_entries(split_entries(raw))
 }

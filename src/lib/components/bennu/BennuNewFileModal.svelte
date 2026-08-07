@@ -14,7 +14,7 @@
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
-  import JavaKindIcon from './JavaKindIcon.svelte';
+  import SymbolKindIcon from './SymbolKindIcon.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -27,7 +27,7 @@
   }: { dir: string; initialKind?: NewFileKind; onClose: () => void } = $props();
 
   /** The Java shapes, in IntelliJ's order — the frequent ones first, not alphabetical.
-   *  `iconKind` is what {@link JavaKindIcon} draws; an exception is a class and wears a
+   *  `iconKind` is what {@link SymbolKindIcon} draws; an exception is a class and wears a
    *  class's ring, because that is what it is. */
   const JAVA_KINDS: { value: NewFileKind; label: string; iconKind: string }[] = [
     { value: 'class',      label: 'Class',      iconKind: 'class' },
@@ -114,7 +114,7 @@
          and a field with one obvious purpose does not need a word above it repeating the
          placeholder. The icon marks which kind the name will become, live. -->
     <div class="nf-name">
-      {#if isJava}<JavaKindIcon kind={JAVA_KINDS.find((k) => k.value === kind)?.iconKind ?? 'class'} />{/if}
+      {#if isJava}<SymbolKindIcon kind={JAVA_KINDS.find((k) => k.value === kind)?.iconKind ?? 'class'} />{/if}
       <input
         class="nf-input"
         bind:this={nameEl}
@@ -138,7 +138,7 @@
               aria-selected={kind === k.value}
               onclick={() => { kind = k.value; nameEl?.focus(); }}
             >
-              <JavaKindIcon kind={k.iconKind} />
+              <SymbolKindIcon kind={k.iconKind} />
               <span>{k.label}</span>
             </button>
           </li>

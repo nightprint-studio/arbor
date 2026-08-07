@@ -19,7 +19,7 @@ import { bennu } from '../rpc';
 import type {
   ProjectInfo, TreeNode, ReadFileResult, CapabilitySet, CompletionItem, Diagnostic,
   BuildResult, ProjectValidationResult, RunHandle, WriteResult, ClassEntry, TodoItem, IndexStats,
-  FileDiagnostics, FileStamp, MainClassEntry, RunConfigSetDto,
+  FileDiagnostics, FileStamp, MainClassEntry, RunConfigSetDto, SourceEdit,
 } from '$lib/types/bennu';
 
 /** Open a Java project folder: resolve the build model (modules / JDK) + capabilities.
@@ -83,6 +83,22 @@ export function fileStamps(files: string[]): Promise<FileStamp[]> {
  *  this renames the on-disk file. Wire: `bennu_move_to_package` — `{ file, source }`. */
 export function moveToPackage(file: string, source: string): Promise<{ new_path: string }> {
   return bennu('bennu_move_to_package', { args: { file, source } });
+}
+
+/** Rename (or move) a file, and get back the code edits the rename implies.
+ *
+ *  For Rust that is the `mod` declaration naming the file and every `use` path through the module it
+ *  declares — the language server is asked **before** the move, because it answers about the tree as
+ *  it stands. The edits are returned rather than applied: Bennu applies them through the editor so
+ *  they land in the undo history. Empty for a file no language cares about.
+ *
+ *  Refuses rather than overwriting an existing file. Save the buffer first — this renames what is on
+ *  disk. Wire: `bennu_rename_path` — `{ file, new_path }`. */
+export function renamePath(
+  file: string,
+  newPath: string,
+): Promise<{ new_path: string; edits: SourceEdit[] }> {
+  return bennu('bennu_rename_path', { args: { file, new_path: newPath } });
 }
 
 /** Re-detect the domain capabilities (Spike-D bitset) for the open project. Wire:

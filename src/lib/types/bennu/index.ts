@@ -137,7 +137,7 @@ export interface FileStamp {
 
 /** One completion candidate (`bennu_completion`). Phase 0 returns `[]`. */
 export interface CompletionItem {
-  /** Text inserted on accept. */
+  /** What the list shows. Also what is inserted when `insert_text` is absent. */
   label: string;
   /** Kind tag for the icon/grouping (`method`, `field`, `class`, `keyword`, …). */
   kind: string;
@@ -147,6 +147,52 @@ export interface CompletionItem {
    *  name to auto-import on accept (when the auto-import setting is on). Absent for member
    *  completions and ambiguous names. */
   auto_import?: string;
+
+  // ── Fields a language server fills in (absent on the native Java path) ──
+  //
+  // The distinction between `label` and `insert_text` is load-bearing: `label` is a display
+  // string — a server may send `push(…)` or `HashMap (std::collections)` — and inserting it
+  // verbatim is how accepting a completion produces code that does not compile.
+
+  /** The text to insert, when it differs from `label`. */
+  insert_text?: string;
+  /** The byte range this item replaces on accept. Absent → replace the identifier at the caret. */
+  replace_start?: number;
+  replace_end?: number;
+  /** `true` when the provider sent this as a snippet.
+   *
+   *  Note what it does NOT mean: `insert_text` is plain text either way — the placeholder syntax is
+   *  parsed away in the backend, and what is left of it is {@link snippet_stops}. */
+  snippet?: boolean;
+  /** The snippet's tab stops, as byte ranges into `insert_text`, **in visiting order**.
+   *
+   *  Visiting order, not source order: the provider's `$0` — where the caret ends up — is already
+   *  moved to the end, so a consumer walks the list front to back and needs to know nothing about
+   *  the syntax it came from. Empty for a plain completion. */
+  snippet_stops?: { start: number; end: number }[];
+  /** The provider's own relevance ordering — honoured rather than re-sorted alphabetically. */
+  sort_text?: string;
+  /** What to match the typed prefix against, when it differs from `label`. */
+  filter_text?: string;
+  /** Documentation for the info panel (markdown). */
+  doc?: string;
+  /** Edits elsewhere in the buffer that must land with the insertion — for Rust, the `use` line
+   *  an auto-imported item needs. Dropping them produces code that does not compile. */
+  edits?: SourceEdit[];
+  deprecated?: boolean;
+  /** The provider marked this as the one to pre-select. */
+  preselect?: boolean;
+  /** A handle for fetching this item's documentation lazily (`bennu_lsp_resolve_completion`). */
+  resolve_id?: number;
+}
+
+/** A plain text edit: replace `[start, end)` of `file` with `new_text`. Byte offsets, applied
+ *  through CodeMirror so undo works. */
+export interface SourceEdit {
+  file: string;
+  start: number;
+  end: number;
+  new_text: string;
 }
 
 /** Severity of a {@link Diagnostic}. */
@@ -261,11 +307,12 @@ export interface RunConfigEnvVar {
 export interface RunConfigDto {
   id: string;
   name: string;
-  /** `"application"` | `"springboot"` | `"junit"` — the category. A string, not a union,
-   *  because the wire may carry a kind this build has never heard of (see the Rust
+  /** `"application"` | `"springboot"` | `"junit"` | `"cargo"` — the category. A string, not a
+   *  union, because the wire may carry a kind this build has never heard of (see the Rust
    *  contract). */
   kind: string;
-  /** The Maven module, relative to the project root. Empty = the root module. */
+  /** Which part of the project this is for. Maven: the module directory relative to the root.
+   *  Cargo: the crate NAME, because that is what `-p` takes. Empty = the root / the workspace. */
   module: string;
   main_class: string;
   program_args: string;
@@ -281,6 +328,22 @@ export interface RunConfigDto {
   /** Maven scopes on the run classpath: `"runtime"` (default), `"compile"`, `"test"`, or `""`
    *  for every scope. */
   classpath_scope?: string;
+  /** springboot only — the active profiles, comma-separated as Spring spells them. */
+  profiles?: string;
+
+  // ── cargo only — the fields of the backend's `Invocation`. Optional: a file written before
+  // the Cargo kind existed has none of them, and a hand-edited one may have some.
+  cargo_command?: string;
+  cargo_target_kind?: string;
+  cargo_target?: string;
+  cargo_features?: string;
+  cargo_all_features?: boolean;
+  cargo_no_default_features?: boolean;
+  cargo_release?: boolean;
+  cargo_profile?: string;
+  cargo_workspace?: boolean;
+  /** Extra cargo flags, BEFORE the `--`. `program_args` goes after it. */
+  cargo_args?: string;
 }
 
 /** The per-repo run-config bundle stored in `<root>/.arbor/config.toml`. */

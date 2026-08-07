@@ -349,26 +349,70 @@ fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
     // A run child is console-less; suppress the window on Windows.
     cmd.no_window();
 
-    let mut child = cmd.spawn().map_err(|e| format!("spawn java ({java}): {e}"))?;
+    let command =
+        display_command(&java, &vm_args, &classpath, &cp_form, &args.main_class, &args.args);
+    let root_for_debug = args.root.clone();
+    let sink = ctx.event_sink();
+    spawn_streamed(
+        cmd,
+        args.main_class.clone(),
+        command,
+        cwd.display().to_string(),
+        &args.root,
+        sink.clone(),
+        // The debug session is keyed by the RUN id, so the console tab and the debugger are the
+        // same thing to everything that has to correlate them (Stop, the frames panel, the
+        // gutter) — which means it can only be started once the id exists.
+        |run_id| {
+            if let Some(launch) = launch {
+                crate::debug::start(run_id.to_string(), root_for_debug, launch, sink);
+            }
+        },
+    )
+    .map_err(|e| format!("spawn java ({java}): {e}"))
+}
+
+/// Spawn `cmd` and stream it to the Run console — the one place a child becomes a *run*.
+///
+/// Everything the console needs is set up here: both pipes pumped on their own threads, the child
+/// registered so Stop can kill its tree and the console can answer a prompt on its stdin, and the
+/// exit event emitted when it goes.
+///
+/// Shared rather than written twice because the two callers differ only in how they build a command
+/// line: [`bennu_run`] launches a JVM, [`crate::cargo_cmd`] launches a cargo subcommand. Everything
+/// after the spawn — cancellation, input, the tab lifecycle, the log annotation — has to behave
+/// *identically* for both, and "nearly identically" is what two copies of this would drift into.
+///
+/// `label` fills the [`RunHandle::main_class`] slot: for a JVM it is the main class, for a cargo
+/// command the command itself. `after_register` runs once the run id exists and before the child is
+/// pumped, for whatever has to be keyed by it.
+///
+/// The child must already have its three pipes set to [`Stdio::piped`]; without them the console has
+/// nothing to show and nothing to write to.
+pub(crate) fn spawn_streamed<F: FnOnce(&str)>(
+    mut cmd: Command,
+    label: String,
+    command_line: String,
+    working_dir: String,
+    root: &str,
+    sink: Arc<dyn EventSink>,
+    after_register: F,
+) -> Result<RunHandle, String> {
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
 
     let run_id = next_run_id();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let stdin = child.stdin.take();
-    let sink = ctx.event_sink();
 
     let child = Arc::new(Mutex::new(child));
     RunRegistry::global().register(&run_id, child.clone(), stdin);
+    after_register(&run_id);
 
-    // The session is keyed by the RUN id, so the console tab and the debugger are the same
-    // thing to everything that has to correlate them (Stop, the frames panel, the gutter).
-    if let Some(launch) = launch {
-        crate::debug::start(run_id.clone(), args.root.clone(), launch, sink.clone());
-    }
-
-    // Resolved once for the whole run, not once per line: the class index answers "which
-    // file declares com.acme.Order" for every frame of every trace this program prints.
-    let classes = class_map(&args.root);
+    // Resolved once for the whole run, not once per line: the class index answers "which file
+    // declares com.acme.Order" for every frame of every trace this program prints. Empty for a
+    // project with no Java index, which costs nothing.
+    let classes = class_map(root);
 
     let run_id_thread = run_id.clone();
     let child_thread = child.clone();
@@ -411,14 +455,7 @@ fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
         })
         .map_err(|e| format!("spawn run thread: {e}"))?;
 
-    let command =
-        display_command(&java, &vm_args, &classpath, &cp_form, &args.main_class, &args.args);
-    Ok(RunHandle {
-        run_id,
-        main_class: args.main_class,
-        command,
-        working_dir: cwd.display().to_string(),
-    })
+    Ok(RunHandle { run_id, main_class: label, command: command_line, working_dir })
 }
 
 /// The spawned command as one display line. Arguments containing spaces are quoted.

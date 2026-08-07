@@ -216,11 +216,24 @@ pub const ERR_EXTERNALLY_MODIFIED: &str = "bennu:externally-modified";
 
 // ── completion / diagnostics (Phase-0 stubs) ─────────────────────────────────
 
-/// A single completion candidate returned by `bennu_completion`. Phase 0 returns an
-/// empty list; the shape is frozen now so the FE binds against it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A single completion candidate returned by `bennu_completion`.
+///
+/// One shape for every language, which is the whole point of the provider seam: the native
+/// Java engine fills in the first four fields and the auto-import hint, a language server
+/// fills in the rest. Everything past `auto_import` is `#[serde(default)]`, so the Java path
+/// is unchanged and the frontend has one code path that honours whatever is present.
+///
+/// The distinction between `label` and `insert_text` is load-bearing. `label` is a **display**
+/// string — a server may send `push(…)` or `HashMap (std::collections)` — and inserting it
+/// verbatim is how accepting a completion produces text that does not compile. When
+/// `insert_text` is present it is what goes in the buffer; `label` is only what the list shows.
+///
+/// `Default` is derived so a producer that only has something to say about `label` / `kind` /
+/// `detail` can write `..Default::default()` instead of eleven `None`s — and so that growing the
+/// struct again does not touch every construction site in the workspace.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompletionItem {
-    /// The text inserted on accept.
+    /// What the list shows. Also what is inserted when `insert_text` is absent.
     pub label: String,
     /// Kind tag, e.g. `"method"` / `"field"` / `"class"` / `"keyword"`.
     pub kind: String,
@@ -232,6 +245,59 @@ pub struct CompletionItem {
     /// names. `#[serde(default)]` so an older payload without the field still deserializes.
     #[serde(default)]
     pub auto_import: Option<String>,
+    /// The text to insert, when it differs from `label`.
+    #[serde(default)]
+    pub insert_text: Option<String>,
+    /// The byte range in the requested buffer that accepting this item replaces, when the
+    /// provider specified one. Absent → the FE replaces the identifier under the caret.
+    #[serde(default)]
+    pub replace_start: Option<usize>,
+    #[serde(default)]
+    pub replace_end: Option<usize>,
+    /// `true` when the provider sent this as a snippet.
+    ///
+    /// Note what it does **not** mean: `insert_text` is plain text either way — the placeholder
+    /// syntax is parsed away in the backend, and what is left of it is
+    /// [`CompletionItem::snippet_stops`]. A consumer that ignores both still inserts something
+    /// sensible rather than `${1:value}`.
+    #[serde(default)]
+    pub snippet: bool,
+    /// The tab stops of a snippet, as byte ranges into `insert_text`, **in visiting order**.
+    ///
+    /// Visiting order and not source order: the provider's `$0` — where the caret ends up — sorts
+    /// last however it was numbered, so a consumer walks this list front to back and needs to know
+    /// nothing about the syntax it came from.
+    ///
+    /// Empty for a plain completion, and empty for a snippet whose body had no placeholders.
+    #[serde(default)]
+    pub snippet_stops: Vec<SnippetStop>,
+    /// The provider's own relevance ordering, when it has one. Honoured rather than
+    /// re-sorted: it is how a language server puts the field you want above the forty trait
+    /// methods that also match.
+    #[serde(default)]
+    pub sort_text: Option<String>,
+    /// What to match the typed prefix against, when it differs from `label`.
+    #[serde(default)]
+    pub filter_text: Option<String>,
+    /// Documentation for the info panel, as markdown.
+    #[serde(default)]
+    pub doc: Option<String>,
+    /// Edits elsewhere in the buffer that must be applied together with the insertion — for
+    /// Rust, the `use` line an auto-imported item needs. Dropping them produces code that
+    /// does not compile.
+    #[serde(default)]
+    pub edits: Vec<crate::lsp::SourceEdit>,
+    #[serde(default)]
+    pub deprecated: bool,
+    /// The provider marked this as the one to pre-select.
+    #[serde(default)]
+    pub preselect: bool,
+    /// A handle for asking the provider to fill in this item's documentation
+    /// (`bennu_lsp_resolve_completion`). Language servers answer a completion list without
+    /// docs and fill them in for one item at a time; `None` means there is nothing more to
+    /// fetch.
+    #[serde(default)]
+    pub resolve_id: Option<usize>,
 }
 
 /// A single diagnostic returned by `bennu_diagnostics`. Phase 0 returns an empty
@@ -878,6 +944,19 @@ pub struct RunHandle {
 
 // ── run configurations (per-repo `[bennu.run]`, IntelliJ-style run targets) ───
 
+/// One tab stop of a snippet completion, as a byte range into the text being inserted.
+///
+/// `start == end` is a caret position rather than a selection — a stop the user types into, as
+/// opposed to one whose default content they type over.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SnippetStop {
+    /// Byte offset in the inserted text where the stop begins.
+    pub start: usize,
+    /// Byte offset where it ends.
+    pub end: usize,
+}
+
 /// One `key=value` environment-variable entry of a [`RunConfig`]. Serialized as a
 /// TOML array-of-tables row (`[[bennu.run.configs.env]]`) so the whole set round-trips
 /// through `<repo>/.arbor/config.toml` losslessly.
@@ -904,8 +983,9 @@ pub struct RunConfig {
     /// Display name of the configuration.
     pub name: String,
     /// What KIND of thing this launches — `"application"` (a `main` class), `"springboot"`
-    /// (a Boot application: the same launch plus its active profiles) or `"junit"` (a test
-    /// scope). It is what the editor and the title-bar selector group by.
+    /// (a Boot application: the same launch plus its active profiles), `"junit"` (a test scope)
+    /// or `"cargo"` (a cargo subcommand). It is what the editor and the title-bar selector
+    /// group by.
     ///
     /// A plain string and not an enum: the set grows (a Tomcat deployment, a Maven goal), and
     /// a `.arbor/config.toml` written by a newer Bennu must not make an older one refuse to
@@ -968,6 +1048,48 @@ pub struct RunConfig {
     /// configurations written before this existed change behaviour on the next launch — which
     /// is the point: they were getting the wrong classpath.
     pub classpath_scope: String,
+
+    // ── `cargo` only ─────────────────────────────────────────────────────────
+    //
+    // A Cargo configuration reuses what generalises and adds what does not. It shares `name`,
+    // `module` (the crate — see below), `program_args`, `working_dir` and `env` with a JVM one;
+    // `main_class`, `vm_args`, `profiles`, `test_scope` and `classpath_scope` mean nothing to it
+    // and stay empty. The fields below are the cargo command line, and they map 1:1 onto
+    // `bennu_cargo::commands::Invocation` — which is the one place a command line is assembled,
+    // so a configuration cannot produce flags the panel would not.
+    //
+    // NOTE on `module`: for Maven it is a directory relative to the root; for Cargo it is the
+    // **crate name**, because that is what `-p` takes. Reusing the field rather than adding a
+    // `cargo_package` keeps "which part of the project is this for" in one place for both
+    // ecosystems, and the run-config editor shows it as a picker either way.
+
+    /// The cargo subcommand: `run` · `test` · `check` · `build` · `clippy` · `fmt` · `doc` · …
+    /// Empty reads as `check`, which is the harmless one.
+    pub cargo_command: String,
+    /// The target selector's kind — `bin` · `example` · `test` · `bench` · `lib` · `all-targets`,
+    /// or empty for whatever the command defaults to.
+    pub cargo_target_kind: String,
+    /// The target's name, for the selector kinds that take one.
+    pub cargo_target: String,
+    /// Features to enable, comma-separated as cargo spells them (`std,derive`).
+    pub cargo_features: String,
+    /// `--all-features`.
+    pub cargo_all_features: bool,
+    /// `--no-default-features`.
+    pub cargo_no_default_features: bool,
+    /// `--release`.
+    pub cargo_release: bool,
+    /// A named `--profile`. Wins over [`RunConfig::cargo_release`], which is the short spelling of
+    /// the same thing.
+    pub cargo_profile: String,
+    /// `--workspace`. Ignored when a crate is named, since asking for both is contradictory.
+    pub cargo_workspace: bool,
+    /// Extra cargo flags placed BEFORE the `--` (`--locked`, `--offline`), as a raw single-line
+    /// string the launcher splits.
+    ///
+    /// Distinct from [`RunConfig::program_args`], which goes AFTER the `--` and reaches the program
+    /// (or the test harness). Conflating the two is how `--nocapture` ends up being handed to cargo.
+    pub cargo_args: String,
 }
 
 impl Default for RunConfig {
@@ -991,6 +1113,16 @@ impl Default for RunConfig {
             // What `mvn spring-boot:run` and a packaged application see. See the field's doc for
             // why the every-scope classpath the index uses is the wrong one to launch with.
             classpath_scope: "runtime".to_string(),
+            cargo_command: String::new(),
+            cargo_target_kind: String::new(),
+            cargo_target: String::new(),
+            cargo_features: String::new(),
+            cargo_all_features: false,
+            cargo_no_default_features: false,
+            cargo_release: false,
+            cargo_profile: String::new(),
+            cargo_workspace: false,
+            cargo_args: String::new(),
         }
     }
 }

@@ -42,6 +42,14 @@ pub struct RenameArgs {
 /// isn't on a renameable identifier.
 #[arbor_rpc::handler]
 fn bennu_rename_plan(_ctx: &BennuState, args: RenameArgs) -> Result<Option<RenamePreview>, String> {
+    // A server-backed file plans through its own server. Its edits are never `inferred` — a
+    // language server resolved them, so unlike the Java engine's same-name-method heuristic
+    // there is no guesswork for the preview to flag.
+    if let Some(preview) =
+        crate::lsp_route::rename_plan(&args.file, &args.source, args.offset, &args.new_name)
+    {
+        return Ok(preview);
+    }
     let plan =
         IndexService::global().plan_rename(&args.file, &args.source, args.offset, &args.new_name);
     Ok(plan.map(preview_of))
@@ -52,6 +60,11 @@ fn bennu_rename_plan(_ctx: &BennuState, args: RenameArgs) -> Result<Option<Renam
 /// building).
 #[arbor_rpc::handler]
 fn bennu_rename_apply(_ctx: &BennuState, args: RenameArgs) -> Result<Vec<RenameEdit>, String> {
+    if let Some(edits) =
+        crate::lsp_route::rename_apply(&args.file, &args.source, args.offset, &args.new_name)
+    {
+        return Ok(edits);
+    }
     let plan =
         IndexService::global().plan_rename(&args.file, &args.source, args.offset, &args.new_name);
     let edits = plan

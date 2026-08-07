@@ -37,17 +37,22 @@ const MAX_POMS: usize = 512;
 /// Read a Maven project's dependencies.
 ///
 /// `jars` is the already-resolved dependency classpath — pass an empty slice when none has been
-/// resolved yet, and every dependency comes back with an empty `jar` and
-/// [`Report::classpath_known`] `false`, which the UI shows as *unknown* rather than *missing*.
+/// resolved yet, and every dependency comes back with an empty [`Dependency::resolved`] and
+/// [`Report::resolved_known`] `false`, which the UI shows as *unknown* rather than *missing*.
 pub fn read(root: &Path, jars: &[PathBuf]) -> Report {
     let poms = Poms::collect(root);
     if poms.entries.is_empty() {
-        return Report { unreadable: poms.unreadable, ..Report::default() };
+        return Report {
+            ecosystem: "maven".to_string(),
+            unreadable: poms.unreadable,
+            ..Report::default()
+        };
     }
 
     let index = JarIndex::build(jars);
     let mut report = Report {
-        classpath_known: !jars.is_empty(),
+        ecosystem: "maven".to_string(),
+        resolved_known: !jars.is_empty(),
         unreadable: poms.unreadable.clone(),
         ..Report::default()
     };
@@ -63,9 +68,9 @@ pub fn read(root: &Path, jars: &[PathBuf]) -> Report {
         }
         report.modules.push(Module {
             name: entry.pom.display_name().to_string(),
-            artifact_id: entry.pom.artifact_id.clone(),
-            pom: wire_path(&entry.path),
-            packaging: entry.pom.packaging.clone(),
+            id: entry.pom.artifact_id.clone(),
+            manifest: wire_path(&entry.path),
+            kind: entry.pom.packaging.clone(),
             dependencies,
         });
     }
@@ -280,21 +285,25 @@ impl Poms {
         }
 
         Dependency {
-            group_id: group,
-            artifact_id: artifact,
+            group,
+            // Provenance is Cargo's question; for Maven the repository the jar came from answers it.
+            source: String::new(),
+            name: artifact,
             version,
             scope: if scope.is_empty() { "compile".to_string() } else { scope },
-            packaging: if dep.packaging == "jar" { String::new() } else { dep.packaging.clone() },
-            classifier,
+            kind: if dep.packaging == "jar" { String::new() } else { dep.packaging.clone() },
+            variant: classifier,
             optional: dep.optional,
             origin,
-            profile: dep.profile.clone(),
+            condition: dep.profile.clone(),
+            // Maven has no features.
+            features: Vec::new(),
             declared_in: Site {
                 file: wire_path(&self.entries[from].path),
                 offset: dep.offset,
                 line: dep.line,
             },
-            jar: hit.map(|h| h.path.clone()).unwrap_or_default(),
+            resolved: hit.map(|h| h.path.clone()).unwrap_or_default(),
         }
     }
 
@@ -435,8 +444,8 @@ impl JarIndex {
             .modules
             .iter()
             .flat_map(|m| m.dependencies.iter())
-            .filter(|d| !d.jar.is_empty())
-            .map(|d| d.jar.as_str())
+            .filter(|d| !d.resolved.is_empty())
+            .map(|d| d.resolved.as_str())
             .collect();
         let mut out: Vec<Transitive> = self
             .jars
@@ -444,10 +453,10 @@ impl JarIndex {
             .filter(|j| !claimed.contains(&j.path.as_str()))
             .filter(|j| !poms.is_reactor_artifact(&j.coord.artifact_id))
             .map(|j| Transitive {
-                group_id: j.coord.group_id.clone(),
-                artifact_id: j.coord.artifact_id.clone(),
+                group: j.coord.group_id.clone(),
+                name: j.coord.artifact_id.clone(),
                 version: j.coord.version.clone(),
-                jar: j.path.clone(),
+                resolved: j.path.clone(),
             })
             .collect();
         out.sort_by(|a, b| a.coord().cmp(&b.coord()).then(a.version.cmp(&b.version)));
@@ -568,20 +577,20 @@ mod tests {
     }
 
     fn module<'a>(report: &'a Report, artifact: &str) -> &'a Module {
-        report.modules.iter().find(|m| m.artifact_id == artifact).expect("module")
+        report.modules.iter().find(|m| m.id == artifact).expect("module")
     }
 
     fn dep<'a>(m: &'a Module, artifact: &str) -> &'a Dependency {
-        m.dependencies.iter().find(|d| d.artifact_id == artifact).expect("dependency")
+        m.dependencies.iter().find(|d| d.name == artifact).expect("dependency")
     }
 
     #[test]
     fn every_module_of_the_reactor_becomes_a_group() {
         let root = fixture("reactor");
         let report = read(&root, &[]);
-        let names: Vec<&str> = report.modules.iter().map(|m| m.artifact_id.as_str()).collect();
+        let names: Vec<&str> = report.modules.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(names, ["portale-parent", "portale-web", "portale-core"]);
-        assert_eq!(module(&report, "portale-parent").packaging, "pom");
+        assert_eq!(module(&report, "portale-parent").kind, "pom");
         assert!(report.unreadable.is_empty());
         let _ = fs::remove_dir_all(&root);
     }
@@ -635,10 +644,10 @@ mod tests {
             PathBuf::from("/r/.m2/repository/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar"),
         ];
         let report = read(&root, &jars);
-        assert!(report.classpath_known);
+        assert!(report.resolved_known);
         let web = module(&report, "portale-web");
-        assert!(dep(web, "spring-web").jar.ends_with("spring-web-5.3.27.jar"));
-        assert!(dep(web, "javax.servlet-api").jar.is_empty(), "declared, never resolved");
+        assert!(dep(web, "spring-web").resolved.ends_with("spring-web-5.3.27.jar"));
+        assert!(dep(web, "javax.servlet-api").resolved.is_empty(), "declared, never resolved");
         // Nobody declared slf4j — something dragged it in, and that is its own list.
         assert_eq!(report.transitive.len(), 1);
         assert_eq!(report.transitive[0].coord(), "org.slf4j:slf4j-api");
@@ -654,7 +663,7 @@ mod tests {
             vec![PathBuf::from("/r/.m2/repository/com/acme/portale-core/2.4.0/portale-core-2.4.0.jar")];
         let report = read(&root, &jars);
         assert!(report.transitive.is_empty());
-        assert!(dep(module(&report, "portale-web"), "portale-core").jar.ends_with("portale-core-2.4.0.jar"));
+        assert!(dep(module(&report, "portale-web"), "portale-core").resolved.ends_with("portale-core-2.4.0.jar"));
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -664,7 +673,7 @@ mod tests {
         let _ = fs::create_dir_all(&dir);
         let report = read(&dir, &[]);
         assert!(report.modules.is_empty());
-        assert!(!report.classpath_known);
+        assert!(!report.resolved_known);
         let _ = fs::remove_dir_all(&dir);
     }
 

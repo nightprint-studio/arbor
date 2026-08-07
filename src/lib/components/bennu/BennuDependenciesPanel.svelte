@@ -2,25 +2,30 @@
   /**
    * Dependencies (left tool window) — what the open project actually depends on.
    *
-   * One group per module of the reactor, each row carrying the four things a dependency list is
-   * opened to find out:
+   * **Maven and Cargo, one panel.** The questions a dependency list is opened to answer are the same
+   * either way, so the report shape is (see `bennu-deps`'s `model.rs`, whose module doc has the
+   * field-by-field mapping). What differs is the words, and those come from
+   * {@link DependencyReport.ecosystem} rather than from a second component.
+   *
+   * One group per module (Maven) or crate (Cargo), each row carrying the four things:
    *
    * - **the coordinate and the version** — with `${…}` expanded and `<dependencyManagement>`
-   *   applied, because the version written in the pom in front of you is usually not the one you
-   *   get;
-   * - **where that version came from** — declared here, pinned by a parent's management, or
-   *   inherited whole from a parent's own `<dependencies>`. This is the question the panel exists
-   *   for, and clicking the row opens the pom that answers it;
-   * - **the scope**, coloured, because `test` and `provided` change what a dependency means;
-   * - **whether it resolved** — a declared dependency with no jar in the local repository is
-   *   exactly the shape of "cannot find symbol" in a file that looks fine.
+   *   applied, or the requirement replaced by whatever `Cargo.lock` actually chose, because the
+   *   version written in the manifest in front of you is usually not the one you get;
+   * - **where that version came from** — declared here, pinned by a parent's management or by
+   *   `[workspace.dependencies]`, or inherited whole. This is the question the panel exists for, and
+   *   clicking the row opens the manifest that answers it;
+   * - **the scope** (Maven) or **kind** (Cargo), coloured, because `test` and `dev` change what a
+   *   dependency means;
+   * - **whether it resolved** — a declared dependency with nothing behind it in the local repository
+   *   is exactly the shape of "cannot find symbol" in a file that looks fine.
    *
-   * Plus one group for the jars nobody declared: what the declared dependencies dragged in. Kept
-   * separate rather than merged, because the two answer different questions and mixing them is how
-   * a dependency panel becomes unreadable.
+   * Plus one group for what nobody declared: what the declared dependencies dragged in. Kept
+   * separate rather than merged, because the two answer different questions and mixing them is how a
+   * dependency panel becomes unreadable.
    *
-   * All of it comes from `bennu_dependencies`, which reads poms and the classpath the index
-   * already resolved. Nothing here runs Maven, so refreshing is cheap and the panel opens
+   * All of it comes from `bennu_dependencies`, which reads manifests plus whatever has already been
+   * resolved. Nothing here runs Maven or Cargo, so refreshing is cheap and the panel opens
    * instantly.
    */
   import { Library, Package, GitFork, Layers, RefreshCw, CircleSlash } from 'lucide-svelte';
@@ -37,12 +42,20 @@
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { dependenciesStore } from '$lib/stores/bennu/dependencies.svelte';
-  import { coordOf, type Dependency, type DependencyModule } from '$lib/ipc/bennu/deps';
+  import {
+    coordOf, scopeLabel, type Dependency, type DependencyModule,
+  } from '$lib/ipc/bennu/deps';
 
   let filter = $state('');
 
   const root = $derived(projectStore.project?.root ?? null);
   const report = $derived(dependenciesStore.report);
+  /** Which build tool this report describes — what decides the words, not the layout. */
+  const ecosystem = $derived(report?.ecosystem ?? '');
+  const isCargo = $derived(ecosystem === 'cargo');
+  /** What a module is called here. A Cargo "module" is a crate, and the panel should say so. */
+  const unitWord = $derived(isCargo ? 'crate' : 'module');
+  const manifestWord = $derived(isCargo ? 'Cargo.toml' : 'pom');
 
   // Re-read when the project changes, and again when the index **stops** — that is when a
   // classpath which was unresolved becomes resolved, and the jar column goes from "unknown" to an
@@ -56,19 +69,23 @@
   $effect(() => {
     const path = root;
     const busyIndexing = bennuIndexStore.indexing;
-    if (!path || projectStore.isCargo) {
+    const cargo = projectStore.isCargo;
+    if (!path) {
       dependenciesStore.reset();
       return;
     }
-    // While the index runs the classpath is in flux; read once when it settles.
-    if (busyIndexing) return;
+    // While the JAVA index runs the classpath is in flux; read once when it settles. A Cargo project
+    // builds no index, so waiting for one would mean waiting forever.
+    if (!cargo && busyIndexing) return;
     void dependenciesStore.load(path, true);
   });
 
   function matches(d: Dependency, q: string): boolean {
     if (!q) return true;
     const origin = d.origin.kind === 'declared' ? '' : d.origin.from;
-    return `${coordOf(d)} ${d.version} ${d.scope} ${d.profile} ${origin}`.toLowerCase().includes(q);
+    return `${coordOf(d)} ${d.name} ${d.version} ${d.scope} ${d.source} ${d.condition} ${origin}`
+      .toLowerCase()
+      .includes(q);
   }
 
   // Modules with their filtered lists. A module that matched nothing drops out while a filter is
@@ -92,8 +109,8 @@
   );
   /** Declared, and not in the local repository. The number worth surfacing without being asked. */
   const missing = $derived(
-    report?.classpath_known
-      ? (report?.modules ?? []).flatMap((m) => m.dependencies).filter((d) => !d.jar).length
+    report?.resolved_known
+      ? (report?.modules ?? []).flatMap((m) => m.dependencies).filter((d) => !d.resolved).length
       : 0,
   );
 
@@ -107,10 +124,12 @@
     open[id] = !isOpen(id, fallback);
   }
 
+  /** The colour a scope (Maven) or kind (Cargo) gets. Both vocabularies have the same three tiers:
+   *  what the library needs, what its tests need, and what is supplied from outside. */
   function scopeTone(scope: string): 'success' | 'info' | 'warning' | 'neutral' {
-    if (scope === 'compile') return 'success';
-    if (scope === 'provided' || scope === 'system') return 'info';
-    if (scope === 'test') return 'warning';
+    if (scope === 'compile' || scope === 'normal') return 'success';
+    if (scope === 'provided' || scope === 'system' || scope === 'build') return 'info';
+    if (scope === 'test' || scope === 'dev') return 'warning';
     return 'neutral';
   }
 
@@ -121,8 +140,8 @@
     });
   }
 
-  function openPom(m: DependencyModule) {
-    void projectStore.openFile(m.pom);
+  function openManifest(m: DependencyModule) {
+    void projectStore.openFile(m.manifest);
   }
 
   /** What the origin tag says, in the fewest words that are still true. */
@@ -140,13 +159,17 @@
   function originTooltip(d: Dependency): string {
     switch (d.origin.kind) {
       case 'managed':
-        return `Declared here without a version — ${d.origin.from}'s <dependencyManagement> pins ${
-          d.version || 'it'
-        }. Opens that pom.`;
+        return isCargo
+          ? `Declared here as \`workspace = true\` — ${d.origin.from}'s [workspace.dependencies] supplies ${
+              d.version || 'the version'
+            }.`
+          : `Declared here without a version — ${d.origin.from}'s <dependencyManagement> pins ${
+              d.version || 'it'
+            }. Opens that pom.`;
       case 'inherited':
-        return `Not declared in this module: inherited from ${d.origin.from}'s own <dependencies>. Opens that pom.`;
+        return `Not declared in this ${unitWord}: inherited from ${d.origin.from}'s own <dependencies>. Opens that pom.`;
       default:
-        return `Declared in this module (line ${d.declared_in.line}).`;
+        return `Declared in this ${unitWord} (line ${d.declared_in.line}).`;
     }
   }
 </script>
@@ -156,11 +179,13 @@
   <!-- Declared unconditionally and gated inside: a snippet is a prop, and a prop wrapped in an
        `{#if}` is a prop the component may never be handed. -->
   {#snippet toolbar()}
-    {#if root && !projectStore.isCargo}
+    {#if root}
       <div class="dep-toolbar">
         <BennuFilterBar bind:query={filter} placeholder="Filter dependencies…" />
         <IconButton
-          tooltip="Re-read the poms and the resolved classpath"
+          tooltip={isCargo
+            ? 'Re-read the manifests and Cargo.lock'
+            : 'Re-read the poms and the resolved classpath'}
           size={22}
           disabled={dependenciesStore.loading}
           onclick={() => root && void dependenciesStore.load(root, true)}
@@ -173,38 +198,44 @@
 
   {#if !root}
     <EmptyState message="Open a project to see its dependencies." />
-  {:else if projectStore.isCargo}
-    <EmptyState message="Cargo projects don't have a Maven dependency graph." />
   {:else if dependenciesStore.error}
     <div class="dep-notice">
       <Alert variant="error" compact text={dependenciesStore.error} />
     </div>
   {:else if !report && dependenciesStore.loading}
-    <div class="dep-loading"><Spinner size={16} /><span>Reading the project's poms…</span></div>
+    <div class="dep-loading"><Spinner size={16} /><span>Reading the project's manifests…</span></div>
   {:else if report}
     <div class="dep-body">
       {#if report.unreadable.length > 0}
         <div class="dep-notice">
           <Alert variant="warning" compact>
-            {report.unreadable.length === 1 ? 'A pom' : `${report.unreadable.length} poms`} could not
-            be read, so {report.unreadable.length === 1 ? 'its module is' : 'those modules are'}
+            {report.unreadable.length === 1
+              ? 'A manifest'
+              : `${report.unreadable.length} manifests`} could not be read, so
+            {report.unreadable.length === 1 ? `its ${unitWord} is` : `those ${unitWord}s are`}
             missing here: {report.unreadable.join(', ')}
           </Alert>
         </div>
       {/if}
-      {#if !report.classpath_known && report.modules.length > 0}
+      {#if !report.resolved_known && report.modules.length > 0}
         <div class="dep-notice">
           <Alert variant="info" compact>
-            The dependency classpath hasn't been resolved yet, so whether each of these is in your
-            local repository is unknown. It resolves in the background as the project indexes.
+            {#if isCargo}
+              There is no <code>Cargo.lock</code> yet, so the version each of these resolves to is
+              unknown — what is shown is the requirement as written. Any cargo command creates one.
+            {:else}
+              The dependency classpath hasn't been resolved yet, so whether each of these is in your
+              local repository is unknown. It resolves in the background as the project indexes.
+            {/if}
           </Alert>
         </div>
       {:else if missing > 0}
         <div class="dep-notice">
           <Alert variant="warning" compact>
             {missing} declared {missing === 1 ? 'dependency is' : 'dependencies are'} not in the local
-            repository — types from {missing === 1 ? 'it' : 'them'} won't resolve. Build the project
-            once to download {missing === 1 ? 'it' : 'them'}.
+            {isCargo ? 'registry' : 'repository'} — types from {missing === 1 ? 'it' : 'them'} won't
+            resolve. {isCargo ? 'Run any cargo command' : 'Build the project'} once to download
+            {missing === 1 ? 'it' : 'them'}.
           </Alert>
         </div>
       {/if}
@@ -217,29 +248,30 @@
           compact
         />
       {:else}
-        {#each modules as m (m.module.pom)}
+        {#each modules as m (m.module.manifest)}
           <SidebarSection
             label={m.module.name}
-            expanded={isOpen(m.module.pom)}
-            onToggle={() => toggle(m.module.pom)}
+            expanded={isOpen(m.module.manifest)}
+            onToggle={() => toggle(m.module.manifest)}
             badge={m.deps.length}
+            badgeTitle={`Dependencies this ${unitWord} declares`}
           >
             {#snippet icon()}<Package size={13} />{/snippet}
             {#if m.deps.length === 0}
               <p class="dep-none">
                 No dependencies.
-                <button type="button" class="dep-link" onclick={() => openPom(m.module)}>
-                  Open {m.module.artifact_id}'s pom
+                <button type="button" class="dep-link" onclick={() => openManifest(m.module)}>
+                  Open {m.module.id}'s {manifestWord}
                 </button>
               </p>
             {:else}
               <ul class="dep-list">
-                {#each m.deps as d (coordOf(d) + '@' + d.classifier)}
+                {#each m.deps as d (coordOf(d) + '@' + d.variant + '@' + d.scope)}
                   <li>
                     <button
                       type="button"
                       class="dep-row"
-                      class:unresolved={report.classpath_known && !d.jar}
+                      class:unresolved={report.resolved_known && !d.resolved}
                       onclick={() => openDeclaration(d)}
                       use:tooltip={originTooltip(d)}
                     >
@@ -250,18 +282,37 @@
                         </span>
                       </span>
                       <span class="dep-meta">
-                        <Badge variant="tone" tone={scopeTone(d.scope)} size="sm" label={d.scope} />
-                        {#if d.packaging}
-                          <Badge variant="tone" tone="neutral" size="sm" label={d.packaging} />
+                        <span use:tooltip={`${scopeLabel(ecosystem)}: ${d.scope}`}>
+                          <Badge variant="tone" tone={scopeTone(d.scope)} size="sm" label={d.scope} />
+                        </span>
+                        {#if d.kind}
+                          <Badge variant="tone" tone="neutral" size="sm" label={d.kind} />
                         {/if}
-                        {#if d.classifier}
-                          <Badge variant="tone" tone="neutral" size="sm" label={d.classifier} />
+                        <!-- For Maven this is the classifier; for Cargo it is the crate this entry
+                             renames, which is the thing you need to know to find it on crates.io. -->
+                        {#if d.variant}
+                          <Badge
+                            variant="tone"
+                            tone="neutral"
+                            size="sm"
+                            label={isCargo ? `= ${d.variant}` : d.variant}
+                          />
+                        {/if}
+                        <!-- Provenance, for Cargo. `crates.io` is the ordinary case and says nothing
+                             worth a badge; a path, a git URL or the workspace does. -->
+                        {#if d.source && d.source !== 'crates.io'}
+                          <span class="dep-tag dep-tag-profile">{d.source}</span>
                         {/if}
                         {#if d.optional}
                           <span class="dep-tag">optional</span>
                         {/if}
-                        {#if d.profile}
-                          <span class="dep-tag dep-tag-profile">profile: {d.profile}</span>
+                        {#if d.condition}
+                          <span class="dep-tag dep-tag-profile">
+                            {isCargo ? d.condition : `profile: ${d.condition}`}
+                          </span>
+                        {/if}
+                        {#if d.features.length}
+                          <span class="dep-tag">+{d.features.join(' +')}</span>
                         {/if}
                         {#if d.origin.kind !== 'declared'}
                           <span class="dep-origin">
@@ -269,7 +320,7 @@
                             <span class="dep-origin-txt">{originLabel(d)}</span>
                           </span>
                         {/if}
-                        {#if report.classpath_known && !d.jar}
+                        {#if report.resolved_known && !d.resolved}
                           <span class="dep-missing"><CircleSlash size={10} /> not resolved</span>
                         {/if}
                       </span>
@@ -290,8 +341,11 @@
           >
             {#snippet icon()}<Layers size={13} />{/snippet}
             <ul class="dep-list">
-              {#each transitive as t (t.jar)}
-                <li class="dep-row dep-row-static" use:tooltip={t.jar}>
+              {#each transitive as t (t.name + '@' + t.version)}
+                <li
+                  class="dep-row dep-row-static"
+                  use:tooltip={t.resolved || 'Not in the local cache'}
+                >
                   <span class="dep-main">
                     <span class="dep-coord mono">{coordOf(t)}</span>
                     <span class="dep-version mono">{t.version}</span>
@@ -305,7 +359,7 @@
     </div>
   {:else}
     <!-- Before the first read lands. Not an empty state with an opinion: nothing is known yet. -->
-    <div class="dep-loading"><Spinner size={16} /><span>Reading the project's poms…</span></div>
+    <div class="dep-loading"><Spinner size={16} /><span>Reading the project's manifests…</span></div>
   {/if}
 </PanelShell>
 
@@ -372,4 +426,7 @@
   .dep-missing { color: var(--color-warning, #d6a640); }
   .dep-origin :global(svg), .dep-missing :global(svg) { flex-shrink: 0; }
   .dep-origin-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  code {
+    font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-primary);
+  }
 </style>

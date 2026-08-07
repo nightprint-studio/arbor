@@ -6,26 +6,29 @@
 <ul>
   <li><kbd>Alt</kbd> + <kbd>1</kbd> — toggle <strong>Project</strong> (files)</li>
   <li><kbd>Alt</kbd> + <kbd>2</kbd> — toggle <strong>Structure</strong> (symbols)</li>
-  <li><kbd>Alt</kbd> + <kbd>N</kbd> — toggle <strong>Dependencies</strong> (by module)</li>
+  <li><kbd>Alt</kbd> + <kbd>N</kbd> — toggle <strong>Dependencies</strong> (by module, or by crate on a Cargo project)</li>
   <li><kbd>Alt</kbd> + <kbd>0</kbd> — toggle <strong>Build</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>R</kbd> — toggle <strong>Run</strong> — the launched program's console, and the debugger when it is one (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>5</kbd> — toggle <strong>Tests</strong> (the catalogue, right rail)</li>
-  <li><kbd>Alt</kbd> + <kbd>9</kbd> — toggle <strong>Trees</strong> — the parse and the declaration model (right rail)</li>
+  <li><kbd>Alt</kbd> + <kbd>9</kbd> — toggle <strong>Trees</strong> — the parse and the declaration model (right rail). Java and JSP: both views read Bennu's own engines, so a Rust project has the Cargo window there instead</li>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd> — <strong>structural search &amp; replace</strong></li>
   <li><kbd>Alt</kbd> + <kbd>6</kbd> — toggle <strong>Problems</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>7</kbd> — toggle <strong>TODO</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>3</kbd> — toggle <strong>Forms</strong> — JSP form analysis (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>F12</kbd> — toggle <strong>Terminal</strong> (bottom dock)</li>
-  <li><kbd>Alt</kbd> + <kbd>8</kbd> — toggle <strong>Maven</strong> (right rail)</li>
+  <li><kbd>Alt</kbd> + <kbd>8</kbd> — toggle the <strong>build tool</strong> window (right rail): <strong>Maven</strong>'s goals on a Java project, <strong>Cargo</strong>'s crates and commands on a Rust one</li>
 </ul>
 
 <h2>Navigate</h2>
 <ul>
-  <li><kbd>Ctrl</kbd> + <kbd>N</kbd> — go to <strong>class</strong> by name (project-wide)</li>
+  <li><kbd>Ctrl</kbd> + <kbd>N</kbd> — go to <strong>class</strong> by name (project-wide). On a Rust project the tab reads <strong>Types</strong> and the language server answers — what it finds are structs, enums, traits and type aliases</li>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> — go to <strong>file</strong> by name</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Y</kbd> — go to <strong>symbol</strong> (methods and fields, project-wide)</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Y</kbd> — go to <strong>symbol</strong> (methods and fields, project-wide; functions and constants on a Rust project)</li>
   <li><kbd>Tab</kbd> — inside the navigator, move between <strong>All · Classes · Files · Symbols</strong></li>
   <li><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>→</kbd> — navigate <strong>back</strong> / <strong>forward</strong> through your recent jumps (across files)</li>
+  <li><kbd>Ctrl</kbd> + <kbd>F12</kbd> — <strong>file structure</strong>: a searchable outline of the file in front of you. On a language-server file the server supplies it, so a Rust file lists its structs, traits, impls and functions</li>
+  <li><kbd>Ctrl</kbd> + <kbd>H</kbd> — <strong>type hierarchy</strong> of the type at the caret: its implementors, or by direction what it is built on</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> — <strong>call hierarchy</strong> of the function at the caret: its callers, or by direction what it calls. Both open the Hierarchy panel, which expands one level at a time and takes the keyboard as it opens — a recursive chain is walked as far as you care to and no further</li>
 </ul>
 
 <h2>Editor</h2>
@@ -41,15 +44,30 @@
   <li><kbd>Ctrl</kbd> + <kbd>Space</kbd> — completions (member access on <kbd>.</kbd>)</li>
   <li><kbd>Ctrl</kbd> + <kbd>/</kbd> — toggle line / block <strong>comment</strong> on the selection (Java <code>//</code>, JSP <code>&lt;%-- --%&gt;</code>, XML <code>&lt;!-- --&gt;</code>)</li>
   <li>Auto-close brackets and quotes — typing <kbd>(</kbd> <kbd>[</kbd> <kbd>&#123;</kbd> <kbd>"</kbd> <kbd>'</kbd> inserts the matching closer; <kbd>Backspace</kbd> on an empty pair removes both</li>
-  <li><kbd>Alt</kbd> + <kbd>Enter</kbd> — show <strong>intentions</strong> (context actions) at the caret</li>
+  <li><kbd>Alt</kbd> + <kbd>Enter</kbd> (<kbd>Option</kbd> + <kbd>Enter</kbd> on a Mac) — show
+    <strong>intentions</strong> at the caret. One list from whichever engine can answer: Bennu's own
+    quick fixes on a <code>.java</code>, the language server's code actions on a file it owns —
+    "import <code>HashMap</code>", "fill match arms", "add missing lifetime"</li>
+  <li><kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>Enter</kbd> — open a <strong>blank line below</strong>
+    and put the caret on it, wherever in the line you were. Not intentions — that is the key above,
+    and on a Mac the two are one modifier apart</li>
   <li><kbd>Shift</kbd> + <kbd>F6</kbd> — <strong>rename</strong> the symbol under the caret (with a per-file preview)</li>
   <li><kbd>Alt</kbd> + <kbd>Insert</kbd> — <strong>generate</strong> constructor, getters or setters</li>
+  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> — <strong>format</strong> the file with the language's own formatter (<code>rustfmt</code> for Rust, honouring the project's configuration). Only for a language with a <strong>language server</strong> behind it</li>
+  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>→</kbd> / <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>←</kbd> — <strong>expand</strong> / <strong>shrink</strong> the selection by one syntactic step — the token, the expression, the argument list, the call, the block, on the server's own idea of structure. VS Code's keys rather than IntelliJ's <kbd>Ctrl</kbd> + <kbd>W</kbd>, which a WebView may read as "close the window"</li>
+  <li><kbd>Tab</kbd> / <kbd>Shift</kbd> + <kbd>Tab</kbd> — after accepting a completion that inserted <strong>placeholders</strong>, move between them; <kbd>Esc</kbd> leaves the run. Accepting <code>println!</code> puts the caret between the parentheses, and a function completion walks you through its arguments</li>
+  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd> — <strong>expand the macro</strong> at the caret and read what it generates. The expansion is recursive (all the way down — the server has no single-step form) and is text rather than a file, so it cannot be navigated: to go deeper, point at the nested macro in the source and expand again</li>
+</ul>
+
+<h2>Files</h2>
+<ul>
+  <li><kbd>F2</kbd> — <strong>rename</strong> the file selected in the Project tree. On a Rust project the rename also rewrites the <code>mod</code> declaration that names the file and every <code>use</code> path through it; the dialog says how many files it will touch before you commit to it</li>
 </ul>
 
 <h2>Build &amp; run</h2>
 <ul>
   <li><kbd>Ctrl</kbd> + <kbd>F9</kbd> — <strong>build</strong> the project — runs the type chosen on the Build split-button: a Maven compile (<code>javac</code> fallback), or a whole-project <strong>validation without compiling</strong>. In a Cargo project it runs <code>cargo check</code> over the workspace</li>
-  <li><kbd>Shift</kbd> + <kbd>F10</kbd> — <strong>run</strong> the active configuration (builds first, then launches) — Maven projects only</li>
+  <li><kbd>Shift</kbd> + <kbd>F10</kbd> — <strong>run</strong> the active configuration. A JVM one builds first, then launches; a Cargo one is a cargo subcommand, which is its own build</li>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd> — <strong>run what is in front of you</strong>: the test at the caret in a Java test file, or a hot-swap deploy of the current JSP</li>
 </ul>
 

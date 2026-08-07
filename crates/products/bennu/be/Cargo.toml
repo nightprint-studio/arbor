@@ -37,6 +37,10 @@ bennu-intel = { path = "../intel" }
 # The code-intel query engine: the resolver + completion + inherited-members domain types the
 # index service maps to the wire (`InheritedMember`).
 bennu-query = { path = "../query" }
+# The other half of the code-intel seam: a generic LSP client. Java goes to the native engine
+# above, every other language goes to a language server through this. Serde-only itself — no new
+# external dependency comes in with it.
+bennu-lsp = { path = "../lsp" }
 # AST-level Java validation (syntax errors + unused imports) over the live buffer — no compile.
 bennu-check = { path = "../check" }
 # The mmap'd symbol index: the `IndexBuilder` the index service holds on each project slot
@@ -107,6 +111,9 @@ bennu-jdwp = { path = "../jdwp" }
 # index service already resolved. Not an extension — it answers about the build, not about a
 # buffer — so it hangs off its own domain rather than the registry.
 bennu-deps = { path = "../deps" }
+# The Cargo side: the manifest schema behind Cargo.toml validation + completion, the crate
+# graph the Rust tool window shows, and the cargo command catalogue.
+bennu-cargo = { path = "../cargo" }
 # `NoWindowExt` — suppress the console window on the short-lived mvn/javac/java children.
 arbor-process-ext = { path = "../../../platform/process-ext" }
 # The log interpreter behind the Run/Build consoles: a line of a child's output → its level

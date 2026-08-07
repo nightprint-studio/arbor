@@ -16,7 +16,7 @@
   import {
     Settings, Coffee, Boxes, FileType, TextCursorInput, ListTree, Bug,
     FoldVertical, Braces, RotateCcw, Wand2, Plus, Trash2, TriangleAlert, FolderOpen,
-    Database, Package,
+    Database, Package, ServerCog, RefreshCw, CircleCheck,
   } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -38,7 +38,11 @@
     type IndentStyle, type SourceEncoding, type SqlDialectSetting,
   } from '$lib/stores/bennu/settings.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
-  import { getBennuConfig, setBennuConfig, type BennuConfig } from '$lib/ipc/bennu/config';
+  import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
+  import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import {
+    getBennuConfig, setBennuConfig, type BennuConfig, type CargoConfigDto, type LspConfigDto,
+  } from '$lib/ipc/bennu/config';
   import { getStepExcludes } from '$lib/ipc/bennu/debug';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -174,6 +178,10 @@
       { id: 'editor',     label: 'Editor',     icon: TextCursorInput },
       { id: 'completion', label: 'Completion', icon: ListTree },
       { id: 'folding',    label: 'Folding',    icon: FoldVertical },
+      // Always present, on every project kind: it is where a *missing* server is explained,
+      // and hiding it on a Java project would hide the answer to "why does my `.rs` file have
+      // no go-to" from exactly the polyglot repo that has one.
+      { id: 'languages',  label: 'Language Servers', icon: ServerCog },
       ...(projectStore.isCargo ? [] : [
         { id: 'style',    label: 'Java Style', icon: Wand2 },
         { id: 'java',     label: 'Java',       icon: Braces },
@@ -194,12 +202,85 @@
   ]);
   let active = $state('editor');
 
+  // Something opened Settings *for a reason* (the status bar's "server not running" pill) and
+  // asked for a page. Honoured once, then cleared, so ordinary re-opens stay where the user was.
+  $effect(() => {
+    const requested = bennuUiStore.settingsSection;
+    if (!requested) return;
+    active = requested;
+    bennuUiStore.consumeSettingsSection();
+  });
+
   // A section that just disappeared (project switched to Cargo while it was open) would
   // leave the shell on a page with no nav entry. Fall back to Editor.
   $effect(() => {
     const ids = groups.flatMap((g) => g.items.map((i) => i.id));
     if (!ids.includes(active)) active = 'editor';
   });
+
+  // ── Language servers ──────────────────────────────────────────────────────────
+  //
+  // Two lists, because they answer different questions: what Bennu *can* run on this machine
+  // (with an install hint for each one it cannot find), and what is running *right now* for the
+  // open projects. A settings page that showed only the first would never explain a server that
+  // is installed and crashing.
+  /** The `[lsp]` section, with a complete default so a config written before it existed reads as
+   *  "on, nothing disabled" rather than as a half-populated object. */
+  const lspCfg = $derived<LspConfigDto>(
+    cfg?.lsp ?? {
+      enabled: true,
+      rust_check_command: 'check',
+      disabled: [],
+      server_paths: {},
+      servers: [],
+    },
+  );
+  const lspEnabled = $derived(lspCfg.enabled);
+  const lspDisabled = $derived(lspCfg.disabled ?? []);
+  const serverPaths = $derived(lspCfg.server_paths ?? {});
+  const rustCheckCommand = $derived(lspCfg.rust_check_command || 'check');
+
+  /** Whether a Rust server exists to configure at all — the check command is rust-analyzer's, and a
+   *  setting for a server this machine has never had is a setting for nothing. */
+  const hasRustServer = $derived(bennuLspStore.servers.some((x) => x.language === 'rust'));
+
+  /** The `[cargo]` section, with a complete default so a config written before it existed reads as
+   *  "on, a day" rather than as a half-populated object. */
+  const cargoCfg = $derived<CargoConfigDto>(
+    cfg?.cargo ?? { crates_io: true, index_ttl_hours: 24 },
+  );
+  const cratesIo = $derived(cargoCfg.crates_io);
+
+  async function setCratesIo(on: boolean) {
+    await saveConfigPatch({ cargo: { ...cargoCfg, crates_io: on } });
+  }
+
+  async function setRustCheckCommand(command: string) {
+    await saveConfigPatch({ lsp: { ...lspCfg, rust_check_command: command } });
+    // It is an `initializationOptions` value, so it only takes effect on a fresh handshake. Saying
+    // so beats a setting that appears to do nothing until the next time the app happens to restart.
+    await bennuLspStore.reloadServers();
+  }
+
+  async function setLspEnabled(on: boolean) {
+    await saveConfigPatch({ lsp: { ...lspCfg, enabled: on } });
+    await bennuLspStore.reloadServers();
+  }
+
+  async function toggleServer(id: string, on: boolean) {
+    const next = on ? lspDisabled.filter((d) => d !== id) : [...new Set([...lspDisabled, id])];
+    await saveConfigPatch({ lsp: { ...lspCfg, disabled: next } });
+    await bennuLspStore.reloadServers();
+  }
+
+  async function commitServerPath(id: string, path: string) {
+    const next = { ...serverPaths };
+    const trimmed = path.trim();
+    if (trimmed) next[id] = trimmed;
+    else delete next[id];
+    await saveConfigPatch({ lsp: { ...lspCfg, server_paths: next } });
+    await bennuLspStore.reloadServers();
+  }
 
   const s = bennuSettingsStore;
 
@@ -428,6 +509,176 @@
             <Toggle checked={s.foldBlockComments} disabled={!s.foldingEnabled}
                     onchange={(v) => s.setFoldBlockComments(v)} ariaLabel="Fold block comments by default" />
           </FormRow>
+        </div>
+
+      {:else if active === 'languages'}
+        <div class="section-header">
+          <h2>Language Servers</h2>
+          <p>
+            Bennu's Java intelligence is its own engine. Every other language — Rust first — is
+            served by an external <strong>language server</strong>: it supplies completion, go-to,
+            find-usages, diagnostics, rename, formatting and the semantic colouring.
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="card-section-title"><ServerCog size={12} /> General</div>
+          <FormRow
+            label="Enable language servers"
+            description="A server only starts for a project whose root carries the matching manifest (a Cargo.toml for Rust) and whose binary is installed — so leaving this on costs nothing when neither is true."
+          >
+            <Toggle checked={lspEnabled} onchange={(v) => void setLspEnabled(v)}
+                    ariaLabel="Enable language servers" />
+          </FormRow>
+        </div>
+
+        <!-- Rust's own knob. Only shown when there is a Rust server to configure: a setting for a
+             server this machine has never had is a setting for nothing. -->
+        {#if hasRustServer}
+          <div class="card">
+            <div class="card-section-title"><ServerCog size={12} /> Rust</div>
+            <FormRow
+              label="Diagnostics on save"
+              description="What rust-analyzer runs after each save to produce the compiler's real diagnostics — types and borrows, as opposed to the syntactic ones the parser alone can see. Clippy is a superset: every cargo check error plus several hundred lints, at the cost of a slower build after every save. Takes effect on the next server start."
+            >
+              <Select
+                value={rustCheckCommand}
+                options={[
+                  { value: 'check', label: 'cargo check — faster' },
+                  { value: 'clippy', label: 'cargo clippy — also the lints' },
+                ]}
+                onchange={(v) => void setRustCheckCommand(v)}
+              />
+            </FormRow>
+            <!-- The one place Bennu reaches the network by itself, so it says so plainly and can be
+                 turned off. Beside the check command because both are "how Rust tooling behaves",
+                 and because this is where someone looks for it. -->
+            <FormRow
+              label="Check crates.io for newer versions"
+              description="Reads the crates.io index to mark a dependency in Cargo.toml that is behind, and to offer a version list when adding one. Answers come from a cache on disk, refreshed at most once a day per crate. Off keeps Bennu entirely local — adding a dependency still works, cargo just picks the version."
+            >
+              <Toggle
+                checked={cratesIo}
+                onchange={(on) => void setCratesIo(on)}
+                ariaLabel="Query the crates.io index"
+              />
+            </FormRow>
+          </div>
+        {/if}
+
+        <!-- What is running RIGHT NOW. Separate from the catalogue below because a server can be
+             installed and still be failing, and only this list can say so. -->
+        {#if bennuLspStore.statuses.length}
+          <div class="card">
+            <div class="card-section-title"><RefreshCw size={12} /> Running</div>
+            {#each bennuLspStore.statuses as st (st.root + st.language)}
+              <div class="lsp-run">
+                <div class="lsp-run-main">
+                  <div class="lsp-run-head">
+                    <span class="lsp-name">{st.version ?? st.name}</span>
+                    <Badge
+                      variant="tone"
+                      tone={st.state === 'ready' ? 'success'
+                        : st.state === 'starting' ? 'info' : 'error'}
+                    >{st.state}</Badge>
+                    {#if st.progress}<span class="lsp-progress">{st.progress}</span>{/if}
+                  </div>
+                  <div class="lsp-run-sub">{st.root}</div>
+                  {#if st.message}
+                    <div class="lsp-run-msg">{st.message}</div>
+                  {/if}
+                  {#if st.state !== 'ready' && st.log_tail.length}
+                    <!-- The server's own stderr. Usually the only place a refusal to start
+                         explains itself, so it is shown rather than kept in a log nobody opens. -->
+                    <pre class="lsp-log">{st.log_tail.slice(-8).join('\n')}</pre>
+                  {/if}
+                </div>
+                <div class="lsp-run-actions">
+                  <Button
+                    size="sm" variant="ghost"
+                    onclick={() => void bennuLspStore.restart(st.root, st.language)}
+                  >Restart</Button>
+                  {#if st.state === 'ready'}
+                    <Button
+                      size="sm" variant="ghost"
+                      onclick={() => void bennuLspStore.stop(st.root, st.language)}
+                    >Stop</Button>
+                  {/if}
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+
+        <div class="card">
+          <div class="card-section-title"><Package size={12} /> Installed servers</div>
+          {#if !bennuLspStore.servers.length}
+            <EmptyState
+              message="No servers in the catalogue"
+              description="Bennu could not read the language-server list from the backend."
+            />
+          {:else}
+            {#each bennuLspStore.servers as srv (srv.id)}
+              <div class="lsp-srv">
+                <div class="lsp-srv-head">
+                  {#if srv.path}
+                    <CircleCheck size={13} class="lsp-ok" />
+                  {:else}
+                    <TriangleAlert size={13} class="lsp-warn" />
+                  {/if}
+                  <span class="lsp-name">{srv.name}</span>
+                  <span class="lsp-exts">{srv.extensions.map((e) => `.${e}`).join(' ')}</span>
+                  {#if srv.custom}<Badge variant="tone" tone="info">custom</Badge>{/if}
+                  <span class="lsp-spacer"></span>
+                  <Toggle
+                    checked={srv.enabled}
+                    disabled={!lspEnabled}
+                    onchange={(v) => void toggleServer(srv.id, v)}
+                    ariaLabel={`Enable ${srv.name}`}
+                  />
+                </div>
+                {#if srv.path}
+                  <div class="lsp-srv-path" title={srv.path}>{srv.path}</div>
+                {:else}
+                  <!-- Not "not found" full stop: the hint is what turns a dead end into a next
+                       step, which is the whole reason the catalogue carries one. -->
+                  <div class="lsp-srv-hint">
+                    <code>{srv.command}</code> was not found. {srv.install_hint}
+                  </div>
+                {/if}
+                <label class="lsp-override">
+                  <span>Executable path</span>
+                  <Input
+                    value={serverPaths[srv.id] ?? ''}
+                    placeholder="leave empty to search PATH and the usual install locations"
+                    onchange={(v) => void commitServerPath(srv.id, v)}
+                  />
+                </label>
+              </div>
+            {/each}
+          {/if}
+        </div>
+
+        <div class="card">
+          <div class="card-section-title"><Braces size={12} /> Adding a language</div>
+          <p class="lsp-note">
+            A language the catalogue does not cover is added in
+            <code>bennu/config.toml</code> under <code>[[lsp.servers]]</code> — the same fields the
+            built-in entries carry, so it gets the same features with no code change:
+          </p>
+          <pre class="lsp-sample">{`[[lsp.servers]]
+id = "zls"
+name = "Zig"
+language = "zig"
+command = "zls"
+extensions = ["zig", "zon"]
+root_markers = ["build.zig"]
+initialization_options = ""`}</pre>
+          <p class="lsp-note">
+            <strong>root_markers</strong> is the gate: without one of those files above the file
+            being edited there is no workspace to open, so nothing starts. An entry whose
+            <code>id</code> matches a built-in replaces it.
+          </p>
         </div>
 
       {:else if active === 'style'}
@@ -718,6 +969,45 @@
 
 <style>
   .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
+
+  /* ── Language servers ── */
+  .lsp-run, .lsp-srv {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 9px 10px; background: var(--bg-base);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+  }
+  .lsp-run { flex-direction: row; align-items: flex-start; gap: 10px; }
+  .lsp-run + .lsp-run, .lsp-srv + .lsp-srv { margin-top: 6px; }
+  .lsp-run-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .lsp-run-head, .lsp-srv-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .lsp-run-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .lsp-name { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary); }
+  .lsp-exts { font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted); }
+  .lsp-spacer { flex: 1; }
+  .lsp-progress { font-size: var(--font-size-xs); color: var(--accent); }
+  .lsp-run-sub, .lsp-srv-path {
+    font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-disabled);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .lsp-run-msg { font-size: var(--font-size-xs); color: var(--warning); line-height: 1.4; }
+  .lsp-srv-hint { font-size: var(--font-size-xs); color: var(--text-muted); line-height: 1.45; }
+  .lsp-srv-hint code, .lsp-note code { font-family: var(--font-code); color: var(--text-primary); }
+  .lsp-log, .lsp-sample {
+    margin: 0; padding: 7px 9px; max-height: 140px; overflow: auto;
+    font-family: var(--font-code); font-size: var(--font-size-2xs); line-height: 1.5;
+    color: var(--text-muted); background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    white-space: pre;
+  }
+  .lsp-override { display: flex; align-items: center; gap: 8px; }
+  .lsp-override > span { font-size: var(--font-size-xs); color: var(--text-muted); flex-shrink: 0; }
+  .lsp-override :global(.input-wrap) { flex: 1; }
+  .lsp-note {
+    margin: 0; padding: 2px 2px 6px;
+    font-size: var(--font-size-xs); color: var(--text-muted); line-height: 1.5;
+  }
+  :global(.lsp-ok) { color: var(--success); flex-shrink: 0; }
+  :global(.lsp-warn) { color: var(--warning); flex-shrink: 0; }
   .bs-muted { color: var(--text-muted); }
   .bs-hint { font-size: var(--font-size-xs); color: var(--text-muted); line-height: 1.45; padding: 4px 2px 8px; }
   .bs-warn {

@@ -197,6 +197,51 @@ pub fn write_file(
     Ok(WriteResult { encoding: applied, stamp: file_stamp(file) })
 }
 
+/// Rename or move `from` to `to`, refusing rather than overwriting.
+///
+/// The refusals, and why each one is a refusal instead of a best effort:
+///
+/// * **`from` is gone** — there is nothing to rename, and `fs::rename` would report a bare "No such
+///   file" that names neither end of the operation.
+/// * **`to` already exists** — a rename that silently replaced a file would destroy it with no undo
+///   anywhere in the system. The one exception is a rename to the *same file*, which is what a
+///   change of letter case is on macOS and Windows: `Foo.rs` → `foo.rs` is a legitimate rename that
+///   an existence check alone reads as a collision.
+/// * **the destination's parent is missing** — creating intermediate directories on a rename is
+///   guessing. `mod.rs` → `sub/mod.rs` where `sub/` does not exist is far more likely a typo than an
+///   instruction to build a tree.
+///
+/// Deliberately not this function's business: telling a language server (the caller asks it for the
+/// edits a rename implies **before** calling this — the server has to answer about the tree as it
+/// stands) and updating any editor state.
+pub fn rename_path(from: &Path, to: &Path) -> Result<(), ProjectError> {
+    if !from.exists() {
+        return Err(ProjectError::Io(format!("{} does not exist", from.display())));
+    }
+    if to.exists() && !same_file(from, to) {
+        return Err(ProjectError::Io(format!("{} already exists", to.display())));
+    }
+    match to.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() && !parent.is_dir() => {
+            return Err(ProjectError::Io(format!("{} is not a directory", parent.display())));
+        }
+        _ => {}
+    }
+    std::fs::rename(from, to).map_err(|e| ProjectError::Io(e.to_string()))
+}
+
+/// Whether two paths name the same file on disk.
+///
+/// By canonicalised path rather than by string, which is the whole point: on a case-insensitive
+/// filesystem `Foo.rs` and `foo.rs` are one file, and only asking the filesystem can tell. A path
+/// that cannot be canonicalised (it does not exist) is not the same file as anything.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
+    }
+}
+
 /// Resolve the encoding label for a file in `project_root`: explicit `encoding_override`
 /// (per-file/per-project) → the pom's declared `sourceEncoding` → `default_encoding`.
 /// Shared by [`read_file`] and [`write_file`] so a read and its matching write agree.
@@ -391,6 +436,46 @@ mod tests {
         write_file(&dir, &gone, "class Gone { int kept; }\n", "UTF-8", None, Some(&read.stamp))
             .unwrap();
         assert_eq!(std::fs::read_to_string(&gone).unwrap(), "class Gone { int kept; }\n");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_rename_moves_the_file_and_refuses_to_clobber_anything() {
+        let dir = temp_dir("rename");
+        let from = dir.join("old.rs");
+        let to = dir.join("new.rs");
+        std::fs::write(&from, b"pub fn keep() {}\n").unwrap();
+
+        rename_path(&from, &to).unwrap();
+        assert!(!from.exists());
+        assert_eq!(std::fs::read_to_string(&to).unwrap(), "pub fn keep() {}\n");
+
+        // Renaming onto an existing file would destroy it, with no undo anywhere in the system.
+        let other = dir.join("other.rs");
+        std::fs::write(&other, b"pub fn other() {}\n").unwrap();
+        assert!(rename_path(&to, &other).is_err());
+        assert_eq!(std::fs::read_to_string(&other).unwrap(), "pub fn other() {}\n", "left intact");
+
+        // A destination whose parent does not exist is a typo, not an instruction to build a tree.
+        assert!(rename_path(&to, &dir.join("nope").join("new.rs")).is_err());
+        // And there is nothing to rename when the source is gone.
+        assert!(rename_path(&dir.join("ghost.rs"), &dir.join("x.rs")).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn changing_only_the_letter_case_is_a_rename_not_a_collision() {
+        // On macOS and Windows the destination "already exists" because it IS the source. An
+        // existence check alone reads that as a clobber and refuses a legitimate rename.
+        let dir = temp_dir("rename-case");
+        let from = dir.join("Thing.rs");
+        let to = dir.join("thing.rs");
+        std::fs::write(&from, b"pub struct Thing;\n").unwrap();
+
+        rename_path(&from, &to).unwrap();
+        assert_eq!(std::fs::read_to_string(&to).unwrap(), "pub struct Thing;\n");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

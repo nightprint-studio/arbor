@@ -86,7 +86,13 @@ members = [
     "crates/products/bennu/xsd",
     "crates/products/bennu/xml",
     "crates/products/bennu/deps",
+    # What a Cargo workspace IS, read off its manifests: the crate graph, the manifest
+    # schema behind Cargo.toml validation + completion, and the cargo command catalogue.
+    "crates/products/bennu/cargo",
     "crates/products/bennu/query",
+    # The LSP client — the impl of bennu-intel's predisposed slot. A leaf: serde plus
+    # two workspace-internal crates, so it can be split out unchanged.
+    "crates/products/bennu/lsp",
     "crates/products/bennu/check",
     "crates/products/bennu/test",
     "crates/products/bennu/jdwp",

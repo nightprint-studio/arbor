@@ -10,13 +10,19 @@
  *    and completion/hover over its closed vocabulary — all local, no backend).
  * 2. **Lezer languages** — HTML (`@codemirror/lang-html`, with embedded JS/CSS and tag
  *    folding), JSON, Markdown.
- * 3. **legacy stream modes** — XML, YAML, `.properties`, CSS/SCSS/LESS, JS/TS, shell,
- *    **Rust** and **TOML**, plus SQL through the shared per-dialect modes. Colour only,
- *    which is the whole ask for a Rust project today: navigation and completion there
- *    want an LSP, and one arrives (or doesn't) without this file changing shape — the
- *    descriptor is the seam.
+ * 3. **language-server backed** — **Rust** ({@link lspLanguage}): a legacy stream mode for the
+ *    instant local colour, plus completion / hover / signature help from the server, and
+ *    semantic tokens layered over the mode by the editor host. Go-to, find-usages, diagnostics
+ *    and rename ride the shared handlers, so they need nothing here.
+ * 4. **legacy stream modes** — XML, YAML, `.properties`, CSS/SCSS/LESS, JS/TS, shell and
+ *    **TOML**, plus SQL through the shared per-dialect modes. Colour only — except a
+ *    `Cargo.toml`, which gets the manifest schema's completion and diagnostics on top
+ *    ({@link cargoTomlLang}).
  *
  * Unknown types get a plain (no-highlight) descriptor so they're still fully editable.
+ *
+ * A language moves between tiers 3 and 4 by changing one line here: the descriptor is the seam,
+ * which is what made adding Rust intelligence a new module rather than a rewrite of this one.
  */
 
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor';
@@ -36,7 +42,9 @@ import { json as jsonLang } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { html } from '@codemirror/lang-html';
 import { javaLanguage } from './java-lang';
+import { lspLanguage } from './lsp-lang';
 import { isSpringPropertyFile, springPropsLang } from './spring-props-lang';
+import { cargoTomlLang, isCargoManifest } from './cargo-toml-lang';
 import { xmlSchemaLang } from './xml-schema-lang';
 import { jspLanguage } from './jsp-lang';
 import { digLanguage } from './dig/dig-lang';
@@ -87,8 +95,29 @@ const yamlLang = streamLang('yaml', yaml);
 const springYamlLang = springPropsLang('spring-yaml', yaml);
 const springPropertiesLang = springPropsLang('spring-properties', properties);
 const shellLang = streamLang('shell', shell);
-const rustLang = streamLang('rust', rust);
+// Rust: the legacy mode for the instant local colour, plus everything a language server adds.
+// Built once — the identity has to be stable or the editor remounts on every keystroke.
+const rustLang = lspLanguage('rust', rust, {
+  line: '//',
+  block: { open: '/*', close: '*/' },
+});
+// A `.ron` file is coloured by the same mode but is NOT Rust to a language server: asking
+// rust-analyzer about one would be asking about a file it has never heard of. So it keeps a
+// plain descriptor of its own.
+const ronLang = streamLang('ron', rust);
+/**
+ * Rust source that is **not a file** — a macro expansion.
+ *
+ * Same colouring, deliberately none of the intelligence: the server produced the text and does not
+ * know it as a document, so completion, hover and go-to would all be asking about something that
+ * exists nowhere. Its own descriptor rather than the `.rs` one for exactly that reason.
+ */
+export const rustTextLanguage = streamLang('rust-text', rust);
 const tomlLang = streamLang('toml', toml);
+// A `Cargo.toml` is TOML the backend has a great deal to say about: the manifest schema behind its
+// completion and its diagnostics. Built once — the identity has to be stable or the editor remounts
+// on every keystroke.
+const cargoManifestLang = cargoTomlLang(toml);
 const jsonDesc = cmLang('json', jsonLang());
 const markdownDesc = cmLang('markdown', markdown());
 const plainLang = cmLang('text', []);
@@ -130,6 +159,9 @@ export function languageForPath(path: string | null): LanguageDescriptor {
   if (name === '.gitignore' || name === '.gitattributes' || name === '.editorconfig') return propsLang;
   // `Cargo.lock` is TOML; `.lock` in general is not (`yarn.lock` isn't), so match the name.
   if (name === 'Cargo.lock') return tomlLang;
+  // The manifest, by NAME: `rustfmt.toml` and `.cargo/config.toml` are not manifests, and applying
+  // the manifest schema to one would flag every key in it.
+  if (isCargoManifest(name)) return cargoManifestLang;
 
   const dot = name.lastIndexOf('.');
   const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';
@@ -160,8 +192,9 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     case 'yml': case 'yaml': return yamlLang;
     case 'properties': case 'ini': case 'conf': case 'cfg': return propsLang;
     // RON (geode's content format) is close enough to a struct literal that the Rust mode
-    // colours it well: same comments, strings, numbers and identifier-before-`(` shape.
-    case 'ron': return rustLang;
+    // colours it well: same comments, strings, numbers and identifier-before-`(` shape. Its own
+    // descriptor, though — see `ronLang`.
+    case 'ron': return ronLang;
     case 'sql': return sqlLangFor(bennuSettingsStore.sqlDialect);
     case 'sh': case 'bash': case 'zsh': return shellLang;
     default: return plainLang;

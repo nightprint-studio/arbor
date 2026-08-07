@@ -24,9 +24,10 @@
    * `INHERITED_SEAM` below.
    */
   import {
-    Box, SquareFunction, Variable, Braces, ArrowDownAZ, MoreVertical,
-    FileCode2, Code2, ArrowRight, Copy, ChevronsDownUp, ChevronsUpDown, ArrowUp,
+    Braces, ArrowDownAZ, MoreVertical,
+    ArrowRight, Copy, ChevronsDownUp, ChevronsUpDown, ArrowUp,
   } from 'lucide-svelte';
+  import { kindGlyph } from './symbol-kind-glyph';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
@@ -40,6 +41,8 @@
   import { SvelteSet } from 'svelte/reactivity';
   import { javaStructure, type JavaNode, type JavaVisibility } from './java-outline';
   import { markupOutline, type MarkupNode } from './markup-outline';
+  import { lspDocumentSymbols, type LspSymbol } from '$lib/ipc/bennu/lsp';
+  import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
   import { detectAccessors, flagsFor } from './java-accessors';
 
   let { title = 'Structure' }: { title?: string } = $props();
@@ -54,7 +57,10 @@
   const MARKUP_EXT = /\.(jsp|jspf|tag|xml|xsd|wsdl|tld|pom)$/i;
   const isJava   = $derived(!!activePath && /\.java$/i.test(activePath));
   const isMarkup = $derived(!!activePath && MARKUP_EXT.test(activePath));
-  const supported = $derived(isJava || isMarkup);
+  /** A file a language server owns — its outline comes from the server rather than from a local
+   *  scan, which is why this branch is asynchronous and the other two are not. */
+  const isLsp    = $derived(bennuLspStore.servesFile(activePath));
+  const supported = $derived(isJava || isMarkup || isLsp);
 
   // ── Node model ──────────────────────────────────────────────────────────────
   // A single tree-node shape the shared `Tree` renders. `java` nodes come from
@@ -62,7 +68,21 @@
   // Tree's getId/getChildren + the row snippet stay uniform.
   type Row =
     | (JavaNode & { flavour: 'java' })
-    | (MarkupNode & { flavour: 'markup'; kind: 'element' });
+    | (MarkupNode & { flavour: 'markup'; kind: 'element' })
+    | LspRow;
+
+  /** A server-supplied symbol, in the shape the Tree renders. The kind is the server's own lowercase
+   *  name (`struct`, `trait`, `function`), which is why the icon table below has entries the Java
+   *  scanner never produces. */
+  interface LspRow {
+    flavour: 'lsp';
+    id: string;
+    name: string;
+    kind: string;
+    detail?: string;
+    line: number;
+    children?: LspRow[];
+  }
 
   function tagJava(nodes: JavaNode[]): (JavaNode & { flavour: 'java' })[] {
     return nodes.map((n) => ({
@@ -71,6 +91,21 @@
       children: n.children ? tagJava(n.children) : undefined,
     }));
   }
+  /** `LspSymbol` → `LspRow`. The id has to be unique per file for the Tree's expansion set, and a
+   *  name alone is not: a `struct` and its `impl` block share one, and so do two fields of different
+   *  types. Kind, name and line together are. */
+  function tagLsp(nodes: LspSymbol[]): LspRow[] {
+    return nodes.map((n) => ({
+      flavour: 'lsp' as const,
+      id: `${n.kind}:${n.name}:${n.line}`,
+      name: n.name,
+      kind: n.kind,
+      detail: n.detail ?? undefined,
+      line: n.line,
+      children: n.children?.length ? tagLsp(n.children) : undefined,
+    }));
+  }
+
   function tagMarkup(nodes: MarkupNode[]): (MarkupNode & { flavour: 'markup'; kind: 'element' })[] {
     return nodes.map((n) => ({
       ...n,
@@ -81,17 +116,34 @@
   }
 
   // Re-derive on source change, debounced so a burst of edits coalesces.
+  //
+  // The LSP branch is a round-trip, so it carries a sequence number: a slow answer for the file you
+  // have just left must not replace the outline of the one you are looking at.
   let roots = $state<Row[]>([]);
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let seq = 0;
   $effect(() => {
     const src = activeSource;
     const path = activePath;
     const java = isJava;
     const markup = isMarkup;
+    const lsp = isLsp;
     if (timer) clearTimeout(timer);
-    if (!path || !(java || markup)) { roots = []; return; }
+    if (!path || !(java || markup || lsp)) { roots = []; return; }
+    const mine = ++seq;
     timer = setTimeout(() => {
-      roots = java ? tagJava(javaStructure(src)) : tagMarkup(markupOutline(src));
+      if (java) {
+        roots = tagJava(javaStructure(src));
+      } else if (markup) {
+        roots = tagMarkup(markupOutline(src));
+      } else {
+        void lspDocumentSymbols(path, src)
+          .then((syms) => { if (mine === seq) roots = tagLsp(syms); })
+          // Silent: the server may still be loading the workspace, and the next keystroke asks
+          // again. A panel that reported every early request would report a working feature as
+          // broken for the first minute of every session.
+          .catch(() => { if (mine === seq) roots = []; });
+      }
     }, 180);
     return () => { if (timer) clearTimeout(timer); };
   });
@@ -176,19 +228,10 @@
   ]);
 
   // ── Visuals per node kind ─────────────────────────────────────────────────────
-  const KIND_ICON = {
-    class:     { icon: Box,            color: 'var(--info)' },
-    interface: { icon: Box,            color: 'var(--info)' },
-    enum:      { icon: Box,            color: 'var(--info)' },
-    record:    { icon: Box,            color: 'var(--info)' },
-    method:    { icon: SquareFunction, color: 'var(--color-tag, #c792ea)' },
-    field:     { icon: Variable,       color: 'var(--success)' },
-    group:     { icon: Braces,         color: 'var(--text-muted)' },
-    element:   { icon: Code2,          color: 'var(--color-tag, #c792ea)' },
-  } as const;
-
+  // The table is shared with every other surface that lists declarations (see
+  // `symbol-kind-glyph.ts`) — a symbol's shape must not depend on which panel you are looking at.
   function iconFor(node: Row) {
-    return KIND_ICON[node.kind as keyof typeof KIND_ICON] ?? { icon: FileCode2, color: 'var(--text-muted)' };
+    return kindGlyph(node.kind);
   }
 
   // Visibility dot: IntelliJ-ish colour coding. Package (default) is muted.
@@ -291,7 +334,7 @@
   {#if !activePath}
     <EmptyState message="Open a file to see its structure." />
   {:else if !supported}
-    <EmptyState message="Structure is available for Java and XML/JSP files." />
+    <EmptyState message="Structure is available for Java, XML/JSP, and any language with a server behind it." />
   {:else if roots.length === 0}
     <EmptyState message="No symbols found in this file." />
   {:else}

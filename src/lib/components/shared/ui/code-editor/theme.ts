@@ -266,6 +266,53 @@ export const codeEditorTheme = EditorView.theme(
     '.cm-tok-operator':    { color: 'var(--syntax-operator, var(--text-secondary))' },
     '.cm-tok-punctuation': { color: 'var(--text-muted)' },
 
+    // ── Semantic-token classes ──
+    //
+    // Emitted only by a language server (see `semantic-tokens.ts`), which knows things a
+    // grammar cannot: that `Foo` is a trait rather than a struct, that `println!` is a macro,
+    // that a binding is `mut`. Each of these is a distinction a stream highlighter has no way
+    // to draw, which is why they earn their own colours rather than folding into the ones above.
+    //
+    // ⚠️ The rule that makes the layering actually work. The base highlighter does NOT leave
+    // identifiers unstyled — `t.variableName` above paints them `--text-primary` — so where both
+    // layers cover the same text there are two competing `color` rules on two **nested** spans,
+    // and the inner one wins regardless of selector specificity. Which of the two is inner
+    // follows decoration precedence, not anything the semantic layer decides. Without this,
+    // the base layer's white could win and a Rust file came out as flat text with coloured
+    // keywords — which is exactly how the bug looked.
+    //
+    // Keyed on `.cm-sem` (the marker every semantic span carries) rather than on `cm-tok-*` in
+    // general: a tree-sitter language's *injections* nest coloured spans inside a token on
+    // purpose (a JSP `<script>` body), and flattening those would be a real regression.
+    '.cm-sem span': { color: 'inherit' },
+    //
+    // A macro invocation is neither a call nor a keyword; the annotation olive puts it in the
+    // same visual family as a Java annotation, which is the closest thing it is.
+    '.cm-tok-macro':       { color: 'var(--syntax-annotation, #bbb529)' },
+    // A lifetime is type-adjacent scaffolding — the type blue, italic and slightly muted so
+    // `'a` does not shout as loudly as the type it qualifies.
+    '.cm-tok-lifetime':    { color: 'var(--syntax-type, #4d9be6)', fontStyle: 'italic', opacity: '0.85' },
+    // A parameter, distinct from both a local (text-primary) and a field (violet): inside a
+    // long function the difference between "this came in" and "this is ours" is what you scan for.
+    '.cm-tok-parameter':   { color: 'var(--syntax-parameter, #a9b7c6)', fontStyle: 'italic' },
+    // `\n` in a string, `{:?}` in a `format!` — code hiding inside a literal, and much easier
+    // to read picked out from it.
+    '.cm-tok-escape':      { color: 'var(--syntax-escape, #cc7832)', fontWeight: '600' },
+    // An unresolved reference. Underlined rather than recoloured: a squiggle already carries
+    // the error, and a second red would make an ordinary in-progress edit look broken.
+    '.cm-tok-invalid':     { textDecoration: 'underline wavy', textDecorationColor: 'var(--danger, #d16969)' },
+
+    // ── Semantic-token MODIFIERS ──
+    //
+    // Layered on top of a class rather than replacing it, so `mut count` keeps its identifier
+    // colour and gains the mark. Deliberately restrained: these ride on top of a colour that is
+    // already carrying meaning, so anything loud here fights it.
+    '.cm-tokmod-mutable':  { textDecoration: 'underline', textDecorationColor: 'var(--border-strong, #555)', textUnderlineOffset: '2px' },
+    '.cm-tokmod-unsafe':   { backgroundColor: 'var(--danger-bg, rgba(209,90,90,0.12))', borderRadius: '2px' },
+    '.cm-tokmod-deprecated': { textDecoration: 'line-through', opacity: '0.75' },
+    '.cm-tokmod-async':    { fontStyle: 'italic' },
+    '.cm-tokmod-documentation': { opacity: '0.9' },
+
     // ── Namespace palette ──
     //
     // `.cm-tok-ns-0…N` — a colour per namespace FAMILY rather than per token kind (a

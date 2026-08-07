@@ -56,11 +56,24 @@
     project that has Spring.</li>
   <li><strong>JUnit</strong> — a test scope: the whole project, one module, or one class. It runs
     through the test runner: it lands here too, as its own tab, with the test tree beside the output.</li>
+  <li><strong>Cargo</strong> — a cargo subcommand: a crate, a command, a target, features, a
+    profile, and two argument fields (<strong>Cargo arguments</strong> before the <code>--</code>,
+    <strong>Program arguments</strong> after it). Everything but the arguments and the working
+    directory is a picker, because the workspace already knows its crates, their targets and their
+    features. Offered only on a Cargo project — and the JVM categories only on a Java one.</li>
 </ul>
 <p>
   On a project with exactly one entry point you need none of this: press ▷ and Bennu finds it,
   makes a configuration for it — a Spring Boot one if that class is a Boot application — and
-  runs it. With several, it opens the editor and asks, which is a real question.
+  runs it. With several, it opens the editor and asks, which is a real question. A Cargo workspace
+  with exactly one binary works the same way, and gets a Cargo configuration for it.
+</p>
+<p>
+  A Cargo configuration has <strong>no build step in front of it</strong> — the command <em>is</em>
+  the build, so prefixing it with one would compile the workspace twice. Everything after that is
+  identical: the same console, the same Stop, the same ⟳. 🐞 is the exception, and stays JVM-only:
+  it attaches JDWP to a JVM Bennu started, and a cargo command forks its own compiler and its own
+  program. See <em>Rust &amp; Cargo</em>.
 </p>
 
 <h3>Multi-module projects</h3>

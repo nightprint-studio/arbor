@@ -458,6 +458,7 @@ pub fn completions(
                         label: k,
                         kind: "property".to_string(),
                         auto_import: None,
+                        ..Default::default()
                     })
                     .collect();
             }
@@ -487,6 +488,7 @@ fn bean_completions(model: &SpringModel) -> Vec<CompletionItem> {
                 format!("{} · {}", b.fqcn, b.stereotype)
             }),
             auto_import: None,
+            ..Default::default()
         });
     }
     out

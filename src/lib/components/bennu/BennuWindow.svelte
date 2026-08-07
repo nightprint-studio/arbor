@@ -25,6 +25,7 @@
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info,
     Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck,
     TextCursorInput, ListChecks, BookOpen, FlaskConical, ListRestart, Bug, Braces, Languages,
+    Cog, Network,
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -51,6 +52,7 @@
   import BennuStructurePanel from './BennuStructurePanel.svelte';
   import BennuDependenciesPanel from './BennuDependenciesPanel.svelte';
   import BennuMavenPanel from './BennuMavenPanel.svelte';
+  import BennuCargoPanel from './BennuCargoPanel.svelte';
   import BennuTestsCatalogPanel from './BennuTestsCatalogPanel.svelte';
   import SyntaxTreePanel from '$lib/components/shared/internal/SyntaxTreePanel.svelte';
   import { bennuAstStore } from '$lib/stores/bennu/ast.svelte';
@@ -68,6 +70,7 @@
   import { JPA_PALETTE_ACTIONS } from './jpa-actions';
   import BennuValidationModal from './BennuValidationModal.svelte';
   import BennuWorkspaceManagerModal from './BennuWorkspaceManagerModal.svelte';
+  import BennuCargoAddModal from './BennuCargoAddModal.svelte';
   import BennuIntentionsOverlay from './BennuIntentionsOverlay.svelte';
   import BennuExternalChangeModal from './BennuExternalChangeModal.svelte';
   import BennuRunConfigModal from './BennuRunConfigModal.svelte';
@@ -89,9 +92,11 @@
   import type { GenerateMode } from './bennu-intentions';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { workspacesStore } from '$lib/stores/bennu/workspaces.svelte';
-  import { isJavaFile, isJspFile, supportsCodeNav } from './file-kind';
+  import { isJavaFile, isJspFile, isLspFile, supportsCodeNav } from './file-kind';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
+  import { bennuCargoStore } from '$lib/stores/bennu/cargo.svelte';
+  import { emptyInvocation as emptyCargoInvocation } from '$lib/ipc/bennu/cargo';
   import { bennuRunConfigStore } from '$lib/stores/bennu/run-config.svelte';
   import { bennuDebugStore } from '$lib/stores/bennu/debug.svelte';
   // Opening a stack frame's source — the same resolution the consoles' stack traces use, so a
@@ -102,8 +107,11 @@
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
+  import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
+  import { lspReloadWorkspace } from '$lib/ipc/bennu/lsp';
   import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
+  import { bennuHierarchyStore } from '$lib/stores/bennu/hierarchy.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import { bennuTomcatStore } from '$lib/stores/bennu/tomcat.svelte';
   import { springStore } from '$lib/stores/bennu/spring.svelte';
@@ -158,6 +166,7 @@
     let detachDecompiled: (() => void) | undefined;
     let detachTests: (() => void) | undefined;
     let detachDebug: (() => void) | undefined;
+    let detachLsp: (() => void) | undefined;
     void bennuRunStore.attach().then((d) => { detachRun = d; });
     void bennuTestStore.attach().then((d) => { detachTests = d; });
     // The debugger's three streams: where the session is, where the program stopped, and what
@@ -167,6 +176,11 @@
     void bennuSpellStore.attach().then((d) => { detachSpell = d; });
     // Reload a decompiled tab when its dependency sources finish downloading.
     void decompiledStore.attach().then((d) => { detachDecompiled = d; });
+    // Language servers: their catalogue (which decides what the editor even offers for a `.rs`
+    // file) and their live status. `attach` also hands the backend its event sink, so without it
+    // nothing about a server would ever be pushed — including the progress that explains why a
+    // freshly-opened Rust project answers nothing for its first half minute.
+    void bennuLspStore.attach().then((d) => { detachLsp = d; });
     // Anti-white-flash: reveal this window once the first real frame is painted.
     requestAnimationFrame(() => requestAnimationFrame(() => void signalWindowReady().catch(() => {})));
     return () => {
@@ -175,7 +189,7 @@
       window.removeEventListener('blur', stopPolling);
       stopPolling();
       detachRun?.(); detachIndex?.(); detachSpell?.(); detachDecompiled?.(); detachTests?.();
-      detachDebug?.();
+      detachDebug?.(); detachLsp?.();
       bennuIndexStore.reset();
     };
   });
@@ -248,6 +262,19 @@
       // The test tree and its results belong to the project that produced them. Carrying
       // them into the next one would show green rows for classes this project doesn't have.
       untrack(() => bennuTestStore.reset());
+    }
+  });
+
+  // The Cargo workspace, on opening a Rust project. Read here rather than only by the Cargo panel
+  // because three other surfaces want it before that panel is ever opened: the run-configuration
+  // editor's crate and target pickers, ▶ looking for the sole binary, and the palette. Cheap — it
+  // reads manifests, never `cargo metadata`.
+  $effect(() => {
+    const root = projectStore.project?.root ?? null;
+    if (root && projectStore.isCargo) {
+      void bennuCargoStore.load(root);
+    } else {
+      bennuCargoStore.reset();
     }
   });
 
@@ -363,6 +390,8 @@
 
   let editor = $state<{
     openGoto: () => void;
+    expandSelection: () => Promise<boolean>;
+    shrinkSelection: () => Promise<boolean>;
     getCaretLine: () => number;
     openSearch: () => void;
     focusEditor: () => void;
@@ -370,13 +399,48 @@
     goToDefinition: () => void;
     openRename: () => void;
     findUsages: () => void;
+    showCallHierarchy: () => void;
+    showTypeHierarchy: () => void;
+    expandMacro: () => void;
     insertAtCursor: (text: string) => void;
     getSelectedText: () => string;
     checkMojibake: () => void;
     createValidationFile: () => void;
+    toggleBreakpointAtCaret: () => void;
+    formatDocument: () => Promise<void>;
     navBack: () => void;
     navForward: () => void;
   } | null>(null);
+
+  /**
+   * Rebuild the language server's model of the project — re-read the manifests, re-resolve the crate
+   * graph.
+   *
+   * rust-analyzer reloads on its own when a `Cargo.toml` it knows about changes, so this is for the
+   * cases it cannot see: a `.cargo/config.toml` edit, a patched or vendored dependency changing
+   * underneath, a `cargo add` run in a terminal, a git dependency that has moved. Which is also why
+   * it is a command and not something Bennu fires after every manifest save — a second
+   * `cargo metadata` plus a build-script rebuild is seconds of work for an answer the server already
+   * had.
+   */
+  async function reloadLanguageServerWorkspace() {
+    const scope = projectStore.project?.root;
+    if (!scope) return;
+    const ok = await lspReloadWorkspace(scope).catch(() => false);
+    toastStore.show(
+      ok ? 'Reloading the workspace…' : 'No language server to reload for this project',
+      ok ? 'info' : 'warning',
+    );
+  }
+
+  /** Restart the language server serving the open file — the way out of a failed slot (failures
+   *  are sticky on purpose) and the fix for "I just installed it". */
+  async function restartActiveLanguageServer() {
+    const status = bennuLspStore.statusFor(projectStore.activeFilePath);
+    if (!status) { toastStore.show('No language server for this file', 'info'); return; }
+    await bennuLspStore.restart(status.root, status.language);
+    toastStore.show(`Restarting ${status.name}…`, 'info');
+  }
 
   /** Ctrl+S — save the active file to disk. */
   function saveActive() {
@@ -501,14 +565,32 @@
     void bennuDebugStore.load(root);
   });
 
+  /**
+   * Drop the hierarchy when the project changes.
+   *
+   * The tree is an answer about one file of one project, and its nodes are handles a *particular*
+   * language server issued. After a switch those handles belong to a session that no longer answers
+   * for anything on screen — so the tree would look current and expand into nothing.
+   */
+  let hierarchyRoot: string | null = null;
+  $effect(() => {
+    const root = projectStore.project?.root ?? null;
+    if (root === hierarchyRoot) return;
+    hierarchyRoot = root;
+    // `untrack`: clearing touches store state this effect must not then react to.
+    untrack(() => bennuHierarchyStore.clear());
+  });
+
   const leftTop = $derived<ActivityRailItem[]>([
     { id: 'project',   tooltip: 'Project',   shortcut: 'Alt+1', icon: FolderTree, active: bennuUiStore.leftPanel === 'project',   onclick: () => bennuUiStore.toggleLeft('project') },
     ...(javaTools
       ? [
           { id: 'structure', tooltip: 'Structure', shortcut: 'Alt+2', icon: ListTree,   active: bennuUiStore.leftPanel === 'structure', onclick: () => bennuUiStore.toggleLeft('structure') },
-          { id: 'dependencies', tooltip: 'Dependencies', shortcut: 'Alt+N', icon: Library, active: bennuUiStore.leftPanel === 'dependencies', onclick: () => bennuUiStore.toggleLeft('dependencies') },
         ]
       : []),
+    // Both ecosystems: the panel answers for a Maven reactor and for a Cargo workspace, from one
+    // report shape.
+    { id: 'dependencies', tooltip: 'Dependencies', shortcut: 'Alt+N', icon: Library, active: bennuUiStore.leftPanel === 'dependencies', onclick: () => bennuUiStore.toggleLeft('dependencies') },
   ]);
   // Left rail bottom cluster: only the bottom-dock toggles (Terminal, Problems).
   // Docs/Settings moved to the titlebar's right cluster (IntelliJ/Corvus layout).
@@ -516,47 +598,56 @@
   // state mirrors the dock's open tab.
   const leftBottom = $derived<ActivityRailItem[]>([
     { id: 'build',    tooltip: 'Build', shortcut: 'Alt+0',      icon: Hammer,         active: bennuUiStore.bottomPanel === 'build',    onclick: () => bennuUiStore.toggleBottom('build') },
-    // Run and Tests are Java-only, exactly like Structure and Dependencies: `bennu_run`
-    // launches a JVM, so on a Cargo root the panel could only ever be empty and its toggle
-    // would be the only way to close it again.
-    ...(javaTools
-      ? [
-          // ONE button for running and debugging, because they are one activity: the same
-          // launch with more to look at. The icon says which it currently is, and the dot is a
-          // WARNING while the program is stopped — a suspended VM holds its locks and its
-          // port, and a debug session you forgot about looks exactly like a hang.
-          {
-            id: 'run',
-            tooltip: bennuDebugStore.live ? 'Run / Debug' : 'Run',
-            shortcut: 'Alt+R',
-            icon: bennuDebugStore.live ? Bug : Play,
-            dot: bennuDebugStore.paused
-              ? ('warning' as const)
-              : bennuRunStore.running
-                ? ('accent' as const)
-                : undefined,
-            active: bennuUiStore.bottomPanel === 'run',
-            onclick: () => bennuUiStore.toggleBottom('run'),
-          },
-        ]
-      : []),
+    // ONE button for running and debugging, because they are one activity: the same launch with
+    // more to look at. The icon says which it currently is, and the dot is a WARNING while the
+    // program is stopped — a suspended VM holds its locks and its port, and a debug session you
+    // forgot about looks exactly like a hang.
+    //
+    // Not Java-only any more: a cargo command streams into the same console through the same
+    // registry, so Stop, ⟳ and the tab strip all mean the same thing on a Rust project.
+    {
+      id: 'run',
+      tooltip: bennuDebugStore.live ? 'Run / Debug' : 'Run',
+      shortcut: 'Alt+R',
+      icon: bennuDebugStore.live ? Bug : Play,
+      dot: bennuDebugStore.paused
+        ? ('warning' as const)
+        : bennuRunStore.running
+          ? ('accent' as const)
+          : undefined,
+      active: bennuUiStore.bottomPanel === 'run',
+      onclick: () => bennuUiStore.toggleBottom('run'),
+    },
     { id: 'problems', tooltip: 'Problems', shortcut: 'Alt+6',   icon: AlertTriangle,  active: bennuUiStore.bottomPanel === 'problems', onclick: () => bennuUiStore.toggleBottom('problems') },
     { id: 'todos',    tooltip: 'TODO', shortcut: 'Alt+7',       icon: ListTodo,       active: bennuUiStore.bottomPanel === 'todos',    onclick: () => bennuUiStore.toggleBottom('todos') },
     { id: 'terminal', tooltip: 'Terminal', shortcut: 'Alt+F12', icon: TerminalSquare, active: bennuUiStore.bottomPanel === 'terminal', onclick: () => bennuUiStore.toggleBottom('terminal') },
   ]);
-  const rightTop = $derived<ActivityRailItem[]>(
-    javaTools
+  /** The build tool's own window — Maven's goals or Cargo's crates. One slot, because a project is
+   *  one or the other, and Alt+8 means "the build tool" either way. */
+  const buildToolRail = $derived<ActivityRailItem>(
+    projectStore.isCargo
+      ? { id: 'cargo', tooltip: 'Cargo — the crates, and what you can run on them', shortcut: 'Alt+8', icon: Cog, active: bennuUiStore.rightPanel === 'cargo', onclick: () => bennuUiStore.toggleRight('cargo') }
+      : { id: 'maven', tooltip: 'Maven', shortcut: 'Alt+8', icon: MavenIcon, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') },
+  );
+  const rightTop = $derived<ActivityRailItem[]>([
+    buildToolRail,
+    ...(javaTools
       ? [
-          { id: 'maven', tooltip: 'Maven', shortcut: 'Alt+8', icon: MavenIcon, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') },
           // The CATALOGUE of tests, not the runs — those are tabs of the Run console. Its own
-          // brand mark for the same reason Maven has one: this button names a product.
+          // brand mark for the same reason Maven has one: this button names a product. Java-only:
+          // `cargo test` is a command on the Cargo panel, not a catalogue Bennu can enumerate.
           { id: 'tests', tooltip: 'Tests', shortcut: 'Alt+5', icon: JUnitIcon, active: bennuUiStore.rightPanel === 'tests', onclick: () => bennuUiStore.toggleRight('tests') },
-          // The parse itself. Not gated on Java: it answers for every language there is a
-          // grammar for, and NAMES the one it has none for — which is the useful answer.
+          // The parse, and the model Bennu derives from it. Both views are about Bennu's OWN
+          // engines — the tree-sitter grammars are Java and JSP, and the model is Java's — so on a
+          // Cargo root the panel can only ever say "no grammar for Rust". It used to be offered
+          // there on the grounds that naming a language it cannot read is an honest answer, and
+          // that stopped being true the moment rust-analyzer started serving those files richly:
+          // the message then reads as "Bennu does not understand Rust", which is the opposite of
+          // the case. An absence is only worth reporting when nothing else is answering.
           { id: 'ast', tooltip: 'Trees — the parse, and the model Bennu derives from it', shortcut: 'Alt+9', icon: Braces, active: bennuUiStore.rightPanel === 'ast', onclick: () => bennuUiStore.toggleRight('ast') },
         ]
-      : [],
-  );
+      : []),
+  ]);
   // Forms drives the BOTTOM dock (wide, horizontal data), not a side panel — its toggle sits
   // in the right rail's bottom cluster; the active state mirrors the dock's open tab.
   const rightBottom = $derived<ActivityRailItem[]>([
@@ -591,11 +682,13 @@
     // The only dependencies that should re-run this are the three values read above.
     untrack(() =>
       bennuUiStore.dropUnavailablePanels({
-        left: java ? ['project', 'structure', 'dependencies'] : ['project'],
-        right: java ? ['maven', 'tests', 'ast'] : ['ast'],
+        left: java ? ['project', 'structure', 'dependencies'] : ['project', 'dependencies'],
+        right: java ? ['maven', 'tests', 'ast'] : ['cargo'],
         bottom: [
-          'problems', 'terminal', 'build', 'todos',
-          ...(java ? ['run' as const] : []),
+          // `hierarchy` survives every switch: it is opened by an action about the caret rather than
+          // by a rail button, so there is no icon that could disappear from under it, and its own
+          // header closes it.
+          'problems', 'terminal', 'build', 'todos', 'run', 'hierarchy',
           ...(jsp ? ['forms' as const] : []),
           // Most framework catalogs have no rail button, so one left open after switching to a
           // project that doesn't offer it would be unclosable from the rail.
@@ -640,6 +733,7 @@
     'terminal': TerminalSquare as unknown as IconComponent,
     'hammer': Hammer as unknown as IconComponent,
     'maven': MavenIcon as unknown as IconComponent,
+    'cog': Cog as unknown as IconComponent,
     'junit': JUnitIcon as unknown as IconComponent,
     'braces': Braces as unknown as IconComponent,
     'list-checks': ListChecks as unknown as IconComponent,
@@ -660,9 +754,10 @@
     'shield': ShieldCheck as unknown as IconComponent,
     // The two framework catalogs that were falling through to the generic `command` glyph:
     // a bound-properties list and the property reference read out of the dependency jars.
-    'list': ListTree as unknown as IconComponent,
+    // (`list` is declared once, above — a second entry here silently shadowed it.)
     'book': BookOpen as unknown as IconComponent,
     'languages': Languages as unknown as IconComponent,
+    'network': Network as unknown as IconComponent,
   };
   function iconResolver(name: string): IconComponent { return ICONS[name] ?? ICONS.command; }
 
@@ -680,20 +775,32 @@
         action: () => run(() => editor?.openGoto()), when: !!projectStore.activeFilePath },
       { id: 'gotodef', title: 'Go to declaration', icon: 'target', shortcut: 'Ctrl+B',
         action: () => run(() => editor?.goToDefinition()), when: canNav },
-      { id: 'gotoclass', title: 'Go to class…', icon: 'box', shortcut: 'Ctrl+N',
+      // Not gated on the ecosystem: the navigator has two engines behind it. A Java project's
+      // types and members come from the symbol index; a Cargo project's come from the language
+      // server, and the tab reads **Types** there because what it finds are structs, enums and
+      // traits. Which engine answers is the modal's business — see `BennuGotoModal.lspBacked`.
+      { id: 'gotoclass', title: javaTools ? 'Go to class…' : 'Go to type…', icon: 'box', shortcut: 'Ctrl+N',
         action: () => run(() => bennuUiStore.openNav('class', editor?.getSelectedText() ?? '')),
-        // Classes come from the Java symbol index, which a Cargo project doesn't build.
-        when: !!projectStore.project && javaTools },
+        when: !!projectStore.project },
       { id: 'gotofile', title: 'Go to file…', icon: 'file', shortcut: 'Ctrl+Shift+N',
         action: () => run(() => bennuUiStore.openNav('file', editor?.getSelectedText() ?? '')), when: !!projectStore.project },
       { id: 'gotosymbol', title: 'Go to symbol…', icon: 'search', shortcut: 'Ctrl+Shift+Y',
         action: () => run(() => bennuUiStore.openNav('symbol', editor?.getSelectedText() ?? '')),
-        // Members come from the Java index, like classes.
-        when: !!projectStore.project && javaTools },
+        when: !!projectStore.project },
+      { id: 'expandsel', title: 'Expand selection', icon: 'braces', shortcut: 'Alt+Shift+Right',
+        action: () => run(() => void editor?.expandSelection()), when: canNav },
+      { id: 'shrinksel', title: 'Shrink selection', icon: 'braces', shortcut: 'Alt+Shift+Left',
+        action: () => run(() => void editor?.shrinkSelection()), when: canNav },
       { id: 'filestructure', title: 'File structure…', icon: 'list-tree', shortcut: 'Ctrl+F12',
         action: () => run(() => bennuUiStore.openFileStructure()), when: canNav },
       { id: 'usages', title: 'Find usages', icon: 'search', shortcut: 'Alt+F7',
         action: () => run(() => void editor?.findUsages()), when: canNav },
+      // Only for a server-backed buffer: the Java engine has find-usages and no hierarchy, so on a
+      // `.java` these verbs would open a panel that can only ever say "nothing here".
+      { id: 'callhierarchy', title: 'Call hierarchy', icon: 'network', shortcut: 'Ctrl+Shift+H',
+        action: () => run(() => editor?.showCallHierarchy()), when: isLspFile(path) },
+      { id: 'typehierarchy', title: 'Type hierarchy', icon: 'network', shortcut: 'Ctrl+H',
+        action: () => run(() => editor?.showTypeHierarchy()), when: isLspFile(path) },
       { id: 'rename', title: 'Rename…', icon: 'target', shortcut: 'Shift+F6',
         action: () => run(() => editor?.openRename()), when: canNav },
       { id: 'save', title: 'Save file', icon: 'file', shortcut: 'Ctrl+S',
@@ -707,7 +814,28 @@
       { id: 'generate', title: 'Generate…', icon: 'wand', shortcut: 'Alt+Insert',
         action: () => run(() => bennuUiStore.openGenerate()), when: isJava },
       { id: 'intentions', title: 'Show intentions', icon: 'bulb', shortcut: 'Alt+Enter',
-        action: () => run(() => editor?.openIntentions()), when: isJava },
+        // Also the language-server quick-fix list for a server-backed buffer — the user's gesture
+        // is "what can you do here", and which engine answers is not their problem.
+        action: () => run(() => editor?.openIntentions()), when: isJava || isLspFile(path) },
+      // NOT IntelliJ's Ctrl+Alt+L: on IT/DE/FR/ES layouts Chromium drops Ctrl+Alt+<letter> to
+      // preserve AltGr, so the binding would simply never fire. Alt+Shift+F is VS Code's and is
+      // in the safe family.
+      { id: 'format', title: 'Format file', icon: 'wand', shortcut: 'Alt+Shift+F',
+        action: () => run(() => void editor?.formatDocument()), when: isLspFile(path) },
+      // What a macro expands to. Recursive — the server has no single-step form — and read-only,
+      // because what comes back is text rather than a file it knows.
+      { id: 'expandmacro', title: 'Expand macro', icon: 'wand', shortcut: 'Alt+Shift+M',
+        action: () => run(() => editor?.expandMacro()), when: isLspFile(path) },
+      { id: 'lsp-restart', title: 'Restart language server', icon: 'refresh-cw',
+        action: () => run(() => void restartActiveLanguageServer()),
+        when: !!bennuLspStore.statusFor(path) },
+      // Not the same thing as a restart: this re-reads the manifests in the SAME session, keeping
+      // everything the server has already indexed.
+      { id: 'lsp-reload', title: 'Reload workspace (re-read the manifests)', icon: 'refresh-cw',
+        action: () => run(() => void reloadLanguageServerWorkspace()),
+        when: !!projectStore.project && !!bennuLspStore.statusFor(path) },
+      { id: 'lsp-settings', title: 'Language server settings…', icon: 'sliders',
+        action: () => run(() => bennuUiStore.openSettings('languages')), when: true },
       { id: 'mojibake', title: 'Check file for mojibake', icon: 'shield',
         action: () => run(() => void editor?.checkMojibake()), when: !!path },
       { id: 'mojibakeproject', title: 'Scan project for mojibake…', icon: 'shield',
@@ -741,14 +869,18 @@
       // place.
       { id: 'structure', title: 'Toggle Structure', icon: 'list-tree',   shortcut: 'Alt+2', action: () => run(() => bennuUiStore.toggleLeft('structure')), when: javaTools },
       { id: 'forms',     title: 'Toggle Forms',     icon: 'list',        shortcut: 'Alt+3', action: () => run(() => bennuUiStore.toggleBottom('forms')), when: jspTools },
-      { id: 'dependencies', title: 'Dependencies',  icon: 'library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: javaTools },
-      { id: 'runpanel',  title: 'Toggle Run',       icon: 'play',        shortcut: 'Alt+R', action: () => run(() => bennuUiStore.toggleBottom('run')), when: javaTools },
+      { id: 'dependencies', title: 'Dependencies',  icon: 'library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: true },
+      { id: 'runpanel',  title: 'Toggle Run',       icon: 'play',        shortcut: 'Alt+R', action: () => run(() => bennuUiStore.toggleBottom('run')), when: true },
       { id: 'tests',     title: 'Toggle Tests',     icon: 'junit',       shortcut: 'Alt+5', action: () => run(() => bennuUiStore.toggleRight('tests')), when: javaTools },
       { id: 'problems',  title: 'Toggle Problems',  icon: 'alert',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
       { id: 'todos',     title: 'Toggle TODO',      icon: 'todo',        shortcut: 'Alt+7', action: () => run(() => bennuUiStore.toggleBottom('todos')), when: true },
       { id: 'terminal',  title: 'Toggle Terminal',  icon: 'terminal',    shortcut: 'Alt+F12', action: () => run(() => bennuUiStore.toggleBottom('terminal')), when: true },
       { id: 'maven',     title: 'Toggle Maven',     icon: 'maven',       shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: javaTools },
-      { id: 'ast',       title: 'Toggle Trees — syntax and model', icon: 'braces',    shortcut: 'Alt+9', action: () => run(() => bennuUiStore.toggleRight('ast')), when: true },
+      { id: 'cargo',     title: 'Toggle Cargo',     icon: 'cog',         shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('cargo')), when: projectStore.isCargo },
+      // Runs the real `cargo add`. In the View section beside the Cargo window because that is where
+      // it is otherwise reached from, and gated on the ecosystem: there is nothing to add to a pom.
+      { id: 'cargoadd',  title: 'Add dependency… (cargo add)', icon: 'library', action: () => run(() => bennuUiStore.openCargoAdd()), when: projectStore.isCargo },
+      { id: 'ast',       title: 'Toggle Trees — syntax and model', icon: 'braces',    shortcut: 'Alt+9', action: () => run(() => bennuUiStore.toggleRight('ast')), when: javaTools },
       { id: 'ssr',       title: 'Structural search / replace…', icon: 'search', shortcut: 'Ctrl+Shift+M', action: () => run(() => bennuUiStore.openSsr()), when: javaTools },
       // The framework catalogs. Palette-only by design (see `framework-catalogs.ts`) and gated
       // on the project having something in them, so they are absent — not empty — everywhere
@@ -785,7 +917,9 @@
       { id: 'validate', title: 'Validate project (no compile)', icon: 'list-checks',
         action: () => run(triggerValidate), when: idle && javaTools },
       { id: 'run', title: 'Run', icon: 'play', shortcut: 'Shift+F10',
-        action: () => run(triggerRun), when: idle && javaTools },
+        action: () => run(triggerRun), when: idle },
+      // Debugging is JVM-only: `bennu_run` attaches JDWP to the child it spawned, and a cargo
+      // command forks its own compiler and its own program.
       { id: 'debug', title: 'Debug', icon: 'bug', shortcut: 'Shift+F9',
         action: () => run(triggerDebug), when: idle && javaTools },
       // The three that only mean anything while the program is standing still. Offered from
@@ -811,11 +945,31 @@
       { id: 'dbgdetach', title: 'Detach the debugger', icon: 'bug',
         action: () => run(() => void bennuDebugStore.detachSession()), when: bennuDebugStore.live },
       { id: 'rerun', title: 'Rerun', icon: 'rerun',
-        action: () => run(() => void bennuRunStore.rerunApp()), when: idle && javaTools && bennuRunStore.canRerun },
+        action: () => run(() => void bennuRunStore.rerunApp()), when: idle && bennuRunStore.canRerun },
       { id: 'stoprun', title: 'Stop the program', icon: 'hammer',
         action: () => run(() => void bennuRunStore.stop()), when: bennuRunStore.running },
       { id: 'runcfg', title: 'Edit run configuration…', icon: 'sliders',
-        action: () => run(() => bennuUiStore.openRunConfig()), when: !!projectStore.project && javaTools },
+        action: () => run(() => bennuUiStore.openRunConfig()), when: !!projectStore.project },
+      // One entry per cargo command, so every one is reachable by name from the keyboard rather
+      // than only by clicking a row in the panel — which has to be open to click. Aimed at the
+      // whole workspace, since that is what "run cargo clippy" means with no crate in hand; a
+      // single crate is the panel's row or a saved configuration.
+      ...bennuCargoStore.commonCommands.map((c) => ({
+        id: `cargo:${c.id}`,
+        title: `Cargo: ${c.label} the workspace`,
+        icon: 'cog',
+        action: () =>
+          run(() => {
+            const root = projectStore.project?.root;
+            if (!root) return;
+            void bennuRunStore.runCargoCommand(
+              root,
+              { ...emptyCargoInvocation(c.id), workspace: true },
+              `${c.id} workspace`,
+            );
+          }),
+        when: idle && projectStore.isCargo,
+      })),
       // Tests. Every one of these is also a button in the panel — but the panel has to be
       // open to press one, and the point of the palette is to reach a verb from wherever you
       // are. The caret verb is gated on the file actually declaring a test, so it is absent
@@ -899,16 +1053,22 @@
     // Ctrl+Shift+Y for symbols because IntelliJ's Ctrl+Alt+Shift+N is off-limits here:
     // Ctrl+Alt+<letter> is dropped by Chromium on IT/DE/FR/ES keyboards (AltGr).
     if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'y') {
-      if (!projectStore.project || !javaTools) return;
+      if (!projectStore.project) return;
       e.preventDefault();
       bennuUiStore.openNav('symbol', editor?.getSelectedText() ?? '');
       return;
     }
+    // Expand / shrink the selection by one syntactic step, on the server's own idea of structure.
+    // Alt+Shift+arrow matches VS Code; IntelliJ's Ctrl+W is not available here, because a WebView
+    // may take it as "close the window" and losing the window is not a selection gesture.
+    if (e.altKey && e.shiftKey && !mod && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+      if (!supportsCodeNav(projectStore.activeFilePath)) return;
+      e.preventDefault();
+      void (e.key === 'ArrowRight' ? editor?.expandSelection() : editor?.shrinkSelection());
+      return;
+    }
     if (mod && !e.altKey && e.key.toLowerCase() === 'n') {
       if (!projectStore.project) return;
-      // Go-to-File works anywhere; Go-to-Class reads the Java symbol index, which a Cargo
-      // project doesn't build — the modal would list nothing, forever.
-      if (!e.shiftKey && !javaTools) return;
       e.preventDefault();
       // Seed the navigator from the editor selection (IntelliJ) — a highlighted word.
       bennuUiStore.openNav(e.shiftKey ? 'file' : 'class', editor?.getSelectedText() ?? '');
@@ -996,6 +1156,22 @@
       return;
     }
 
+    /*
+     * The hierarchies. IntelliJ's Ctrl+H for the type hierarchy, and Ctrl+Shift+H for the call
+     * hierarchy rather than its Ctrl+Alt+H — Ctrl+Alt+<letter> is dropped by Chromium on IT/DE/FR/ES
+     * layouts to preserve AltGr, so that binding would never fire here.
+     *
+     * Server-backed buffers only: Bennu's Java engine answers find-usages and has no hierarchy, so
+     * on a `.java` the key would open a panel that could only say "nothing here".
+     */
+    if (mod && !e.altKey && e.key.toLowerCase() === 'h') {
+      if (!isLspFile(projectStore.activeFilePath)) return;
+      e.preventDefault();
+      if (e.shiftKey) editor?.showCallHierarchy();
+      else editor?.showTypeHierarchy();
+      return;
+    }
+
     // Find in project (Ctrl+Shift+F) — a modal, replacing the old Search rail.
     if (mod && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); bennuUiStore.openFind(editor?.getSelectedText() ?? ''); return; }
 
@@ -1032,6 +1208,21 @@
       if (e.key === 'ArrowRight') { e.preventDefault(); editor?.navForward(); return; }
     }
 
+    // Format with the language's own formatter (rustfmt for Rust). Alt+Shift+F rather than
+    // IntelliJ's Ctrl+Alt+L: Chromium drops Ctrl+Alt+<letter> on IT/DE/FR/ES layouts to preserve
+    // AltGr, so that binding would never fire on this machine.
+    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'f') {
+      if (!isLspFile(projectStore.activeFilePath)) return;
+      e.preventDefault(); void editor?.formatDocument(); return;
+    }
+
+    // Expand the macro at the caret. Alt+Shift+M, in the same safe family as the format binding
+    // above and beside Ctrl+Shift+M (structural search) without colliding with it.
+    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'm') {
+      if (!isLspFile(projectStore.activeFilePath)) return;
+      e.preventDefault(); editor?.expandMacro(); return;
+    }
+
     if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
       if (e.key === 'F12') { e.preventDefault(); bennuUiStore.toggleBottom('terminal'); return; }
       if (e.key === 'F7') {
@@ -1048,6 +1239,12 @@
       if (e.key === '5' && javaTools) { e.preventDefault(); bennuUiStore.toggleRight('tests'); return; }
       if (e.key === '7') { e.preventDefault(); bennuUiStore.toggleBottom('todos'); return; }
       if (e.key === '0') { e.preventDefault(); bennuUiStore.toggleBottom('build'); return; }
+      // Both ecosystems, matching their rail icons: the Dependencies panel answers for a Cargo
+      // workspace as well as a Maven reactor, and a cargo command streams into the same console.
+      if (e.key.toLowerCase() === 'n') { e.preventDefault(); bennuUiStore.toggleLeft('dependencies'); return; }
+      // The Run console. A letter and not a digit because IntelliJ's Alt+4 is already Endpoints
+      // here, and moving an existing tool's shortcut to make room would cost more than it buys.
+      if (e.key.toLowerCase() === 'r') { e.preventDefault(); bennuUiStore.toggleBottom('run'); return; }
       // The Java-only tools. Gated on `javaTools` for the same reason their rail icons and
       // palette entries are: on a Cargo project the shortcut would open a panel that can
       // only be empty, and whose toggle is nowhere on screen to close it again.
@@ -1055,21 +1252,31 @@
         if (e.key === '2') { e.preventDefault(); bennuUiStore.toggleLeft('structure'); return; }
         // Forms needs pages, not just Java — same gate as its rail icon.
         if (e.key === '3' && jspTools) { e.preventDefault(); bennuUiStore.toggleBottom('forms'); return; }
-        if (e.key.toLowerCase() === 'n') { e.preventDefault(); bennuUiStore.toggleLeft('dependencies'); return; }
-        // The Run console. A letter and not a digit because IntelliJ's Alt+4 is already
-        // Endpoints here, and moving an existing tool's shortcut to make room would cost
-        // more than it buys.
-        if (e.key.toLowerCase() === 'r') { e.preventDefault(); bennuUiStore.toggleBottom('run'); return; }
-        // Debug, beside Run for the same reason: every digit the rail could want is already
-        // spoken for, and the two panels are read together.
-        if (e.key === '8') { e.preventDefault(); bennuUiStore.toggleRight('maven'); return; }
+        // Both views read Bennu's own engines, which have nothing to say about a Rust file —
+        // see the rail item.
+        if (e.key === '9') { e.preventDefault(); bennuUiStore.toggleRight('ast'); return; }
       }
-      // Outside the Java gate on purpose: the syntax tree answers for whatever the file is, and
-      // names the language it has no grammar for — which is useful on a Cargo project too.
-      if (e.key === '9') { e.preventDefault(); bennuUiStore.toggleRight('ast'); return; }
+      // The build tool's window — Maven's goals or Cargo's crates, one slot. Outside the Java gate
+      // because a Cargo project has one too.
+      if (e.key === '8') {
+        e.preventDefault();
+        bennuUiStore.toggleRight(projectStore.isCargo ? 'cargo' : 'maven');
+        return;
+      }
+      /*
+       * Intentions. Consumed **whatever the buffer is**, and that is the load-bearing part: with the
+       * key left to fall through, the WebView's contenteditable takes Alt+Enter as a line break and
+       * the gesture *edits the file* instead of doing nothing. A key that means "what can you do
+       * here" must never insert anything.
+       *
+       * Both engines answer: Bennu's own intentions on a `.java`, a language server's code actions on
+       * a file it owns — the same list, because the user's question is not "which engine".
+       */
       if (e.key === 'Enter') {
-        if (!isJavaFile(projectStore.activeFilePath)) return;
-        e.preventDefault(); editor?.openIntentions(); return;
+        e.preventDefault();
+        const path = projectStore.activeFilePath;
+        if (isJavaFile(path) || isLspFile(path)) editor?.openIntentions();
+        return;
       }
       if (e.key === 'Insert') {
         if (!isJavaFile(projectStore.activeFilePath)) return;
@@ -1134,6 +1341,7 @@
         {#if showRight}
           <PanelCard orientation="right" initialSize={280} minSize={200} maxSize={520}>
             {#if bennuUiStore.rightPanel === 'maven'}<BennuMavenPanel />{/if}
+            {#if bennuUiStore.rightPanel === 'cargo'}<BennuCargoPanel />{/if}
             {#if bennuUiStore.rightPanel === 'tests'}<BennuTestsCatalogPanel />{/if}
             {#if bennuUiStore.rightPanel === 'ast'}
               <SyntaxTreePanel
@@ -1240,6 +1448,15 @@
 
 {#if bennuUiStore.workspaceManagerOpen}
   <BennuWorkspaceManagerModal onClose={() => bennuUiStore.closeWorkspaceManager()} />
+{/if}
+
+<!-- Mounted by the window rather than by the Cargo panel: it is reachable from the palette, and the
+     panel it is launched from need not be open for that. -->
+{#if bennuUiStore.cargoAddOpen && projectStore.project && projectStore.isCargo}
+  <BennuCargoAddModal
+    root={projectStore.project.root}
+    onClose={() => bennuUiStore.closeCargoAdd()}
+  />
 {/if}
 
 <!-- Alt+Enter intentions popup. Owns its own visibility via bennuIntentionsStore;

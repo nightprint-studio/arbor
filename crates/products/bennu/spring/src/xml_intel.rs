@@ -312,6 +312,7 @@ pub fn completions(model: &SpringModel, source: &str, offset: usize) -> Vec<Comp
                 label: k,
                 kind: "property".to_string(),
                 auto_import: None,
+                ..Default::default()
             })
             .collect();
     }
@@ -324,6 +325,7 @@ pub fn completions(model: &SpringModel, source: &str, offset: usize) -> Vec<Comp
                 kind: "bean".to_string(),
                 detail: Some(b.fqcn.clone()),
                 auto_import: None,
+                ..Default::default()
             })
             .collect();
     }
@@ -336,6 +338,7 @@ pub fn completions(model: &SpringModel, source: &str, offset: usize) -> Vec<Comp
                 kind: "class".to_string(),
                 detail: None,
                 auto_import: None,
+                ..Default::default()
             })
             .collect();
     }
@@ -349,6 +352,7 @@ pub fn completions(model: &SpringModel, source: &str, offset: usize) -> Vec<Comp
                     kind: "property".to_string(),
                     detail: Some(simple_name(&t.fqcn).to_string()),
                     auto_import: None,
+                    ..Default::default()
                 })
                 .collect();
         }

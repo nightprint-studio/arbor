@@ -4,7 +4,8 @@
 //! `bennu_deps::prelude::...`. In practice a host needs [`read`] and the types it returns;
 //! everything below that is reachable for a consumer that wants one pom rather than a project.
 
-// The one call a host makes.
+// The one call a host makes, per ecosystem.
+pub use crate::cargo::read as read_cargo;
 pub use crate::graph::read;
 
 // What it returns.

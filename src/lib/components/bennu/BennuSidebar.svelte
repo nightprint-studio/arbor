@@ -16,7 +16,7 @@
   import {
     FolderOpen, Folder, FileCode2, FolderTree, Plus, Crosshair,
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
-    Copy, LocateFixed, ChevronDown, ChevronRight, FileText, FlaskConical,
+    Copy, LocateFixed, ChevronDown, ChevronRight, FileText, FlaskConical, FileType2,
   } from 'lucide-svelte';
   import { tick } from 'svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
@@ -26,6 +26,7 @@
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import BennuFilterBar from './BennuFilterBar.svelte';
   import BennuNewFileModal from './BennuNewFileModal.svelte';
+  import BennuRenameFileModal from './BennuRenameFileModal.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -42,7 +43,7 @@
   import IconifyIconView from '@iconify/svelte';
   import type { IconifyIcon } from '@iconify/svelte';
   import { getFileIcon } from '$lib/utils/file-icons';
-  import JavaKindIcon from './JavaKindIcon.svelte';
+  import SymbolKindIcon from './SymbolKindIcon.svelte';
   import { javaKindStore } from '$lib/stores/bennu/java-kinds.svelte';
 
   /** Row height for the tree, in px.
@@ -292,6 +293,11 @@
           { id: 'open',          label: 'Open',               icon: FolderOpen },
           { id: 'new', label: 'New', icon: Plus, children: NEW_SUBMENU },
           { separator: true, id: 'sep-file', label: '' },
+          // Files only. Renaming a DIRECTORY is a different operation — for Rust it moves a whole
+          // module path, and `willRenameFiles` would have to be asked per file inside it — so it is
+          // absent rather than offered and then half-done.
+          { id: 'rename',        label: 'Rename…',            icon: FileType2, shortcut: 'F2' },
+          { separator: true, id: 'sep-rename', label: '' },
           ...runItem,
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
@@ -304,6 +310,7 @@
         case 'new-class': newFileKind = 'class'; newFileDir = newDir; break;
         case 'new-file':  newFileKind = 'file';  newFileDir = newDir; break;
         case 'run-tests': runTestsFor(node); break;
+        case 'rename':    renamePath = node.path; break;
         case 'open':      void projectStore.openFile(node.path); break;
         case 'copy-path': copyText(node.path); break;
         case 'copy-rel':  copyText(relativePath(node.path)); break;
@@ -324,6 +331,21 @@
     const active = projectStore.activeFilePath;
     return active ? parentDir(active) : (projectStore.project?.root ?? '');
   }
+
+  /**
+   * F2 on a focused row — the rename key everywhere from IntelliJ to Explorer to Finder.
+   *
+   * Here rather than in the window's key handler because it is about the row that has focus, which
+   * only the tree knows. Directories are skipped for the same reason the menu entry is files-only.
+   */
+  function onRowKeydown(node: TreeNode, e: KeyboardEvent) {
+    if (e.key !== 'F2' || node.is_dir) return;
+    e.preventDefault();
+    renamePath = node.path;
+  }
+
+  /** The file a Rename dialog is open for (null = closed). */
+  let renamePath = $state<string | null>(null);
 
   // The directory a New-file modal is open for (null = closed).
   let newFileDir = $state<string | null>(null);
@@ -387,6 +409,7 @@
         ariaLabel="Project files"
         onSelect={onRowSelect}
         onContextMenu={onRowContextMenu}
+        onRowKeydown={onRowKeydown}
       >
         {#snippet row(ctx: RowSnippetCtx<TreeNode>)}
           {@const meta = iconFor(ctx.node)}
@@ -396,7 +419,7 @@
               <Glyph size={14} />
             </span>
           {:else if meta.shape === 'kind'}
-            <span class="tree-icon"><JavaKindIcon kind={meta.kind} /></span>
+            <span class="tree-icon"><SymbolKindIcon kind={meta.kind} /></span>
           {:else}
             <!-- A file-type icon carries its own colours (it IS the brand mark), so this one
                  is not tinted — a `color` here would only fight it. -->
@@ -434,6 +457,10 @@
     initialKind={newFileKind}
     onClose={() => (newFileDir = null)}
   />
+{/if}
+
+{#if renamePath !== null}
+  <BennuRenameFileModal path={renamePath} onClose={() => (renamePath = null)} />
 {/if}
 
 <style>

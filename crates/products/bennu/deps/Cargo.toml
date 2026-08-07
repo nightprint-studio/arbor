@@ -5,7 +5,7 @@ edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
-description  = "What a Maven project depends on, and where each answer came from: the reactor's poms read module by module, versions resolved through properties / dependencyManagement / the parent chain, and the result matched against the jars actually resolved into the local repository."
+description  = "What a project depends on, and where each answer came from — one report shape for two ecosystems. Maven: the reactor's poms read module by module, versions resolved through properties / dependencyManagement / the parent chain, matched against the jars in the local repository. Cargo: the workspace manifests, with the versions Cargo.lock actually chose and the unpacked sources in the local registry."
 
 [dependencies]
 # The tolerant XML scanner. A pom is XML, and this codebase already has a scanner that
@@ -13,3 +13,9 @@ description  = "What a Maven project depends on, and where each answer came from
 # a place the editor can jump to. Reading a pom by hand a third time was the alternative.
 bennu-xml = { path = "../xml" }
 serde     = { workspace = true }
+# The Cargo half: the manifest reader, the declared-dependency model and the crate graph. The
+# report shape is shared, so the second producer belongs beside the first rather than in the
+# backend — `cargo.rs` is to `pom.rs`/`graph.rs` what Cargo is to Maven.
+bennu-cargo = { path = "../cargo" }
+# `user_home()` — the resolved sources live under `$CARGO_HOME`, which defaults to `~/.cargo`.
+arbor-core  = { path = "../../../foundation/core" }

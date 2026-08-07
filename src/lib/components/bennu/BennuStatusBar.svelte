@@ -16,16 +16,32 @@
    * bg-elevated strip (flows from the titlebar) — mirrors MerulaFooter / Corvus
    * StatusBar. Subtle + keyboard-first (nothing here is mouse-only).
    */
-  import { Coffee, Boxes, Database, FileType, Package } from 'lucide-svelte';
+  import {
+    Coffee, Boxes, Database, FileType, Package, ServerCog, ServerCrash,
+  } from 'lucide-svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import BennuIndentStatus from './BennuIndentStatus.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
+  import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import type { Snippet } from 'svelte';
 
   let { footerExtra }: { footerExtra?: Snippet } = $props();
+
+  /** The language server to report.
+   *
+   *  The file's own when it has one — a polyglot repo can have two up, and the one answering for
+   *  what is on screen is the one worth naming — otherwise the project's. A server running for
+   *  this project is a fact about the project, and hiding it while a `Cargo.toml` or a README is
+   *  open removes the answer to "is it still indexing" exactly when that is the question. */
+  const lsp = $derived(
+    bennuLspStore.statusForProject(projectStore.project?.root, projectStore.activeFilePath),
+  );
+  /** Semantic tokens painted in the open buffer — surfaced in the tooltip because "the file is all
+   *  white" has two indistinguishable causes, and this number tells them apart. */
+  const tokens = $derived(bennuLspStore.tokenCount);
 
   const isCargo = $derived(projectStore.isCargo);
   const jdk = $derived(projectStore.project?.jdk ?? null);
@@ -119,6 +135,43 @@
       <span class="bf-sep"></span>
     {/if}
 
+    <!-- The language server for the open file, when one owns it.
+         This is the Rust counterpart of the index readout above, and it exists for the same
+         reason: rust-analyzer needs tens of seconds to become useful on a cold project and
+         answers almost nothing until it has. Without a line saying so, "go-to does nothing"
+         and "the server is still loading the workspace" look identical. -->
+    {#if lsp}
+      {#if lsp.state === 'starting' || lsp.progress}
+        <button
+          type="button"
+          class="bf-item bf-btn bf-indexing bf-lsp-progress"
+          use:tooltip={`${lsp.name}${lsp.progress ? ` · ${lsp.progress}` : ' · starting'} — click for language server settings`}
+          onclick={() => bennuUiStore.openSettings('languages')}
+        >
+          <Spinner size={11} /> {lsp.progress || `${lsp.name} starting`}…
+        </button>
+      {:else if lsp.state === 'failed' || lsp.state === 'exited'}
+        <button
+          type="button"
+          class="bf-item bf-btn bf-lsp-failed"
+          use:tooltip={lsp.message || `${lsp.name} is not running — click to fix`}
+          onclick={() => bennuUiStore.openSettings('languages')}
+        >
+          <ServerCrash size={12} /> {lsp.name}
+        </button>
+      {:else}
+        <button
+          type="button"
+          class="bf-item bf-btn"
+          use:tooltip={`${lsp.version ?? lsp.name} · ${lsp.features.length} features · ${tokens} semantic tokens in this buffer — click for language server settings`}
+          onclick={() => bennuUiStore.openSettings('languages')}
+        >
+          <ServerCog size={12} /> {lsp.name}
+        </button>
+      {/if}
+      <span class="bf-sep"></span>
+    {/if}
+
     <!-- Indentation (tabs/spaces + width) — click / keyboard to change; applies live. -->
     <BennuIndentStatus />
 
@@ -154,6 +207,24 @@
   .bf-navigating { color: var(--accent); }
   .bf-navigating :global(svg) { color: var(--accent); }
   .bf-muted { color: var(--text-disabled); }
+  /* A footer item that is actually actionable. Styled as text, not as a button: the strip is
+     information, and a real button chrome here would compete with the editor for attention. */
+  .bf-btn {
+    background: none; border: none; padding: 0; margin: 0;
+    font: inherit; color: inherit; cursor: pointer; border-radius: var(--radius-sm);
+    transition: color var(--transition-fast);
+  }
+  .bf-btn:hover { color: var(--text-primary); }
+  .bf-btn:hover :global(svg) { color: var(--text-secondary); }
+  .bf-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+  .bf-lsp-failed { color: var(--warning); }
+  .bf-lsp-failed :global(svg) { color: var(--warning); }
+  .bf-lsp-failed:hover { color: var(--warning); }
+  /* A server's progress message is free text — rust-analyzer puts absolute paths in it — and the
+     footer is one row. The backend already caps the string; this is the second line of defence, so
+     no message can ever push the rest of the strip sideways. `min-width: 0` is what lets a flex
+     child shrink below its content at all. */
+  .bf-lsp-progress { max-width: 30ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .bf-sub {
     font-size: var(--font-size-2xs); color: var(--text-disabled);
     padding-left: 2px; max-width: 160px; overflow: hidden; text-overflow: ellipsis;

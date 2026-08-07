@@ -21,4 +21,7 @@
 //! but the prelude is the canonical call-site path.
 
 pub mod contract;
+/// The language-server side of the contract — its own module because `contract.rs` is
+/// already long and everything in there answers an LSP-backed handler.
+pub mod lsp;
 pub mod prelude;

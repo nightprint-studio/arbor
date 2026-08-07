@@ -24,9 +24,13 @@ import {
   readFile as ipcReadFile,
   writeFile as ipcWriteFile,
   fileStamps as ipcFileStamps,
+  renamePath as ipcRenamePath,
   isExternallyModifiedError,
   projectDiagnostics as ipcProjectDiagnostics,
 } from '$lib/ipc/bennu';
+// Splicing byte-offset edits into a source string — shared with the rename-preview apply, which is
+// where it started.
+import { applyByteEdits } from '$lib/components/bennu/rename-apply';
 // Live re-index — kept in its own IPC file to avoid racing edits on index.ts.
 import { didChange as ipcDidChange } from '$lib/ipc/bennu/nav';
 // The Problems store — a save triggers a silent cross-file re-validation that refreshes it.
@@ -38,7 +42,7 @@ import { workspacesStore } from './workspaces.svelte';
 // Autosave gate — the user's persisted preference (config-backed).
 import { bennuSettingsStore } from './settings.svelte';
 import type { ProjectSession } from '$lib/ipc/bennu/config';
-import type { ProjectInfo, TreeNode } from '$lib/types/bennu';
+import type { ProjectInfo, SourceEdit, TreeNode } from '$lib/types/bennu';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 // MOCK — remove when bennu-be serves real data.
 import { DEMO_PROJECT, DEMO_TREE, DEMO_ROOT, isDemoPath, demoReadFile } from './bennu-mock';
@@ -498,6 +502,36 @@ function createProjectStore() {
     return true;
   }
 
+  /**
+   * Apply byte-offset edits across files: group by file, splice each one, persist.
+   *
+   * Here rather than in each caller because there are three of them — a language server's
+   * `workspace/applyEdit`, a code action's edit list, and the edits a file rename implies — and every
+   * one needs the same steps: read the file's *current* text (which is the buffer when a tab has it),
+   * splice byte spans, write it back through the same guard an ordinary save goes through.
+   *
+   * Returns how many files could not be written. Counted per file rather than aborting: the others
+   * are still correct, and stopping halfway leaves a project that neither builds nor explains itself.
+   */
+  async function applyEditsAcrossFiles(edits: readonly SourceEdit[]): Promise<number> {
+    const byFile = new Map<string, SourceEdit[]>();
+    for (const e of edits) {
+      const list = byFile.get(e.file);
+      if (list) list.push(e);
+      else byFile.set(e.file, [e]);
+    }
+    let failed = 0;
+    for (const [file, fileEdits] of byFile) {
+      try {
+        const current = await loadText(file);
+        if (!(await saveText(file, applyByteEdits(current, fileEdits)))) failed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    return failed;
+  }
+
   /** Record `text` as `path`'s on-disk baseline: clean, no pending autosave, not conflicted. */
   function markSaved(path: string, text: string) {
     savedContent.set(path, text);
@@ -758,6 +792,76 @@ function createProjectStore() {
       // in `openFileInternal` (shared with boot restore); this wrapper persists the session.
       await openFileInternal(path);
       persistWorkspace();
+    },
+
+    /** Apply byte-offset edits across files (a server's `applyEdit`, a code action, a rename's
+     *  implied edits). Returns how many files could not be written. */
+    applyEdits: applyEditsAcrossFiles,
+
+    /**
+     * Rename the file at `path` to `newName` in the same directory.
+     *
+     * The order matters and is the backend's: it asks the language server what the rename implies
+     * *before* moving anything, then moves, then hands back the edits — so a failed move leaves both
+     * the tree and the code untouched. Applying those edits is this side's job, because they go
+     * through the same write path as a save (and so through the same external-change guard).
+     *
+     * The buffer is saved first, for the same reason `moveFileToPackage` does it: the rename carries
+     * whatever is on disk, and unsaved edits left behind would be edits to a path that no longer
+     * exists.
+     *
+     * Returns the new path. Throws with a message the caller can show — the refusals (a name already
+     * taken, a missing directory) are the interesting outcomes, not exceptional ones.
+     */
+    async renameFile(path: string, newName: string): Promise<string> {
+      const trimmed = newName.trim();
+      if (!trimmed) throw new Error('A file needs a name');
+      const parent = path.replace(/[\\/][^\\/]*$/, '');
+      const target = canonPath(`${parent}/${trimmed}`);
+      if (target === canonPath(path)) return path;
+
+      const wasOpen = openFilePaths.includes(path);
+      const source = sources.get(path) ?? (await loadText(path));
+      if (dirty.has(path) && !(await saveText(path, source))) {
+        throw new Error('The file changed on disk — resolve that first, then rename it');
+      }
+
+      const res = await ipcRenamePath(path, target);
+      const newPath = canonPath(res.new_path);
+
+      // Carry the cached text / encoding to the new key so a reopened tab is instant, and drop the
+      // old stamp: it describes a path that no longer exists, and a stale one would make the next
+      // save refuse for no reason.
+      sources.set(newPath, source);
+      const enc = encodings.get(path);
+      if (enc) encodings.set(newPath, enc);
+      savedContent.set(newPath, source);
+      sources.delete(path);
+      savedContent.delete(path);
+      stamps.delete(path);
+      dirty.delete(path);
+      conflicted.delete(path);
+      try {
+        const [fresh] = await ipcFileStamps([newPath]);
+        if (fresh?.stamp) stamps.set(newPath, fresh.stamp);
+      } catch { /* the guard simply stays off for this path until it is re-read */ }
+
+      // Re-point the tab only if one was open: renaming from the tree must not open the file.
+      openFilePaths = openFilePaths.filter((p) => p !== path);
+      if (wasOpen) await openFileInternal(newPath);
+      else if (activeFilePath === path) activeFilePath = openFilePaths[0] ?? null;
+
+      // AFTER the move: the edits are expressed against files as they are now, and one of them is
+      // very often the renamed file itself.
+      if (res.edits.length) {
+        const failed = await applyEditsAcrossFiles(res.edits);
+        if (failed) {
+          throw new Error(`Renamed, but ${failed} file(s) referring to it could not be updated`);
+        }
+      }
+      if (project?.root && !isDemo) loadTreeInto(project.root);
+      persistWorkspace();
+      return newPath;
     },
 
     /** Move the file at `path` into the folder matching the `package` it declares (the filesystem

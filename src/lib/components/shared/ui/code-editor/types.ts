@@ -136,6 +136,18 @@ export interface LanguageDescriptor {
   cmFold?: boolean;
 
   /**
+   * Fold from ranges a **provider** supplies rather than from the buffer's own structure.
+   *
+   * For a language whose descriptor has no fold information of its own — a legacy `StreamLanguage`
+   * mode carries none, which is why a `.rs` file had no fold gutter at all. The host pushes the
+   * ranges (`setFoldRanges`); this only says that the machinery should be installed.
+   *
+   * Independent of {@link cmFold}: that one drives folding from a Lezer grammar's `foldNodeProp`,
+   * this one from something outside the editor. A descriptor would not normally set both.
+   */
+  serverFold?: boolean;
+
+  /**
    * Classify a **leaf** CST node into a {@link TokenClass}, or `null` to leave it
    * unstyled. `field` is the parent's field name for this child (disambiguates a
    * bare `identifier` used as a call name vs a type vs a plain reference);
