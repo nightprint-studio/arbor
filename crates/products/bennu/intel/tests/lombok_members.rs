@@ -46,8 +46,10 @@ fn completion_offers_lombok_getters_and_setters() {
     for expected in ["getId", "setId", "getCustomer", "setCustomer", "isShipped", "setShipped"] {
         assert!(labels.contains(&expected.to_string()), "expected {expected:?} in {labels:?}");
     }
-    // The real fields are still offered too.
-    assert!(labels.contains(&"id".to_string()), "declared field still offered, got {labels:?}");
+    // The fields themselves are `private`, and the receiver is in another class — so they are
+    // hidden here for the same reason any private is. The accessors above are the whole point of
+    // `@Data`: they are what this class CAN reach.
+    assert!(!labels.contains(&"id".to_string()), "a private field stays private, got {labels:?}");
 }
 
 #[test]
@@ -361,19 +363,29 @@ fn slf4j_injects_a_log_field() {
              import lombok.extern.slf4j.Slf4j;\n\
              @Slf4j\n\
              public class Svc {\n\
-             \x20   public void go() { }\n\
+             \x20   public void go() {\n\
+             \x20       this.\n\
+             \x20   }\n\
+             \x20   public void after() { }\n\
              }\n",
         ),
         (
             "UseSvc.java",
             "package s;\n\
              public class UseSvc {\n\
-             \x20   void run(Svc svc) { svc.\n }\n\
+             \x20   void run(Svc svc) { svc.log.info(\"x\"); }\n\
              }\n",
         ),
     ]);
-    let s = p.source("UseSvc.java").to_string();
-    let off = at(&s, "svc.\n") + "svc.".len();
-    let labels = p.complete_labels("UseSvc.java", off);
+    // From INSIDE the class, which is the only place `log` is reachable: Lombok generates it
+    // `private static final`, and the visibility rule hides it from an external receiver exactly
+    // as it hides any other private field.
+    let s = p.source("Svc.java").to_string();
+    let off = at(&s, "this.\n") + "this.".len();
+    let labels = p.complete_labels("Svc.java", off);
     assert!(labels.contains(&"log".to_string()), "@Slf4j injects a `log` field, got {labels:?}");
+    let outside = p.source("UseSvc.java").to_string();
+    let from_outside =
+        p.complete_labels("UseSvc.java", at(&outside, "svc.log") + "svc.".len());
+    assert!(!from_outside.contains(&"log".to_string()), "…and it is private: {from_outside:?}");
 }

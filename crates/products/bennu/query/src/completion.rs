@@ -11,12 +11,17 @@ use std::collections::HashSet;
 
 use bennu_classpath::prelude::MemberIndex as CpMemberIndex;
 use bennu_java::prelude::{
-    enclosing_type_binary, infer_receiver_type, ClassMembers, Member, MemberKind, TypeRef,
-    TypeResolver, Visibility,
+    enclosing_type_binary, extract_symbols, infer_receiver_type, ClassMembers, Member, MemberKind,
+    TypeRef, TypeResolver, Visibility,
 };
 use bennu_proto::prelude::CompletionItem;
 
 use crate::resolver::IndexResolver;
+
+/// The identifier spliced in at the caret to make a `receiver.` buffer parse while the enclosing
+/// type is read off it. Its name never reaches an answer — only the type declaration around it
+/// does — so anything that lexes as a Java identifier would do.
+const SITE_PLACEHOLDER: &str = "x";
 
 /// Compute member-access completions at `byte_offset` in `source`.
 ///
@@ -51,15 +56,33 @@ pub fn completion<M: CpMemberIndex>(
         s
     };
 
-    let Some(recv) = infer_receiver_type(&repaired, dot_offset, resolver) else {
-        return Vec::new();
+    let recv = match infer_receiver_type(&repaired, dot_offset, resolver) {
+        Some(r) => r,
+        // A **type** receiver — `Color.RED`, `Files.copy(…)`, `Config.MAX`. Inference types
+        // expressions, and a type name is not one, so it answered nothing and every static access
+        // completed to an empty list. Resolving the written name AS a type is the other half of
+        // the same question, and the one `refs` already asks on the go-to path.
+        None => match type_receiver(&repaired, dot_offset, resolver) {
+            Some(r) => r,
+            None => return Vec::new(),
+        },
     };
 
-    // The class the caret sits inside (original coords — the prefix excision above doesn't move
-    // `byte_offset` relative to the enclosing type). A `private` member is offered only when its
-    // declaring type shares this top-level class (JLS §6.6.1); `None` (caret outside any type) →
-    // no private is accessible.
-    let site = enclosing_type_binary(source, byte_offset);
+    // The class the caret sits inside. A `private` member is offered only when its declaring type
+    // shares this top-level class (JLS §6.6.1); `None` (caret outside any type) → no private is
+    // accessible.
+    //
+    // Asked of a buffer with a placeholder identifier spliced in AT the caret. `receiver.` is a
+    // syntax error, and tree-sitter's recovery for one can swallow the enclosing class whole —
+    // `return this.` leaves a parse with no `class_declaration` in it at all. So the site came
+    // back `None` in the one state completion ever runs in, and a class could not see its own
+    // private members. `receiver.x` parses, and nothing before the caret moves.
+    //
+    // A SEPARATE repair from `repaired`, deliberately: `infer_receiver_type` splices its own stub
+    // only when the byte after the dot is whitespace or a closer, and handing it this buffer
+    // suppresses that — the receiver then mis-parses and every completion goes empty.
+    let sited = format!("{}{SITE_PLACEHOLDER}{}", &source[..byte_offset], &source[byte_offset..]);
+    let site = enclosing_type_binary(&sited, byte_offset);
 
     let mut out = Vec::new();
     let mut seen = HashSet::new();
@@ -79,6 +102,46 @@ fn same_top_level(declaring: &str, site: Option<&str>) -> bool {
     declaring == site
         || site.starts_with(&format!("{declaring}/"))
         || declaring.starts_with(&format!("{site}/"))
+}
+
+/// The receiver read as a TYPE name — the other half of "what is before this dot".
+///
+/// `Color.` and `color.` are the same shape and different programs: one names a type and offers
+/// its constants and statics, the other is a variable. Inference answers the second; this answers
+/// the first, and only after it has declined — so a name that is both stays a value, which is what
+/// Java's own rule says.
+///
+/// `None` when the text before the dot is not a plain (possibly dotted) name, or when nothing on
+/// the classpath is called that.
+fn type_receiver<M: CpMemberIndex>(
+    source: &str,
+    dot_offset: usize,
+    resolver: &IndexResolver<M>,
+) -> Option<TypeRef> {
+    let bytes = source.as_bytes();
+    // Back over `Foo`, `a.b.Foo` — but not over a `)` or a `]`, which mean the receiver was an
+    // expression that inference already failed to type. Guessing a type from one of those would
+    // complete the wrong thing rather than nothing.
+    let mut start = dot_offset.checked_sub(1)?; // the dot itself
+    while start > 0 {
+        let c = bytes[start - 1];
+        if c.is_ascii_alphanumeric() || c == b'_' || c == b'$' || c == b'.' {
+            start -= 1;
+        } else {
+            break;
+        }
+    }
+    let name = source.get(start..dot_offset - 1)?.trim();
+    if name.is_empty() || !name.starts_with(|c: char| c.is_alphabetic() || c == '_') {
+        return None;
+    }
+    if name.contains('.') {
+        // Already qualified: it names a type exactly when the classpath holds one.
+        let binary = name.replace('.', "/");
+        return resolver.members_of(&binary).is_some().then(|| TypeRef::simple(binary));
+    }
+    let imports = extract_symbols(source).imports;
+    resolver.resolve_simple_name(name, &imports).map(TypeRef::simple)
 }
 
 /// Split the caret into `(dot_offset, typed_prefix)`: scan back over identifier chars;

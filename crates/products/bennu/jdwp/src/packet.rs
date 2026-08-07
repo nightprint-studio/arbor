@@ -90,12 +90,24 @@ impl Packet {
 pub fn handshake(stream: &mut (impl Read + Write)) -> Result<()> {
     stream.write_all(HANDSHAKE)?;
     stream.flush()?;
+    // Read what comes back rather than `read_exact`-ing the full 14 bytes. A peer that answers
+    // with FEWER and then closes is the same discovery as one that answers with the wrong bytes —
+    // it is not a JDWP agent — and `read_exact` reports that as a bare "unexpected end of file",
+    // which tells whoever is staring at the port nothing at all.
     let mut back = [0u8; 14];
-    stream.read_exact(&mut back)?;
-    if &back != HANDSHAKE {
+    let mut got = 0;
+    while got < back.len() {
+        match stream.read(&mut back[got..]) {
+            Ok(0) => break, // closed early
+            Ok(n) => got += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    if &back[..got] != HANDSHAKE {
         return Err(JdwpError::Protocol(format!(
             "not a JDWP endpoint — it answered the handshake with {:?}",
-            String::from_utf8_lossy(&back)
+            String::from_utf8_lossy(&back[..got])
         )));
     }
     Ok(())
@@ -145,7 +157,9 @@ mod tests {
 
     #[test]
     fn a_wrong_handshake_says_so_instead_of_hanging() {
-        // A socket that is not a JDWP agent — an HTTP server on the port you guessed.
+        // A socket that is not a JDWP agent — an HTTP server on the port you guessed. Its answer
+        // is also SHORTER than a handshake, which is the harder half: a peer that closes early
+        // must still be reported as "not a JDWP endpoint" and not as an end-of-file.
         let mut fake = Cursor::new(b"HTTP/1.1 404 ".to_vec());
         let mut buf: Vec<u8> = Vec::new();
         struct Duplex<'a>(&'a mut Cursor<Vec<u8>>, &'a mut Vec<u8>);

@@ -172,12 +172,20 @@ fn private_member_hidden_from_external_receiver() {
 #[test]
 fn private_member_shown_within_same_class() {
     // Within its own class body, a private member IS accessible and must still be offered.
+    //
+    // Shaped like the `zoo` fixture, and for its documented reason: an unfinished `receiver.`
+    // with nothing after it leaves tree-sitter's recovery nothing to close on, and the whole file
+    // parses as one ERROR — so the class declares no members to complete FROM. A member after the
+    // trigger is what a real buffer has, and what the artifact needs.
     let d = Project::new(&[(
         "Cat.java",
         "package zoo;\n\
          public class Cat {\n\
          \x20   private int lives;\n\
-         \x20   public int look() { return this.\n }\n\
+         \x20   public void look() {\n\
+         \x20       this.\n\
+         \x20   }\n\
+         \x20   public void after() { }\n\
          }\n",
     )]);
     let s = d.source("Cat.java").to_string();
@@ -313,13 +321,14 @@ fn enum_constants_complete_after_the_enum_name() {
             "package p;\n\
              public class Use {\n\
              \x20   void m() {\n\
-             \x20       Color c = Color.\n\
+             \x20       Color.\n\
              \x20   }\n\
+             \x20   void after() { }\n\
              }\n",
         ),
     ]);
     let s = p.source("Use.java").to_string();
-    let off = at(&s, "= Color.") + "= Color.".len();
+    let off = at(&s, "Color.") + "Color.".len();
     let labels = p.complete_labels("Use.java", off);
     for c in ["RED", "GREEN", "BLUE"] {
         assert!(labels.contains(&c.to_string()), "expected constant {c:?} in {labels:?}");

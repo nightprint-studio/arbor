@@ -453,6 +453,10 @@ struct FileWalker<'a> {
     /// Per enclosing type, `field name → the type that declares it`. See
     /// [`field_owners`](Self::field_owners).
     field_owners: HashMap<String, HashMap<String, String>>,
+    /// The fields each type in THIS file declares, by simple type name — what the buffer says,
+    /// independently of what the built index knows. The fallback half of
+    /// [`field_owner`](Self::field_owner).
+    file_fields: HashMap<String, std::collections::HashSet<String>>,
 }
 
 impl<'a> FileWalker<'a> {
@@ -481,6 +485,7 @@ impl<'a> FileWalker<'a> {
             imports: Vec::new(),
             local_names: std::collections::HashSet::new(),
             field_owners: HashMap::new(),
+            file_fields: HashMap::new(),
         }
     }
 
@@ -494,6 +499,12 @@ impl<'a> FileWalker<'a> {
         // into `com/acme/SharedService` when the class lives in a dependency.
         self.imports = symbols.imports.clone();
         self.local_names = collect_bound_names(root, self.bytes);
+        // What the BUFFER declares, which is not the same question as what the index holds.
+        self.file_fields = symbols
+            .types
+            .iter()
+            .map(|t| (t.name.clone(), t.fields.iter().map(|f| f.name.clone()).collect()))
+            .collect();
         let mut stack = vec![*root];
         while let Some(n) = stack.pop() {
             let mut cur = n.walk();
@@ -576,7 +587,7 @@ impl<'a> FileWalker<'a> {
         }
         let Some(name) = self.node_text(node) else { return };
         let Some(enclosing) = self.enclosing_type_binary(node) else { return };
-        let Some(owner) = self.field_owner(&enclosing, &name) else { return };
+        let Some(owner) = self.field_owner(&enclosing, &name, node) else { return };
         self.attempted += 1;
         // A local or parameter of the same name shadows the field. `classify_caret` refuses to
         // classify those at all, so indexing them here would file a local's reads under a field
@@ -591,19 +602,41 @@ impl<'a> FileWalker<'a> {
         self.edges.push((DeclKey::Field { owner, name }, usage));
     }
 
-    /// The type that declares field `name`, starting at `binary` and walking its supertypes.
-    /// `None` — unlike [`declaring_owner`](Self::declaring_owner) — when nothing declares it.
+    /// The type that declares field `name`, for a bare read sitting inside `binary`.
     ///
-    /// Strict because this is the gate a bare identifier passes to become an edge at all, and a
-    /// lenient answer would file every unresolvable name in the project under the class it
-    /// happened to sit in. Memoized per type: it is asked once per identifier in the project, so
-    /// each type's field table is resolved once and answered from a map afterwards.
-    fn field_owner(&mut self, binary: &str, name: &str) -> Option<String> {
+    /// Two sources, and the second is the one that makes this work on a real project:
+    ///
+    /// 1. the **resolver**, walked up the supertypes — the only thing that can find an inherited
+    ///    field, and the answer the query side computes for the same caret;
+    /// 2. failing that, the **file's own parsed declarations**. The resolver answers from the
+    ///    built index, which is a different thing from the buffer: a class the index has not
+    ///    reached yet, one whose members did not survive a partial build, a nested type it holds
+    ///    under another name — in every one of those `members_of` says nothing, and the field
+    ///    three lines below the method reading it does not exist as far as this walk is
+    ///    concerned. The query side never noticed because its own lookup is *lenient*: when
+    ///    nothing declares the name it hands back the enclosing type anyway, so the caret builds
+    ///    a key for a bucket the index never filled. That gap is the whole bug — a field with no
+    ///    usages that <kbd>Ctrl</kbd>+click navigates from correctly — and the fallback closes it
+    ///    on the one thing always available here, the file being walked.
+    ///
+    /// Still **strict overall**: a name neither the resolver nor the file knows as a field
+    /// produces nothing, so an unresolvable identifier is not filed under whichever class it
+    /// happened to sit in. Both branches name the same owner the query side would, which is the
+    /// invariant that matters — a different answer is a key that matches nothing.
+    ///
+    /// Memoized per type: this is asked once per identifier in the project.
+    fn field_owner(&mut self, binary: &str, name: &str, node: &Node) -> Option<String> {
         if !self.field_owners.contains_key(binary) {
             let table = self.build_field_owners(binary);
             self.field_owners.insert(binary.to_string(), table);
         }
-        self.field_owners.get(binary)?.get(name).cloned()
+        if let Some(owner) = self.field_owners.get(binary).and_then(|t| t.get(name)) {
+            return Some(owner.clone());
+        }
+        let declared = enclosing_type_simple(node, self.bytes)
+            .and_then(|simple| self.file_fields.get(&simple))
+            .is_some_and(|fields| fields.contains(name));
+        declared.then(|| binary.to_string())
     }
 
     /// `field name → declaring type` for `start` and its supertypes.
@@ -699,19 +732,17 @@ impl<'a> FileWalker<'a> {
         Some(start_binary.to_string())
     }
 
+    /// The binary name of the type `node` sits in.
+    ///
+    /// Delegates to the FREE function of the same name — the one the caret classifier uses — and
+    /// that is the whole point. This used to have its own copy that asked the resolver to turn
+    /// the simple name into a binary one, where the query's falls back to the buffer's `package`
+    /// line. For a type the project map holds they agree; for one it does not — a **nested**
+    /// class, a file the index has not reached — the copy gave up and the query did not, so a
+    /// member's own-class uses were filed under a key nothing ever looked up. Two spellings of
+    /// one question is how an index and the query that reads it drift apart silently.
     fn enclosing_type_binary(&self, node: &Node) -> Option<String> {
-        let mut cur = node.parent();
-        while let Some(n) = cur {
-            if matches!(
-                n.kind(),
-                "class_declaration" | "interface_declaration" | "enum_declaration"
-            ) {
-                let name = n.child_by_field_name("name").and_then(|x| self.node_text(&x))?;
-                return self.resolve_type_simple(&name);
-            }
-            cur = n.parent();
-        }
-        None
+        enclosing_type_binary(node, self.bytes, self.project_types)
     }
 
     fn resolve_type_simple(&self, simple: &str) -> Option<String> {
@@ -1233,6 +1264,22 @@ fn is_bound_name(node: &Node) -> bool {
         }
         _ => parent.child_by_field_name("name").map(|n| n.id() == node.id()).unwrap_or(false),
     }
+}
+
+/// The SIMPLE name of the type declaration enclosing `node`.
+///
+/// The same walk `enclosing_type_binary` does and stopping at the same declaration kinds, so the
+/// two always speak about one type — it is the binary form of exactly this name that a bare
+/// field's key is built from.
+fn enclosing_type_simple(node: &Node, bytes: &[u8]) -> Option<String> {
+    let mut cur = Some(*node);
+    while let Some(n) = cur {
+        if matches!(n.kind(), "class_declaration" | "interface_declaration" | "enum_declaration") {
+            return n.child_by_field_name("name")?.utf8_text(bytes).ok().map(str::to_string);
+        }
+        cur = n.parent();
+    }
+    None
 }
 
 /// Every name bound by a local, parameter, catch, resource, loop variable or pattern anywhere in

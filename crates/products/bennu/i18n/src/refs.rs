@@ -113,7 +113,7 @@ fn java_keys(source: &str) -> Vec<KeyRef> {
     for call in LOOKUP_CALLS {
         for (at, _) in source.match_indices(call) {
             // Must START an identifier — `getText` inside `formatGetText` is not this call.
-            if at > 0 && is_ident_byte(bytes[at - 1]) {
+            if at > 0 && is_java_ident_byte(bytes[at - 1]) {
                 continue;
             }
             let mut p = at + call.len();
@@ -204,8 +204,19 @@ fn string_literal(source: &str, at: usize) -> Option<KeyRef> {
     Some(KeyRef { key: key.to_string(), start, end })
 }
 
+/// Whether a byte can be part of an XML/JSP **attribute name** — where `.` and `-` are ordinary
+/// (`data-key`, `bean.title`).
 fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'.' || b == b'-'
+}
+
+/// Whether a byte can be part of a **Java identifier**.
+///
+/// Deliberately not [`is_ident_byte`]: a `.` is an attribute name's business and a *separator* in
+/// Java, so sharing the predicate made `this.getMessage(…)` and `bundle.getString(…)` look like
+/// the tail of a longer name and skipped them — which is how those calls are normally written.
+fn is_java_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
 }
 
 fn skip_ws(bytes: &[u8], mut at: usize) -> usize {

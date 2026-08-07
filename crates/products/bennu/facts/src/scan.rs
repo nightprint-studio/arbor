@@ -247,7 +247,7 @@ fn collect_type(node: &Node, bytes: &[u8], owner: &str, out: &mut Vec<TypeFacts>
         name,
         fqcn: fqcn.clone(),
         kind: type_kind(node.kind()),
-        is_abstract: has_modifier(node, bytes, "abstract"),
+        is_abstract: has_modifier(node, "abstract"),
         extends: clause_text(node, bytes, "superclass", "extends"),
         implements: interfaces_of(node, bytes),
         annotations: annotations_of(node, bytes),
@@ -338,8 +338,8 @@ fn method_facts(node: &Node, bytes: &[u8], is_constructor: bool) -> Option<Metho
         params: params_of(node, bytes),
         annotations: annotations_of(node, bytes),
         name_offset: name_node.start_byte(),
-        is_static: has_modifier(node, bytes, "static"),
-        is_public: has_modifier(node, bytes, "public"),
+        is_static: has_modifier(node, "static"),
+        is_public: has_modifier(node, "public"),
         is_constructor,
     })
 }
@@ -378,9 +378,9 @@ fn field_facts(node: &Node, bytes: &[u8], out: &mut Vec<FieldFacts>) {
     let type_text =
         node.child_by_field_name("type").and_then(|n| text(&n, bytes)).unwrap_or_default();
     let annotations = annotations_of(node, bytes);
-    let is_static = has_modifier(node, bytes, "static");
-    let is_final = has_modifier(node, bytes, "final");
-    let is_public = has_modifier(node, bytes, "public");
+    let is_static = has_modifier(node, "static");
+    let is_final = has_modifier(node, "final");
+    let is_public = has_modifier(node, "public");
     let mut w = node.walk();
     for d in node.named_children(&mut w) {
         if d.kind() != "variable_declarator" {
@@ -468,17 +468,25 @@ fn push_type(text: &str, out: &mut Vec<String>) {
     }
 }
 
-fn has_modifier(node: &Node, bytes: &[u8], keyword: &str) -> bool {
+/// Whether a declaration carries a modifier keyword.
+///
+/// Read off the `modifiers` node's own **keyword tokens**, never off its text. An annotation is a
+/// modifier too, so `@Value("abstract static")` puts both of those words inside that node — and a
+/// text match finds them there however careful it is about word boundaries, which is how a class
+/// came back abstract because of a string it was annotated with.
+fn has_modifier(node: &Node, keyword: &str) -> bool {
     let mut w = node.walk();
     // Bound to a local rather than left as the tail expression: the iterator borrows the
     // cursor, and a tail expression outlives the block's own locals.
     let found = node.children(&mut w).any(|c| {
-        c.kind() == "modifiers"
-            && text(&c, bytes).is_some_and(|t| {
-                // Word-boundary match: `abstract` must not be found inside an annotation's
-                // string argument (`@Value("abstract")`).
-                t.split(|ch: char| !ch.is_alphanumeric() && ch != '_').any(|word| word == keyword)
-            })
+        if c.kind() != "modifiers" {
+            return false;
+        }
+        let mut mw = c.walk();
+        // An anonymous token's `kind()` IS its text, so this compares the keyword itself and
+        // cannot reach inside an annotation child.
+        let hit = c.children(&mut mw).any(|m| m.kind() == keyword);
+        hit
     });
     found
 }
@@ -722,7 +730,9 @@ mod tests {
 
     #[test]
     fn a_string_argument_never_reads_as_a_modifier() {
-        // `has_modifier` matches whole words, so this must NOT come back abstract.
+        // An annotation IS a modifier, so both words sit inside the `modifiers` node. Reading its
+        // TEXT finds them there however careful the word boundaries are — which is why the
+        // keywords are read as tokens instead.
         let f = scan("@Value(\"abstract static\") class C {}");
         assert!(!f.types[0].is_abstract);
     }
@@ -760,12 +770,15 @@ mod tests {
 
     #[test]
     fn a_truncated_text_block_yields_nothing_rather_than_a_bad_span() {
-        // Mid-keystroke: the closing delimiter is not there yet.
+        // Mid-keystroke: the closing delimiter is not there yet, so the opener runs to the end of
+        // the file and the class body never closes — which usually means there is no type to
+        // report at all. That IS the graceful answer, and it is why every level here is
+        // tolerated: what must never happen is a span that indexes backwards.
         let f = scan("class C { @Query(\"\"\") Object m(); }");
-        assert!(f.types[0].methods.first().is_none_or(|m| m
+        assert!(f.types.first().is_none_or(|t| t.methods.first().is_none_or(|m| m
             .annotations
             .first()
-            .is_none_or(|a| a.value().is_none_or(|s| s.end >= s.start))));
+            .is_none_or(|a| a.value().is_none_or(|s| s.end >= s.start)))));
     }
 
     /// An interface's `extends` list has no field name in the grammar, so a field-only lookup

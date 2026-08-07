@@ -933,8 +933,9 @@ mod tests {
             vec![],
             vec![],
         );
-        let paths: Vec<&str> =
-            ext.model().config_bindings.iter().map(|b| b.path.as_str()).collect();
+        // Bound: `model()` hands back a guard, and the `&str`s below borrow through it.
+        let model = ext.model();
+        let paths: Vec<&str> = model.config_bindings.iter().map(|b| b.path.as_str()).collect();
         assert!(paths.contains(&"app.http"), "got: {paths:?}");
         assert!(paths.contains(&"app.http.client"), "one level down");
         assert!(paths.contains(&"app.http.client.read-timeout"), "two levels down");
@@ -958,8 +959,8 @@ mod tests {
             vec![],
             vec![],
         );
-        let paths: Vec<&str> =
-            ext.model().config_bindings.iter().map(|b| b.path.as_str()).collect();
+        let model = ext.model();
+        let paths: Vec<&str> = model.config_bindings.iter().map(|b| b.path.as_str()).collect();
         assert!(paths.contains(&"app.endpoints.<key>.url"), "got: {paths:?}");
     }
 
@@ -974,8 +975,8 @@ mod tests {
             vec![],
             vec![],
         );
-        let paths: Vec<&str> =
-            ext.model().config_bindings.iter().map(|b| b.path.as_str()).collect();
+        let model = ext.model();
+        let paths: Vec<&str> = model.config_bindings.iter().map(|b| b.path.as_str()).collect();
         assert_eq!(paths, ["app.name", "app.max-pool-size"]);
     }
 

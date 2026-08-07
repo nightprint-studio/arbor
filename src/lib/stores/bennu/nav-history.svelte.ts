@@ -64,6 +64,23 @@ function createBennuNavStore() {
       });
     },
 
+    /** Move the current place without adding one.
+     *
+     *  What makes a cross-file jump ONE stop instead of two. Opening a file and scrolling to
+     *  the line you asked for are two caret events and a single navigation: recording both
+     *  leaves a stop at line 1 of a file nobody asked to be at, which is where Back took you.
+     *  The second event refines the slot the first opened. */
+    replace(place: NavPlace) {
+      untrack(() => {
+        if (index < 0) {
+          places = [place];
+          index = 0;
+          return;
+        }
+        places[index] = place;
+      });
+    },
+
     /** Step back one place, or `null` when already at the oldest. */
     back(): NavPlace | null {
       return untrack(() => {

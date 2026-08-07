@@ -289,8 +289,8 @@ impl SpringModel {
     /// picker the user reads, not a diagnostic. Being too generous costs an extra row;
     /// being too strict costs the feature.
     pub fn candidates(&self, type_text: &str, qualifier: &str) -> Vec<&BeanDef> {
-        let bare = strip_generics(type_text);
-        let wanted = simple_name(&bare);
+        let wanted_owned = injected_type(type_text);
+        let wanted = wanted_owned.as_str();
         if wanted.is_empty() {
             return Vec::new();
         }
@@ -352,6 +352,56 @@ impl SpringModel {
         }
         self.endpoints.iter().filter(|e| e.label().to_ascii_lowercase().contains(&q)).collect()
     }
+}
+
+/// Wrappers whose FIRST type argument is what an injection point is really asking for.
+///
+/// `@Autowired List<OrderService> all` injects every `OrderService` bean — the collection is the
+/// shape of the answer, not the type being asked for. Matching on `List` matched nothing, which
+/// is the one injection style that has no other way to be resolved.
+const ELEMENT_WRAPPERS: &[&str] =
+    &["List", "Set", "Collection", "Stream", "Optional", "ObjectProvider", "Provider"];
+
+/// The type an injection point asks for: the element of a collection or provider, the VALUE of a
+/// `Map` (Spring keys those by bean name), the type itself otherwise. Always a simple name —
+/// which is what [`SpringModel::candidates`] compares.
+pub fn injected_type(type_text: &str) -> String {
+    let outer = simple_name(&strip_generics(type_text)).to_string();
+    let arg = |n: usize| type_argument(type_text, n).map(|a| simple_name(&strip_generics(&a)).to_string());
+    let inner = match outer.as_str() {
+        w if ELEMENT_WRAPPERS.contains(&w) => arg(0),
+        "Map" => arg(1),
+        _ => None,
+    };
+    inner.filter(|s| !s.is_empty()).unwrap_or(outer)
+}
+
+/// The `n`th type argument of `Foo<A, B>`, respecting nesting. `None` when there is none.
+pub fn type_argument(type_text: &str, n: usize) -> Option<String> {
+    let open = type_text.find('<')?;
+    let close = type_text.rfind('>')?;
+    if close <= open + 1 {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut current = String::new();
+    let mut args: Vec<String> = Vec::new();
+    for ch in type_text[open + 1..close].chars() {
+        match ch {
+            '<' => {
+                depth += 1;
+                current.push(ch);
+            }
+            '>' => {
+                depth = depth.saturating_sub(1);
+                current.push(ch);
+            }
+            ',' if depth == 0 => args.push(std::mem::take(&mut current)),
+            _ => current.push(ch),
+        }
+    }
+    args.push(current);
+    args.get(n).map(|a| a.trim().to_string()).filter(|a| !a.is_empty())
 }
 
 /// The last dotted segment of a name (`com.acme.Foo` → `Foo`), and the whole string when

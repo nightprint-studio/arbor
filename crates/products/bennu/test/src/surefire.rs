@@ -191,8 +191,12 @@ fn detail_of(node: roxmltree::Node<'_, '_>) -> (Option<String>, Option<String>, 
 
 /// Every text and CDATA node under `node`, concatenated. `Node::text()` returns only the
 /// first text child, which for a trace split across CDATA sections silently loses the rest.
+///
+/// Only the TEXT descendants: `descendants()` yields `node` itself first, and asking an *element*
+/// for its text hands back its first text child — which is then collected again as itself, so
+/// every trace and every captured stdout came out written twice.
 fn all_text(node: roxmltree::Node<'_, '_>) -> String {
-    node.descendants().filter_map(|n| n.text()).collect()
+    node.descendants().filter(roxmltree::Node::is_text).filter_map(|n| n.text()).collect()
 }
 
 /// Seconds as Surefire writes them → milliseconds. Accepts BOTH decimal separators: 2.x

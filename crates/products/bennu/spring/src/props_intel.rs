@@ -507,6 +507,14 @@ pub fn inline_hint(model: &SpringModel, path: &str, source: &str, offset: usize)
     // `source[offset..]` on it panics. A panic in a query handler poisons the model's lock, and
     // from then on every framework answer for that project is empty: the toolbar goes blank and
     // stays blank.
+    // Ghost text is drawn AT the caret, so an offset this buffer does not have is not something
+    // to clamp — `safe_offset` would put it at the end, and the hint would then appear at a
+    // position the user is not standing on. Nothing is the honest answer until the two agree
+    // again, which is the next keystroke. (Completion clamps, and should: a popup filters by what
+    // was typed rather than drawing itself into the text.)
+    if offset > source.len() {
+        return None;
+    }
     let offset = safe_offset(source, offset)?;
     match classify(path, source, offset)? {
         Caret::Value { key, partial } if partial.is_empty() => {
@@ -673,7 +681,9 @@ mod tests {
         let m = model(
             "class S { @Value(\"${app.n}\") int a; @Value(\"${app.n}\") String b; }",
         );
-        let h = hover(&m, YAML_PATH, "app:\n  n: 1\n", 9).unwrap();
+        // On the KEY: hover answers for the key's own span, not for its value.
+        let yaml = "app:\n  n: 1\n";
+        let h = hover(&m, YAML_PATH, yaml, yaml.find("n:").unwrap()).unwrap();
         assert!(h.doc.contains("readers disagree"), "got: {}", h.doc);
     }
 

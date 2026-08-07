@@ -242,6 +242,57 @@ fn a_constant_is_counted_wherever_it_is_read() {
     assert_eq!(n, 3, "twice bare in clamp(), once as Limits.MAX in Other");
 }
 
+/// The shape a legacy class is actually written in: the methods first, the collaborators
+/// declared `final` and initialised inline at the BOTTOM. Nothing about a field's position
+/// changes what reads it — this exists because it once did.
+#[test]
+fn fields_declared_below_the_methods_that_read_them_are_counted() {
+    let p = Project::new(&[(
+        "Service.java",
+        "package z;\n\
+         public class Service {\n\
+         \x20   public int run() { return helper.size() + limit; }\n\
+         \x20   public int again() { return limit; }\n\
+         \x20   private final java.util.List<String> helper = new java.util.ArrayList<>();\n\
+         \x20   private final int limit = 10;\n\
+         }\n",
+    )]);
+    let s = p.source("Service.java").to_string();
+    assert_eq!(p.usage_count("Service.java", at(&s, "int limit") + "int ".len()), 2);
+    assert_eq!(
+        p.usage_count("Service.java", at(&s, "helper =")),
+        1,
+        "the receiver of `helper.size()` is a read of the field",
+    );
+}
+
+/// The two sides of find-usages — the index that records a use and the caret that looks one up —
+/// must build the same key. A NESTED class is where they used to spell the enclosing type
+/// differently, which reads as "no usages" from the declaration while <kbd>Ctrl</kbd>+click from
+/// the use navigates perfectly well.
+#[test]
+fn a_nested_class_counts_its_own_members() {
+    let p = Project::new(&[(
+        "Outer.java",
+        "package z;\n\
+         public class Outer {\n\
+         \x20   public static class Inner {\n\
+         \x20       public int read() { return depth + step(); }\n\
+         \x20       public int twice() { return depth; }\n\
+         \x20       private int step() { return 1; }\n\
+         \x20       private final int depth = 3;\n\
+         \x20   }\n\
+         }\n",
+    )]);
+    let s = p.source("Outer.java").to_string();
+    assert_eq!(p.usage_count("Outer.java", at(&s, "int depth") + "int ".len()), 2);
+    assert_eq!(
+        p.usage_count("Outer.java", at(&s, "int step()") + "int ".len()),
+        1,
+        "a bare call to a sibling method counts the same way",
+    );
+}
+
 /// A field's own declarator is the declaration find-usages is answering ABOUT, never one of the
 /// answers.
 #[test]

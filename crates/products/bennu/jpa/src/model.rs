@@ -308,7 +308,11 @@ mod tests {
         assert!(m.entity("Order").is_some());
         assert!(m.entity("com.acme.Order").is_some());
         assert!(m.entity("OrderLine").is_some(), "the name JPQL uses");
-        assert!(m.entity("List<Order>").is_some(), "generics are stripped first");
+        // Stripped means the type's OWN arguments go — `Base<T>` names `Base`. It does not mean a
+        // container is unwrapped: `List<Order>` names `List`, and asking this for the row type of
+        // a collection is the caller's job (`type_argument`), not a silent unwrap here.
+        assert!(m.entity("Order<T>").is_some(), "a type's own arguments are stripped");
+        assert!(m.entity("List<Order>").is_none(), "a container is not the entity it holds");
         assert!(m.entity("Nope").is_none());
     }
 

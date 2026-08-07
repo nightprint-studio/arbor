@@ -391,7 +391,10 @@ fn needs_escape(bytes: &[u8], at: usize) -> bool {
     match bytes[at] {
         b'\\' | b'`' | b'[' => true,
         b'=' | b'~' => run(bytes[at]) >= 2,
-        b'*' => run(b'*') >= 2 || opens(),
+        // Also when it CLOSES a run. `=` and `~` mean something only in pairs, so breaking the
+        // pair is enough; a lone `*` is emphasis all by itself, and the second star of `**` has
+        // nothing after it to "open" — leave it bare and `\**forte\**` still opens on it.
+        b'*' => run(b'*') >= 2 || opens() || bytes.get(at.wrapping_sub(1)) == Some(&b'*'),
         // `_` only ever opened emphasis at a word edge, so only escape it there.
         b'_' => (run(b'_') >= 2 || opens()) && !word_byte(bytes, at.wrapping_sub(1)),
         b'#' => !word_byte(bytes, at.wrapping_sub(1)) && tag_byte(bytes, at + 1),

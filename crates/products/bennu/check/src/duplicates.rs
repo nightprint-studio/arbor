@@ -18,14 +18,23 @@
 //! ```
 //!
 //! Both parameter lists read `X`, so a text comparison called them the same method — they are a
-//! legal overload, and the compiler accepts them. The fix is to fold the type parameters' **bounds**
-//! into the key, positionally.
+//! legal overload, and the compiler accepts them.
 //!
-//! Bounds and *not names*, deliberately: keying on the names would make `<T> void f(T)` and
-//! `<U> void f(U)` look distinct, when they are a genuine duplicate (both erase to `f(Object)`).
-//! Keying on bounds keeps that pair colliding — both unbounded — while separating the pair above.
-//! Two type variables with the same bound are the same type as far as a signature is concerned,
-//! which is exactly the question this check asks.
+//! The fix is to compare the parameters **after substituting each of the member's own type
+//! variables by what it erases to** — its bound, or `Object` when it has none. That single rule
+//! answers both directions of the question, because both are questions about erasure:
+//!
+//! ```text
+//! <X extends Collection> many(X c)  →  many(Collection)   distinct: a legal overload
+//! <X extends Map>        many(X c)  →  many(Map)
+//!
+//! <T> void f(T a)                   →  f(Object)          identical: a real duplicate
+//! <U> void f(U b)                   →  f(Object)
+//! ```
+//!
+//! Substituting rather than keying on the bounds beside the parameters, because the parameter's
+//! written text carries the variable's **name**: `f(T)` and `f(U)` read as different signatures
+//! however the bounds are compared, while the compiler sees `f(Object)` twice and rejects the pair.
 
 use std::collections::HashMap;
 
@@ -53,9 +62,9 @@ pub fn duplicate_signatures_in(root: Node, source: &str) -> Vec<Diagnostic> {
 /// pre-order of the slice matches the old DFS, so the first-seen-wins dedup keys identically.
 pub fn duplicate_signatures_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
-    // Key: (enclosing body node id, member kind + name, own type-parameter bounds, parameter type
-    // texts). First-seen node kept; a second insertion is a duplicate.
-    let mut seen: HashMap<(usize, String, Vec<String>, Vec<String>), ()> = HashMap::new();
+    // Key: (enclosing body node id, member kind + name, parameter types with the member's own type
+    // variables erased). First-seen node kept; a second insertion is a duplicate.
+    let mut seen: HashMap<(usize, String, Vec<String>), ()> = HashMap::new();
     let mut out = Vec::new();
     for &n in nodes {
         let (kind_name, name_node) = match n.kind() {
@@ -72,8 +81,8 @@ pub fn duplicate_signatures_nodes(nodes: &[Node], source: &str) -> Vec<Diagnosti
             _ => continue,
         };
         let Some(body) = n.parent() else { continue };
-        let params = param_types(n, bytes);
-        let key = (body.id(), kind_name, type_param_bounds(n, bytes), params);
+        let params = param_types(n, bytes, &type_var_erasures(n, bytes));
+        let key = (body.id(), kind_name, params);
         if seen.insert(key, ()).is_some() {
             let what = if n.kind() == "constructor_declaration" { "constructor" } else { "method" };
             out.push(Diagnostic {
@@ -89,17 +98,19 @@ pub fn duplicate_signatures_nodes(nodes: &[Node], source: &str) -> Vec<Diagnosti
     out
 }
 
-/// The written parameter types of a method/constructor, whitespace-normalised. A varargs `T...`
-/// keeps its `...` so `f(T...)` and `f(T)` stay distinct.
-fn param_types(member: Node, bytes: &[u8]) -> Vec<String> {
+/// The written parameter types of a method/constructor, whitespace-normalised and with the
+/// member's own type variables replaced by what they erase to. A varargs `T...` keeps its `...` so
+/// `f(T...)` and `f(T)` stay distinct.
+fn param_types(member: Node, bytes: &[u8], vars: &HashMap<String, String>) -> Vec<String> {
     let Some(params) = member.child_by_field_name("parameters") else { return Vec::new() };
     let mut out = Vec::new();
     let mut c = params.walk();
+    let erase = |t: &str| substitute_type_vars(&normalize(t), vars);
     for p in params.named_children(&mut c) {
         match p.kind() {
             "formal_parameter" => {
                 if let Some(t) = p.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok()) {
-                    out.push(normalize(t));
+                    out.push(erase(t));
                 }
             }
             "spread_parameter" => {
@@ -111,7 +122,7 @@ fn param_types(member: Node, bytes: &[u8]) -> Vec<String> {
                         || k == "generic_type" || k == "array_type"
                     {
                         if let Ok(t) = ch.utf8_text(bytes) {
-                            out.push(format!("{}...", normalize(t)));
+                            out.push(format!("{}...", erase(t)));
                         }
                         break;
                     }
@@ -123,35 +134,86 @@ fn param_types(member: Node, bytes: &[u8]) -> Vec<String> {
     out
 }
 
-/// The member's own type parameters, as their **bounds** in declaration order — `<X extends Map>` →
-/// `["Map"]`, `<T>` → `[""]`, `<K, V extends Comparable<V>>` → `["", "Comparable<V>"]`. Empty when
-/// the member declares none.
+/// The member's own type variables, mapped to what each **erases to** — its bound, or `Object`
+/// when it has none. Empty when the member declares no type parameters, which is the common case
+/// and costs nothing.
 ///
-/// Bounds rather than names: see the module doc. A multi-bound `<T extends A & B>` keeps its whole
-/// bound text, so it stays distinct from `<T extends A>`.
-fn type_param_bounds(member: Node, bytes: &[u8]) -> Vec<String> {
-    let Some(tps) = member.child_by_field_name("type_parameters") else { return Vec::new() };
-    let mut out = Vec::new();
+/// A multi-bound `<T extends A & B>` keeps its whole bound text rather than erasing to `A` the way
+/// javac does, so it stays distinct from `<T extends A>`. That under-reports, which is this
+/// check's standing preference over risking a false positive.
+fn type_var_erasures(member: Node, bytes: &[u8]) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let Some(tps) = member.child_by_field_name("type_parameters") else { return out };
     let mut c = tps.walk();
     for tp in tps.named_children(&mut c) {
         if tp.kind() != "type_parameter" {
             continue;
         }
-        // The bound is an optional `type_bound` child; its absence means "unbounded" — which erases
-        // to Object, and which two unbounded variables share.
+        // `type_parameter` is `[annotations] <name> [type_bound]` — no field names, so the
+        // variable is its FIRST name child and the bound its optional `type_bound`. The grammar
+        // aliases that name to `type_identifier` (which is how the rest of the crate reads one);
+        // `identifier` is accepted beside it so a grammar bump cannot silently empty this map and
+        // turn every substitution below into the identity.
+        let mut name: Option<String> = None;
         let mut bound = String::new();
         let mut bc = tp.walk();
         for ch in tp.named_children(&mut bc) {
-            if ch.kind() == "type_bound" {
-                if let Ok(t) = ch.utf8_text(bytes) {
-                    bound = normalize(t);
+            match ch.kind() {
+                "type_identifier" | "identifier" if name.is_none() => {
+                    name = ch.utf8_text(bytes).ok().map(str::to_string);
                 }
-                break;
+                "type_bound" => {
+                    // The node's text is `extends X` — the keyword is not part of the type.
+                    if let Ok(t) = ch.utf8_text(bytes) {
+                        let t = t.trim_start();
+                        bound = normalize(t.strip_prefix("extends").unwrap_or(t));
+                    }
+                }
+                _ => {}
             }
         }
-        out.push(bound);
+        if let Some(name) = name {
+            // Unbounded erases to `Object` — which is precisely what two unbounded variables share
+            // and why `<T> f(T)` and `<U> f(U)` are one method, not two.
+            out.insert(name, if bound.is_empty() { "Object".to_string() } else { bound });
+        }
     }
     out
+}
+
+/// Replace every whole-word occurrence of one of `vars`' names with what it erases to.
+///
+/// Whole words, and never a segment that follows a `.`: a qualified `java.util.Map` must survive a
+/// method that happens to call one of its variables `Map`.
+fn substitute_type_vars(text: &str, vars: &HashMap<String, String>) -> String {
+    if vars.is_empty() {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut word = String::new();
+    let mut qualified = false;
+    for ch in text.chars() {
+        if ch.is_alphanumeric() || ch == '_' || ch == '$' {
+            word.push(ch);
+            continue;
+        }
+        flush_word(&mut out, &mut word, vars, qualified);
+        qualified = ch == '.';
+        out.push(ch);
+    }
+    flush_word(&mut out, &mut word, vars, qualified);
+    out
+}
+
+fn flush_word(out: &mut String, word: &mut String, vars: &HashMap<String, String>, qualified: bool) {
+    if word.is_empty() {
+        return;
+    }
+    match vars.get(word.as_str()) {
+        Some(erasure) if !qualified => out.push_str(erasure),
+        _ => out.push_str(word),
+    }
+    word.clear();
 }
 
 fn normalize(s: &str) -> String {
@@ -223,6 +285,32 @@ mod tests {
     fn unbounded_type_variables_of_different_names_still_collide() {
         let d = dups("class C { <T> void f(T a) {} <U> void f(U b) {} }");
         assert_eq!(d.len(), 1, "both erase to f(Object): {d:?}");
+    }
+
+    /// The substitution reaches inside a type argument — `List<T>` and `List<U>` are one
+    /// parameter list, and a nested variable is where the name would otherwise survive.
+    #[test]
+    fn a_type_variable_inside_a_type_argument_is_erased_too() {
+        let d = dups(
+            "class C {\n\
+               <T> void f(java.util.List<T> a) {}\n\
+               <U> void f(java.util.List<U> b) {}\n\
+             }",
+        );
+        assert_eq!(d.len(), 1, "both erase to f(List<Object>): {d:?}");
+    }
+
+    /// Whole words, and never a segment after a `.` — a method whose variable happens to be
+    /// called `Map` must not rewrite `java.util.Map` out of another parameter.
+    #[test]
+    fn a_variable_named_like_a_package_segment_leaves_qualified_names_alone() {
+        let d = dups(
+            "class C {\n\
+               <Map> void f(Map a, java.util.Map b) {}\n\
+               <Map> void f(java.util.Map a, Map b) {}\n\
+             }",
+        );
+        assert!(d.is_empty(), "f(Object,Map) is not f(Map,Object): {d:?}");
     }
 
     /// The same bound spelled the same way is still a duplicate.

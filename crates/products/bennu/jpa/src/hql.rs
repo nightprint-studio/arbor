@@ -71,26 +71,45 @@ pub fn placeholders(text: &str) -> Vec<Placeholder> {
     out
 }
 
-/// Colouring for the query text. `base` offsets every span into the file.
+/// Words after which the NEXT one is a name the project chose, not part of the language.
+///
+/// Without this, an entity called `Order` — or a table called `Group`, or `Case`, or `Set` — is
+/// coloured as the keyword it collides with, which is how a perfectly good query comes to read as
+/// broken. The position says which it is: whatever follows `from` is being named, whatever
+/// follows nothing in particular is being used.
+const NAME_INTRODUCERS: &[&str] = &["from", "join", "update", "into", "new", "table"];
+
+/// Colouring for the query text.
 pub fn tokens(text: &str, native: bool) -> Vec<Token> {
-    scan(text)
-        .into_iter()
-        .filter_map(|(start, end, kind)| {
-            let kind = match kind {
-                "word" => {
-                    let word = text[start..end].to_ascii_lowercase();
-                    let known =
-                        JPQL.contains(&word.as_str()) || (native && SQL_EXTRA.contains(&word.as_str()));
-                    if !known {
-                        return None;
-                    }
-                    "keyword"
+    let mut out = Vec::new();
+    // The previous WORD, which is what decides whether this one is a name. Reset by anything that
+    // is not a word, so a string or a parameter breaks the pairing rather than reaching across it.
+    let mut previous: Option<String> = None;
+    for (start, end, kind) in scan(text) {
+        let kind = match kind {
+            "word" => {
+                let word = text[start..end].to_ascii_lowercase();
+                let introduced =
+                    previous.as_deref().is_some_and(|p| NAME_INTRODUCERS.contains(&p));
+                previous = Some(word.clone());
+                if introduced {
+                    continue; // the project's own vocabulary
                 }
-                other => other,
-            };
-            Some(Token { start, end, kind })
-        })
-        .collect()
+                let known =
+                    JPQL.contains(&word.as_str()) || (native && SQL_EXTRA.contains(&word.as_str()));
+                if !known {
+                    continue;
+                }
+                "keyword"
+            }
+            other => {
+                previous = None;
+                other
+            }
+        };
+        out.push(Token { start, end, kind });
+    }
+    out
 }
 
 /// One pass over the text, yielding `(start, end, kind)` for the lexical pieces that matter.
@@ -123,8 +142,12 @@ fn scan(text: &str) -> Vec<(usize, usize, &'static str)> {
                 }
                 out.push((start, i, "string"));
             }
-            // A named parameter. `::` is Postgres's cast operator, not a placeholder.
-            b':' if i + 1 < b.len() && b[i + 1] != b':' => {
+            // Postgres's cast operator, consumed as a UNIT. Stepping over only the first colon
+            // left the second one looking exactly like a named parameter, so `x::text` bound a
+            // `:text` nobody wrote — and the check then demanded an argument for it.
+            b':' if b.get(i + 1) == Some(&b':') => i += 2,
+            // A named parameter.
+            b':' => {
                 let start = i;
                 i += 1;
                 while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {

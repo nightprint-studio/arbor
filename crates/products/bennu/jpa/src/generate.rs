@@ -1229,7 +1229,13 @@ mod tests {
         let g = query_method(&m, &repo, "interface R {\n}\n", &spec);
         // Two parameters for the Between, none for the IsNull.
         assert!(g.preview.contains("(BigDecimal totalFrom, BigDecimal totalTo)"), "{}", g.preview);
-        assert!(g.preview.starts_with("List<Order> findByTotalBetweenAndCustomerNameIsNull"));
+        // `trim_start`: a preview shows the text as it will be INSERTED, indent and all (see the
+        // `assert_eq!`s over `entity_attribute`). What is asserted here is what comes first on the
+        // line, not that the line begins at column zero.
+        assert!(g
+            .preview
+            .trim_start()
+            .starts_with("List<Order> findByTotalBetweenAndCustomerNameIsNull"));
     }
 
     /// A renamed method stops being derivable, so it must arrive with its query written out —
@@ -1314,7 +1320,7 @@ mod tests {
             ..QuerySpec::default()
         };
         let g = query_method(&m, &repo, "interface R {\n}\n", &spec);
-        assert!(g.preview.starts_with("Page<Order> "));
+        assert!(g.preview.trim_start().starts_with("Page<Order> "));
         assert!(g.preview.contains("Pageable pageable"));
     }
 
@@ -1331,7 +1337,9 @@ mod tests {
                 sorted,
                 ..QuerySpec::default()
             };
-            query_method(&m, &repo, "interface R {\n}\n", &spec).preview
+            // Trimmed: what each shape RETURNS is the question here, and the preview carries the
+            // insertion's indent (see `entity_attribute`'s exact-match tests).
+            query_method(&m, &repo, "interface R {\n}\n", &spec).preview.trim_start().to_string()
         };
         assert!(build(ReturnShape::Slice, false).starts_with("Slice<Order> "));
         assert!(build(ReturnShape::Stream, false).starts_with("Stream<Order> "));
@@ -1365,6 +1373,7 @@ mod tests {
         };
         assert!(query_method(&m, &repo, "interface R {\n}\n", &spec)
             .preview
+            .trim_start()
             .starts_with("long countByTotalGreaterThan("));
     }
 

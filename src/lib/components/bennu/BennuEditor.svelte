@@ -198,13 +198,27 @@
   let caretCol = $state(1);
 
   // ── Navigation history (Ctrl+Alt+←/→) ─────────────────────────────────────────
-  // Record a "place" when the caret makes a real JUMP — a different file, or a big
-  // in-file hop (a go-to / structure / find click) — not on every arrow keystroke. A
-  // programmatic back/forward jump sets `suppressNav` so it doesn't record itself as a
-  // fresh place (which would break the ring).
+  //
+  // Record a "place" when the caret makes a real JUMP — a different file, or a big in-file hop
+  // (a go-to / structure / find click) — not on every arrow keystroke.
+  //
+  // The hard part is that **one navigation is several caret events**. Every cross-file jump in
+  // Bennu is `openFile(…)` and then `requestGoto(line)`: the open lands the buffer wherever it
+  // starts, the scroll follows. Treating those as two places is what put stops in the ring
+  // nobody ever visited — Back from a go-to took you to line 1 of the file you had just arrived
+  // in, and a Back that crossed files recorded its own landing, truncating the branch and
+  // killing Forward. So two pieces of state below: which jump we are still waiting to land, and
+  // whether the entry we last pushed was a file opening that the next hop should refine.
   let lastNav: { file: string; line: number } | null = null;
-  let suppressNav = false;
+  /** The landing of a programmatic Back/Forward, with a budget of buffer events to ignore
+   *  before giving up on it — so a jump that can never land (a shorter file, a navigation the
+   *  user superseded) cannot wedge the history shut. */
+  let pendingJump: { file: string; line: number; budget: number } | null = null;
+  /** The file whose OPENING we just recorded. The next jump inside it refines that entry
+   *  instead of pushing a second one. Consumed by the first caret event either way. */
+  let justOpened: string | null = null;
   const NAV_JUMP_LINES = 3; // an in-file move larger than this counts as a jump
+  const NAV_SETTLE_EVENTS = 4; // buffer events a pending jump may swallow before it gives up
 
   function onCaret(line: number, col: number) {
     caretLine = line; caretCol = col;
@@ -219,24 +233,56 @@
 
     const path = activePath;
     if (!path) return;
-    if (suppressNav) {
-      // This caret event is the landing of a Back/Forward jump — remember it, don't record.
-      suppressNav = false;
-      lastNav = { file: path, line };
-      return;
+
+    if (pendingJump) {
+      const arrived =
+        isSamePath(pendingJump.file, path) && Math.abs(pendingJump.line - line) <= 1;
+      if (!arrived && pendingJump.budget > 0) {
+        // On the way: the buffer being swapped, the target file opening at wherever it starts.
+        // The old file can report a last caret position too, before `activePath` catches up —
+        // hence swallowing by budget rather than by which file this event is in.
+        pendingJump.budget -= 1;
+        return;
+      }
+      pendingJump = null;
+      if (arrived) {
+        // Already in the ring at the index we just stepped to. Recording it again would
+        // truncate the branch this step moved into — which is why Forward stopped working
+        // after any Back that crossed a file.
+        lastNav = { file: path, line };
+        justOpened = null;
+        return;
+      }
+      // Never landed, or the user went somewhere else meanwhile: fall through and treat this
+      // as an ordinary event rather than blocking the history for the rest of the session.
     }
-    const jumped = !lastNav || lastNav.file !== path || Math.abs(lastNav.line - line) > NAV_JUMP_LINES;
-    if (jumped) bennuNavStore.record({ file: path, line, col });
+
+    const opened = justOpened;
+    justOpened = null;
+    const changedFile = !lastNav || !isSamePath(lastNav.file, path);
+    const movedFar = !!lastNav && Math.abs(lastNav.line - line) > NAV_JUMP_LINES;
+    const jumped = changedFile || movedFar;
+    if (jumped) {
+      const place = { file: path, line, col };
+      if (opened && isSamePath(opened, path)) {
+        bennuNavStore.replace(place); // the scroll that the opening was for
+      } else {
+        bennuNavStore.record(place);
+        // Only a file OPENING is provisional. Two deliberate hops inside one file are two
+        // stops, and collapsing them would lose the one you meant to come back to.
+        justOpened = changedFile ? path : null;
+      }
+    }
     lastNav = { file: path, line };
   }
 
   /** Navigate to a recorded place (cross-file via the goto relay so the remounted editor
-   *  picks it up on mount; same-file directly). `suppressNav` keeps the resulting caret
-   *  event from recording a new place. */
+   *  picks it up on mount; same-file directly). `pendingJump` keeps every caret event this
+   *  causes — the opening as much as the landing — out of the history. */
   async function navGo(place: { file: string; line: number; col: number } | null) {
     if (!place) return;
-    suppressNav = true;
-    if (place.file !== projectStore.activeFilePath) {
+    pendingJump = { file: place.file, line: place.line, budget: NAV_SETTLE_EVENTS };
+    if (!isSamePath(place.file, projectStore.activeFilePath)) {
       await projectStore.openFile(place.file);
       bennuUiStore.requestGoto(place.line);
     } else {

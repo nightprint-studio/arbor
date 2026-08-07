@@ -82,7 +82,16 @@ Two impl slots:
     because the index and the query must produce the same key or the lookup finds an empty
     bucket. It is gated on a memoized `field name → declaring type` table per enclosing type,
     which rejects nearly every identifier in a method body (they are locals) before the
-    per-scope shadowing walk runs at all.
+    per-scope shadowing walk runs at all. When the resolver does not know the type — a class the
+    index has not reached, a nested one it holds under another name — the gate falls back to the
+    **file's own parsed fields**, because the query side's lookup is lenient there and would
+    otherwise build a key for a bucket nothing filled.
+  - **One spelling of "the enclosing type".** Both sides call the same
+    `enclosing_type_binary`; the walker used to keep its own copy that asked the resolver where
+    the query's falls back to the buffer's `package` line, and the two answers differed for
+    exactly the types the project map does not hold. The symptom is a member with no usages that
+    <kbd>Ctrl</kbd>+click navigates from correctly — a drift between an index and the query that
+    reads it never announces itself.
   - `classify_caret(...)` → the `DeclKey` a caret references (declaration site or use
     site). `classify_target(...)` is the rename superset that also recognises a **local
     variable / parameter** (`RenameTarget::Local`), which find-usages doesn't bucket.

@@ -506,12 +506,14 @@ mod tests {
 
     #[test]
     fn a_pathological_document_cannot_recurse_the_stack_away() {
-        // Built rather than written out: the point is the depth, not the shape.
-        let mut deepest = String::from(r#"{"Node Type":"Leaf"}"#);
+        // Built as VALUES rather than as text to be parsed: the point is `assemble`'s own depth
+        // guard, and a document this deep trips serde_json's parser recursion limit first — which
+        // failed the fixture before the thing under test ever ran.
+        let mut deepest = serde_json::json!({"Node Type": "Leaf"});
         for _ in 0..200 {
-            deepest = format!(r#"{{"Node Type":"Nested","Plans":[{deepest}]}}"#);
+            deepest = serde_json::json!({"Node Type": "Nested", "Plans": [deepest]});
         }
-        let root = node(&format!(r#"[{{"Plan":{deepest}}}]"#));
+        let root = serde_json::json!([{"Plan": deepest}]);
         let plan = assemble(String::new(), &root, false, 0);
         assert_eq!(plan.nodes.len() as u32, MAX_DEPTH + 1);
     }

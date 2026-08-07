@@ -306,7 +306,7 @@ mod tests {
         let m = model_of(&[src(ORDER), repo.clone()]);
         let d = diagnostics(&m, "/p/R.java", &repo);
         assert_eq!(d.len(), 1);
-        assert_eq!(d[0].code.as_deref(), Some("jpa.unbound-param"));
+        assert_eq!(d[0].code, "jpa.unbound-param");
         assert_eq!(&repo[d[0].start..d[0].end], ":min", "the squiggle is on the placeholder");
     }
 
@@ -323,7 +323,7 @@ mod tests {
         let m = model_of(&[src(ORDER), repo.clone()]);
         let d = diagnostics(&m, "/p/R.java", &repo);
         assert_eq!(d.len(), 1);
-        assert_eq!(d[0].code.as_deref(), Some("jpa.unknown-property"));
+        assert_eq!(d[0].code, "jpa.unknown-property");
     }
 
     #[test]
@@ -332,7 +332,7 @@ mod tests {
         let m = model_of(&[src(ORDER), repo.clone()]);
         let d = diagnostics(&m, "/p/R.java", &repo);
         assert_eq!(d.len(), 1);
-        assert_eq!(d[0].code.as_deref(), Some("jpa.argument-count"));
+        assert_eq!(d[0].code, "jpa.argument-count");
         assert!(d[0].message.contains("2 bound arguments"));
     }
 

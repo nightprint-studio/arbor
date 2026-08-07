@@ -37,6 +37,14 @@ enum LocalTy {
     /// argument (`List<Foo>` → `Foo`). Distinct from [`LocalTy::VarInit`], which would type the
     /// loop variable as the collection itself.
     IterElem(usize, usize),
+    /// The name IS bound here, but its type is not something we compute — a multi-catch union,
+    /// whose binding is the least upper bound of its alternatives.
+    ///
+    /// A variant rather than simply recording nothing, because the two are opposite answers: with
+    /// no entry the name falls through to an enclosing scope and can resolve to a **field it
+    /// shadows**, which is a confidently wrong type. This one shadows correctly and then resolves
+    /// to nothing, which leaves every member check silent — the honest outcome.
+    Opaque,
 }
 
 /// One local declaration in a scope: where the declaration statement starts + how it's typed.
@@ -387,6 +395,20 @@ enum LambdaParam {
     NotParam,
 }
 
+/// What looking a bare name up as a local found.
+///
+/// Three outcomes rather than an `Option`, for the reason [`LambdaParam`] has three: "there is no
+/// local called this" and "there is one and I cannot type it" lead to opposite next steps. The
+/// first should go on to try a field; the second must not, because the local **shadows** that
+/// field and typing the name as it would be confidently wrong.
+enum LocalLookup {
+    Typed(TypeRef),
+    /// Found, untypeable — a multi-catch union's binding (whose type is the least upper bound of
+    /// its alternatives), or an initializer we could not infer.
+    Opaque,
+    NotLocal,
+}
+
 impl Ctx<'_> {
     /// Infer the type of an arbitrary receiver expression node.
     ///
@@ -482,8 +504,12 @@ impl Ctx<'_> {
     fn infer_identifier(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
         let name = node_text(node, self.bytes)?;
 
-        if let Some(tr) = self.resolve_local(node, &name) {
-            return Some(tr);
+        match self.resolve_local(node, &name) {
+            LocalLookup::Typed(tr) => return Some(tr),
+            // Bound here, type unknown. Same rule as an untyped lambda parameter below: leave it
+            // unresolved rather than reach past the binding to the field it hides.
+            LocalLookup::Opaque => return None,
+            LocalLookup::NotLocal => {}
         }
         // An untyped lambda parameter (`x -> x.foo()`, `(a, b) -> …`) shadows a field of the same
         // name. Recognise it — and TARGET-TYPE it from the lambda's functional interface when we can
@@ -1066,7 +1092,7 @@ impl Ctx<'_> {
     /// Resolve `name` as a local variable or method parameter visible at `use_node`.
     /// Walks ancestors, checking parameters + each scope's (cached) local declarations for a match
     /// that precedes the use.
-    fn resolve_local(&self, use_node: &Node, name: &str) -> Option<TypeRef> {
+    fn resolve_local(&self, use_node: &Node, name: &str) -> LocalLookup {
         let use_start = use_node.start_byte();
         let mut scope = use_node.parent();
         while let Some(s) = scope {
@@ -1075,7 +1101,7 @@ impl Ctx<'_> {
             // catch ancestor (a huge method body has hundreds of statements, scanned per identifier).
             if matches!(s.kind(), "method_declaration" | "constructor_declaration" | "lambda_expression") {
                 if let Some(tr) = self.param_type(&s, name) {
-                    return Some(tr);
+                    return LocalLookup::Typed(tr);
                 }
             }
             // local variable declarations directly in this scope, before the use (last one wins,
@@ -1083,12 +1109,15 @@ impl Ctx<'_> {
             let locals = self.scope_locals(&s);
             if let Some(decls) = locals.get(name) {
                 if let Some(decl) = decls.iter().rev().find(|d| d.start < use_start) {
-                    return self.resolve_local_ty(&decl.ty);
+                    return match self.resolve_local_ty(&decl.ty) {
+                        Some(tr) => LocalLookup::Typed(tr),
+                        None => LocalLookup::Opaque,
+                    };
                 }
             }
             scope = s.parent();
         }
-        None
+        LocalLookup::NotLocal
     }
 
     /// A parameter of `scope` named `name`, resolved to its declared type (`None` if `scope` has no
@@ -1178,16 +1207,21 @@ impl Ctx<'_> {
                 "catch_formal_parameter" => {
                     let name = c.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes));
                     let mut tw = c.walk();
-                    let type_text = c
-                        .named_children(&mut tw)
-                        .find(|n| n.kind() == "catch_type")
-                        .filter(|ct| ct.named_child_count() == 1)
-                        .and_then(|ct| ct.named_child(0))
-                        .and_then(|t| node_text(&t, self.bytes));
-                    if let (Some(vn), Some(t)) = (name, type_text) {
-                        map.entry(vn)
-                            .or_default()
-                            .push(LocalDecl { start: c.start_byte(), ty: LocalTy::Declared(t) });
+                    let catch_type =
+                        c.named_children(&mut tw).find(|n| n.kind() == "catch_type");
+                    // A single alternative is the binding's type. A union has none we can name, so
+                    // the binding is recorded as OPAQUE rather than skipped: skipping it would let
+                    // the name fall through to a field it shadows and be typed as that instead.
+                    let ty = match catch_type {
+                        Some(ct) if ct.named_child_count() == 1 => ct
+                            .named_child(0)
+                            .and_then(|t| node_text(&t, self.bytes))
+                            .map(LocalTy::Declared),
+                        Some(_) => Some(LocalTy::Opaque),
+                        None => None,
+                    };
+                    if let (Some(vn), Some(ty)) = (name, ty) {
+                        map.entry(vn).or_default().push(LocalDecl { start: c.start_byte(), ty });
                     }
                 }
                 _ => {}
@@ -1375,6 +1409,8 @@ impl Ctx<'_> {
     /// anywhere else instead of dead-ending on an unknown bare name.
     fn resolve_local_ty(&self, ty: &LocalTy) -> Option<TypeRef> {
         match ty {
+            // Bound, but to nothing we can name. The `None` is the answer, not a fall-through.
+            LocalTy::Opaque => None,
             LocalTy::Declared(t) => self.resolve_type_text(t),
             LocalTy::VarInit(start, end) => {
                 let init = self.root.named_descendant_for_byte_range(*start, *end)?;

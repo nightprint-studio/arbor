@@ -224,6 +224,12 @@ pub fn resolve_type(name: &str, facts: &JavaFacts) -> String {
         return imp.clone();
     }
     // Declared in this file? Then it is this package's.
+    //
+    // And no further: without a classpath, an unqualified name with no import is equally likely
+    // to be this package's, a wildcard import's, or `java.lang`'s, so qualifying it with the
+    // current package would invent a type as often as it named one. The simple name is what comes
+    // back instead — which costs nothing, because everything that consumes this matches by simple
+    // name anyway (see `SpringModel::candidates`).
     if facts.types.iter().any(|t| t.name == bare) && !facts.package.is_empty() {
         return format!("{}.{}", facts.package, bare);
     }
@@ -729,7 +735,10 @@ mod tests {
             "package com.acme;\n@Service class OrderServiceImpl implements OrderService, Auditable {}\n",
         );
         let b = &annotation_beans(&[u])[0];
-        assert_eq!(b.supertypes, ["com.acme.OrderService", "com.acme.Auditable"]);
+        // Simple names, because nothing imports these and inventing a package would be a guess —
+        // and because the only consumer, `SpringModel::candidates`, matches by simple name on
+        // purpose. What the test is about is that the interfaces are RECORDED at all.
+        assert_eq!(b.supertypes, ["OrderService", "Auditable"]);
     }
 
     #[test]

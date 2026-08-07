@@ -32,7 +32,11 @@ pub const SPRING_MARKERS: &[&str] = &[
     "@Bean",
     "@Named",
     "@Qualifier",
-    "@Mapping", // covers @RequestMapping / @GetMapping / @PostMapping / …
+    // No `@`: the verb sits between it and the word, so `@Mapping` matched `@RequestMapping` and
+    // nothing else — every `@GetMapping`-only controller was skipped by the pre-filter and its
+    // routes never appeared. A bare `Mapping` also hits a class called `FieldMapping`, which is
+    // the trade this list is explicitly built to make: a false hit costs one parse.
+    "Mapping",
     "@Scheduled",
     "@ConfigurationProperties",
     "@Conditional",

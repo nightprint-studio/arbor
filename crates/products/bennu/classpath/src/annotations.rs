@@ -255,12 +255,15 @@ pub fn class_annotations_of(
 /// `class_name` is not always wrapped, and a decoder that assumed one shape would answer
 /// with a truncated name rather than fail visibly.
 fn dotted_from_descriptor(descriptor: &str) -> String {
+    // The array dimensions come FIRST (`[[Lcom/acme/Foo;`), so they have to go before the `L…;`
+    // wrapper can be recognised at all. Stripped afterwards, as they were, the prefix test never
+    // matched and the wrapper survived into the answer — `Lcom.acme.Foo;`.
+    let descriptor = descriptor.trim_start_matches('[');
     let inner = descriptor
         .strip_prefix('L')
         .and_then(|s| s.strip_suffix(';'))
         .unwrap_or(descriptor);
-    // An array descriptor's leading `[`s are not part of the name.
-    inner.trim_start_matches('[').replace('/', ".")
+    inner.replace('/', ".")
 }
 
 #[cfg(test)]
