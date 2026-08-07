@@ -529,6 +529,13 @@
   would flag every dynamic label in the project.
 </p>
 <p>
+  <strong>What is deliberately left alone</strong>: a key that is answered from somewhere other
+  than a file. Entando's <code>&lt;wp:i18n key="…"&gt;</code> reads the platform's label table in
+  the <strong>database</strong>, edited from its admin console — no <code>.properties</code>
+  declares it, and treating it as one would put a warning under every label on every page. That
+  one tag, by name, and no attempt at the rest of Entando's vocabulary.
+</p>
+<p>
   <strong>On a key</strong>, <kbd>Ctrl</kbd> + <kbd>B</kbd> opens the line that declares it — one
   entry per translation, each showing what that language says, so choosing is reading rather than
   guessing. Hovering shows the same thing without leaving the page, and names the locales that do

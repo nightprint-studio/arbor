@@ -20,9 +20,11 @@ import {
   highlightActiveLine, highlightActiveLineGutter, drawSelection,
   ViewPlugin, Decoration, type DecorationSet, type KeyBinding, type PluginValue, type ViewUpdate,
 } from '@codemirror/view';
-import { EditorState, StateField, StateEffect, Prec, type Extension, type Text } from '@codemirror/state';
 import {
-  history, defaultKeymap, historyKeymap, indentWithTab, deleteLine,
+  Compartment, EditorState, StateField, StateEffect, Prec, type Extension, type Text,
+} from '@codemirror/state';
+import {
+  history, defaultKeymap, historyKeymap, indentWithTab, deleteLine, redo,
   moveLineUp, moveLineDown,
 } from '@codemirror/commands';
 import { bracketMatching, indentOnInput, foldKeymap, foldGutter, codeFolding } from '@codemirror/language';
@@ -99,6 +101,21 @@ export function editorRuler(column: number) {
   );
 }
 
+/**
+ * The undo history, in a compartment so it can be **emptied**.
+ *
+ * CodeMirror has no "clear the history" command — reconfiguring the extension is how it is done,
+ * and there is one thing that needs it: a controlled `value` swap puts a different file in the
+ * same view. Undo would then replay the previous file's edits, at the positions they had in a
+ * document that is no longer there. `historyReset()` is the effect that prevents it.
+ */
+export const historyCompartment = new Compartment();
+
+/** The effect that empties the undo history — dispatch it with a whole-document replacement. */
+export function historyReset() {
+  return historyCompartment.reconfigure(history());
+}
+
 export interface CodeEditorExtensionsOptions {
   readOnly?: boolean;
   /**
@@ -172,7 +189,11 @@ export function createCodeEditorExtensions(
     codeEditorHighlightStyle,
     // Absent, not empty: an unwanted gutter still costs its horizontal column.
     ...(opts.lineNumbers === false ? [] : [lineNumbers()]),
-    history(),
+    // In a compartment so the host can RESET it. A controlled `value` swap replaces the whole
+    // document without remounting the view, and the edits of the file that was there a moment
+    // ago are still undoable — expressed as positions in a text that is gone. See
+    // `historyCompartment`.
+    historyCompartment.of(history()),
     drawSelection(),
     indentOnInput(),
     bracketMatching(),
@@ -308,6 +329,10 @@ export function createCodeEditorExtensions(
       // IntelliJ: Ctrl+Y deletes the current line. First in the list so it wins over
       // the Windows redo binding (Mod-y) that historyKeymap also maps to Ctrl-y.
       { key: 'Ctrl-y', run: deleteLine, preventDefault: true },
+      // …which leaves the editor with NO redo on Windows and Linux: `historyKeymap` binds redo to
+      // `Mod-y` there and to `Mod-Shift-z` only on macOS, so taking `Ctrl-y` for delete-line took
+      // the only one there was. `Ctrl/Cmd+Shift+Z` is what IntelliJ and VS Code use everywhere.
+      { key: 'Mod-Shift-z', run: redo, preventDefault: true },
       // The IDE verbs CodeMirror has no binding for. All three are keys an
       // IntelliJ-trained hand presses without looking, and finding nothing there is
       // what makes an editor feel like a text box.

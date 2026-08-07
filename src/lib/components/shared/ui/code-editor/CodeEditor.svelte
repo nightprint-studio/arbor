@@ -13,7 +13,9 @@
    * are mapped onto CodeMirror's UTF-16 lint spans against the live buffer.
    */
   import { onDestroy } from 'svelte';
-  import { EditorState, Compartment, StateEffect, StateField, type Extension } from '@codemirror/state';
+  import {
+    EditorState, Compartment, StateEffect, StateField, Transaction, type Extension,
+  } from '@codemirror/state';
   import {
     Decoration,
     EditorView,
@@ -30,7 +32,7 @@
   import { openSearchPanel } from '@codemirror/search';
 
   import type { LanguageDescriptor, EditorDiagnostic, EditorViewSnapshot } from './types';
-  import { createCodeEditorExtensions, refTextAt } from './extensions';
+  import { createCodeEditorExtensions, historyReset, refTextAt } from './extensions';
   import { minimapExtension } from './minimap';
   import { makeByteToU16 } from './highlight';
 
@@ -648,6 +650,17 @@
   });
 
   // ── value (controlled) → editor ───────────────────────────────────────────────
+  //
+  // This is a document SWAP — a tab switch, a cross-file open, a reload from disk — not an edit
+  // somebody made. Two things follow, and both were missing:
+  //
+  //   * it must not join the undo history. It did, so pressing Ctrl+Z past your own edits walked
+  //     backwards through the swaps and put the *previous* file's text in front of you — and at
+  //     the oldest one, the empty document the view was created with. That is the "undo too many
+  //     times and the file empties".
+  //   * the history must be EMPTIED. Whatever you typed in the file that was here a moment ago is
+  //     still undoable otherwise, and undoing it applies changes at positions that belonged to a
+  //     document no longer present — silent corruption rather than a visible refusal.
   $effect(() => {
     const next = value;
     if (!view) return;
@@ -656,7 +669,11 @@
     if (current === next) return;
     suppressEmit = true;
     try {
-      view.dispatch({ changes: { from: 0, to: current.length, insert: next } });
+      view.dispatch({
+        changes: { from: 0, to: current.length, insert: next },
+        annotations: Transaction.addToHistory.of(false),
+        effects: historyReset(),
+      });
     } finally { suppressEmit = false; }
   });
 

@@ -33,6 +33,8 @@
   <li><kbd>Ctrl</kbd> + <kbd>G</kbd> — go to line (or line:column)</li>
   <li><kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click) — go to declaration of the symbol under the caret (or show its usages when already on the declaration)</li>
   <li><kbd>Alt</kbd> + <kbd>F7</kbd> — <strong>find usages</strong> of the symbol under the caret (across the project)</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd> — <strong>undo</strong> / <strong>redo</strong>. The history belongs to the buffer you are in: opening another file starts a fresh one, so undo can never reach past the file in front of you</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Y</kbd> — delete the current line (IntelliJ's key; redo is on <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd>)</li>
   <li><kbd>Ctrl</kbd> + <kbd>S</kbd> — <strong>save</strong> the current file</li>
   <li><kbd>Ctrl</kbd> + <kbd>F</kbd> — find in the current file</li>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> — find in project</li>

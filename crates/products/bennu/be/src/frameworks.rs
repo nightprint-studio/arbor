@@ -718,10 +718,17 @@ pub struct FileArgs {
 
 impl FileArgs {
     /// The buffer to answer against: the live text when the editor sent it, else the file.
+    ///
+    /// Normalized to LF on the disk path, like every other file this seam hands an extension. Every
+    /// offset an extension reports is handed to the editor, whose buffer went through the same
+    /// normalization on read — leave the `\r`s in and a squiggle drifts one byte per preceding
+    /// line, which on a CRLF page reads as a warning a line or two below the thing it is about.
     fn text(&self) -> Option<String> {
         match &self.source {
             Some(s) => Some(s.clone()),
-            None => std::fs::read_to_string(&self.file).ok(),
+            None => Some(normalize_newlines(&String::from_utf8_lossy(
+                &std::fs::read(&self.file).ok()?,
+            ))),
         }
     }
 }

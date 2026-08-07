@@ -4,8 +4,8 @@
 //! rule here is by SHAPE rather than by a list of tags:
 //!
 //! - an attribute called `key`, or one whose name ends in `Key` — `<fmt:message key>`,
-//!   `<bean:message key>`, `<wp:i18n key>`, `<html:errors key>`, `<display:column titleKey>`,
-//!   a validator's `<message key>`;
+//!   `<bean:message key>`, `<html:errors key>`, `<display:column titleKey>`, a validator's
+//!   `<message key>`;
 //! - the `name` of a `*:text` tag — Struts 2's `<s:text name="…">`, whose `name` means something
 //!   completely different from `name` on every other tag;
 //! - the first string argument of `getText` / `getMessage` / `getString` in Java.
@@ -13,6 +13,11 @@
 //! A value that is computed (`${…}`, `%{…}`, a scriptlet) is **not** a key reference. It usually
 //! IS one at runtime, but nothing here can say which, and a check that guessed would report a
 //! missing key on every dynamic label in the project.
+//!
+//! Neither is a key that is answered from somewhere other than a `.properties` — Entando's
+//! `<wp:i18n key="…">` reads the platform's label table in the **database**. See
+//! [`reads_from_elsewhere`]: the shape rule above would otherwise sweep in a whole framework's
+//! labels and report every one of them as missing.
 
 /// One place a key is named.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,10 +94,41 @@ pub fn key_prefix_at(path: &str, source: &str, offset: usize) -> Option<String> 
     if attr.is_empty() {
         return None;
     }
-    let qualifies = attr == "key"
-        || (attr.len() > 3 && attr.ends_with("Key"))
+    let qualifies = (attr == "key" || (attr.len() > 3 && attr.ends_with("Key")))
+        && !enclosing_tag_reads_elsewhere(source, p)
         || (attr == "name" && enclosing_tag_is_text(source, p));
     qualifies.then(|| source[quote_at + 1..offset].to_string())
+}
+
+/// Whether the tag open before `at` is one whose `key` is not a bundle key — see
+/// [`reads_from_elsewhere`]. Completing bundle keys into a `<wp:i18n key>` would offer the wrong
+/// vocabulary entirely.
+fn enclosing_tag_reads_elsewhere(source: &str, at: usize) -> bool {
+    let Some(open) = source[..at].rfind('<') else { return false };
+    let bytes = source.as_bytes();
+    let name_end = scan_while(bytes, open + 1, |b| !b" \t\r\n/>".contains(&b));
+    let tag = &source[open + 1..name_end];
+    reads_from_elsewhere(tag.rsplit(':').next().unwrap_or(tag))
+}
+
+/// Whether a tag's `key` names something that is **not** in a `.properties` bundle.
+///
+/// Entando's `<wp:i18n key="…">` is the case that matters, and it is not a detail: its labels live
+/// in the platform's own table in the **database**, edited from the admin console, and no file on
+/// disk declares them. Reading it as a bundle key put "no bundle declares…" under every label on
+/// every page of an Entando application — a check that is wrong everywhere is worse than no check,
+/// and this crate's whole stated rule is to under-report rather than risk that.
+///
+/// Matched on the LOCAL name rather than the `wp:` prefix, which a page is free to bind to
+/// whatever it likes. `<s:i18n name="bundle">` is a different tag with a different attribute — it
+/// pushes a bundle onto the stack — and is not affected.
+///
+/// **Exactly** `i18n`, not a family of names guessed at around it. Bennu has no Entando tag
+/// support, and a list of tags nobody has confirmed exist is the same invention as the check this
+/// removes — just pointing the other way. A second tag that turns out to read from the database
+/// is one more line, added when it is seen rather than in advance.
+fn reads_from_elsewhere(local: &str) -> bool {
+    local.eq_ignore_ascii_case("i18n")
 }
 
 /// Whether the tag open before `at` is a `*:text` — the one place `name` names a key.
@@ -148,6 +184,10 @@ fn markup_keys(source: &str) -> Vec<KeyRef> {
             continue;
         }
         let local = tag.rsplit(':').next().unwrap_or(tag);
+        if reads_from_elsewhere(local) {
+            i = name_end;
+            continue;
+        }
         // Struts 2's `<s:text name>` — the one tag where `name` is a key.
         let name_is_key = local.eq_ignore_ascii_case("text");
 
@@ -245,7 +285,7 @@ mod tests {
     fn every_spelling_of_a_key_attribute_is_one() {
         let src = r#"
             <fmt:message key="a.one"/>
-            <wp:i18n key="a.two" />
+            <bean:message key="a.two" />
             <s:text name="a.three"/>
             <display:column titleKey="a.four" property="x"/>
             <html:errors key='a.five'>
@@ -258,6 +298,25 @@ mod tests {
         // The trap: `name` means a form field, a bean, a parameter — everywhere but `<s:text>`.
         let src = r#"<s:textfield name="username"/><s:text name="label.user"/>"#;
         assert_eq!(keys("/p/page.jsp", src), ["label.user"]);
+    }
+
+    /// Entando's labels live in the platform's database, not in a `.properties`. Reading its
+    /// `key` as a bundle key put a warning under every label on every page.
+    #[test]
+    fn an_entando_label_is_not_a_bundle_key() {
+        let src = "<th scope=\"col\"><wp:i18n key=\"LABEL_COMUNICAZIONI_RIFERIMENTO\" /></th>\n\
+                   <fmt:message key=\"real.one\"/>";
+        assert_eq!(keys("/p/page.jsp", src), ["real.one"]);
+        // Nor is a key completed into one: the vocabulary there is a different vocabulary.
+        let at = src.find("LABEL_").unwrap() + "LABEL_".len();
+        assert_eq!(key_prefix_at("/p/page.jsp", src, at), None);
+    }
+
+    /// The tag is skipped, not the rest of the LINE — a real page puts several on one.
+    #[test]
+    fn a_skipped_tag_does_not_swallow_what_follows_it() {
+        let src = "<wp:i18n key=\"IGNORED\"/><fmt:message key=\"after.it\"/>";
+        assert_eq!(keys("/p/page.jsp", src), ["after.it"]);
     }
 
     #[test]
@@ -318,3 +377,4 @@ mod tests {
         assert_eq!(keys("/p/page.jsp", src), ["after.it"]);
     }
 }
+
