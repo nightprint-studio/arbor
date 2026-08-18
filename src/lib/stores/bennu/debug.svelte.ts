@@ -28,7 +28,7 @@ import { focusWindow } from '$lib/ipc/window';
 import { bennuUiStore } from './ui.svelte';
 import {
   getDebugConfig, setDebugConfig, debugResume, debugStep, debugDetach, debugMute,
-  debugVariables, debugExpand, debugWatch,
+  debugVariables, debugExpand, debugWatch, debugDump,
 } from '$lib/ipc/bennu/debug';
 import type {
   BreakpointDto, BreakpointStatusDto, DebugBreakpointsEvent, DebugConfigDto, DebugPauseDto,
@@ -74,6 +74,24 @@ export interface Watch {
   error: string;
 }
 
+/**
+ * A value being read whole, in the inspect modal.
+ *
+ * A **snapshot**: the text was rendered against one stop and stays readable after the program runs
+ * on, which is deliberate — you open it to read a value, and having it blank itself because something
+ * continued in the background would lose the thing you were looking at.
+ */
+export interface Inspect {
+  /** The row it was opened from — its name and type are the modal's title. */
+  value: DebugValueDto;
+  text: string;
+  nodes: number;
+  /** Whether a cap was hit. Shown, because a dump silently cut reads as complete. */
+  truncated: boolean;
+  loading: boolean;
+  error: string;
+}
+
 function node(value: DebugValueDto, id: string): VarNode {
   return { id, value, children: null, loading: false, open: false, error: '' };
 }
@@ -91,11 +109,18 @@ function createBennuDebugStore() {
   let status = $state<DebugStatusDto['status'] | null>(null);
   let vm = $state('');
   let message = $state('');
+  /** Which debugger is underneath. Drives the language-specific prose in the panel; a session with
+   *  no engine reported is a JVM one. */
+  let engine = $state<'jvm' | 'native'>('jvm');
+  /** The standing caveat, when the adapter in use cannot render Rust's own types. */
+  let note = $state('');
   let stopped = $state<DebugPauseDto | null>(null);
   let selectedFrame = $state(0);
   let variables = $state<VarNode[]>([]);
   let variablesLoading = $state(false);
   let watches = $state<Watch[]>([]);
+  /** The value being read whole, or null when the modal is closed. */
+  let inspect = $state<Inspect | null>(null);
   /** Breakpoints muted for THIS session — set and listed, but not installed. Deliberately not
    *  persisted: muting is something you do to finish the run in front of you, and a debugger
    *  that silently ignored your breakpoints tomorrow because of it would be a trap. */
@@ -344,6 +369,10 @@ function createBennuDebugStore() {
     /** The VM's own description, for the panel's status line. */
     get vm() { return vm; },
     get message() { return message; },
+    /** `jvm` or `native` — which language's watch rules the panel should describe. */
+    get engine() { return engine; },
+    /** A standing caveat about what this session can show, or empty. */
+    get note() { return note; },
     /** Whether a debug session exists at all (however it is doing). */
     get live() { return sessionId !== null && status !== 'terminated'; },
     /** Whether the program is stopped right now — what enables the step buttons. */
@@ -356,6 +385,8 @@ function createBennuDebugStore() {
     get variables() { return variables; },
     get variablesLoading() { return variablesLoading; },
     get watches() { return watches; },
+    /** The value being read whole in the inspect modal, or null. */
+    get inspect() { return inspect; },
     /** The frame the panel is showing — what "go to source" and the watches use. */
     get currentFrame(): StackFrameDto | null {
       return stopped?.frames[selectedFrame] ?? null;
@@ -377,6 +408,10 @@ function createBennuDebugStore() {
           // Sent once, when the VM answers; later statuses leave it empty rather than
           // repeating it, so an empty one must not blank what is already known.
           if (p.vm) vm = p.vm;
+          if (p.engine) engine = p.engine;
+          // Unlike `vm`, this is sent on every status and an empty one is meaningful: it means the
+          // caveat no longer applies.
+          note = p.note ?? '';
           if (p.status !== 'paused') forgetStop();
           if (p.status === 'terminated') statuses = new Map();
           // A fresh session starts unmuted: muting is scoped to the run it was done in.
@@ -481,6 +516,37 @@ function createBennuDebugStore() {
       } finally {
         target.loading = false;
       }
+    },
+
+    /**
+     * Read one value whole, as RON-shaped text.
+     *
+     * The way out of the lazy tree: a struct whose fields are structs is nineteen disclosure
+     * triangles before it can be read. One round trip fetches the whole subtree.
+     *
+     * Opens the modal immediately with a spinner rather than after the answer, because the walk is a
+     * round trip per node against a suspended program and a click that does nothing for a second
+     * reads as a click that did nothing.
+     */
+    async inspectValue(value: DebugValueDto): Promise<void> {
+      if (!sessionId) return;
+      const id = sessionId;
+      inspect = { value, text: '', nodes: 0, truncated: false, loading: true, error: '' };
+      try {
+        const dump = await debugDump(id, value);
+        // The user may have closed it, or opened another row, while the walk was running — writing
+        // this answer into a modal that is now about something else would show the wrong value under
+        // the right title.
+        if (inspect?.value !== value) return;
+        inspect = { value, ...dump, loading: false, error: '' };
+      } catch (e) {
+        if (inspect?.value !== value) return;
+        inspect = { value, text: '', nodes: 0, truncated: false, loading: false, error: clean(e) };
+      }
+    },
+
+    closeInspect(): void {
+      inspect = null;
     },
 
     // ── watches ──────────────────────────────────────────────────────────────

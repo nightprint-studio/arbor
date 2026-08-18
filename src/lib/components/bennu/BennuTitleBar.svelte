@@ -159,18 +159,14 @@
             disabled: !testStore.running, onclick: () => void testStore.stop() } as DropdownItem,
         ]),
     { kind: 'separator' },
-    // Debugging stays JVM-only: it attaches JDWP to the child `bennu_run` spawned, and a cargo
-    // command forks its own compiler and its own program.
-    ...(isCargo
-      ? []
-      : [
-          { kind: 'item', id: 'debug', label: 'Debug', icon: Bug, shortcut: 'Shift+F9',
-            disabled: busy, onclick: debugProject } as DropdownItem,
-          // Detach, not stop: the program keeps running. Stopping it is `Stop`, above.
-          { kind: 'item', id: 'detach', label: 'Detach the debugger', icon: Unplug,
-            disabled: !bennuDebugStore.live,
-            onclick: () => void bennuDebugStore.detachSession() } as DropdownItem,
-        ]),
+    // Both ecosystems: JDWP attaches to the JVM `bennu_run` spawned, a Cargo target is built and then
+    // launched under a debug adapter. Detach means the same thing on both — the program keeps running
+    // with nothing attached, which is not Stop.
+    { kind: 'item', id: 'debug', label: 'Debug', icon: Bug, shortcut: 'Shift+F9',
+      disabled: busy, onclick: debugProject },
+    { kind: 'item', id: 'detach', label: 'Detach the debugger', icon: Unplug,
+      disabled: !bennuDebugStore.live,
+      onclick: () => void bennuDebugStore.detachSession() },
     { kind: 'separator' },
     { kind: 'item', id: 'editcfg', label: 'Edit configurations…', icon: SlidersHorizontal, disabled: !hasProject, onclick: () => bennuUiStore.openRunConfig() },
   ]);
@@ -334,19 +330,19 @@
       >
         <Play size={16} />
       </button>
-      <!-- 🐞 stays JVM-only: it attaches JDWP to the child `bennu_run` spawned. -->
-      {#if !isCargo}
-        <button
-          class="btb-run-btn"
-          class:btb-debugging={bennuDebugStore.live}
-          onclick={debugProject}
-          disabled={!hasProject || busy}
-          use:tooltip={{ content: 'Debug', shortcut: 'Shift+F9' }}
-          aria-label="Debug"
-        >
-          <Bug size={16} />
-        </button>
-      {/if}
+      <!-- 🐞 on both ecosystems: JDWP attaches to the JVM `bennu_run` spawned, and a Cargo target is
+           built and then launched under a debug adapter. Which of the two is behind it is not a
+           question this button — or the panel it opens — can ask. -->
+      <button
+        class="btb-run-btn"
+        class:btb-debugging={bennuDebugStore.live}
+        onclick={debugProject}
+        disabled={!hasProject || busy}
+        use:tooltip={{ content: 'Debug', shortcut: 'Shift+F9' }}
+        aria-label="Debug"
+      >
+        <Bug size={16} />
+      </button>
       <Dropdown items={runMenu} position="fixed" direction="down" width="220px">
         {#snippet trigger({ open, toggle })}
           <button class="btb-run-btn" class:open onclick={toggle} disabled={!hasProject} use:tooltip={'More run actions'} aria-label="More run actions" aria-haspopup="menu" aria-expanded={open}>

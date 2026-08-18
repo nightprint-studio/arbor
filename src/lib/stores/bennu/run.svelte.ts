@@ -46,7 +46,7 @@ import {
   bennuRunConfigStore, splitArgs, envRecord, isRunKind, cargoInvocationOf, type RunConfig,
 } from './run-config.svelte';
 import {
-  cargoRun as ipcCargoRun, cargoWorkspace, type CargoInvocation,
+  cargoDebug as ipcCargoDebug, cargoRun as ipcCargoRun, cargoWorkspace, type CargoInvocation,
 } from '$lib/ipc/bennu/cargo';
 // A `junit` configuration is launched by the TEST runner, not by this one — see `runConfig`.
 // (`tests` imports only a TYPE from here, so the edge is erased at build and there is no
@@ -149,6 +149,14 @@ interface CargoRunSpec {
   env: Record<string, string>;
   /** The console tab's label. */
   label: string;
+  /**
+   * Whether to launch it under a debugger.
+   *
+   * Not a separate kind of spec, because it is not a separate configuration: debugging is the run you
+   * already set up with a debugger attached. What differs is only which verb the backend is asked for,
+   * and that the build happens before the process exists — see `cargoDebug`.
+   */
+  debug?: boolean;
 }
 
 /**
@@ -578,10 +586,17 @@ function createBennuRunStore() {
     const id = openTab(spec, spec.label, spec.invocation.command);
     patchTab(id, { live: true, startedAt: Date.now() });
     try {
-      const handle = await ipcCargoRun(spec.root, spec.invocation, {
-        workingDir: spec.workingDir,
-        env: spec.env,
-      });
+      // The one difference: a debug launch has to build first, because a native binary cannot be
+      // debugged by starting it differently the way a JVM can — the debugger has to be what starts it.
+      const handle = spec.debug
+        ? await ipcCargoDebug(spec.root, spec.invocation, {
+            workingDir: spec.workingDir,
+            env: spec.env,
+          })
+        : await ipcCargoRun(spec.root, spec.invocation, {
+            workingDir: spec.workingDir,
+            env: spec.env,
+          });
       patchTab(id, {
         runId: handle.run_id,
         command: handle.command,
@@ -614,20 +629,17 @@ function createBennuRunStore() {
       return;
     }
     if (cfg.kind === 'cargo') {
-      if (debug) {
-        // A cargo command forks its own compiler and, for `run`, its own program — so the
-        // JDWP-style "attach to the child we spawned" does not apply, and there is no Rust
-        // debugger wired up yet. Saying so beats silently running it without one.
-        bennuUiStore.showBottom('run');
-        pushRun('Debugging a Cargo configuration is not supported yet — running it instead.', 'err');
-      }
+      // Debugging a cargo configuration is the configuration you have, with a debugger. The backend
+      // builds the target first and launches the binary under an adapter — `cargo run` cannot be
+      // debugged directly, because it execs the program itself and never hands anyone a path.
       await launchCargo({
         kind: 'cargo',
         root,
         invocation: cargoInvocationOf(cfg),
         workingDir: cfg.workingDir.trim(),
         env: envRecord(cfg.env),
-        label: cfg.name,
+        label: debug ? `Debug ${cfg.name}` : cfg.name,
+        debug,
       });
       return;
     }

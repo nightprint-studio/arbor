@@ -1,0 +1,22 @@
+[package]
+name         = "bennu-dap"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "A client for the Debug Adapter Protocol: the request/response/event envelope, the handshake, adapter discovery (codelldb, lldb-dap, gdb), and the typed operations a breakpoint debugger needs. Transport and protocol only — no session policy, no UI."
+
+[dependencies]
+# The protocol shapes are hand-rolled, for the same reason the LSP ones are: Bennu speaks a
+# bounded subset, the mapping onto Bennu's own wire types has to be written either way, and a
+# crate tracking the whole spec is a breaking-minor treadmill for surface we never touch.
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# The `Content-Length` envelope, shared with the LSP client.
+bennu-framed = { path = "../framed" }
+# `NoWindowExt` — an adapter is a child process, and on Windows a bare spawn flashes a console.
+arbor-process-ext = { path = "../../../platform/process-ext" }
+# `user_home()` — adapters live where the tooling put them (`~/.vscode/extensions`, a rustup
+# toolchain's `bin`), and a windowed app's PATH holds almost none of those.
+arbor-core = { path = "../../../foundation/core" }

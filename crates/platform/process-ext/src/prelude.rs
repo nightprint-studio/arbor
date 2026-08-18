@@ -5,3 +5,6 @@
 //! crate root for existing call sites.
 
 pub use crate::NoWindowExt;
+
+// Finding a tool on this machine — see [`crate::locate`] for why a `PATH` lookup is not enough.
+pub use crate::locate::{executable_in, generic_bin_dirs, locate_executable};

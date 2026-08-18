@@ -473,6 +473,9 @@ dependencies = [
 [[package]]
 name = "arbor-process-ext"
 version = "0.3.0"
+dependencies = [
+ "arbor-core",
+]
 
 [[package]]
 name = "arbor-rpc"
@@ -877,6 +880,7 @@ dependencies = [
  "bennu-check",
  "bennu-classpath",
  "bennu-core",
+ "bennu-dap",
  "bennu-deps",
  "bennu-ext",
  "bennu-fulcrum-i18n",
@@ -956,6 +960,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bennu-dap"
+version = "0.3.0"
+dependencies = [
+ "arbor-core",
+ "arbor-process-ext",
+ "bennu-framed",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bennu-deps"
 version = "0.3.0"
 dependencies = [
@@ -985,6 +1000,10 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-java",
 ]
+
+[[package]]
+name = "bennu-framed"
+version = "0.3.0"
 
 [[package]]
 name = "bennu-fulcrum-i18n"
@@ -1091,6 +1110,7 @@ version = "0.3.0"
 dependencies = [
  "arbor-core",
  "arbor-process-ext",
+ "bennu-framed",
  "serde",
  "serde_json",
 ]

@@ -1,114 +1,17 @@
-//! The LSP **base protocol**: JSON-RPC 2.0 bodies inside `Content-Length`-framed
-//! headers, over a plain byte stream (a child process's stdin/stdout).
+//! The LSP **message bodies**: JSON-RPC 2.0 requests, responses and notifications.
 //!
-//! Deliberately dumb: this module moves bytes and decides nothing. It does not know
-//! what a request means, which requests exist, or who answers them — that is
-//! [`crate::client`]'s job. What it owns is the one thing every LSP transport bug
-//! comes from: the frame boundary.
+//! The envelope they travel in — `Content-Length`-framed headers over a byte stream — is
+//! [`bennu_framed`], because DAP uses the identical envelope with entirely different bodies. It
+//! lived here while the language server was its only consumer; the debugger made it two, and a
+//! second copy of a frame reader is a second place for a desync bug to be fixed in.
 //!
-//! ```text
-//! Content-Length: 42\r\n
-//! \r\n
-//! {"jsonrpc":"2.0","id":1,"method":"shutdown"}
-//! ```
-//!
-//! Three rules the spec states and implementations forget:
-//!
-//! * the header block is ASCII and ends with an **empty** `\r\n` line;
-//! * `Content-Length` counts **bytes**, not characters — a body with one `é` in it is
-//!   longer than its `chars().count()`, so the body is read as bytes and decoded
-//!   after;
-//! * header names are **case-insensitive** (`content-length` is legal, and some
-//!   servers send it).
-//!
-//! A malformed frame is a protocol desync, not a recoverable per-message error: once
-//! the reader has lost the boundary every subsequent read is garbage. So framing
-//! errors surface as [`io::Error`] and the caller's move is to declare the session
-//! dead, which is what [`crate::client`] does.
-
-use std::io::{self, BufRead, Write};
+//! What is left here is the part that is genuinely LSP's: the `jsonrpc: "2.0"` shapes, the request
+//! id, and the error object.
 
 use serde::{Deserialize, Serialize};
 
-/// The header that carries the body length. Compared case-insensitively.
-const CONTENT_LENGTH: &str = "content-length";
-
-/// A hard ceiling on one message's body, as a defence against a desynced stream
-/// turning a bogus length into a multi-gigabyte allocation.
-///
-/// Generous on purpose: a `textDocument/semanticTokens/full` for a 20k-line file, or
-/// a `workspace/symbol` answer on a large Cargo workspace, is legitimately megabytes.
-/// This is a sanity bound, not a policy.
-const MAX_BODY: usize = 128 * 1024 * 1024;
-
-/// Read one framed message body from `reader`.
-///
-/// `Ok(None)` is a clean end of stream — the server exited — and is the normal way a
-/// reader loop terminates. `Err` means the framing itself was violated: the caller
-/// must not try to read again.
-pub fn read_message<R: BufRead>(reader: &mut R) -> io::Result<Option<Vec<u8>>> {
-    let mut content_length: Option<usize> = None;
-    let mut line = String::new();
-
-    loop {
-        line.clear();
-        let read = reader.read_line(&mut line)?;
-        if read == 0 {
-            // EOF. Clean only *between* messages: mid-header it means the server died
-            // with a half-written frame, which the caller should hear about as an error
-            // rather than as an orderly shutdown.
-            return if content_length.is_none() {
-                Ok(None)
-            } else {
-                Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "language server closed its output mid-header",
-                ))
-            };
-        }
-        let trimmed = line.trim_end_matches(['\r', '\n']);
-        if trimmed.is_empty() {
-            break; // end of the header block
-        }
-        let Some((name, value)) = trimmed.split_once(':') else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("malformed LSP header line: {trimmed:?}"),
-            ));
-        };
-        if name.trim().eq_ignore_ascii_case(CONTENT_LENGTH) {
-            content_length = Some(value.trim().parse::<usize>().map_err(|e| {
-                io::Error::new(io::ErrorKind::InvalidData, format!("bad Content-Length: {e}"))
-            })?);
-        }
-        // Every other header (`Content-Type`, and whatever a server invents) is
-        // ignored: the spec fixes the charset at UTF-8 and nothing else is actionable.
-    }
-
-    let len = content_length.ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "LSP frame without a Content-Length header")
-    })?;
-    if len > MAX_BODY {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("LSP frame claims {len} bytes — refusing (stream is probably desynced)"),
-        ));
-    }
-    let mut body = vec![0u8; len];
-    reader.read_exact(&mut body)?;
-    Ok(Some(body))
-}
-
-/// Write one framed message body to `writer` and flush it.
-///
-/// The flush is not optional: a language server is a request/response peer, so a body
-/// sitting in our buffer is a request the server never sees and a caller that blocks
-/// until it times out.
-pub fn write_message<W: Write>(writer: &mut W, body: &[u8]) -> io::Result<()> {
-    write!(writer, "Content-Length: {}\r\n\r\n", body.len())?;
-    writer.write_all(body)?;
-    writer.flush()
-}
+// The envelope, re-exported so a call site inside this crate keeps reading as one transport.
+pub use bennu_framed::{read_message as read_frame, write_message as write_frame, MAX_BODY};
 
 // ---------------------------------------------------------------------------
 // JSON-RPC message shapes
@@ -279,73 +182,9 @@ pub const ERR_METHOD_NOT_FOUND: i64 = -32601;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::BufReader;
 
-    fn read_all(input: &[u8]) -> Vec<Vec<u8>> {
-        let mut r = BufReader::new(input);
-        let mut out = Vec::new();
-        while let Some(body) = read_message(&mut r).expect("framing") {
-            out.push(body);
-        }
-        out
-    }
-
-    #[test]
-    fn reads_back_what_it_writes() {
-        let mut buf: Vec<u8> = Vec::new();
-        write_message(&mut buf, br#"{"jsonrpc":"2.0","id":1}"#).unwrap();
-        write_message(&mut buf, br#"{"jsonrpc":"2.0","id":2}"#).unwrap();
-        let frames = read_all(&buf);
-        assert_eq!(frames.len(), 2, "two frames round-tripped");
-        assert_eq!(frames[1], br#"{"jsonrpc":"2.0","id":2}"#);
-    }
-
-    #[test]
-    fn content_length_counts_bytes_not_characters() {
-        // `é` is two bytes and one char. A length in characters would truncate the body
-        // and desync every following frame — the classic LSP transport bug.
-        let body = r#"{"m":"é"}"#;
-        assert_ne!(body.len(), body.chars().count(), "the fixture must be multi-byte");
-        let mut buf: Vec<u8> = Vec::new();
-        write_message(&mut buf, body.as_bytes()).unwrap();
-        assert!(
-            String::from_utf8_lossy(&buf).starts_with(&format!("Content-Length: {}", body.len())),
-            "header counts bytes"
-        );
-        assert_eq!(read_all(&buf)[0], body.as_bytes());
-    }
-
-    #[test]
-    fn header_name_is_case_insensitive_and_extra_headers_are_ignored() {
-        let raw = b"content-length: 2\r\nContent-Type: application/vscode-jsonrpc\r\n\r\n{}";
-        assert_eq!(read_all(raw)[0], b"{}");
-    }
-
-    #[test]
-    fn clean_eof_between_messages_is_not_an_error() {
-        let mut r = BufReader::new(&b""[..]);
-        assert!(read_message(&mut r).unwrap().is_none(), "end of stream, not a failure");
-    }
-
-    #[test]
-    fn eof_mid_header_is_an_error() {
-        // The server died with a frame half-written: the caller must not read on.
-        let mut r = BufReader::new(&b"Content-Length: 10\r\n"[..]);
-        assert!(read_message(&mut r).is_err());
-    }
-
-    #[test]
-    fn a_frame_without_a_length_is_rejected() {
-        let mut r = BufReader::new(&b"Content-Type: x\r\n\r\n{}"[..]);
-        assert!(read_message(&mut r).is_err());
-    }
-
-    #[test]
-    fn an_absurd_length_is_refused_rather_than_allocated() {
-        let raw = format!("Content-Length: {}\r\n\r\n", MAX_BODY + 1);
-        let mut r = BufReader::new(raw.as_bytes());
-        assert!(read_message(&mut r).is_err());
-    }
+    // The framing tests live in `bennu-framed`, which owns the envelope. What is tested here is what
+    // is left: the JSON-RPC bodies.
 
     #[test]
     fn classification_follows_field_presence() {

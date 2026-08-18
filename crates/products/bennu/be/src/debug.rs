@@ -57,7 +57,7 @@ use bennu_jdwp::prelude::{
     LineEntry, Local, Location, Method, StepDepth, SuspendPolicy,
 };
 use bennu_proto::prelude::{
-    Breakpoint, BreakpointStatus, DebugConfig, DebugPause, DebugStatus, DebugValue,
+    Breakpoint, BreakpointStatus, DebugConfig, DebugDump, DebugPause, DebugStatus, DebugValue,
     ExceptionBreakpoint, StackFrame,
 };
 use serde::Deserialize;
@@ -239,6 +239,13 @@ fn serve(
     let config: DebugConfig = crate::repo_config::load(&root, "debug");
     let session = Arc::new(Session::new(session_id.clone(), root, client, sink.clone(), config));
     registry().lock().unwrap_or_else(|p| p.into_inner()).insert(session_id.clone(), session.clone());
+    // …and in the shared dispatch table the handlers read, which is what makes them protocol-blind.
+    // Two maps, one truth each: this module's answers "which JDWP sessions exist" (its own event loop
+    // and `debug_value` need the concrete type), the shared one answers "who has this id".
+    crate::debug_backend::insert(
+        &session_id,
+        session.clone() as Arc<dyn crate::debug_backend::DebugBackend>,
+    );
 
     session.install_all();
     session.install_exceptions();
@@ -253,7 +260,71 @@ fn serve(
 
     // The channel closed, which means the reader thread ended, which means the socket did.
     registry().lock().unwrap_or_else(|p| p.into_inner()).remove(&session_id);
+    crate::debug_backend::remove(&session_id);
     emit_status(&sink, &session_id, "terminated", &vm, "");
+}
+
+/// The JDWP session's side of the seam every `bennu_debug_*` handler is written against.
+///
+/// A thin adapter and nothing more: each method is one of the inherent ones this module already had,
+/// which is the sign the seam was real before it was named. See [`crate::debug_backend`].
+impl crate::debug_backend::DebugBackend for Session {
+    fn kind(&self) -> &'static str {
+        "jdwp"
+    }
+
+    fn describe(&self) -> String {
+        version(&self.client).unwrap_or_default()
+    }
+
+    fn root(&self) -> String {
+        self.root.clone()
+    }
+
+    fn resume(&self) -> Result<(), String> {
+        Session::resume(self)
+    }
+
+    fn step(&self, step: crate::debug_backend::Step) -> Result<(), String> {
+        let depth = match step {
+            crate::debug_backend::Step::Into => StepDepth::Into,
+            crate::debug_backend::Step::Out => StepDepth::Out,
+            crate::debug_backend::Step::Over => StepDepth::Over,
+        };
+        Session::step(self, depth)
+    }
+
+    fn set_muted(&self, muted: bool) -> Result<(), String> {
+        Session::set_muted(self, muted);
+        Ok(())
+    }
+
+    fn detach(&self) -> Result<(), String> {
+        // Best-effort: a VM that has stopped answering still has to let go of this end.
+        if dispose(&self.client).is_err() {
+            self.client.close();
+        }
+        Ok(())
+    }
+
+    fn variables(&self, frame: usize) -> Result<Vec<DebugValue>, String> {
+        crate::debug_value::variables(self, frame)
+    }
+
+    fn expand(&self, handle: &str) -> Result<Vec<DebugValue>, String> {
+        let object: Id = handle.parse().map_err(|_| "not an object handle".to_string())?;
+        crate::debug_value::expand(self, object)
+    }
+
+    fn watch(&self, frame: usize, expression: &str) -> Result<DebugValue, String> {
+        crate::debug_value::watch(self, frame, expression)
+    }
+
+    fn reinstall(&self, config: &DebugConfig) -> Result<(), String> {
+        self.set_breakpoints(config.breakpoints.clone());
+        self.set_exceptions(config.exceptions.clone());
+        Ok(())
+    }
 }
 
 fn emit_status(sink: &Arc<dyn EventSink>, id: &str, status: &str, vm: &str, message: &str) {
@@ -262,6 +333,10 @@ fn emit_status(sink: &Arc<dyn EventSink>, id: &str, status: &str, vm: &str, mess
         status: status.to_string(),
         vm: vm.to_string(),
         message: message.to_string(),
+        engine: "jvm".to_string(),
+        // A JVM session has no equivalent of the missing-formatters caveat: the VM renders its own
+        // values and there is nothing to install.
+        note: String::new(),
     };
     sink.emit(EVT_DEBUG_STATUS, serde_json::to_value(payload).unwrap_or(json!({})));
 }
@@ -539,7 +614,9 @@ impl Session {
             .unwrap_or_default();
         let line = self.line_of(frame.location);
         let file = self.file_of(&class);
-        StackFrame { index, class, method, line, project: file.is_some(), file }
+        // `name` stays empty: a JVM frame HAS a class and a method, so inventing a combined string
+        // would be a second rendering of what the panel already composes from the two.
+        StackFrame { index, class, method, name: String::new(), line, project: file.is_some(), file }
     }
 
     /// The source line a bytecode index falls on: the **last** table entry at or before it,
@@ -984,9 +1061,10 @@ fn bennu_get_debug_config(_ctx: &BennuState, args: RootArgs) -> Result<DebugConf
 fn bennu_set_debug_config(_ctx: &BennuState, args: SetDebugConfigArgs) -> Result<(), String> {
     crate::repo_config::save(&args.root, "debug", &args.config)?;
 
+    // Every live session of that root, whichever protocol it speaks: a push that silently reached the
+    // Java one and not the Rust one would be worse than one that reached neither.
     for session in live_sessions_of(&args.root) {
-        session.set_breakpoints(args.config.breakpoints.clone());
-        session.set_exceptions(args.config.exceptions.clone());
+        let _ = session.reinstall(&args.config);
     }
     Ok(())
 }
@@ -994,12 +1072,12 @@ fn bennu_set_debug_config(_ctx: &BennuState, args: SetDebugConfigArgs) -> Result
 /// Every live session debugging `root`. A list rather than an option because nothing here
 /// forbids two, and a breakpoint push that silently reached only one of them would be worse
 /// than one that reaches none.
-fn live_sessions_of(root: &str) -> Vec<Arc<Session>> {
-    registry()
+fn live_sessions_of(root: &str) -> Vec<Arc<dyn crate::debug_backend::DebugBackend>> {
+    crate::debug_backend::registry()
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .values()
-        .filter(|s| same_file(&s.root, root))
+        .filter(|s| same_file(&s.root(), root))
         .cloned()
         .collect()
 }
@@ -1030,19 +1108,15 @@ pub struct StepArgs {
 /// Let the program run on.
 #[arbor_rpc::handler]
 fn bennu_debug_resume(_ctx: &BennuState, args: SessionArgs) -> Result<(), String> {
-    session(&args.session_id)?.resume()
+    crate::debug_backend::get(&args.session_id)?.resume()
 }
 
 /// One step, at line granularity, skipping the JDK and other people's frameworks
 /// ([`DEFAULT_STEP_EXCLUDES`], or the configured list).
 #[arbor_rpc::handler]
 fn bennu_debug_step(_ctx: &BennuState, args: StepArgs) -> Result<(), String> {
-    let depth = match args.depth.as_str() {
-        "into" => StepDepth::Into,
-        "out" => StepDepth::Out,
-        _ => StepDepth::Over,
-    };
-    session(&args.session_id)?.step(depth)
+    let step = crate::debug_backend::Step::parse(&args.depth);
+    crate::debug_backend::get(&args.session_id)?.step(step)
 }
 
 /// Args for [`bennu_debug_mute`].
@@ -1059,8 +1133,7 @@ pub struct MuteArgs {
 /// predict, and muting the ones you placed on purpose is a different intent.
 #[arbor_rpc::handler]
 fn bennu_debug_mute(_ctx: &BennuState, args: MuteArgs) -> Result<(), String> {
-    session(&args.session_id)?.set_muted(args.muted);
-    Ok(())
+    crate::debug_backend::get(&args.session_id)?.set_muted(args.muted)
 }
 
 /// Detach: the program keeps running, unsuspended, with no debugger attached.
@@ -1070,22 +1143,13 @@ fn bennu_debug_mute(_ctx: &BennuState, args: MuteArgs) -> Result<(), String> {
 /// because you finished looking.
 #[arbor_rpc::handler]
 fn bennu_debug_detach(_ctx: &BennuState, args: SessionArgs) -> Result<(), String> {
-    let session = session(&args.session_id)?;
-    // Best-effort: a VM that has stopped answering still has to let go of this end.
-    if dispose(&session.client).is_err() {
-        session.client.close();
-    }
-    Ok(())
+    crate::debug_backend::get(&args.session_id)?.detach()
 }
 
 /// The variables in scope at a frame of the stopped thread.
 #[arbor_rpc::handler]
 fn bennu_debug_variables(_ctx: &BennuState, args: FrameArgs) -> Result<Vec<DebugValue>, String> {
-    // Bound to a local first: `&session(…)?` makes the `?` infer its own output from the
-    // argument's `&Session`, and an `Arc<Session>` is not one. With the type settled, the
-    // borrow deref-coerces the ordinary way.
-    let session = session(&args.session_id)?;
-    crate::debug_value::variables(&session, args.frame)
+    crate::debug_backend::get(&args.session_id)?.variables(args.frame)
 }
 
 /// Args for expanding one object.
@@ -1100,9 +1164,27 @@ pub struct ExpandArgs {
 /// elements.
 #[arbor_rpc::handler]
 fn bennu_debug_expand(_ctx: &BennuState, args: ExpandArgs) -> Result<Vec<DebugValue>, String> {
-    let object: Id = args.object.parse().map_err(|_| "not an object handle".to_string())?;
-    let session = session(&args.session_id)?;
-    crate::debug_value::expand(&session, object)
+    crate::debug_backend::get(&args.session_id)?.expand(&args.object)
+}
+
+/// Args for a dump: the row that was clicked, whole.
+///
+/// The row rather than just its handle, because a handle alone cannot be described — neither protocol
+/// has a "what is this reference" request, and the name and declared type are what the header line is
+/// made of. The frontend has the row already, so sending it back costs nothing.
+#[derive(Deserialize)]
+pub struct DumpArgs {
+    pub session_id: String,
+    pub value: DebugValue,
+}
+
+/// One value and everything under it, as RON-shaped text — see [`crate::debug_dump`].
+///
+/// Protocol-blind: it walks `expand`, so the same modal answers on a Java object graph and a Rust one.
+#[arbor_rpc::handler]
+fn bennu_debug_dump(_ctx: &BennuState, args: DumpArgs) -> Result<DebugDump, String> {
+    let backend = crate::debug_backend::get(&args.session_id)?;
+    Ok(crate::debug_dump::dump(backend.as_ref(), &args.value))
 }
 
 /// Args for a watch.
@@ -1119,8 +1201,7 @@ pub struct WatchArgs {
 /// is allowed to be, and why it is a path rather than Java.
 #[arbor_rpc::handler]
 fn bennu_debug_watch(_ctx: &BennuState, args: WatchArgs) -> Result<DebugValue, String> {
-    let session = session(&args.session_id)?;
-    crate::debug_value::watch(&session, args.frame, &args.expression)
+    crate::debug_backend::get(&args.session_id)?.watch(args.frame, &args.expression)
 }
 
 fn session(id: &str) -> Result<Arc<Session>, String> {

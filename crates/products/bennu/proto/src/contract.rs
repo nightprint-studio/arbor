@@ -1261,9 +1261,20 @@ pub struct BreakpointStatus {
 pub struct StackFrame {
     /// 0 = the innermost frame, where execution is.
     pub index: u32,
-    /// Fully-qualified declaring class, `$` and all.
+    /// Fully-qualified declaring class, `$` and all. **Empty on a native frame** — see `name`.
     pub class: String,
     pub method: String,
+    /// The frame's whole name, when the debugger gives one string rather than a class and a method.
+    ///
+    /// The one place the two debuggers genuinely differ. JDWP reports a declaring class and a method
+    /// separately; DAP reports `geode::mine::dig`, or `core::ops::function::FnOnce::call_once{{vtable.shim}}`
+    /// for a synthetic frame — and splitting that at the last `::` to invent a class produces nonsense
+    /// on exactly the frames worth reading. So a native frame carries it whole here and leaves `class`
+    /// empty, and the panel prefers this when it is set.
+    ///
+    /// `#[serde(default)]` because a Java session does not send it and the frontend must not require it.
+    #[serde(default)]
+    pub name: String,
     /// The source line, when the class carries a line table.
     pub line: Option<u32>,
     /// Absolute path, when this project declares the class. Absent for a library or JDK frame,
@@ -1272,6 +1283,24 @@ pub struct StackFrame {
     /// Whether it is this project's own code — what the panel renders in full rather than
     /// muted, and what "step into" is trying to reach.
     pub project: bool,
+}
+
+/// A whole value, rendered as RON-shaped text — what the inspect modal shows.
+///
+/// Text rather than a tree, because the tree already exists and is the thing being escaped from: a
+/// struct whose fields are structs is nineteen disclosure triangles before it can be read. One block
+/// of text can be read top to bottom, searched, and pasted into a bug report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DebugDump {
+    /// The rendering. RON-*shaped*: a debugger reports a name, a rendered value and children, not a
+    /// type system, so the shape is inferred. Reading it is the promise; round-tripping it is not.
+    pub text: String,
+    /// How many values were visited. What makes the difference between a small struct and a walk that
+    /// stopped somewhere visible.
+    pub nodes: u32,
+    /// Whether a cap was hit — depth, node count, one container's width, or the time budget. Said,
+    /// because a dump silently cut reads as a complete answer and would be quoted as one.
+    pub truncated: bool,
 }
 
 /// A variable, a field, or an array element — one row of the variables tree.
@@ -1300,6 +1329,19 @@ pub struct DebugStatus {
     pub vm: String,
     /// Why it ended, or what went wrong. Empty when nothing did.
     pub message: String,
+    /// `jvm` · `native`. Which debugger is underneath, and therefore which language's rules the
+    /// panel should describe: a Java watch is a path with `.field` and `[0]`, a Rust one also has
+    /// `*` and the adapter's own expression dialects behind a prefix. The panel has one set of
+    /// affordances to explain and cannot guess which from the rest of this payload.
+    #[serde(default)]
+    pub engine: String,
+    /// A standing caveat about what this session can show — empty when there is none.
+    ///
+    /// Exists for one situation and it is a common one: an LLDB with no Rust formatters renders a
+    /// `Vec` as a pointer and a length. Without being told, that reads as a broken debugger rather
+    /// than as an unconfigured one, so the sentence travels with the status and says what to install.
+    #[serde(default)]
+    pub note: String,
 }
 
 /// The program stopped: which thread, why, and where it is.

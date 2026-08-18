@@ -21,11 +21,10 @@
 //!
 //! ## Watches are paths, not Java
 //!
-//! A watch expression is `name`, `name.field.field`, or `name[3]` — resolved by reading fields
-//! and array slots. It is not an expression language: `a + b`, a method call, a cast or a
-//! generic `List.get(0)` would all need an evaluator *and* method invocation, and half an
-//! expression language that silently fails on the other half is worse than a small one whose
-//! shape is obvious.
+//! A watch expression is `name`, `name.field.field`, or `name[3]` — resolved here by reading fields
+//! and array slots. The grammar itself is [`crate::debug_path`], shared with the Rust watch: the
+//! walk is what differs between JDWP and DAP, the shape of what the user typed is not. See that
+//! module for why a watch is deliberately not an expression language.
 
 // Named, not glob: the crate's prelude exports its own one-parameter `Result<T>`, which would
 // shadow `std`'s in a module whose functions all return `Result<T, String>`.
@@ -36,6 +35,7 @@ use bennu_jdwp::prelude::{
 use bennu_proto::prelude::DebugValue;
 
 use crate::debug::{simple_name, Session, MAX_ELEMENTS};
+use crate::debug_path::{self, Step};
 
 /// Past this many characters a string is shown cut. A log line's worth is plenty to recognise
 /// a value by; a 4 MB JSON payload in a variables row helps nobody.
@@ -184,15 +184,6 @@ fn field_rows(session: &Session, object: Id, class: Id) -> Result<Vec<DebugValue
 
 // ── watches ─────────────────────────────────────────────────────────────────────
 
-/// One step of a watch path.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Step {
-    /// A name: the first one is a variable, the rest are fields.
-    Name(String),
-    /// An array subscript.
-    Index(i32),
-}
-
 /// Evaluate a watch path against a frame. The result is named by the whole expression, so the
 /// panel row reads as what was asked rather than as its last segment.
 pub(crate) fn watch(
@@ -200,9 +191,9 @@ pub(crate) fn watch(
     frame: usize,
     expression: &str,
 ) -> Result<DebugValue, String> {
-    let steps = parse(expression)?;
+    let steps = debug_path::parse(expression, debug_path::JAVA)?;
     let mut walk = steps.into_iter();
-    let Some(Step::Name(first)) = walk.next() else {
+    let Some(Step::Field(first)) = walk.next() else {
         return Err("a watch starts with a variable name".to_string());
     };
 
@@ -234,7 +225,7 @@ fn root_value(session: &Session, frame: usize, name: &str) -> Result<Value, Stri
     if this.is_null() {
         return Err(format!("no variable named `{name}` here"));
     }
-    follow(session, this, &Step::Name(name.to_string()))
+    follow(session, this, &Step::Field(name.to_string()))
         .map_err(|_| format!("no variable or field named `{name}` here"))
 }
 
@@ -249,6 +240,9 @@ fn follow(session: &Session, value: Value, step: &Step) -> Result<Value, String>
     let class = object_type(&session.client, id).map_err(|e| e.to_string())?;
 
     match step {
+        // The Java syntax has no `*`, so the parser never produces this — the arm exists because
+        // one grammar serves both languages and an unreachable case is better said than assumed.
+        Step::Deref => Err("there is no `*` in a Java watch".to_string()),
         Step::Index(at) => {
             if class.type_tag != 3 {
                 return Err("that is not an array".to_string());
@@ -263,7 +257,7 @@ fn follow(session: &Session, value: Value, step: &Step) -> Result<Value, String>
                 .next()
                 .ok_or_else(|| "no value".to_string())
         }
-        Step::Name(name) => {
+        Step::Field(name) => {
             let mut current = class.id;
             for _ in 0..MAX_SUPERS {
                 if current == 0 {
@@ -282,64 +276,6 @@ fn follow(session: &Session, value: Value, step: &Step) -> Result<Value, String>
             Err(format!("no field named `{name}` on {}", simple_name(&session.class_name_of(class.id))))
         }
     }
-}
-
-/// Split a watch expression into its path. Whitespace is ignored; anything that is not a name,
-/// a `.` or a `[n]` is refused by name, because a watch that quietly evaluates *something else*
-/// than what was typed is the worst possible answer.
-fn parse(expression: &str) -> Result<Vec<Step>, String> {
-    let mut steps = Vec::new();
-    let mut name = String::new();
-    let mut chars = expression.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        match c {
-            c if c.is_whitespace() => continue,
-            // A `.` ends the step before it. What that step is depends on what came before:
-            // a pending name (`order.total`), or a subscript that is already complete
-            // (`items[2].price`). Only a dot with genuinely nothing in front of it — a leading
-            // one, or a second in a row — is the error, and treating "no pending name" as that
-            // made every path through an array index unwatchable.
-            '.' => match (name.is_empty(), steps.last()) {
-                (false, _) => steps.push(Step::Name(std::mem::take(&mut name))),
-                (true, Some(Step::Index(_))) => {}
-                (true, _) => return Err("an empty name in the path".to_string()),
-            },
-            '[' => {
-                if !name.is_empty() {
-                    steps.push(Step::Name(std::mem::take(&mut name)));
-                }
-                let mut digits = String::new();
-                for d in chars.by_ref() {
-                    if d == ']' {
-                        break;
-                    }
-                    digits.push(d);
-                }
-                let at: i32 = digits
-                    .trim()
-                    .parse()
-                    .map_err(|_| format!("`[{digits}]` is not an array index"))?;
-                steps.push(Step::Index(at));
-            }
-            c if c.is_alphanumeric() || c == '_' || c == '$' => name.push(c),
-            other => {
-                return Err(format!(
-                    "`{other}` is not part of a watch — a watch is a name, `.field` and `[0]`"
-                ))
-            }
-        }
-    }
-    if !name.is_empty() {
-        steps.push(Step::Name(name));
-    }
-    if steps.is_empty() {
-        return Err("an empty watch".to_string());
-    }
-    if !matches!(steps.first(), Some(Step::Name(_))) {
-        return Err("a watch starts with a variable name".to_string());
-    }
-    Ok(steps)
 }
 
 // ── rendering ───────────────────────────────────────────────────────────────────
@@ -502,55 +438,8 @@ mod tests {
         assert_eq!(tag_of(""), Tag::Object);
     }
 
-    #[test]
-    fn a_watch_path_is_names_and_subscripts() {
-        assert_eq!(parse("order").unwrap(), vec![Step::Name("order".into())]);
-        assert_eq!(
-            parse("order.customer.name").unwrap(),
-            vec![
-                Step::Name("order".into()),
-                Step::Name("customer".into()),
-                Step::Name("name".into())
-            ]
-        );
-        assert_eq!(
-            parse("items[2].price").unwrap(),
-            vec![Step::Name("items".into()), Step::Index(2), Step::Name("price".into())]
-        );
-        // Whitespace is noise, not structure.
-        assert_eq!(parse(" order . total ").unwrap().len(), 2);
-        // Two subscripts in a row, and a name after them.
-        assert_eq!(
-            parse("grid[1][2].label").unwrap(),
-            vec![
-                Step::Name("grid".into()),
-                Step::Index(1),
-                Step::Index(2),
-                Step::Name("label".into())
-            ]
-        );
-    }
 
-    /// A dot with nothing in front of it. The check exists for these two and not for the
-    /// `items[2].price` it used to reject along with them.
-    #[test]
-    fn a_dot_with_nothing_before_it_is_refused() {
-        assert!(parse(".order").is_err());
-        assert!(parse("order..total").is_err());
-    }
 
-    /// A watch that is not a path is refused by name. Quietly evaluating something adjacent to
-    /// what was typed would be the worst possible answer — you would trust the number.
-    #[test]
-    fn anything_that_is_not_a_path_is_refused_rather_than_approximated() {
-        assert!(parse("a + b").is_err());
-        assert!(parse("list.get(0)").is_err());
-        assert!(parse("(Order) x").is_err());
-        assert!(parse("").is_err());
-        assert!(parse("[0]").is_err(), "a watch starts with a name");
-        assert!(parse("a..b").is_err());
-        assert!(parse("a[x]").is_err(), "a subscript is a number");
-    }
 
     #[test]
     fn a_long_string_is_cut_and_says_so() {

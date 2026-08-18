@@ -5,6 +5,9 @@ edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
-description  = "std::process::Command extension trait: suppress console window on Windows."
+description  = "The platform's process oddities: suppressing Windows' console-window popup, and finding a tool's executable when a windowed app's PATH is not the shell's."
 
 [dependencies]
+# `user_home()` — the executable search has to look where tools actually are (`~/.cargo/bin`, a VS
+# Code extension dir, `~/.local/bin`), and a windowed app's PATH holds almost none of them.
+arbor-core = { path = "../../foundation/core" }

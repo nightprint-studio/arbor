@@ -1,0 +1,12 @@
+[package]
+name         = "bennu-framed"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The Content-Length base protocol both LSP and DAP speak over a child process's stdio: one frame reader, one frame writer, and the boundary rules every transport bug comes from. Bytes only — it does not know what a message means."
+
+[dependencies]
+# None, deliberately. This is `std::io` and a header parser. A transport shared by the language
+# server and the debugger is the last place to take a dependency someone else versions.

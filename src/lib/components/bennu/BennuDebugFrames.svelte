@@ -75,20 +75,48 @@
   function shortClass(fqcn: string): string {
     return fqcn.split('.').pop() ?? fqcn;
   }
+
+  /**
+   * A frame's two halves: what to put first, and what to put after it.
+   *
+   * A JVM frame splits into a method and its class. A **native** frame does not — it is one path,
+   * `geode::mine::dig` — so the leaf is the part worth reading at this width and the rest is the
+   * qualifier, exactly as a package is for Java. Splitting at the last `::` is safe *here* in a way it
+   * is not in the backend: this is only deciding what to show first, and the whole string is in the
+   * tooltip and in `lead + trail` either way.
+   */
+  function parts(frame: StackFrameDto): { lead: string; trail: string } {
+    const line = frame.line ? `:${frame.line}` : '';
+    if (!frame.name) {
+      return { lead: frame.method, trail: `${shortClass(frame.class)}${line}` };
+    }
+    const at = frame.name.lastIndexOf('::');
+    if (at < 0) return { lead: frame.name, trail: line };
+    return { lead: frame.name.slice(at + 2), trail: `${frame.name.slice(0, at)}${line}` };
+  }
+
+  /** The whole truth, for the tooltip. */
+  function fullName(frame: StackFrameDto): string {
+    const line = frame.line ? `:${frame.line}` : '';
+    if (frame.name) return `${frame.name}${line}`;
+    return `${frame.class}.${frame.method}${line}`;
+  }
 </script>
 
 {#snippet frameRow(frame: StackFrameDto, inRun: boolean)}
+  <!-- Hoisted out of the button: `{@const}` is only legal as an immediate child of a block. -->
+  {@const p = parts(frame)}
   <button
     class="df-frame"
     class:selected={frame.index === bennuDebugStore.selectedFrame}
     class:library={!frame.project}
     class:nested={inRun}
     type="button"
-    title="{frame.class}.{frame.method}{frame.line ? `:${frame.line}` : ''}"
+    title={fullName(frame)}
     onclick={() => bennuDebugStore.selectFrame(frame.index)}
   >
-    <span class="df-method">{frame.method}</span>
-    <span class="df-class">{shortClass(frame.class)}{frame.line ? `:${frame.line}` : ''}</span>
+    <span class="df-method">{p.lead}</span>
+    <span class="df-class">{p.trail}</span>
   </button>
 {/snippet}
 

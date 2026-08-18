@@ -53,6 +53,17 @@ pub struct BennuConfig {
     /// to avoid the one-shot background CPU on every open. The `#[serde(default)]` container fills a
     /// missing key from this struct's `Default` (→ `true`), so existing config files opt in.
     pub validate_on_open: bool,
+    /// Which debug adapter to drive a native (Rust) debug session with: `codelldb`, `lldb-dap` or
+    /// `gdb`. Empty = whichever is installed, in that order of preference.
+    ///
+    /// Worth pinning because the three are not interchangeable in the way that matters: only CodeLLDB
+    /// renders Rust's own types, so a `Vec<T>` is its elements under one and a pointer and a length
+    /// under the others. A pinned adapter that is missing is reported rather than silently replaced.
+    #[serde(default)]
+    pub debug_adapter: String,
+    /// An explicit path to that adapter's executable, when it is somewhere the search does not look.
+    #[serde(default)]
+    pub debug_adapter_path: String,
     /// **Autosave**: write a modified buffer to disk automatically — after a short idle, on switching
     /// tabs, and when the window loses focus. `true` by default (IntelliJ-style); turn it off to save
     /// only explicitly (Ctrl+S).
@@ -320,6 +331,10 @@ impl Default for BennuConfig {
             sql_dialect: "portable".to_string(),
             preferred_build_type: "mvn".to_string(),
             validate_on_open: true,
+            // Empty = whichever adapter is installed, preferring the one that renders Rust's own
+            // types. Naming one here would pin every user to a debugger they may not have.
+            debug_adapter: String::new(),
+            debug_adapter_path: String::new(),
             autosave: true,
             collapse_library_frames: true,
             // Empty = the backend's defaults. Writing the list here would freeze a user's

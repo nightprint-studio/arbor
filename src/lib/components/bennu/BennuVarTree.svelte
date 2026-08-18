@@ -13,8 +13,9 @@
    * and would mean running application code inside a paused program — which can block on a
    * lock the suspended thread holds, mutate state, or throw.
    */
-  import { ChevronRight } from 'lucide-svelte';
+  import { ChevronRight, Braces } from 'lucide-svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
   // Itself, for the recursion. `<svelte:self>` is the Svelte 4 spelling and is deprecated in
   // runes mode — a component importing itself is the supported one.
   import BennuVarTree from './BennuVarTree.svelte';
@@ -56,6 +57,20 @@
       <span class="vt-type">{node.value.type_name}</span>
     {/if}
     {#if node.loading}<Spinner size={11} />{/if}
+    {#if node.value.object}
+      <!-- The way out of the lazy tree, on the rows that have something under them: a struct whose
+           fields are structs is nineteen triangles before it can be read. A real button, so Tab
+           reaches it and Enter opens it — the tree has no row selection to hang a single key on. -->
+      <button
+        class="vt-open"
+        type="button"
+        use:tooltip={'Read the whole value'}
+        aria-label="Read the whole value of {node.value.name}"
+        onclick={() => void bennuDebugStore.inspectValue(node.value)}
+      >
+        <Braces size={11} />
+      </button>
+    {/if}
   </div>
 
   {#if node.open}
@@ -104,6 +119,20 @@
     overflow: hidden; text-overflow: ellipsis; max-width: 60ch;
   }
   .vt-type { color: var(--text-muted); font-size: 10.5px; margin-left: 4px; }
+
+  /* Out of the way until the row is under the pointer — or focused, so the keyboard path is not the
+     invisible one. */
+  .vt-open {
+    margin-left: 2px; flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; padding: 0;
+    border: 0; border-radius: var(--radius-sm); background: none;
+    color: var(--text-muted); cursor: pointer; opacity: 0;
+    transition: opacity var(--transition-fast), background var(--transition-fast),
+      color var(--transition-fast);
+  }
+  .vt-row:hover .vt-open, .vt-open:focus-visible { opacity: 1; }
+  .vt-open:hover { background: var(--bg-hover); color: var(--text-primary); }
 
   .vt-error, .vt-empty {
     font-size: 11px; padding-top: 1px; padding-bottom: 3px;

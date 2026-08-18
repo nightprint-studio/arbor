@@ -1035,10 +1035,10 @@
         action: () => run(triggerValidate), when: idle && javaTools },
       { id: 'run', title: 'Run', icon: 'play', shortcut: 'Shift+F10',
         action: () => run(triggerRun), when: idle },
-      // Debugging is JVM-only: `bennu_run` attaches JDWP to the child it spawned, and a cargo
-      // command forks its own compiler and its own program.
+      // Both ecosystems: JDWP attaches to the JVM `bennu_run` spawned, a Cargo target is built and
+      // then launched under a debug adapter.
       { id: 'debug', title: 'Debug', icon: 'bug', shortcut: 'Shift+F9',
-        action: () => run(triggerDebug), when: idle && javaTools },
+        action: () => run(triggerDebug), when: idle },
       // The three that only mean anything while the program is standing still. Offered from
       // the palette as well as the panel because the panel has to be open to press one, and
       // reaching a verb from wherever you are is what the palette is for.

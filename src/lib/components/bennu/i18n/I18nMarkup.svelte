@@ -147,7 +147,7 @@
     >{p.text}</span>{:else if p.tag === 'param'}<span
       class="mk-param"
       use:tooltip={p.tip}
-    >{p.text}</span>{:else}<span
+    >{p.text}</span>{:else if p.tag === 'span'}<span
       class={p.cls}
       style={p.style}
       use:tooltip={p.tip}

@@ -1042,10 +1042,21 @@
 
   // ── Breakpoints (the flag gutter) ─────────────────────────────────────────────
 
-  /** Whether this file can hold a breakpoint at all. A decompiled view has no line numbers
-   *  that mean anything to the VM, and a `.properties` file compiles to nothing — offering a
-   *  gutter there is offering a click that can only ever be pending. */
-  const canBreak = $derived(!!activePath && isJavaFileOf(activePath) && !isDecompiledView);
+  /**
+   * Whether this file can hold a breakpoint at all.
+   *
+   * Java **and Rust**: both have a debugger behind them now, and the two are the same gesture in the
+   * same margin — see `debug_backend` on the backend side. A decompiled view is excluded because its
+   * line numbers mean nothing to the VM, and everything else (a `.properties`, a `.xml`) compiles to
+   * nothing at all: offering a gutter there is offering a click that can only ever be pending.
+   */
+  const breakLanguage: 'java' | 'rust' | null = $derived.by(() => {
+    if (!activePath || isDecompiledView) return null;
+    if (isJavaFileOf(activePath)) return 'java';
+    if (isRustFileOf(activePath)) return 'rust';
+    return null;
+  });
+  const canBreak = $derived(breakLanguage !== null);
 
   /**
    * The gutter's dots: solid where the VM accepted the breakpoint, hollow where it is waiting
@@ -1088,7 +1099,11 @@
       return;
     }
     const src = projectStore.sourceOf(activePath);
-    const t = setTimeout(() => { breakpointable = breakpointableLines(src); }, 200);
+    // The language decides the reading: a Rust `fn` line takes a breakpoint (LLDB binds it to the
+    // prologue) where a Java method signature does not, and Rust's lifetimes and raw strings would
+    // desync a scanner written for Java literals.
+    const language = breakLanguage ?? 'java';
+    const t = setTimeout(() => { breakpointable = breakpointableLines(src, language); }, 200);
     return () => clearTimeout(t);
   });
 

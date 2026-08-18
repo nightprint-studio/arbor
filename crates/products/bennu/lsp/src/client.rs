@@ -406,7 +406,7 @@ impl LspClient {
         let written = {
             let mut guard = self.stdin.lock().unwrap_or_else(|p| p.into_inner());
             match guard.as_mut() {
-                Some(stdin) => jsonrpc::write_message(stdin, body),
+                Some(stdin) => jsonrpc::write_frame(stdin, body),
                 None => return Err(LspError::NotRunning),
             }
         };
@@ -449,7 +449,8 @@ impl Drop for LspClient {
 /// The reader thread: parse frames until the stream ends, dispatching each one.
 fn read_loop<R: BufRead>(weak: Weak<LspClient>, mut reader: R) {
     loop {
-        let frame = match jsonrpc::read_message(&mut reader) {
+        // The peer name goes into the transport errors, so a desync says which process it was.
+        let frame = match jsonrpc::read_frame(&mut reader, "the language server") {
             Ok(Some(body)) => body,
             Ok(None) => {
                 if let Some(client) = weak.upgrade() {

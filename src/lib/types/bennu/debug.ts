@@ -58,9 +58,21 @@ export interface BreakpointStatusDto {
 export interface StackFrameDto {
   /** 0 = the innermost frame, where execution is. */
   index: number;
-  /** Fully-qualified declaring class, `$` and all. */
+  /** Fully-qualified declaring class, `$` and all. **Empty on a native frame** — see `name`. */
   class: string;
   method: string;
+  /**
+   * The frame's whole name, when the debugger gives one string rather than a class and a method.
+   *
+   * The one place the two debuggers differ. A JVM frame has a declaring class and a method; a native
+   * one has `geode::mine::dig`, or `core::ops::function::FnOnce::call_once{{vtable.shim}}` for a
+   * synthetic frame — and splitting that at the last `::` to invent a class produces nonsense on
+   * exactly the frames worth reading. So a native frame carries it whole here and leaves `class`
+   * empty, and the panel prefers this when it is set.
+   *
+   * Absent from a Java session's frames, so treat it as optional.
+   */
+  name?: string;
   line: number | null;
   /** Absolute path, when this project declares the class. Absent for a library frame. */
   file: string | null;
@@ -82,6 +94,18 @@ export interface DebugValueDto {
   object: string | null;
 }
 
+/** One value and everything under it, as RON-shaped text — what the inspect modal shows. */
+export interface DebugDumpDto {
+  /** The rendering. RON-*shaped*: a debugger reports a name, a rendered value and children, not a
+   *  type system, so the shape is inferred from the children. Reading it is the promise;
+   *  round-tripping it through a RON parser is not. */
+  text: string;
+  /** How many values were visited. */
+  nodes: number;
+  /** Whether a cap was hit — depth, node count, one container's width, or the time budget. */
+  truncated: boolean;
+}
+
 /** Where a session is as a whole. */
 export interface DebugStatusDto {
   /** The run id the session belongs to — the same id the Run console tab carries. */
@@ -90,6 +114,24 @@ export interface DebugStatusDto {
   /** The VM's own description. Sent once, when it becomes known. */
   vm: string;
   message: string;
+  /**
+   * Which debugger is underneath, and therefore which language's rules the panel should describe.
+   *
+   * A Java watch is a path — `order.customer.name`, `items[2]`. A Rust one is that plus a leading
+   * `*`, and behind a prefix it can also reach the adapter's own expression evaluators. Those are
+   * different affordances to explain, and nothing else in this payload says which applies.
+   *
+   * Optional because a session that predates the field is a JVM one.
+   */
+  engine?: 'jvm' | 'native';
+  /**
+   * A standing caveat about what this session can show, or empty.
+   *
+   * One situation, and a common one: an LLDB with no Rust formatters renders a `Vec` as a pointer
+   * and a length. Shown rather than left to be discovered, because unconfigured and broken look
+   * identical from the variables tree.
+   */
+  note?: string;
 }
 
 /** The program stopped: which thread, why, and where it is. */

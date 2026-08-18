@@ -201,6 +201,32 @@ export function cargoPreview(invocation: CargoInvocation): Promise<string> {
 /** Launch a cargo command, streaming into the Run console. Returns immediately with the handle the
  *  console correlates by; Stop and stdin work on it exactly as they do for a JVM run.
  *  Wire: `bennu_cargo_run`. */
+/**
+ * Build a cargo target and debug it — the Run configuration you already have, with a debugger.
+ *
+ * Slower to resolve than {@link cargoRun}, and unavoidably: a native binary cannot be debugged by
+ * launching it differently the way a JVM can, so the target has to be **built** before a debugger can
+ * start it. This resolves when there is either a live session or a reason there is not — a failing
+ * build, or no debug adapter installed — so the button stays busy until one of those is true.
+ *
+ * Wire: `bennu_cargo_debug`.
+ */
+export function cargoDebug(
+  root: string,
+  invocation: CargoInvocation,
+  opts: { workingDir?: string; env?: Record<string, string>; stopOnEntry?: boolean } = {},
+): Promise<{ run_id: string; main_class: string; command: string; working_dir: string }> {
+  return bennu('bennu_cargo_debug', {
+    args: {
+      root,
+      invocation,
+      working_dir: opts.workingDir ?? '',
+      env: opts.env ?? {},
+      stop_on_entry: opts.stopOnEntry ?? false,
+    },
+  });
+}
+
 export function cargoRun(
   root: string,
   invocation: CargoInvocation,

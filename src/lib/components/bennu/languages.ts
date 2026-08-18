@@ -101,10 +101,16 @@ const rustLang = lspLanguage('rust', rust, {
   line: '//',
   block: { open: '/*', close: '*/' },
 });
-// A `.ron` file is coloured by the same mode but is NOT Rust to a language server: asking
-// rust-analyzer about one would be asking about a file it has never heard of. So it keeps a
-// plain descriptor of its own.
-const ronLang = streamLang('ron', rust);
+/**
+ * RON — geode's content format, and the shape a debugger value is dumped in.
+ *
+ * Coloured by the Rust mode (same comments, strings, numbers, and the identifier-before-`(` shape)
+ * but **not Rust to a language server**: asking rust-analyzer about a `.ron` would be asking about a
+ * file it has never heard of, and a dumped value is not a file at all. So it keeps a plain descriptor
+ * of its own, and one instance is shared by both uses — the identity has to be stable or an editor
+ * remounts on every keystroke.
+ */
+export const ronLanguage = streamLang('ron', rust);
 /**
  * Rust source that is **not a file** — a macro expansion.
  *
@@ -194,7 +200,7 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     // RON (geode's content format) is close enough to a struct literal that the Rust mode
     // colours it well: same comments, strings, numbers and identifier-before-`(` shape. Its own
     // descriptor, though — see `ronLang`.
-    case 'ron': return ronLang;
+    case 'ron': return ronLanguage;
     case 'sql': return sqlLangFor(bennuSettingsStore.sqlDialect);
     case 'sh': case 'bash': case 'zsh': return shellLang;
     default: return plainLang;

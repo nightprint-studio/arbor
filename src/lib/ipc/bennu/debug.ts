@@ -9,7 +9,12 @@
  */
 
 import { bennu } from '../rpc';
-import type { DebugConfigDto, DebugValueDto, StepDepth } from '$lib/types/bennu/debug';
+import type {
+  DebugConfigDto,
+  DebugDumpDto,
+  DebugValueDto,
+  StepDepth,
+} from '$lib/types/bennu/debug';
 
 /** The project's persisted `[bennu.debug]` — the breakpoints the gutter draws when a file
  *  opens, and the watches the panel starts with. Wire: `bennu_get_debug_config`. */
@@ -86,4 +91,21 @@ export function debugWatch(
   expression: string,
 ): Promise<DebugValueDto> {
   return bennu('bennu_debug_watch', { args: { session_id: sessionId, frame, expression } });
+}
+
+/**
+ * One value and everything under it, as RON-shaped text.
+ *
+ * The escape hatch from the lazy tree: a struct whose fields are structs is nineteen disclosure
+ * triangles before it can be read, and by then it does not fit on screen. This is one round trip for
+ * the whole subtree, bounded by a depth, a node count and a time budget — and it says when it hit
+ * one, because a dump silently cut reads as a complete answer.
+ *
+ * The whole **row** goes over rather than just its handle: neither debugger has a "what is this
+ * reference" request, so the name and declared type on the header line have to come from here.
+ *
+ * Wire: `bennu_debug_dump` — `DumpArgs { session_id, value }`.
+ */
+export function debugDump(sessionId: string, value: DebugValueDto): Promise<DebugDumpDto> {
+  return bennu('bennu_debug_dump', { args: { session_id: sessionId, value } });
 }

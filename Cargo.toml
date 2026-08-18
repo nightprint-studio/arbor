@@ -97,9 +97,15 @@ members = [
     # extension reads a message bundle.
     "crates/products/bennu/toml",
     "crates/products/bennu/query",
+    # The `Content-Length` base protocol, shared by the LSP and DAP clients below. Dependency-free
+    # by construction: it is `std::io` and a header parser.
+    "crates/products/bennu/framed",
     # The LSP client — the impl of bennu-intel's predisposed slot. A leaf: serde plus
     # two workspace-internal crates, so it can be split out unchanged.
     "crates/products/bennu/lsp",
+    # The DAP client — the debugger's transport, and the Rust half of what JDWP is for Java. Same
+    # shape as `lsp`: hand-rolled protocol, serde, and the shared frame reader.
+    "crates/products/bennu/dap",
     "crates/products/bennu/check",
     "crates/products/bennu/test",
     "crates/products/bennu/jdwp",

@@ -110,6 +110,8 @@ bennu-test = { path = "../test" }
 # own — this crate's `debug` module is what makes it a debugger, by deciding what a session is
 # and turning the VM's locations back into this project's files.
 bennu-jdwp = { path = "../jdwp" }
+# The DAP client — the debugger's transport for a native binary, as `bennu-jdwp` is for a JVM.
+bennu-dap = { path = "../dap" }
 # What the project depends on, read out of its poms and matched against the classpath the
 # index service already resolved. Not an extension — it answers about the build, not about a
 # buffer — so it hangs off its own domain rather than the registry.

@@ -14,6 +14,9 @@ description  = "Generic Language Server Protocol CLIENT for Bennu — the impl b
 # we never touch. So the only dependencies are the workspace's serde pair.
 serde      = { workspace = true }
 serde_json = { workspace = true }
+# The `Content-Length` envelope, shared with the debug-adapter client — the bodies differ entirely,
+# the frame boundary does not, and one frame reader is one place to fix a desync.
+bennu-framed = { path = "../framed" }
 # `NoWindowExt` — a language server is a long-lived child process, and on Windows a
 # bare `Command::spawn` flashes (and keeps) a console window.
 arbor-process-ext = { path = "../../../platform/process-ext" }

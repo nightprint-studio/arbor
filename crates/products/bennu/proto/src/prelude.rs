@@ -7,7 +7,7 @@
 
 pub use crate::contract::{
     Breakpoint, BreakpointStatus, BuildDiagnostic, BuildResult, CapabilityHit, CapabilitySet,
-    ClassEntry, CompletionItem, DebugConfig, DebugPause, DebugStatus, DebugValue,
+    ClassEntry, CompletionItem, DebugConfig, DebugDump, DebugPause, DebugStatus, DebugValue,
     DeclarationTarget, Diagnostic, EncodingIssue, EnvVar, ExceptionBreakpoint, FileContents,
     FileDiagnostics, FileStamp, FileValidationStat, FindHit, FormAnalysis, StackFrame,
     ERR_EXTERNALLY_MODIFIED,

@@ -179,11 +179,34 @@ mod child;
 // The debugger (`bennu-jdwp`): launch with the agent connecting back to a port we opened first,
 // install the project's breakpoints, and serve the stopped program — `bennu_get/set_breakpoints`,
 // `bennu_debug_resume` / `_step` / `_detach` / `_variables` / `_expand` / `_watch`.
+// What a live debug session must be able to do, whichever protocol it speaks — the seam between the
+// ten `bennu_debug_*` handlers and the two protocols behind them (JDWP for a JVM, DAP for a native
+// binary). Which debugger is in use is deliberately not a question the frontend can ask.
+// A debug session over DAP: the Rust side of what `debug` is for Java. Spawns an adapter (CodeLLDB,
+// lldb-dap, GDB 14+), runs the DAP handshake, and implements `debug_backend::DebugBackend` so the ten
+// `bennu_debug_*` handlers reach it without knowing which protocol answered.
+// Debugging a cargo target: build it with `--message-format=json`, read the executable's real path out
+// of the artifact stream (composing `target/debug/<name>` is wrong on any project that configures a
+// profile, a bin name, a target-dir or a cross target — and silently), then hand it to `debug_dap`.
+mod cargo_debug;
+mod debug_dap;
+mod debug_backend;
 mod debug;
 // Reading a stopped program: a frame's variables, what is inside an object or an array, and
 // watches (which are paths — `order.customer.name` — and deliberately not an expression
 // language). Split from `debug` because the session lifecycle and the value tree are two jobs.
 mod debug_value;
+// The grammar of a watch, shared by both debuggers: a path — `order.customer.name`, `items[2]`,
+// `*head` — and a refusal by name for anything else. The walk differs per protocol, the shape of
+// what the user typed does not.
+mod debug_path;
+// The Rust side of a watch: route a path to our own walk over the DAP variables tree, hand anything
+// else to the adapter's evaluator in the right dialect, and say what Rust cannot evaluate at all
+// rather than forwarding LLDB's C++ prose about a Rust type.
+mod debug_expr;
+// One value and everything under it as RON-shaped text, for the inspect modal. Walks the
+// `DebugBackend` trait and nothing else, so it answers on a Java object graph and a Rust one alike.
+mod debug_dump;
 // One definition of "a bennu setting that belongs to this repository": the sections of
 // `<repo>/.arbor/bennu/config.toml` — run configurations, breakpoints, the Tomcat link. Bennu's own
 // file rather than the shared `.arbor/config.toml` these used to sit in, with a read-only
