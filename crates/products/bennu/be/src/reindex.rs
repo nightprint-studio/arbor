@@ -36,6 +36,7 @@ fn bennu_reindex(ctx: &BennuState, args: ReindexArgs) -> Result<(), String> {
     // newly written test class — or a newly written `main` — ends up needing a restart to
     // appear.
     crate::tests::forget_discovery(&args.root);
+    crate::cargo_tests::forget_discovery(&args.root);
     crate::main_classes::forget_main_classes(&args.root);
     // And the "nothing has changed since the last compile" stamp: a re-index is the user
     // saying they no longer trust what we remember about this project.

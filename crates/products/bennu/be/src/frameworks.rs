@@ -36,6 +36,7 @@ use bennu_ext::prelude::{
 };
 use bennu_project::prelude::{detect_capabilities, normalize_newlines, parse_pom};
 use bennu_proto::prelude::{CompletionItem, Diagnostic};
+use bennu_fulcrum_i18n::prelude::FulcrumI18nExtension;
 use bennu_i18n::prelude::MessagesExtension;
 use bennu_jpa::prelude::JpaExtension;
 use bennu_jsp::prelude::JspExtension;
@@ -171,6 +172,9 @@ impl FrameworkService {
                 Arc::new(XmlExtension::new()) as Arc<dyn FrameworkExtension>,
                 Arc::clone(&jsp) as Arc<dyn FrameworkExtension>,
                 Arc::new(MessagesExtension::new()) as Arc<dyn FrameworkExtension>,
+                // The fifth framework, and the first that is not Java's: a Cargo root with an
+                // `i18n/` tree gets a registry where every Java extension declined.
+                Arc::new(FulcrumI18nExtension::new()) as Arc<dyn FrameworkExtension>,
             ],
             &caps,
         );
@@ -183,7 +187,8 @@ impl FrameworkService {
         // extension has no use for it. Since that one applies to every project, skipping the
         // read when it is the *only* active extension is what keeps a plain Maven project from
         // paying a Spring-sized scan to get `pom.xml` completion.
-        let wants_java = registry.ids().iter().any(|id| !matches!(*id, "xml" | "jsp"));
+        let wants_java =
+            registry.ids().iter().any(|id| !matches!(*id, "xml" | "jsp" | "fulcrum.i18n"));
         let java: Vec<ScannedFile> = if wants_java {
             let encoding = resolve_index_encoding(root);
             bennu_intel::prelude::read_java_sources(path, &encoding)
@@ -200,7 +205,11 @@ impl FrameworkService {
         } else {
             Vec::new()
         };
-        let walked = collect_config_files(path);
+        // The `.rs` / `.ron` trees are only walked when something asked for them: on a Maven
+        // project nothing does, and reading a checked-in vendor directory to find nothing is a
+        // project scan spent on a feature that is off.
+        let wants_sources = registry.ids().contains(&"fulcrum.i18n");
+        let walked = collect_config_files(path, wants_sources);
         let descriptors = collect_descriptors(path);
         let schemas = collect_schemas(path);
         // Only walked when something asked for it: on a project with no tag libraries the JSP
@@ -220,6 +229,8 @@ impl FrameworkService {
             schemas: &schemas,
             descriptors: &descriptors,
             taglibs: &taglibs,
+            rust: &walked.rust,
+            ron: &walked.ron,
         });
         // Each extension keeps only what its own `applies` admitted it to; a handle to one the
         // registry dropped would be a model nobody ever fills.
@@ -250,6 +261,9 @@ struct WalkedFiles {
     xml: Vec<ScannedFile>,
     resources: Vec<ScannedFile>,
     pages: Vec<ScannedFile>,
+    /// Only filled when an extension asked for them — see [`collect_config_files`].
+    rust: Vec<ScannedFile>,
+    ron: Vec<ScannedFile>,
 }
 
 /// Whether a file name is a server-rendered page — the JSP family, including the `.tag` files
@@ -264,12 +278,16 @@ fn is_page_file(lower: &str) -> bool {
 /// configuration, a message bundle, a validator's messages — and that is each extension's
 /// question, not the walk's.
 fn is_resource_file(lower: &str) -> bool {
-    [".properties", ".yml", ".yaml"].iter().any(|e| lower.ends_with(e))
+    // `.toml` is in the list because a fulcrum message bundle is one. It also sweeps up every
+    // `Cargo.toml` in a workspace, which costs a read and nothing else: what a keyed resource is
+    // FOR is each extension's question, and the i18n catalogue ignores anything outside an `i18n/`
+    // directory.
+    [".properties", ".yml", ".yaml", ".toml"].iter().any(|e| lower.ends_with(e))
 }
 
 /// Walk the project for the file kinds an extension is handed: XML (any of them — the extension
 /// decides which are its own), property resources, and pages.
-fn collect_config_files(root: &Path) -> WalkedFiles {
+fn collect_config_files(root: &Path, wants_sources: bool) -> WalkedFiles {
     let mut out = WalkedFiles::default();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -294,6 +312,10 @@ fn collect_config_files(root: &Path) -> WalkedFiles {
                 &mut out.resources
             } else if is_page_file(&lower) {
                 &mut out.pages
+            } else if wants_sources && lower.ends_with(".rs") {
+                &mut out.rust
+            } else if wants_sources && lower.ends_with(".ron") {
+                &mut out.ron
             } else {
                 continue;
             };
@@ -1564,7 +1586,7 @@ mod tests {
         std::fs::write(res.join("home.jsp"), "<html/>").unwrap();
         std::fs::write(target.join("application.yml"), "a: 2").unwrap();
 
-        let walked = collect_config_files(&dir);
+        let walked = collect_config_files(&dir, true);
         let (xml, resources) = (&walked.xml, &walked.resources);
         assert_eq!(xml.len(), 1);
         assert_eq!(resources.len(), 2, "a message bundle is a resource; Spring filters its own");
@@ -1585,7 +1607,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("application.properties"), "a=1\r\nb=2\r\nc=3\r\n").unwrap();
 
-        let walked = collect_config_files(&dir);
+        let walked = collect_config_files(&dir, true);
         let text = &walked.resources[0].text;
         assert!(!text.contains('\r'), "the editor's buffer has no CR either");
         assert_eq!(text.find("c=3"), Some(8), "3 lines of 4 bytes, not of 5");

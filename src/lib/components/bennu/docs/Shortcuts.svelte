@@ -68,7 +68,7 @@
 <ul>
   <li><kbd>Ctrl</kbd> + <kbd>F9</kbd> — <strong>build</strong> the project — runs the type chosen on the Build split-button: a Maven compile (<code>javac</code> fallback), or a whole-project <strong>validation without compiling</strong>. In a Cargo project it runs <code>cargo check</code> over the workspace</li>
   <li><kbd>Shift</kbd> + <kbd>F10</kbd> — <strong>run</strong> the active configuration. A JVM one builds first, then launches; a Cargo one is a cargo subcommand, which is its own build</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd> — <strong>run what is in front of you</strong>: the test at the caret in a Java test file, or a hot-swap deploy of the current JSP</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd> — <strong>run what is in front of you</strong>: the test at the caret in a Java or Rust test file, or a hot-swap deploy of the current JSP</li>
 </ul>
 
 <h2>Debug</h2>
@@ -91,8 +91,8 @@
 
 <h2>Tests</h2>
 <ul>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd> — run the <strong>test at the caret</strong>: the method you are inside, or the whole class when the caret is above the first test</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F5</kbd> — run <strong>every test</strong> in the project</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd> — run the <strong>test at the caret</strong>: the method or <code>fn</code> you are inside, or — with the caret above the first test — the whole class in Java and the file's cargo target in Rust</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F5</kbd> — run <strong>every test</strong>: the project under Maven, the whole workspace under cargo</li>
   <li><kbd>Ctrl</kbd> + <kbd>F5</kbd> — <strong>rerun</strong> exactly what ran last</li>
   <li>Command palette — <strong>Rerun failed tests</strong>, and <strong>Stop the test run</strong></li>
 </ul>

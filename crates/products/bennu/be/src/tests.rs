@@ -60,14 +60,16 @@ use crate::build::{BuildGuard, BUSY_MSG};
 
 // ── event topics (the wire contract for the FE) ────────────────────────────────
 
-/// A line of `mvn test` output.
-const EVT_TEST_OUTPUT: &str = "arbor://bennu/test-output";
+/// A line of test-runner output. Shared with the cargo runner: the console under the tree shows
+/// the run's output whichever build system produced it, so one topic feeds it.
+pub(crate) const EVT_TEST_OUTPUT: &str = "arbor://bennu/test-output";
 /// Surefire announced a class — it is running now.
 const EVT_TEST_RUNNING: &str = "arbor://bennu/test-running";
 /// A class finished; carries its full parsed report.
 const EVT_TEST_CLASS: &str = "arbor://bennu/test-class";
-/// The run ended — exit code, whether it was cancelled, and Maven's own totals.
-const EVT_TEST_EXIT: &str = "arbor://bennu/test-exit";
+/// The run ended — exit code, whether it was cancelled, and the runner's own totals. Shared with
+/// the cargo runner, which maps libtest's counts onto the same four numbers.
+pub(crate) const EVT_TEST_EXIT: &str = "arbor://bennu/test-exit";
 
 /// How often the run thread sweeps the report directories and checks on the child. Fast
 /// enough that a class appears to land as it finishes, slow enough to be free.
@@ -333,20 +335,25 @@ fn bennu_cancel_tests(_ctx: &BennuState, args: CancelTestsArgs) -> Result<bool, 
 }
 
 /// A run the canceller can reach.
-struct LiveRun {
-    child: Arc<Mutex<Child>>,
+pub(crate) struct LiveRun {
+    pub(crate) child: Arc<Mutex<Child>>,
     /// Set by [`bennu_cancel_tests`], read by the run thread when it reports the exit — so
     /// the panel can say "stopped" rather than "failed with no exit code".
-    cancelled: Arc<Mutex<bool>>,
+    pub(crate) cancelled: Arc<Mutex<bool>>,
 }
 
-fn registry() -> &'static Mutex<HashMap<String, LiveRun>> {
+/// Live test runs, keyed by run id.
+///
+/// Shared with [`crate::cargo_tests`] deliberately: Stop is **one** verb to the panel, and a
+/// second registry would mean a second cancel handler the frontend had to choose between — with
+/// the wrong choice looking exactly like a Stop button that does nothing.
+pub(crate) fn registry() -> &'static Mutex<HashMap<String, LiveRun>> {
     static REG: OnceLock<Mutex<HashMap<String, LiveRun>>> = OnceLock::new();
     REG.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// A monotonically-increasing, process-unique run id — same shape as `bennu_run`'s.
-fn next_run_id() -> String {
+pub(crate) fn next_run_id() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(1);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let nanos =

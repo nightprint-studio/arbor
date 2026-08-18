@@ -38,7 +38,10 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
-  import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
+  import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
+
+  /** The runner for the open project — the toolbar's ▷ / ⟳ / ■ mean the same thing either way. */
+  const testStore = $derived(activeTestStore());
   import { bennuDebugStore } from '$lib/stores/bennu/debug.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -85,7 +88,7 @@
    *  panel; everything after that streams into it. */
   function runAllTests() {
     const root = projectStore.project?.root;
-    if (root) void bennuTestStore.runAll(root);
+    if (root) void testStore.runAll(root);
   }
   /** Run the preferred build type (Maven compile or whole-project validation) — the split-button
    *  main action + Ctrl+F9. */
@@ -142,13 +145,13 @@
       : [
           { kind: 'separator', label: 'Tests' } as DropdownItem,
           { kind: 'item', id: 'testall', label: 'Run all tests', icon: FlaskConical, shortcut: 'Ctrl+Shift+F5',
-            disabled: busy || bennuTestStore.running || !hasProject, onclick: runAllTests } as DropdownItem,
+            disabled: busy || testStore.running || !hasProject, onclick: runAllTests } as DropdownItem,
           { kind: 'item', id: 'testrerun', label: 'Rerun tests', icon: RotateCw, shortcut: 'Ctrl+F5',
-            disabled: busy || bennuTestStore.running || !bennuTestStore.hasResults, onclick: () => void bennuTestStore.rerun() } as DropdownItem,
+            disabled: busy || testStore.running || !testStore.hasResults, onclick: () => void testStore.rerun() } as DropdownItem,
           { kind: 'item', id: 'testrerunfailed', label: 'Rerun failed tests', icon: ListRestart,
-            disabled: busy || bennuTestStore.running || !bennuTestStore.hasFailures, onclick: () => void bennuTestStore.rerunFailed() } as DropdownItem,
+            disabled: busy || testStore.running || !testStore.hasFailures, onclick: () => void testStore.rerunFailed() } as DropdownItem,
           { kind: 'item', id: 'teststop', label: 'Stop the test run', icon: Square,
-            disabled: !bennuTestStore.running, onclick: () => void bennuTestStore.stop() } as DropdownItem,
+            disabled: !testStore.running, onclick: () => void testStore.stop() } as DropdownItem,
         ]),
     { kind: 'separator' },
     // Debugging stays JVM-only: it attaches JDWP to the child `bennu_run` spawned, and a cargo

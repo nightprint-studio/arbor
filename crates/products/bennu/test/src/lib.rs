@@ -22,11 +22,30 @@
 //! report-directory watch live in `bennu-be`'s `tests` domain, which is where they can be
 //! cancelled and where a partially-written file can simply be read again next tick.
 //!
+//! ## Two ecosystems, three problems each
+//!
+//! The same three questions have to be answered again for **Cargo**, and none of the answers
+//! carries over — which is why they are separate files rather than branches inside these ones:
+//!
+//! | | Maven | Cargo |
+//! |---|---|---|
+//! | what is a test | [`discover`] (a class, via tree-sitter) | [`cargo_discover`] (a `fn`, via a scan) |
+//! | how to ask for it | [`selector`] (`-Dtest=`) | [`cargo_selector`] (cargo flags **and** libtest filters) |
+//! | what happened | [`surefire`] (XML on disk) | [`cargo_report`] (two output streams) |
+//!
+//! The shapes are genuinely different. Surefire's unit of report is a class and it writes a file;
+//! libtest's is a case and it writes a line. Maven names a test one way; cargo splits the naming
+//! between itself and the test binary. One thing IS shared, and deliberately: [`surefire::TestStatus`]
+//! is the status vocabulary for both, so the panel has one set of icons and one meaning of red.
+//!
 //! ## Public API: use the [`prelude`]
 //!
 //! Workspace convention: call sites reach this crate's surface through
 //! `bennu_test::prelude::...`.
 
+pub mod cargo_discover;
+pub mod cargo_report;
+pub mod cargo_selector;
 pub mod console;
 pub mod discover;
 pub mod prelude;

@@ -71,6 +71,33 @@
   <li>Switch tabs with a click; the <strong>×</strong> closes one and a neighbour takes focus.</li>
 </ul>
 
+<h2>Images</h2>
+<p>
+  A <code>.png</code>, <code>.jpg</code>, <code>.gif</code>, <code>.bmp</code>, <code>.webp</code>,
+  <code>.ico</code>, <code>.avif</code>, <code>.tiff</code> or <code>.svg</code> opens as a
+  <strong>preview</strong> in a tab of its own, beside your source files — which is what makes
+  checking the asset a <code>.ron</code> or a stylesheet names a click rather than a trip out of the
+  window.
+</p>
+<ul>
+  <li><strong>Fit</strong> (the default, <kbd>F</kbd>) and <strong>actual size</strong>
+    (<kbd>0</kbd>). Fit never magnifies: a 16 × 16 icon blown up to fill the panel is a worse answer
+    to "what is this" than a 16 × 16 icon.</li>
+  <li><kbd>+</kbd> / <kbd>−</kbd> or <kbd>Ctrl</kbd> + scroll steps through a zoom ladder. Above
+    1:1 the image is drawn with hard pixel edges rather than smoothed, because zooming into an icon
+    is how you count its pixels.</li>
+  <li>The status line gives the format, the pixel dimensions and the file size — the last two being
+    different questions, and both worth answering about an asset.</li>
+  <li>The chequerboard behind the image is there so a transparent background is distinguishable
+    from a black one.</li>
+</ul>
+<p>
+  An image tab has no buffer, so it cannot be edited and cannot be saved — <kbd>Ctrl</kbd> +
+  <kbd>S</kbd> on one does nothing rather than writing an empty file over your artwork. Formats a
+  browser cannot decode (<code>.psd</code>, <code>.xcf</code>, <code>.svgz</code>) are still
+  declined, because a preview showing a broken-image glyph is worse than a clear refusal.
+</p>
+
 <h2>Structure</h2>
 <p>
   The <strong>Structure</strong> tool (left rail) lists the active file's symbols — types, methods and

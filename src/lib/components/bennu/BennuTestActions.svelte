@@ -11,15 +11,19 @@
    * header slot and must look like the buttons either side of them.
    */
   import {
-    ChevronsDownUp, ChevronsUpDown, Clock, Filter as FilterIcon, ListRestart, Play, RotateCw,
-    Square, Trash2,
+    ChevronsDownUp, ChevronsUpDown, Clock, EyeOff, Filter as FilterIcon, ListRestart, Play,
+    RotateCw, Square, Trash2,
   } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
-  import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
+  import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
+  import { bennuCargoTestStore } from '$lib/stores/bennu/cargo-tests.svelte';
 
-  const store = bennuTestStore;
+  const store = $derived(activeTestStore());
   const root = $derived(projectStore.project?.root ?? '');
+  /** `#[ignore]` is cargo's, and so is the only way to override it (`--include-ignored`). There is
+   *  no Maven equivalent worth a button: a `@Disabled` test cannot be run without editing it. */
+  const cargo = $derived(projectStore.isCargo);
 </script>
 
 {#if store.running}
@@ -36,6 +40,17 @@
   <button class="ps-btn" type="button" disabled={!store.hasFailures}
     use:tooltip={'Rerun failed tests'} aria-label="Rerun failed tests"
     onclick={() => void store.rerunFailed()}><ListRestart size={13} /></button>
+{/if}
+{#if cargo}
+  <button
+    class="ps-btn"
+    class:ps-btn-active={bennuCargoTestStore.includeIgnored}
+    type="button"
+    use:tooltip={'Also run #[ignore]d tests'}
+    aria-label="Also run ignored tests"
+    aria-pressed={bennuCargoTestStore.includeIgnored}
+    onclick={() => bennuCargoTestStore.setIncludeIgnored(!bennuCargoTestStore.includeIgnored)}
+  ><EyeOff size={13} /></button>
 {/if}
 <button class="ps-btn" class:ps-btn-active={store.onlyFailed} type="button"
   use:tooltip={'Show only failed'} aria-label="Show only failed" aria-pressed={store.onlyFailed}

@@ -19,11 +19,12 @@
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import BennuImageView from './BennuImageView.svelte';
   import { CodeEditor } from '$lib/components/shared/ui/code-editor';
   import { tooltip } from '$lib/actions/tooltip';
   import { languageForPath } from './languages';
   import {
-    isJavaFile as isJavaFileOf, isJspFile as isJspFileOf,
+    isImageFile, isJavaFile as isJavaFileOf, isJspFile as isJspFileOf,
     isLspFile as isLspFileOf, hasPushedDiagnostics,
     supportsCodeNav, supportsDiagnostics,
   } from './file-kind';
@@ -171,6 +172,15 @@
 
   const activePath = $derived(projectStore.activeFilePath);
   const openPaths = $derived(projectStore.openFilePaths);
+  /**
+   * The open tab is an image, so this area shows a preview instead of an editor.
+   *
+   * Checked here rather than deeper down because it changes what the whole area *is*: there is no
+   * document, so the toolbar's actions, the breadcrumb, the diagnostics badge and the Ln/Col footer
+   * all have nothing to say. A `CodeEditor` mounted on an image would be an empty buffer whose
+   * every keystroke is an edit to a file that has no text.
+   */
+  const isImageTab = $derived(isImageFile(activePath));
 
   // Per-tab cursor + scroll, so switching away and back restores where you left off.
   // The editor remounts on tab switch ({#key activePath}); it emits `onViewState` while
@@ -2416,7 +2426,11 @@
     </div>
 
     <!-- The editor toolbar: breadcrumb (left) + file-type-specific actions (right). This is
-         THE per-file action bar — new file-type tools slot into `.ed-actions`. -->
+         THE per-file action bar — new file-type tools slot into `.ed-actions`.
+         Skipped for an image, which brings its own bar: every action here is about a document
+         (go to line, reformat, the breadcrumb's symbol path) and a second row repeating the file
+         name above a preview is just two toolbars. -->
+    {#if !isImageTab}
     <div class="ed-toolbar">
       <div class="ed-crumbs">
         {#if isValidationFile}<ShieldCheck size={12} class="crumb-icon" />{/if}
@@ -2527,6 +2541,7 @@
         </IconButton>
       </div>
     </div>
+    {/if}
   {/if}
 
   <!-- Decompiled dependency with no attached sources: offer a one-click "Download sources" fetch. -->
@@ -2545,7 +2560,11 @@
     </div>
   {/if}
 
-  {#if activePath}
+  {#if activePath && isImageTab}
+    <!-- An image has no buffer to edit, so it gets its own view rather than an editor with an
+         empty document in it. The tab strip, the tree selection and Ctrl+W all behave the same. -->
+    <BennuImageView path={activePath} />
+  {:else if activePath}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="ed-editor-wrap" oncontextmenu={onEditorContextMenu}>
       {#key activePath}
@@ -2604,7 +2623,7 @@
     </div>
   {/if}
 
-  {#if activePath}
+  {#if activePath && !isImageTab}
     <div class="ed-footer">
       <span class="ed-pos"><MapPin size={11} /> Ln {caretLine}, Col {caretCol}</span>
       <span class="ed-foot-sep">·</span>

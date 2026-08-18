@@ -31,6 +31,9 @@ import {
 // Splicing byte-offset edits into a source string — shared with the rename-preview apply, which is
 // where it started.
 import { applyByteEdits } from '$lib/components/bennu/rename-apply';
+// Which files open as a preview instead of as text — the shared list, so the explorer, the markdown
+// editor and this store cannot disagree about what an image is.
+import { isImageFile } from '$lib/utils/image-files';
 // Live re-index — kept in its own IPC file to avoid racing edits on index.ts.
 import { didChange as ipcDidChange } from '$lib/ipc/bennu/nav';
 // The Problems store — a save triggers a silent cross-file re-validation that refreshes it.
@@ -49,9 +52,14 @@ import { DEMO_PROJECT, DEMO_TREE, DEMO_ROOT, isDemoPath, demoReadFile } from './
 
 /** Extensions Bennu refuses to open in the text editor: opening a large binary would
  *  make `bennu_read_file` (UTF-8 decode) choke — a `.xcf` once froze the window. The
- *  guard is by extension (cheap, no read); a proper binary preview is a later wave. */
+ *  guard is by extension (cheap, no read).
+ *
+ *  **Images are not in this set** — they open as a preview instead (see {@link isImageFile} and
+ *  `BennuImageView`). What makes that safe is that they never enter the source cache at all: no
+ *  text is read for them, so nothing downstream can mistake one for an empty buffer and write it
+ *  back. `saveText` refuses them outright as the second line of that defence. */
 const BINARY_EXTENSIONS = new Set([
-  'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svgz', 'xcf', 'psd', 'ai',
+  'svgz', 'xcf', 'psd', 'ai',
   'pdf', 'zip', 'jar', 'war', 'ear', 'class', 'exe', 'dll', 'so', 'dylib', 'bin',
   'o', 'obj', 'a', 'lib', '7z', 'gz', 'bz2', 'xz', 'tar', 'rar', 'iso', 'dmg',
   'mp3', 'mp4', 'm4a', 'wav', 'flac', 'ogg', 'avi', 'mov', 'mkv', 'webm',
@@ -341,6 +349,13 @@ function createProjectStore() {
       toastStore.show(`Can't open ${path.split(/[\\/]/).pop()} — binary file`, 'info');
       return;
     }
+    // An image gets a tab but no buffer: the preview reads the file itself, through the asset
+    // protocol, so nothing decodes megabytes of PNG as UTF-8 on the way to a text editor.
+    if (isImageFile(path)) {
+      activeFilePath = path;
+      if (!openFilePaths.includes(path)) openFilePaths = [...openFilePaths, path];
+      return;
+    }
     await ensureLoaded(path);
     activeFilePath = path;
     if (!openFilePaths.includes(path)) openFilePaths = [...openFilePaths, path];
@@ -461,6 +476,10 @@ function createProjectStore() {
    * (the package move) must not proceed on `false`.
    */
   async function saveText(path: string, text: string, force = false): Promise<boolean> {
+    // An image has no buffer, so anything asking to write one is asking to overwrite the file with
+    // an empty string. Refused here rather than trusted not to happen: a stray Ctrl+S on a preview
+    // tab would otherwise be silent data loss.
+    if (isImageFile(path)) return false;
     sources.set(path, text);
     if (isDemoPath(path)) {
       // MOCK — no disk behind a demo file; treat it as saved so the tab goes clean.

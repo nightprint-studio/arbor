@@ -304,13 +304,10 @@ fn from_long_form(
     dep
 }
 
-/// Apply one spec key to a dependency. Unknown keys are ignored — the validator reports them, and
-/// a reader that refused them would make a typo cost the whole row.
-fn apply_spec_key(dep: &mut DeclaredDep, key: &str, raw_value: &str) {
-    apply_spec_key_at(dep, key, raw_value, 0, 0);
-}
-
-/// [`apply_spec_key`], plus where the value is.
+/// Apply one spec key to a dependency, and record **where its value is**.
+///
+/// Unknown keys are ignored — the validator reports them, and a reader that refused them would make
+/// a typo cost the whole row.
 ///
 /// The span is only kept for `version`, because that is the only spec key anything rewrites. Passing
 /// `0, 0` means "the position is unknown", which reads as "not actionable" downstream.

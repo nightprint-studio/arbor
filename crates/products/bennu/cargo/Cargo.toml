@@ -24,6 +24,9 @@ serde_json = { workspace = true }
 # shapes ARE the contract, and every other analysis crate here (bennu-check, bennu-intel,
 # bennu-complete) reaches for them the same way.
 bennu-proto = { path = "../proto" }
+# The span-aware TOML reader. Extracted the day a second consumer appeared: it records where every
+# table and key IS and knows nothing about what any of them mean, so it was never Cargo's.
+bennu-toml  = { path = "../toml" }
 # `user_home()` — the offline crate/version catalogue is read out of `$CARGO_HOME`, which
 # defaults to `~/.cargo`, and a windowed app's environment does not reliably carry either.
 arbor-core = { path = "../../../foundation/core" }

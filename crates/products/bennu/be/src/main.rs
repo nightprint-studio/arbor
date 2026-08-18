@@ -252,6 +252,10 @@ mod tomcat;
 // per-class results as Surefire writes its reports). Shares the build's single-run lock —
 // two Maven processes on one tree fight over `target/`.
 mod tests;
+// The same three verbs for a Cargo workspace: `bennu_discover_cargo_tests` (every `#[test]`, placed
+// in its crate and target) + `bennu_run_cargo_tests`, which reads a live `cargo test` off its two
+// output streams. Stop is still `bennu_cancel_tests` — one registry, one verb.
+mod cargo_tests;
 // What is inside a type (`bennu_type_shape`) — a DTO's fields, an interface's properties, one
 // level per call. Asked by the framework panels when a row names a type worth opening; never by
 // a catalog build, which would resolve hundreds of them to show two.

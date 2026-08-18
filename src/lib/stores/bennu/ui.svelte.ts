@@ -73,6 +73,7 @@ export type BottomPanel =
   | 'librarybeans'
   | 'endpoints'
   | 'messages'
+  | 'labels'
   | 'springconfig'
   | 'springbindings'
   | 'springdocumented'

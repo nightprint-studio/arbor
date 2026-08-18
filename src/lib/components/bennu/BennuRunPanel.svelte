@@ -61,7 +61,7 @@
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore, formatMs } from '$lib/stores/bennu/run.svelte';
   import { bennuDebugStore } from '$lib/stores/bennu/debug.svelte';
-  import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
+  import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
   import BennuDebugControls from './BennuDebugControls.svelte';
   import BennuDebugFrames from './BennuDebugFrames.svelte';
   import BennuDebugValues from './BennuDebugValues.svelte';
@@ -77,6 +77,10 @@
    *  minted by the backend. */
   const TESTS = 'tests';
 
+  /** The runner for the open project — Maven's or cargo's. One tab either way: it is the same
+   *  activity, and the strip has no business knowing which build system produced it. */
+  const testStore = $derived(activeTestStore());
+
   /**
    * Whether there is a test run to show a tab for.
    *
@@ -84,7 +88,7 @@
    * the project declares is a different question, answered by the Tests tool window, which is
    * always there and is where a run starts.
    */
-  const hasTestRun = $derived(bennuTestStore.running || bennuTestStore.hasResults);
+  const hasTestRun = $derived(testStore.running || testStore.hasResults);
 
   /**
    * Which tab is showing.
@@ -125,10 +129,10 @@
     ...(hasTestRun
       ? [{
           id: TESTS,
-          label: bennuTestStore.label || 'Tests',
+          label: testStore.label || 'Tests',
           title: 'The test run',
           closable: true,
-          icon: bennuTestStore.running ? Play : JUnitIcon,
+          icon: testStore.running ? Play : JUnitIcon,
           iconSize: 11,
         }]
       : []),
@@ -153,7 +157,7 @@
    *  live process — the store refuses that, and Stop is right there. */
   function closeTab(id: string) {
     if (id === TESTS) {
-      bennuTestStore.clear();
+      testStore.clear();
       bennuUiStore.showRunTab(null);
       return;
     }
@@ -179,7 +183,7 @@
    *  keyed on the label, because rerunning the same suite twice is two launches. */
   let testsWereRunning = false;
   $effect(() => {
-    const now = bennuTestStore.running;
+    const now = testStore.running;
     if (now && !testsWereRunning) bennuUiStore.showRunTab(TESTS);
     testsWereRunning = now;
   });

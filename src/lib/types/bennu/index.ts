@@ -5,9 +5,11 @@
  * commands live in `$lib/ipc/bennu`.
  */
 
-// The unit-test domain keeps its own file: its shapes come from `bennu-test` rather than
-// `bennu-proto`, and they carry enough of their own reasoning to be worth reading together.
+// The unit-test domains keep their own files: their shapes come from `bennu-test` rather than
+// `bennu-proto`, and they carry enough of their own reasoning to be worth reading together. Two
+// files because the two build systems genuinely model a test differently — see either header.
 export type * from './tests';
+export type * from './cargo-tests';
 
 /** The JDK Bennu resolves classpath sources against (`ProjectInfo.jdk`). */
 export interface JdkInfo {

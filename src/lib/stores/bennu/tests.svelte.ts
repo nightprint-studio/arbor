@@ -34,54 +34,12 @@ import type { RunLogLine } from './run.svelte';
  *  old, much lower cap was paying for a DOM that no longer exists. */
 const MAX_LINES = 10_000;
 
-/** What a row in the tree is showing. `pending` = declared but not run (yet). */
-export type RowStatus = 'passed' | 'failed' | 'error' | 'skipped' | 'running' | 'pending';
-
-/** One row of the test tree — a class, or one of its cases. */
-export interface TestRow {
-  /** Stable key for `{#each}` and for selection. */
-  id: string;
-  kind: 'class' | 'case';
-  /** What the row reads as: the simple class name, or the method name. */
-  label: string;
-  /** The declaring class, fully qualified with dots. */
-  classname: string;
-  /**
-   * The name to hand Surefire when running this row's class (`OrderTest`,
-   * `OuterTest$Inner`). Carried on the row rather than derived from `classname` at the call
-   * site: the two spellings differ for a nested class, and deriving one from the other is
-   * exactly the step that silently runs the wrong thing.
-   */
-  selector: string;
-  /** For a case row, its class row's id — what ← navigates to. */
-  parentId?: string;
-  /** For a case row, the method name as the report wrote it. */
-  method?: string;
-  status: RowStatus;
-  /** Duration in ms; `null` for a row that hasn't run. */
-  timeMs: number | null;
-  flaky: boolean;
-  /** Source location, when discovery knows it — this is what makes a row double-clickable. */
-  file?: string;
-  line?: number;
-  offset?: number;
-  disabled: boolean;
-  disabledReason?: string | null;
-  message?: string | null;
-  /** The exception type of a failure (`java.lang.AssertionError`). */
-  errorKind?: string | null;
-  trace?: string | null;
-  /** Whatever the class printed, hung off the class row. */
-  systemOut?: string | null;
-  children: TestRow[];
-  /** For a class row: how its cases came out. */
-  counts?: { total: number; bad: number; skipped: number };
-}
-
-/** Whether a status should read as a failure. */
-export function isBad(status: RowStatus): boolean {
-  return status === 'failed' || status === 'error';
-}
+// The row shape, the status vocabulary and the duration format are shared with the cargo runner —
+// there is one panel, so there is one row type. Re-exported because six components already import
+// them from this module, and the import path is not what changed.
+import { formatDuration, isBad, type RowStatus, type TestRow } from './test-tree';
+export { formatDuration, isBad, type RowStatus, type TestRow };
+export type { RowKind } from './test-tree';
 
 /**
  * The method name to hand back to Surefire, stripped of anything an invocation added.
@@ -175,7 +133,10 @@ function createBennuTestStore() {
     if (attached) return detach;
     attached = true;
     const add = (f: UnlistenFn) => unlisteners.push(f);
-    const mine = (id: string) => runId === null || id === runId;
+    // The output and exit topics are shared with the cargo runner, whose run ids are prefixed —
+    // so a `cargo-` id is somebody else's run even when we have none of our own in flight.
+    const mine = (id: string) =>
+      !id.startsWith('cargo-') && (runId === null || id === runId);
 
     add(await listen<{
       run_id: string;
@@ -366,6 +327,7 @@ function createBennuTestStore() {
       return {
         id: `${r.classname}#${c.name}#${i}`,
         kind: 'case' as const,
+        depth: 1,
         label: c.name,
         classname: c.classname || r.classname,
         // The report spells a nested class `Outer$Inner`, which IS the selector.
@@ -392,6 +354,7 @@ function createBennuTestStore() {
     return d.methods.map((m) => ({
       id: `${d.fqcn}#${m.name}`,
       kind: 'case' as const,
+      depth: 1,
       label: m.name,
       classname: d.fqcn,
       selector: d.selector,
@@ -440,6 +403,7 @@ function createBennuTestStore() {
       out.push({
         id: name,
         kind: 'class',
+        depth: 0,
         label: decl ? decl.fqcn.slice(decl.package ? decl.package.length + 1 : 0) : shortName(name),
         classname: name,
         // Discovery knows the exact spelling; without it, the last dotted segment is the
@@ -515,6 +479,16 @@ function createBennuTestStore() {
     /** Whether "rerun failed" has anything to do. */
     get hasFailures() { return failedCount() > 0; },
 
+    /** Every class row that is open — the inverse of `collapsed`, which is what the tree widget
+     *  wants. Only classes fold; a case has no children. */
+    get expandedIds() {
+      const out = new Set<string>();
+      for (const c of rows) {
+        if (c.children.length && !collapsed.has(c.id)) out.add(c.id);
+      }
+      return out;
+    },
+
     isCollapsed(id: string) { return collapsed.has(id); },
     toggleCollapsed(id: string) {
       if (collapsed.has(id)) collapsed.delete(id);
@@ -532,6 +506,15 @@ function createBennuTestStore() {
     run,
     stop,
 
+    /** Run whatever a row stands for — the panel's one verb, so it never has to know that a
+     *  Maven class is addressed by a selector name. */
+    runRow(root: string, row: TestRow) {
+      const selector = row.selector ?? '';
+      if (!selector) return Promise.resolve();
+      return row.kind === 'case'
+        ? run(root, { kind: 'cases', cases: [{ class: selector, method: baseMethodName(row.method ?? row.label) }] })
+        : run(root, { kind: 'classes', classes: [selector] });
+    },
     /** Every test in the project. */
     runAll(root: string) { return run(root, { kind: 'all' }); },
     /** Every test in one class (by its Surefire selector name). */
@@ -606,15 +589,6 @@ function createBennuTestStore() {
       stopTicker();
     },
   };
-}
-
-/** `1.2s` / `340ms` / `1m 05s` — the same reading the Build panel uses. */
-export function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(1)}s`;
-  const m = Math.floor(s / 60);
-  return `${m}m ${String(Math.round(s % 60)).padStart(2, '0')}s`;
 }
 
 /** The last segment of a dotted name. */

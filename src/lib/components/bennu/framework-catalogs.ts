@@ -21,6 +21,7 @@ import type { ExtEntry, ExtStat } from '$lib/ipc/bennu/ext';
 
 /** Bottom-dock ids for the framework catalogs. */
 export type FrameworkCatalogId =
+  | 'labels'
   | 'beans'
   | 'librarybeans'
   | 'endpoints'
@@ -109,6 +110,25 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
       { id: 'none', label: 'No grouping' },
     ],
     columns: { primary: 'key', secondary: 'text' },
+  },
+  {
+    // The fulcrum engine's i18n: a `.ron` content file names a LABEL, not a string, and the strings
+    // live in `i18n/<lang>/<category>.toml`. `unused`, `missing <lang>` and the usage rows under a
+    // label are what you cannot see any other way — a mistyped label is invisible to the compiler
+    // and the engine renders the label itself on screen when it cannot resolve one.
+    id: 'labels',
+    kind: 'fulcrum.i18n.labels',
+    title: 'Labels',
+    command: 'i18n labels',
+    icon: 'languages',
+    placeholder: 'Filter by label, text or category…',
+    empty: 'No i18n labels found — this project has no i18n/languages.toml.',
+    groups: [
+      { id: 'kind', label: 'Group by category' },
+      { id: 'namespace', label: 'Group by key prefix' },
+      { id: 'none', label: 'No grouping' },
+    ],
+    columns: { primary: 'label', secondary: 'text' },
   },
   {
     id: 'beans',
@@ -384,9 +404,11 @@ export function kindClass(kind: string): string {
     case 'redirect':
     case 'redirectAction':
       return 'k-put';
-    // A message key's translations.
+    // A message key's translations, and — under a fulcrum label — the places that read it.
     case 'locale':
       return 'k-service';
+    case 'use':
+      return 'k-get';
     default:
       return 'k-neutral';
   }

@@ -75,6 +75,9 @@ members = [
     "crates/products/bennu/jsp-grammar",
     "crates/products/bennu/jsp",
     "crates/products/bennu/i18n",
+    # The fulcrum engine's conventions, one crate per subsystem. Each registers itself with the
+    # framework-extension seam under a namespaced id, so a sibling is a new crate plus one line.
+    "crates/products/bennu/fulcrum/i18n",
     "crates/products/bennu/web",
     "crates/products/bennu/spel",
     "crates/products/bennu/facts",
@@ -89,6 +92,10 @@ members = [
     # What a Cargo workspace IS, read off its manifests: the crate graph, the manifest
     # schema behind Cargo.toml validation + completion, and the cargo command catalogue.
     "crates/products/bennu/cargo",
+    # TOML read with positions — every table and key with the byte offsets of its value. Its own
+    # crate because it owns no schema: `bennu-cargo` reads a manifest with it, the fulcrum i18n
+    # extension reads a message bundle.
+    "crates/products/bennu/toml",
     "crates/products/bennu/query",
     # The LSP client — the impl of bennu-intel's predisposed slot. A leaf: serde plus
     # two workspace-internal crates, so it can be split out unchanged.

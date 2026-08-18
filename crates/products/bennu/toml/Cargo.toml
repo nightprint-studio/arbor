@@ -1,0 +1,11 @@
+[package]
+name         = "bennu-toml"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "A span-aware TOML reader: every table and every key with the byte offsets of its value. Tolerant by construction — a file mid-keystroke yields less information, never an error. Reads text; owns no schema."
+
+# No dependencies, and that is the point: this is a scanner over a string.
+[dependencies]

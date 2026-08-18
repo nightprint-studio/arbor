@@ -54,6 +54,8 @@
   import BennuMavenPanel from './BennuMavenPanel.svelte';
   import BennuCargoPanel from './BennuCargoPanel.svelte';
   import BennuTestsCatalogPanel from './BennuTestsCatalogPanel.svelte';
+  import BennuCargoTestsPanel from './BennuCargoTestsPanel.svelte';
+  import RustTestIcon from './RustTestIcon.svelte';
   import SyntaxTreePanel from '$lib/components/shared/internal/SyntaxTreePanel.svelte';
   import { bennuAstStore } from '$lib/stores/bennu/ast.svelte';
   import MavenIcon from './MavenIcon.svelte';
@@ -103,6 +105,8 @@
   // frame in a dependency lands in its source view rather than nowhere.
   import { openLogLink } from './log-link';
   import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
+  import { bennuCargoTestStore } from '$lib/stores/bennu/cargo-tests.svelte';
+  import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
@@ -118,6 +122,7 @@
   import { availableCatalogs } from './framework-catalogs';
   import { hotswapJsp } from '$lib/ipc/bennu/tomcat';
   import { discoverTests } from '$lib/ipc/bennu/tests';
+  import { discoverCargoTests } from '$lib/ipc/bennu/cargo-tests';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 
   onMount(() => {
@@ -165,10 +170,12 @@
     let detachSpell: (() => void) | undefined;
     let detachDecompiled: (() => void) | undefined;
     let detachTests: (() => void) | undefined;
+    let detachCargoTests: (() => void) | undefined;
     let detachDebug: (() => void) | undefined;
     let detachLsp: (() => void) | undefined;
     void bennuRunStore.attach().then((d) => { detachRun = d; });
     void bennuTestStore.attach().then((d) => { detachTests = d; });
+    void bennuCargoTestStore.attach().then((d) => { detachCargoTests = d; });
     // The debugger's three streams: where the session is, where the program stopped, and what
     // the VM made of each breakpoint.
     void bennuDebugStore.attach().then((d) => { detachDebug = d; });
@@ -189,6 +196,7 @@
       window.removeEventListener('blur', stopPolling);
       stopPolling();
       detachRun?.(); detachIndex?.(); detachSpell?.(); detachDecompiled?.(); detachTests?.();
+      detachCargoTests?.();
       detachDebug?.(); detachLsp?.();
       bennuIndexStore.reset();
     };
@@ -262,6 +270,7 @@
       // The test tree and its results belong to the project that produced them. Carrying
       // them into the next one would show green rows for classes this project doesn't have.
       untrack(() => bennuTestStore.reset());
+      untrack(() => bennuCargoTestStore.reset());
     }
   });
 
@@ -343,7 +352,35 @@
   /** Run every test in the project (Ctrl+Shift+F5 / palette). */
   function triggerRunAllTests() {
     const root = projectStore.project?.root;
-    if (root) void bennuTestStore.runAll(root);
+    if (root) void activeTestStore().runAll(root);
+  }
+
+  /**
+   * Run the Rust test at the caret.
+   *
+   * The same rule as the Java path — the last declaration at or above the caret — with cargo's
+   * extra fact: an `#[rstest]` produces several libtest cases named after it, so it is asked for
+   * by prefix rather than exactly (`caseRefOf` decides). With the caret above every test, the
+   * whole file's target runs, which is the nearest thing cargo can express to "this file".
+   */
+  async function runRustTestAtCaret(root: string, file: string, line: number) {
+    const tests = await discoverCargoTests(root, { file }).catch(() => []);
+    if (!tests.length) {
+      toastStore.show('This file declares no tests', 'info');
+      return;
+    }
+    const owner = tests.filter((t) => t.line <= line).sort((a, b) => a.line - b.line).pop();
+    if (owner) {
+      void bennuCargoTestStore.runCases(root, [bennuCargoTestStore.caseRefOf(owner)]);
+      return;
+    }
+    // Above the first test: run the target the file belongs to.
+    const first = tests[0];
+    void bennuCargoTestStore.run(root, {
+      kind: 'target',
+      package: first.package,
+      target: first.target,
+    });
   }
 
   /**
@@ -361,6 +398,10 @@
     const file = projectStore.activeFilePath;
     if (!root || !file) return;
     const line = editor?.getCaretLine() ?? 1;
+    if (projectStore.isCargo) {
+      await runRustTestAtCaret(root, file, line);
+      return;
+    }
     const classes = await discoverTests(root, { file }).catch(() => []);
     // A file may declare several test classes (a nested `@Nested`, a helper beside the main
     // one); the one that owns the caret is the last one that starts at or above it.
@@ -383,10 +424,13 @@
 
   /** Whether the active file declares any test — gates the caret-run verb + its shortcut, so
    *  the key is silent on a file where it could only ever say "nothing here". */
-  const activeFileHasTests = $derived(
-    !!projectStore.activeFilePath &&
-      bennuTestStore.classesInFile(projectStore.activeFilePath).length > 0,
-  );
+  const activeFileHasTests = $derived.by(() => {
+    const file = projectStore.activeFilePath;
+    if (!file) return false;
+    return projectStore.isCargo
+      ? bennuCargoTestStore.testsInFile(file).length > 0
+      : bennuTestStore.classesInFile(file).length > 0;
+  });
 
   let editor = $state<{
     openGoto: () => void;
@@ -508,7 +552,10 @@
   //
   // This is also why "does any extension apply" is not the gate it once was: XML applies to every
   // project, so that question has answered yes for everything since the XML extension landed.
-  const catalogs = $derived(javaTools ? availableCatalogs(springStore.stats) : []);
+  // Not gated on `javaTools`: which catalogs a project gets is decided by what the extensions
+  // actually found (`availableCatalogs` filters on the counts), and gating on the ecosystem was
+  // what hid the fulcrum i18n one on the projects that have it.
+  const catalogs = $derived(availableCatalogs(springStore.stats));
   const catalogIds = $derived(catalogs.map((c) => c.id));
   // Every JPA generator writes into an existing entity or repository, so the verbs are worth
   // offering exactly when the project has some.
@@ -526,11 +573,15 @@
     // backend stops answering anything at all. The log for it reads as unanswered calls piling
     // up across every unrelated domain, which is what makes it hard to attribute.
     const busyIndexing = bennuIndexStore.indexing;
-    if (!root || projectStore.isDemo || projectStore.isCargo) {
+    if (!root || projectStore.isDemo) {
       springStore.reset();
       return;
     }
-    if (busyIndexing) return;
+    // A Cargo root asks too, and does not wait: the framework seam is no longer Java's alone — the
+    // fulcrum i18n extension applies to a project whose only Java is none — and there is no Java
+    // semantic index building on one, so there is nothing to race. A project the extensions all
+    // decline costs one capability check and no walk at all.
+    if (!projectStore.isCargo && busyIndexing) return;
     void springStore.loadOverview(root, true);
   });
 
@@ -540,14 +591,18 @@
    * At the window level rather than inside the Tests panel, because the tree's "Run tests
    * in…" entry has to know whether a folder contains any *before* it is clicked — and the
    * panel may never have been opened. Deferred until indexing stops for the same reason the
-   * framework overview is: the walk parses every `.java` in the tree, and racing it against
+   * framework overview is: the walk parses every source file in the tree, and racing it against
    * the indexer buys nothing.
+   *
+   * A Cargo workspace does discover too, and does not wait: the Java semantic index is not
+   * building on one, so there is nothing to race.
    */
   $effect(() => {
     const root = projectStore.project?.root ?? null;
+    const cargo = projectStore.isCargo;
     const busyIndexing = bennuIndexStore.indexing;
-    if (!root || projectStore.isDemo || projectStore.isCargo || busyIndexing) return;
-    void bennuTestStore.discover(root);
+    if (!root || projectStore.isDemo || (!cargo && busyIndexing)) return;
+    void activeTestStore().discover(root);
   });
 
   /**
@@ -631,12 +686,19 @@
   );
   const rightTop = $derived<ActivityRailItem[]>([
     buildToolRail,
+    // The CATALOGUE of tests, not the runs — those are tabs of the Run console. Present on both
+    // ecosystems: a Cargo workspace enumerates its `#[test]`s exactly as a Maven project does, and
+    // the panel behind this button is the per-ecosystem one.
+    {
+      id: 'tests',
+      tooltip: 'Tests',
+      shortcut: 'Alt+5',
+      icon: projectStore.isCargo ? RustTestIcon : JUnitIcon,
+      active: bennuUiStore.rightPanel === 'tests',
+      onclick: () => bennuUiStore.toggleRight('tests'),
+    },
     ...(javaTools
       ? [
-          // The CATALOGUE of tests, not the runs — those are tabs of the Run console. Its own
-          // brand mark for the same reason Maven has one: this button names a product. Java-only:
-          // `cargo test` is a command on the Cargo panel, not a catalogue Bennu can enumerate.
-          { id: 'tests', tooltip: 'Tests', shortcut: 'Alt+5', icon: JUnitIcon, active: bennuUiStore.rightPanel === 'tests', onclick: () => bennuUiStore.toggleRight('tests') },
           // The parse, and the model Bennu derives from it. Both views are about Bennu's OWN
           // engines — the tree-sitter grammars are Java and JSP, and the model is Java's — so on a
           // Cargo root the panel can only ever say "no grammar for Rust". It used to be offered
@@ -909,8 +971,10 @@
     ];
     const idle = !!projectStore.project && !bennuRunStore.active;
     // A test run shares the backend's single-run lock with the build, so a test verb offered
-    // while either is in flight would only be refused.
-    const testsIdle = idle && javaTools && !bennuTestStore.running;
+    // while either is in flight would only be refused. Not gated on `javaTools` any more: a Cargo
+    // project has a runner of its own, and gating on the ecosystem was what hid all of it.
+    const testStore = activeTestStore();
+    const testsIdle = idle && !testStore.running;
     const runItems = [
       { id: 'build', title: javaTools ? 'Build project' : 'Check project (cargo check)', icon: 'hammer', shortcut: 'Ctrl+F9',
         action: () => run(triggerBuild), when: idle },
@@ -979,11 +1043,11 @@
       { id: 'test-caret', title: 'Run test at caret', icon: 'play', shortcut: 'Ctrl+Shift+F10',
         action: () => run(() => void triggerRunTestAtCaret()), when: testsIdle && activeFileHasTests },
       { id: 'test-rerun', title: 'Rerun tests', icon: 'refresh-cw', shortcut: 'Ctrl+F5',
-        action: () => run(() => void bennuTestStore.rerun()), when: testsIdle && bennuTestStore.hasResults },
+        action: () => run(() => void testStore.rerun()), when: testsIdle && testStore.hasResults },
       { id: 'test-rerun-failed', title: 'Rerun failed tests', icon: 'rerun',
-        action: () => run(() => void bennuTestStore.rerunFailed()), when: testsIdle && bennuTestStore.hasFailures },
+        action: () => run(() => void testStore.rerunFailed()), when: testsIdle && testStore.hasFailures },
       { id: 'test-stop', title: 'Stop the test run', icon: 'hammer',
-        action: () => run(() => void bennuTestStore.stop()), when: bennuTestStore.running },
+        action: () => run(() => void testStore.stop()), when: testStore.running },
       { id: 'hotswap-all', title: 'Deploy all JSPs to Tomcat', icon: 'server',
         action: () => run(() => void deployToTomcat(true)), when: !!projectStore.project && javaTools },
     ];
@@ -1136,23 +1200,26 @@
      * stays silent rather than picking one of the two at random.
      */
     if (mod && e.shiftKey && !e.altKey && e.key === 'F10') {
-      if (!projectStore.project || !javaTools) return;
-      if (isJspFile(projectStore.activeFilePath)) {
+      if (!projectStore.project) return;
+      if (javaTools && isJspFile(projectStore.activeFilePath)) {
         e.preventDefault(); void deployToTomcat(false); return;
       }
-      if (activeFileHasTests && !bennuTestStore.running && !bennuRunStore.active) {
+      if (activeFileHasTests && !activeTestStore().running && !bennuRunStore.active) {
         e.preventDefault(); void triggerRunTestAtCaret(); return;
       }
+      // A Cargo project has no deploy to fall back on: the key means the test at the caret, and
+      // on a file with none it stays silent rather than doing something else.
+      if (!javaTools) return;
       // A Java file with no tests: keep the historical behaviour (deploy) so the key still
       // does its old job everywhere it used to.
       e.preventDefault(); void deployToTomcat(false); return;
     }
     // Rerun the last test run (Ctrl+F5) / run them all (Ctrl+Shift+F5) — IntelliJ's Rerun.
     if (mod && !e.altKey && e.key === 'F5') {
-      if (!projectStore.project || !javaTools || bennuTestStore.running || bennuRunStore.active) return;
+      if (!projectStore.project || activeTestStore().running || bennuRunStore.active) return;
       e.preventDefault();
       if (e.shiftKey) triggerRunAllTests();
-      else void bennuTestStore.rerun();
+      else void activeTestStore().rerun();
       return;
     }
 
@@ -1342,7 +1409,11 @@
           <PanelCard orientation="right" initialSize={280} minSize={200} maxSize={520}>
             {#if bennuUiStore.rightPanel === 'maven'}<BennuMavenPanel />{/if}
             {#if bennuUiStore.rightPanel === 'cargo'}<BennuCargoPanel />{/if}
-            {#if bennuUiStore.rightPanel === 'tests'}<BennuTestsCatalogPanel />{/if}
+            <!-- The catalogue is per-ecosystem: a Rust test is identified by crate + target +
+                 module + name, which is four levels the Java panel has no columns for. -->
+            {#if bennuUiStore.rightPanel === 'tests'}
+              {#if projectStore.isCargo}<BennuCargoTestsPanel />{:else}<BennuTestsCatalogPanel />{/if}
+            {/if}
             {#if bennuUiStore.rightPanel === 'ast'}
               <SyntaxTreePanel
                 title="Trees"

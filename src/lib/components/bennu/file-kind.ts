@@ -14,6 +14,7 @@
  */
 
 import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
+import { isImageFile } from '$lib/utils/image-files';
 import { isCargoManifest } from './cargo-toml-lang';
 
 /** Lower-cased extension of `path` (without the dot), or '' when there is none. */
@@ -59,6 +60,14 @@ export function isRustFile(path: string | null | undefined): boolean {
 export function isLspFile(path: string | null | undefined): boolean {
   return bennuLspStore.servesFile(path);
 }
+
+/**
+ * An image — opened as a **preview** rather than refused as binary.
+ *
+ * Re-exported from the shared list rather than spelled out again here: the set is not Bennu's, and
+ * it had already been written three times in the app before the list existed.
+ */
+export { isImageFile };
 
 /** A geode `.dig` mole script. Highlighted, folded, and completed from its (closed)
  *  vocabulary — but its navigation is a later story, so not in {@link supportsCodeNav}. */

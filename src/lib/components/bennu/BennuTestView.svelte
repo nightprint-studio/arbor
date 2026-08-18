@@ -21,8 +21,9 @@
    * Data and lifecycle live in {@link bennuTestStore}; this is presentation plus the keyboard
    * map. The header's buttons are {@link BennuTestActions}, its verdict {@link BennuTestSummary}.
    */
-  import { ChevronDown, ChevronRight, Play } from 'lucide-svelte';
+  import { Play } from 'lucide-svelte';
   import ResizablePanel from '$lib/components/shared/ui/ResizablePanel.svelte';
+  import Tree, { type RowSnippetCtx } from '$lib/components/shared/ui/Tree.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import BennuConsole from './BennuConsole.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
@@ -30,11 +31,13 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
-  import {
-    bennuTestStore, formatDuration, baseMethodName, type TestRow,
-  } from '$lib/stores/bennu/tests.svelte';
+  import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
+  import { formatDuration, type TestRow } from '$lib/stores/bennu/test-tree';
 
-  const store = bennuTestStore;
+  /** The runner for the open project — Maven's or cargo's. This view never learns which: a row
+   *  runs itself (`runRow`), because what a row means is the runner's business and this one draws
+   *  a two-level Java tree and a four-level Rust one from the same rows. */
+  const store = $derived(activeTestStore());
   const root = $derived(projectStore.project?.root ?? '');
   const rows = $derived(store.flatRows);
   const selected = $derived(store.selected);
@@ -47,12 +50,21 @@
 
   // ── running things ─────────────────────────────────────────────────────────
 
-  /** Run whatever a row stands for: a whole class, or one method. The row carries its own
-   *  Surefire selector, so nothing here has to re-derive one. */
+  /** Run whatever a row stands for — a crate, a target, a module, a class, one test. */
   function runRow(row: TestRow) {
     if (!root) return;
-    if (row.kind === 'class') void store.runClass(root, row.selector);
-    else void store.runCase(root, row.selector, baseMethodName(row.method ?? row.label));
+    void store.runRow(root, row);
+  }
+
+  /** What ▷ on this row would run, in words. */
+  function runTip(row: TestRow): string {
+    switch (row.kind) {
+      case 'crate':  return 'Run every test in this crate';
+      case 'target': return 'Run this target';
+      case 'module': return 'Run this module';
+      case 'class':  return 'Run this class';
+      default:       return 'Run this test';
+    }
   }
 
   /** Open a row's declaration. Only rows discovery could place are openable — a
@@ -67,51 +79,18 @@
 
   // ── keyboard ───────────────────────────────────────────────────────────────
 
-  let treeEl = $state<HTMLDivElement | null>(null);
-
-  function move(delta: number) {
-    if (!rows.length) return;
-    const at = rows.findIndex((r) => r.id === store.selectedId);
-    const next = at === -1 ? 0 : Math.max(0, Math.min(rows.length - 1, at + delta));
-    store.select(rows[next].id);
-    queueMicrotask(() => {
-      treeEl?.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'nearest' });
-    });
-  }
-
   /**
-   * The tree's keyboard map, IntelliJ's: arrows navigate and fold, Enter goes to the source,
-   * Ctrl+Enter runs what is under the cursor. Every one of those is otherwise a double-click
-   * or a context menu, and this view is where a keyboard-first session spends its time.
+   * Ctrl/Cmd+Enter runs the row under the cursor.
+   *
+   * The only key this view binds: the shared Tree owns ↑↓←→, Home/End, Enter and Space, which is
+   * the whole of IntelliJ's tree map — and it also **virtualises**, which is why the rows are no
+   * longer walked by hand here. A 2 000-test workspace was 2 000 DOM rows rebuilt on every result;
+   * the widget mounts what fits on screen plus a margin.
    */
-  function onTreeKey(e: KeyboardEvent) {
-    const row = selected;
-    switch (e.key) {
-      case 'ArrowDown': e.preventDefault(); move(1); return;
-      case 'ArrowUp':   e.preventDefault(); move(-1); return;
-      case 'ArrowRight':
-        if (row?.kind === 'class' && store.isCollapsed(row.id)) {
-          e.preventDefault(); store.toggleCollapsed(row.id);
-        } else if (row?.kind === 'class' && row.children.length) {
-          e.preventDefault(); move(1);
-        }
-        return;
-      case 'ArrowLeft':
-        if (row?.kind === 'class' && !store.isCollapsed(row.id)) {
-          e.preventDefault(); store.toggleCollapsed(row.id);
-        } else if (row?.kind === 'case' && row.parentId) {
-          e.preventDefault(); store.select(row.parentId);
-        }
-        return;
-      case 'Enter':
-        if (!row) return;
-        e.preventDefault();
-        if (e.ctrlKey || e.metaKey) runRow(row);
-        else openRow(row);
-        return;
-      case 'Home': e.preventDefault(); if (rows.length) store.select(rows[0].id); return;
-      case 'End':  e.preventDefault(); if (rows.length) store.select(rows[rows.length - 1].id); return;
-    }
+  function onRowKey(row: TestRow, e: KeyboardEvent) {
+    if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    runRow(row);
   }
 
   // Discovery is kicked off at the window level (the project tree's context menu needs it before
@@ -121,14 +100,7 @@
 
 <div class="tp-body">
   <ResizablePanel direction="horizontal" initialSize={380} minSize={240} maxSize={760}>
-    <div
-      class="tp-tree"
-      bind:this={treeEl}
-      role="tree"
-      aria-label="Tests"
-      tabindex="0"
-      onkeydown={onTreeKey}
-    >
+    <div class="tp-tree">
       {#if store.discovering && !rows.length}
         <div class="tp-mid"><Spinner size={16} /><span>Looking for tests…</span></div>
       {:else if !rows.length}
@@ -142,70 +114,53 @@
           />
         </div>
       {:else}
-        {#each rows as row (row.id)}
-          {@const open = !store.isCollapsed(row.id)}
-          <div
-            class="tr tr-{row.kind}"
-            class:tr-selected={store.selectedId === row.id}
-            class:tr-dim={row.status === 'pending' || row.disabled}
-            data-selected={store.selectedId === row.id}
-            role="treeitem"
-            aria-selected={store.selectedId === row.id}
-            aria-expanded={row.kind === 'class' ? open : undefined}
-            tabindex="-1"
-            onclick={() => store.select(row.id)}
-            ondblclick={() => openRow(row)}
-            onkeydown={(e) => {
-              // The tree container owns the arrows; a row only ever sees a key when a
-              // click has focused it, and then Enter should do what a double-click does.
-              if (e.key !== 'Enter' && e.key !== ' ') return;
-              e.preventDefault();
-              store.select(row.id);
-              if (e.ctrlKey || e.metaKey) runRow(row);
-              else openRow(row);
-            }}
-          >
-            {#if row.kind === 'class'}
-              <button
-                class="tr-twisty"
-                type="button"
-                tabindex="-1"
-                aria-label={open ? 'Collapse' : 'Expand'}
-                onclick={(e) => { e.stopPropagation(); store.toggleCollapsed(row.id); }}
-              >
-                {#if row.children.length}
-                  {#if open}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}
-                {/if}
-              </button>
-            {:else}
-              <span class="tr-indent"></span>
-            {/if}
+        <Tree
+          nodes={store.rows}
+          expandedIds={store.expandedIds}
+          onExpandToggle={(id) => store.toggleCollapsed(id)}
+          selectedId={store.selectedId}
+          onSelect={(node) => store.select(node.id)}
+          onActivate={openRow}
+          onRowKeydown={onRowKey}
+          rowTitle={(node) => node.classname}
+          toggleOnClick={false}
+          rowHeight={22}
+          ariaLabel="Tests"
+        >
+          {#snippet row({ node }: RowSnippetCtx<TestRow>)}
+            <BennuTestStatusIcon status={node.status} />
+            <!-- The kind class lives on the label rather than on the widget's row wrapper, so the
+                 typography rules stay scoped to this component instead of reaching in globally. -->
+            <span
+              class="tr-label tl-{node.kind}"
+              class:tl-dim={node.status === 'pending' || node.disabled}
+            >{node.label}</span>
 
-            <BennuTestStatusIcon status={row.status} />
-            <span class="tr-label">{row.label}</span>
-
-            {#if row.flaky}<span class="tr-tag tag-flaky" use:tooltip={'Failed, then passed on a rerun'}>flaky</span>{/if}
-            {#if row.disabled}
-              <span class="tr-tag tag-off" use:tooltip={row.disabledReason ?? 'Disabled'}>disabled</span>
+            {#if node.flaky}
+              <span class="tr-tag tag-flaky" use:tooltip={'Failed, then passed on a rerun'}>flaky</span>
             {/if}
-            {#if row.counts && row.counts.bad > 0}
-              <span class="tr-tag tag-bad">{row.counts.bad}</span>
+            {#if node.tag}<span class="tr-tag tag-note">{node.tag}</span>{/if}
+            {#if node.disabled}
+              <span class="tr-tag tag-off" use:tooltip={node.disabledReason ?? 'Disabled'}>disabled</span>
             {/if}
-            {#if row.timeMs !== null}<span class="tr-time">{formatDuration(row.timeMs)}</span>{/if}
+            {#if node.counts && node.counts.bad > 0}
+              <span class="tr-tag tag-bad">{node.counts.bad}</span>
+            {/if}
+            {#if node.timeMs !== null}<span class="tr-time">{formatDuration(node.timeMs)}</span>{/if}
 
             <button
               class="tr-run"
               type="button"
               tabindex="-1"
               disabled={store.running || !root}
-              use:tooltip={{ content: row.kind === 'class' ? 'Run this class' : 'Run this test', shortcut: 'Ctrl+Enter' }}
+              use:tooltip={{ content: runTip(node), shortcut: 'Ctrl+Enter' }}
               aria-label="Run"
-              onclick={(e) => { e.stopPropagation(); runRow(row); }}
+              onclick={(e) => { e.stopPropagation(); runRow(node); }}
             >
               <Play size={11} />
             </button>
-          </div>
-        {/each}
+          {/snippet}
+        </Tree>
       {/if}
     </div>
   </ResizablePanel>
@@ -241,30 +196,27 @@
   .tp-body { flex: 1; min-height: 0; display: flex; align-items: stretch; overflow: hidden; }
 
   /* Tree */
-  .tp-tree { height: 100%; overflow: auto; padding: 3px 0; outline: none; }
-  .tp-tree:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+  /* This element IS the scroller, and it has to be: the Tree widget brings no scroller of its own
+     — it walks up for the first scrollable ancestor and measures its virtualisation window against
+     that. Without one here it would find the document, take the whole window as its viewport, and
+     mount all 2 000 rows. */
+  .tp-tree { height: 100%; min-height: 0; overflow: auto; }
   .tp-mid {
     height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 8px; color: var(--text-disabled); font-size: var(--font-size-xs);
   }
 
-  .tr {
-    display: flex; align-items: center; gap: 6px;
-    padding: 2px 8px 2px 4px; min-height: 22px;
-    font-size: var(--font-size-sm); color: var(--text-primary);
-    cursor: default; user-select: none;
-  }
-  .tr:hover { background: var(--bg-hover); }
-  .tr-selected, .tr-selected:hover { background: var(--accent-subtle); }
-  /* Not-run rows recede so the results stand out against them. */
-  .tr-dim .tr-label { color: var(--text-muted); }
-  .tr-case { padding-left: 20px; }
-  .tr-case .tr-label { font-family: var(--font-code); font-size: var(--font-size-xs); }
-
-  .tr-twisty, .tr-indent { width: 14px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-  .tr-twisty { background: none; border: none; padding: 0; color: var(--text-muted); cursor: pointer; }
-  .tr-twisty:hover { color: var(--text-primary); }
+  /* The row wrapper, the chevron and the indentation are the Tree widget's; everything below styles
+     what the row snippet puts inside one. */
   .tr-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Not-run rows recede so the results stand out against them. */
+  .tl-dim { color: var(--text-muted); }
+  /* A code identifier gets the code font; a container does not. Per KIND and not per depth, because
+     the cargo tree is four levels deep and the Java one is two. */
+  .tl-case, .tl-module { font-family: var(--font-code); font-size: var(--font-size-xs); }
+  /* A crate is the coarsest grouping in a workspace of twenty, so it carries the weight. */
+  .tl-crate { font-weight: 600; }
+  .tl-target { color: var(--text-secondary); }
 
   .tr-tag {
     flex-shrink: 0; padding: 0 5px; border-radius: var(--radius-sm);
@@ -273,6 +225,8 @@
   .tag-flaky { color: var(--warning); background: var(--warning-subtle); }
   .tag-off { color: var(--text-muted); background: var(--bg-overlay); }
   .tag-bad { color: var(--error); background: var(--error-subtle, var(--bg-overlay)); }
+  /* `async`, `bench`, `should panic`, an ignore reason — informational, so it must not shout. */
+  .tag-note { color: var(--text-muted); background: var(--bg-overlay); text-transform: none; font-weight: 500; }
   .tr-time { flex-shrink: 0; font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted); }
 
   /* The per-row run button appears on hover / selection: always-on it would put a column of
@@ -284,7 +238,11 @@
     color: var(--text-muted); cursor: pointer; opacity: 0;
     transition: opacity var(--transition-fast), color var(--transition-fast);
   }
-  .tr:hover .tr-run, .tr-selected .tr-run, .tr-run:focus-visible { opacity: 1; }
+  /* The hover/selected state lives on the widget's row element, so reaching it needs `:global` —
+     written as one global sequence, which is the only placement Svelte accepts. */
+  :global(.tree-row:hover) .tr-run,
+  :global(.tree-row[aria-selected='true']) .tr-run,
+  .tr-run:focus-visible { opacity: 1; }
   .tr-run:hover:not(:disabled) { color: var(--success); background: var(--bg-hover); }
   .tr-run:disabled { opacity: 0; }
 

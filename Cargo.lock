@@ -879,6 +879,7 @@ dependencies = [
  "bennu-core",
  "bennu-deps",
  "bennu-ext",
+ "bennu-fulcrum-i18n",
  "bennu-i18n",
  "bennu-index",
  "bennu-intel",
@@ -911,6 +912,7 @@ version = "0.3.0"
 dependencies = [
  "arbor-core",
  "bennu-proto",
+ "bennu-toml",
  "serde",
  "serde_json",
 ]
@@ -982,6 +984,16 @@ version = "0.3.0"
 dependencies = [
  "tree-sitter",
  "tree-sitter-java",
+]
+
+[[package]]
+name = "bennu-fulcrum-i18n"
+version = "0.3.0"
+dependencies = [
+ "bennu-ext",
+ "bennu-proto",
+ "bennu-toml",
+ "serde",
 ]
 
 [[package]]
@@ -1151,6 +1163,10 @@ dependencies = [
  "roxmltree",
  "serde",
 ]
+
+[[package]]
+name = "bennu-toml"
+version = "0.3.0"
 
 [[package]]
 name = "bennu-web"

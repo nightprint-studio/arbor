@@ -7,9 +7,10 @@
    */
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import { tooltip } from '$lib/actions/tooltip';
-  import { bennuTestStore, formatDuration } from '$lib/stores/bennu/tests.svelte';
+  import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
+  import { formatDuration } from '$lib/stores/bennu/test-tree';
 
-  const store = bennuTestStore;
+  const store = $derived(activeTestStore());
   const counts = $derived(store.counts);
 
   const verdict = $derived.by(() => {

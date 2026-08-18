@@ -272,6 +272,8 @@ mod tests {
             schemas: &[],
             descriptors: &[],
             taglibs: &[],
+            rust: &[],
+            ron: &[],
         });
         ext
     }
@@ -354,6 +356,8 @@ mod tests {
             schemas: &[],
             descriptors: &[],
             taglibs: &[],
+            rust: &[],
+            ron: &[],
         });
         let src = "<fmt:message key=\"anything\"/>";
         let p = PathBuf::from("/p/x.jsp");

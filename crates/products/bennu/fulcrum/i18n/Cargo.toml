@@ -1,0 +1,19 @@
+[package]
+name         = "bennu-fulcrum-i18n"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The fulcrum engine's i18n convention, as Bennu tooling: the labels an `i18n/` tree declares in each language, the markup a translation is written in (styles, glossary, controls, placeholders), and every place a `.ron` or `.rs` reads one. Pure — it reads text and answers questions; the scan and the panels are the backend's."
+
+[dependencies]
+# The extension seam this crate implements.
+bennu-ext   = { path = "../../ext" }
+# The wire types a contribution is made of (Diagnostic / CapabilitySet / CompletionItem).
+bennu-proto = { path = "../../proto" }
+# TOML read WITH positions — a label has to be navigable to, so the value's byte range is the
+# whole point. See that crate's header.
+bennu-toml  = { path = "../../toml" }
+
+serde = { workspace = true }

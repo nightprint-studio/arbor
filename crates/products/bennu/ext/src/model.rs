@@ -39,7 +39,20 @@ pub struct ProjectScan<'a> {
     pub java: &'a [ScannedFile],
     /// Every `.xml` file (config candidates — the extension decides which are its own).
     pub xml: &'a [ScannedFile],
-    /// Resource files that carry configuration: `.properties`, `.yml`, `.yaml`.
+    /// **Rust sources** — every `.rs` in the tree.
+    ///
+    /// Its own bucket for the same reason [`Self::pages`] is: an extension that wants Rust almost
+    /// never wants Java in the same pass, and the two are read by different engines entirely. Empty
+    /// is normal and must stay harmless — a Maven project has none.
+    pub rust: &'a [ScannedFile],
+    /// **RON data files** — every `.ron` in the tree.
+    ///
+    /// Content rather than configuration, and that distinction is the reason it is not in
+    /// [`Self::resources`]: a `.ron` describes a game's nodes, crystals and cutscenes, and what an
+    /// extension looks for in one is a *reference* — a label, an asset id — rather than a setting.
+    /// Empty is normal.
+    pub ron: &'a [ScannedFile],
+    /// Resource files that carry configuration: `.properties`, `.yml`, `.yaml`, `.toml`.
     pub resources: &'a [ScannedFile],
     /// **Server-rendered pages** — every `.jsp` / `.jspf` / `.jspx` / `.tag` / `.tagx` in the
     /// tree.

@@ -34,9 +34,10 @@
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
+  import { bennuCargoTestStore } from '$lib/stores/bennu/cargo-tests.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
-  import type { TreeNode } from '$lib/types/bennu';
+  import type { DiscoveredRustTest, DiscoveredTest, TreeNode } from '$lib/types/bennu';
   import { packageTree, isInPackageRoot } from './package-tree';
   // The shared file-icon vocabulary — the same one Corvus's tree and Sitta's explorer draw
   // from, so a `pom.xml` looks like a `pom.xml` wherever you meet it.
@@ -248,17 +249,37 @@
    * naming one only makes the run report that it matched nothing.
    */
   function testsFor(node: TreeNode) {
+    if (projectStore.isCargo) {
+      // No abstract-base equivalent in Rust: every `#[test]` is runnable where it is written.
+      return node.is_dir
+        ? bennuCargoTestStore.testsUnder(node.path)
+        : bennuCargoTestStore.testsInFile(node.path);
+    }
     return node.is_dir
       ? bennuTestStore.classesUnder(node.path)
       : bennuTestStore.classesInFile(node.path).filter((c) => !c.is_abstract);
   }
 
-  /** Run every test the node stands for. */
+  /**
+   * Run every test the node stands for.
+   *
+   * Two runners, two ways of naming a selection: Maven takes class names, cargo takes case refs
+   * (package + target + path), and neither can express the other's. Which is why the branch is
+   * here rather than behind a shared verb — a folder is not a scope either build system has.
+   */
   function runTestsFor(node: TreeNode) {
     const root = projectStore.project?.root;
-    const classes = testsFor(node);
-    if (!root || !classes.length) return;
-    void bennuTestStore.runClasses(root, classes.map((c) => c.selector));
+    if (!root) return;
+    const found = testsFor(node);
+    if (!found.length) return;
+    if (projectStore.isCargo) {
+      void bennuCargoTestStore.runCases(
+        root,
+        (found as DiscoveredRustTest[]).map((t) => bennuCargoTestStore.caseRefOf(t)),
+      );
+      return;
+    }
+    void bennuTestStore.runClasses(root, (found as DiscoveredTest[]).map((c) => c.selector));
   }
 
   function onRowContextMenu(node: TreeNode, e: MouseEvent) {

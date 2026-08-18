@@ -8,7 +8,7 @@
    */
   import {
     BookOpen, Rocket, Boxes, PenLine, Keyboard, FolderGit2, FlaskConical, Play, Replace, ServerCog,
-    Cog,
+    Cog, Languages,
   } from 'lucide-svelte';
   import DocsShell, { type DocsNavItem, type DocsNavGroup } from '$lib/components/shared/DocsShell.svelte';
   import GettingStarted from './docs/GettingStarted.svelte';
@@ -18,6 +18,7 @@
   import Running from './docs/Running.svelte';
   import Cargo from './docs/Cargo.svelte';
   import Testing from './docs/Testing.svelte';
+  import I18n from './docs/I18n.svelte';
   import Structural from './docs/Structural.svelte';
   import Shortcuts from './docs/Shortcuts.svelte';
 
@@ -35,6 +36,7 @@
       { id: 'cargo',    label: 'Rust & Cargo',            icon: Cog },
       { id: 'running',  label: 'Building & running',      icon: Play },
       { id: 'testing',  label: 'Testing',                 icon: FlaskConical },
+      { id: 'i18n',     label: 'i18n labels',             icon: Languages },
       { id: 'structural', label: 'Structural search',      icon: Replace },
     ] },
     { id: 'reference', label: 'Reference', icon: Keyboard, items: [
@@ -50,6 +52,7 @@
     'cargo': Cargo,
     'running': Running,
     'testing': Testing,
+    'i18n': I18n,
     'structural': Structural,
     'shortcuts': Shortcuts,
   };

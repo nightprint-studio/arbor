@@ -201,8 +201,55 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
         src.entando_showlet.then_some("<wp:*> showlet / ControllerServlet"),
     );
 
+    // ── FulcrumI18n ──────────────────────────────────────────────────────────
+    //
+    // Tier B only, and by **layout** rather than by dependency. The tooling is useful on a project
+    // that merely *authors* content — a `.ron` tree with its bundles beside it, the engine nowhere
+    // in its own manifest — and the layout is what the engine keys on too: an `i18n/` directory
+    // whose `languages.toml` declares what it has been translated into.
+    let i18n = find_i18n_root(root);
+    activate(
+        &mut set.fulcrum_i18n,
+        &mut hits,
+        "fulcrum_i18n",
+        None,
+        i18n.as_deref(),
+        None,
+    );
+
     set.hits = hits;
     set
+}
+
+/// The first `i18n/languages.toml` under `root`, relative and forward-slashed.
+///
+/// Bounded like every other signal here: presence is all detection needs, and a project keeps its
+/// content under a handful of directories rather than eighty levels down. Returns the path so the
+/// capability can *say* what convinced it — a classification with no evidence is one nobody can
+/// argue with when it is wrong.
+fn find_i18n_root(root: &Path) -> Option<String> {
+    let mut found: Option<String> = None;
+    walk_shallow(root, 7, &mut |path, name| {
+        if found.is_some() || name != "languages.toml" {
+            return;
+        }
+        // The file alone is not the convention — it has to sit in a directory called `i18n`.
+        let in_i18n = path
+            .parent()
+            .and_then(|d| d.file_name())
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n == "i18n");
+        if !in_i18n {
+            return;
+        }
+        found = Some(
+            path.strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/"),
+        );
+    });
+    found
 }
 
 /// Flip a capability on and record the winning evidence. A strong signal (A or B)

@@ -53,6 +53,13 @@ pub struct CapabilitySet {
     pub lombok: bool,
     /// Entando / jAPS platform (`org.entando.*` / `com.agiletec.*`, `<wp:*>`).
     pub entando_japs: bool,
+    /// The **fulcrum engine's i18n convention**: an `i18n/` directory holding a `languages.toml`,
+    /// with the translations in `<lang>/<category>.toml` beside it.
+    ///
+    /// Detected from the layout rather than from a dependency, and deliberately: the tooling is
+    /// useful on a project that only *authors* content — a `.ron` tree plus its bundles, with the
+    /// engine nowhere in its own manifest — and the layout is what the engine itself keys on.
+    pub fulcrum_i18n: bool,
     /// The evidence behind each active capability — the signals that tripped it,
     /// so the FE can explain the classification (and mark provisional / C-only ones).
     pub hits: Vec<CapabilityHit>,
