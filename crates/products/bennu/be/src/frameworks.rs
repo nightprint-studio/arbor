@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use bennu_core::prelude::BennuState;
+use bennu_bevy::prelude::BevyExtension;
 use bennu_ext::prelude::{
     ExtAction, ExtEntry, ExtGutterMark, ExtHighlight, ExtHover, ExtStat, ExtTarget,
     ExtensionRegistry, FileCtx, FrameworkExtension, ProjectScan, ScannedFile,
@@ -182,6 +183,7 @@ impl FrameworkService {
         let jpa = Arc::new(JpaExtension::new());
         let jsp = Arc::new(JspExtension::new());
         let fulcrum = Arc::new(FulcrumI18nExtension::new());
+        let bevy = Arc::new(BevyExtension::new());
         // The whole registration surface. A further framework is one more entry here — and the
         // XML, JSP and message-bundle ones arriving as exactly that entry is the claim the seam
         // was built on, now made four times.
@@ -195,6 +197,9 @@ impl FrameworkService {
                 // The fifth framework, and the first that is not Java's: a Cargo root with an
                 // `i18n/` tree gets a registry where every Java extension declined.
                 Arc::clone(&fulcrum) as Arc<dyn FrameworkExtension>,
+                // The sixth, and the second whose evidence is a Cargo manifest rather than a pom:
+                // the ECS declarations of a Bevy project and the systems that touch them.
+                Arc::clone(&bevy) as Arc<dyn FrameworkExtension>,
             ],
             &caps,
         );
@@ -208,7 +213,7 @@ impl FrameworkService {
         // read when it is the *only* active extension is what keeps a plain Maven project from
         // paying a Spring-sized scan to get `pom.xml` completion.
         let wants_java =
-            registry.ids().iter().any(|id| !matches!(*id, "xml" | "jsp" | "fulcrum.i18n"));
+            registry.ids().iter().any(|id| !matches!(*id, "xml" | "jsp" | "fulcrum.i18n" | "bevy"));
         let java: Vec<ScannedFile> = if wants_java {
             let encoding = resolve_index_encoding(root);
             bennu_intel::prelude::read_java_sources(path, &encoding)
@@ -228,7 +233,8 @@ impl FrameworkService {
         // The `.rs` / `.ron` trees are only walked when something asked for them: on a Maven
         // project nothing does, and reading a checked-in vendor directory to find nothing is a
         // project scan spent on a feature that is off.
-        let wants_sources = registry.ids().contains(&"fulcrum.i18n");
+        let wants_sources =
+            registry.ids().iter().any(|id| matches!(*id, "fulcrum.i18n" | "bevy"));
         let walked = collect_config_files(path, wants_sources);
         let descriptors = collect_descriptors(path);
         let schemas = collect_schemas(path);

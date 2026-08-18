@@ -51,6 +51,11 @@ export interface CapabilitySet {
   jdbc_dao: boolean;
   lombok: boolean;
   entando_japs: boolean;
+  /** The fulcrum engine's i18n convention — an `i18n/languages.toml` with `<lang>/<category>.toml`
+   *  bundles beside it. Detected from the layout, so a project that only authors content has it. */
+  fulcrum_i18n: boolean;
+  /** Bevy ECS — a `bevy` / `bevy_*` dependency in a Cargo manifest, corroborated by the sources. */
+  bevy: boolean;
   hits: CapabilityHit[];
 }
 

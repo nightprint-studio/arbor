@@ -121,7 +121,13 @@ fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Dia
     // last publish rather than computing anything — which is why it is cheap enough to sit on the
     // same debounce as the Java validation, and why it ignores the fast/full `resolved` tier: a
     // server has only one answer.
-    if let Some(diags) = crate::lsp_route::diagnostics(&args.file, args.source.as_deref()) {
+    if let Some(mut diags) = crate::lsp_route::diagnostics(&args.file, args.source.as_deref()) {
+        // …plus whatever a framework extension has to say about the same file. A server answering
+        // for a language does not mean nothing else has anything to add: rust-analyzer reports what
+        // the compiler reports, and a pair of Bevy systems that contend over a resource with nothing
+        // ordering them compiles perfectly. Returning the server's answer alone here is what made
+        // every extension diagnostic on a `.rs` unreachable.
+        diags.extend(crate::frameworks::diagnostics_for(&args.file, args.source.as_deref()));
         return Ok(diags);
     }
     // A `Cargo.toml`. Its own validator rather than a language server's: rust-analyzer reports very

@@ -2,13 +2,13 @@
   /**
    * Bennu documentation — the manual (Getting Started, Projects & capabilities, the module graph,
    * Editing & navigation, Language servers, Rust & Cargo, Building & running, Testing,
-   * Structural search,
+   * i18n labels, Bevy ECS, Structural search,
    * keyboard reference). Built on the shared `DocsShell`, the same surface Arbor's and merula's
    * docs use.
    */
   import {
     BookOpen, Rocket, Boxes, PenLine, Keyboard, FolderGit2, FlaskConical, Play, Replace, ServerCog,
-    Cog, Languages, Network,
+    Cog, Languages, Network, Gamepad2,
   } from 'lucide-svelte';
   import DocsShell, { type DocsNavItem, type DocsNavGroup } from '$lib/components/shared/DocsShell.svelte';
   import GettingStarted from './docs/GettingStarted.svelte';
@@ -20,6 +20,7 @@
   import Cargo from './docs/Cargo.svelte';
   import Testing from './docs/Testing.svelte';
   import I18n from './docs/I18n.svelte';
+  import Bevy from './docs/Bevy.svelte';
   import Structural from './docs/Structural.svelte';
   import Shortcuts from './docs/Shortcuts.svelte';
 
@@ -39,6 +40,7 @@
       { id: 'running',  label: 'Building & running',      icon: Play },
       { id: 'testing',  label: 'Testing',                 icon: FlaskConical },
       { id: 'i18n',     label: 'i18n labels',             icon: Languages },
+      { id: 'bevy',     label: 'Bevy ECS',                icon: Gamepad2 },
       { id: 'structural', label: 'Structural search',      icon: Replace },
     ] },
     { id: 'reference', label: 'Reference', icon: Keyboard, items: [
@@ -56,6 +58,7 @@
     'running': Running,
     'testing': Testing,
     'i18n': I18n,
+    'bevy': Bevy,
     'structural': Structural,
     'shortcuts': Shortcuts,
   };

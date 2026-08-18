@@ -31,7 +31,10 @@ export type FrameworkCatalogId =
   | 'springdocumented'
   | 'jpaentities'
   | 'jparepositories'
-  | 'taglibs';
+  | 'taglibs'
+  | 'bevycomponents'
+  | 'bevysystems'
+  | 'bevyconflicts';
 
 /** How rows can be grouped. Which of these a catalog offers is per-catalog. */
 export type GroupMode = 'none' | 'path' | 'owner' | 'kind' | 'namespace';
@@ -129,6 +132,62 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
       { id: 'none', label: 'No grouping' },
     ],
     columns: { primary: 'label', secondary: 'text' },
+  },
+  {
+    // The ECS half of a Bevy project: what data exists, and who touches it. The sub-rows are the
+    // point — "who writes `Health`" is a question about system signatures, and the text search that
+    // usually stands in for it answers with every comment that mentions the word.
+    //
+    // It gets the rail button because it is the list you keep open while working: in an ECS the
+    // component IS the architecture, and the panel is the nearest thing the codebase has to a
+    // diagram of itself.
+    id: 'bevycomponents',
+    kind: 'bevy.components',
+    title: 'Components',
+    command: 'Bevy components, resources, messages and events',
+    icon: 'bevy',
+    placeholder: 'Filter by component, resource, message, event or bundle…',
+    empty: 'No ECS declarations found — no #[derive(Component)] and no #[derive(Resource)].',
+    groups: [
+      { id: 'kind', label: 'Group by role' },
+      { id: 'none', label: 'No grouping' },
+    ],
+    columns: { primary: 'type', secondary: 'touched by' },
+    rail: true,
+    shortcut: 'Alt+Shift+B',
+  },
+  {
+    // Badged by schedule, so grouping by badge groups by schedule — which is the question a system
+    // list is usually opened with ("what runs in FixedUpdate?").
+    id: 'bevysystems',
+    kind: 'bevy.systems',
+    title: 'Systems',
+    command: 'Bevy systems',
+    icon: 'list-checks',
+    placeholder: 'Filter by system, schedule or the type it touches…',
+    empty: 'No systems found — no function in this project takes a Bevy system parameter.',
+    groups: [
+      { id: 'kind', label: 'Group by schedule' },
+      { id: 'none', label: 'No grouping' },
+    ],
+    columns: { primary: 'system', secondary: 'accesses' },
+  },
+  {
+    // Pairs the engine must serialise. NOT a bug list: two conflicting systems that are explicitly
+    // ordered are working as intended, and the row says which it is. What is worth looking at is
+    // the `unordered` tag — a frame-order dependency nobody wrote down.
+    id: 'bevyconflicts',
+    kind: 'bevy.conflicts',
+    title: 'Access conflicts',
+    command: 'Bevy system access conflicts',
+    icon: 'shield',
+    placeholder: 'Filter by system, schedule or contended type…',
+    empty: 'No pair of systems in one schedule contends over the same data.',
+    groups: [
+      { id: 'kind', label: 'Group by schedule' },
+      { id: 'none', label: 'No grouping' },
+    ],
+    columns: { primary: 'pair', secondary: 'contended' },
   },
   {
     id: 'beans',

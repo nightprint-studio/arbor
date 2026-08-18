@@ -110,6 +110,41 @@ pub struct ProjectScan<'a> {
     pub taglibs: &'a [ScannedFile],
 }
 
+impl<'a> ProjectScan<'a> {
+    /// A scan of `root` with **every bucket empty** — the base a caller fills the one or two it
+    /// cares about on top of:
+    ///
+    /// ```ignore
+    /// ext.reindex(&ProjectScan { java: &sources, ..ProjectScan::empty(root) });
+    /// ```
+    ///
+    /// It exists because the alternative had already gone wrong once. This struct grows a bucket
+    /// whenever a new kind of file becomes worth handing over — `rust` and `ron` were the last two
+    /// — and every exhaustive literal in the workspace has to be edited in the same commit or it
+    /// stops compiling. The ones in production code are found immediately; the ones in `#[cfg(test)]`
+    /// modules are found by whoever next runs that crate's tests, which is how three extensions came
+    /// to have test modules that did not build.
+    ///
+    /// So a caller that means "only these files" says exactly that, and the next bucket costs it
+    /// nothing. The **host** still writes every field out ([`crate::registry::FrameworkExtension::reindex`]
+    /// is fed from a real walk), because there the opposite risk applies: a bucket silently left
+    /// empty is a feature that goes quiet.
+    pub fn empty(root: &'a Path) -> Self {
+        Self {
+            root,
+            java: &[],
+            xml: &[],
+            rust: &[],
+            ron: &[],
+            resources: &[],
+            pages: &[],
+            schemas: &[],
+            descriptors: &[],
+            taglibs: &[],
+        }
+    }
+}
+
 /// One file an extension is being asked about — the buffer as it is *right now*, which
 /// for an open editor is the unsaved text, not what is on disk.
 pub struct FileCtx<'a> {

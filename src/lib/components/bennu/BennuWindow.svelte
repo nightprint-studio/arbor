@@ -58,6 +58,7 @@
   import BennuTestsCatalogPanel from './BennuTestsCatalogPanel.svelte';
   import BennuCargoTestsPanel from './BennuCargoTestsPanel.svelte';
   import RustTestIcon from './RustTestIcon.svelte';
+  import BevyIcon from './BevyIcon.svelte';
   import SyntaxTreePanel from '$lib/components/shared/internal/SyntaxTreePanel.svelte';
   import { bennuAstStore } from '$lib/stores/bennu/ast.svelte';
   import MavenIcon from './MavenIcon.svelte';
@@ -755,17 +756,20 @@
     ...(jspTools
       ? [{ id: 'forms', tooltip: 'Forms', shortcut: 'Alt+3', icon: TextCursorInput, active: bennuUiStore.bottomPanel === 'forms', onclick: () => bennuUiStore.toggleBottom('forms') }]
       : []),
-    // The framework catalogs that asked for a rail button — today just Endpoints, which is a
-    // list you keep open while working rather than one you go and fetch. The rest stay
-    // palette-only so the rail doesn't grow a row per framework. `catalogs` has already dropped
-    // the ones this project found nothing for.
+    // The framework catalogs that asked for a rail button — a list you keep open while working
+    // rather than one you go and fetch: Endpoints on a web project, Components on a Bevy one. The
+    // rest stay palette-only so the rail doesn't grow a row per framework. `catalogs` has already
+    // dropped the ones this project found nothing for.
+    //
+    // The icon comes from the spec through the same resolver the palette uses, so a catalog is
+    // described in ONE place: two rail buttons with the same glyph say the rail is decorative.
     ...catalogs
       .filter((c) => c.rail)
       .map((c) => ({
         id: c.id,
         tooltip: c.title,
         shortcut: c.shortcut,
-        icon: Target,
+        icon: iconResolver(c.icon),
         active: bennuUiStore.bottomPanel === c.id,
         onclick: () => bennuUiStore.toggleBottom(c.id),
       })),
@@ -861,6 +865,10 @@
     // The two framework catalogs that were falling through to the generic `command` glyph:
     // a bound-properties list and the property reference read out of the dependency jars.
     // (`list` is declared once, above — a second entry here silently shadowed it.)
+    // Bevy's own bird. A brand mark rather than a metaphor, like Maven's above — and the rail
+    // resolves a catalog's icon through this map, so the one entry serves the button and the
+    // palette entry both.
+    'bevy': BevyIcon as unknown as IconComponent,
     'book': BookOpen as unknown as IconComponent,
     'languages': Languages as unknown as IconComponent,
     'network': Network as unknown as IconComponent,
@@ -1303,6 +1311,14 @@
 
     // Workspace manager (Ctrl+Shift+W) — create / switch / manage named workspaces.
     if (mod && e.shiftKey && !e.altKey && isKey(e, 'w')) { e.preventDefault(); bennuUiStore.openWorkspaceManager(); return; }
+
+    // Bevy components (Alt+Shift+B) — the ECS catalog, which on a Bevy project is the thing you
+    // read code beside. Same shape as the Spring beans door below: silent when the project has
+    // no declarations, because there would be no panel to open.
+    if (e.altKey && e.shiftKey && !mod && isKey(e, 'b')) {
+      if (!catalogIds.includes('bevycomponents')) return;
+      e.preventDefault(); bennuUiStore.toggleBottom('bevycomponents'); return;
+    }
 
     // Spring beans (Ctrl+Shift+B) — the framework catalog with a keyboard door, since it
     // is the one you reach for while reading code. Its siblings (Endpoints, Config) stay

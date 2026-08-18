@@ -97,6 +97,10 @@ bennu-i18n = { path = "../i18n" }
 # The fulcrum engine's i18n convention — the fifth framework extension, and the first that applies
 # to a Cargo root rather than a Maven one.
 bennu-fulcrum-i18n = { path = "../fulcrum/i18n" }
+# Bevy ECS — the components, resources and events a Rust project declares, the systems that touch
+# them, and the pairs an access conflict serialises. Gated on a `bevy` dependency in the Cargo
+# manifest, so a Maven project never carries it.
+bennu-bevy = { path = "../bevy" }
 # The JSP grammar itself — the SAME generate the editor loads as wasm. Named here for the two
 # features that compare or display a real parse rather than a tolerant scan: the syntax-tree
 # panel (`ast.rs`) and structural search (`ssr.rs`).

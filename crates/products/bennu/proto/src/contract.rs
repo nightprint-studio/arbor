@@ -60,6 +60,14 @@ pub struct CapabilitySet {
     /// useful on a project that only *authors* content — a `.ron` tree plus its bundles, with the
     /// engine nowhere in its own manifest — and the layout is what the engine itself keys on.
     pub fulcrum_i18n: bool,
+    /// **Bevy ECS.** Detected from the Cargo manifest — a `bevy` (or `bevy_*`) dependency anywhere
+    /// in the workspace — and corroborated by the source shape (`#[derive(Component)]`,
+    /// `add_systems`).
+    ///
+    /// A dependency rather than a layout, unlike [`Self::fulcrum_i18n`]: a project cannot declare a
+    /// component without the crate that defines the trait, so the manifest is the strong signal and
+    /// the sources are the confirming one.
+    pub bevy: bool,
     /// The evidence behind each active capability — the signals that tripped it,
     /// so the FE can explain the classification (and mark provisional / C-only ones).
     pub hits: Vec<CapabilityHit>,

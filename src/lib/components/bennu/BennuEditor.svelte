@@ -891,7 +891,12 @@
         // string — which is exactly why a mistake inside it survives review, and the marks below are
         // what make its structure visible. Asked for on every bundle, panel open or not: the
         // colouring is not a feature of the panel.
-        || isI18nBundle(path));
+        || isI18nBundle(path)
+        // A Rust source. Named explicitly rather than left to `supportsDiagnostics`, which only
+        // admits a `.rs` once a language server has claimed it: the ECS gutter marks are Bennu's
+        // own and must not blink out because rust-analyzer is absent, misconfigured or still
+        // starting.
+        || isRustFileOf(path));
     if (!path || !wantsFramework) { springMarks = []; springGutter = []; fwActions = []; return; }
     const src = projectStore.sourceOf(path);
     void bennuIndexStore.buildRevision; // new beans / new keys after a rebuild
@@ -995,6 +1000,15 @@
     endpoint: '»',   // » a route enters here
     entity: '▤',     // ▤ a persistent entity — points at the repositories that manage it
     repository: '◇', // ◇ a repository — points at the entity it manages
+    // The ECS declarations. Distinct glyphs rather than one for all four, because the question a
+    // mark answers is different for each: a component is data on an entity, a resource is a
+    // singleton, an event is a buffer, a bundle is a recipe.
+    component: '◈',  // ◈ a component — points at the systems that read and write it
+    resource: '▣',   // ▣ a resource — points at the systems that read and write it
+    message: '✉',    // ✉ a buffered message — points at its readers and writers
+    event: '✳',      // ✳ an observer event — points at the observers that handle it
+    bundle: '▦',     // ▦ a bundle — points at what it inserts
+    states: '⬡',     // ⬡ a States enum
   };
 
   const springGutterMarks = $derived(
@@ -3137,6 +3151,14 @@
   :global(.cm-fw-gutter-endpoint) { color: var(--warning); }
   :global(.cm-fw-gutter-entity) { color: var(--syntax-field, #9876aa); }
   :global(.cm-fw-gutter-repository) { color: var(--syntax-function, #ffc66d); }
+  /* The ECS marks. Data is one family (component / bundle share a hue), a resource is a singleton
+     and an event is a signal — so the colour carries the same distinction the glyph does. */
+  :global(.cm-fw-gutter-component) { color: var(--syntax-type, #4ec9b0); }
+  :global(.cm-fw-gutter-bundle) { color: var(--syntax-type, #4ec9b0); }
+  :global(.cm-fw-gutter-resource) { color: var(--info); }
+  :global(.cm-fw-gutter-message) { color: var(--warning); }
+  :global(.cm-fw-gutter-event) { color: var(--warning); }
+  :global(.cm-fw-gutter-states) { color: var(--syntax-keyword, #cc7832); }
   /* The usage count beside a property key: a number, so it reads as one. */
   :global(.cm-fw-gutter-usage) {
     color: var(--text-muted); font-family: var(--font-code); font-weight: 600;

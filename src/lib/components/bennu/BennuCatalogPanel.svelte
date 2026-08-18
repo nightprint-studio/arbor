@@ -210,10 +210,19 @@
   function toggleGroup(k: string) { if (collapsed.has(k)) collapsed.delete(k); else collapsed.add(k); }
   function toggleRow(k: string) { if (expanded.has(k)) expanded.delete(k); else expanded.add(k); }
 
+  /**
+   * Open a row's source site and put the caret **on it**.
+   *
+   * The byte offset when there is one, the line only as a fallback: a line puts the caret in
+   * column 1, and the thing you clicked is a name halfway along it. Every contributed site
+   * carries an offset (it is what `ExtTarget` has always jumped to from the gutter); the line is
+   * for a row whose extension only knew which line it was on.
+   */
   function open(r: ExtEntry) {
     if (!r.file) return;
     void projectStore.openFile(r.file).then(() => {
-      if (r.line) bennuUiStore.requestGoto(r.line);
+      if ((r.offset ?? 0) > 0) bennuUiStore.requestGotoOffset(r.offset ?? 0);
+      else if (r.line) bennuUiStore.requestGoto(r.line);
     });
   }
 
@@ -421,7 +430,17 @@
                   {@const ck = `${rk}>${c.id}`}
                   <div class="child">
                     <span class="badge sm {kindClass(c.kind)}">{c.kind}</span>
-                    <span class="child-name">{c.primary}</span>
+                    <!-- A sub-row often names a place of its own — the system that writes this
+                         component, the class that injects this bean — and that place is the whole
+                         reason the row was expanded. It opens like the parent when it has one, and
+                         stays plain text when it does not. -->
+                    {#if c.file}
+                      <button class="child-name openable" type="button" onclick={() => open(c)}>
+                        {c.primary}
+                      </button>
+                    {:else}
+                      <span class="child-name">{c.primary}</span>
+                    {/if}
                     {#if looksComposite(c.secondary) && r.file}
                       {@render typeChip(c.secondary, r.file ?? '', ck)}
                       <span class="child-spacer"></span>
@@ -429,6 +448,7 @@
                       <span class="child-type">{c.secondary}</span>
                     {/if}
                     {#each c.tags as t (t)}<span class="tag">{t}</span>{/each}
+                    {#if c.line}<span class="row-line">{c.line}</span>{/if}
                   </div>
                   {#if openTypes.has(ck)}
                     {@render typeTree(ck, openTypes.get(ck)!, 2)}
@@ -637,7 +657,13 @@
     padding: 1px 10px 1px 42px;
     font-family: var(--font-ui-sans);
   }
-  .child-name { font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-secondary); }
+  .child-name {
+    font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-secondary);
+    background: transparent; border: none; padding: 0; text-align: left;
+  }
+  /* Only the ones that go somewhere say so — the rest are the same text, unchanged. */
+  .child-name.openable { cursor: pointer; }
+  .child-name.openable:hover { color: var(--text-primary); text-decoration: underline; }
   .child-type { flex: 1; min-width: 0; font-size: var(--font-size-2xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* A parameter whose type is a door has the chip instead of the plain text, and the spacer
      keeps the row's trailing tags where they are on every other row. */

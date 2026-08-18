@@ -217,8 +217,87 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
         None,
     );
 
+    // ── Bevy ─────────────────────────────────────────────────────────────────
+    //
+    // Tier A from the **Cargo** manifest rather than the pom — the first capability whose strong
+    // signal is not Maven's, which is what a Rust project's evidence looks like. Corroborated by
+    // the source shape so that a workspace member that merely *depends* on a Bevy crate without
+    // declaring anything still activates (the tooling is empty there, and an empty panel gated on
+    // real evidence is better than a missing one).
+    let bevy_dep = find_bevy_dependency(root);
+    activate(
+        &mut set.bevy,
+        &mut hits,
+        "bevy",
+        bevy_dep.as_deref(),
+        None,
+        src.bevy_source.then_some("#[derive(Component)] / add_systems in source"),
+    );
+
     set.hits = hits;
     set
+}
+
+/// The first Cargo manifest under `root` that declares a `bevy` / `bevy_*` dependency, as
+/// `"bevy (path/to/Cargo.toml)"`.
+///
+/// Read line by line rather than through a TOML parser, deliberately: detection needs *presence*,
+/// the shapes a dependency can take are few and all of them start the line with the crate name,
+/// and reaching for a parser here would make the capability layer depend on the manifest crate for
+/// one boolean. Bounded like every other signal — a workspace is a handful of manifests, and a
+/// vendored tree is not worth walking to find out it has none.
+fn find_bevy_dependency(root: &Path) -> Option<String> {
+    const MAX_MANIFESTS: usize = 80;
+    let mut found: Option<String> = None;
+    let mut seen = 0usize;
+    walk_shallow(root, 5, &mut |path, name| {
+        if found.is_some() || name != "Cargo.toml" || seen >= MAX_MANIFESTS {
+            return;
+        }
+        seen += 1;
+        let Some(text) = read_head(path, MAX_SOURCE_BYTES) else { return };
+        if !manifest_declares_bevy(&text) {
+            return;
+        }
+        let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+        found = Some(format!("bevy ({rel})"));
+    });
+    found
+}
+
+/// Whether a manifest's text declares a dependency on Bevy.
+///
+/// Only inside a dependency table: `bevy` under `[package]` would be the project's own name, and a
+/// crate called `bevy-something` of one's own is not a use of the engine.
+fn manifest_declares_bevy(text: &str) -> bool {
+    let mut in_deps = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(header) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            let header = header.trim();
+            // `[dependencies.bevy]` is a declaration in itself.
+            if let Some(name) = header.rsplit('.').next() {
+                if is_bevy_crate(name) && header.contains("dependencies") {
+                    return true;
+                }
+            }
+            in_deps = header.contains("dependencies");
+            continue;
+        }
+        if !in_deps {
+            continue;
+        }
+        let name = line.split(['=', '.', ' ']).next().unwrap_or("").trim();
+        if is_bevy_crate(name) {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_bevy_crate(name: &str) -> bool {
+    let name = name.trim().trim_matches('"');
+    name == "bevy" || name.starts_with("bevy_") || name.starts_with("bevy-")
 }
 
 /// The first `i18n/languages.toml` under `root`, relative and forward-slashed.
@@ -386,6 +465,9 @@ struct SourceSignals {
     jdbc_usage: bool,
     lombok_import: bool,
     entando_showlet: bool,
+    /// A Rust source declares an ECS item or registers a system — the corroborating half of the
+    /// Bevy signal.
+    bevy_source: bool,
     /// A JSP view exists at all. Recorded from the file NAME, before the read budget is
     /// consulted, so a project whose pages sit past the scan cap is still known to have them.
     has_jsp: bool,
@@ -401,6 +483,7 @@ impl SourceSignals {
             let lname = name.to_ascii_lowercase();
             let is_java = lname.ends_with(".java");
             let is_jsp = lname.ends_with(".jsp") || lname.ends_with(".tag");
+            let is_rust = lname.ends_with(".rs");
             // Presence is decided by the name alone — no read, no budget. The cap below limits
             // how many files we OPEN, and a project's pages must not become invisible just
             // because they are deep in the walk.
@@ -408,7 +491,7 @@ impl SourceSignals {
             if scanned >= MAX_SOURCE_FILES {
                 return;
             }
-            if !is_java && !is_jsp {
+            if !is_java && !is_jsp && !is_rust {
                 return;
             }
             scanned += 1;
@@ -430,6 +513,11 @@ impl SourceSignals {
                 s.lombok_import |= text.contains("import lombok.")
                     || text.contains("@Data")
                     || text.contains("@Getter");
+            }
+            if is_rust {
+                s.bevy_source |= text.contains("#[derive(Component)]")
+                    || text.contains("add_systems(")
+                    || text.contains("bevy::prelude");
             }
             if is_jsp {
                 s.taglib_directive |= text.contains("<%@ taglib") || text.contains("<%@taglib");

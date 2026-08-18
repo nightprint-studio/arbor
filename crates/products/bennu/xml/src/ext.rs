@@ -234,16 +234,7 @@ mod tests {
             .map(|(p, t)| ScannedFile { path: PathBuf::from(p), text: t.to_string() })
             .collect();
         let ext = XmlExtension::new();
-        ext.reindex(&ProjectScan {
-            root: Path::new("/p"),
-            java: &[],
-            xml: &[],
-            resources: &[],
-            pages: &[],
-            schemas: &files,
-            descriptors: &[],
-            taglibs: &[],
-        });
+        ext.reindex(&ProjectScan { schemas: &files, ..ProjectScan::empty(Path::new("/p")) });
         ext
     }
 

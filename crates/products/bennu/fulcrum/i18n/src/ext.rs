@@ -505,16 +505,9 @@ enabled = true
             "(id: \"drill\", name: \"tree:nodes.drill.name\", desc: \"tree:nodes.drill.desc\")",
         )];
         ext.reindex(&ProjectScan {
-            root: Path::new("/p"),
-            java: &[],
-            xml: &[],
             resources: &resources,
-            pages: &[],
-            schemas: &[],
-            descriptors: &[],
-            taglibs: &[],
-            rust: &[],
             ron: &ron,
+            ..ProjectScan::empty(Path::new("/p"))
         });
         ext
     }
@@ -600,18 +593,7 @@ enabled = true
             file("/p/i18n/styles.toml", "[bold]\nweight = \"bold\"\n"),
             file("/p/i18n/it/menu.toml", "a = 'ciao $bolde{mondo}'\n"),
         ];
-        ext.reindex(&ProjectScan {
-            root: Path::new("/p"),
-            java: &[],
-            xml: &[],
-            resources: &resources,
-            pages: &[],
-            schemas: &[],
-            descriptors: &[],
-            taglibs: &[],
-            rust: &[],
-            ron: &[],
-        });
+        ext.reindex(&ProjectScan { resources: &resources, ..ProjectScan::empty(Path::new("/p")) });
         let src = "a = 'ciao $bolde{mondo}'\n";
         let p = PathBuf::from("/p/i18n/it/menu.toml");
         let d = ext.diagnostics(&ctx(&p, src));
@@ -630,18 +612,7 @@ enabled = true
             file("/p/i18n/languages.toml", LANGUAGES),
             file("/p/i18n/it/menu.toml", "a = 'ciao $anything{mondo}'\n"),
         ];
-        ext.reindex(&ProjectScan {
-            root: Path::new("/p"),
-            java: &[],
-            xml: &[],
-            resources: &resources,
-            pages: &[],
-            schemas: &[],
-            descriptors: &[],
-            taglibs: &[],
-            rust: &[],
-            ron: &[],
-        });
+        ext.reindex(&ProjectScan { resources: &resources, ..ProjectScan::empty(Path::new("/p")) });
         let p = PathBuf::from("/p/i18n/it/menu.toml");
         let d = ext.diagnostics(&ctx(&p, "a = 'ciao $anything{mondo}'\n"));
         assert!(d.iter().all(|x| x.code != "fulcrum.i18n.unknown-style"));
@@ -650,18 +621,7 @@ enabled = true
     #[test]
     fn a_project_with_no_bundles_says_nothing_at_all() {
         let ext = FulcrumI18nExtension::new();
-        ext.reindex(&ProjectScan {
-            root: Path::new("/p"),
-            java: &[],
-            xml: &[],
-            resources: &[],
-            pages: &[],
-            schemas: &[],
-            descriptors: &[],
-            taglibs: &[],
-            rust: &[],
-            ron: &[],
-        });
+        ext.reindex(&ProjectScan::empty(Path::new("/p")));
         let src = "(name: \"anything:at.all\")";
         let p = PathBuf::from("/p/x.ron");
         assert!(ext.is_ready(), "an empty project is ready, not pending");

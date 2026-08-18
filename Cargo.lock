@@ -876,6 +876,7 @@ dependencies = [
  "arbor-process-ext",
  "arbor-rpc",
  "arbor-syntax",
+ "bennu-bevy",
  "bennu-cargo",
  "bennu-check",
  "bennu-classpath",
@@ -908,6 +909,15 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tree-sitter",
+]
+
+[[package]]
+name = "bennu-bevy"
+version = "0.3.0"
+dependencies = [
+ "bennu-complete",
+ "bennu-ext",
+ "bennu-proto",
 ]
 
 [[package]]

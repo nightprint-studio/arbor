@@ -320,16 +320,7 @@ mod tests {
 
     fn indexed(java: Vec<ScannedFile>) -> JpaExtension {
         let ext = JpaExtension::new();
-        ext.reindex(&ProjectScan {
-            root: Path::new("/p"),
-            java: &java,
-            xml: &[],
-            resources: &[],
-            pages: &[],
-            schemas: &[],
-            descriptors: &[],
-            taglibs: &[],
-        });
+        ext.reindex(&ProjectScan { java: &java, ..ProjectScan::empty(Path::new("/p")) });
         ext
     }
 

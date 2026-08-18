@@ -206,7 +206,8 @@
   capability is backed by <strong>evidence</strong> at one of three tiers:
 </p>
 <ul>
-  <li><strong>Tier A</strong> — a dependency coordinate in the <code>pom.xml</code> (strongest).</li>
+  <li><strong>Tier A</strong> — a declared dependency: a coordinate in the <code>pom.xml</code>, or a
+    crate in a <code>Cargo.toml</code> (strongest).</li>
   <li><strong>Tier B</strong> — a configuration file (e.g. a <code>struts.xml</code> or a TLD).</li>
   <li><strong>Tier C</strong> — a source pattern (corroborating; a C-only hit is provisional).</li>
 </ul>
@@ -214,6 +215,13 @@
   The detected set gates which features light up — for example, JSP taglib awareness only when a
   taglib is actually in use. The demo project shows Struts (convention + XML), JSP taglibs, the
   OGNL value stack, a JDBC DAO and Entando.
+</p>
+<p>
+  Not every capability is Java's. A Cargo project is detected the same way, from the same evidence
+  in its own manifest: a <code>bevy</code> (or <code>bevy_*</code>) dependency turns on the
+  <strong>Bevy ECS</strong> tooling, and an <code>i18n/languages.toml</code> beside a
+  <code>.ron</code> tree turns on the <strong>i18n labels</strong> one — that second by layout
+  rather than by dependency, because it is useful on a project that only authors content.
 </p>
 
 <h2>Form analysis</h2>

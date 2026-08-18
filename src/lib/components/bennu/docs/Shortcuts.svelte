@@ -109,14 +109,15 @@
 <ul>
   <li><kbd>Alt</kbd> + <kbd>4</kbd> — <strong>Endpoints</strong> — every URL the application answers, request mappings and Struts actions in one list, each expanding into what it takes and what it returns</li>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd> — <strong>Spring beans</strong> — every bean the project declares</li>
+  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd> — <strong>Bevy components</strong> — every component, resource, message, event and bundle, each expanding into the systems that read and write it</li>
   <li>Command palette — <strong>Message bundles</strong> (every key with its text, how many places read it, and which locales are missing it), <strong>Spring configuration</strong> (every property key, and which <code>application*.yml</code> resolves first) and <strong>Spring bound properties</strong> (every <code>@ConfigurationProperties</code> field with the key it binds)</li>
 </ul>
 <p>
   These appear only on a project that actually uses the framework <em>and</em> has something in the
   list — a service with no routes of either kind gets no Endpoints button, shortcut or palette
-  entry, rather than a door onto an empty panel. Endpoints has a button in the right activity bar,
-  because a route list is something you keep open; the others are opened from the palette, so the
-  rail doesn't grow a row per framework.
+  entry, rather than a door onto an empty panel. Endpoints and Bevy components have a button in
+  the right activity bar, because both are lists you keep open while working; the others are
+  opened from the palette, so the rail doesn't grow a row per framework.
 </p>
 
 <h2>Window</h2>

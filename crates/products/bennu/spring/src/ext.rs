@@ -739,14 +739,11 @@ mod tests {
     ) -> SpringExtension {
         let ext = SpringExtension::new();
         ext.reindex(&ProjectScan {
-            root: std::path::Path::new("/p"),
             java: &java,
             xml: &xml,
             resources: &res,
-            pages: &[],
-            schemas: &[],
             descriptors: &descriptors,
-            taglibs: &[],
+            ..ProjectScan::empty(std::path::Path::new("/p"))
         });
         ext
     }
@@ -857,17 +854,11 @@ mod tests {
         assert_eq!(ext.active_property_file().as_deref(), Some("/p/application-dev.yml"));
         // The pin survives a reindex.
         ext.reindex(&ProjectScan {
-            root: std::path::Path::new("/p"),
-            java: &[],
-            xml: &[],
             resources: &[
                 file("/p/application.yml", "app:\n  mode: base\n"),
                 file("/p/application-dev.yml", "app:\n  mode: dev\n"),
             ],
-            pages: &[],
-            schemas: &[],
-            descriptors: &[],
-            taglibs: &[],
+            ..ProjectScan::empty(std::path::Path::new("/p"))
         });
         assert_eq!(ext.model().props.lookup("app.mode").unwrap().1.value, "dev");
     }

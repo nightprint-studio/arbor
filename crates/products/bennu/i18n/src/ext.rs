@@ -264,16 +264,9 @@ mod tests {
         ];
         let pages = [file("/p/login.jsp", "<s:text name=\"login.title\"/><fmt:message key=\"gone.missing\"/>")];
         ext.reindex(&ProjectScan {
-            root: Path::new("/p"),
-            java: &[],
-            xml: &[],
             resources: &resources,
             pages: &pages,
-            schemas: &[],
-            descriptors: &[],
-            taglibs: &[],
-            rust: &[],
-            ron: &[],
+            ..ProjectScan::empty(Path::new("/p"))
         });
         ext
     }
@@ -347,18 +340,7 @@ mod tests {
     #[test]
     fn a_project_with_no_bundles_says_nothing_at_all() {
         let ext = MessagesExtension::new();
-        ext.reindex(&ProjectScan {
-            root: Path::new("/p"),
-            java: &[],
-            xml: &[],
-            resources: &[],
-            pages: &[],
-            schemas: &[],
-            descriptors: &[],
-            taglibs: &[],
-            rust: &[],
-            ron: &[],
-        });
+        ext.reindex(&ProjectScan::empty(Path::new("/p")));
         let src = "<fmt:message key=\"anything\"/>";
         let p = PathBuf::from("/p/x.jsp");
         assert!(ext.is_ready(), "an empty project is ready, not pending");

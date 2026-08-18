@@ -1,0 +1,16 @@
+[package]
+name         = "bennu-bevy"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bevy ECS support for Bennu as a framework extension — the components, resources and events a Rust project declares, the systems that read and write them, and the pairs of systems an access conflict serialises. Read from the source shape alone: no build, no running app."
+
+[dependencies]
+# The extension seam this crate implements.
+bennu-ext   = { path = "../ext" }
+# The wire types a contribution is made of (CapabilitySet gates it; Diagnostic is not used yet).
+bennu-proto = { path = "../proto" }
+# Byte-offset mechanics (`line_number`) — the same helper every other extension reports lines with.
+bennu-complete = { path = "../complete" }

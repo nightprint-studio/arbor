@@ -19,6 +19,8 @@
  * Rune store — private `$state`, returned getters + methods (CLAUDE.md).
  */
 
+import type { FrameworkCatalogId } from '$lib/components/bennu/framework-catalogs';
+
 import { SvelteSet } from 'svelte/reactivity';
 import type { GenerateMode } from '$lib/components/bennu/bennu-intentions';
 
@@ -47,10 +49,14 @@ export type RightPanel = 'maven' | 'cargo' | 'tests' | 'ast' | 'i18n';
  *  one. The Forms inspector lives here (wide, horizontal data) rather than in a narrow side
  *  panel; its toggle sits in the right rail's bottom cluster.
  *
- *  The framework catalogs (see `framework-catalogs.ts`) are palette-only apart from
- *  `endpoints`: a framework tool is noise on the projects that don't use it and the rail is
- *  the one piece of chrome that is always on screen. A route list is the exception — it is
- *  something you keep open while working, not something you go and fetch. */
+ *  The framework catalogs arrive as {@link FrameworkCatalogId} rather than being listed again:
+ *  they are declared once, in `framework-catalogs.ts`, and the two lists had already drifted apart
+ *  once — a catalog added there and forgotten here is one the dock cannot be told to open, which
+ *  the compiler only notices at the call site that tries.
+ *
+ *  Most of them are palette-only: a framework tool is noise on the projects that don't use it and
+ *  the rail is the one piece of chrome that is always on screen. Which of them earn a rail button
+ *  is that table's `rail` flag, not a distinction this type makes. */
 export type BottomPanel =
   | 'problems'
   | 'terminal'
@@ -75,17 +81,7 @@ export type BottomPanel =
    *  and closed from its own header. */
   | 'hierarchy'
   | 'forms'
-  | 'beans'
-  | 'librarybeans'
-  | 'endpoints'
-  | 'messages'
-  | 'labels'
-  | 'springconfig'
-  | 'springbindings'
-  | 'springdocumented'
-  | 'jpaentities'
-  | 'jparepositories'
-  | 'taglibs';
+  | FrameworkCatalogId;
 
 /** Which tab the Go-to navigator opens on. */
 export type NavMode = 'class' | 'file' | 'symbol' | 'all';

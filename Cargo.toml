@@ -85,6 +85,9 @@ members = [
     "crates/products/bennu/ext",
     "crates/products/bennu/spring",
     "crates/products/bennu/jpa",
+    # Bevy ECS, read from the source shape: the fourth framework extension, and the second that
+    # is not Java's.
+    "crates/products/bennu/bevy",
     "crates/products/bennu/dtd",
     "crates/products/bennu/xsd",
     "crates/products/bennu/xml",
