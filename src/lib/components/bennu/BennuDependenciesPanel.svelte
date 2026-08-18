@@ -28,7 +28,7 @@
    * resolved. Nothing here runs Maven or Cargo, so refreshing is cheap and the panel opens
    * instantly.
    */
-  import { Library, Package, GitFork, Layers, RefreshCw, CircleSlash } from 'lucide-svelte';
+  import { Library, Package, GitFork, Layers, Network, RefreshCw, CircleSlash } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
@@ -182,6 +182,16 @@
     {#if root}
       <div class="dep-toolbar">
         <BennuFilterBar bind:query={filter} placeholder="Filter dependencies…" />
+        <!-- The graph of the same project, one press away. This panel answers "what does this module
+             need"; the graph answers "who needs it, and what does changing it cost" — which is the
+             question people arrive at this panel with and cannot get from a list. -->
+        <IconButton
+          tooltip={isCargo ? 'Crate graph (Alt+Shift+D)' : 'Module graph (Alt+Shift+D)'}
+          size={22}
+          onclick={() => bennuUiStore.openModuleGraph()}
+        >
+          <Network size={12} />
+        </IconButton>
         <IconButton
           tooltip={isCargo
             ? 'Re-read the manifests and Cargo.lock'

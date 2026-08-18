@@ -130,7 +130,10 @@
 <h2>Expanding a macro</h2>
 <p>
   <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd> on a macro call shows what it generates, in a
-  dialog you can read, copy and re-expand from. Worth knowing what it is and is not:
+  dialog you can read, copy and re-expand from. It is also offered under
+  <kbd>Alt</kbd> + <kbd>Enter</kbd>, named after the macro it found — <em>Expand vec!</em> — beside the
+  server's own quick fixes, and only when the caret is genuinely inside a macro call. Worth knowing
+  what it is and is not:
 </p>
 <ul>
   <li>the expansion is <strong>recursive</strong> — all the way down. The server offers no single-step

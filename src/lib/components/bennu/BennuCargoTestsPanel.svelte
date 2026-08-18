@@ -20,12 +20,12 @@
    * Keyboard: the shared Tree owns ↑↓←→ and Enter, so finding and opening a test needs no mouse;
    * Ctrl+Enter on a row runs it.
    */
-  import { Play, RefreshCw, Square } from 'lucide-svelte';
+  import { ChevronsDownUp, ChevronsUpDown, Play, RefreshCw, Square } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
-  import Tree, { type RowSnippetCtx } from '$lib/components/shared/ui/Tree.svelte';
+  import Tree, { type RowSnippetCtx, type TreeController } from '$lib/components/shared/ui/Tree.svelte';
   import BennuTestStatusIcon from './BennuTestStatusIcon.svelte';
   import RustTestIcon from './RustTestIcon.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -39,6 +39,11 @@
   const rows = $derived(store.rows);
 
   let filter = $state('');
+
+  /** The tree's imperative handle — what the two fold buttons drive. Expansion lives inside the
+   *  widget here (the run panel's copy of this tree is the one that persists it in the store), so
+   *  "all of it" is a request the widget answers rather than state to mirror. */
+  let tree = $state<TreeController | null>(null);
 
   /** Match on the row's own label **and** on the path it stands for, so typing `parse` finds a
    *  test inside `util::parse` as well as one called `parses`. */
@@ -103,6 +108,24 @@
       aria-label="Refresh"
       onclick={() => void store.discover(root, true)}
     ><RefreshCw size={13} /></button>
+    <!-- Fold the lot. In a workspace of twenty crates the default view is the only one you can
+         read, and getting back to it after opening six modules was otherwise twelve clicks. -->
+    <button
+      class="ps-btn"
+      type="button"
+      disabled={rows.length === 0}
+      use:tooltip={'Collapse all'}
+      aria-label="Collapse all"
+      onclick={() => tree?.collapseAll()}
+    ><ChevronsDownUp size={13} /></button>
+    <button
+      class="ps-btn"
+      type="button"
+      disabled={rows.length === 0}
+      use:tooltip={'Expand all'}
+      aria-label="Expand all"
+      onclick={() => tree?.expandAll()}
+    ><ChevronsUpDown size={13} /></button>
   {/snippet}
 
   {#snippet children()}
@@ -129,6 +152,7 @@
       {:else}
         <div class="ct-tree">
           <Tree
+            bind:this={tree}
             nodes={rows}
             {filter}
             {match}

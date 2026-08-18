@@ -22,7 +22,9 @@
 //! ## Two ecosystems, one report
 //!
 //! [`graph::read`] answers for a Maven reactor and [`cargo::read`] for a Cargo workspace, and both
-//! produce the same [`model::Report`] — one panel, one set of questions. The vocabularies differ
+//! produce the same [`model::Report`] — one panel, one set of questions. [`module_graph`] then reads
+//! that report for the questions only the *shape* answers: who uses a module, what a change to it
+//! rebuilds, and whether the project has a dependency cycle. The vocabularies differ
 //! (`scope` against `kind`, `groupId` against a crate name) and [`model`] documents exactly how they
 //! line up and which two fields belong to one ecosystem only.
 //!
@@ -47,4 +49,6 @@ pub mod graph;
 pub mod repo;
 // What a dependency is once every question about it has been answered.
 pub mod model;
+// Who depends on whom *inside* the project: the internal edges, their cycles and their layers.
+pub mod module_graph;
 pub mod prelude;

@@ -18,6 +18,7 @@
   import {
     FolderOpen, FolderPlus, LogOut, Settings, Keyboard, FlaskConical,
     Play, Bug, Unplug, MoreVertical, Palette, SlidersHorizontal, Info, Hammer, Square, TriangleAlert,
+    UserCog,
     ListChecks, ChevronDown, RotateCw, ListRestart,
   } from 'lucide-svelte';
   import type { BuildType } from '$lib/stores/bennu/run.svelte';
@@ -46,11 +47,15 @@
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
   import ThemeEditorModal from '$lib/components/shared/ThemeEditorModal.svelte';
+  import ProfileManagerModal from '$lib/components/shared/ProfileManagerModal.svelte';
+  import { profileStore } from '$lib/stores/profiles.svelte';
+  import { profileMenuItems } from '$lib/utils/profile-menu';
 
   let pickerOpen = $state(false);
   // Whether the folder picker opens a NEW workspace (replace) or ADDS a project to the current one.
   let pickerMode = $state<'open' | 'add'>('open');
   let themeEditorOpen = $state(false);
+  let profileManagerOpen = $state(false);
 
   // Run/Build are wired to bennu-be (build.rs); Debug isn't implemented yet (a
   // later wave — it toasts). All disabled when no project is open.
@@ -231,10 +236,18 @@
     { kind: 'item' as const, id: 'edit-themes', label: 'Edit themes…', icon: Settings, onclick: () => { themeEditorOpen = true; } },
   ]);
 
+  // ── Profile ───────────────────────────────────────────────────────────────────
+  // The same submenu Corvus's titlebar has, from the same builder. It belongs here and not only
+  // there: which profile is active decides where Bennu reads and writes its own settings and its
+  // `workspace.toml`, and a window that cannot say — let alone change — which one it is on is a
+  // window you cannot trust with a second profile. The active row carries the tick.
+  const profileItems = $derived(profileMenuItems(() => { profileManagerOpen = true; }));
+
   const settingsMenu = $derived<DropdownItem[]>([
     { kind: 'item', id: 'settings',  label: 'Settings…',           icon: Settings,  shortcut: 'Ctrl+,',   onclick: () => bennuUiStore.openSettings() },
     { kind: 'item', id: 'shortcuts', label: 'Keyboard shortcuts…', icon: Keyboard,  shortcut: 'F1',       onclick: () => bennuUiStore.toggleDocs() },
     { kind: 'separator' },
+    { kind: 'submenu', id: 'profile', label: `Profile — ${profileStore.active}`, icon: UserCog, items: profileItems },
     { kind: 'submenu', id: 'theme', label: 'Theme', icon: Palette, items: themeItems },
   ]);
 
@@ -362,6 +375,10 @@
 
 {#if themeEditorOpen}
   <ThemeEditorModal onClose={() => (themeEditorOpen = false)} />
+{/if}
+
+{#if profileManagerOpen}
+  <ProfileManagerModal onClose={() => (profileManagerOpen = false)} />
 {/if}
 
 <style>

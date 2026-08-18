@@ -30,7 +30,14 @@ async function refresh() {
   }
 }
 
+// Once per webview. Two products can share one webview (the tabbed container mounts Corvus and
+// Bennu side by side), and both titlebars now offer the profile switcher — without this guard that
+// window would hold two `profile-switched` subscriptions and reload itself twice.
+let _inited = false;
+
 async function init() {
+  if (_inited) return;
+  _inited = true;
   await refresh();
   await listen('arbor://profile-switched', () => {
     // Re-resolve every store against the new profile by reloading the webview;

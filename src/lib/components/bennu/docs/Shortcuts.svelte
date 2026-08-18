@@ -7,6 +7,7 @@
   <li><kbd>Alt</kbd> + <kbd>1</kbd> — toggle <strong>Project</strong> (files)</li>
   <li><kbd>Alt</kbd> + <kbd>2</kbd> — toggle <strong>Structure</strong> (symbols)</li>
   <li><kbd>Alt</kbd> + <kbd>N</kbd> — toggle <strong>Dependencies</strong> (by module, or by crate on a Cargo project)</li>
+  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd> — the <strong>module graph</strong> — who depends on whom inside the project, in a window. Inside it, <kbd>Alt</kbd> + <kbd>S</kbd> isolates the selected module's world. <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd> would have been the obvious key for the window itself and is <em>Switch window</em>, bound in every window</li>
   <li><kbd>Alt</kbd> + <kbd>0</kbd> — toggle <strong>Build</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>R</kbd> — toggle <strong>Run</strong> — the launched program's console, and the debugger when it is one (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>5</kbd> — toggle <strong>Tests</strong> (the catalogue, right rail)</li>
@@ -56,7 +57,7 @@
   <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> — <strong>format</strong> the file with the language's own formatter (<code>rustfmt</code> for Rust, honouring the project's configuration). Only for a language with a <strong>language server</strong> behind it</li>
   <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>→</kbd> / <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>←</kbd> — <strong>expand</strong> / <strong>shrink</strong> the selection by one syntactic step — the token, the expression, the argument list, the call, the block, on the server's own idea of structure. VS Code's keys rather than IntelliJ's <kbd>Ctrl</kbd> + <kbd>W</kbd>, which a WebView may read as "close the window"</li>
   <li><kbd>Tab</kbd> / <kbd>Shift</kbd> + <kbd>Tab</kbd> — after accepting a completion that inserted <strong>placeholders</strong>, move between them; <kbd>Esc</kbd> leaves the run. Accepting <code>println!</code> puts the caret between the parentheses, and a function completion walks you through its arguments</li>
-  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd> — <strong>expand the macro</strong> at the caret and read what it generates. The expansion is recursive (all the way down — the server has no single-step form) and is text rather than a file, so it cannot be navigated: to go deeper, point at the nested macro in the source and expand again</li>
+  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd> — <strong>expand the macro</strong> at the caret and read what it generates (also under <kbd>Alt</kbd> + <kbd>Enter</kbd>). The expansion is recursive (all the way down — the server has no single-step form) and is text rather than a file, so it cannot be navigated: to go deeper, point at the nested macro in the source and expand again</li>
 </ul>
 
 <h2>Files</h2>

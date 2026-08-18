@@ -46,11 +46,13 @@ pub fn delete_profile(name: String) -> Result<(), AppError> {
 
 /// Switch the active profile **live** (no relaunch): persist the pointer, flip
 /// the in-process profile cell, re-resolve every per-profile backend cache and
-/// the plugin host against the new profile, then broadcast
-/// `arbor://profile-switched` so each window reloads its frontend stores. A
-/// no-op (returns `Ok`) when already on the target profile.
+/// the plugin host against the new profile, restart the product backends that
+/// resolve the profile for themselves, then broadcast `arbor://profile-switched`
+/// so each window reloads its frontend stores. A no-op (returns `Ok`) when
+/// already on the target profile.
 #[tauri::command]
 pub fn switch_profile(
+    app: tauri::AppHandle,
     state: tauri::State<'_, crate::AppState>,
     name: String,
 ) -> Result<(), AppError> {
@@ -65,6 +67,10 @@ pub fn switch_profile(
     profile::write_pointer(&name)?;
     arbor_core::prelude::set_active_profile(&name);
     state.reload_for_active_profile();
+    // Corvus's backend is repointed by message (inside `reload_for_active_profile`); every other
+    // one resolves the profile for itself at spawn and has to be restarted, or it keeps writing
+    // into the profile we just left. See `recycle_backends_for_profile`.
+    crate::ipc::recycle_backends_for_profile(&app);
     // Reload the plugin host so the new profile's plugin set is picked up.
     if let Err(e) = crate::ipc::platform::plugin::reload_runtime(&state) {
         tracing::warn!("profile switch: plugin reload failed: {e}");

@@ -11,6 +11,9 @@ pub use crate::graph::read;
 // What it returns.
 pub use crate::model::{Dependency, Module, Origin, Report, Site, Transitive};
 
+// The internal shape of the project, derived from a report.
+pub use crate::module_graph::{module_graph, GraphEdge, GraphNode, ModuleGraph};
+
 // One pom, for a consumer that has the text and wants the declarations.
 pub use crate::pom::{parse as parse_pom, ParentRef, Pom, RawDependency};
 

@@ -14,11 +14,12 @@
   import {
     Settings, Keyboard, LayoutDashboard, Palette,
     FolderOpen, Download, FolderPlus, Package, Clock, ScrollText, Info, LogOut, Zap,
-    UserCog, User, Plus,
+    UserCog,
   } from 'lucide-svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
   import { profileStore } from '$lib/stores/profiles.svelte';
+  import { profileMenuItems } from '$lib/utils/profile-menu';
   import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { pluginStore } from '$lib/stores/plugin.svelte';
   import { firePluginAction } from '$lib/ipc/plugin';
@@ -129,18 +130,8 @@
   ]);
 
   // ── Profiles submenu (quick-switch + manage) ─────────────────────────────────
-  const profileItems = $derived<DropdownItem[]>([
-    ...profileStore.list.map(name => ({
-      kind: 'item' as const, id: `profile:${name}`, label: name, icon: User,
-      active: profileStore.active === name,
-      onclick: () => void profileStore.switchTo(name),
-    })),
-    { kind: 'separator' as const },
-    { kind: 'item' as const, id: 'new-profile', label: 'New profile…', icon: Plus,
-      onclick: () => { profileManagerOpen = true; } },
-    { kind: 'item' as const, id: 'manage-profiles', label: 'Manage profiles…', icon: UserCog,
-      onclick: () => { profileManagerOpen = true; } },
-  ]);
+  // Shared with every other product's titlebar — same list, same tick, one place.
+  const profileItems = $derived(profileMenuItems(() => { profileManagerOpen = true; }));
 
   const settingsMenu = $derived<DropdownItem[]>([
     { kind: 'item', id: 'settings', label: 'Settings…', icon: Settings, action: 'settings',

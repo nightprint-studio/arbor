@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Bennu documentation — the manual (Getting Started, Projects & capabilities,
+   * Bennu documentation — the manual (Getting Started, Projects & capabilities, the module graph,
    * Editing & navigation, Language servers, Rust & Cargo, Building & running, Testing,
    * Structural search,
    * keyboard reference). Built on the shared `DocsShell`, the same surface Arbor's and merula's
@@ -8,11 +8,12 @@
    */
   import {
     BookOpen, Rocket, Boxes, PenLine, Keyboard, FolderGit2, FlaskConical, Play, Replace, ServerCog,
-    Cog, Languages,
+    Cog, Languages, Network,
   } from 'lucide-svelte';
   import DocsShell, { type DocsNavItem, type DocsNavGroup } from '$lib/components/shared/DocsShell.svelte';
   import GettingStarted from './docs/GettingStarted.svelte';
   import Projects from './docs/Projects.svelte';
+  import ModuleGraph from './docs/ModuleGraph.svelte';
   import Editing from './docs/Editing.svelte';
   import LanguageServers from './docs/LanguageServers.svelte';
   import Running from './docs/Running.svelte';
@@ -31,6 +32,7 @@
   const navGroups: DocsNavGroup[] = [
     { id: 'workspace', label: 'Workspace', icon: Boxes, items: [
       { id: 'projects', label: 'Projects & capabilities', icon: FolderGit2 },
+      { id: 'module-graph', label: 'The module graph',      icon: Network },
       { id: 'editing',  label: 'Editing & navigation',    icon: PenLine },
       { id: 'lsp',      label: 'Language servers',        icon: ServerCog },
       { id: 'cargo',    label: 'Rust & Cargo',            icon: Cog },
@@ -47,6 +49,7 @@
   const sections = {
     'getting-started': GettingStarted,
     'projects': Projects,
+    'module-graph': ModuleGraph,
     'editing': Editing,
     'lsp': LanguageServers,
     'cargo': Cargo,

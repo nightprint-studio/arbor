@@ -179,24 +179,39 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   explorer_toggle_live:     { key: 't', ctrl: true, shift: true,    description: 'Toggle live tail (follow file)', group: 'File Explorer' },
 };
 
+/**
+ * Does `event` name the key `key`, whatever the layout and the modifiers printed on it?
+ *
+ * The character a key produces is not the key. Two families of chord break if you compare
+ * `event.key` to a letter or a digit:
+ *
+ *   * **Shift** shifts it — Shift+1 arrives as `!` on US and as `£` / `!` / `"` on EU layouts;
+ *   * **Alt** *composes* it, and on macOS that is not an edge case but the norm: Option+M is `µ`,
+ *     Option+Shift+M is `Â`, Option+1 is `¡`, Option+N is a dead key. A binding written as
+ *     "Alt+Shift+M" and compared against `'m'` therefore never fires on a Mac at all — the feature
+ *     behind it looks broken rather than unbound, which is the expensive kind of silence.
+ *
+ * `event.code` is the physical key and immune to both, so a letter or a digit falls back to it. It
+ * is a fallback rather than the primary test because `code` is *too* physical: on a French layout
+ * `KeyA` is where Q is printed, and a user pressing the key labelled A means A.
+ *
+ * Named keys (`F5`, `Enter`, `ArrowLeft`) are unaffected by either family and compare directly.
+ */
+export function isKey(event: KeyboardEvent, key: string): boolean {
+  if (event.key.toLowerCase() === key.toLowerCase()) return true;
+  if (key.length !== 1) return false;
+  if (/[0-9]/.test(key)) return event.code === `Digit${key}` || event.code === `Numpad${key}`;
+  if (/[a-z]/i.test(key)) return event.code === `Key${key.toUpperCase()}`;
+  return false;
+}
+
 export function matchesBinding(event: KeyboardEvent, binding: Keybinding): boolean {
   if (!binding.key) return false;
   const ctrlMatch  = !!binding.ctrl  === (event.ctrlKey || event.metaKey);
   const shiftMatch = !!binding.shift === event.shiftKey;
   const altMatch   = !!binding.alt   === event.altKey;
   if (!(ctrlMatch && shiftMatch && altMatch)) return false;
-
-  // Fallback to `event.code` for digits and letters: with Shift held the
-  // browser reports the shifted character (e.g. Shift+1 → `event.key === '!'`
-  // on US, `£`/`!`/`"` on EU layouts), which would otherwise never match a
-  // binding declared as `'1'`. `event.code` is layout-independent.
-  const k = binding.key;
-  if (event.key.toLowerCase() === k.toLowerCase()) return true;
-  if (k.length === 1) {
-    if (/[0-9]/.test(k) && (event.code === `Digit${k}` || event.code === `Numpad${k}`)) return true;
-    if (/[a-z]/i.test(k) && event.code === `Key${k.toUpperCase()}`) return true;
-  }
-  return false;
+  return isKey(event, binding.key);
 }
 
 // Friendlier display names for keys whose `KeyboardEvent.key` value reads

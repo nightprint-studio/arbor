@@ -2108,6 +2108,55 @@ pub fn ensure_bennu_be(app: &AppHandle) {
     }
 }
 
+/// Recycle every product backend that resolves the active profile **for itself**, after a live
+/// profile switch.
+///
+/// Each `*-be` reads the profile pointer once, in `init_active_profile()` at spawn, and every
+/// per-profile path it touches afterwards comes from that one answer. Nothing in the protocol moves
+/// a *running* backend to another profile — corvus-be is the exception and not the rule: it is told
+/// its product directory through `sync_config`, so a switch repoints it without a restart.
+///
+/// Which means a switch that left the others running would have Bennu writing its `workspace.toml`,
+/// and Sitta/Picus/Garrulus their state, into the profile you just left — silently, and into the
+/// wrong file rather than into none. Restarting them is the whole fix: a fresh process reads the new
+/// pointer at boot, which is the same path a cold start already takes every day.
+///
+/// Detaching drops the client, which closes the child's stdin; it sees EOF and exits. Only backends
+/// that are actually attached are touched — the rest spawn on the new profile whenever their window
+/// next asks for them.
+///
+/// On its own thread because `ensure_*_be` blocks on the child's first `Hello` frame, and this is
+/// called from a Tauri command: doing it inline would freeze the UI for as long as N backends take
+/// to come up. The frontend is reloading on `arbor://profile-switched` in parallel, and each
+/// product's window re-asks as its backend announces itself (`arbor://<product>-be-up` — merula is
+/// the one that does not emit it, and re-reads on its next call).
+pub fn recycle_backends_for_profile(app: &AppHandle) {
+    type Ensure = fn(&AppHandle);
+    let backends: [(&'static str, Ensure); 6] = [
+        ("bennu", ensure_bennu_be),
+        ("sitta", ensure_sitta_be),
+        ("merula", ensure_merula_be),
+        ("picus", ensure_picus_be),
+        ("garrulus", ensure_garrulus_be),
+        ("tyto", ensure_tyto_be),
+    ];
+    let live: Vec<(&'static str, Ensure)> = backends
+        .into_iter()
+        .filter(|(program, _)| split_broker::is_attached(program))
+        .collect();
+    if live.is_empty() {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        for (program, ensure) in live {
+            tracing::info!("profile switch: recycling {program}-be onto the new profile");
+            split_broker::detach(program, "profile switch");
+            ensure(&app);
+        }
+    });
+}
+
 fn spawn_bennu_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)> {
     use crate::process_ext::NoWindowExt;
 

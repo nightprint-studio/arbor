@@ -24,7 +24,9 @@
    * Discovery itself lives in {@link bennuTestStore}; it is kicked off at the window level and
    * is a no-op once a project has been scanned.
    */
-  import { Check, ChevronDown, ChevronRight, Play, RefreshCw, ArrowDownAZ } from 'lucide-svelte';
+  import {
+    ArrowDownAZ, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Play, RefreshCw,
+  } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
@@ -99,6 +101,17 @@
     expanded = next;
   }
 
+  /** Open every class that has methods — over the **shown** list, so it follows the filter: with
+   *  `order` typed in, "expand all" means the ones you can see. Classes with no methods are left
+   *  out because there is nothing under them to reveal. */
+  function expandAll() {
+    expanded = new Set(shown.filter((t) => t.methods.length).map((t) => t.fqcn));
+  }
+
+  function collapseAll() {
+    expanded = new Set();
+  }
+
   /** Open the declaration. Clicking a row reads it; ▷ runs it — the same split the project
    *  tree uses, so neither is a surprise. */
   function open(file: string, line: number) {
@@ -135,6 +148,28 @@
       onclick={() => void store.discover(root, true)}
     >
       <RefreshCw size={13} />
+    </button>
+    <!-- Fold the lot — the same pair the Rust catalogue and the run console carry, in the same
+         order, so the gesture is one habit across all three. -->
+    <button
+      class="ps-btn"
+      type="button"
+      disabled={!expanded.size}
+      use:tooltip={'Collapse all'}
+      aria-label="Collapse all"
+      onclick={collapseAll}
+    >
+      <ChevronsDownUp size={13} />
+    </button>
+    <button
+      class="ps-btn"
+      type="button"
+      disabled={!store.discovered.length}
+      use:tooltip={'Expand all'}
+      aria-label="Expand all"
+      onclick={expandAll}
+    >
+      <ChevronsUpDown size={13} />
     </button>
   {/snippet}
 

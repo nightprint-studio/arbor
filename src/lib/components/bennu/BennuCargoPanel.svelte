@@ -18,7 +18,7 @@
    * than running `cargo metadata` — so the panel opens instantly, and opens on a workspace that has
    * never been built.
    */
-  import { Cog, PackagePlus, Play, RefreshCw, TriangleAlert } from 'lucide-svelte';
+  import { Cog, Network, PackagePlus, Play, RefreshCw, TriangleAlert } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
@@ -117,6 +117,14 @@
           onclick={() => bennuUiStore.openCargoAdd()}
         >
           <PackagePlus size={12} />
+        </IconButton>
+        <!-- This panel lists the crates; the graph shows how they are wired to each other. -->
+        <IconButton
+          tooltip="Crate graph (Alt+Shift+D)"
+          size={22}
+          onclick={() => bennuUiStore.openModuleGraph()}
+        >
+          <Network size={12} />
         </IconButton>
         <IconButton
           tooltip="Re-read the workspace manifests"

@@ -493,6 +493,69 @@ mod tests {
         }
     }
 
+    /// A workspace with **no projects** round-trips.
+    ///
+    /// This is the shape a freshly-created workspace has, and it is the shape the release
+    /// data-loss report was about: workspaces appeared, projects did not. An empty
+    /// array-of-tables is also the case a pretty TOML serializer is most likely to emit
+    /// differently, so it is pinned rather than assumed.
+    #[test]
+    fn an_empty_workspace_round_trips() {
+        let store = BennuWorkspaces {
+            active_id: "w1".to_string(),
+            workspaces: vec![ws("w1", "Scratch", &[])],
+        };
+        let text = toml::to_string_pretty(&store).expect("serializes");
+        let back = parse_workspaces(&text);
+        assert_eq!(back.active_id, "w1");
+        assert_eq!(back.workspaces.len(), 1, "an empty workspace is still a workspace");
+        assert_eq!(back.workspaces[0].name, "Scratch");
+        assert!(back.workspaces[0].projects.is_empty());
+    }
+
+    /// The legacy migration must fire **only** on a legacy file. A real store whose workspaces
+    /// happen to hold no projects is not one — reading it as legacy would drop every workspace in
+    /// it, which is the same data loss by a different route.
+    #[test]
+    fn a_real_store_is_never_read_as_a_legacy_file() {
+        let text = toml::to_string_pretty(&BennuWorkspaces {
+            active_id: "w1".to_string(),
+            workspaces: vec![ws("w1", "A", &[]), ws("w2", "B", &[])],
+        })
+        .expect("serializes");
+        let back = parse_workspaces(&text);
+        assert_eq!(back.workspaces.len(), 2);
+    }
+
+    /// A file written by a **newer** Bennu still loads. Every persisted struct here is
+    /// `#[serde(default)]`, and this is what that buys: an added field does not turn one upgrade
+    /// into an erased session, which without the default would be a parse error, then the legacy
+    /// retry, then an empty store written back over the file.
+    #[test]
+    fn an_unknown_field_does_not_discard_the_file() {
+        let text = "\
+active_id = \"w1\"
+future_flag = true
+
+[[workspaces]]
+id = \"w1\"
+name = \"A\"
+color_idx = 2
+active_project = \"/p\"
+theme = \"neon\"
+
+[[workspaces.projects]]
+root = \"/p\"
+open_files = [\"/p/A.java\"]
+active_file = \"/p/A.java\"
+scroll = 42
+";
+        let back = parse_workspaces(text);
+        assert_eq!(back.active_id, "w1");
+        assert_eq!(back.workspaces.len(), 1);
+        assert_eq!(back.workspaces[0].projects.len(), 1, "the session survived the unknown keys");
+    }
+
     /// A store with nested projects round-trips through pretty TOML (field order — scalars before
     /// the `projects` / `workspaces` arrays-of-tables — must not trip "values before tables").
     #[test]

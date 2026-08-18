@@ -33,7 +33,9 @@
   import { animStore } from '$lib/stores/animations.svelte';
   import { signalWindowReady } from '$lib/ipc/window';
   import { syncWindowTitle } from '$lib/utils/window-title.svelte';
+  import { isKey } from '$lib/utils/keybindings';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
+  import { profileStore } from '$lib/stores/profiles.svelte';
   import { recordRecentProject, onOpenIntent } from '$lib/ipc/recents';
 
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
@@ -82,6 +84,7 @@
   import BennuUsagesPopover from './BennuUsagesPopover.svelte';
   import BennuGotoModal from './BennuGotoModal.svelte';
   import BennuIndexInspectorModal from './BennuIndexInspectorModal.svelte';
+  import BennuModuleGraphModal from './BennuModuleGraphModal.svelte';
   import BennuMojibakeScanModal from './BennuMojibakeScanModal.svelte';
   import BennuTomcatConfigModal from './BennuTomcatConfigModal.svelte';
   // The job-output bottom panel: shared chrome (lives under corvus/jobs/ but depends only on the
@@ -104,6 +107,8 @@
   // Opening a stack frame's source — the same resolution the consoles' stack traces use, so a
   // frame in a dependency lands in its source view rather than nowhere.
   import { openLogLink } from './log-link';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { listen } from '@tauri-apps/api/event';
   import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
   import { bennuCargoTestStore } from '$lib/stores/bennu/cargo-tests.svelte';
   import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
@@ -131,6 +136,9 @@
     void animStore.loadConfig();
     // Hydrate the config-backed editor toggles (autosave / auto-import) from the persisted config.
     void bennuSettingsStore.loadConfig();
+    // The profile list + which one is active, for the titlebar's switcher. Idempotent, so a Bennu
+    // that shares its webview with Corvus does not subscribe twice.
+    void profileStore.init();
     // Autosave on frame deactivation (the window loses OS focus) — IntelliJ-style. Guarded by the
     // setting; saves whatever has unsaved edits. `blur` on the window fires when you switch apps.
     const onWindowBlur = () => { if (bennuSettingsStore.autosave) void projectStore.saveAllDirty(); };
@@ -163,6 +171,32 @@
     // install / when the BE is absent. Driven by the workspace store (owns the named-workspace
     // set). Kicks off the index build via the effect below.
     void workspacesStore.restore();
+    // The last few hundred milliseconds of a session are the ones a debounce is still holding, and
+    // closing the window is exactly when they are lost. Tauri AWAITS this handler before it closes,
+    // so writing here is the difference between persisting them and not. No veto: whatever happens
+    // to the write, the window must still close.
+    const closeWin = getCurrentWindow();
+    let unlistenClose: (() => void) | undefined;
+    void closeWin
+      .onCloseRequested(async () => {
+        try {
+          await workspacesStore.flush();
+        } catch { /* the window closes regardless */ }
+      })
+      .then((un) => { unlistenClose = un; });
+    // Hiding counts too: a machine that sleeps or a window sent to the background can be the last
+    // thing that happens before the process goes.
+    const onHidden = () => { if (document.hidden) void workspacesStore.flush(); };
+    document.addEventListener('visibilitychange', onHidden);
+    // `bennu-be` is spawned lazily *as* this window opens, so every load above can run before it is
+    // routable — and then nothing asked again. This event is the backend saying "now I am": the
+    // deterministic answer, where the workspace store's retry loop is only a fallback for a spawn
+    // slower than its window. Both loads are no-ops once they have succeeded.
+    let unlistenBeUp: (() => void) | undefined;
+    void listen('arbor://bennu-be-up', () => {
+      void workspacesStore.restore();
+      void bennuSettingsStore.loadConfig();
+    }).then((un) => { unlistenBeUp = un; });
     // Subscribe to the build/run + index-progress event streams for this window;
     // detach on unmount.
     let detachRun: (() => void) | undefined;
@@ -197,6 +231,9 @@
       stopPolling();
       detachRun?.(); detachIndex?.(); detachSpell?.(); detachDecompiled?.(); detachTests?.();
       detachCargoTests?.();
+      unlistenClose?.();
+      unlistenBeUp?.();
+      document.removeEventListener('visibilitychange', onHidden);
       detachDebug?.(); detachLsp?.();
       bennuIndexStore.reset();
     };
@@ -932,6 +969,11 @@
       { id: 'structure', title: 'Toggle Structure', icon: 'list-tree',   shortcut: 'Alt+2', action: () => run(() => bennuUiStore.toggleLeft('structure')), when: javaTools },
       { id: 'forms',     title: 'Toggle Forms',     icon: 'list',        shortcut: 'Alt+3', action: () => run(() => bennuUiStore.toggleBottom('forms')), when: jspTools },
       { id: 'dependencies', title: 'Dependencies',  icon: 'library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: true },
+      // The same subject from the other angle: the list says what each module needs, the graph says
+      // who needs *it*, what a change to it rebuilds, and whether the project has a cycle. Named for
+      // the ecosystem's own word so a Rust workspace is not offered a "module" graph.
+      { id: 'modulegraph', title: projectStore.isCargo ? 'Crate graph' : 'Module graph', icon: 'network',
+        shortcut: 'Alt+Shift+D', action: () => run(() => bennuUiStore.openModuleGraph()), when: !!projectStore.project },
       { id: 'runpanel',  title: 'Toggle Run',       icon: 'play',        shortcut: 'Alt+R', action: () => run(() => bennuUiStore.toggleBottom('run')), when: true },
       { id: 'tests',     title: 'Toggle Tests',     icon: 'junit',       shortcut: 'Alt+5', action: () => run(() => bennuUiStore.toggleRight('tests')), when: javaTools },
       { id: 'problems',  title: 'Toggle Problems',  icon: 'alert',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
@@ -1105,7 +1147,7 @@
     // screen. No-op in a standalone Bennu window.
     if (!surfaceStore.hasFocus('bennu')) return;
     const mod = e.ctrlKey || e.metaKey;
-    if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); bennuUiStore.togglePalette(); return; }
+    if (mod && isKey(e, 'k')) { e.preventDefault(); bennuUiStore.togglePalette(); return; }
     if (bennuUiStore.paletteOpen) return; // the palette owns the keyboard while open
 
     // F1 toggles docs from anywhere; Docs/Settings/Find modals own Esc themselves.
@@ -1116,7 +1158,7 @@
     // decides which tab it lands on, and Tab moves between them without reopening.
     // Ctrl+Shift+Y for symbols because IntelliJ's Ctrl+Alt+Shift+N is off-limits here:
     // Ctrl+Alt+<letter> is dropped by Chromium on IT/DE/FR/ES keyboards (AltGr).
-    if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'y') {
+    if (mod && e.shiftKey && !e.altKey && isKey(e, 'y')) {
       if (!projectStore.project) return;
       e.preventDefault();
       bennuUiStore.openNav('symbol', editor?.getSelectedText() ?? '');
@@ -1131,7 +1173,7 @@
       void (e.key === 'ArrowRight' ? editor?.expandSelection() : editor?.shrinkSelection());
       return;
     }
-    if (mod && !e.altKey && e.key.toLowerCase() === 'n') {
+    if (mod && !e.altKey && isKey(e, 'n')) {
       if (!projectStore.project) return;
       e.preventDefault();
       // Seed the navigator from the editor selection (IntelliJ) — a highlighted word.
@@ -1140,7 +1182,7 @@
     }
 
     // Save the active file (Ctrl/Cmd+S).
-    if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
+    if (mod && !e.shiftKey && !e.altKey && isKey(e, 's')) {
       if (!projectStore.activeFilePath) return;
       e.preventDefault(); saveActive(); return;
     }
@@ -1231,7 +1273,7 @@
      * Server-backed buffers only: Bennu's Java engine answers find-usages and has no hierarchy, so
      * on a `.java` the key would open a panel that could only say "nothing here".
      */
-    if (mod && !e.altKey && e.key.toLowerCase() === 'h') {
+    if (mod && !e.altKey && isKey(e, 'h')) {
       if (!isLspFile(projectStore.activeFilePath)) return;
       e.preventDefault();
       if (e.shiftKey) editor?.showCallHierarchy();
@@ -1240,21 +1282,21 @@
     }
 
     // Find in project (Ctrl+Shift+F) — a modal, replacing the old Search rail.
-    if (mod && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); bennuUiStore.openFind(editor?.getSelectedText() ?? ''); return; }
+    if (mod && e.shiftKey && isKey(e, 'f')) { e.preventDefault(); bennuUiStore.openFind(editor?.getSelectedText() ?? ''); return; }
 
     // Structural search (Ctrl+Shift+M) — the shape-aware sibling of the one above. Java-only:
     // it needs a grammar, and on a Cargo project there is none to point it at.
-    if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'm' && javaTools) {
+    if (mod && e.shiftKey && !e.altKey && isKey(e, 'm') && javaTools) {
       e.preventDefault(); bennuUiStore.openSsr(); return;
     }
 
     // Workspace manager (Ctrl+Shift+W) — create / switch / manage named workspaces.
-    if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'w') { e.preventDefault(); bennuUiStore.openWorkspaceManager(); return; }
+    if (mod && e.shiftKey && !e.altKey && isKey(e, 'w')) { e.preventDefault(); bennuUiStore.openWorkspaceManager(); return; }
 
     // Spring beans (Ctrl+Shift+B) — the framework catalog with a keyboard door, since it
     // is the one you reach for while reading code. Its siblings (Endpoints, Config) stay
     // palette-only. Silent on a project that declares none: no panel to open.
-    if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+    if (mod && e.shiftKey && !e.altKey && isKey(e, 'b')) {
       if (!catalogIds.includes('beans')) return;
       e.preventDefault(); bennuUiStore.toggleBottom('beans'); return;
     }
@@ -1278,14 +1320,28 @@
     // Format with the language's own formatter (rustfmt for Rust). Alt+Shift+F rather than
     // IntelliJ's Ctrl+Alt+L: Chromium drops Ctrl+Alt+<letter> on IT/DE/FR/ES layouts to preserve
     // AltGr, so that binding would never fire on this machine.
-    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'f') {
+    //
+    // Every letter and digit below is matched with `isKey` rather than against `e.key`, and that is
+    // load-bearing for exactly these Alt chords: macOS composes Option+<key> into another character
+    // (Option+Shift+F is `Ï`, Option+Shift+M is `Â`, Option+1 is `¡`), so comparing the character
+    // silently unbinds the whole Alt family on a Mac.
+    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isKey(e, 'f')) {
       if (!isLspFile(projectStore.activeFilePath)) return;
       e.preventDefault(); void editor?.formatDocument(); return;
     }
 
+    // The module graph — who depends on whom inside the project. Alt+Shift+D ("dependency diagram")
+    // rather than the obvious Ctrl+Shift+G: that one is `switch_window`, bound in EVERY window, and
+    // taking it here would break escaping the window from inside Bennu. A dialog, so the chord only
+    // has to open it — Esc closes it like every other one.
+    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isKey(e, 'd')) {
+      if (!projectStore.project) return;
+      e.preventDefault(); bennuUiStore.openModuleGraph(); return;
+    }
+
     // Expand the macro at the caret. Alt+Shift+M, in the same safe family as the format binding
     // above and beside Ctrl+Shift+M (structural search) without colliding with it.
-    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'm') {
+    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isKey(e, 'm')) {
       if (!isLspFile(projectStore.activeFilePath)) return;
       e.preventDefault(); editor?.expandMacro(); return;
     }
@@ -1296,36 +1352,36 @@
         if (!supportsCodeNav(projectStore.activeFilePath)) return;
         e.preventDefault(); void editor?.findUsages(); return;
       }
-      if (e.key === '1') { e.preventDefault(); bennuUiStore.toggleLeft('project'); return; }
+      if (isKey(e, '1')) { e.preventDefault(); bennuUiStore.toggleLeft('project'); return; }
       // Endpoints — the one framework catalog with a rail button, so it gets the rail's
       // digit like every other tool there, and only when the rail has it.
-      if (e.key === '4' && catalogIds.includes('endpoints')) { e.preventDefault(); bennuUiStore.toggleBottom('endpoints'); return; }
-      if (e.key === '6') { e.preventDefault(); bennuUiStore.toggleBottom('problems'); return; }
+      if (isKey(e, '4') && catalogIds.includes('endpoints')) { e.preventDefault(); bennuUiStore.toggleBottom('endpoints'); return; }
+      if (isKey(e, '6')) { e.preventDefault(); bennuUiStore.toggleBottom('problems'); return; }
       // Tests (Alt+5) — the CATALOGUE, on the right rail. A test RUN is a tab of the Run
       // console; this is where you go to start one. Java-only, like its rail icon.
-      if (e.key === '5' && javaTools) { e.preventDefault(); bennuUiStore.toggleRight('tests'); return; }
-      if (e.key === '7') { e.preventDefault(); bennuUiStore.toggleBottom('todos'); return; }
-      if (e.key === '0') { e.preventDefault(); bennuUiStore.toggleBottom('build'); return; }
+      if (isKey(e, '5') && javaTools) { e.preventDefault(); bennuUiStore.toggleRight('tests'); return; }
+      if (isKey(e, '7')) { e.preventDefault(); bennuUiStore.toggleBottom('todos'); return; }
+      if (isKey(e, '0')) { e.preventDefault(); bennuUiStore.toggleBottom('build'); return; }
       // Both ecosystems, matching their rail icons: the Dependencies panel answers for a Cargo
       // workspace as well as a Maven reactor, and a cargo command streams into the same console.
-      if (e.key.toLowerCase() === 'n') { e.preventDefault(); bennuUiStore.toggleLeft('dependencies'); return; }
+      if (isKey(e, 'n')) { e.preventDefault(); bennuUiStore.toggleLeft('dependencies'); return; }
       // The Run console. A letter and not a digit because IntelliJ's Alt+4 is already Endpoints
       // here, and moving an existing tool's shortcut to make room would cost more than it buys.
-      if (e.key.toLowerCase() === 'r') { e.preventDefault(); bennuUiStore.toggleBottom('run'); return; }
+      if (isKey(e, 'r')) { e.preventDefault(); bennuUiStore.toggleBottom('run'); return; }
       // The Java-only tools. Gated on `javaTools` for the same reason their rail icons and
       // palette entries are: on a Cargo project the shortcut would open a panel that can
       // only be empty, and whose toggle is nowhere on screen to close it again.
       if (javaTools) {
-        if (e.key === '2') { e.preventDefault(); bennuUiStore.toggleLeft('structure'); return; }
+        if (isKey(e, '2')) { e.preventDefault(); bennuUiStore.toggleLeft('structure'); return; }
         // Forms needs pages, not just Java — same gate as its rail icon.
-        if (e.key === '3' && jspTools) { e.preventDefault(); bennuUiStore.toggleBottom('forms'); return; }
+        if (isKey(e, '3') && jspTools) { e.preventDefault(); bennuUiStore.toggleBottom('forms'); return; }
         // Both views read Bennu's own engines, which have nothing to say about a Rust file —
         // see the rail item.
-        if (e.key === '9') { e.preventDefault(); bennuUiStore.toggleRight('ast'); return; }
+        if (isKey(e, '9')) { e.preventDefault(); bennuUiStore.toggleRight('ast'); return; }
       }
       // The build tool's window — Maven's goals or Cargo's crates, one slot. Outside the Java gate
       // because a Cargo project has one too.
-      if (e.key === '8') {
+      if (isKey(e, '8')) {
         e.preventDefault();
         bennuUiStore.toggleRight(projectStore.isCargo ? 'cargo' : 'maven');
         return;
@@ -1351,15 +1407,15 @@
       }
     }
 
-    if (mod && e.key.toLowerCase() === 'g') { e.preventDefault(); editor?.openGoto(); return; }
+    if (mod && isKey(e, 'g')) { e.preventDefault(); editor?.openGoto(); return; }
     // Go to definition (Ctrl/Cmd+B, IntelliJ) — resolves the action reference under
     // the caret to its config/class/view. Editor-scoped; no-op with no file open.
-    if (mod && !e.shiftKey && e.key.toLowerCase() === 'b') {
+    if (mod && !e.shiftKey && isKey(e, 'b')) {
       if (!supportsCodeNav(projectStore.activeFilePath)) return;
       e.preventDefault(); editor?.goToDefinition(); return;
     }
-    if (mod && e.key.toLowerCase() === 'f') { e.preventDefault(); editor?.openSearch(); return; }
-    if (mod && e.key.toLowerCase() === 'o') {
+    if (mod && isKey(e, 'f')) { e.preventDefault(); editor?.openSearch(); return; }
+    if (mod && isKey(e, 'o')) {
       e.preventDefault();
       window.dispatchEvent(new CustomEvent('bennu:open-project'));
       return;
@@ -1484,6 +1540,10 @@
 
 {#if bennuUiStore.indexInspectorOpen}
   <BennuIndexInspectorModal onClose={() => bennuUiStore.closeIndexInspector()} />
+{/if}
+
+{#if bennuUiStore.moduleGraphOpen}
+  <BennuModuleGraphModal onClose={() => bennuUiStore.closeModuleGraph()} />
 {/if}
 
 {#if bennuUiStore.mojibakeScanOpen}

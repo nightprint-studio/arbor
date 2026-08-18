@@ -11,7 +11,7 @@
    * The folder-picker for Open / Add project lives in the parent titlebar (shared with the
    * hamburger + Ctrl+O), so those two actions are delegated up via `onOpenPicker`.
    */
-  import { ChevronDown, FolderOpen, FolderPlus, Plus, Layers, Check, FileCode2 } from 'lucide-svelte';
+  import { ChevronDown, FolderPlus, Plus, Layers, Check, FileCode2 } from 'lucide-svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import Monogram from '$lib/components/shared/ui/Monogram.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -40,10 +40,19 @@
     return ws ? ws.projects.map((p) => ({ root: p.root, name: basename(p.root) })) : [];
   }
 
+  /**
+   * Create a workspace and go straight to picking its first project.
+   *
+   * It used to create one called "New workspace" and open the manager — which left you in a modal
+   * about *naming* something that had nothing in it, with the actual next step ("Add project…")
+   * back in a different menu. A new workspace exists in order to hold a project, so the picker is
+   * what should be in front of you; the name comes from the first project it gets, and the manager
+   * is still there to change it.
+   */
   async function newWorkspace(close: () => void) {
     close();
-    await workspacesStore.create('New workspace');
-    bennuUiStore.openWorkspaceManager();
+    await workspacesStore.create('');
+    onOpenPicker('add');
   }
 </script>
 
@@ -109,17 +118,14 @@
   {/snippet}
 
   {#snippet footer({ close })}
-    <button class="ws-foot" onclick={() => { close(); onOpenPicker('add'); }} disabled={!projectStore.project} role="menuitem">
-      <FolderPlus size={13} /><span>Add project to workspace…</span>
+    <button class="ws-foot" onclick={() => { close(); onOpenPicker('add'); }} role="menuitem">
+      <FolderPlus size={13} /><span>Add project…</span>
     </button>
     <button class="ws-foot" onclick={() => void newWorkspace(close)} role="menuitem">
       <Plus size={13} /><span>New workspace…</span>
     </button>
     <button class="ws-foot" onclick={() => { close(); bennuUiStore.openWorkspaceManager(); }} role="menuitem">
       <Layers size={13} /><span>Manage workspaces…</span>
-    </button>
-    <button class="ws-foot" onclick={() => { close(); onOpenPicker('open'); }} role="menuitem">
-      <FolderOpen size={13} /><span>Open project…</span>
     </button>
   {/snippet}
 </Dropdown>

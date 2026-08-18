@@ -56,7 +56,7 @@
     type RunConfig, type EnvVar, type RunConfigKind, type TestScopeKind,
   } from '$lib/stores/bennu/run-config.svelte';
   import { springStore } from '$lib/stores/bennu/spring.svelte';
-  import { runKindIcon } from './run-kinds';
+  import { runConfigIcon, runKindIcon } from './run-kinds';
   import BennuCargoRunForm from './BennuCargoRunForm.svelte';
   import BennuRunEnvField from './BennuRunEnvField.svelte';
 
@@ -538,7 +538,7 @@
                 <!-- What kind of thing this is, stated where you are editing it. Read-only:
                      changing an Application into a JUnit run is not an edit, it is a
                      different configuration — make that one and delete this. -->
-                {@const KindIcon = runKindIcon(selected.kind)}
+                {@const KindIcon = runConfigIcon(selected)}
                 <span class="kind-pill"><KindIcon size={11} />{runKindLabel(selected.kind)}</span>
               {/snippet}
               <Input

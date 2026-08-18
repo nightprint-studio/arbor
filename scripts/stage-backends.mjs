@@ -14,12 +14,27 @@ const EXE = process.platform === 'win32' ? '.exe' : '';
 // binary missing from this list is never copied into `src-tauri/backends/`, which
 // is what `tauri.conf.json`'s `resources` bundles — so it works in dev (the
 // launcher finds it beside itself in `target/debug/`) and silently has no backend
-// in an installed app. That failure is invisible until someone installs a build.
+// in an installed app.
 //
-// NOTE: `tyto-be` and `bennu-be` are still in that state. Left alone here because
-// which binaries ship is a release call, not a side effect — but it looks like an
-// oversight rather than a decision, and it is worth confirming.
-const BACKENDS = ['corvus-be', 'merula-be', 'sitta-be', 'picus-be', 'garrulus-be'];
+// That failure mode is worth spelling out, because it cost a bug report: the
+// product's window still opens (the shell serves the webview), so it looks alive
+// while every one of its RPCs answers `BackendNotRunning`. For Bennu that read as
+// "workspaces are added but projects are not, and closing loses the workspaces" —
+// the workspace list is frontend state, and the two things that needed the
+// backend were opening a project and writing `workspace.toml`.
+//
+// So: this list must name **every** backend the app can spawn. Keep it in step
+// with `backends:release` in package.json and with the `ensure_*_be` spawners in
+// `src-tauri/src/ipc/mod.rs`.
+const BACKENDS = [
+  'corvus-be',
+  'merula-be',
+  'sitta-be',
+  'picus-be',
+  'garrulus-be',
+  'bennu-be',
+  'tyto-be',
+];
 const destDir = 'src-tauri/backends';
 
 mkdirSync(destDir, { recursive: true });

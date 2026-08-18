@@ -53,6 +53,11 @@
   also fills with verdicts as a run streams, so it doubles as a status column.
 </p>
 <p>
+  Its header folds the whole tree either way — the same two buttons the run console carries. On a
+  workspace of twenty crates the folded view is the one you can read, and getting back to it after
+  opening half a dozen modules is one press.
+</p>
+<p>
   <strong>A run</strong> lands in the <strong>Run</strong> console (<kbd>Alt</kbd> + <kbd>R</kbd>),
   as a tab beside the programs you have launched, because a test run <em>is</em> a launch: a
   command, a live transcript, a Stop button, an outcome. The tab appears when you start one and

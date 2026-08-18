@@ -136,3 +136,86 @@ export function scopeLabel(ecosystem: string): string {
 export function dependencies(root: string): Promise<DependencyReport> {
   return bennu('bennu_dependencies', { args: { root } });
 }
+
+// ── The internal module graph ───────────────────────────────────────────────────
+
+/** One module of the project, as a node of its own dependency graph.
+ *
+ *  Mirrors `bennu_deps::module_graph::GraphNode`; that file is authoritative and explains why each
+ *  number is worth computing. */
+export interface GraphNode {
+  /** The build tool's id — the artifactId, or the crate name. */
+  id: string;
+  /** Display name — `<name>`, else the artifactId; the crate name for Cargo. */
+  name: string;
+  /** Absolute path of the manifest, forward-slashed. What a row opens. */
+  manifest: string;
+  /** Maven's `<packaging>`, or Cargo's target kinds (`lib` · `bin` · `lib+bin` · `proc-macro`). */
+  kind: string;
+  /** How far above the foundation: 0 depends on nothing internal, else one more than the deepest
+   *  module it depends on. Every module of a cycle shares a layer. */
+  layer: number;
+  /** Direct dependents inside the project. */
+  dependents: number;
+  /** Direct dependencies inside the project. */
+  dependencies: number;
+  /** Third-party dependencies it declares, by distinct coordinate. */
+  external: number;
+  /** Transitive internal dependencies — the part of the project it is built on. */
+  reach: number;
+  /** Transitive dependents: change this and this many modules rebuild. */
+  impact: number;
+  /** Whether it is inside a dependency cycle. */
+  in_cycle: boolean;
+}
+
+/** One edge. A pair can carry several — a normal dependency and a dev one are two facts. */
+export interface GraphEdge {
+  /** Index into `ModuleGraph.nodes` — the module that declares it. */
+  from: number;
+  /** Index into `ModuleGraph.nodes` — the module depended on. */
+  to: number;
+  /** Maven's scope, or Cargo's kind (`normal` · `dev` · `build`). */
+  scope: string;
+  optional: boolean;
+  /** The profile, or the `cfg(…)` of a target table. Empty for the ordinary case. */
+  condition: string;
+  /** Whether it is part of a cycle. */
+  in_cycle: boolean;
+  /** Whether the ecosystem would refuse a cycle closed by this edge — false for a Cargo dev
+   *  dependency, which may legally close one. */
+  structural: boolean;
+}
+
+/** The project's internal dependency graph. */
+export interface ModuleGraph {
+  /** `maven` or `cargo`. */
+  ecosystem: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  /** Each entry is a set of modules that all reach each other — a real cycle, by node index.
+   *  Reported as a group because that is what is true; the build tool names one pair out of it. */
+  cycles: number[][];
+  /** The longest chain, in modules — how many layers the drawing needs. */
+  depth: number;
+  /** Distinct third-party dependencies across the project. */
+  external_total: number;
+  /** Set when the project has more modules than the graph is built for; the ones present are the
+   *  first that fit. */
+  truncated: boolean;
+}
+
+/** What the ecosystem calls the *foundation* end of the graph. Cargo has crates, Maven has modules,
+ *  and a window whose every label said "module" on a Rust workspace would read as though it had been
+ *  written for something else. */
+export function moduleWord(ecosystem: string, plural = false): string {
+  const word = ecosystem === 'cargo' ? 'crate' : 'module';
+  return plural ? `${word}s` : word;
+}
+
+/** The project's internal module graph — who depends on whom, with cycles, layers and the
+ *  rebuild-impact numbers. Reads the same manifests the dependency report does and runs neither
+ *  build tool, so it is safe to call whenever the window is opened. Wire: `bennu_module_graph`. */
+export function moduleGraph(root: string): Promise<ModuleGraph> {
+  return bennu('bennu_module_graph', { args: { root } });
+}

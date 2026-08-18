@@ -49,6 +49,21 @@
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   export type TreeNodeBase = object;
 
+  /**
+   * What `bind:this` on a Tree gives you — the actions the widget cannot express as props.
+   *
+   * A named type rather than `any` so a toolbar button that calls `expandAll` is checked, and so the
+   * imperative surface is one visible list instead of whatever a consumer happens to guess at.
+   */
+  export type TreeController = {
+    /** Open every branch, at any depth. */
+    expandAll(): void;
+    /** Close every branch. */
+    collapseAll(): void;
+    /** Both of the above, when the direction is itself a variable. */
+    setAllExpanded(next: boolean): void;
+  };
+
   export type RowSnippetCtx<T> = {
     node: T;
     depth: number;
@@ -251,6 +266,42 @@
     expandOverride = { ...expandOverride, [id]: next };
     onExpandToggle?.(id, next, node);
   }
+
+  /**
+   * Expand — or collapse — every branch, at any depth.
+   *
+   * Imperative (`bind:this` + a toolbar button) because it is an action and not a state: a prop
+   * would have to be a nonce the consumer bumps, which is a worse way to say "do this now".
+   *
+   * Works in **controlled** mode as well, by reporting each id through `onExpandToggle` instead of
+   * writing the widget's own map — so a consumer that persists expansion in a store keeps being the
+   * one source of truth, and the button does not silently do nothing there.
+   *
+   * A lazy tree (`hasChildren` with children fetched on toggle) expands the branches it already
+   * knows; ones whose children have not arrived cannot be walked, so they open collapsed.
+   */
+  export function setAllExpanded(next: boolean): void {
+    const patch: Record<string, boolean> = {};
+    const walk = (list: T[] | undefined): void => {
+      for (const node of list ?? []) {
+        const kids = getChildren(node);
+        const branch = hasChildren ? hasChildren(node) : !!kids?.length;
+        if (branch) {
+          const id = getId(node);
+          if (isControlled()) onExpandToggle?.(id, next, node);
+          else { patch[id] = next; seeded.add(id); }
+        }
+        walk(kids);
+      }
+    };
+    walk(nodes);
+    if (!isControlled()) expandOverride = { ...expandOverride, ...patch };
+  }
+
+  /** Open every branch. See {@link setAllExpanded}. */
+  export function expandAll(): void { setAllExpanded(true); }
+  /** Close every branch. See {@link setAllExpanded}. */
+  export function collapseAll(): void { setAllExpanded(false); }
 
   // ── Filter ──────────────────────────────────────────────────────────
   const normalizedFilter = $derived(filter.trim().toLowerCase());

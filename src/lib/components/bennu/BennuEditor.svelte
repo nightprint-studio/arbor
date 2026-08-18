@@ -25,7 +25,7 @@
   import { languageForPath } from './languages';
   import {
     isImageFile, isJavaFile as isJavaFileOf, isJspFile as isJspFileOf,
-    isLspFile as isLspFileOf, hasPushedDiagnostics,
+    isLspFile as isLspFileOf, isRustFile as isRustFileOf, hasPushedDiagnostics,
     supportsCodeNav, supportsDiagnostics,
   } from './file-kind';
   import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
@@ -1416,8 +1416,30 @@
       const u2b = makeU16ToByte(src);
       const start = u2b(sel.from);
       const end = u2b(sel.to);
-      const actions = await lspCodeActions(path, src, start, end).catch(() => []);
+      // Both questions asked at once. Expanding a macro is not a code action — it is
+      // rust-analyzer's own request — but "what can you do where I am standing" is one gesture, so
+      // it belongs in the same list rather than behind a chord you have to know about.
+      //
+      // Asked speculatively rather than guessed from the text: the server answers `null` off a
+      // macro call straight from its syntax tree, which costs a fraction of the assists request
+      // running beside it, and it answers with the *name*. A `ident!`-shaped regex here would both
+      // offer the row on `a != b` and miss a caret inside a nested expansion. The answer is also
+      // the expansion itself, so picking the row opens the modal with nothing left to wait for.
+      const [actions, macro] = await Promise.all([
+        lspCodeActions(path, src, start, end).catch(() => []),
+        isRustFileOf(path)
+          ? lspExpandMacro(path, src, editorComp.caretByteOffset()).catch(() => null)
+          : Promise.resolve(null),
+      ]);
       if (projectStore.activeFilePath === path) {
+        if (macro) {
+          dynamic.push({
+            id: 'expand-macro',
+            label: `Expand ${macro.name}!`,
+            icon: Wand2,
+            run: () => { macroView = macro; },
+          });
+        }
         for (const a of orderedActions(actions)) {
           // A disabled action is shown with its reason rather than hidden: "cannot extract:
           // selection crosses a block" tells you what to change, an absent menu item does not.

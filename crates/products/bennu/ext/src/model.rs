@@ -130,7 +130,14 @@ impl FileCtx<'_> {
 
     /// The file name (with extension), or an empty string.
     pub fn file_name(&self) -> String {
-        self.path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string()
+        // Split on BOTH separators rather than deferring to `Path::file_name`, which only knows the
+        // host's. That made this helper disagree with `path_str` below — which normalises `\` on
+        // every platform — so a `FileCtx` holding a Windows path answered `C:\p\src\App.java` for
+        // its file name anywhere but Windows. Production never hits it (the paths are the host's),
+        // but the two helpers describing the same path differently is the kind of difference that
+        // only shows up in whichever test runs on the other OS.
+        let s = self.path.to_string_lossy();
+        s.rsplit(['/', '\\']).next().unwrap_or_default().to_string()
     }
 
     /// The path as a forward-slashed string — the form every contributed target uses, so

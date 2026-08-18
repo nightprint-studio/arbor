@@ -20,7 +20,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunConfigStore, type RunConfig } from '$lib/stores/bennu/run-config.svelte';
-  import { runKindIcon } from './run-kinds';
+  import { runConfigIcon } from './run-kinds';
 
   const root = $derived(projectStore.project?.root ?? null);
   const groups = $derived(root ? bennuRunConfigStore.groupedFor(root) : []);
@@ -48,7 +48,7 @@
         // Which module, on a reactor — four configurations called "Application" are otherwise
         // the same row four times.
         meta: isMultiModule ? moduleOf(c) || undefined : undefined,
-        icon: runKindIcon(c.kind),
+        icon: runConfigIcon(c),
         // A check, not a highlight: this is a single-choice list and the check is what says
         // "this is the one ▷ will run".
         active: c.id === active?.id,
@@ -83,7 +83,7 @@
       aria-expanded={open}
     >
       {#if active}
-        {@const Ic = runKindIcon(active.kind)}
+        {@const Ic = runConfigIcon(active)}
         <Ic size={13} />
         <span class="rcs-name">{active.name || 'Unnamed'}</span>
         {#if isMultiModule && moduleOf(active)}

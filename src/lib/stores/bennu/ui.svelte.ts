@@ -139,6 +139,8 @@ function createBennuUiStore() {
   let navMode = $state<NavMode>('class');
   // Index inspector modal (debug: index stats + class list).
   let indexInspectorOpen = $state(false);
+  // The module-graph window (who depends on whom, inside the project).
+  let moduleGraphOpen = $state(false);
   // Project mojibake-scan modal (whole-project UTF-8-as-Cp1252 corruption report).
   let mojibakeScanOpen = $state(false);
   // Tomcat hot-swap settings modal (link a Tomcat + pick the deployed webapp).
@@ -229,6 +231,7 @@ function createBennuUiStore() {
     /** Query to pre-fill the Go-to navigator field with (from a selection), or ''. */
     get navInitial()   { return navInitial; },
     get indexInspectorOpen() { return indexInspectorOpen; },
+    get moduleGraphOpen() { return moduleGraphOpen; },
     get mojibakeScanOpen() { return mojibakeScanOpen; },
     get tomcatConfigOpen() { return tomcatConfigOpen; },
     get fileStructureOpen() { return fileStructureOpen; },
@@ -322,6 +325,8 @@ function createBennuUiStore() {
     closeNav()           { navOpen = false; },
     openIndexInspector() { indexInspectorOpen = true; },
     closeIndexInspector() { indexInspectorOpen = false; },
+    openModuleGraph() { moduleGraphOpen = true; },
+    closeModuleGraph() { moduleGraphOpen = false; },
     openMojibakeScan() { mojibakeScanOpen = true; },
     closeMojibakeScan() { mojibakeScanOpen = false; },
     openTomcatConfig() { tomcatConfigOpen = true; },
