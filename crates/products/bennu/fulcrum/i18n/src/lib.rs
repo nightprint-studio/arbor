@@ -29,6 +29,9 @@
 //!    each with the position of its value.
 //! 3. [`refs`] — where the project reads a label, in `.ron` and in `.rs`.
 //!
+//! 4. [`studio`] — the same three, read off the **live buffer** instead of the index: what the
+//!    editor's i18n panel and its markup colouring are driven from.
+//!
 //! [`ext`] composes them into the one thing a host registers.
 //!
 //! ## Where this sits, and why it is its own crate
@@ -49,3 +52,4 @@ pub mod ext;
 pub mod markup;
 pub mod prelude;
 pub mod refs;
+pub mod studio;

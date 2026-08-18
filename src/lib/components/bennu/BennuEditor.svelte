@@ -15,7 +15,9 @@
     PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed, ShieldCheck, Plus, BookOpen,
     Braces, ArrowLeftRight, Package, FolderInput, CircleAlert, TriangleAlert, Check,
     DownloadCloud, FileDown, Variable, Database, Clock, Columns3, ListPlus, SquarePen,
+    Languages,
   } from 'lucide-svelte';
+  import { untrack } from 'svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
@@ -47,6 +49,9 @@
   import { javaKindStore } from '$lib/stores/bennu/java-kinds.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { bennuI18nStore } from '$lib/stores/bennu/i18n.svelte';
+  import { isI18nBundle } from './i18n/bundle-path';
+  import { markupEdit } from './i18n/markup-edit';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { diagnostics as ipcDiagnostics } from '$lib/ipc/bennu';
@@ -136,6 +141,8 @@
     selectByteRange: (startByte: number, endByte: number) => void;
     /** The primary selection, in UTF-16 document offsets. */
     selectionRange: () => { from: number; to: number; head: number; empty: boolean };
+    /** The primary selection in UTF-8 bytes — the frame every backend span is in. */
+    selectionByteRange: () => { start: number; end: number; empty: boolean };
     /** Several byte-range replacements as ONE undo step — a formatter's edit list. */
     replaceByteRanges: (
       edits: readonly { startByte: number; endByte: number; text: string }[],
@@ -879,7 +886,12 @@
     const wantsFramework =
       !!path
       && (supportsDiagnostics(path)
-        || /(^|[\\/])(application|bootstrap)[^\\/]*\.(ya?ml|properties)$/i.test(path));
+        || /(^|[\\/])(application|bootstrap)[^\\/]*\.(ya?ml|properties)$/i.test(path)
+        // A fulcrum translation bundle. TOML has one opinion about `'$red.bold{{n}} left'` — it is a
+        // string — which is exactly why a mistake inside it survives review, and the marks below are
+        // what make its structure visible. Asked for on every bundle, panel open or not: the
+        // colouring is not a feature of the panel.
+        || isI18nBundle(path));
     if (!path || !wantsFramework) { springMarks = []; springGutter = []; fwActions = []; return; }
     const src = projectStore.sourceOf(path);
     void bennuIndexStore.buildRevision; // new beans / new keys after a rebuild
@@ -901,6 +913,78 @@
         .catch(() => {});
     }, 220);
     return () => { cancelled = true; clearTimeout(t); };
+  });
+
+  /*
+   * ── The i18n panel, both directions ───────────────────────────────────────────────────────────
+   *
+   * The panel is a tool window on the right and has no handle on this component, so the store between
+   * them carries traffic each way — see `bennuI18nStore` for why an *intent* travels rather than a
+   * computed edit.
+   */
+
+  /** Feed the panel: the value under the caret, re-read on every move and every keystroke. */
+  $effect(() => {
+    const path = activePath;
+    // Only while the panel is open. The markup COLOURING above is unconditional; this is the panel's
+    // own data, and asking for it with nothing on screen would be a round trip per keystroke for
+    // nobody.
+    if (bennuUiStore.rightPanel !== 'i18n' || !path || !isI18nBundle(path)) {
+      bennuI18nStore.reset();
+      return;
+    }
+    // Both dependencies are the point: the caret moving means a different translation, the buffer
+    // changing means the same one says something else. `sourceOf` is the tracked one — reading the
+    // document off the component would not re-run this on a keystroke.
+    void caretLine;
+    void caretCol;
+    void projectStore.sourceOf(path);
+    void bennuIndexStore.buildRevision; // a new stylesheet / a new sibling language after a scan
+    void bennuI18nStore.retry; // a rescan changed the project's capabilities, not the buffer
+    if (!editorComp) return;
+    // The text and the offset must come from the SAME document. `caretByteOffset()` measures against
+    // the editor's own, so the text has to be the editor's own too — the store's copy is updated from
+    // `oninput` and is a tick behind mid-keystroke, which is exactly when this runs. A value's span is
+    // a few bytes wide, so a few bytes of drift is the difference between finding it and finding
+    // nothing.
+    bennuI18nStore.track(path, editorComp.getValue(), editorComp.caretByteOffset());
+  });
+
+  /**
+   * Write what the panel's toolbar asked for.
+   *
+   * The selection is read HERE, at the moment the button was pressed, and clamped into the value —
+   * without the clamp a selection spanning the closing quote would write `$bold{` inside the string
+   * and `}` outside it, producing a file TOML can no longer parse from one click on a button whose
+   * job is to be safe.
+   */
+  $effect(() => {
+    const req = bennuI18nStore.request;
+    if (!req) return;
+    // Untracked: this reads the view and the buffer to compute an edit, and every one of those reads
+    // would otherwise re-run the effect on the change the edit itself causes.
+    untrack(() => {
+      const view = bennuI18nStore.view;
+      const base = view?.content_start;
+      if (!editorComp || !view || base == null) { bennuI18nStore.consume(); return; }
+
+      const raw = editorComp.selectionByteRange();
+      const valueEnd = base + new TextEncoder().encode(view.raw).length;
+      const start = Math.min(Math.max(raw.start, base), valueEnd);
+      const end = Math.min(Math.max(raw.end, start), valueEnd);
+      // A caret outside the value entirely (the panel was open, then the caret moved to the key)
+      // collapses to a clamped point, which is still inside the value — so the construct lands in the
+      // text rather than being written nowhere.
+      const text = start === raw.start && end === raw.end ? editorComp.getSelectionText() : '';
+
+      const edit = markupEdit(req.insert, { start, end, text });
+      if (edit) {
+        editorComp.replaceByteRange(edit.start, edit.end, edit.text);
+        editorComp.setSelectionBytes(edit.selectStart, edit.selectEnd);
+        editorComp.focus();
+      }
+      bennuI18nStore.consume();
+    });
   });
 
   /** Glyph per gutter-mark kind. Text, not an icon set: the shared editor draws whatever
@@ -2501,6 +2585,22 @@
           {/each}
           <span class="ed-tsep"></span>
         {/if}
+        {#if isI18nBundle(activePath)}
+          <!-- The affordance for a panel with no rail button. A translation bundle is the one file
+               where the i18n panel has something to say, so the button exists exactly there — which
+               makes the toolbar's contents the answer to "what kind of file is this", the same rule
+               the contributed actions above follow. -->
+          <IconButton
+            tooltip="i18n — preview this translation, and write markup into it"
+            shortcut="Alt+Shift+I"
+            size={26}
+            active={bennuUiStore.rightPanel === 'i18n'}
+            onclick={() => bennuUiStore.toggleRight('i18n')}
+          >
+            <Languages size={13} />
+          </IconButton>
+          <span class="ed-tsep"></span>
+        {/if}
         {#if isValidationFile}
           <!-- Struts validation-file tools. -->
           <IconButton tooltip="Validation reference" size={26} onclick={() => bennuUiStore.toggleDocs()}>
@@ -2932,6 +3032,56 @@
   :global(.cm-content .cm-fw-spring-spel-keyword span) { color: var(--syntax-keyword, #cc7832); font-weight: 600; }
   :global(.cm-content .cm-fw-spring-placeholder-default),
   :global(.cm-content .cm-fw-spring-placeholder-default span) { color: var(--text-muted); font-style: italic; }
+
+  /*
+   * The fulcrum i18n markup, inside a TOML string.
+   *
+   * Same idea as the Spring placeholders above and the same reason: the host language sees one opaque
+   * string, so the structure inside it is invisible until something paints it. What is coloured is the
+   * **names** — the part you have to get right — plus a tint on each construct so nesting reads as
+   * nesting. `$red.bold{@potion{una pozione}}` is two boxes deep and looks it.
+   *
+   * A name the project does not declare is coloured as a warning rather than as a name. There is a
+   * diagnostic saying so too, but the diagnostic arrives with the next scan and this arrives with the
+   * keystroke — and the failure it prevents is silent: a style that does not exist renders as the
+   * default, so the text appears, unstyled, and nothing complains.
+   */
+  :global(.cm-content .cm-fw-fulcrum-i18n-span-style),
+  :global(.cm-content .cm-fw-fulcrum-i18n-span-glossary),
+  :global(.cm-content .cm-fw-fulcrum-i18n-span-control) {
+    background: color-mix(in srgb, var(--syntax-string, #6a8759) 10%, transparent);
+    border-radius: 2px;
+  }
+  :global(.cm-content .cm-fw-fulcrum-i18n-placeholder),
+  :global(.cm-content .cm-fw-fulcrum-i18n-placeholder span) {
+    color: var(--syntax-field, #9876aa); font-weight: 600;
+  }
+  :global(.cm-content .cm-fw-fulcrum-i18n-style),
+  :global(.cm-content .cm-fw-fulcrum-i18n-style span) {
+    color: var(--syntax-function, #ffc66d); font-weight: 600;
+  }
+  :global(.cm-content .cm-fw-fulcrum-i18n-glossary),
+  :global(.cm-content .cm-fw-fulcrum-i18n-glossary span) {
+    color: var(--syntax-type, #4ec9b0); font-weight: 600;
+  }
+  :global(.cm-content .cm-fw-fulcrum-i18n-control),
+  :global(.cm-content .cm-fw-fulcrum-i18n-control span) {
+    color: var(--syntax-keyword, #cc7832); font-weight: 600;
+  }
+  :global(.cm-content .cm-fw-fulcrum-i18n-namespace),
+  :global(.cm-content .cm-fw-fulcrum-i18n-namespace span) {
+    color: var(--text-muted); font-weight: 600;
+  }
+  /* Underlined rather than recoloured: the point is that this name resolves to nothing, and giving it
+     a colour of its own would make it look like a kind of name rather than a missing one. */
+  :global(.cm-content .cm-fw-fulcrum-i18n-style-unknown),
+  :global(.cm-content .cm-fw-fulcrum-i18n-style-unknown span),
+  :global(.cm-content .cm-fw-fulcrum-i18n-glossary-unknown),
+  :global(.cm-content .cm-fw-fulcrum-i18n-glossary-unknown span) {
+    color: var(--warning);
+    text-decoration: underline wavy var(--warning);
+    text-underline-offset: 2px;
+  }
 
   /*
    * A `@Query` is a second language living inside a Java string, and that is exactly why a

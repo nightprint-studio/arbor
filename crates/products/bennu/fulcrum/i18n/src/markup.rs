@@ -157,31 +157,52 @@ fn collect_placeholders(segments: &[Segment], out: &mut Vec<String>) {
 /// Every style name referenced anywhere in the string, with its span — what the "no such style"
 /// check walks.
 pub fn style_refs(segments: &[Segment]) -> Vec<Name> {
-    let mut out = Vec::new();
-    collect(segments, &mut out, &mut Vec::new());
-    out
+    let mut refs = Refs::default();
+    collect(segments, &mut refs);
+    refs.styles
 }
 
 /// Every glossary key referenced anywhere, with its span.
 pub fn glossary_refs(segments: &[Segment]) -> Vec<Name> {
-    let mut out = Vec::new();
-    let mut keys = Vec::new();
-    collect(segments, &mut out, &mut keys);
-    keys
+    let mut refs = Refs::default();
+    collect(segments, &mut refs);
+    refs.glossary
 }
 
-fn collect(segments: &[Segment], styles: &mut Vec<Name>, keys: &mut Vec<Name>) {
+/// Every control name used anywhere, with its span.
+///
+/// Unlike the two above there is nothing to check these against — see
+/// [`LabelCatalog::controls`](crate::catalog::LabelCatalog::controls) for what they are for.
+pub fn control_refs(segments: &[Segment]) -> Vec<Name> {
+    let mut refs = Refs::default();
+    collect(segments, &mut refs);
+    refs.controls
+}
+
+/// The named things a tree references. One walker fills all three, so a construct that starts
+/// nesting differently cannot be handled one way here and another way there.
+#[derive(Default)]
+struct Refs {
+    styles: Vec<Name>,
+    glossary: Vec<Name>,
+    controls: Vec<Name>,
+}
+
+fn collect(segments: &[Segment], out: &mut Refs) {
     for s in segments {
         match &s.kind {
-            SegmentKind::Style { styles: names, content, .. } => {
-                styles.extend(names.iter().cloned());
-                collect(content, styles, keys);
+            SegmentKind::Style { styles, content, .. } => {
+                out.styles.extend(styles.iter().cloned());
+                collect(content, out);
             }
             SegmentKind::Glossary { key, content, .. } => {
-                keys.push(key.clone());
-                collect(content, styles, keys);
+                out.glossary.push(key.clone());
+                collect(content, out);
             }
-            SegmentKind::Control { content, .. } => collect(content, styles, keys),
+            SegmentKind::Control { name, content, .. } => {
+                out.controls.push(name.clone());
+                collect(content, out);
+            }
             _ => {}
         }
     }

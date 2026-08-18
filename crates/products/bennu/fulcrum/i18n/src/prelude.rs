@@ -12,8 +12,14 @@ pub use crate::catalog::{Declaration, GlossaryDecl, LabelCatalog, Language, Styl
 
 // What a translation is written in.
 pub use crate::markup::{
-    flatten, glossary_refs, parse_markup, placeholders, style_refs, MarkupProblem, Name, Parsed,
-    Segment, SegmentKind,
+    control_refs, flatten, glossary_refs, parse_markup, placeholders, style_refs, MarkupProblem,
+    Name, Parsed, Segment, SegmentKind,
+};
+
+// The bundle as the buffer has it — the editor panel's half.
+pub use crate::studio::{
+    bundle_of, live_value_at, live_values, markup_spans, studio_view, Bundle, LiveValue, MarkupSpan,
+    Sibling, StudioView,
 };
 
 // Where the project reads a label.

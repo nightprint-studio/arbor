@@ -18,6 +18,7 @@
   <li><kbd>Alt</kbd> + <kbd>3</kbd> — toggle <strong>Forms</strong> — JSP form analysis (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>F12</kbd> — toggle <strong>Terminal</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>8</kbd> — toggle the <strong>build tool</strong> window (right rail): <strong>Maven</strong>'s goals on a Java project, <strong>Cargo</strong>'s crates and commands on a Rust one</li>
+  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd> — toggle <strong>i18n</strong> (right rail) — the fulcrum translation under the caret, rendered, with its parameters and a language picker. Only on a translation bundle; there is no rail button, because on every other file the panel could only say "not here"</li>
 </ul>
 
 <h2>Navigate</h2>

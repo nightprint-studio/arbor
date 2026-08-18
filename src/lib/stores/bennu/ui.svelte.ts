@@ -36,7 +36,13 @@ export type LeftPanel = 'project' | 'structure' | 'dependencies';
  */
 // `maven` and `cargo` share the rail slot and the Alt+8 keybinding: they are the same tool window
 // for two ecosystems, and a project is only ever one of them.
-export type RightPanel = 'maven' | 'cargo' | 'tests' | 'ast';
+/** Right tool windows — a split beside the editor.
+ *
+ *  `i18n` is the one with no rail button, for the same reason `hierarchy` has none in the bottom dock:
+ *  it is about the caret, and on every file that is not a fulcrum translation bundle it could only ever
+ *  say "not here". It is reached from the editor's own toolbar — which appears on a bundle and nowhere
+ *  else — from the palette, and from its shortcut. */
+export type RightPanel = 'maven' | 'cargo' | 'tests' | 'ast' | 'i18n';
 /** Bottom tool windows — one panel per rail button, except Build and Problems which share
  *  one. The Forms inspector lives here (wide, horizontal data) rather than in a narrow side
  *  panel; its toggle sits in the right rail's bottom cluster.

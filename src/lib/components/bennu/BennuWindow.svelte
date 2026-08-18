@@ -99,6 +99,8 @@
   import { workspacesStore } from '$lib/stores/bennu/workspaces.svelte';
   import { isJavaFile, isJspFile, isLspFile, supportsCodeNav } from './file-kind';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import BennuI18nPanel from './BennuI18nPanel.svelte';
+  import { isI18nBundle } from './i18n/bundle-path';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { bennuCargoStore } from '$lib/stores/bennu/cargo.svelte';
   import { emptyInvocation as emptyCargoInvocation } from '$lib/ipc/bennu/cargo';
@@ -782,7 +784,10 @@
     untrack(() =>
       bennuUiStore.dropUnavailablePanels({
         left: java ? ['project', 'structure', 'dependencies'] : ['project', 'dependencies'],
-        right: java ? ['maven', 'tests', 'ast'] : ['cargo'],
+        // `i18n` is in both branches and needs no capability gate: it has no rail icon to lose, and
+        // whether it applies is a question about the open FILE rather than about the project — a
+        // fulcrum content tree can sit in a Maven repo as easily as in a Cargo one.
+        right: java ? ['maven', 'tests', 'ast', 'i18n'] : ['cargo', 'i18n'],
         bottom: [
           // `hierarchy` survives every switch: it is opened by an action about the caret rather than
           // by a rail button, so there is no icon that could disappear from under it, and its own
@@ -799,6 +804,8 @@
 
   const showLeft   = $derived(bennuUiStore.leftPanel !== null);
   const showRight  = $derived(bennuUiStore.rightPanel !== null);
+  /** Whether the open right panel wants the wider column — see the card below. */
+  const wideRight  = $derived(bennuUiStore.rightPanel === 'i18n');
   const showBottom = $derived(bennuUiStore.bottomPanel !== null);
   // A job's output was opened from the (shared) Jobs overlay — the shared uiStore drives it, exactly
   // like corvus. It takes the bottom slot while shown; closing it (its back/close button clears the
@@ -974,6 +981,10 @@
       // the ecosystem's own word so a Rust workspace is not offered a "module" graph.
       { id: 'modulegraph', title: projectStore.isCargo ? 'Crate graph' : 'Module graph', icon: 'network',
         shortcut: 'Alt+Shift+D', action: () => run(() => bennuUiStore.openModuleGraph()), when: !!projectStore.project },
+      // Offered only on a translation bundle: everywhere else the panel could only say "not here",
+      // and a palette that lists what cannot work is a palette you stop trusting.
+      { id: 'i18npanel', title: 'Toggle i18n panel', icon: 'languages', shortcut: 'Alt+Shift+I',
+        action: () => run(() => bennuUiStore.toggleRight('i18n')), when: isI18nBundle(path) },
       { id: 'runpanel',  title: 'Toggle Run',       icon: 'play',        shortcut: 'Alt+R', action: () => run(() => bennuUiStore.toggleBottom('run')), when: true },
       { id: 'tests',     title: 'Toggle Tests',     icon: 'junit',       shortcut: 'Alt+5', action: () => run(() => bennuUiStore.toggleRight('tests')), when: javaTools },
       { id: 'problems',  title: 'Toggle Problems',  icon: 'alert',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
@@ -1339,6 +1350,14 @@
       e.preventDefault(); bennuUiStore.openModuleGraph(); return;
     }
 
+    // The i18n panel — the translation under the caret, rendered. Alt+Shift+I, in the same safe
+    // family as the two above, and gated on the file: on anything but a translation bundle the panel
+    // has nothing to say, and opening an empty one is worse than the key doing nothing.
+    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isKey(e, 'i')) {
+      if (!isI18nBundle(projectStore.activeFilePath)) return;
+      e.preventDefault(); bennuUiStore.toggleRight('i18n'); return;
+    }
+
     // Expand the macro at the caret. Alt+Shift+M, in the same safe family as the format binding
     // above and beside Ctrl+Shift+M (structural search) without colliding with it.
     if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isKey(e, 'm')) {
@@ -1462,7 +1481,18 @@
         </div>
 
         {#if showRight}
-          <PanelCard orientation="right" initialSize={280} minSize={200} maxSize={520}>
+          <!-- The i18n panel gets a wider default and a higher ceiling than the tool windows beside
+               it. Those show lists of names; this one shows a SENTENCE, and at 280px a translation
+               wraps into six lines — losing the one thing a preview is for. `{#key}` on the size so
+               the card re-reads it when the active panel changes: `initialSize` is, by design, only
+               read once. -->
+          {#key wideRight}
+          <PanelCard
+            orientation="right"
+            initialSize={wideRight ? 400 : 280}
+            minSize={wideRight ? 280 : 200}
+            maxSize={wideRight ? 760 : 520}
+          >
             {#if bennuUiStore.rightPanel === 'maven'}<BennuMavenPanel />{/if}
             {#if bennuUiStore.rightPanel === 'cargo'}<BennuCargoPanel />{/if}
             <!-- The catalogue is per-ecosystem: a Rust test is identified by crate + target +
@@ -1480,7 +1510,12 @@
                 emptyMessage="Open a file and its trees appear here."
               />
             {/if}
+            <!-- Mounted only while shown, like Forms: it is scoped to the caret and re-read on every
+                 move, so there is nothing to preserve — and while hidden it would keep asking the
+                 backend about a panel nobody is looking at. -->
+            {#if bennuUiStore.rightPanel === 'i18n'}<BennuI18nPanel />{/if}
           </PanelCard>
+          {/key}
         {/if}
       {/snippet}
     </WorkspaceShell>

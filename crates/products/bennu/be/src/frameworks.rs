@@ -44,7 +44,7 @@ use bennu_spring::prelude::SpringExtension;
 use bennu_xml::prelude::XmlExtension;
 use serde::{Deserialize, Serialize};
 
-use crate::index_service::{resolve_index_encoding, IndexService};
+use crate::index_service::resolve_index_encoding;
 
 /// Directories never worth walking for framework config.
 const SKIP_DIRS: &[&str] = &["target", "node_modules", ".git", ".idea", ".arbor"];
@@ -64,6 +64,7 @@ struct Slot {
     spring: Option<Arc<SpringExtension>>,
     jpa: Option<Arc<JpaExtension>>,
     jsp: Option<Arc<JspExtension>>,
+    fulcrum: Option<Arc<FulcrumI18nExtension>>,
 }
 
 /// Process-wide extension host, one slot per project root.
@@ -71,6 +72,8 @@ pub struct FrameworkService {
     slots: Mutex<HashMap<String, Arc<Slot>>>,
     /// One build lock per root, so a cold slot is built ONCE. See [`FrameworkService::slot`].
     building: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Every project root the shell has opened, normalised — see [`register_root`].
+    roots: Mutex<Vec<String>>,
 }
 
 impl FrameworkService {
@@ -79,6 +82,7 @@ impl FrameworkService {
         INSTANCE.get_or_init(|| FrameworkService {
             slots: Mutex::new(HashMap::new()),
             building: Mutex::new(HashMap::new()),
+            roots: Mutex::new(Vec::new()),
         })
     }
 
@@ -127,8 +131,23 @@ impl FrameworkService {
     }
 
     /// The slot for the project owning `file`, via the index service's root map.
+    /// The project root that owns `file`: the **longest** registered root that is a prefix of it.
+    ///
+    /// Longest, because a multi-module reactor registers the parent and a nested module may be
+    /// registered too, and the answer wanted is the innermost one.
+    pub fn root_for_file(&self, file: &str) -> Option<String> {
+        let path = Path::new(file);
+        let roots = self.roots.lock().unwrap_or_else(|p| p.into_inner());
+        roots
+            .iter()
+            // Component-wise, not textual: `/p/foo` must not be read as owning `/p/foobar`.
+            .filter(|root| path.starts_with(Path::new(root)))
+            .max_by_key(|root| root.len())
+            .cloned()
+    }
+
     fn slot_for_file(&self, file: &str) -> Option<Arc<Slot>> {
-        let root = IndexService::global().root_for_file(file)?;
+        let root = self.root_for_file(file)?;
         self.slot(&root)
     }
 
@@ -162,6 +181,7 @@ impl FrameworkService {
         }
         let jpa = Arc::new(JpaExtension::new());
         let jsp = Arc::new(JspExtension::new());
+        let fulcrum = Arc::new(FulcrumI18nExtension::new());
         // The whole registration surface. A further framework is one more entry here — and the
         // XML, JSP and message-bundle ones arriving as exactly that entry is the claim the seam
         // was built on, now made four times.
@@ -174,13 +194,13 @@ impl FrameworkService {
                 Arc::new(MessagesExtension::new()) as Arc<dyn FrameworkExtension>,
                 // The fifth framework, and the first that is not Java's: a Cargo root with an
                 // `i18n/` tree gets a registry where every Java extension declined.
-                Arc::new(FulcrumI18nExtension::new()) as Arc<dyn FrameworkExtension>,
+                Arc::clone(&fulcrum) as Arc<dyn FrameworkExtension>,
             ],
             &caps,
         );
         // Nothing applies → no walk, no parse, no model.
         if registry.is_empty() {
-            return Some(Slot { registry, spring: None, jpa: None, jsp: None });
+            return Some(Slot { registry, spring: None, jpa: None, jsp: None, fulcrum: None });
         }
 
         // Reading the Java tree is by far the most expensive part of a scan, and the XML
@@ -239,6 +259,7 @@ impl FrameworkService {
             spring: active.contains(&"spring").then_some(spring),
             jpa: active.contains(&"jpa").then_some(jpa),
             jsp: active.contains(&"jsp").then_some(jsp),
+            fulcrum: active.contains(&"fulcrum.i18n").then_some(fulcrum),
             registry,
         })
     }
@@ -770,6 +791,42 @@ fn with_file<T: Default>(
     let path = PathBuf::from(&args.file);
     let ctx = FileCtx { path: &path, source: &text };
     f(&slot.registry, &ctx)
+}
+
+/// Remember that `root` is an open project, so every caret-based query in this module can find it.
+///
+/// ## Why this exists at all
+///
+/// The lookup used to ask the **Java symbol index** which project owned a file, and that index is
+/// only ever populated for a Java project — `bennu_open_project` returns early on any other kind. So
+/// on a Cargo root every one of these queries answered "no project owns this file" and therefore
+/// "no framework applies", silently: the fulcrum i18n extension's hover, go-to, completion,
+/// diagnostics and markup colouring were all dead on exactly the projects it was written for, while
+/// the Labels panel worked because a catalog is asked for **by root** and never went through here.
+///
+/// The framework host is not the Java indexer and must not depend on its bookkeeping. Registered for
+/// every project kind, and never removed: a tab from a project you have switched away from is still
+/// open, and its file still has to resolve.
+pub fn register_root(root: &str) {
+    let key = norm(root);
+    if key.is_empty() {
+        return;
+    }
+    let service = FrameworkService::global();
+    let mut roots = service.roots.lock().unwrap_or_else(|p| p.into_inner());
+    if !roots.iter().any(|r| *r == key) {
+        roots.push(key);
+    }
+}
+
+/// The fulcrum i18n extension owning `file`, when the project has one.
+///
+/// Same exception the `Slot` doc describes: the i18n editor panel asks a question in fulcrum's own
+/// vocabulary — a parsed markup tree, a stylesheet, the same label in the other languages — which
+/// the seam has no verb for and should not grow one for. `None` on any project that is not a fulcrum
+/// one, so the handler answers "nothing here" without touching a file.
+pub fn fulcrum_of_file(file: &str) -> Option<Arc<FulcrumI18nExtension>> {
+    FrameworkService::global().slot_for_file(file)?.fulcrum.clone()
 }
 
 /// The tag-library catalog of the project `file` belongs to, when the JSP extension applies to
@@ -1571,6 +1628,36 @@ mod tests {
     fn root_normalization_is_stable_across_separators() {
         assert_eq!(norm(r"C:\p\proj\"), "C:/p/proj");
         assert_eq!(norm("/p/proj"), "/p/proj");
+    }
+
+    /// The registry is what makes a caret query work on a **non-Java** project, and the bug it fixes
+    /// was silent: the lookup used to go through the Java symbol index, which `bennu_open_project`
+    /// only populates for a Java kind, so on a Cargo root every query here answered "no project owns
+    /// this file" and therefore "no framework applies".
+    #[test]
+    fn a_registered_root_owns_its_files_and_the_innermost_one_wins() {
+        // Distinct paths, so this does not depend on what another test registered.
+        let outer = "/reg-test/workspace";
+        let inner = "/reg-test/workspace/crates/thing";
+        register_root(outer);
+        register_root(inner);
+        // Registering twice must not double up — a re-open of the same project is ordinary.
+        register_root(outer);
+
+        let svc = FrameworkService::global();
+        assert_eq!(
+            svc.root_for_file("/reg-test/workspace/content/core/i18n/en/menu.toml").as_deref(),
+            Some(outer),
+        );
+        // The innermost registered root wins: a nested crate is its own project to anything asking.
+        assert_eq!(
+            svc.root_for_file("/reg-test/workspace/crates/thing/src/lib.rs").as_deref(),
+            Some(inner),
+        );
+        // A prefix that is not a path prefix is not a match — `/reg-test/workspace` must not be read
+        // as owning `/reg-test/workspace-other`.
+        assert!(svc.root_for_file("/reg-test/workspace-other/src/lib.rs").is_none());
+        assert!(svc.root_for_file("/reg-test/elsewhere/a.toml").is_none());
     }
 
     #[test]

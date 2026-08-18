@@ -1020,6 +1020,23 @@
     return { from: s.from, to: s.to, head: s.head, empty: s.empty };
   }
 
+  /** The primary selection as **UTF-8 byte offsets** — the byte-aware sibling of
+   *  {@link selectionRange}, and the read direction of {@link selectByteRange}.
+   *
+   *  Needed by anything that computes an edit *around* the selection from backend spans: those spans
+   *  are bytes, and comparing them against CodeMirror's UTF-16 offsets is wrong by the number of
+   *  non-ASCII characters before them — which, in a file of translations, is most lines. */
+  export function selectionByteRange(): { start: number; end: number; empty: boolean } {
+    if (!view) return { start: 0, end: 0, empty: true };
+    const s = view.state.selection.main;
+    const doc = view.state.doc;
+    const enc = new TextEncoder();
+    const start = enc.encode(doc.sliceString(0, s.from)).length;
+    // Measured as a delta from `from` rather than re-encoding the whole prefix twice.
+    const end = start + enc.encode(doc.sliceString(s.from, s.to)).length;
+    return { start, end, empty: s.empty };
+  }
+
   /** Highlight `[from, to)` and scroll it into view — how a command shows *which*
    *  region it is about to act on, in the buffer rather than in a message. */
   export function selectRange(from: number, to: number) {

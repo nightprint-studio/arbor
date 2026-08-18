@@ -243,6 +243,10 @@ mod main_classes;
 // to never walks a file. This module is the ONLY place the backend names a framework, and adding a
 // third is one entry in `registry_for`.
 mod frameworks;
+// The i18n editor panel's one verb (`bennu_i18n_studio`): the translation under the caret, parsed,
+// with the stylesheet and the other languages beside it. Answers off the LIVE buffer, so it is right
+// on a line that is being typed — which the indexed catalogue behind `frameworks` cannot be.
+mod fulcrum_i18n;
 // Tomcat JSP hot-swap (per-repo `[bennu.tomcat]`): `bennu_get/set_tomcat_config` (the link) +
 // `bennu_detect_tomcat` (validate a Tomcat root + resolve the deployed context) + `bennu_hotswap_jsp`
 // (copy one/all JSPs into the exploded webapp so Jasper recompiles them — no redeploy/restart).

@@ -73,6 +73,11 @@ fn bennu_open_project(ctx: &BennuState, args: OpenProjectArgs) -> Result<Project
     crate::lsp_registry::LspRegistry::global().set_sink(ctx.event_sink());
     crate::lsp_registry::LspRegistry::global().warm_start(&args.root);
 
+    // Every project kind, and BEFORE the early return below: the framework-extension host resolves a
+    // file's project through this, and a Cargo root that never registered made every caret-based
+    // framework query on it answer "no project owns this file" — see `frameworks::register_root`.
+    crate::frameworks::register_root(&args.root);
+
     if !info.kind.is_java() {
         return Ok(info);
     }

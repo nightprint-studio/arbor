@@ -83,6 +83,98 @@
   merely unfinished ones.
 </p>
 
+<h2>The i18n panel</h2>
+<p class="doc-lead">
+  A bundle is a file where TOML sees one thing — a string — and the markup inside it is invisible to
+  every tool that reads TOML. The panel is the other half of that file:
+  <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd>, or the <em>i18n</em> button on the editor toolbar,
+  which appears on a translation file and nowhere else. It opens on the right, beside the editor: the
+  markup on the left, what it comes out as on the right, both changing as you type.
+</p>
+<p>
+  It follows the <strong>caret</strong>. There is no label to pick — the line you are on is the
+  translation, and a second selection to keep in step with the first would be one too many.
+</p>
+
+<h3>The preview</h3>
+<p>
+  The sentence, with the constructs resolved: styles painted from <code>styles.toml</code>, glossary
+  terms marked as terms, and each placeholder shown as its name until you give it a sample value.
+</p>
+<p>
+  It shows the <strong>distinctions</strong> the stylesheet draws — that <code>$warning</code> is not
+  the colour of <code>$hint</code>, that a title is bigger than the text around it — and not the
+  engine's own output. Sizes are relative: the smallest declared size renders at the panel's own, the
+  rest in proportion. A faithful 48-point heading in a side panel would push the rest off screen, and
+  what you are checking is how the sentence reads, which survives being scaled.
+</p>
+<p>
+  Two things it will not pretend to: a <strong>control</strong> is drawn as a chip rather than as an
+  animation, because <code>~shake</code> is motion and a still picture of it would be a lie; and a
+  <strong>style or glossary name the project does not declare</strong> is underlined rather than
+  recoloured, because the real consequence is that the span has lost its styling.
+</p>
+
+<h3>Parameters</h3>
+<p>
+  Every parameter of the label — <em>not</em> only the ones this language uses. That union is the
+  point: <code>en</code> passing <code>{'{amount}'}</code> while the Italian never mentions it is a
+  real defect, invisible to every compiler and every test because both files are valid, and invisible
+  in any view that shows one language at a time. The row says which languages use it, and the button
+  writes it in at the caret.
+</p>
+<p>
+  Typing a <strong>sample value</strong> substitutes it into the preview, which is what turns "the
+  markup, minus the markup" into "the sentence, as somebody will read it" — and long values are the
+  reason to bother: <code>{'{name}'}</code> reads fine until it is <em>Bartolomeo della Fortezza</em>
+  and the line wraps into three. Samples are scratch; they are not saved.
+</p>
+
+<h3>Writing markup</h3>
+<p>
+  Four buttons in the panel's header, each wrapping the editor's selection — or opening an empty
+  construct with the caret inside it when there is no selection. With a selection the words stay
+  selected afterwards, so <code>$red.bold&#123;…&#125;</code> is two presses on the same words.
+</p>
+<ul>
+  <li><strong>Style</strong> and <strong>glossary</strong> offer only what the project declares. A
+    name that is not in <code>styles.toml</code> is a defect, so it is not offered.</li>
+  <li><strong>Control</strong> and <strong>placeholder</strong> accept anything you type — a control
+    name is whatever the engine implements, and i18n knows the <em>form</em> of
+    <code>~slow&#123;…&#125;</code> and nothing about its meaning. The controls your project already
+    uses are listed first, most-used first, since that is the only honest list there is. Typing
+    <code>sleep(0.8)</code> or <code>sleep 0.8</code> both write
+    <code>~sleep(0.8)</code>.</li>
+</ul>
+<p>
+  On a <strong>double-quoted value containing an escape</strong> the buttons are disabled and the
+  panel says why: such a string's content is shorter than its source, so no offset inside it can be
+  trusted, and Bennu will not write to a byte it cannot locate. Rewriting the value with single quotes
+  fixes the toolbar, the colouring and the problem markers at once.
+</p>
+
+<h3>Switching language</h3>
+<p>
+  The picker beside the label lists <strong>every declared language</strong>, and the ones with no
+  translation yet are the ones it exists for: picking one opens the file the translation would go in,
+  even when that file does not exist yet. Languages that are declared but switched off stay in the
+  list, marked — a translation may legitimately go there, but nothing is owed to it.
+</p>
+<p>
+  Below the parameters, the languages that <em>do</em> have the label show what they say, so
+  "what does the English actually say" is answered without opening anything.
+</p>
+
+<h2>Markup colouring in the editor</h2>
+<p>
+  In the bundle itself, the parts of a value that are structure rather than prose are coloured: the
+  placeholder names, the style names, the glossary keys, the controls, with a tint over each construct
+  so nesting reads as nesting. A name the project does not declare is coloured as a warning
+  <em>as you type</em> — the diagnostic saying the same thing arrives with the next scan, and the
+  failure it prevents is silent, since a style that does not exist renders as the default and nothing
+  complains.
+</p>
+
 <h2>The Labels panel</h2>
 <p>
   Open it from the command palette (<em>i18n labels</em>). One row per label — the label, the text

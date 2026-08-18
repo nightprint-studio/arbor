@@ -42,7 +42,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use bennu_toml::prelude::{Manifest, ROOT_TABLE};
+use bennu_toml::prelude::{Entry, Manifest, ROOT_TABLE};
 use serde::Serialize;
 
 /// A language the project declares.
@@ -115,6 +115,8 @@ pub struct LabelCatalog {
     labels: BTreeMap<String, Vec<Declaration>>,
     styles: BTreeMap<String, StyleDecl>,
     glossary: BTreeMap<String, GlossaryDecl>,
+    /// Control names the project's own translations use, most-used first — see [`Self::controls`].
+    controls: Vec<String>,
 }
 
 impl LabelCatalog {
@@ -148,6 +150,7 @@ impl LabelCatalog {
                 }
             }
         }
+        cat.controls = harvest_controls(&cat.labels);
         cat
     }
 
@@ -252,6 +255,17 @@ impl LabelCatalog {
 
     pub fn has_glossary_file(&self) -> bool {
         !self.glossary.is_empty()
+    }
+
+    /// The control names the project's translations actually use, most-used first.
+    ///
+    /// There is no catalogue of controls to check against — what `~slow` or `~sleep(0.8)` mean is
+    /// the consumer's, and i18n knows only the *form*. So the honest answer to "which controls may
+    /// I write" is the project's own vocabulary, which is also the useful one: it converges on the
+    /// handful a project has settled on instead of offering an invented list the engine may not
+    /// implement. Ordered by use so the common ones come first, then by name so it is stable.
+    pub fn controls(&self) -> &[String] {
+        &self.controls
     }
 
     // ── readers ───────────────────────────────────────────────────────────────
@@ -365,11 +379,7 @@ impl LabelCatalog {
             if content_start.is_none() && !is_quoted(&e.value) {
                 continue;
             }
-            let key = match e.table.as_str() {
-                ROOT_TABLE => e.key.clone(),
-                table => format!("{table}.{}", e.key),
-            };
-            let label = format!("{category}:{key}");
+            let label = format!("{category}:{}", entry_key(e));
             let decl = Declaration {
                 lang: lang.to_string(),
                 file: path.to_string(),
@@ -394,21 +404,21 @@ impl LabelCatalog {
 
 /// What an `i18n/` file is.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum FileKind {
+pub(crate) enum FileKind {
     Languages,
     Styles,
     Glossary,
     Category { lang: String, category: String },
 }
 
-struct Place {
+pub(crate) struct Place {
     /// The `i18n` directory, forward-slashed and without a trailing slash.
-    root: String,
-    kind: FileKind,
+    pub(crate) root: String,
+    pub(crate) kind: FileKind,
 }
 
 /// Where a path sits in an `i18n/` tree, or `None` when it is not in one.
-fn place_of(path: &str) -> Option<Place> {
+pub(crate) fn place_of(path: &str) -> Option<Place> {
     let path = path.replace('\\', "/");
     if !path.ends_with(".toml") {
         return None;
@@ -443,8 +453,41 @@ fn place_of(path: &str) -> Option<Place> {
     }
 }
 
+/// Every control name the declarations use, most-used first.
+///
+/// Costs one markup parse per declaration, paid once when the catalogue is built rather than on the
+/// keystroke that opens a picker — which is the only reason it is a stored field and not a method.
+fn harvest_controls(labels: &BTreeMap<String, Vec<Declaration>>) -> Vec<String> {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for decls in labels.values() {
+        for d in decls {
+            for name in crate::markup::control_refs(&crate::markup::parse_markup(&d.value).segments)
+            {
+                *counts.entry(name.text).or_default() += 1;
+            }
+        }
+    }
+    let mut out: Vec<(String, usize)> = counts.into_iter().collect();
+    // Most-used first; `BTreeMap` already ordered the names, and a stable sort keeps that as the
+    // tie-break, so two controls used once each stay alphabetical.
+    out.sort_by(|a, b| b.1.cmp(&a.1));
+    out.into_iter().map(|(name, _)| name).collect()
+}
+
+/// The label key an entry declares: `new_game` under `[items]` is `items.new_game`.
+///
+/// Shared with the live-buffer reader in [`crate::studio`] deliberately — a key composed one way
+/// while indexing and another way while typing means the panel is looking at a label the catalogue
+/// does not have, and the symptom is an empty panel on a line that is plainly a translation.
+pub(crate) fn entry_key(entry: &Entry) -> String {
+    match entry.table.as_str() {
+        ROOT_TABLE => entry.key.clone(),
+        table => format!("{table}.{}", entry.key),
+    }
+}
+
 /// Whether a raw TOML value is a quoted string.
-fn is_quoted(raw: &str) -> bool {
+pub(crate) fn is_quoted(raw: &str) -> bool {
     let v = raw.trim();
     (v.starts_with('"') && v.len() >= 2) || (v.starts_with('\'') && v.len() >= 2)
 }
@@ -455,7 +498,7 @@ fn is_quoted(raw: &str) -> bool {
 /// content shorter than its source, so an offset into the value would drift after the escape. A
 /// literal string (single quotes) never escapes anything, which is also why the markup wants one —
 /// `"\$"` is not a valid TOML escape, and `'\$'` is exactly the two characters.
-fn unquote(raw: &str) -> (String, Option<usize>) {
+pub(crate) fn unquote(raw: &str) -> (String, Option<usize>) {
     let trimmed = raw.trim_start();
     let lead = raw.len() - trimmed.len();
     let v = trimmed.trim_end();
