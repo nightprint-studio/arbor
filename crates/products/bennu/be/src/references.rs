@@ -36,7 +36,7 @@ pub struct ReferencesArgs {
 /// Find all usages of the symbol at `file`:`offset`. `None` when no project owns the file,
 /// its index is still building, or the caret isn't on a referenceable symbol.
 #[arbor_rpc::handler]
-fn bennu_references(
+pub(crate) fn bennu_references(
     _ctx: &BennuState,
     args: ReferencesArgs,
 ) -> Result<Option<UsagesResult>, String> {

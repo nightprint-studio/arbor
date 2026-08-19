@@ -44,6 +44,10 @@ mod studio;
 mod cloud;
 mod marketplace;
 mod ipc;
+// The AI tool surface (MCP): the loopback endpoint, the permission model that gates it,
+// and the log of what it did. The protocol itself is `arbor-mcp`; this is the half that
+// knows what Arbor is and what the user allowed.
+mod mcp;
 mod native_menu;
 mod setup;
 mod window;

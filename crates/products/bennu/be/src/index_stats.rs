@@ -14,14 +14,21 @@ use serde::Deserialize;
 use crate::index_service::IndexService;
 
 /// Args for [`bennu_index_stats`].
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct IndexStatsArgs {
     /// Absolute path to the project root to report on.
     pub root: String,
 }
 
-/// Return a cheap [`IndexStats`] snapshot for the project rooted at `root`.
-#[arbor_rpc::handler]
+/// Report how much of the project's semantic index is built: symbol and config counts,
+/// the JDK level in use, and whether the build model resolved.
+///
+/// Worth checking when a navigation or diagnostic call comes back empty — an empty
+/// answer from a warming index means "not yet", not "nothing there".
+#[arbor_rpc::handler(mcp(
+    title = "Check the index state",
+    safety = read,
+))]
 fn bennu_index_stats(_ctx: &BennuState, args: IndexStatsArgs) -> Result<IndexStats, String> {
     Ok(IndexService::global().index_stats(&args.root))
 }

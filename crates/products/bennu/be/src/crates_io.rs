@@ -63,6 +63,15 @@ fn ttl(cfg: &CargoConfig) -> Duration {
 /// converges over a few passes instead of blocking once.
 const MAX_FETCHES_PER_REQUEST: usize = 16;
 
+/// How many crates one project-wide sweep may fetch.
+///
+/// Larger than the editor's budget because the caller is not a keystroke: a sweep is asked once,
+/// by something that cannot glance at the manifest again in a second, and a partial answer whose
+/// edge is invisible is worse than a slower call. Still bounded — a cold cache over a big
+/// workspace should not become three hundred requests — and whatever it does not reach is counted
+/// and reported rather than passed off as "up to date".
+pub(crate) const MAX_FETCHES_PER_SWEEP: usize = 96;
+
 /// One published version, as the add dialog needs it.
 #[derive(Debug, Clone, Serialize)]
 pub struct CrateRelease {
@@ -164,54 +173,84 @@ async fn bennu_cargo_version_hints(
         return Ok(Vec::new());
     }
     let _ = &args.file;
-    let manifest = Manifest::parse(&args.source);
-    let candidates: Vec<_> = declared(&manifest)
-        .into_iter()
-        .filter(|d| {
-            d.source() == "crates.io"
-                && !d.req.is_empty()
-                && d.req_end > d.req_start
-                && d.complete
-        })
-        .collect();
+    Ok(HintSweep::new(MAX_FETCHES_PER_REQUEST).manifest(&cfg, &args.source).await)
+}
 
-    let mut out = Vec::new();
-    let mut fetched = 0usize;
-    for dep in candidates {
-        // The budget covers *fetches*, not lookups: a cached crate is free, so a manifest that has
-        // been open before answers in full.
-        let cached_only = fetched >= MAX_FETCHES_PER_REQUEST;
-        let path = index_cache_path(&cache_dir(), &dep.package);
-        if !cached_only && !index_is_fresh(&path, ttl(&cfg)) {
-            fetched += 1;
-        }
-        let versions = if cached_only {
-            read_index_cache(&cache_dir(), &dep.package).map(|b| parse_index(&b)).unwrap_or_default()
-        } else {
-            versions_of(&dep.package, &cfg, false).await
-        };
-        let Some(latest) = latest_release(&versions) else { continue };
-        if requirement_admits(&dep.req, &latest.version) {
-            continue;
-        }
-        out.push(VersionHint {
-            name: dep.package.clone(),
-            offset: dep.offset,
-            line: dep.line,
-            start: dep.req_start,
-            end: dep.req_end,
-            current: dep.req.clone(),
-            latest: latest.version.clone(),
-        });
+/// One pass over one or more manifests, under a shared fetch budget.
+///
+/// The editor asks about a single buffer between keystrokes; a project-wide sweep asks about
+/// twenty manifests once. Both want the same test applied to each dependency, and neither wants the
+/// other's budget — so the budget is the parameter and the test is shared, rather than the test
+/// being written twice with two constants in it.
+pub(crate) struct HintSweep {
+    /// Fetches still allowed. Counts *fetches*, not lookups: a cached crate is free, so a manifest
+    /// that has been read before answers in full whatever this is.
+    budget: usize,
+    /// Dependencies whose freshness could not be established because the budget ran out and nothing
+    /// was cached. Said out loud by every caller that has room to: "no hint" and "not checked" are
+    /// different answers, and only one of them means up to date.
+    pub unchecked: usize,
+}
+
+impl HintSweep {
+    pub(crate) fn new(budget: usize) -> Self {
+        Self { budget, unchecked: 0 }
     }
-    Ok(out)
+
+    /// The dependencies of one manifest's text that have a newer release.
+    pub(crate) async fn manifest(&mut self, cfg: &CargoConfig, source: &str) -> Vec<VersionHint> {
+        let manifest = Manifest::parse(source);
+        let candidates: Vec<_> = declared(&manifest)
+            .into_iter()
+            .filter(|d| {
+                d.source() == "crates.io"
+                    && !d.req.is_empty()
+                    && d.req_end > d.req_start
+                    && d.complete
+            })
+            .collect();
+
+        let mut out = Vec::new();
+        for dep in candidates {
+            let cached_only = self.budget == 0;
+            let path = index_cache_path(&cache_dir(), &dep.package);
+            let stale = !index_is_fresh(&path, ttl(cfg));
+            if stale {
+                match cached_only {
+                    true => self.unchecked += 1,
+                    false => self.budget -= 1,
+                }
+            }
+            let versions = if cached_only {
+                read_index_cache(&cache_dir(), &dep.package)
+                    .map(|b| parse_index(&b))
+                    .unwrap_or_default()
+            } else {
+                versions_of(&dep.package, cfg, false).await
+            };
+            let Some(latest) = latest_release(&versions) else { continue };
+            if requirement_admits(&dep.req, &latest.version) {
+                continue;
+            }
+            out.push(VersionHint {
+                name: dep.package.clone(),
+                offset: dep.offset,
+                line: dep.line,
+                start: dep.req_start,
+                end: dep.req_end,
+                current: dep.req.clone(),
+                latest: latest.version.clone(),
+            });
+        }
+        out
+    }
 }
 
 /// The features of one version, in an order a list can be drawn in.
 ///
 /// Sorted with `default` first, because that is the one whose absence changes what you get, and the
 /// rest alphabetically — the index's own order is however the crate's author wrote the table.
-fn sorted_features(mut features: Vec<String>) -> Vec<String> {
+pub(crate) fn sorted_features(mut features: Vec<String>) -> Vec<String> {
     features.sort_by(|a, b| match (a.as_str(), b.as_str()) {
         ("default", "default") => std::cmp::Ordering::Equal,
         ("default", _) => std::cmp::Ordering::Less,
@@ -222,7 +261,7 @@ fn sorted_features(mut features: Vec<String>) -> Vec<String> {
 }
 
 /// A crate's versions: cache first, then the index, then whatever is cached however old.
-async fn versions_of(name: &str, cfg: &CargoConfig, refresh: bool) -> Vec<IndexVersion> {
+pub(crate) async fn versions_of(name: &str, cfg: &CargoConfig, refresh: bool) -> Vec<IndexVersion> {
     let dir = cache_dir();
     let path = index_cache_path(&dir, name);
     if !refresh && index_is_fresh(&path, ttl(cfg)) {
@@ -449,5 +488,37 @@ mod tests {
         a.kind = "nonsense".to_string();
         let argv = add_argv(&a);
         assert!(!argv.iter().any(|f| f == "--dev" || f == "--build"), "{argv:?}");
+    }
+}
+
+#[cfg(test)]
+mod sweep_tests {
+    use super::HintSweep;
+    use bennu_core::prelude::CargoConfig;
+
+    /// A crate name nothing will ever have cached, so the sweep's own accounting is what is
+    /// under test rather than whatever happens to be on this machine.
+    const MANIFEST: &str = "[dependencies]\nzz-not-a-real-crate-9f3a = \"1\"\n";
+
+    #[tokio::test]
+    async fn a_dependency_the_budget_could_not_reach_is_counted_not_assumed_current() {
+        // Budget zero: no fetch is allowed, nothing is cached, so the crate's freshness is
+        // simply unknown — and "unknown" reported as "up to date" is the one wrong answer this
+        // tool must not give.
+        let mut sweep = HintSweep::new(0);
+        let hints = sweep.manifest(&CargoConfig::default(), MANIFEST).await;
+        assert!(hints.is_empty());
+        assert_eq!(sweep.unchecked, 1);
+    }
+
+    #[tokio::test]
+    async fn entries_with_no_version_to_be_behind_are_not_candidates_at_all() {
+        // A path, a git and a workspace-inherited dependency have no requirement here, so they
+        // never cost a fetch and never count as unchecked.
+        let src = "[dependencies]\na = { path = \"../a\" }\nb = { workspace = true }\n\
+                   c = { git = \"https://example.invalid/c\" }\n";
+        let mut sweep = HintSweep::new(0);
+        assert!(sweep.manifest(&CargoConfig::default(), src).await.is_empty());
+        assert_eq!(sweep.unchecked, 0);
     }
 }

@@ -35,14 +35,18 @@ const MAX_TODOS: usize = 2000;
 const MAX_TEXT_LEN: usize = 200;
 
 /// Args for [`bennu_todos`].
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct TodoScanArgs {
     /// Absolute path to the project root to scan.
     pub root: String,
 }
 
-/// Scan `root` for `TODO`/`FIXME`/`XXX`/`HACK` markers and return the hits.
-#[arbor_rpc::handler]
+/// Find every TODO / FIXME / XXX / HACK marker left in the project's source, with its
+/// file, line and the text of the comment.
+#[arbor_rpc::handler(mcp(
+    title = "Find TODO and FIXME markers",
+    safety = read,
+))]
 fn bennu_todos(_ctx: &BennuState, args: TodoScanArgs) -> Result<Vec<TodoItem>, String> {
     let mut out = Vec::new();
     let mut capped = false;

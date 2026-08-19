@@ -30,6 +30,15 @@
      */
     highlight?: boolean;
     /**
+     * Draw the trigger as text until it is hovered or open.
+     *
+     * For a **column** of selects where most rows sit at their default: twenty bordered
+     * boxes all reading the same inherited value is a wall the eye has to parse row by
+     * row to find the two that differ. Quiet + `highlight` on the ones that do is the
+     * pair — the exceptions are then the only things drawn as controls.
+     */
+    quiet?: boolean;
+    /**
      * Cap on the menu's visual height in pixels. Passed straight to the
      * underlying `Dropdown` — important when the dropdown might open
      * *upward* (`flipUp`), because Dropdown's positioning formula uses
@@ -80,6 +89,7 @@
     narrow    = false,
     size      = 'md',
     highlight = false,
+    quiet = false,
     maxHeight,
     searchable = false,
     searchPlaceholder = 'Search…',
@@ -169,6 +179,7 @@
         class:narrow
         class:sm={size === 'sm'}
         class:hl={highlight}
+        class:quiet={quiet && !highlight}
         onclick={toggle}
         {disabled}
         type="button"
@@ -187,6 +198,20 @@
 
 <style>
   .select-wrap { display: inline-block; }
+
+  /* Quiet: no chrome until you reach for it. The chevron stays, so the row still reads
+     as something you can change. */
+  .select-input.quiet {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-tertiary);
+  }
+  .select-input.quiet:hover,
+  .select-input.quiet[aria-expanded='true'] {
+    background: var(--bg-input);
+    border-color: var(--border);
+    color: var(--text-secondary);
+  }
   .select-wrap.narrow { width: 120px; }
   /* Sizes to the container rather than to the selected label.
      `flex` and `min-width` are both load-bearing, not belt-and-braces: this

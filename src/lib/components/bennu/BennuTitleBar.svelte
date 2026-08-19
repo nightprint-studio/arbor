@@ -18,7 +18,7 @@
   import {
     FolderOpen, FolderPlus, LogOut, Settings, Keyboard, FlaskConical,
     Play, Bug, Unplug, MoreVertical, Palette, SlidersHorizontal, Info, Hammer, Square, TriangleAlert,
-    UserCog,
+    UserCog, Bot,
     ListChecks, ChevronDown, RotateCw, ListRestart,
   } from 'lucide-svelte';
   import type { BuildType } from '$lib/stores/bennu/run.svelte';
@@ -37,6 +37,7 @@
   import BennuRunConfigSelect from './BennuRunConfigSelect.svelte';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import McpProjectRuleModal from '$lib/components/shared/McpProjectRuleModal.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
@@ -56,6 +57,7 @@
   let pickerMode = $state<'open' | 'add'>('open');
   let themeEditorOpen = $state(false);
   let profileManagerOpen = $state(false);
+  let mcpProjectOpen = $state(false);
 
   // Run/Build are wired to bennu-be (build.rs); Debug isn't implemented yet (a
   // later wave — it toasts). All disabled when no project is open.
@@ -239,9 +241,32 @@
   // window you cannot trust with a second profile. The active row carries the tick.
   const profileItems = $derived(profileMenuItems(() => { profileManagerOpen = true; }));
 
+  // ── AI access, for the project that is open ───────────────────────────────────
+  // The endpoint, the products and the defaults are Arbor-wide and stay on the home
+  // surface. What belongs HERE is the one thing that is about this project: whether an
+  // AI client may reach it and what it may do. Reaching that setting by going back to
+  // the Welcome page and finding this project in a list would be the long way round to
+  // a question you are already looking at the answer to.
+  //
+  // The row deliberately carries no "custom / inherited" hint: the store is per-window
+  // and Bennu's copy is unloaded until this modal opens it, so such a hint would either
+  // be wrong or force every Bennu window to fetch AI settings at startup for a feature
+  // that is off by default. The modal states it on its own header instead.
+  const mcpRoot = $derived(projectStore.project?.root ?? null);
+
   const settingsMenu = $derived<DropdownItem[]>([
     { kind: 'item', id: 'settings',  label: 'Settings…',           icon: Settings,  shortcut: 'Ctrl+,',   onclick: () => bennuUiStore.openSettings() },
     { kind: 'item', id: 'shortcuts', label: 'Keyboard shortcuts…', icon: Keyboard,  shortcut: 'F1',       onclick: () => bennuUiStore.toggleDocs() },
+    ...(mcpRoot
+      ? [
+          { kind: 'separator' as const },
+          {
+            kind: 'item' as const, id: 'mcp-project', icon: Bot,
+            label: 'AI access by project…',
+            onclick: () => { mcpProjectOpen = true; },
+          },
+        ]
+      : []),
     { kind: 'separator' },
     { kind: 'submenu', id: 'profile', label: `Profile — ${profileStore.active}`, icon: UserCog, items: profileItems },
     { kind: 'submenu', id: 'theme', label: 'Theme', icon: Palette, items: themeItems },
@@ -375,6 +400,14 @@
 
 {#if profileManagerOpen}
   <ProfileManagerModal onClose={() => (profileManagerOpen = false)} />
+{/if}
+
+{#if mcpProjectOpen && mcpRoot}
+  <McpProjectRuleModal
+    root={mcpRoot}
+    name={projectStore.project?.name}
+    product="bennu"
+    onClose={() => (mcpProjectOpen = false)} />
 {/if}
 
 <style>

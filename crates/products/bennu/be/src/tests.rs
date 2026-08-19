@@ -57,6 +57,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::build::{BuildGuard, BUSY_MSG};
+use crate::test_report::RunEnd;
 
 // ── event topics (the wire contract for the FE) ────────────────────────────────
 
@@ -110,7 +111,7 @@ pub struct DiscoverTestsArgs {
 /// cannot run. A discovery that disagrees with what will execute is worse than one that
 /// lags by a save.
 #[arbor_rpc::handler]
-fn bennu_discover_tests(
+pub(crate) fn bennu_discover_tests(
     _ctx: &BennuState,
     args: DiscoverTestsArgs,
 ) -> Result<Vec<DiscoveredTest>, String> {
@@ -191,10 +192,30 @@ pub struct TestRunHandle {
     pub widened: Option<String>,
 }
 
-/// Launch `mvn test` for `scope`, streaming output and per-class results. Returns as soon as
-/// the child is up; everything after that arrives as events.
-#[arbor_rpc::handler]
-fn bennu_run_tests(ctx: &BennuState, args: RunTestsArgs) -> Result<TestRunHandle, String> {
+/// A launched Maven run, before anyone has waited on it.
+///
+/// Split from [`bennu_run_tests`] so the same run can be driven two ways: on a thread, for
+/// a caller that wants the handle and will listen for the events, or **inline**, for a
+/// caller that wants the answer. Both drive the identical loop — one pump per stream, one
+/// report sweep per tick — because a second copy of it would be a second place for a class
+/// that lands with the last line of output to go missing.
+pub(crate) struct MavenRun {
+    handle: TestRunHandle,
+    command: String,
+    guard: BuildGuard,
+    child: Arc<Mutex<Child>>,
+    stdout: Option<std::process::ChildStdout>,
+    stderr: Option<std::process::ChildStderr>,
+    root: PathBuf,
+    run_id: String,
+    sink: Arc<dyn EventSink>,
+    seen: HashMap<PathBuf, Stamp>,
+    classes: crate::log::ClassMap,
+    totals: Arc<Mutex<Option<RunTotals>>>,
+}
+
+/// Spawn `mvn test` for `scope` and register it, without waiting for anything.
+pub(crate) fn start_maven_run(ctx: &BennuState, args: &RunTestsArgs) -> Result<MavenRun, String> {
     // Same lock as the build: two Maven processes on one tree fight over `target/`.
     let guard = BuildGuard::acquire().ok_or_else(|| BUSY_MSG.to_string())?;
 
@@ -228,8 +249,7 @@ fn bennu_run_tests(ctx: &BennuState, args: RunTestsArgs) -> Result<TestRunHandle
     let stderr = child.stderr.take();
     let sink = ctx.event_sink();
     // Stamp every report that exists BEFORE the run, so "changed since" needs no clock.
-    let mut seen = snapshot_reports(&root);
-    let totals: Arc<Mutex<Option<RunTotals>>> = Arc::new(Mutex::new(None));
+    let seen = snapshot_reports(&root);
 
     let child = Arc::new(Mutex::new(child));
     registry().lock().unwrap_or_else(|p| p.into_inner()).insert(
@@ -237,78 +257,124 @@ fn bennu_run_tests(ctx: &BennuState, args: RunTestsArgs) -> Result<TestRunHandle
         LiveRun { child: child.clone(), cancelled: Arc::new(Mutex::new(false)) },
     );
 
-    // One lookup for the whole run — every frame of every failure resolves through it.
-    let classes = crate::log::class_map(&args.root);
+    Ok(MavenRun {
+        handle: TestRunHandle {
+            run_id: run_id.clone(),
+            label: plan.label,
+            widened: plan.widened,
+        },
+        command: format!("{mvn} {}", plan.args.join(" ")),
+        guard,
+        child,
+        stdout,
+        stderr,
+        root,
+        run_id,
+        sink,
+        seen,
+        // One lookup for the whole run — every frame of every failure resolves through it.
+        classes: crate::log::class_map(&args.root),
+        totals: Arc::new(Mutex::new(None)),
+    })
+}
 
-    let thread_id = run_id.clone();
-    let thread_totals = totals.clone();
+impl MavenRun {
+    /// The handle the streaming caller returns before any of this has happened.
+    pub(crate) fn handle(&self) -> TestRunHandle {
+        self.handle.clone()
+    }
+
+    /// Pump the output, sweep the reports until the child exits, emit the exit event.
+    ///
+    /// Consumes the run and blocks for as long as Maven does. `collector`, when given, is
+    /// filled with every class report as it lands — the events are emitted either way, so
+    /// waiting for the answer never costs the panel its live tree.
+    pub(crate) fn drive(mut self, collector: Option<&crate::test_report::Collector>) -> RunEnd {
+        // The guard rides the run: the lock is held for as long as Maven does, not just for
+        // as long as the handler that started it.
+        let _guard = self.guard;
+        self.sink.progress(&format!("mvn test — {}", self.handle.label), None, None);
+        let mut pumps = Vec::new();
+        if let Some(out) = self.stdout.take() {
+            pumps.push(spawn_pump(
+                out,
+                "stdout",
+                self.run_id.clone(),
+                self.sink.clone(),
+                self.totals.clone(),
+                self.classes.clone(),
+            ));
+        }
+        if let Some(err) = self.stderr.take() {
+            pumps.push(spawn_pump(
+                err,
+                "stderr",
+                self.run_id.clone(),
+                self.sink.clone(),
+                self.totals.clone(),
+                self.classes.clone(),
+            ));
+        }
+
+        let dirs = report_dirs(&self.root);
+        let code = loop {
+            sweep_reports(&dirs, &mut self.seen, &self.run_id, &self.sink, collector);
+            let status = self.child.lock().unwrap_or_else(|p| p.into_inner()).try_wait();
+            match status {
+                Ok(Some(s)) => break s.code(),
+                // The child vanished (killed hard). Not an error to report — Stop is a
+                // normal way for a test run to end.
+                Err(_) => break None,
+                Ok(None) => std::thread::sleep(POLL),
+            }
+        };
+
+        // Drain the pipes before the final sweep: a class whose report lands with the
+        // last line of output must still make it into the tree.
+        for p in pumps {
+            let _ = p.join();
+        }
+        sweep_reports(&dirs, &mut self.seen, &self.run_id, &self.sink, collector);
+
+        let cancelled = registry()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&self.run_id)
+            .map(|r| *r.cancelled.lock().unwrap_or_else(|p| p.into_inner()))
+            .unwrap_or(false);
+        let totals = *self.totals.lock().unwrap_or_else(|p| p.into_inner());
+        self.sink.emit(EVT_TEST_EXIT, json!({
+            "run_id": self.run_id,
+            "code": code,
+            "cancelled": cancelled,
+            "totals": totals.map(|t| json!({
+                "run": t.run, "failures": t.failures, "errors": t.errors, "skipped": t.skipped,
+            })),
+        }));
+
+        RunEnd {
+            code,
+            cancelled,
+            command: self.command,
+            label: self.handle.label,
+            totals: totals.map(|t| (t.run, t.failures + t.errors, t.skipped)),
+        }
+    }
+}
+
+/// Launch `mvn test` for `scope`, streaming output and per-class results. Returns as soon as
+/// the child is up; everything after that arrives as events.
+#[arbor_rpc::handler]
+fn bennu_run_tests(ctx: &BennuState, args: RunTestsArgs) -> Result<TestRunHandle, String> {
+    let run = start_maven_run(ctx, &args)?;
+    let handle = run.handle();
     std::thread::Builder::new()
-        .name(format!("bennu-test-{run_id}"))
+        .name(format!("bennu-test-{}", handle.run_id))
         .spawn(move || {
-            // The guard rides the thread: the lock is held for as long as Maven runs, not
-            // just for as long as the handler that started it.
-            let _guard = guard;
-            let mut pumps = Vec::new();
-            if let Some(out) = stdout {
-                pumps.push(spawn_pump(
-                    out,
-                    "stdout",
-                    thread_id.clone(),
-                    sink.clone(),
-                    thread_totals.clone(),
-                    classes.clone(),
-                ));
-            }
-            if let Some(err) = stderr {
-                pumps.push(spawn_pump(
-                    err,
-                    "stderr",
-                    thread_id.clone(),
-                    sink.clone(),
-                    thread_totals.clone(),
-                    classes,
-                ));
-            }
-
-            let dirs = report_dirs(&root);
-            let code = loop {
-                sweep_reports(&dirs, &mut seen, &thread_id, &sink);
-                let status = child.lock().unwrap_or_else(|p| p.into_inner()).try_wait();
-                match status {
-                    Ok(Some(s)) => break s.code(),
-                    // The child vanished (killed hard). Not an error to report — Stop is a
-                    // normal way for a test run to end.
-                    Err(_) => break None,
-                    Ok(None) => std::thread::sleep(POLL),
-                }
-            };
-
-            // Drain the pipes before the final sweep: a class whose report lands with the
-            // last line of output must still make it into the tree.
-            for p in pumps {
-                let _ = p.join();
-            }
-            sweep_reports(&dirs, &mut seen, &thread_id, &sink);
-
-            let cancelled = registry()
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .remove(&thread_id)
-                .map(|r| *r.cancelled.lock().unwrap_or_else(|p| p.into_inner()))
-                .unwrap_or(false);
-            let totals = *thread_totals.lock().unwrap_or_else(|p| p.into_inner());
-            sink.emit(EVT_TEST_EXIT, json!({
-                "run_id": thread_id,
-                "code": code,
-                "cancelled": cancelled,
-                "totals": totals.map(|t| json!({
-                    "run": t.run, "failures": t.failures, "errors": t.errors, "skipped": t.skipped,
-                })),
-            }));
+            run.drive(None);
         })
         .map_err(|e| format!("spawn test thread: {e}"))?;
-
-    Ok(TestRunHandle { run_id, label: plan.label, widened: plan.widened })
+    Ok(handle)
 }
 
 // ── bennu_cancel_tests ─────────────────────────────────────────────────────────
@@ -382,6 +448,7 @@ fn spawn_pump<R: std::io::Read + Send + 'static>(
         let buf = BufReader::new(reader);
         for line in buf.lines().map_while(Result::ok) {
             if let Some(class) = running_class(&line) {
+                sink.progress(&format!("Running {class}"), None, None);
                 sink.emit(EVT_TEST_RUNNING, json!({ "run_id": run_id, "classname": class }));
             }
             if let Some(t) = run_totals(&line) {
@@ -488,6 +555,7 @@ fn sweep_reports(
     seen: &mut HashMap<PathBuf, Stamp>,
     run_id: &str,
     sink: &Arc<dyn EventSink>,
+    collector: Option<&crate::test_report::Collector>,
 ) {
     for dir in dirs {
         for (path, stamp) in report_files(dir) {
@@ -497,6 +565,22 @@ fn sweep_reports(
             let Ok(xml) = std::fs::read_to_string(&path) else { continue };
             let Some(result) = parse_report(&xml) else { continue };
             seen.insert(path, stamp);
+            if let Some(collector) = collector {
+                collector.class(&result);
+            }
+            sink.progress(
+                &match result.is_bad() {
+                    true => format!(
+                        "{}: {} failed of {}",
+                        result.classname,
+                        result.failures + result.errors,
+                        result.total
+                    ),
+                    false => format!("{}: {} passed", result.classname, result.total),
+                },
+                None,
+                None,
+            );
             sink.emit(EVT_TEST_CLASS, json!({ "run_id": run_id, "result": result }));
         }
     }

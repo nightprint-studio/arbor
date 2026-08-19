@@ -37,7 +37,7 @@ pub struct DependenciesArgs {
 /// `Cargo.lock` — each is a state the report describes rather than a failure the panel has to render
 /// as an error.
 #[arbor_rpc::handler]
-fn bennu_dependencies(_ctx: &BennuState, args: DependenciesArgs) -> Result<Report, String> {
+pub(crate) fn bennu_dependencies(_ctx: &BennuState, args: DependenciesArgs) -> Result<Report, String> {
     Ok(report_of(&args.root))
 }
 
@@ -48,7 +48,7 @@ fn bennu_dependencies(_ctx: &BennuState, args: DependenciesArgs) -> Result<Repor
 /// Reads the same report the Dependencies panel does and derives the shape from it, so the two
 /// windows can never disagree about what the project contains. Never errors, for the same reasons.
 #[arbor_rpc::handler]
-fn bennu_module_graph(_ctx: &BennuState, args: DependenciesArgs) -> Result<ModuleGraph, String> {
+pub(crate) fn bennu_module_graph(_ctx: &BennuState, args: DependenciesArgs) -> Result<ModuleGraph, String> {
     Ok(module_graph(&report_of(&args.root)))
 }
 

@@ -28,15 +28,24 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::time::{Duration, Instant};
 
 use arbor_ipc::prelude::EventSink;
 use bennu_core::prelude::{load_config, CustomLspServer, LspConfig};
 use bennu_lsp::prelude::{
-    find_root, is_dependency_source, locate, locate_custom, spec_by_id, FileEdit, FileOp,
+    background_init_options, find_root, is_dependency_source, locate, locate_custom, spec_by_id,
+    FileEdit, FileOp,
     LspSession, ServerAvailability,
     ServerSpec, SessionConfig, SessionObserver, SessionState, BUILTIN_SERVERS,
 };
+
+/// How often the reaper looks for idle background sessions.
+///
+/// Coarse on purpose: it decides *when* a session that is already going to be stopped is stopped,
+/// so a minute of slack costs a minute of memory and saves fifty-nine wake-ups.
+const REAP_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Frontend event: a server's state / progress changed.
 pub const EVT_STATUS: &str = "arbor://bennu/lsp-status";
@@ -49,6 +58,48 @@ pub const EVT_MESSAGE: &str = "arbor://bennu/lsp-message";
 
 /// A slot key: `(workspace root, language)`.
 type SlotKey = (String, String);
+
+/// Why a server is running — which is the same question as whether it may be stopped.
+///
+/// The distinction is not bookkeeping: a session with a window on it costs a rebuild the moment it
+/// is taken away, and one with nothing on screen costs a gigabyte for as long as it is kept. They
+/// are opposite trades and the registry cannot make either one without knowing which it is holding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionOrigin {
+    /// A window has this project open. Never reclaimed.
+    Window,
+    /// Started to answer a request with nothing on screen behind it — an AI client, in practice.
+    /// Runs on the lean profile and is stopped once it goes quiet.
+    Background,
+}
+
+/// What the language server for a file can say **right now**.
+///
+/// Five states because they are five different answers to "nothing came back", and collapsing them
+/// is how an empty result quietly becomes a claim. [`ServerReadiness::Warming`] is the one that
+/// earns the type: a server whose handshake is done but whose workspace is still loading answers
+/// "no references" confidently and wrongly, and for find-usages that is the difference between
+/// *unused* and *not yet* — which is the difference between deleting a method and not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerReadiness {
+    /// No server serves this file. Bennu's own engines are the whole answer.
+    Absent,
+    /// One serves it, and nothing has started it — nobody has asked it anything yet.
+    Idle { name: String },
+    /// It cannot answer yet. `detail` is the server's own progress line when it has one
+    /// (`Indexing 43%`), empty while the handshake is still going.
+    Warming { name: String, detail: String },
+    /// It is answering.
+    Ready { name: String },
+    /// It cannot answer, and will not without something changing — not installed, or it died.
+    Failed { name: String, message: String },
+}
+
+/// What is known about a slot besides its server: who wanted it, and when it was last any use.
+struct Lease {
+    origin: SessionOrigin,
+    last_used: Instant,
+}
 
 /// What is known about a slot regardless of whether its server came up.
 #[derive(Clone)]
@@ -139,6 +190,31 @@ impl ResolvedServer {
     }
 }
 
+/// The base options with the background profile laid over them.
+///
+/// A shallow merge at the top level, which is exact here rather than approximate: every key the
+/// profile sets is one the base does not have (see `background_init_options`), so nothing is
+/// overwritten and no nested object is half-replaced. A deep merge would be more general and would
+/// hide the day that stops being true.
+fn lean(
+    base: Option<serde_json::Value>,
+    profile: Option<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let Some(profile) = profile else { return base };
+    let Some(mut base) = base else { return Some(profile) };
+    match (base.as_object_mut(), profile.as_object()) {
+        (Some(target), Some(extra)) => {
+            for (k, v) in extra {
+                target.insert(k.clone(), v.clone());
+            }
+            Some(base)
+        }
+        // A non-object on either side is a server whose options someone wrote by hand. Left alone:
+        // the profile is an optimisation and must never be the reason a session starts wrong.
+        _ => Some(base),
+    }
+}
+
 /// The user's `initialization_options` JSON string, parsed.
 ///
 /// Ignored (with a log line) rather than fatal when it does not parse: a typo in one server's
@@ -161,6 +237,17 @@ fn parse_init_options(id: &str, raw: &str) -> Option<serde_json::Value> {
 /// The registry.
 pub struct LspRegistry {
     slots: Mutex<HashMap<SlotKey, Slot>>,
+    /// Why each slot exists and when it was last used.
+    ///
+    /// Beside `slots` rather than inside it because the two are read at different moments — every
+    /// routed request touches a lease, almost none of them look at a slot — and because the three
+    /// `Slot` variants would each have to carry it. A lease is created with its slot and dropped
+    /// with it; nothing else ever inserts one, which is what keeps the two maps agreeing. They are
+    /// never locked at the same time.
+    leases: Mutex<HashMap<SlotKey, Lease>>,
+    /// Whether the reaper thread is up. Started on first use rather than at boot: a backend serving
+    /// a project with no language server should not have a thread waking up forever for nothing.
+    reaping: AtomicBool,
     /// The latest event sink, so a background start can report its own outcome. One window per
     /// backend, so the newest is the right one.
     sink: RwLock<Option<Arc<dyn EventSink>>>,
@@ -173,6 +260,8 @@ impl LspRegistry {
     pub fn global() -> &'static LspRegistry {
         REGISTRY.get_or_init(|| LspRegistry {
             slots: Mutex::new(HashMap::new()),
+            leases: Mutex::new(HashMap::new()),
+            reaping: AtomicBool::new(false),
             sink: RwLock::new(None),
         })
     }
@@ -208,7 +297,13 @@ impl LspRegistry {
         let key = slot_key(&root.to_string_lossy(), &server.language);
 
         match self.peek(&key) {
-            Existing::Ready(session) if session.is_alive() => return Some(session),
+            Existing::Ready(session) if session.is_alive() => {
+                // The one choke point every routed request passes through, which is what makes
+                // "idle" mean anything: a session answering questions is never idle, whoever is
+                // asking them.
+                self.touch(&key);
+                return Some(session);
+            }
             Existing::Ready(session) => {
                 // The process died under us. Recorded as failed rather than silently
                 // restarted: a server that crashes on this project would otherwise be
@@ -219,8 +314,42 @@ impl LspRegistry {
             Existing::Pending => return None,
             Existing::Absent => {}
         }
-        self.begin_start(key, server, root, &cfg.lsp.server_paths);
+        // Created as background, deliberately. A project a window opened has already been through
+        // `warm_start` and so has a slot; reaching here means a request arrived for a project
+        // nothing has open, which is exactly the session that must not outlive the asking. If a
+        // window opens it later, `warm_start` claims it — see [`Self::claim`].
+        self.begin_start(key, server, root, &cfg.lsp.server_paths, SessionOrigin::Background);
         None
+    }
+
+    /// Mark a slot as used now.
+    fn touch(&self, key: &SlotKey) {
+        if let Some(lease) = self.leases.lock().unwrap_or_else(|p| p.into_inner()).get_mut(key) {
+            lease.last_used = Instant::now();
+        }
+    }
+
+    /// Record who wants a slot, promoting it if a window now does.
+    ///
+    /// One-way on purpose: a project opened in a window and then closed keeps its session. Closing
+    /// a tab is not a statement about memory, and demoting there would make the session most likely
+    /// to be wanted again the one most likely to be taken away.
+    fn claim(&self, key: &SlotKey, origin: SessionOrigin) {
+        let mut leases = self.leases.lock().unwrap_or_else(|p| p.into_inner());
+        let lease = leases.entry(key.clone()).or_insert(Lease { origin, last_used: Instant::now() });
+        lease.last_used = Instant::now();
+        if matches!(origin, SessionOrigin::Window) {
+            lease.origin = SessionOrigin::Window;
+        }
+    }
+
+    /// Whether a slot runs on the lean profile.
+    fn is_background(&self, key: &SlotKey) -> bool {
+        self.leases
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(key)
+            .is_some_and(|l| matches!(l.origin, SessionOrigin::Background))
     }
 
     /// Which root a file belongs to, and whether a server may be **started** for it.
@@ -293,6 +422,7 @@ impl LspRegistry {
         server: ResolvedServer,
         root: PathBuf,
         overrides: &std::collections::BTreeMap<String, String>,
+        origin: SessionOrigin,
     ) {
         let command = locate_for(&server, overrides);
         let info = SlotInfo {
@@ -319,9 +449,13 @@ impl LspRegistry {
             }
             slots.insert(key.clone(), slot);
         }
+        // After the slot is claimed and outside its lock: the lease is only meaningful for a slot
+        // that exists, and the early return above is the case where it does not.
+        self.claim(&key, origin);
+        self.start_reaper();
         self.emit_status();
         if let Some(command) = command {
-            self.spawn_start(key, server, command, root);
+            self.spawn_start(key, server, command, root, origin);
         }
     }
 
@@ -349,7 +483,14 @@ impl LspRegistry {
         server: ResolvedServer,
         command: String,
         root: PathBuf,
+        origin: SessionOrigin,
     ) {
+        let init_options = match origin {
+            SessionOrigin::Window => server.init_options.clone(),
+            SessionOrigin::Background => {
+                lean(server.init_options.clone(), background_init_options(&server.id))
+            }
+        };
         let cfg = SessionConfig {
             id: server.id.clone(),
             name: server.name.clone(),
@@ -357,7 +498,7 @@ impl LspRegistry {
             command,
             args: server.args.clone(),
             root,
-            init_options: server.init_options.clone(),
+            init_options,
             env: Vec::new(),
         };
         let observer: Arc<dyn SessionObserver> =
@@ -416,7 +557,7 @@ impl LspRegistry {
     /// rust-analyzer and then answers nothing for half a minute while it indexes — which reads
     /// as "Bennu has no Rust support" rather than as "the server is warming up". Starting at
     /// open moves that wait to where the user is not yet asking a question.
-    pub fn warm_start(&'static self, root: &str) {
+    pub fn warm_start(&'static self, root: &str, origin: SessionOrigin) {
         let cfg = load_config();
         if !cfg.lsp.enabled {
             return;
@@ -432,11 +573,65 @@ impl LspRegistry {
             }
             let key = slot_key(root, &server.language);
             if !matches!(self.peek(&key), Existing::Absent) {
+                // Already running. Still worth saying who wants it now: a project an AI client
+                // summarised half an hour ago and the user has just opened in a tab must stop
+                // being reclaimable, and this is the moment that becomes true.
+                self.claim(&key, origin);
                 continue;
             }
-            self.begin_start(key, server, root_path.to_path_buf(), &cfg.lsp.server_paths);
+            self.begin_start(key, server, root_path.to_path_buf(), &cfg.lsp.server_paths, origin);
         }
         self.prune_dependency_roots();
+    }
+
+    /// Stop background sessions that have gone quiet, forever, on their own thread.
+    ///
+    /// A thread rather than a check folded into `ensure`: the whole point is to reclaim a session
+    /// that nothing is asking about, and a session nothing is asking about produces no calls to
+    /// hang a check on. Started on the first slot and never stopped — one sleeping thread per
+    /// backend, against up to a gigabyte apiece.
+    fn start_reaper(&'static self) {
+        if self.reaping.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let spawned = std::thread::Builder::new().name("bennu-lsp-reaper".to_string()).spawn(
+            move || loop {
+                std::thread::sleep(REAP_INTERVAL);
+                LspRegistry::global().reap_idle();
+            },
+        );
+        if spawned.is_err() {
+            // Not fatal, and not silent: everything still works, background sessions simply live
+            // as long as the backend — which is exactly the state this was added to leave.
+            eprintln!("[lsp] could not spawn the reaper thread; background servers will not be stopped");
+            self.reaping.store(false, Ordering::SeqCst);
+        }
+    }
+
+    /// Stop every background session idle beyond the configured timeout.
+    ///
+    /// Reads the timeout on each pass rather than caching it, so changing the setting takes effect
+    /// without a restart. `0` disables reclamation entirely, which is a supported answer: a machine
+    /// with the memory to spare should not pay a cold rebuild for tidiness.
+    fn reap_idle(&self) {
+        let timeout = load_config().lsp.background_idle_timeout_secs;
+        if timeout == 0 {
+            return;
+        }
+        let timeout = Duration::from_secs(timeout);
+        let expired: Vec<SlotKey> = {
+            let leases = self.leases.lock().unwrap_or_else(|p| p.into_inner());
+            leases
+                .iter()
+                .filter(|(_, l)| matches!(l.origin, SessionOrigin::Background))
+                .filter(|(_, l)| l.last_used.elapsed() >= timeout)
+                .map(|(k, _)| k.clone())
+                .collect()
+        };
+        for (root, language) in expired {
+            eprintln!("[lsp] stopping idle background server for {root} ({language})");
+            self.stop(&root, &language);
+        }
     }
 
     /// Shut down any session whose root is a dependency's own source.
@@ -532,6 +727,58 @@ impl LspRegistry {
         find_root(Path::new(file), &server.markers()).is_some()
     }
 
+    /// What the server serving `file` can say right now — **without starting one**.
+    ///
+    /// The no-side-effects part is the point: this is called to explain an empty answer, and a
+    /// question about why nothing came back must not itself spawn a language server.
+    ///
+    /// A file inside an unpacked dependency reports [`ServerReadiness::Absent`] rather than the
+    /// state of whichever session happens to have it open: that session is borrowed (see
+    /// [`Self::root_of`]) and naming it here would attribute a project's readiness to a file
+    /// outside it.
+    pub fn readiness_for(&self, file: &str) -> ServerReadiness {
+        let cfg = load_config();
+        if !cfg.lsp.enabled {
+            return ServerReadiness::Absent;
+        }
+        let Some(server) = self.server_for(file, &cfg.lsp) else {
+            return ServerReadiness::Absent;
+        };
+        let RootKind::Own(root) = self.root_of(file, &server) else {
+            return ServerReadiness::Absent;
+        };
+        let key = slot_key(&root.to_string_lossy(), &server.language);
+        let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        match slots.get(&key) {
+            None => ServerReadiness::Idle { name: server.name.clone() },
+            Some(Slot::Starting(info)) => {
+                ServerReadiness::Warming { name: info.name.clone(), detail: String::new() }
+            }
+            Some(Slot::Failed { info, message, .. }) => {
+                ServerReadiness::Failed { name: info.name.clone(), message: message.clone() }
+            }
+            Some(Slot::Ready(session)) => {
+                let status = session.status();
+                if !session.is_alive() {
+                    return ServerReadiness::Failed {
+                        name: status.name,
+                        message: "the language server exited".to_string(),
+                    };
+                }
+                // Handshake done is not the same as ready to answer. `progress` is the server's own
+                // "Indexing 43%", and the window it covers is exactly the one in which a confident
+                // empty answer is wrong.
+                match status.progress.is_empty() {
+                    true => ServerReadiness::Ready { name: status.name },
+                    false => ServerReadiness::Warming {
+                        name: status.name,
+                        detail: status.progress,
+                    },
+                }
+            }
+        }
+    }
+
     /// Every slot's status, for the status bar and the settings panel.
     pub fn statuses(&self) -> Vec<bennu_proto::prelude::LspStatus> {
         let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
@@ -574,8 +821,16 @@ impl LspRegistry {
         if let Some(Slot::Ready(session)) = &previous {
             session.shutdown();
         }
+        // The restarted session is the one that was there: a background slot restarted by hand from
+        // the settings panel does not thereby acquire a window, and re-reading the lease before it
+        // is dropped is what keeps that true.
+        let origin = match self.is_background(&key) {
+            true => SessionOrigin::Background,
+            false => SessionOrigin::Window,
+        };
+        self.leases.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
         self.emit_status();
-        self.warm_start(&key.0);
+        self.warm_start(&key.0, origin);
         true
     }
 
@@ -583,6 +838,7 @@ impl LspRegistry {
     pub fn stop(&self, root: &str, language: &str) -> bool {
         let key = slot_key(root, language);
         let slot = self.slots.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
+        self.leases.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
         let stopped = matches!(slot, Some(Slot::Ready(_)));
         if let Some(Slot::Ready(session)) = slot {
             session.shutdown();
@@ -595,6 +851,7 @@ impl LspRegistry {
     pub fn shutdown_all(&self) {
         let slots: Vec<Slot> =
             self.slots.lock().unwrap_or_else(|p| p.into_inner()).drain().map(|(_, v)| v).collect();
+        self.leases.lock().unwrap_or_else(|p| p.into_inner()).clear();
         for slot in slots {
             if let Slot::Ready(session) = slot {
                 session.shutdown();
@@ -910,5 +1167,70 @@ mod tests {
         // catalogue carries install hints.
         let spec = spec_by_id("rust-analyzer").unwrap();
         assert!(spec.install_hint.contains("rustup component add"));
+    }
+}
+
+#[cfg(test)]
+mod lease_tests {
+    use super::*;
+
+    /// The registry is process-wide, so every test uses a key of its own — sharing one would make
+    /// these depend on the order they happened to run in.
+    fn key(name: &str) -> SlotKey {
+        (format!("/lease-test/{name}"), "rust".to_string())
+    }
+
+    #[test]
+    fn a_window_claims_a_session_an_agent_started() {
+        // The case the promotion exists for: an AI client summarised a project half an hour ago and
+        // the user has just opened it in a tab. Taking that server away is now a visible stall.
+        let reg = LspRegistry::global();
+        let k = key("promote");
+        reg.claim(&k, SessionOrigin::Background);
+        assert!(reg.is_background(&k));
+        reg.claim(&k, SessionOrigin::Window);
+        assert!(!reg.is_background(&k));
+    }
+
+    #[test]
+    fn a_later_agent_call_does_not_demote_a_window_session() {
+        // One-way. Closing a tab is not a statement about memory, and a session the user has been
+        // in is the one most likely to be wanted again.
+        let reg = LspRegistry::global();
+        let k = key("no-demote");
+        reg.claim(&k, SessionOrigin::Window);
+        reg.claim(&k, SessionOrigin::Background);
+        assert!(!reg.is_background(&k));
+    }
+
+    #[test]
+    fn touching_a_slot_that_has_no_lease_is_not_an_error() {
+        // `stop` drops the lease; a request already in flight may touch the key just after.
+        LspRegistry::global().touch(&key("absent"));
+    }
+
+    #[test]
+    fn the_background_profile_is_added_to_the_base_rather_than_replacing_it() {
+        let base = serde_json::json!({ "procMacro": { "enable": true }, "checkOnSave": true });
+        let merged = lean(Some(base), background_init_options("rust-analyzer")).unwrap();
+        // The settings that make a project resolve survive untouched — the whole safety property.
+        assert_eq!(merged["procMacro"]["enable"], serde_json::json!(true));
+        assert_eq!(merged["checkOnSave"], serde_json::json!(true));
+        assert_eq!(merged["cachePriming"]["enable"], serde_json::json!(false));
+        assert!(merged["lru"]["capacity"].is_number());
+        assert!(merged["numThreads"].is_number());
+    }
+
+    #[test]
+    fn a_server_with_no_profile_is_left_exactly_as_it_was() {
+        let base = serde_json::json!({ "a": 1 });
+        assert_eq!(lean(Some(base.clone()), background_init_options("gopls")), Some(base));
+    }
+
+    #[test]
+    fn hand_written_options_that_are_not_an_object_are_never_rewritten() {
+        // An optimisation must not be the reason a session starts wrong.
+        let odd = serde_json::json!(["not", "an", "object"]);
+        assert_eq!(lean(Some(odd.clone()), background_init_options("rust-analyzer")), Some(odd));
     }
 }

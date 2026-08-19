@@ -23,7 +23,7 @@
     Package, TerminalSquare, Loader, Bell, FolderGit2, Workflow,
     GitPullRequest, Search, FolderPlus, Download, Settings, TicketCheck,
     StickyNote, FolderTree, FolderOpen, History, Bug, BarChart2,
-    Monitor, Database, Shield, ShieldCheck, Cloud, Tag, Share2, FolderX,
+    Monitor, Database, Shield, ShieldCheck, Cloud, Tag, Share2, FolderX, Bot,
     Palette, Link2, Store, Music4,
   } from 'lucide-svelte';
 
@@ -52,6 +52,7 @@
   import SettingsInterface    from './docs/SettingsInterface.svelte';
   import SettingsPerformance  from './docs/SettingsPerformance.svelte';
   import SettingsAccess       from './docs/SettingsAccess.svelte';
+  import AiToolAccess         from './docs/AiToolAccess.svelte';
   import SettingsProject      from './docs/SettingsProject.svelte';
   import PipelinesLocal       from './docs/PipelinesLocal.svelte';
   import PipelinesCicd        from './docs/PipelinesCicd.svelte';
@@ -149,6 +150,7 @@
         { id: 'settings-interface',   label: 'Interface & Git',  icon: Monitor   },
         { id: 'settings-performance', label: 'Performance',      icon: Database  },
         { id: 'settings-access',      label: 'Access',           icon: Shield    },
+        { id: 'ai-tool-access',       label: 'AI tool access',   icon: Bot       },
         { id: 'settings-sync',        label: 'Settings Sync',    icon: Cloud     },
         { id: 'settings-project',     label: 'Project',          icon: FolderGit2 },
         { id: 'themes',               label: 'Themes & Presets', icon: Palette   },
@@ -203,6 +205,7 @@
     'settings-interface':    SettingsInterface,
     'settings-performance':  SettingsPerformance,
     'settings-access':       SettingsAccess,
+    'ai-tool-access':        AiToolAccess,
     'settings-project':      SettingsProject,
     'pipelines-local':       PipelinesLocal,
     'pipelines-cicd':        PipelinesCicd,

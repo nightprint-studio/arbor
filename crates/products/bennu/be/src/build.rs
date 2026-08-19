@@ -144,17 +144,41 @@ pub struct BuildArgs {
 /// all").
 #[arbor_rpc::handler]
 fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String> {
+    let outcome = compile_project(ctx, &args.root, args.module.as_deref())?;
+    Ok(BuildResult { tool: outcome.tool, ok: outcome.ok, diagnostics: outcome.diagnostics })
+}
+
+/// The compile itself — everything [`bennu_build`] does, plus the raw log it discards.
+///
+/// Split out for the agent-facing facade, which has no build panel behind it and so needs the log
+/// when the diagnostic parser recognised nothing. The handler stays the thin shape it was; the two
+/// cannot diverge because there is only one of them.
+pub(crate) fn compile_project(
+    ctx: &BennuState,
+    root_path: &str,
+    module: Option<&str>,
+) -> Result<CompileOutcome, String> {
     // Refuse to start a second build/validation while one is running (only one at a time).
     let _guard = BuildGuard::acquire().ok_or_else(|| BUSY_MSG.to_string())?;
     let sink = ctx.event_sink();
-    let root = PathBuf::from(&args.root);
+    let root = PathBuf::from(root_path);
+    let module = module.map(str::trim).filter(|m| !m.is_empty());
 
     let outcome = if is_cargo_root(&root) {
-        let (ok, raw) = run_cargo_check(&root)?;
+        // Says what is running to whoever is waiting on the call — the only thing a caller with no
+        // build panel would otherwise have during the minute this takes.
+        sink.progress(
+            &match module {
+                Some(package) => format!("cargo check -p {package}"),
+                None => "cargo check --workspace".to_string(),
+            },
+            None,
+            None,
+        );
+        let (ok, raw) = run_cargo_check(&root, module)?;
         finish_compile("cargo", ok, raw, &sink, &root)
     } else {
-        let java_home = resolve_java_home(&args.root);
-        let module = args.module.as_deref().map(str::trim).filter(|m| !m.is_empty());
+        let java_home = resolve_java_home(root_path);
         // Nothing has changed since the last successful compile → say so and stop. This is
         // the whole difference between "press ▷ and wait" and "press ▷": Maven's floor is
         // seconds even with nothing to do, and the most common launch of all is the one where
@@ -162,7 +186,13 @@ fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String>
         match up_to_date(&root) {
             Some(stamp) => {
                 sink.emit(EVT_BUILD_OUTPUT, json!({ "text": "Everything is up to date." }));
-                CompileOutcome { tool: "up-to-date".into(), ok: true, diagnostics: Vec::new(), stamp: Some(stamp) }
+                CompileOutcome {
+                    tool: "up-to-date".into(),
+                    ok: true,
+                    diagnostics: Vec::new(),
+                    raw: String::new(),
+                    stamp: Some(stamp),
+                }
             }
             None => {
                 let stamp = source_stamp(&root);
@@ -180,12 +210,15 @@ fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String>
     // own output.
     if outcome.ok {
         if let Some(stamp) = outcome.stamp {
-            build_stamps().lock().unwrap_or_else(|p| p.into_inner()).insert(args.root.clone(), stamp);
+            build_stamps()
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(root_path.to_string(), stamp);
         }
     }
 
     sink.emit(EVT_BUILD_DONE, json!({
-        "root": &args.root,
+        "root": root_path,
         "tool": &outcome.tool,
         "ok": outcome.ok,
         "diagnostics": outcome.diagnostics.len(),
@@ -199,10 +232,10 @@ fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String>
     // index rebuild for nothing, and — since a rebuild deliberately forgets the build stamp —
     // it would make the NEXT launch compile again. The skip would defeat itself.
     if outcome.ok && outcome.tool != "cargo" && outcome.tool != "up-to-date" {
-        IndexService::global().reindex(&args.root, ctx.event_sink());
+        IndexService::global().reindex(root_path, ctx.event_sink());
     }
 
-    Ok(BuildResult { tool: outcome.tool, ok: outcome.ok, diagnostics: outcome.diagnostics })
+    Ok(outcome)
 }
 
 /// Whether `root` is governed by Cargo — the same precedence `bennu-project`'s
@@ -546,10 +579,16 @@ fn bennu_run_input(_ctx: &BennuState, args: RunInputArgs) -> Result<(), String> 
 
 /// The outcome of a compile: the tool that ran, whether it exited 0, and the parsed
 /// diagnostics. The raw log is streamed as events (not carried here).
-struct CompileOutcome {
-    tool: String,
-    ok: bool,
-    diagnostics: Vec<BuildDiagnostic>,
+pub(crate) struct CompileOutcome {
+    pub(crate) tool: String,
+    pub(crate) ok: bool,
+    pub(crate) diagnostics: Vec<BuildDiagnostic>,
+    /// The compiler's own output, kept rather than only streamed.
+    ///
+    /// The panel reads the `build-output` events and needs nothing here; a caller with no panel —
+    /// an agent — has no other way to see a failure the diagnostic parser did not recognise, and
+    /// "the build failed, no further information" is the least useful answer a build can give.
+    pub(crate) raw: String,
     /// The source stamp this compile corresponds to, recorded on success so the next one can
     /// skip. `None` for a toolchain the staleness check doesn't cover (Cargo).
     stamp: Option<u64>,
@@ -592,27 +631,37 @@ fn finish_compile(
     for line in raw.lines() {
         sink.emit(EVT_BUILD_OUTPUT, log.line(line));
     }
-    CompileOutcome { tool: tool.to_string(), ok, diagnostics: parse_diagnostics(&raw), stamp: None }
+    CompileOutcome {
+        tool: tool.to_string(),
+        ok,
+        diagnostics: parse_diagnostics(&raw),
+        raw,
+        stamp: None,
+    }
 }
 
-/// `cargo check --workspace --message-format=short` in `root`.
+/// `cargo check --message-format=short` in `root`, over `package` or the whole workspace.
 ///
-/// `--workspace` because the root of a Cargo workspace is a *virtual* manifest with no
-/// code of its own: without it, pressing Build on a workspace checks nothing and reports
-/// success, which is the worst possible answer. `--color=never` so ANSI escapes don't end
+/// `--workspace` when no package is named, because the root of a Cargo workspace is a
+/// *virtual* manifest with no code of its own: without it, pressing Build on a workspace
+/// checks nothing and reports success, which is the worst possible answer. `--color=never` so ANSI escapes don't end
 /// up rendered as garbage in the build log.
 ///
 /// `Err` only when the launcher can't be spawned (no `cargo` on `PATH`) — there is no
 /// fallback compiler to try, unlike the `mvn` → `javac` path: `rustc` invoked by hand
 /// cannot resolve a single dependency, so offering it would produce a wall of
 /// unresolved-import errors that say nothing about the code.
-fn run_cargo_check(root: &Path) -> Result<(bool, String), String> {
+fn run_cargo_check(root: &Path, package: Option<&str>) -> Result<(bool, String), String> {
     let mut cmd = Command::new(CARGO);
-    cmd.current_dir(root)
-        .arg("check")
-        .arg("--workspace")
-        .arg("--message-format=short")
-        .arg("--color=never");
+    cmd.current_dir(root).arg("check");
+    // One package instead of the workspace when the caller named one. On a workspace of twenty
+    // crates that is the difference between a check you wait out and one you read — and after
+    // editing a single crate it is also the only part of the answer that changed.
+    match package {
+        Some(package) => cmd.arg("-p").arg(package),
+        None => cmd.arg("--workspace"),
+    };
+    cmd.arg("--message-format=short").arg("--color=never");
     cmd.no_window();
     let out = cmd.output().map_err(|e| format!("spawn cargo ({CARGO}): {e}"))?;
     Ok((out.status.success(), merge_output(&out.stdout, &out.stderr)))

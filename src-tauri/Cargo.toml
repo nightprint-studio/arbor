@@ -84,6 +84,14 @@ arbor-plugin-api  = { path = "../crates/platform/plugin/api" }
 arbor-plugin-core = { path = "../crates/platform/plugin/core" }
 arbor-plugin-marketplace = { path = "../crates/platform/plugin/marketplace" }
 arbor-plugin-types = { path = "../crates/platform/plugin/types" }
+# The AI tool surface. `arbor-mcp` is the protocol (JSON-RPC + MCP + the transport
+# guards); `arbor-http` is the loopback server under it. What the tools DO is
+# `src/mcp/`, here in the shell, because that is where the user's consent lives.
+arbor-mcp   = { path = "../crates/platform/mcp" }
+arbor-http  = { path = "../crates/foundation/http" }
+# `#[handler(mcp(...))]` metadata crosses the seam as `arbor_rpc::ToolDescriptor`, and
+# `arbor_be::TOOLS_METHOD` names the reserved method that carries it.
+arbor-be    = { path = "../crates/foundation/be" }
 arbor-scheduler   = { path = "../crates/platform/scheduler" }
 
 # --- Tauri ---

@@ -44,6 +44,10 @@ mod library;
 // The capture engine (scap capture, windows-capture enumeration, ffmpeg encode,
 // cpal mic) that the domains above drive. Native deps live here, never in the shell.
 mod capture;
+// The agent surface: the same engine addressed the way an AI client can address it —
+// windows by title, images by value. Separate from the UI domains because the shapes
+// genuinely differ, not because the code does.
+mod agent;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, the plugin dir and

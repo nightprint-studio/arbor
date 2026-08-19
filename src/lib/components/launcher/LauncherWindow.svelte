@@ -18,6 +18,9 @@
   import LauncherShell from '$lib/components/launcher/LauncherShell.svelte';
   import WelcomeHome from '$lib/components/launcher/WelcomeHome.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
+  import { mcpStore } from '$lib/stores/mcp.svelte';
+  import type { McpAuditEntry } from '$lib/types/mcp';
+  import { listen } from '@tauri-apps/api/event';
   import FeedbackHost from '$lib/feedback/FeedbackHost.svelte';
   import { createNativeMenuPublisher } from '$lib/utils/native-menu';
   import { syncWindowTitle } from '$lib/utils/window-title.svelte';
@@ -47,6 +50,13 @@
     void animStore.loadConfig();
     // Release the plugin boot thread (no BootSplash on the launcher window).
     invoke('frontend_ready').catch(() => { /* legacy backend without handshake */ });
+
+    // The AI tool surface's SETTINGS live on the home surface — this window when
+    // products get their own, the Welcome tab when they are tabs — because that is
+    // where Arbor's own settings live rather than any one product's. The consent
+    // prompt and the call log do not: both ride in `GlobalOverlays`, in every window,
+    // because this one is closed as soon as a product tab opens.
+    void mcpStore.load();
   });
 </script>
 

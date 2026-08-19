@@ -95,6 +95,13 @@ pub fn attach(program: &'static str, gen: u64, methods: HashSet<String>, child: 
         None => tracing::info!("split_broker::attach({program}) gen={gen} ({n_methods} methods)"),
     }
     drop(displaced); // potential blocking child teardown, lock-free
+
+    // A backend that just became routable may serve a different set of tools than the one
+    // before it — the everyday case being a rebuild during development. Told here because
+    // this is the single point every `ensure_*_be` funnels through; the MCP layer decides
+    // whether it is a program anyone is exposing, and stays silent when the endpoint is
+    // down. Called after the write lock is released: it takes a lock of its own.
+    crate::mcp::backend_attached(program);
 }
 
 /// Detach `program`'s backend (it died or was shut down): every method falls back

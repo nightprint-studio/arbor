@@ -283,10 +283,19 @@ mod tests;
 // in its crate and target) + `bennu_run_cargo_tests`, which reads a live `cargo test` off its two
 // output streams. Stop is still `bennu_cancel_tests` — one registry, one verb.
 mod cargo_tests;
+// The other half of a test run: what it looked like once it FINISHED. The two runners above
+// return the moment the child is up, which is right for a live tree and useless to a caller
+// that cannot listen — so a `Collector` rides the same pumps and a `TestRunReport` comes out
+// the far end, in one shape for both build systems.
+mod test_report;
 // What is inside a type (`bennu_type_shape`) — a DTO's fields, an interface's properties, one
 // level per call. Asked by the framework panels when a row names a type worth opening; never by
 // a catalog build, which would resolve hundreds of them to show two.
 mod type_shape;
+// The agent surface: the handful of verbs whose SHAPE differs for an AI client (one
+// round trip where the editor takes four, and guidance in the reply rather than in a
+// static description). Delegates to the domain modules above; re-implements nothing.
+mod agent;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, `bennu_config_dir()` /

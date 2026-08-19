@@ -32,6 +32,12 @@ tyto-core = { path = "../core" }
 arbor-plugin-core  = { path = "../../../platform/plugin/core" }
 serde      = { workspace = true }
 serde_json = { workspace = true }
+# JSON Schema for the `#[handler(mcp(...))]` args structs. Direct (not via arbor-rpc's
+# re-export) because `#[derive(JsonSchema)]` needs the crate name in scope; the version
+# is the workspace pin, so one artifact.
+schemars   = { workspace = true }
+# Inline screenshots for the agent surface: PNG bytes → base64 in the tool result.
+base64     = { workspace = true }
 # Drives the serve loop / async domain handlers as the recording engine lands.
 tokio      = { workspace = true }
 

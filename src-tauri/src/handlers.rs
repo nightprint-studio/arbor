@@ -120,6 +120,16 @@ macro_rules! invoke_handlers {
             $crate::commands::picus_commands::picus_has_secret,
             // Cross-product recents (Canopy's list) + the "open this project"
             // intent a product's shell pulls as it mounts.
+            $crate::commands::mcp_commands::get_mcp_config,
+            $crate::commands::mcp_commands::set_mcp_config,
+            $crate::commands::mcp_commands::get_mcp_status,
+            $crate::commands::mcp_commands::mcp_consent_respond,
+            $crate::commands::mcp_commands::mcp_regenerate_token,
+            $crate::commands::mcp_commands::mcp_revoke_session_grants,
+            $crate::commands::mcp_commands::get_mcp_tools,
+            $crate::commands::mcp_commands::get_mcp_clients,
+            $crate::commands::mcp_commands::get_mcp_audit,
+            $crate::commands::mcp_commands::clear_mcp_audit,
             $crate::commands::recents_commands::record_recent_project,
             $crate::commands::recents_commands::list_recent_projects,
             $crate::commands::recents_commands::forget_recent_project,

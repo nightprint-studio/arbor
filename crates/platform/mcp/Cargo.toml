@@ -1,0 +1,20 @@
+[package]
+name         = "arbor-mcp"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Model Context Protocol server for Arbor: JSON-RPC 2.0 over Streamable HTTP on loopback, a tool catalogue an AI client can discover and call, and the origin/token checks that keep it to this machine. Protocol only — what the tools DO is the host's business."
+
+[dependencies]
+arbor-http  = { path = "../../foundation/http" }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+# The catalogue is a trait object the host implements, and answering a tool call is
+# I/O (a round trip to a backend process). Object-safe async needs the shim.
+async-trait = { workspace = true }
+tokio       = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

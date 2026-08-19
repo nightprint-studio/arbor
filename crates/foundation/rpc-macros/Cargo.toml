@@ -13,3 +13,6 @@ proc-macro = true
 [dependencies]
 syn   = { version = "2", features = ["full"] }
 quote = "1"
+# Already in the tree under syn/quote; named explicitly because the schema-source
+# helpers hand `TokenStream` fragments around and a type alias needs the path.
+proc-macro2 = "1"

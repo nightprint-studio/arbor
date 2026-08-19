@@ -11,7 +11,8 @@
 //! nothing outside this crate has to think in `{line, character}`.
 
 pub use crate::catalogue::{
-    extension_of, find_root, is_dependency_source, spec_by_id, ServerSpec, BUILTIN_SERVERS,
+    background_init_options, extension_of, find_root, is_dependency_source, spec_by_id,
+    ServerSpec, BUILTIN_SERVERS,
 };
 pub use crate::client::{LspError, ServerHandler};
 pub use crate::discovery::{locate, locate_custom};

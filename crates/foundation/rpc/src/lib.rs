@@ -27,8 +27,10 @@ extern crate self as arbor_rpc;
 
 pub mod builder;
 pub mod prelude;
+pub mod tool;
 
 pub use builder::{Builder, HandlerEntry, RpcBundle};
+pub use tool::{object_schema, schema_of, Safety, ToolDescriptor, ToolField, ToolMeta, ToolOutput};
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -43,6 +45,11 @@ use serde_json::Value;
 // `serde` re-exporting `serde_derive`).
 pub use arbor_rpc_macros::handler;
 pub use inventory;
+// Re-exported so the generated `schema_of::<T>` paths resolve through this crate and a
+// consumer never has to match our schemars version by hand. A crate that *derives*
+// `JsonSchema` still depends on schemars directly — a derive macro needs its own crate
+// name in scope — but it inherits the version from here.
+pub use schemars;
 
 /// A type-erased **sync** handler: `(backend context, JSON params) -> JSON
 /// result`. The success path is a JSON value; the error is the handler's
@@ -77,9 +84,57 @@ pub struct Entry {
     pub program: &'static str,
     pub name: &'static str,
     pub kind: Kind,
+    /// Present only when the handler opted in with `#[handler(mcp(...))]` —
+    /// the metadata that lets an AI client discover and call it. `None` (the
+    /// default) means the handler is reachable from the frontend and invisible
+    /// to any tool surface. See [`tool`].
+    pub mcp: Option<ToolMeta>,
 }
 
 inventory::collect!(Entry);
+
+/// Every handler that opted into tool exposure, across all programs this binary links.
+///
+/// A `*-be` binary links only its own program's handlers, so this is exactly its tool
+/// set — which is why the `__tools` method `arbor-be` serves calls this rather than the
+/// filtered variant: a backend does not need to know its own router label to describe
+/// itself. The shell, which links several programs, aggregates per-child instead.
+pub fn tools() -> Vec<ToolDescriptor> {
+    collect_tools(|_| true)
+}
+
+/// Every handler in `program` that opted into tool exposure, as serializable
+/// descriptors.
+///
+/// Sorted by name so the list a client sees is stable across runs: an MCP client
+/// caches `tools/list`, and a set that reshuffles itself looks like a changed server.
+pub fn tools_for(program: &str) -> Vec<ToolDescriptor> {
+    collect_tools(|e| e.program == program)
+}
+
+fn collect_tools(keep: impl Fn(&Entry) -> bool) -> Vec<ToolDescriptor> {
+    let mut tools: Vec<ToolDescriptor> = inventory::iter::<Entry>()
+        .filter(|e| keep(e))
+        .filter_map(|e| {
+            let meta = e.mcp.as_ref()?;
+            let name = meta.name.unwrap_or(e.name);
+            Some(ToolDescriptor {
+                name: name.to_string(),
+                method: e.name.to_string(),
+                title: if meta.title.is_empty() { name.to_string() } else { meta.title.to_string() },
+                description: meta.description.to_string(),
+                input_schema: (meta.schema)(),
+                safety: meta.safety,
+                idempotent: meta.idempotent,
+                open_world: meta.open_world,
+                wrap_in: meta.wrap_in.map(str::to_string),
+                output: meta.output,
+            })
+        })
+        .collect();
+    tools.sort_by(|a, b| a.name.cmp(&b.name));
+    tools
+}
 
 /// Decode one named argument out of the JSON param object. A missing key is
 /// treated as `null` (so `Option<_>` args default to `None`); a type mismatch
@@ -224,6 +279,122 @@ mod tests {
         let call = registry_for("other")["other.tick"];
         let out = call(&Ctx { base: 0 }, serde_json::Value::Null).unwrap();
         assert_eq!(out, serde_json::json!(7));
+    }
+
+    // ── Tool exposure ───────────────────────────────────────────────────────
+
+    #[derive(serde::Deserialize, schemars::JsonSchema)]
+    struct EchoArgs {
+        /// The text to send back.
+        text: String,
+        /// Truncate the echo to this many characters.
+        limit: Option<u32>,
+    }
+
+    /// Echo `text` straight back to the caller.
+    ///
+    /// Exists to prove the seam; returns nothing a caller didn't already have.
+    #[handler(name = "tool.echo", mcp(title = "Echo text", safety = read))]
+    fn tool_echo(_ctx: &Ctx, args: EchoArgs) -> Result<String, String> {
+        Ok(match args.limit {
+            Some(n) => args.text.chars().take(n as usize).collect(),
+            None => args.text,
+        })
+    }
+
+    /// Delete the thing named `id`. There is no undo.
+    #[handler(name = "tool.delete", mcp(name = "demo_delete", safety = destructive))]
+    fn tool_delete(_ctx: &Ctx, id: String, force: Option<bool>) -> Result<bool, String> {
+        Ok(force.unwrap_or(false) && !id.is_empty())
+    }
+
+    #[test]
+    fn only_annotated_handlers_become_tools() {
+        let tools = tools_for("");
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"tool.echo"));
+        // `mcp(name = …)` renames the tool without touching the wire method.
+        assert!(names.contains(&"demo_delete"));
+        assert!(!names.contains(&"tool.delete"));
+        // `test.add` / `ping` are handlers, not tools — exposure is opt-in.
+        assert!(!names.contains(&"test.add"));
+        assert!(!names.contains(&"ping"));
+        // Stable order, so a client's cached tool list doesn't churn between runs.
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted);
+    }
+
+    #[test]
+    fn a_struct_arg_is_flattened_and_re_wrapped() {
+        let tools = tools_for("");
+        let echo = tools.iter().find(|t| t.name == "tool.echo").unwrap();
+
+        // The model sees EchoArgs' own fields, not an `args` wrapper…
+        assert_eq!(echo.input_schema["properties"]["text"]["type"], "string");
+        assert_eq!(
+            echo.input_schema["properties"]["text"]["description"],
+            "The text to send back."
+        );
+        assert!(echo.input_schema["properties"].get("args").is_none());
+        // …and the host puts the wrapper back before dispatch.
+        assert_eq!(echo.wrap_in.as_deref(), Some("args"));
+        assert_eq!(
+            echo.wrap_arguments(serde_json::json!({ "text": "hi" })),
+            serde_json::json!({ "args": { "text": "hi" } })
+        );
+    }
+
+    #[test]
+    fn the_doc_comment_is_the_description() {
+        let tools = tools_for("");
+        let echo = tools.iter().find(|t| t.name == "tool.echo").unwrap();
+        assert!(echo.description.starts_with("Echo `text` straight back"));
+        assert!(echo.description.contains("prove the seam"));
+        assert_eq!(echo.title, "Echo text");
+        // No explicit title → falls back to the method name.
+        let del = tools.iter().find(|t| t.name == "demo_delete").unwrap();
+        assert_eq!(del.title, "demo_delete");
+        // …while the method it routes to is still the handler's own name.
+        assert_eq!(del.method, "tool.delete");
+    }
+
+    #[test]
+    fn flat_args_compose_an_object_schema_with_optionals_unwrapped() {
+        let tools = tools_for("");
+        let del = tools.iter().find(|t| t.name == "demo_delete").unwrap();
+        assert_eq!(del.input_schema["properties"]["id"]["type"], "string");
+        // `Option<bool>` → `boolean`, and absent from `required`.
+        assert_eq!(del.input_schema["properties"]["force"]["type"], "boolean");
+        assert_eq!(del.input_schema["required"], serde_json::json!(["id"]));
+        assert!(del.wrap_in.is_none());
+    }
+
+    #[test]
+    fn safety_drives_the_annotations() {
+        let tools = tools_for("");
+        let echo = tools.iter().find(|t| t.name == "tool.echo").unwrap();
+        let del = tools.iter().find(|t| t.name == "demo_delete").unwrap();
+
+        assert_eq!(echo.safety, Safety::Read);
+        assert!(echo.safety.read_only() && !echo.safety.destructive());
+        // A read is idempotent unless the author says otherwise…
+        assert!(echo.idempotent);
+
+        assert_eq!(del.safety, Safety::Destructive);
+        assert!(del.safety.destructive() && !del.safety.read_only());
+        // …and anything that mutates is not.
+        assert!(!del.idempotent);
+        assert!(!del.open_world);
+    }
+
+    #[test]
+    fn an_exposed_handler_is_still_an_ordinary_handler() {
+        // Exposure adds metadata; it must not change dispatch.
+        let call = registry_for("")["tool.echo"];
+        let out = call(&Ctx { base: 0 }, serde_json::json!({ "args": { "text": "abcdef", "limit": 3 } }))
+            .unwrap();
+        assert_eq!(out, serde_json::json!("abc"));
     }
 
     #[test]

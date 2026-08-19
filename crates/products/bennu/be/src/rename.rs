@@ -74,7 +74,7 @@ fn bennu_rename_apply(_ctx: &BennuState, args: RenameArgs) -> Result<Vec<RenameE
 }
 
 /// Map an intel [`RenamePlan`] onto the wire [`RenamePreview`].
-fn preview_of(plan: RenamePlan) -> RenamePreview {
+pub(crate) fn preview_of(plan: RenamePlan) -> RenamePreview {
     let total_edits = plan.total_edits();
     RenamePreview {
         old_name: plan.old_name,

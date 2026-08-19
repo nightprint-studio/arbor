@@ -109,6 +109,247 @@ pub struct AppConfig {
     /// Launcher (Canopy home screen) preferences.
     #[serde(default)]
     pub launcher: LauncherConfig,
+    /// The AI tool surface (MCP). Off by default, and every dimension of it —
+    /// which products, which projects, which classes of action — is opt-in
+    /// separately. See [`McpConfig`].
+    #[serde(default)]
+    pub mcp: McpConfig,
+}
+
+// ── MCP (the AI tool surface) ────────────────────────────────────────────────
+
+/// What an external AI client is allowed to do through Arbor.
+///
+/// Four independent gates, because they answer four different questions and a
+/// single switch would force the strictest answer on all of them:
+///
+/// 1. [`enabled`](Self::enabled) — is the endpoint listening at all;
+/// 2. [`products`](Self::products) — which backends it can reach;
+/// 3. [`scope`](Self::scope) — which projects on disk are in play;
+/// 4. [`policy`](Self::policy) — what happens per class of action.
+///
+/// Gates 2 and 4 also answer **per project**, through [`projects`](Self::projects):
+/// what a client may do is rarely one answer for everything you own, and the
+/// interesting grant — "on this one it may also write" — is precisely the one a
+/// global switch cannot express without granting it everywhere.
+///
+/// Everything defaults to the closed position. A fresh profile has no endpoint,
+/// no product enabled, no project in scope beyond the ones already open, and
+/// destructive actions refused outright rather than merely prompted.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct McpConfig {
+    /// Master switch. `false` → nothing is listening on any port.
+    pub enabled: bool,
+    /// Loopback port for the endpoint. Fixed rather than ephemeral because the
+    /// URL goes into the client's own config file (`claude mcp add --transport
+    /// http arbor http://127.0.0.1:<port>/mcp`), and a port that moved every
+    /// restart would mean re-editing that file every restart.
+    pub port: u16,
+    /// Bearer token clients present. Generated on first use and then **kept**, for
+    /// the same reason the port is fixed: it is written into the client's own
+    /// config, and a token that rotated on every restart would mean re-registering
+    /// the server on every restart.
+    ///
+    /// Rotating it automatically was never a security property to begin with — the
+    /// endpoint only exists while Arbor runs, and turning it off revokes access
+    /// completely. Rotation is worth having *deliberately*, which is what the
+    /// Regenerate action is for; as an accident of restarting it only broke clients.
+    ///
+    /// Stored in the clear, like the settings panel shows it: it is a loopback
+    /// credential, and anything that can read this file is already the user.
+    pub token: String,
+    /// Per-product switch, keyed by program id (`bennu`, `tyto`). A product
+    /// absent from the map is **off**: adding a backend to Arbor must never
+    /// silently add its tools to the AI surface.
+    pub products: std::collections::HashMap<String, bool>,
+    /// Which paths on disk the tools may touch.
+    pub scope: McpScope,
+    /// What happens per safety class, for a project that says nothing of its own.
+    pub policy: McpPolicy,
+    /// Per-project rules. Also **is** the allowlist under
+    /// [`McpScopeMode::Allowlist`] — one list, so a project cannot be in scope and
+    /// have no row, or have a row and silently not be in scope.
+    pub projects: Vec<McpProjectRule>,
+    /// How long a consent prompt waits before answering "no" on the user's
+    /// behalf. A prompt nobody is at must not hold a tool call open forever.
+    pub consent_timeout_secs: u64,
+    /// Cap on a single tool result, in bytes. Everything a tool returns is
+    /// spent from the model's context, so an unbounded project tree is not a
+    /// generous answer — it is the rest of the conversation.
+    pub max_result_bytes: usize,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: 8787,
+            token: String::new(),
+            products: std::collections::HashMap::new(),
+            scope: McpScope::default(),
+            policy: McpPolicy::default(),
+            projects: Vec::new(),
+            consent_timeout_secs: 120,
+            max_result_bytes: 256 * 1024,
+        }
+    }
+}
+
+/// Which projects the AI surface may work on.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct McpScope {
+    pub mode: McpScopeMode,
+}
+
+/// One project's own answer to gates 2 and 4.
+///
+/// Kept in the **user's** profile keyed by path, not in the project's own
+/// `.arbor/config.toml`, and that is the whole point: a permission file living in
+/// a repository is a permission file that gets committed, and a shared repo could
+/// then ship `destructive = "allow"` to everyone who clones it. What an AI client
+/// may do here is a fact about *this user's* trust in *this checkout*, so it is
+/// stored where that user's other trust decisions are.
+///
+/// Every field is an override with an "inherit" position, and inherit is the
+/// default: a rule says only what differs from the global settings, so tightening
+/// the global policy still tightens every project that never disagreed with it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct McpProjectRule {
+    /// Absolute project root. Paths under it resolve to this rule; when roots
+    /// nest, the longest match wins — the inner project is the more specific
+    /// statement about the file in question.
+    pub root: String,
+    /// Remembered separately from the folder name so a rule for a project that
+    /// has been moved or unmounted is still legible in the list rather than
+    /// reading as a bare path.
+    pub name: String,
+    /// Per-product override. Absent → inherit; `false` → this product is refused
+    /// here even when it is globally on.
+    pub products: std::collections::HashMap<String, bool>,
+    /// Per-class override. `None` → inherit.
+    pub policy: McpPolicyOverride,
+    /// Per-**tool** override, keyed by the tool's name. Absent → inherit the class.
+    ///
+    /// The most specific thing a rule can say, and the one the class alone cannot:
+    /// "this project may be written to, but only by the file-saving tool" is a
+    /// sentence about one endpoint, and expressing it by loosening the whole Modify
+    /// class would grant every other tool in it as well. Sparse on purpose — a rule
+    /// that listed every tool would freeze today's tool set into the config and stop
+    /// following it as tools are added.
+    pub tools: std::collections::HashMap<String, McpDecision>,
+}
+
+impl McpProjectRule {
+    /// What to call this project in a refusal or a list. Falls back to the folder
+    /// name, then to the raw root — never to an empty string, which in a sentence
+    /// reads as a bug rather than as a missing name.
+    pub fn display_name(&self) -> &str {
+        if !self.name.is_empty() {
+            return &self.name;
+        }
+        std::path::Path::new(&self.root)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&self.root)
+    }
+}
+
+/// A policy where every class may decline to have an opinion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct McpPolicyOverride {
+    pub read: Option<McpDecision>,
+    pub write: Option<McpDecision>,
+    pub destructive: Option<McpDecision>,
+}
+
+impl McpPolicyOverride {
+    /// This override's answer for `safety`, or `None` to inherit.
+    pub fn get(&self, safety: arbor_rpc::prelude::Safety) -> Option<McpDecision> {
+        use arbor_rpc::prelude::Safety;
+        match safety {
+            Safety::Read => self.read,
+            Safety::Write => self.write,
+            Safety::Destructive => self.destructive,
+        }
+    }
+
+    /// Whether it says anything at all — what the UI shows as "inherits everything".
+    pub fn is_empty(&self) -> bool {
+        self.read.is_none() && self.write.is_none() && self.destructive.is_none()
+    }
+}
+
+/// How [`McpScope`] decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum McpScopeMode {
+    /// Only what is already open in Arbor. The default, and the one that needs
+    /// no maintenance: the user's own act of opening a project is the grant.
+    #[default]
+    OpenProjects,
+    /// What the *calling product* has open — the product decides its own reach.
+    ///
+    /// A refinement of [`OpenProjects`], which pools every product's projects into
+    /// one set: under that mode a repository you only ever opened in Corvus is
+    /// reachable by Bennu's file-reading tools, which is not what opening it in
+    /// Corvus meant. Here the grant matches the act — you opened this in Bennu, so
+    /// Bennu's tools may work on it, and nothing else gained anything.
+    ///
+    /// A product that records no projects (Tyto captures screens, not projects) has
+    /// an empty scope, so any path-bearing call from it is refused. Its own tools
+    /// carry no paths, so in practice that costs nothing and stays honest.
+    ByProduct,
+    /// Only the projects listed in [`McpConfig::projects`], open or not.
+    Allowlist,
+    /// Anywhere on disk. Means an AI client can read any file this user can —
+    /// deliberately spelled out rather than hidden behind an empty list.
+    Anywhere,
+}
+
+/// What happens when a tool of each safety class is called.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct McpPolicy {
+    /// Tools that only observe.
+    pub read: McpDecision,
+    /// Tools that change something recoverable.
+    pub write: McpDecision,
+    /// Tools that delete, rewrite in bulk, or run code.
+    pub destructive: McpDecision,
+}
+
+impl Default for McpPolicy {
+    /// Reads flow, writes ask, destructive is off.
+    ///
+    /// Not "ask for everything": a surface that prompts on every file read
+    /// trains the user to approve without reading, which is worse than not
+    /// prompting at all. The prompts are spent where they carry information.
+    fn default() -> Self {
+        Self {
+            read: McpDecision::Allow,
+            write: McpDecision::Ask,
+            destructive: McpDecision::Deny,
+        }
+    }
+}
+
+/// One policy decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum McpDecision {
+    /// Run it, no prompt. The call is still audited.
+    Allow,
+    /// Prompt the user, and refuse if nobody answers in time.
+    #[default]
+    Ask,
+    /// Refuse without prompting. The tool is still *listed*, so the model is
+    /// told the capability exists and is not available — which it can act on,
+    /// unlike silence.
+    Deny,
 }
 
 /// One entry of the cross-product "recently opened" history.

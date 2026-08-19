@@ -25,6 +25,15 @@
     disabled?: boolean;
     /** Make the group fill its container (segment + card layouts). */
     block?: boolean;
+    /**
+     * Keep a horizontal group on one line.
+     *
+     * Wrapping is the right default in a form column, and wrong in a label-plus-control
+     * row: a segment broken across two lines reads as two groups, and the reader has to
+     * work out that the orphaned option belongs to the row above it. The label beside it
+     * can ellipsize; the choices are what the row is for.
+     */
+    nowrap?: boolean;
     onchange?: (value: string) => void;
   }
 
@@ -37,6 +46,7 @@
     direction  = 'horizontal',
     disabled   = false,
     block      = false,
+    nowrap     = false,
     onchange,
   }: Props = $props();
 
@@ -51,6 +61,7 @@
   class="radio-group app-{appearance} sz-{size} dir-{direction}"
   class:disabled
   class:block
+  class:nowrap
   role={appearance === 'segment' || appearance === 'card' ? 'radiogroup' : undefined}
 >
   {#each options as opt}
@@ -123,6 +134,7 @@
 
   .dir-vertical { flex-direction: column; align-items: stretch; }
   .dir-horizontal { flex-direction: row; align-items: center; flex-wrap: wrap; }
+  .radio-group.nowrap { flex-wrap: nowrap; flex: none; }
   .block { width: 100%; }
   .block.app-segment .seg-btn,
   .block.app-card    .card-opt { flex: 1; }
@@ -186,6 +198,7 @@
   /* ---- Radio ---- */
   .app-radio { gap: 8px; }
   .app-radio.dir-horizontal { gap: 14px; flex-wrap: wrap; align-items: center; }
+  .app-radio.dir-horizontal.nowrap { flex-wrap: nowrap; }
 
   .radio-option {
     display: inline-flex;

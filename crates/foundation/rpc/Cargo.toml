@@ -12,3 +12,8 @@ arbor-rpc-macros = { path = "../rpc-macros" }
 inventory   = "0.3"
 serde       = { workspace = true }
 serde_json  = { workspace = true }
+# JSON Schema for the tool surface (`#[handler(mcp(...))]`). Derived from the args
+# structs the handlers already have, so a new field reaches the schema by existing —
+# and the `///` on each field becomes the parameter description a model reads.
+# Re-exported from this crate's root so consumers inherit the version.
+schemars    = { workspace = true }

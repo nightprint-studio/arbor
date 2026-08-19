@@ -115,7 +115,7 @@ pub struct DiagnosticsArgs {
 /// wildcard/computed candidate → nothing, never a false positive). For a plain Java
 /// file, the empty stub (syntactic diagnostics land with tree-sitter in a later wave).
 #[arbor_rpc::handler]
-fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Diagnostic>, String> {
+pub(crate) fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Diagnostic>, String> {
     // A language-server-backed file first. Its diagnostics are **pushed** by the server (for
     // Rust they arrive when `cargo check` finishes, seconds after a save), so this call reads the
     // last publish rather than computing anything — which is why it is cheap enough to sit on the

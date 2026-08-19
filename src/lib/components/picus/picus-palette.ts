@@ -19,6 +19,7 @@
  */
 
 import {
+  Activity,
   Bookmark, BookmarkPlus, BookOpen, Braces, Check, Command, Database, FileCode2, FileCog, FolderCog,
   FolderOpen, FolderTree, FormInput, Info, Keyboard, Layers, PackageMinus, PackagePlus,
   PanelBottom, PanelLeft, Pencil, Play, Plus, RefreshCw, Replace, Search, Settings, Table2, Tags,
@@ -69,6 +70,7 @@ const ICONS: Record<string, IconComponent> = {
   tags: Tags as unknown as IconComponent,
   pencil: Pencil as unknown as IconComponent,
   info: Info as unknown as IconComponent,
+  activity: Activity as unknown as IconComponent,
   trash: Trash2 as unknown as IconComponent,
   outOfProject: PackageMinus as unknown as IconComponent,
   intoProject: PackagePlus as unknown as IconComponent,
@@ -459,6 +461,7 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
     { id: 'settings', title: 'Settings…', icon: 'settings', shortcut: 'Ctrl+,', when: true, action: () => a.run(() => picusUiStore.openSettings()) },
     { id: 'shortcuts', title: 'Keyboard shortcuts…', icon: 'keyboard', shortcut: 'Shift+F1', when: true, action: () => a.run(() => picusUiStore.openShortcuts()) },
     { id: 'docs', title: 'Documentation', icon: 'docs', shortcut: 'F1', when: true, action: () => a.run(() => picusUiStore.toggleDocs()) },
+    { id: 'ai-activity', title: 'AI activity…', subtitle: 'What an AI client is doing right now, and what it has done', icon: 'activity', when: true, action: () => a.run(() => window.dispatchEvent(new CustomEvent('arbor:open-mcp-activity'))) },
     { id: 'about', title: 'About Picus', icon: 'command', when: true, action: () => a.run(() => picusUiStore.openAbout()) },
   ];
 

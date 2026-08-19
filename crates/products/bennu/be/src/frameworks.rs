@@ -1471,7 +1471,7 @@ fn bennu_jpa_generate(_ctx: &BennuState, args: JpaGenerateArgs) -> Result<JpaGen
 }
 
 /// Args for the project-scoped handlers.
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct CatalogArgs {
     /// Absolute project root.
     pub root: String,
@@ -1480,7 +1480,27 @@ pub struct CatalogArgs {
 }
 
 /// The rows of one catalog — what every framework list panel (Beans, Endpoints) reads.
-#[arbor_rpc::handler]
+#[arbor_rpc::handler(mcp(
+    name = "bennu_catalog",
+    title = "List a framework catalog",
+    safety = read,
+    description = "List one catalog of things a framework contributes to this project. \
+Call bennu_frameworks first and read the kinds off it rather than guessing: every stat \
+it reports carries the `catalog` kind it drills into, so that list is always the live \
+one. The usual kinds are \"beans\" (Spring beans, with their classes), \"endpoints\" \
+(the HTTP or Struts actions the project serves), \"mappers\" (MyBatis), \"entities\" \
+and \"repositories\" (JPA), \"properties\" and \"injections\" (Spring), \"keys\" \
+(i18n bundles), \"taglibs\" (JSP) — and on a Bevy project \"components\" (each ECS \
+type with the systems that read and write it), \"systems\", and \"conflicts\". \
+\"conflicts\" is the one worth asking for by name: pairs of systems that can never run \
+at the same time because they contend over the same component or resource, each tagged \
+with whether anything in the project orders them — an `unordered` pair is a frame-order \
+dependency nobody wrote down, and the commonest source of a Bevy bug that only appears \
+sometimes. It is a NEGATIVE claim, so it holds even though only this project's own \
+sources were read: no system added later can un-conflict a pair. A kind no active \
+extension provides comes back empty rather than as an error. Prefix a kind with its \
+extension when two provide the same name (\"spring.beans\").",
+))]
 fn bennu_ext_catalog(_ctx: &BennuState, args: CatalogArgs) -> Result<Vec<ExtEntry>, String> {
     // One catalog is contributed by the HOST rather than by an extension: the beans an
     // allowlisted dependency declares are read out of jars, and the classpath and the
@@ -1508,8 +1528,9 @@ fn bennu_ext_catalog(_ctx: &BennuState, args: CatalogArgs) -> Result<Vec<ExtEntr
 }
 
 /// Args for [`bennu_ext_overview`] / [`bennu_spring_refresh`].
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct RootArgs {
+    /// Absolute path to the project root.
     pub root: String,
 }
 
@@ -1543,7 +1564,12 @@ pub struct PropertyFileInfo {
 /// The framework overview for a project: which extensions are active, their headline
 /// counts, and the property-file picker's contents. Empty (not an error) for a project no
 /// extension applies to — the frontend hides the tooling on that.
-#[arbor_rpc::handler]
+#[arbor_rpc::handler(mcp(
+    name = "bennu_frameworks",
+    title = "See which frameworks a project is built on",
+    safety = read,
+    description = "Report which frameworks Bennu recognises in a project and how much of each it found: Struts actions, Spring beans and properties, MyBatis mappers, JSP taglibs, Bevy systems. This is the fastest way to learn what an unfamiliar codebase actually is, and it is worth calling before reading source in a legacy enterprise project — in those stacks the behaviour lives in XML configuration rather than in the Java, so the file you would have opened first is often not where the answer is. An empty result means no extension recognised the project, not that the project is broken. If `ready` is false the scan is still running and the counts will grow.",
+))]
 fn bennu_ext_overview(_ctx: &BennuState, args: RootArgs) -> Result<ExtOverview, String> {
     let Some(slot) = FrameworkService::global().slot(&args.root) else {
         return Ok(ExtOverview::default());

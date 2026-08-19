@@ -21,6 +21,7 @@
  */
 
 import {
+  Activity,
   ArrowDownToLine, ArrowUpFromLine, BookOpen, Bug, CalendarDays, Command, FileText, FolderOpen,
   FolderTree, Hash, History as HistoryIcon, Keyboard, Layers, Link, ListTodo, PanelBottom,
   PanelLeft, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, Share2, Table2, Trash2,
@@ -52,6 +53,7 @@ const ICONS: Record<string, IconComponent> = {
   daily: CalendarDays as unknown as IconComponent,
   rename: Pencil as unknown as IconComponent,
   trash: Trash2 as unknown as IconComponent,
+  activity: Activity as unknown as IconComponent,
   restore: RotateCcw as unknown as IconComponent,
   folder: FolderOpen as unknown as IconComponent,
   export: FileText as unknown as IconComponent,
@@ -467,6 +469,7 @@ export function buildGarrulusPalette(
       when: true,
       action: () => a.run(() => a.openDocs('sync')),
     },
+    { id: 'ai-activity', title: 'AI activity…', subtitle: 'What an AI client is doing right now, and what it has done', icon: 'activity', when: true, action: () => a.run(() => window.dispatchEvent(new CustomEvent('arbor:open-mcp-activity'))) },
     { id: 'about', title: 'About Garrulus', icon: 'command', when: !!a.openAbout, action: () => a.run(() => a.openAbout?.()) },
   ];
 

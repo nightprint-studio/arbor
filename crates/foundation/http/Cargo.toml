@@ -1,0 +1,20 @@
+[package]
+name         = "arbor-http"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Minimal HTTP/1.1 server for Arbor's loopback endpoints (MCP today, the OAuth redirect catcher next). Hand-rolled on tokio: request parse, response write, keep-alive and Server-Sent Events, and nothing else — no routing, no middleware, no framework."
+
+[dependencies]
+# The runtime every Arbor process already carries. `net` + `io-util` are what
+# this crate actually uses; the workspace pin is `full`, so no new feature surface.
+tokio     = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# The round-trip tests drive a real listener on 127.0.0.1:0 and speak HTTP at it
+# by hand — the same bytes a client would send, so the parser is tested against
+# the wire and not against its own idea of the wire.
+tokio = { workspace = true }

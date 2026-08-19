@@ -21,6 +21,7 @@ use bennu_project::prelude::{
 use serde::{Deserialize, Serialize};
 
 use crate::index_service::IndexService;
+use crate::lsp_registry::SessionOrigin;
 
 /// The JDK level used to resolve classpath sources when the project doesn't declare
 /// (or we can't infer) one. JDK 8 is the target-stack default (Struts2/Entando).
@@ -36,7 +37,7 @@ const DEFAULT_JDK: &str = "1.8";
 const TREE_DEPTH: usize = 64;
 
 /// Args for [`bennu_open_project`].
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct OpenProjectArgs {
     /// Absolute path to the project root (the dir holding the root `pom.xml`).
     pub root: String,
@@ -62,6 +63,29 @@ pub struct OpenProjectArgs {
 /// Both are off-thread and neither blocks the other; a polyglot root gets both.
 #[arbor_rpc::handler]
 fn bennu_open_project(ctx: &BennuState, args: OpenProjectArgs) -> Result<ProjectInfo, String> {
+    open_and_start(ctx, &args.root, SessionOrigin::Window)
+}
+
+/// Open `root` and start everything that opening it starts: the language-server warm-up,
+/// the framework-extension registration, and the symbol-index build.
+///
+/// Shared because there is now more than one door into a project — the editor's
+/// `bennu_open_project` and the agent surface's `bennu_project_summary` — and a second
+/// door that starts only *some* of the engines is a project that behaves differently
+/// depending on who opened it. Idempotent: re-opening re-reads the manifest and leaves
+/// a running index alone.
+///
+/// `origin` is the one thing the two doors do NOT share, and it is about the language server
+/// rather than the project: a window has somebody looking at it, so its server runs in full and is
+/// never reclaimed; a request from an AI client has nothing on screen between one call and the
+/// next, so its server runs lean and is stopped once it goes quiet. Both doors otherwise start
+/// exactly the same engines, which is what this function is for.
+pub(crate) fn open_and_start(
+    ctx: &BennuState,
+    root: &str,
+    origin: SessionOrigin,
+) -> Result<ProjectInfo, String> {
+    let args = OpenProjectArgs { root: root.to_string() };
     let cfg = bennu_core::config::load();
     let jdk_override = cfg.jdk_overrides.get(&args.root).map(|s| s.as_str());
     let opts = OpenOptions { default_encoding: &cfg.default_encoding, jdk_override };
@@ -71,7 +95,7 @@ fn bennu_open_project(ctx: &BennuState, args: OpenProjectArgs) -> Result<Project
     // itself only claims slots and spawns threads — the handshake happens on those, so this
     // never blocks the open.
     crate::lsp_registry::LspRegistry::global().set_sink(ctx.event_sink());
-    crate::lsp_registry::LspRegistry::global().warm_start(&args.root);
+    crate::lsp_registry::LspRegistry::global().warm_start(&args.root, origin);
 
     // Every project kind, and BEFORE the early return below: the framework-extension host resolves a
     // file's project through this, and a Cargo root that never registered made every caret-based
@@ -101,7 +125,7 @@ fn bennu_open_project(ctx: &BennuState, args: OpenProjectArgs) -> Result<Project
 }
 
 /// Args for [`bennu_project_tree`].
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct ProjectTreeArgs {
     /// Absolute path to the directory to build the tree from (the project root, or a
     /// sub-directory the FE is lazily expanding).
@@ -110,14 +134,22 @@ pub struct ProjectTreeArgs {
     pub depth: Option<usize>,
 }
 
-/// Build the project file tree rooted at `root`, dirs-first, noise-dirs skipped.
-#[arbor_rpc::handler]
+/// List the files and directories under a project path, directories first, with build
+/// output and VCS noise already excluded.
+///
+/// Use it to find your way around a project you have not read yet. `depth` bounds how
+/// far it descends — keep it small on a large tree and call again on the sub-directory
+/// you care about, rather than pulling the whole thing into context at once.
+#[arbor_rpc::handler(mcp(
+    title = "List a project's files",
+    safety = read,
+))]
 fn bennu_project_tree(_ctx: &BennuState, args: ProjectTreeArgs) -> Result<TreeNode, String> {
     build_tree(Path::new(&args.root), args.depth.unwrap_or(TREE_DEPTH)).map_err(Into::into)
 }
 
 /// Args for [`bennu_read_file`].
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct ReadFileArgs {
     /// Absolute path to the project root (used to resolve the pom-declared encoding).
     pub root: String,
@@ -125,10 +157,16 @@ pub struct ReadFileArgs {
     pub file: String,
 }
 
-/// Read a file decoded in the project's resolved encoding (per-file/per-project
-/// override → pom-declared → config default). Returns the text + the encoding that
-/// applied.
-#[arbor_rpc::handler]
+/// Read a project file as text, decoded with the encoding that file is actually in.
+///
+/// Prefer this over a plain filesystem read for anything inside a Java project: legacy
+/// sources are frequently Cp1252 or Latin-1 rather than UTF-8, and the encoding is
+/// resolved from the build manifest and per-file overrides. Reading those bytes as UTF-8
+/// silently mangles every accented character. The reply names the encoding that applied.
+#[arbor_rpc::handler(mcp(
+    title = "Read a project file",
+    safety = read,
+))]
 fn bennu_read_file(_ctx: &BennuState, args: ReadFileArgs) -> Result<FileContents, String> {
     let cfg = bennu_core::config::load();
     // A per-file override wins over a per-project one (both keyed by absolute path).
@@ -171,7 +209,7 @@ fn bennu_file_stamps(_ctx: &BennuState, args: FileStampsArgs) -> Result<Vec<File
 }
 
 /// Args for [`bennu_write_file`].
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct WriteFileArgs {
     /// Absolute path to the project root (used to resolve the pom-declared encoding).
     pub root: String,
@@ -195,7 +233,17 @@ pub struct WriteFileArgs {
 /// Refuses with an [`ERR_EXTERNALLY_MODIFIED`](bennu_proto::prelude::ERR_EXTERNALLY_MODIFIED)-
 /// prefixed error when `expect_stamp` says the file changed since it was read — the guard
 /// that keeps autosave from throwing away an edit made outside Bennu.
-#[arbor_rpc::handler]
+#[arbor_rpc::handler(mcp(
+    title = "Write a project file in its own encoding",
+    safety = write,
+    description = "Save text to a project file, encoded the way that file actually is. \
+Use this instead of an ordinary file write for anything inside a Java project: legacy \
+sources are frequently Cp1252 or Latin-1, and writing UTF-8 bytes over them silently \
+mangles every accented character — a corruption that reads back fine to you, because you \
+read through bennu_read_file, and is wrong for everyone else. Pass the `stamp` \
+bennu_read_file gave you and the save is refused if the file changed underneath instead \
+of overwriting someone's work.",
+))]
 fn bennu_write_file(_ctx: &BennuState, args: WriteFileArgs) -> Result<WriteResult, String> {
     let cfg = bennu_core::config::load();
     // A per-file override wins over a per-project one (both keyed by absolute path) — the

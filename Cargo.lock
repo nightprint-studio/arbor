@@ -215,12 +215,15 @@ name = "arbor"
 version = "0.3.0"
 dependencies = [
  "arbor-auth",
+ "arbor-be",
  "arbor-brp",
  "arbor-cloud",
  "arbor-core",
  "arbor-feedback",
  "arbor-fs",
+ "arbor-http",
  "arbor-ipc",
+ "arbor-mcp",
  "arbor-plugin-api",
  "arbor-plugin-core",
  "arbor-plugin-marketplace",
@@ -375,6 +378,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbor-http"
+version = "0.3.0"
+dependencies = [
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "arbor-ipc"
 version = "0.3.0"
 dependencies = [
@@ -391,6 +402,17 @@ version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "arbor-mcp"
+version = "0.3.0"
+dependencies = [
+ "arbor-http",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -483,6 +505,7 @@ version = "0.3.0"
 dependencies = [
  "arbor-rpc-macros",
  "inventory",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
 ]
@@ -491,6 +514,7 @@ dependencies = [
 name = "arbor-rpc-macros"
 version = "0.3.0"
 dependencies = [
+ "proc-macro2",
  "quote",
  "syn 2.0.117",
 ]
@@ -904,6 +928,7 @@ dependencies = [
  "bennu-web",
  "bennu-xml",
  "reqwest 0.12.28",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "tokio",
@@ -7652,7 +7677,7 @@ checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
 dependencies = [
  "dyn-clone",
  "indexmap 1.9.3",
- "schemars_derive",
+ "schemars_derive 0.8.22",
  "serde",
  "serde_json",
  "url",
@@ -7679,6 +7704,7 @@ checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
 dependencies = [
  "dyn-clone",
  "ref-cast",
+ "schemars_derive 1.2.1",
  "serde",
  "serde_json",
 ]
@@ -7688,6 +7714,18 @@ name = "schemars_derive"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32e265784ad618884abaea0600a9adf15393368d840e0222d101a072f3f7534d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d115b50f4aaeea07e79c1912f645c7513d81715d0420f8bc77a18c6260b307f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9885,10 +9923,12 @@ dependencies = [
  "arbor-ipc",
  "arbor-plugin-core",
  "arbor-rpc",
+ "base64 0.22.1",
  "cpal",
  "ffmpeg-sidecar",
  "image",
  "scap",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "tokio",

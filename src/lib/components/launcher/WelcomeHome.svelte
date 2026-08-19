@@ -25,6 +25,8 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import WelcomeProductCard from './WelcomeProductCard.svelte';
+  import McpSettingsModal from '$lib/components/launcher/mcp/McpSettingsModal.svelte';
+  import { mcpMenuItems } from '$lib/components/launcher/mcp/menu';
   import { windowMenuItems } from '$lib/utils/window-menu';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import { launcherState, type DecoratedTool, type RecentProject } from '$lib/stores/launcher/state.svelte';
@@ -96,7 +98,13 @@
     }
   }
 
+  /** The AI tool surface's settings. It MUST be reachable from here for the same
+   *  reason the window-mode switch is: in tabbed mode this page is the entry point
+   *  and the Canopy launcher — the only other place that offers it — never shows. */
+  let mcpOpen = $state(false);
+
   const settingsMenu = $derived<DropdownItem[]>([
+    ...mcpMenuItems(() => (mcpOpen = true)),
     { kind: 'separator', label: 'Products open in' },
     { kind: 'item', id: 'mode:windows', label: 'Their own window',
       active: !windowModeStore.tabbed, onclick: () => pickWindowMode('windows') },
@@ -209,6 +217,10 @@
     </div>
   </div>
 </div>
+
+{#if mcpOpen}
+  <McpSettingsModal onClose={() => (mcpOpen = false)} />
+{/if}
 
 <style>
   /* Arbor's window shape: chrome on --bg-elevated, one floating panel on

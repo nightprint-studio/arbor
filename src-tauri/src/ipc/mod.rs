@@ -41,6 +41,7 @@
 
 pub mod corvus;
 pub mod event_sink;
+pub mod event_tap;
 pub mod platform;
 pub mod split_broker;
 pub mod stream_registry;
@@ -1721,8 +1722,7 @@ fn spawn_corvus_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String
     let res = ChildClient::spawn(
         cmd,
         move |topic, payload| {
-            use tauri::Emitter;
-            let _ = app_for_events.emit(&topic, payload);
+            forward_backend_event(&app_for_events, "corvus", topic, payload);
         },
         move |method, params| host_dispatch(&app_for_host, method, params),
         move || {
@@ -1930,13 +1930,12 @@ fn spawn_sitta_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>
     match ChildClient::spawn(
         cmd,
         move |topic, payload| {
-            use tauri::Emitter;
             // Sitta has no push events yet (Onda 1). When the git-awareness wave
             // lands (fs_git status/branch events), scope these to the explorer
             // windows (`window::explorer::is_explorer_label`) instead of the global
             // app bus — there can be several `explorer-N` windows, and the launcher
             // / Corvus windows don't want the explorer's telemetry.
-            let _ = app_for_events.emit(&topic, payload);
+            forward_backend_event(&app_for_events, "sitta", topic, payload);
         },
         move |method, params| host_dispatch(&app_for_host, method, params),
         move || {
@@ -2035,12 +2034,11 @@ fn spawn_tyto_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)
     match ChildClient::spawn(
         cmd,
         move |topic, payload| {
-            use tauri::Emitter;
             // Recorder push events (e.g. `tyto://recording-progress`) land here when
             // the engine ships. Scope to the Tyto window rather than the global app
             // bus once there can be multiple recorder surfaces; a single window today
             // makes the global emit harmless.
-            let _ = app_for_events.emit(&topic, payload);
+            forward_backend_event(&app_for_events, "tyto", topic, payload);
         },
         move |method, params| host_dispatch(&app_for_host, method, params),
         move || {
@@ -2179,10 +2177,9 @@ fn spawn_bennu_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>
     match ChildClient::spawn(
         cmd,
         move |topic, payload| {
-            use tauri::Emitter;
             // Analysis push events (e.g. `bennu://indexing-progress`) land here when
             // the index wave ships. Global emit is harmless with a single window.
-            let _ = app_for_events.emit(&topic, payload);
+            forward_backend_event(&app_for_events, "bennu", topic, payload);
         },
         move |method, params| host_dispatch(&app_for_host, method, params),
         move || {
@@ -2272,11 +2269,10 @@ fn spawn_picus_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>
     match ChildClient::spawn(
         cmd,
         move |topic, payload| {
-            use tauri::Emitter;
             // Studio push events (query progress, index progress) land here when the
             // database / script waves ship. Global emit is harmless with a single
             // window.
-            let _ = app_for_events.emit(&topic, payload);
+            forward_backend_event(&app_for_events, "picus", topic, payload);
         },
         move |method, params| host_dispatch(&app_for_host, method, params),
         move || {
@@ -2366,11 +2362,10 @@ fn spawn_garrulus_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<Stri
     match ChildClient::spawn(
         cmd,
         move |topic, payload| {
-            use tauri::Emitter;
             // Vault push events (`garrulus:vault-changed` from the filesystem watcher,
             // sync progress). Global emit: Garrulus is a single-window product and the
             // rate is low (the watcher debounces).
-            let _ = app_for_events.emit(&topic, payload);
+            forward_backend_event(&app_for_events, "garrulus", topic, payload);
         },
         move |method, params| host_dispatch(&app_for_host, method, params),
         move || {
@@ -2400,6 +2395,17 @@ fn spawn_garrulus_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<Stri
 /// handler's return value as JSON (`null` for unit returns). Backend errors
 /// arrive as [`IpcError::Backend`] carrying the original `AppError` wire string,
 /// which we re-wrap as [`AppError::Other`] so the FE sees the identical message.
+/// Forward one backend event to the frontend, and to anything in the shell waiting on it.
+///
+/// The webview is every event's destination; [`event_tap`] is the second one, for listeners
+/// that live in this process — today the MCP endpoint, narrating a tool call it is waiting
+/// on. Free when nobody is subscribed, which is the normal case.
+fn forward_backend_event(app: &AppHandle, program: &'static str, topic: String, payload: serde_json::Value) {
+    use tauri::Emitter;
+    event_tap::tap().publish(program, &topic, &payload);
+    let _ = app.emit(&topic, payload);
+}
+
 pub fn dispatch_rpc(
     state: &AppState,
     program: &str,

@@ -18,6 +18,23 @@ use std::sync::Arc;
 use arbor_rpc::{async_registry_for, registry_for, AsyncCallFn, CallFn};
 use serde_json::Value;
 
+/// The reserved method every backend answers with its AI-tool self-description.
+///
+/// Double-underscored because it is host plumbing, not product surface — the same
+/// convention as the shell's `__open_path` / `__set_config` reverse-channel methods. It
+/// rides the ordinary request path, so discovering a backend's tools needs no protocol
+/// change and no widening of the `Hello` frame (which must stay exactly what it is:
+/// the first frame on the wire, with nothing allowed to precede it).
+pub const TOOLS_METHOD: &str = "__tools";
+
+/// [`TOOLS_METHOD`]'s body: every `#[handler(mcp(...))]` this binary links.
+///
+/// Ignores the context — a backend describing itself needs no state — which is what
+/// lets it be a plain fn pointer registered for any `S`.
+fn describe_tools(_ctx: &(dyn Any + 'static), _params: Value) -> Result<Value, String> {
+    serde_json::to_value(arbor_rpc::tools()).map_err(|e| e.to_string())
+}
+
 /// One extra handler group: its method map + a factory for the per-call context
 /// the group's handlers downcast to.
 struct ExtraGroup {
@@ -39,11 +56,18 @@ impl<S: 'static> Dispatcher<S> {
     /// A dispatcher whose primary context is `state`. Async handlers are awaited on
     /// `handle` (a serve-loop worker thread drives the `block_on`, never the
     /// runtime itself).
+    ///
+    /// Every dispatcher answers [`TOOLS_METHOD`] out of the box — the self-description
+    /// the host reads to build its AI tool surface. It is registered here rather than
+    /// left to each product because a backend that forgets it is not a backend with one
+    /// missing method, it is a backend that is silently invisible to the tool layer.
     pub fn new(state: Arc<S>, handle: tokio::runtime::Handle) -> Self {
+        let mut sync: HashMap<&'static str, CallFn> = HashMap::new();
+        sync.insert(TOOLS_METHOD, describe_tools);
         Self {
             state,
             handle,
-            sync: HashMap::new(),
+            sync,
             asyncs: HashMap::new(),
             extra: Vec::new(),
         }

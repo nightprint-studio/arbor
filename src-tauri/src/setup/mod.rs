@@ -159,6 +159,11 @@ fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(desktop)]
     crate::window::tyto::register_configured(app.handle());
 
+    // Bring up the AI tool endpoint (MCP) if the user enabled it. Off by default, so
+    // this is a no-op on a fresh profile. Must run after `wire_backend` above: the
+    // catalogue routes tool calls through the IPC router it installs.
+    crate::mcp::reconcile(app.handle());
+
     // Register the `arbor://` URI scheme + deep-link routing (warm + cold start).
     #[cfg(all(desktop, any(not(debug_assertions), feature = "deep-link-dev")))]
     deep_link::register(app);

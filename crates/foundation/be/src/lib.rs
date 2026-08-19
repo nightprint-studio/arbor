@@ -30,5 +30,5 @@ pub mod prelude;
 
 pub use app::App;
 pub use app_ctx::BackendAppCtx;
-pub use dispatch::Dispatcher;
+pub use dispatch::{Dispatcher, TOOLS_METHOD};
 pub use io::BackendIo;

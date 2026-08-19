@@ -52,7 +52,7 @@ const CARGO: &str = "cargo";
 // ── bennu_cargo_workspace ──────────────────────────────────────────────────────
 
 /// Args for the handlers that take a project root.
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct RootArgs {
     /// Absolute path to the workspace root (the dir holding the root `Cargo.toml`).
     pub root: String,
@@ -63,7 +63,17 @@ pub struct RootArgs {
 /// Reads manifests and the filesystem — never `cargo metadata`, which on a cold workspace costs
 /// seconds and wants the network. Never errors: a root with no manifest is an empty workspace, which
 /// is what an editor opened on the wrong directory should show.
-#[arbor_rpc::handler]
+#[arbor_rpc::handler(mcp(
+    name = "bennu_cargo_workspace",
+    title = "Describe a Cargo workspace and its dependencies",
+    safety = read,
+    description = "Describe a Rust project's Cargo workspace: its member crates, what \
+each depends on, and the third-party crates it pulls in with the versions actually \
+resolved. Use it to see the shape of an unfamiliar workspace, to work out what a change \
+to one crate would rebuild, and to spot dependencies that have moved on. Reads the \
+manifests and the lockfile — it does not run cargo, so it answers on a project that has \
+never been built.",
+))]
 fn bennu_cargo_workspace(_ctx: &BennuState, args: RootArgs) -> Result<CargoWorkspace, String> {
     Ok(read_workspace(Path::new(&args.root)))
 }

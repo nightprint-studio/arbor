@@ -14,6 +14,9 @@ members = [
     "crates/foundation/core",
     "crates/foundation/be",
     "crates/foundation/fs",
+    # The one HTTP server in the workspace. Listening (MCP, and the OAuth redirect
+    # catcher once `arbor-auth` migrates onto it) — never outbound, that is `reqwest`.
+    "crates/foundation/http",
     "crates/foundation/ipc",
     "crates/foundation/shell-common",
     "crates/foundation/rpc",
@@ -51,6 +54,9 @@ members = [
     "crates/platform/plugin/marketplace",
     "crates/platform/plugin/rpc",
     "crates/platform/plugin/types",
+    # The AI tool surface: MCP protocol only. What the tools DO stays in the shell,
+    # which is also where the user can see and gate it.
+    "crates/platform/mcp",
     "crates/platform/scheduler",
     "crates/products/merula/merula-pattern",
     "crates/products/merula/merula-lang",
@@ -185,6 +191,10 @@ zeroize = { version = "1", features = ["derive"] }
 
 # Misc
 uuid   = { version = "1", features = ["v4"] }
+# JSON Schema generation for the MCP tool surface. ONE pin shared by arbor-rpc (which
+# re-exports it) and by every crate that derives `JsonSchema` on a handler's args struct
+# — a derive macro needs its own crate name in scope, so those depend on it directly.
+schemars = "1.2"
 dirs   = "6.0.0"
 regex  = "1"
 # MIDI (SMF) read/write — pure-Rust, zero-dep. Used by the merula import/transcribe

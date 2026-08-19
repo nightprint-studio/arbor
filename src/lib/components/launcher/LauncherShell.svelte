@@ -23,6 +23,8 @@
   import { openProduct } from '$lib/utils/open-product';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { Settings as SettingsIcon, X as CloseIcon } from 'lucide-svelte';
+  import McpSettingsModal from '$lib/components/launcher/mcp/McpSettingsModal.svelte';
+  import { mcpMenuItems } from '$lib/components/launcher/mcp/menu';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import { windowMenuItems } from '$lib/utils/window-menu';
@@ -148,7 +150,13 @@
     }
   }
 
+  /** The AI tool surface's settings. Reached from here because the launcher owns the
+   *  endpoint, the consent prompts and the log — not any one product. The Welcome
+   *  tab carries the same entry: in tabbed mode this window never shows. */
+  let mcpOpen = $state(false);
+
   const settingsMenu = $derived<DropdownItem[]>([
+    ...mcpMenuItems(() => (mcpOpen = true)),
     { kind: 'separator', label: 'Products open in' },
     { kind: 'item', id: 'mode:windows', label: 'Their own window',
       active: !windowModeStore.tabbed, onclick: () => pickWindowMode('windows') },
@@ -256,6 +264,10 @@
     <CanopyToast msg={toast.msg} color={toast.color} />
   {/if}
 </div>
+
+{#if mcpOpen}
+  <McpSettingsModal onClose={() => (mcpOpen = false)} />
+{/if}
 
 <style>
   /* Self-contained dark aesthetic (its own palette, not the app theme). Fonts

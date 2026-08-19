@@ -248,6 +248,19 @@ pub struct LspConfig {
     /// [`CustomLspServer`]. An entry whose `id` matches a built-in replaces it, which is how
     /// a server is reconfigured rather than merely re-pointed.
     pub servers: Vec<CustomLspServer>,
+    /// How long a language server with **no window showing its project** may sit idle before it is
+    /// stopped, in seconds. `0` never stops one.
+    ///
+    /// Such a session exists because something asked a question about a project nobody has open —
+    /// an AI client, in practice. Left alone it would live as long as the backend: rust-analyzer is
+    /// most of a gigabyte resident, and the ceiling on how many is the number of projects that can
+    /// be asked about, which is not a ceiling. This is the only thing that reclaims one.
+    ///
+    /// Ten minutes by default — long enough that a session of related questions never pays a cold
+    /// restart, short enough that a machine does not accumulate them over an afternoon. A server a
+    /// window opened is **never** stopped by this, whatever it says: something is on screen, and
+    /// taking it away costs a rebuild the moment it is looked at.
+    pub background_idle_timeout_secs: u64,
 }
 
 impl Default for LspConfig {
@@ -258,6 +271,7 @@ impl Default for LspConfig {
             disabled: Vec::new(),
             server_paths: BTreeMap::new(),
             servers: Vec::new(),
+            background_idle_timeout_secs: 600,
         }
     }
 }

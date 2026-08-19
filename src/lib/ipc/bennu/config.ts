@@ -89,6 +89,13 @@ export interface LspConfigDto {
   server_paths: Record<string, string>;
   /** User-defined servers, for a language the catalogue does not cover. */
   servers: CustomLspServerDto[];
+  /** How long a server with **no window showing its project** may sit idle before it is stopped,
+   *  in seconds. `0` never stops one.
+   *
+   *  Such a session exists because something asked about a project nobody has open — an AI client,
+   *  in practice. rust-analyzer is most of a gigabyte resident, and nothing else reclaims one. A
+   *  server a window opened is never stopped by this. */
+  background_idle_timeout_secs: number;
 }
 
 /** Mirrors the BE `CustomLspServer` — the same fields the built-in catalogue carries, because the

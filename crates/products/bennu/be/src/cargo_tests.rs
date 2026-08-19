@@ -58,6 +58,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::build::{BuildGuard, BUSY_MSG};
+use crate::test_report::RunEnd;
 use crate::tests::{next_run_id, registry, LiveRun, EVT_TEST_EXIT, EVT_TEST_OUTPUT};
 
 // ── event topics ───────────────────────────────────────────────────────────────
@@ -105,7 +106,7 @@ pub struct DiscoverArgs {
 /// compiles from disk, so a test discovered in unsaved text is a test the runner cannot run, and a
 /// catalogue that disagrees with what will execute is worse than one that lags by a save.
 #[arbor_rpc::handler]
-fn bennu_discover_cargo_tests(
+pub(crate) fn bennu_discover_cargo_tests(
     _ctx: &BennuState,
     args: DiscoverArgs,
 ) -> Result<Vec<RustTest>, String> {
@@ -228,9 +229,26 @@ pub struct CargoRunHandle {
     pub widened: Option<String>,
 }
 
-/// Launch `cargo test` for `scope`, streaming targets, cases and output as events.
-#[arbor_rpc::handler]
-fn bennu_run_cargo_tests(ctx: &BennuState, args: RunArgs) -> Result<CargoRunHandle, String> {
+/// A launched `cargo test`, before anyone has waited on it.
+///
+/// The Maven runner's twin, and split for the same reason — see [`crate::tests::MavenRun`]:
+/// one loop, driven either on a thread (the panel wants the handle) or inline (a caller
+/// wants the answer).
+pub(crate) struct CargoRun {
+    handle: CargoRunHandle,
+    guard: BuildGuard,
+    child: Arc<Mutex<std::process::Child>>,
+    stdout: Option<std::process::ChildStdout>,
+    stderr: Option<std::process::ChildStderr>,
+    run_id: String,
+    sink: Arc<dyn EventSink>,
+    ws: Arc<CargoWorkspace>,
+    announced: Announced,
+    totals: Arc<Mutex<Totals>>,
+}
+
+/// Spawn `cargo test` for `scope` and register it, without waiting for anything.
+pub(crate) fn start_cargo_run(ctx: &BennuState, args: &RunArgs) -> Result<CargoRun, String> {
     // The same lock the build takes: two cargo processes on one workspace queue on cargo's own
     // `target/` lock, which looks like a hang rather than like a queue.
     let guard = BuildGuard::acquire().ok_or_else(|| BUSY_MSG.to_string())?;
@@ -257,10 +275,6 @@ fn bennu_run_cargo_tests(ctx: &BennuState, args: RunArgs) -> Result<CargoRunHand
     let run_id = format!("cargo-{}", next_run_id());
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let sink = ctx.event_sink();
-    let ws = Arc::new(read_workspace(&root));
-    let announced: Announced = Arc::new((Mutex::new(Vec::new()), Condvar::new()));
-    let totals = Arc::new(Mutex::new(Totals::default()));
 
     let child = Arc::new(Mutex::new(child));
     registry().lock().unwrap_or_else(|p| p.into_inner()).insert(
@@ -268,68 +282,108 @@ fn bennu_run_cargo_tests(ctx: &BennuState, args: RunArgs) -> Result<CargoRunHand
         LiveRun { child: child.clone(), cancelled: Arc::new(Mutex::new(false)) },
     );
 
-    let thread_id = run_id.clone();
-    let thread_totals = totals.clone();
+    Ok(CargoRun {
+        handle: CargoRunHandle {
+            run_id: run_id.clone(),
+            label: plan.label,
+            command: format!("cargo {}", plan.args.join(" ")),
+            widened: plan.widened,
+        },
+        guard,
+        child,
+        stdout,
+        stderr,
+        run_id,
+        sink: ctx.event_sink(),
+        ws: Arc::new(read_workspace(&root)),
+        announced: Arc::new((Mutex::new(Vec::new()), Condvar::new())),
+        totals: Arc::new(Mutex::new(Totals::default())),
+    })
+}
+
+impl CargoRun {
+    /// The handle the streaming caller returns before any of this has happened.
+    pub(crate) fn handle(&self) -> CargoRunHandle {
+        self.handle.clone()
+    }
+
+    /// Pump both streams until cargo exits, emit the exit event. Blocks for as long as the
+    /// run does. `collector`, when given, is filled with every case as it is announced.
+    pub(crate) fn drive(mut self, collector: Option<Arc<crate::test_report::Collector>>) -> RunEnd {
+        // The guard rides the run: the lock is held for as long as cargo runs, not just for
+        // as long as the handler that started it.
+        let _guard = self.guard;
+        self.sink.progress(&format!("cargo test — {}", self.handle.label), None, None);
+        let mut pumps = Vec::new();
+        if let Some(err) = self.stderr.take() {
+            pumps.push(spawn_stderr_pump(
+                err,
+                self.run_id.clone(),
+                self.sink.clone(),
+                self.announced.clone(),
+                self.ws.clone(),
+            ));
+        }
+        if let Some(out) = self.stdout.take() {
+            pumps.push(spawn_stdout_pump(
+                out,
+                self.run_id.clone(),
+                self.sink.clone(),
+                self.announced.clone(),
+                self.totals.clone(),
+                collector,
+            ));
+        }
+
+        let code =
+            self.child.lock().unwrap_or_else(|p| p.into_inner()).wait().ok().and_then(|s| s.code());
+        for p in pumps {
+            let _ = p.join();
+        }
+
+        let cancelled = registry()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&self.run_id)
+            .map(|r| *r.cancelled.lock().unwrap_or_else(|p| p.into_inner()))
+            .unwrap_or(false);
+        let t = *self.totals.lock().unwrap_or_else(|p| p.into_inner());
+        self.sink.emit(EVT_TEST_EXIT, json!({
+            "run_id": self.run_id,
+            "code": code,
+            "cancelled": cancelled,
+            // Mapped onto the Maven runner's four numbers so the panel's exit handling is one
+            // path: libtest has no notion of "error" distinct from "failure", so that stays 0.
+            "totals": {
+                "run": t.passed + t.failed + t.ignored,
+                "failures": t.failed,
+                "errors": 0,
+                "skipped": t.ignored,
+            },
+        }));
+
+        RunEnd {
+            code,
+            cancelled,
+            command: self.handle.command,
+            label: self.handle.label,
+            totals: Some((t.passed + t.failed + t.ignored, t.failed, t.ignored)),
+        }
+    }
+}
+
+/// Launch `cargo test` for `scope`, streaming targets, cases and output as events.
+#[arbor_rpc::handler]
+fn bennu_run_cargo_tests(ctx: &BennuState, args: RunArgs) -> Result<CargoRunHandle, String> {
+    let run = start_cargo_run(ctx, &args)?;
+    let handle = run.handle();
     std::thread::Builder::new()
-        .name(format!("bennu-cargo-test-{run_id}"))
+        .name(format!("bennu-cargo-test-{}", handle.run_id))
         .spawn(move || {
-            // The guard rides the thread: the lock is held for as long as cargo runs, not just for
-            // as long as the handler that started it.
-            let _guard = guard;
-            let mut pumps = Vec::new();
-            if let Some(err) = stderr {
-                pumps.push(spawn_stderr_pump(
-                    err,
-                    thread_id.clone(),
-                    sink.clone(),
-                    announced.clone(),
-                    ws.clone(),
-                ));
-            }
-            if let Some(out) = stdout {
-                pumps.push(spawn_stdout_pump(
-                    out,
-                    thread_id.clone(),
-                    sink.clone(),
-                    announced.clone(),
-                    thread_totals.clone(),
-                ));
-            }
-
-            let code = child.lock().unwrap_or_else(|p| p.into_inner()).wait().ok().and_then(|s| s.code());
-            for p in pumps {
-                let _ = p.join();
-            }
-
-            let cancelled = registry()
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .remove(&thread_id)
-                .map(|r| *r.cancelled.lock().unwrap_or_else(|p| p.into_inner()))
-                .unwrap_or(false);
-            let t = *thread_totals.lock().unwrap_or_else(|p| p.into_inner());
-            sink.emit(EVT_TEST_EXIT, json!({
-                "run_id": thread_id,
-                "code": code,
-                "cancelled": cancelled,
-                // Mapped onto the Maven runner's four numbers so the panel's exit handling is one
-                // path: libtest has no notion of "error" distinct from "failure", so that stays 0.
-                "totals": {
-                    "run": t.passed + t.failed + t.ignored,
-                    "failures": t.failed,
-                    "errors": 0,
-                    "skipped": t.ignored,
-                },
-            }));
+            run.drive(None);
         })
         .map_err(|e| format!("spawn cargo test thread: {e}"))?;
-
-    Ok(CargoRunHandle {
-        run_id,
-        label: plan.label,
-        command: format!("cargo {}", plan.args.join(" ")),
-        widened: plan.widened,
-    })
+    Ok(handle)
 }
 
 /// Running totals across every target of one run.
@@ -372,6 +426,7 @@ fn spawn_stderr_pump<R: std::io::Read + Send + 'static>(
                 }
                 cv.notify_all();
             } else if let Some(crate_name) = compiling_crate(&line) {
+                sink.progress(&format!("Compiling {crate_name}"), None, None);
                 sink.emit(
                     EVT_CARGO_COMPILING,
                     json!({ "run_id": run_id, "crate": crate_name }),
@@ -444,6 +499,7 @@ fn spawn_stdout_pump<R: std::io::Read + Send + 'static>(
     sink: Arc<dyn EventSink>,
     announced: Announced,
     totals: Arc<Mutex<Totals>>,
+    collector: Option<Arc<crate::test_report::Collector>>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut parser = LibtestParser::new();
@@ -459,6 +515,11 @@ fn spawn_stdout_pump<R: std::io::Read + Send + 'static>(
                     LibtestEvent::Start { count } => {
                         let index = blocks.fetch_add(1, Ordering::Relaxed);
                         let target = await_target(&announced, index);
+                        sink.progress(
+                            &format!("{} — {count} tests", target.desc),
+                            None,
+                            Some(count as u64),
+                        );
                         sink.emit(EVT_CARGO_TARGET, json!({
                             "run_id": run_id,
                             "index": index,
@@ -487,6 +548,9 @@ fn spawn_stdout_pump<R: std::io::Read + Send + 'static>(
                                 _ => t.failed += 1,
                             }
                         }
+                        if let Some(collector) = &collector {
+                            collector.case(&path, status);
+                        }
                         let (module, name) = split_path(&path);
                         sink.emit(EVT_CARGO_CASE, json!({
                             "run_id": run_id,
@@ -502,6 +566,9 @@ fn spawn_stdout_pump<R: std::io::Read + Send + 'static>(
                     }
                     LibtestEvent::Failure { path, output } => {
                         let index = current.as_ref().map(|(i, _)| *i).unwrap_or(0);
+                        if let Some(collector) = &collector {
+                            collector.message(&path, &output);
+                        }
                         sink.emit(EVT_CARGO_CASE, json!({
                             "run_id": run_id,
                             "index": index,
@@ -513,6 +580,11 @@ fn spawn_stdout_pump<R: std::io::Read + Send + 'static>(
                     }
                     LibtestEvent::Result(r) => {
                         let index = current.as_ref().map(|(i, _)| *i).unwrap_or(0);
+                        sink.progress(
+                            &format!("{} passed, {} failed", r.passed, r.failed),
+                            None,
+                            None,
+                        );
                         sink.emit(EVT_CARGO_TARGET_DONE, json!({
                             "run_id": run_id,
                             "index": index,
@@ -528,6 +600,9 @@ fn spawn_stdout_pump<R: std::io::Read + Send + 'static>(
         }
         // A run killed mid-failure still has a message worth showing.
         if let Some(LibtestEvent::Failure { path, output }) = parser.flush() {
+            if let Some(collector) = &collector {
+                collector.message(&path, &output);
+            }
             sink.emit(EVT_CARGO_CASE, json!({
                 "run_id": run_id,
                 "path": path,

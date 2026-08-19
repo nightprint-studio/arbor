@@ -22,7 +22,7 @@
   import { onMount, untrack } from 'svelte';
   import {
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
-    TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info,
+    TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info, Bot, Activity as ActivityIcon,
     Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck,
     TextCursorInput, ListChecks, BookOpen, FlaskConical, ListRestart, Bug, Braces, Languages,
     Cog, Network,
@@ -859,6 +859,8 @@
     'bulb': Lightbulb as unknown as IconComponent,
     'sliders': SlidersHorizontal as unknown as IconComponent,
     'info': Info as unknown as IconComponent,
+    'bot': Bot as unknown as IconComponent,
+    'activity': ActivityIcon as unknown as IconComponent,
     'refresh-cw': RotateCw as unknown as IconComponent,
     'indent': IndentIncrease as unknown as IconComponent,
     'shield': ShieldCheck as unknown as IconComponent,
@@ -1144,6 +1146,10 @@
         when: !!projectStore.project && javaTools && !bennuIndexStore.indexing },
       { id: 'docs', title: 'Documentation', icon: 'command', shortcut: 'F1', action: () => run(() => bennuUiStore.toggleDocs()), when: true },
       { id: 'settings', title: 'Settings', icon: 'command', shortcut: 'Ctrl+,', action: () => run(() => bennuUiStore.openSettings()), when: true },
+      { id: 'mcpactivity', title: 'AI activity…', icon: 'activity',
+        action: () => run(() => window.dispatchEvent(new CustomEvent('arbor:open-mcp-activity'))), when: true },
+      { id: 'mcptools', title: 'AI tools…', icon: 'bot',
+        action: () => run(() => window.dispatchEvent(new CustomEvent('arbor:open-mcp-tools'))), when: true },
       { id: 'about', title: 'About Bennu', icon: 'info', action: () => run(() => bennuUiStore.openAbout()), when: true },
     ];
     const pack = (items: typeof editorItems) =>

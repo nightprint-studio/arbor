@@ -29,7 +29,7 @@ use serde::Deserialize;
 use crate::index_service::IndexService;
 
 /// Args for [`bennu_class_index`].
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct ClassIndexArgs {
     /// Absolute path to the project root to scan.
     pub root: String,
@@ -38,7 +38,15 @@ pub struct ClassIndexArgs {
 /// Return one [`ClassEntry`] per declared type in the project at `root`. Serves the cache
 /// the index build populated when a project is open (instant, no re-parse); falls back to a
 /// fresh `.java` scan otherwise.
-#[arbor_rpc::handler]
+#[arbor_rpc::handler(mcp(
+    title = "List every type declared in the project",
+    safety = read,
+    description = "List every class, interface, enum and record the project declares, \
+each with its fully-qualified name, its simple name, the file it lives in and the line \
+it is declared on. This is how you go from a type name to its location without \
+guessing at paths — the project's own naming conventions are rarely the ones you would \
+predict from the package.",
+))]
 fn bennu_class_index(_ctx: &BennuState, args: ClassIndexArgs) -> Result<Vec<ClassEntry>, String> {
     // Cache-first: the open project's build already captured every declared type.
     if let Some(cached) = IndexService::global().class_index(&args.root) {

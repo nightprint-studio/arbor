@@ -136,6 +136,10 @@ arbor-logscan = { path = "../../../foundation/logscan" }
 arbor-feedback = { path = "../../../platform/feedback" }
 serde      = { workspace = true }
 serde_json = { workspace = true }
+# JSON Schema for the `#[handler(mcp(...))]` args structs — the field `///`s become the
+# per-parameter descriptions an AI client reads. Direct because `#[derive(JsonSchema)]`
+# needs the crate name in scope; version from the workspace pin.
+schemars   = { workspace = true }
 # Per-repo run-config persistence: read/merge/write `<repo>/.arbor/config.toml`'s
 # `[bennu.run]` section (same version bennu-core already pins). Not a new external dep —
 # it's already used across the workspace (bennu-core, corvus repo_config).

@@ -402,6 +402,59 @@ fn rust_analyzer_init_options(check_command: &str) -> serde_json::Value {
     })
 }
 
+/// How large a query cache a background session may keep.
+///
+/// rust-analyzer's own default is *unbounded* — the cache grows with whatever has been asked, which
+/// is the right trade when a person is typing into the answer and the wrong one for a session that
+/// answered three questions an hour ago. A bound costs recomputation, never correctness.
+const BACKGROUND_LRU_CAPACITY: u32 = 64;
+
+/// How many worker threads a background session may use.
+///
+/// Its default is every core. Two is enough to answer a request in a reasonable time and leaves the
+/// machine to whoever is actually sitting at it — which for a session with no window is everybody
+/// else.
+const BACKGROUND_THREADS: u32 = 2;
+
+/// The `initializationOptions` a session gets when **no window is showing its project** — one
+/// started to answer a request rather than because somebody opened the project.
+///
+/// Merged over [`ServerSpec::init_options`], shallowly and deliberately: none of these keys appear
+/// there, so the merge is an addition rather than an override, and the settings that make a Rust
+/// project resolve at all are untouched by construction.
+///
+/// The three chosen all trade *time* for *resources* and none of them removes an answer:
+///
+/// * **`cachePriming` off.** On open, rust-analyzer primes its caches for every crate in the
+///   workspace — the long "indexing" bar, and on a twenty-crate workspace the bulk of the cost of
+///   starting one at all. Off, the work happens when a request needs that crate: a session asked
+///   about two files analyses two files. The first question about a cold crate is slower; the
+///   ninety that never come cost nothing.
+/// * **`lru.capacity` bounded** — see [`BACKGROUND_LRU_CAPACITY`].
+/// * **`numThreads` bounded** — see [`BACKGROUND_THREADS`].
+///
+/// **Deliberately absent, and this is the important half.** `procMacro` and `cargo.buildScripts`
+/// are the two settings a naive tuning turns off first, because they are the most expensive — and
+/// they are the two that must never be touched. A Bevy project resolves almost nothing without
+/// proc macros: every `#[derive(Component)]`, `#[derive(Resource)]`, `#[derive(Bundle)]` and
+/// reflect derive becomes unresolved, so the saving buys a project that reads as catastrophically
+/// broken while compiling perfectly. `cargo.allTargets` is absent for a smaller version of the same
+/// reason: it would halve the graph by dropping tests, on a tool surface that can run them.
+///
+/// `checkOnSave` is left alone for now. It is the largest recurring cost and the strongest
+/// candidate — a caller that can compile on demand does not need an ambient one — but turning it
+/// off makes Rust diagnostics silently unavailable to the per-file check, and that has to be said
+/// in the same change rather than discovered.
+pub fn background_init_options(id: &str) -> Option<serde_json::Value> {
+    (id == "rust-analyzer").then(|| {
+        serde_json::json!({
+            "cachePriming": { "enable": false },
+            "lru": { "capacity": BACKGROUND_LRU_CAPACITY },
+            "numThreads": BACKGROUND_THREADS,
+        })
+    })
+}
+
 /// Which code lenses to ask rust-analyzer for.
 ///
 /// Every one of these is a client-side command, so the rule for turning one on is "Bennu can do
@@ -707,5 +760,34 @@ mod tests {
                 "expected a cargo/rustup bin dir among {dirs:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod background_profile_tests {
+    use super::*;
+
+    #[test]
+    fn the_lean_profile_never_touches_what_makes_a_project_resolve() {
+        // The two settings a naive tuning turns off first, and the two that must never be: without
+        // proc macros a Bevy project loses every `#[derive(Component)]` and reads as broken.
+        let opts = background_init_options("rust-analyzer").unwrap();
+        assert!(opts.get("procMacro").is_none());
+        assert!(opts.get("cargo").is_none());
+        assert!(opts.get("checkOnSave").is_none());
+    }
+
+    #[test]
+    fn it_bounds_the_three_costs_it_is_there_to_bound() {
+        let opts = background_init_options("rust-analyzer").unwrap();
+        assert_eq!(opts["cachePriming"]["enable"], serde_json::json!(false));
+        assert_eq!(opts["lru"]["capacity"], serde_json::json!(BACKGROUND_LRU_CAPACITY));
+        assert_eq!(opts["numThreads"], serde_json::json!(BACKGROUND_THREADS));
+    }
+
+    #[test]
+    fn only_the_server_whose_settings_we_know_gets_one() {
+        assert!(background_init_options("gopls").is_none());
+        assert!(background_init_options("my-custom-server").is_none());
     }
 }

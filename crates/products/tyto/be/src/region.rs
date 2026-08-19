@@ -55,7 +55,18 @@ fn clear_region(_state: &TytoState) -> Result<(), String> {
 /// CSS pixels, for the overlay's **smart** pick (hover an element → snap to it). Empty
 /// off Windows or when the app exposes no accessibility. Captured here (before the
 /// overlay covers the screen) so hover hit-tests these rects rather than the overlay.
-#[arbor_rpc::handler]
+#[arbor_rpc::handler(mcp(
+    name = "tyto_read_ui_elements",
+    title = "Read the on-screen UI element rectangles",
+    safety = read,
+    // The doc comment above is written for the region-picker overlay that consumes
+    // this — "snap to it on hover" means nothing to a model, so the tool gets its own.
+    description = "List the accessibility rectangles of the foreground window's UI \
+elements on a monitor, as {x, y, width, height} in monitor-local pixels. Use it to \
+reason about screen layout structurally instead of from pixels alone — pairing it with \
+tyto_screenshot tells you both what an element looks like and where it is. Returns an \
+empty list on platforms or applications that expose no accessibility information.",
+))]
 fn enumerate_ui_elements(_state: &TytoState, monitor_id: String) -> Result<Vec<PixelRect>, String> {
     Ok(crate::capture::uia::enumerate_elements(&monitor_id))
 }

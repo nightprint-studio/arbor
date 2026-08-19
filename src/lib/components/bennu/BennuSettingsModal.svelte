@@ -233,12 +233,16 @@
       disabled: [],
       server_paths: {},
       servers: [],
+      background_idle_timeout_secs: 600,
     },
   );
   const lspEnabled = $derived(lspCfg.enabled);
   const lspDisabled = $derived(lspCfg.disabled ?? []);
   const serverPaths = $derived(lspCfg.server_paths ?? {});
   const rustCheckCommand = $derived(lspCfg.rust_check_command || 'check');
+  // `?? 600` and not `|| 600`: zero is a real choice here — never reclaim — and `||` would read it
+  // as absent and silently put ten minutes back.
+  const backgroundIdle = $derived(String(lspCfg.background_idle_timeout_secs ?? 600));
 
   /** Whether a Rust server exists to configure at all — the check command is rust-analyzer's, and a
    *  setting for a server this machine has never had is a setting for nothing. */
@@ -260,6 +264,12 @@
     // It is an `initializationOptions` value, so it only takes effect on a fresh handshake. Saying
     // so beats a setting that appears to do nothing until the next time the app happens to restart.
     await bennuLspStore.reloadServers();
+  }
+
+  async function setBackgroundIdle(secs: string) {
+    await saveConfigPatch({ lsp: { ...lspCfg, background_idle_timeout_secs: Number(secs) } });
+    // No server restart: the reaper reads this on every pass, so a change applies to the sessions
+    // already running rather than only to the next ones.
   }
 
   async function setLspEnabled(on: boolean) {
@@ -530,6 +540,26 @@
             <Toggle checked={lspEnabled} onchange={(v) => void setLspEnabled(v)}
                     ariaLabel="Enable language servers" />
           </FormRow>
+          <!-- Only meaningful while servers can start at all. Not under Rust: it is about every
+               language server, and rust-analyzer is merely the one that costs the most. -->
+          {#if lspEnabled}
+            <FormRow
+              label="Stop unattended servers after"
+              description="A language server can be started by an AI client asking about a project you do not have open. Nothing on screen is using it, and rust-analyzer holds most of a gigabyte, so it is stopped once it goes quiet — this is how long that takes. A server for a project you have open is never stopped. Applies to servers already running."
+            >
+              <Select
+                value={backgroundIdle}
+                options={[
+                  { value: '300', label: '5 minutes' },
+                  { value: '600', label: '10 minutes' },
+                  { value: '1800', label: '30 minutes' },
+                  { value: '3600', label: '1 hour' },
+                  { value: '0', label: 'Never — keep them running' },
+                ]}
+                onchange={(v) => void setBackgroundIdle(v)}
+              />
+            </FormRow>
+          {/if}
         </div>
 
         <!-- Rust's own knob. Only shown when there is a Rust server to configure: a setting for a

@@ -121,8 +121,15 @@ fn take_screenshot(_state: &TytoState, args: StartRecordingArgs) -> Result<Strin
     Ok(path.to_string_lossy().to_string())
 }
 
-/// Poll the current session state (recording / paused / elapsed).
-#[arbor_rpc::handler]
+/// Report whether a screen recording is currently running, and for how long.
+///
+/// Check this before assuming the screen is idle: a recording started by the user is
+/// invisible to anything else, and interfering with one is not recoverable.
+#[arbor_rpc::handler(mcp(
+    name = "tyto_recording_state",
+    title = "Check the recording state",
+    safety = read,
+))]
 fn session_state(_state: &TytoState) -> Result<SessionState, String> {
     let s = capture::ENGINE.snapshot();
     Ok(SessionState {

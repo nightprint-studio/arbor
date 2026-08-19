@@ -209,6 +209,7 @@
     { id: 'docs',      label: 'Documentation',      group: 'Window', icon: 'BookOpen', keys: 'F1',       desc: 'Open the in-app merula documentation.', run: () => merulaStore.openDocs() },
     { id: 'settings',  label: 'Settings…',          group: 'Window', icon: 'Settings', keys: 'Ctrl+,',   desc: 'Open the merula settings (audio, render, editor).', run: () => merulaStore.openSettings() },
     { id: 'shortcuts', label: 'Keyboard Shortcuts', group: 'Window', icon: 'Keyboard', keys: 'Shift+F1', desc: 'View the full keyboard shortcut reference.', run: () => merulaStore.openShortcuts() },
+    { id: 'ai-activity', label: 'AI activity…', group: 'Window', icon: 'Activity', desc: 'What an AI client is doing right now, and what it has done.', run: () => window.dispatchEvent(new CustomEvent('arbor:open-mcp-activity')) },
   ]);
 
   let query = $state('');

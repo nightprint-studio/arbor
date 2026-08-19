@@ -5,5 +5,5 @@
 
 pub use crate::app::App;
 pub use crate::app_ctx::BackendAppCtx;
-pub use crate::dispatch::Dispatcher;
+pub use crate::dispatch::{Dispatcher, TOOLS_METHOD};
 pub use crate::io::BackendIo;

@@ -41,8 +41,17 @@ pub struct CaptureSources {
     pub windows: Vec<WindowSource>,
 }
 
-/// Enumerate monitors + capturable windows.
-#[arbor_rpc::handler]
+/// List what can be captured right now: every monitor, and every open application
+/// window with its title.
+///
+/// Call this to learn which windows exist before capturing one, or when a title
+/// fragment matched more than one. Returns ids (`mon-…`, `win-…`), titles and
+/// resolutions — no pixels.
+#[arbor_rpc::handler(mcp(
+    name = "tyto_list_sources",
+    title = "List capturable screens and windows",
+    safety = read,
+))]
 fn list_capture_sources(_state: &TytoState) -> Result<CaptureSources, String> {
     Ok(crate::capture::source::list_capture_sources())
 }

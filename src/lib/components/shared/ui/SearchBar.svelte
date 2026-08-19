@@ -36,6 +36,14 @@
     onClear?: () => void;
     /** Emitted on every keystroke (raw value). */
     oninput?: (value: string) => void;
+    /**
+     * Raw keydown on the input, called BEFORE this component's own handling.
+     * For a consumer that owns a list below the bar: arrows have to move the
+     * selection without the caret leaving the field, or narrowing and choosing
+     * become two gestures with a mouse in between. Call `preventDefault()` to
+     * keep Enter / Escape from also being handled here.
+     */
+    onkeydown?: (e: KeyboardEvent) => void;
   }
 
   let {
@@ -49,7 +57,7 @@
     placeholder  = 'Search…',
     autofocus    = false,
     ariaLabel    = 'Search',
-    onNext, onPrev, onClear, oninput,
+    onNext, onPrev, onClear, oninput, onkeydown,
   }: Props = $props();
 
   let inputEl = $state<HTMLInputElement | null>(null);
@@ -65,6 +73,8 @@
   }
 
   function handleKey(e: KeyboardEvent) {
+    onkeydown?.(e);
+    if (e.defaultPrevented) return;
     if (e.key === 'Escape') {
       if (query) { e.preventDefault(); doClear(); }
       return;
