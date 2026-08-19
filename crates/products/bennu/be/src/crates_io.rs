@@ -358,7 +358,7 @@ async fn bennu_cargo_add(_ctx: &BennuState, args: AddArgs) -> Result<AddResult, 
     let root = args.root.clone();
 
     let output = tokio::task::spawn_blocking(move || {
-        let mut cmd = std::process::Command::new("cargo");
+        let mut cmd = std::process::Command::new(crate::cargo_cmd::cargo_launcher());
         cmd.current_dir(Path::new(&root));
         for a in &argv {
             cmd.arg(a);

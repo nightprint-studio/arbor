@@ -652,7 +652,8 @@ fn finish_compile(
 /// cannot resolve a single dependency, so offering it would produce a wall of
 /// unresolved-import errors that say nothing about the code.
 fn run_cargo_check(root: &Path, package: Option<&str>) -> Result<(bool, String), String> {
-    let mut cmd = Command::new(CARGO);
+    let launcher = cargo_launcher();
+    let mut cmd = Command::new(&launcher);
     cmd.current_dir(root).arg("check");
     // One package instead of the workspace when the caller named one. On a workspace of twenty
     // crates that is the difference between a check you wait out and one you read — and after
@@ -663,7 +664,9 @@ fn run_cargo_check(root: &Path, package: Option<&str>) -> Result<(bool, String),
     };
     cmd.arg("--message-format=short").arg("--color=never");
     cmd.no_window();
-    let out = cmd.output().map_err(|e| format!("spawn cargo ({CARGO}): {e}"))?;
+    let out = cmd
+        .output()
+        .map_err(|e| format!("spawn cargo ({}): {e}", launcher.to_string_lossy()))?;
     Ok((out.status.success(), merge_output(&out.stdout, &out.stderr)))
 }
 
@@ -1330,7 +1333,8 @@ pub(crate) fn resolve_mvn(root: &Path) -> String {
 
 /// The `cargo` launcher: `cargo` on `PATH`. A rustup install puts it there on every
 /// platform, so unlike `mvn` there is no per-OS launcher name to resolve.
-const CARGO: &str = "cargo";
+// Resolved, not taken from `PATH`: see `cargo_cmd::cargo_launcher`.
+use crate::cargo_cmd::cargo_launcher;
 
 /// The `javac` program under `JAVA_HOME/bin`, else `javac` on `PATH`.
 fn javac_program(java_home: Option<&Path>) -> String {

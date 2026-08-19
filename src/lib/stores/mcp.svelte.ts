@@ -50,6 +50,35 @@ function createMcpStore() {
   let auditRun = $state(0);
   let queue = $state<McpConsentRequest[]>([]);
 
+  /**
+   * Collapse rows that share an identity, keeping the more informative one.
+   *
+   * The log is a file two processes can both rewrite, so it can come back holding the
+   * same call twice — once finished, once as it looked while still open. The rendering
+   * is a KEYED each on `(run, id)`, and a duplicate key there is a hard crash that takes
+   * the whole overlay tree down with it. A log that disagrees with itself is worth one
+   * row shown once; it is not worth a white screen.
+   *
+   * Which copy wins: a finished row over a live/interrupted one, then the one that
+   * collected more progress. Both are "this is the copy that still knows something".
+   */
+  function dedupe(rows: McpAuditEntry[]): McpAuditEntry[] {
+    const LIVE = new Set(['waiting', 'asking', 'running', 'interrupted']);
+    const best = new Map<string, McpAuditEntry>();
+    for (const row of rows) {
+      const key = `${row.run}:${row.id}`;
+      const kept = best.get(key);
+      if (!kept) { best.set(key, row); continue; }
+      const richer =
+        LIVE.has(kept.outcome) && !LIVE.has(row.outcome) ? row
+        : !LIVE.has(kept.outcome) && LIVE.has(row.outcome) ? kept
+        : (row.progress?.length ?? 0) > (kept.progress?.length ?? 0) ? row
+        : kept;
+      best.set(key, richer);
+    }
+    return [...best.values()];
+  }
+
   /** In flight, so N callers on one window produce one round-trip and one answer. */
   let loading: Promise<void> | null = null;
 
@@ -58,7 +87,7 @@ function createMcpStore() {
       const [cfg, st, log] = await Promise.all([getMcpConfig(), getMcpStatus(), getMcpAudit()]);
       config = cfg;
       status = st;
-      audit = log.entries;
+      audit = dedupe(log.entries);
       auditRun = log.run;
     } catch {
       // A profile with no MCP section reads as the defaults, which are all-closed.
@@ -194,7 +223,7 @@ function createMcpStore() {
    *  backend's ring is the real record — so a panel opening asks rather than assumes. */
   async function refreshAudit() {
     const log = await getMcpAudit();
-    audit = log.entries;
+    audit = dedupe(log.entries);
     auditRun = log.run;
   }
 

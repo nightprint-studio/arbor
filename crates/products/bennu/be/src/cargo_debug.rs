@@ -33,7 +33,8 @@ use bennu_cargo::prelude::{Invocation, TargetSelector};
 use serde::Deserialize;
 
 /// The cargo executable, as everywhere else in this crate.
-const CARGO: &str = "cargo";
+// Resolved, not taken from `PATH`: see `cargo_cmd::cargo_launcher`.
+use crate::cargo_cmd::cargo_launcher;
 
 /// One `compiler-artifact` line, reduced to what matters.
 #[derive(Debug, Clone, Deserialize)]
@@ -240,7 +241,8 @@ pub fn build_and_locate(
     mut on_line: impl FnMut(&str),
 ) -> Result<String, String> {
     let argv = build_argv(invocation, wanted);
-    let mut cmd = Command::new(CARGO);
+    let launcher = cargo_launcher();
+    let mut cmd = Command::new(&launcher);
     cmd.current_dir(cwd);
     for a in &argv {
         cmd.arg(a);
@@ -250,7 +252,9 @@ pub fn build_and_locate(
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(Stdio::null());
     cmd.no_window();
 
-    let mut child = cmd.spawn().map_err(|e| format!("spawn cargo ({CARGO}): {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("spawn cargo ({}): {e}", launcher.to_string_lossy()))?;
     // stderr on a thread, because the two pipes fill independently and reading one to the end while
     // the other is full deadlocks a verbose build.
     let stderr = child.stderr.take();

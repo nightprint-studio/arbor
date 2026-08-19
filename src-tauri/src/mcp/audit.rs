@@ -142,6 +142,7 @@ fn ensure_loaded() {
             // after them because this happens before any of them exist.
             stored.truncate(CAPACITY);
             stored.extend(log.drain(..));
+            dedupe(&mut stored);
             *log = stored;
         }
     });
@@ -255,10 +256,49 @@ fn push(app: &AppHandle, entry: &AuditEntry) {
     let _ = app.emit("arbor://mcp-call", entry.clone());
 }
 
+/// Collapse rows that share `(run, id)`, keeping the one that still knows something.
+///
+/// The identity of a row is `(run, id)` and the file is not owned by one process: two
+/// Arbor instances on the same profile both hydrate it and both rewrite it whole, so it
+/// can come back holding one call twice — once finished, once as it looked while it was
+/// still open and later read back as `interrupted`. Reading is where that gets absorbed,
+/// because it is the only place that sees the whole list at once.
+///
+/// A finished row beats a live one; between two of the same kind the one that collected
+/// more progress wins. Order is preserved: the survivor keeps the earliest position, so
+/// the log still reads chronologically.
+fn dedupe(rows: &mut Vec<AuditEntry>) {
+    let mut seen: std::collections::HashMap<(u64, u64), usize> = std::collections::HashMap::new();
+    let mut out: Vec<AuditEntry> = Vec::with_capacity(rows.len());
+    for row in rows.drain(..) {
+        match seen.get(&(row.run, row.id)) {
+            None => {
+                seen.insert((row.run, row.id), out.len());
+                out.push(row);
+            }
+            Some(&at) => {
+                let kept = &out[at];
+                let kept_live = LIVE.contains(&kept.outcome.as_str());
+                let row_live = LIVE.contains(&row.outcome.as_str());
+                let replace = match (kept_live, row_live) {
+                    (true, false) => true,
+                    (false, true) => false,
+                    _ => row.progress.len() > kept.progress.len(),
+                };
+                if replace {
+                    out[at] = row;
+                }
+            }
+        }
+    }
+    *rows = out;
+}
+
 /// The log, newest first, with the run that is reading it.
 pub fn entries() -> ActivityLog {
     ensure_loaded();
     let mut out = LOG.lock().map(|l| l.clone()).unwrap_or_default();
+    dedupe(&mut out);
     out.reverse();
     ActivityLog { run: current_run(), entries: out }
 }
@@ -375,5 +415,56 @@ mod tests {
     fn short_arguments_are_kept_whole() {
         let args = serde_json::json!({ "root": "/p" });
         assert_eq!(preview(&args), r#"{"root":"/p"}"#);
+    }
+
+    /// A row with just enough shape for the identity + survivor rules.
+    fn row(run: u64, id: u64, outcome: &str, progress: usize) -> AuditEntry {
+        AuditEntry {
+            id,
+            run,
+            at: 0,
+            tool: "t".to_string(),
+            program: "p".to_string(),
+            safety: "read".to_string(),
+            outcome: outcome.to_string(),
+            arguments: String::new(),
+            duration_ms: None,
+            detail: None,
+            progress: (0..progress).map(|n| n.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn dedupe_keeps_the_finished_copy_over_the_interrupted_one() {
+        // Exactly what a log written by two instances looked like on disk: the same
+        // call, once completed with its progress and once as it was left open.
+        let mut rows = vec![
+            row(1787129283433, 1, "asked_allowed", 3),
+            row(1787129283433, 1, "interrupted", 0),
+            row(1787129903858, 1, "allowed", 0),
+        ];
+        dedupe(&mut rows);
+        assert_eq!(rows.len(), 2, "the duplicate identity collapses");
+        assert_eq!(rows[0].outcome, "asked_allowed", "a finished row beats a live one");
+        assert_eq!(rows[0].progress.len(), 3, "and keeps what it collected");
+        // `(run, id)` is the identity: the same id under a different run is a different call.
+        assert_eq!(rows[1].run, 1787129903858);
+    }
+
+    #[test]
+    fn dedupe_prefers_the_copy_that_saw_more() {
+        let mut rows = vec![row(9, 1, "allowed", 0), row(9, 1, "allowed", 4)];
+        dedupe(&mut rows);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].progress.len(), 4, "between two finished rows, the richer one");
+    }
+
+    #[test]
+    fn dedupe_preserves_order_and_leaves_a_clean_log_alone() {
+        let mut rows = vec![row(1, 1, "allowed", 0), row(1, 2, "denied", 0), row(2, 1, "allowed", 0)];
+        let before: Vec<(u64, u64)> = rows.iter().map(|r| (r.run, r.id)).collect();
+        dedupe(&mut rows);
+        let after: Vec<(u64, u64)> = rows.iter().map(|r| (r.run, r.id)).collect();
+        assert_eq!(before, after, "nothing to collapse, nothing reordered");
     }
 }

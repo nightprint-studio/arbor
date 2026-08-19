@@ -255,7 +255,9 @@ pub(crate) fn start_cargo_run(ctx: &BennuState, args: &RunArgs) -> Result<CargoR
 
     let root = PathBuf::from(&args.root);
     let plan = cargo_plan(&args.scope, args.include_ignored);
-    let mut cmd = Command::new("cargo");
+    // Resolved rather than taken from `PATH`: a windowed app doesn't have `~/.cargo/bin` on it.
+    let launcher = crate::cargo_cmd::cargo_launcher();
+    let mut cmd = Command::new(&launcher);
     cmd.current_dir(&root)
         .args(&plan.args)
         .stdout(Stdio::piped())
@@ -267,7 +269,10 @@ pub(crate) fn start_cargo_run(ctx: &BennuState, args: &RunArgs) -> Result<CargoR
     cmd.no_window();
 
     let mut child = cmd.spawn().map_err(|e| {
-        format!("Could not run cargo: {e}. Is it on PATH? (a windowed app may not have ~/.cargo/bin)")
+        // Name what was actually tried: "not on PATH" sends the reader to their shell config,
+        // which is the wrong place when the app never reads it.
+        format!("Could not run cargo ({}): {e}. Install Rust, or make cargo reachable from a \
+                 windowed app — it does not inherit your shell's PATH.", launcher.to_string_lossy())
     })?;
 
     // Prefixed, because the exit event is shared with the Maven runner and both stores listen to

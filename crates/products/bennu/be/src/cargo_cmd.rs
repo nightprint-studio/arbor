@@ -43,11 +43,34 @@ use serde::{Deserialize, Serialize};
 
 use crate::build::spawn_streamed;
 
-/// The launcher. `cargo` on `PATH` — a windowed app's `PATH` may not have `~/.cargo/bin` on it, but
-/// unlike a language server there is no alternative location worth guessing: a machine with Rust
-/// installed and `cargo` unreachable is a machine where nothing Rust-related works, and saying so is
-/// better than finding a second copy.
-const CARGO: &str = "cargo";
+/// Resolve a rustup-installed tool to a path, falling back to its bare name on `PATH`.
+///
+/// `PATH` alone is not enough, and the failure only shows up in the **shipped** build: an app
+/// started from Finder inherits `/usr/bin:/bin:…` and none of the login shell's additions, so
+/// `~/.cargo/bin` is missing and every cargo-backed tool reports "not on PATH" — while the same
+/// binary run from a terminal works, because it inherited the terminal's environment. A bug that
+/// exists only in the configuration users actually get is the worst place for one to hide.
+///
+/// Looking in `$CARGO_HOME/bin` is not guessing among alternatives: it is the one location rustup
+/// defines, and [`bennu_cargo::prelude::cargo_home`] already resolves it for the registry readers —
+/// whose own doc note says a windowed app inheriting almost no environment is the ordinary case.
+/// Falling back to the bare name keeps a PATH-only install (a distro package, a corporate image)
+/// working exactly as before.
+fn rustup_bin(name: &str) -> std::ffi::OsString {
+    let exe = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+    if let Some(home) = bennu_cargo::prelude::cargo_home() {
+        let candidate = home.join("bin").join(&exe);
+        if candidate.is_file() {
+            return candidate.into_os_string();
+        }
+    }
+    std::ffi::OsString::from(exe)
+}
+
+/// Where to launch cargo from. The one spelling every cargo spawn in this backend uses.
+pub fn cargo_launcher() -> std::ffi::OsString {
+    rustup_bin("cargo")
+}
 
 // ── bennu_cargo_workspace ──────────────────────────────────────────────────────
 
@@ -160,12 +183,12 @@ pub(crate) fn toolchain() -> Toolchain {
 
 fn probe_toolchain() -> Toolchain {
     let mut out = Toolchain::default();
-    if let Some(text) = capture(CARGO, &["--version"]) {
+    if let Some(text) = capture(cargo_launcher(), &["--version"]) {
         out.version = text.trim().to_string();
     }
     // `rustup component list --installed` prints one component per line. Absent rustup is a normal
     // state, not a failure — see `Toolchain::components`.
-    if let Some(text) = capture("rustup", &["component", "list", "--installed"]) {
+    if let Some(text) = capture(rustup_bin("rustup"), &["component", "list", "--installed"]) {
         out.components_known = true;
         out.components = text
             .lines()
@@ -176,7 +199,7 @@ fn probe_toolchain() -> Toolchain {
             .map(component_name)
             .collect();
     }
-    if let Some(text) = capture("rustup", &["show", "active-toolchain"]) {
+    if let Some(text) = capture(rustup_bin("rustup"), &["show", "active-toolchain"]) {
         // `stable-aarch64-apple-darwin (default)` — the name is the first token.
         out.toolchain = text.split_whitespace().next().unwrap_or("").to_string();
     }
@@ -200,7 +223,7 @@ fn component_name(line: &str) -> String {
 }
 
 /// Run `program args…` and return its stdout, or `None` when it could not be run.
-fn capture(program: &str, args: &[&str]) -> Option<String> {
+fn capture(program: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> Option<String> {
     let mut cmd = Command::new(program);
     cmd.args(args);
     cmd.no_window();
@@ -269,7 +292,7 @@ fn bennu_cargo_run(ctx: &BennuState, args: CargoRunArgs) -> Result<RunHandle, St
     };
 
     let argv = argv(&args.invocation);
-    let mut cmd = Command::new(CARGO);
+    let mut cmd = Command::new(cargo_launcher());
     cmd.current_dir(&cwd);
     for a in &argv {
         cmd.arg(a);
@@ -303,7 +326,13 @@ fn bennu_cargo_run(ctx: &BennuState, args: CargoRunArgs) -> Result<RunHandle, St
         ctx.event_sink(),
         |_| {},
     )
-    .map_err(|e| format!("spawn cargo ({CARGO}): {e}{}", install_hint(&args.invocation)))
+    .map_err(|e| {
+        format!(
+            "spawn cargo ({}): {e}{}",
+            cargo_launcher().to_string_lossy(),
+            install_hint(&args.invocation)
+        )
+    })
 }
 
 /// The console tab's title: the command, plus what it was aimed at.
