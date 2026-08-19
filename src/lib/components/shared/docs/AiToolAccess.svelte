@@ -322,5 +322,8 @@
     has finished reading the project.</li>
   <li><strong>Tyto</strong> — list capturable screens and windows, capture one (by window
     title, returned as an image), read the on-screen accessibility layout, check whether a
-    recording is running.</li>
+    recording is running, record the screen for a fixed number of seconds as a frame
+    sequence, and read any one of those frames back — by index or by the moment it was on
+    screen. Recording writes into your capture library and needs your approval; it refuses
+    rather than interfering when a recording is already running.</li>
 </ul>

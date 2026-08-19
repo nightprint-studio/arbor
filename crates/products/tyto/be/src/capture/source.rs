@@ -11,6 +11,8 @@ use cpal::traits::{DeviceTrait, HostTrait};
 
 use crate::sources::{AudioInput, CaptureSources, MonitorSource, WindowSource};
 
+use super::access;
+
 /// Monitors as wire structs (`mon-<id>` ids the FE hands back on select).
 pub fn list_monitors() -> Vec<MonitorSource> {
     #[cfg(target_os = "windows")]
@@ -182,7 +184,7 @@ fn win_monitor_geometry(monitor_id: &str) -> (i32, i32, f64) {
 
 #[cfg(not(target_os = "windows"))]
 fn scap_monitors() -> Vec<MonitorSource> {
-    scap::get_all_targets()
+    scap_targets()
         .into_iter()
         .filter_map(|t| match t {
             scap::Target::Display(d) => Some(MonitorSource {
@@ -199,7 +201,7 @@ fn scap_monitors() -> Vec<MonitorSource> {
 
 #[cfg(not(target_os = "windows"))]
 fn scap_windows() -> Vec<WindowSource> {
-    scap::get_all_targets()
+    scap_targets()
         .into_iter()
         .filter_map(|t| match t {
             scap::Target::Window(w) if !w.title.trim().is_empty() && !is_own_window(&w.title) => {
@@ -210,9 +212,28 @@ fn scap_windows() -> Vec<WindowSource> {
         .collect()
 }
 
+/// scap's targets for the enumeration paths, which have no `Result` to put a failure
+/// in. Empty on refusal — [`list_capture_sources`] carries the reason instead, so an
+/// empty picker is never left unexplained.
+#[cfg(not(target_os = "windows"))]
+fn scap_targets() -> Vec<scap::Target> {
+    access::targets().unwrap_or_default()
+}
+
 /// Monitors + windows in one round-trip (the picker queries both together).
+///
+/// When capture isn't available the lists come back empty **with a reason**: an empty
+/// picker and a refused permission look identical to the user otherwise, and the
+/// frontend would fall back to showing placeholder devices that don't exist.
 pub fn list_capture_sources() -> CaptureSources {
-    CaptureSources { monitors: list_monitors(), windows: list_windows() }
+    match access::ensure_permission() {
+        Ok(()) => CaptureSources {
+            monitors: list_monitors(),
+            windows: list_windows(),
+            unavailable: None,
+        },
+        Err(reason) => CaptureSources { monitors: Vec::new(), windows: Vec::new(), unavailable: Some(reason) },
+    }
 }
 
 /// Microphone inputs via cpal. The `id` is the cpal device name (what the record

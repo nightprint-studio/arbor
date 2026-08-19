@@ -5,14 +5,28 @@
    * switch itself lives in the CapturePanel section header; the region option
    * opens the region selector via the recorder store.
    */
-  import { Monitor, AppWindow, Crop, Check, RefreshCw, X } from 'lucide-svelte';
+  import { Monitor, AppWindow, Crop, Check, RefreshCw, X, Settings } from 'lucide-svelte';
   import { convertFileSrc } from '@tauri-apps/api/core';
+  import Alert from '$lib/components/shared/ui/Alert.svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import Monogram from '$lib/components/shared/ui/Monogram.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import Button from '$lib/components/shared/ui/Button.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { openScreenRecordingSettings } from '$lib/ipc/tyto/main-window';
   import { recorderStore } from '$lib/stores/tyto/recorder.svelte';
+  import { uiStore } from '$lib/stores/ui.svelte';
+
+  /** Send the user to the OS pane where the permission lives. After a refusal this is
+   *  the only way out — the OS never asks a second time — so it earns a button rather
+   *  than a sentence telling them to go find it. */
+  async function openPrivacySettings() {
+    const opened = await openScreenRecordingSettings().catch(() => false);
+    if (!opened) {
+      uiStore.showToast('Open your system privacy settings and allow Arbor to record the screen.', 'info');
+    }
+  }
 
   /** Stable per-app colour (hashed hue) so each window reads distinctly. */
   function appColor(app: string): string {
@@ -58,7 +72,24 @@
 </script>
 
 <div class="source">
-  {#if recorderStore.targetKind === 'monitor'}
+  {#if recorderStore.captureUnavailable}
+    <!-- A standing condition, not an event: it belongs where the (now empty) list of
+         sources would have been, not in a toast that scrolls away. -->
+    <Alert variant="warning" title="Screen capture isn't available">
+      <p class="perm-why">{recorderStore.captureUnavailable}</p>
+      {#if recorderStore.captureDiagnosis}
+        <!-- The shell's reading of the same permission: which of the several ways a
+             granted permission still fails to reach the recorder this one is. -->
+        <p class="perm-hint">{recorderStore.captureDiagnosis}</p>
+      {/if}
+      {#snippet actions()}
+        <Button variant="secondary" size="sm" onclick={openPrivacySettings}>
+          {#snippet iconStart()}<Settings size={13} />{/snippet}
+          Open Settings
+        </Button>
+      {/snippet}
+    </Alert>
+  {:else if recorderStore.targetKind === 'monitor'}
     <div class="grid">
       {#each recorderStore.monitors as mon (mon.id)}
         <button
@@ -161,6 +192,15 @@
 </div>
 
 <style>
+  .perm-why { margin: 0; }
+  .perm-hint {
+    margin: 8px 0 0;
+    padding-top: 8px;
+    border-top: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+    font-size: var(--font-size-2xs);
+    opacity: 0.85;
+  }
+
   .source { display: flex; flex-direction: column; gap: 12px; }
 
   /* ── Monitor tiles ── */

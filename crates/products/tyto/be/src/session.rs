@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tyto_core::config::load as load_cfg;
 use tyto_core::prelude::TytoState;
 
-use crate::capture::{self, target::CropRect, session::StartConfig};
+use crate::capture::{self, target::CropRect, session::{RecordingOutput, StartConfig}};
 use crate::region::PixelRect;
 
 /// Parameters for [`start_recording`] and [`take_screenshot`].
@@ -34,6 +34,15 @@ pub struct StartRecordingArgs {
     /// `#[serde(default)]` so `start_recording` (which never sends this key) deserializes.
     #[serde(default)]
     pub mask_points: Option<Vec<[i32; 2]>>,
+    /// What the recording should produce: `video` (H.264 mp4) or `frames` (a
+    /// deduplicated, timestamped image sequence). Omitted = the persisted default.
+    ///
+    /// Only the CHOICE travels on the wire. How a sequence is written — frame format,
+    /// sampling ceiling, downscale — comes from the persisted config, exactly like the
+    /// filename template and the screenshot format do: those are settings the user set
+    /// once, not per-capture arguments.
+    #[serde(default)]
+    pub output: Option<String>,
 }
 
 /// The current session snapshot the frontend polls.
@@ -43,14 +52,25 @@ pub struct SessionState {
     pub recording: bool,
     pub paused: bool,
     pub elapsed_ms: u64,
+    /// What the running session produces: `video` | `frames`.
+    pub output: String,
 }
 
-/// kbps for a quality preset (mirrors the FE's QUALITY_BITRATE).
-fn bitrate_for(quality: &str) -> u32 {
-    match quality {
-        "high" => 24_000,
-        "compact" => 6_000,
-        _ => 12_000, // balanced
+/// Resolve the sink from the requested output (or the persisted default) plus the
+/// persisted frame-sequence settings. Anything unrecognised falls back to video —
+/// a typo must not silently change what a capture produces.
+fn output_for(requested: Option<&str>, cfg: &tyto_core::prelude::TytoConfig) -> RecordingOutput {
+    let want = requested.unwrap_or(cfg.record_output.as_str());
+    if want.eq_ignore_ascii_case("frames") {
+        RecordingOutput::Frames {
+            format: cfg.frames.format.clone(),
+            sample_fps: cfg.frames.sample_fps.clamp(1, 60),
+            max_width: cfg.frames.max_width,
+        }
+    } else {
+        // Already derived from the preset by `TytoConfig::normalize` — the table
+        // lives in `tyto-core`, and this reads what it produced.
+        RecordingOutput::Video { bitrate_kbps: cfg.encoding.bitrate_kbps }
     }
 }
 
@@ -59,9 +79,15 @@ fn crop_from(region: Option<PixelRect>) -> Option<CropRect> {
 }
 
 fn build_start_config(args: &StartRecordingArgs) -> StartConfig {
-    let cfg = load_cfg();
+    let mut cfg = load_cfg();
     let fps = args.fps.unwrap_or(cfg.capture.fps).clamp(1, 240);
-    let quality = args.quality.clone().unwrap_or(cfg.encoding.quality);
+    // A per-call quality overrides the persisted one; re-normalizing makes the
+    // bitrate follow it, through the same path a saved config takes.
+    if let Some(q) = args.quality.clone() {
+        cfg.encoding.quality = q;
+        cfg.normalize();
+    }
+    let output = output_for(args.output.as_deref(), &cfg);
     let mic_id = args.mic_id.clone().filter(|s| !s.trim().is_empty());
     let system_audio = args.system_audio.unwrap_or(cfg.capture.system_audio);
     StartConfig {
@@ -69,12 +95,12 @@ fn build_start_config(args: &StartRecordingArgs) -> StartConfig {
         source_id: args.source_id.clone(),
         region: crop_from(args.region),
         fps,
-        bitrate_kbps: bitrate_for(&quality),
         mic_id,
         system_audio,
         out_dir: capture::output_dir(),
         filename_template: cfg.output.filename_template.clone(),
         target_label: args.source_id.clone().unwrap_or_else(|| args.target_kind.clone()),
+        output,
     }
 }
 
@@ -137,5 +163,6 @@ fn session_state(_state: &TytoState) -> Result<SessionState, String> {
         recording: s.recording,
         paused: s.paused,
         elapsed_ms: s.elapsed_ms,
+        output: s.output.to_string(),
     })
 }

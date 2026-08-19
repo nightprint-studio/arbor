@@ -10,7 +10,9 @@ use std::time::Duration;
 
 use scap::capturer::{Capturer, Options, Resolution};
 use scap::frame::{Frame, FrameType};
-use scap::{get_all_targets, Target};
+use scap::Target;
+
+use super::access;
 
 /// A rectangle in physical pixels, display-local, for a region crop.
 #[derive(Clone, Copy, Debug)]
@@ -83,10 +85,9 @@ impl CaptureTarget {
 /// `monitor`/`region` map to a Display (by `mon-<id>`, else the first display); `window`
 /// maps to a Window by `win-<id>`.
 pub fn resolve_scap_target(kind: &str, source_id: Option<&str>) -> Result<Target, String> {
-    if !scap::is_supported() {
-        return Err("screen capture isn't supported on this system".to_string());
-    }
-    let targets = get_all_targets();
+    // Support, permission and scap's habit of panicking on a refusal are all handled
+    // once, in `access` — never here.
+    let targets = access::targets()?;
     match kind {
         "monitor" | "region" => {
             let want = source_id.and_then(|s| s.strip_prefix("mon-")).and_then(|s| s.parse::<u32>().ok());
@@ -116,19 +117,21 @@ pub fn resolve_scap_target(kind: &str, source_id: Option<&str>) -> Result<Target
 
 /// One-shot scap capture: build → first frame → stop. Returns raw BGRA + dimensions.
 fn grab_once_bgra(target: Target) -> Result<(Vec<u8>, u32, u32), String> {
-    if !scap::has_permission() && !scap::request_permission() {
-        return Err("screen-capture permission was denied".to_string());
-    }
-    let mut cap = Capturer::build(Options {
-        fps: 60,
-        show_cursor: true,
-        show_highlight: false,
-        target: Some(target),
-        crop_area: None,
-        output_type: FrameType::BGRAFrame,
-        output_resolution: Resolution::Captured,
-        excluded_targets: None,
-    })
+    access::ensure_permission()?;
+    // Building the capturer reaches the same shareable-content call that panics on a
+    // refusal, so it is guarded like the enumeration is.
+    let mut cap = access::guard("starting the capture", || {
+        Capturer::build(Options {
+            fps: 60,
+            show_cursor: true,
+            show_highlight: false,
+            target: Some(target),
+            crop_area: None,
+            output_type: FrameType::BGRAFrame,
+            output_resolution: Resolution::Captured,
+            excluded_targets: None,
+        })
+    })?
     .map_err(|e| format!("couldn't start capture: {e:?}"))?;
     cap.start_capture();
     let frame = cap.get_next_frame();

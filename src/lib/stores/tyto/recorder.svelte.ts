@@ -18,17 +18,18 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   listenTytoBackend, listenRecordingProgress, listenRecordingError,
   getTytoConfig, setTytoConfig, type TytoRecorderConfig,
-  listCaptureSources, listAudioInputs, listCaptures,
+  listCaptureSources, listAudioInputs, listCaptures, readFrameSequence, getOutputDir,
+  TYTO_CAPTURE_PERMISSION,
   startRecording as beStart, stopRecording as beStop, takeScreenshot as beScreenshot,
   removeCapture as beRemove, renameCapture as beRename, clearCaptures as beClear,
   revealCapture as beReveal, openCapture as beOpen, revealOutput as beRevealOutput,
   selectRegion as beSelectRegion, freezeScreen, previewSource,
   enumerateUiElements, enumerateWindowRects,
   type CaptureWire, type StartRecordingArgs, type PixelRectWire, type WindowPickRectWire,
-  type FrozenFrame,
+  type FrozenFrame, type FrameSequenceWire,
 } from '$lib/ipc/tyto/recorder';
 import { uiStore } from '$lib/stores/ui.svelte';
-import { setTytoSelection, resetTytoBounds } from '$lib/ipc/tyto/main-window';
+import { setTytoSelection, resetTytoBounds, screenRecordingStatus } from '$lib/ipc/tyto/main-window';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { openRecordingHud, closeRecordingHud, TYTO_RECORDING_STOPPED } from '$lib/ipc/tyto/hud-window';
 
@@ -54,6 +55,12 @@ export interface RegionSelection {
 }
 
 export type CaptureMode = 'record' | 'screenshot';
+/** What a recording produces. Not a capture MODE: the flow, the countdown, the HUD
+ *  and the source picking are identical — only the sink at the end differs. */
+export type RecordOutput = 'video' | 'frames';
+/** What a saved capture IS on disk — a superset of {@link CaptureMode}, because a
+ *  recording can have landed as a video or as an image sequence. */
+export type CaptureKind = 'record' | 'screenshot' | 'frames';
 export type TargetKind = 'monitor' | 'window' | 'region';
 /** The pick method active inside the in-window Snip-style selector:
  *  `rect`/`free`/`smart` resolve to a region; `window`/`display` pick a whole target. */
@@ -61,6 +68,8 @@ export type SelectMethod = 'rect' | 'free' | 'smart' | 'window' | 'display';
 export type Quality = 'high' | 'balanced' | 'compact';
 export type Fps = 30 | 60;
 export type ScreenshotFormat = 'png' | 'jpg' | 'webp';
+/** Image format of each frame in a sequence — the same encoders as screenshots. */
+export type FrameFormat = 'png' | 'jpg' | 'webp';
 
 export interface MonitorTarget {
   id: string;
@@ -85,17 +94,85 @@ export interface AudioInput {
 export interface Capture {
   id: string;
   name: string;
-  kind: CaptureMode;
+  kind: CaptureKind;
   target: string;
   durationMs: number | null; // null for screenshots
   sizeBytes: number;
   createdAt: number;
   /** Hue (deg) for the synthetic thumbnail gradient — mock stand-in for a frame. */
   hue: number;
-  /** Absolute file path on disk (empty in the mock). Used to show the real image /
-   *  play the real video via `convertFileSrc`. */
+  /** Absolute path on disk (empty in the mock): the file, or the `.frames`
+   *  directory for a sequence. Used to show the real media via `convertFileSrc`. */
   path: string;
+  /** Thumbnail path — only a frame sequence has one (a video is its own poster
+   *  frame, a screenshot its own thumbnail). Empty otherwise. */
+  poster: string;
 }
+
+/** A frame sequence loaded for playback. Times are ms from the start; `frames[i]`
+ *  is an asset URL ready for an `<img>`. */
+export interface FrameSequence {
+  width: number;
+  height: number;
+  durationMs: number;
+  sampleFps: number;
+  /** `convertFileSrc` URLs, in playback order. */
+  frames: string[];
+  /** Presentation time of each frame, ms from the start (`times[0] === 0`). */
+  times: number[];
+}
+
+// ── Shared control vocabularies ──────────────────────────────────────────────
+//
+// The same choices are offered in the capture panel and in the settings dialog. They
+// live here, once, because two hand-written copies of a list of options drift — one
+// gains "WebP" and the other doesn't, and the two surfaces quietly stop agreeing on
+// what the product can do.
+
+export const TYTO_FPS_OPTIONS = [
+  { value: '30', label: '30' },
+  { value: '60', label: '60' },
+];
+
+export const TYTO_QUALITY_OPTIONS = [
+  { value: 'high',     label: 'High' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'compact',  label: 'Compact' },
+];
+
+export const TYTO_COUNTDOWN_OPTIONS = [
+  { value: '0',  label: 'Off' },
+  { value: '3',  label: '3s' },
+  { value: '5',  label: '5s' },
+  { value: '10', label: '10s' },
+];
+
+/** Encoders shared by screenshots and frame sequences — the same three either way. */
+export const TYTO_IMAGE_FORMAT_OPTIONS = [
+  { value: 'png',  label: 'PNG' },
+  { value: 'jpg',  label: 'JPG' },
+  { value: 'webp', label: 'WebP' },
+];
+
+export const TYTO_MODE_OPTIONS = [
+  { value: 'record',     label: 'Record' },
+  { value: 'screenshot', label: 'Screenshot' },
+];
+
+export const TYTO_OUTPUT_OPTIONS = [
+  { value: 'video',  label: 'Video' },
+  { value: 'frames', label: 'Frames' },
+];
+
+/** `0` is "as captured" — spelled out, because a bare 0 in a width field reads as a
+ *  mistake rather than as a choice. */
+export const TYTO_FRAME_WIDTH_OPTIONS = [
+  { value: '0',    label: 'As captured' },
+  { value: '1920', label: '1920 px' },
+  { value: '1280', label: '1280 px' },
+  { value: '960',  label: '960 px' },
+  { value: '640',  label: '640 px' },
+];
 
 // ── Mock fixtures ────────────────────────────────────────────────────────────
 
@@ -115,8 +192,6 @@ const MOCK_MICS: AudioInput[] = [
   { id: 'mic-1', name: 'Shure MV7 (USB)',       default: true },
   { id: 'mic-2', name: 'Microphone (Realtek)',  default: false },
 ];
-
-const QUALITY_BITRATE: Record<Quality, number> = { high: 24000, balanced: 12000, compact: 6000 };
 
 // ── Store ────────────────────────────────────────────────────────────────────
 
@@ -149,6 +224,17 @@ function createRecorderStore() {
 
   let fps = $state<Fps>(60);
   let quality = $state<Quality>('balanced');
+  // Derived from `quality` by tyto-core, never here: the frontend displays the
+  // number the encoder will actually use rather than keeping a second copy of the
+  // preset table that could drift from it. 0 until the backend has answered.
+  let bitrateKbps = $state(0);
+  // What a recording produces. `frames` swaps the mp4 encoder for a deduplicated,
+  // timestamped image sequence — same capture, same flow, different sink.
+  let recordOutput = $state<RecordOutput>('video');
+  let frameFormat = $state<FrameFormat>('png');
+  let frameSampleFps = $state(12);
+  // 0 = keep the captured resolution.
+  let frameMaxWidth = $state(0);
   // Seconds of 3-2-1 countdown before a video recording starts (0 = off).
   let countdownSecs = $state(3);
 
@@ -161,7 +247,13 @@ function createRecorderStore() {
   let countdownValue = $state(0);
   let cancelCountdownFn: (() => void) | null = null;
 
-  let outputDir = $state('C:\\Users\\user\\Videos\\Tyto');
+  // Empty until the backend resolves it: the default lives in `tyto-core` and is
+  // platform-dependent, so any literal here is a wrong answer on some machine.
+  let outputDir = $state('');
+  // Whether that path is the user's choice or the resolved default. Load-bearing on
+  // save: writing the resolved default back would turn "wherever this OS keeps
+  // videos" into a fixed path, and moving the folder would stop following.
+  let outputDirExplicit = false;
   // Screenshot image format (still captures only; recordings use the container).
   let screenshotFormat = $state<ScreenshotFormat>('png');
   // Copy a screenshot to the OS clipboard right after it's saved (backend, via arboard).
@@ -213,6 +305,14 @@ function createRecorderStore() {
   let beSession = false;
   // Last backend error surfaced to the UI (empty = none).
   let lastError = $state<string | null>(null);
+  // Why capture can't run at all (a refused OS screen-recording permission), as the
+  // backend phrased it. Distinct from `lastError`: this is a standing condition the
+  // picker must explain, not an event that just happened.
+  let captureUnavailable = $state<string | null>(null);
+  // The shell's reading of the same permission, fetched only once capture is
+  // refused. It names WHICH of the three failures this is — the recorder process
+  // alone can only report that it was told no.
+  let captureDiagnosis = $state<string | null>(null);
 
   function targetLabel(): string {
     if (targetKind === 'monitor') return monitors.find(m => m.id === selectedMonitorId)?.name.split(' · ')[0] ?? 'Monitor';
@@ -227,7 +327,7 @@ function createRecorderStore() {
     return `tyto_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
   }
 
-  function pushCapture(kind: CaptureMode, durationMs: number | null) {
+  function pushCapture(kind: CaptureKind, durationMs: number | null) {
     counter += 1;
     const sizeBytes = kind === 'screenshot'
       ? 1_500_000 + Math.round((counter * 811_237) % 3_000_000)
@@ -243,6 +343,7 @@ function createRecorderStore() {
         createdAt: Date.now(),
         hue: (counter * 47 + 20) % 360,
         path: '',
+        poster: '',
       },
       ...captures,
     ];
@@ -257,6 +358,9 @@ function createRecorderStore() {
    *  drawn rectangle; a window needs a still-present selection (guards the "capture
    *  with nothing/stale selected" case); a monitor always has one. */
   function isTargetReady(): boolean {
+    // Nothing is capturable when the OS said no — disable the action rather than let
+    // it fail, and let `notReadyReason` say why.
+    if (captureUnavailable) return false;
     if (targetKind === 'region') return region !== null;
     if (targetKind === 'window') return windows.some((w) => w.id === selectedWindowId);
     return true;
@@ -277,7 +381,15 @@ function createRecorderStore() {
     if (cfg.encoding.quality === 'high' || cfg.encoding.quality === 'balanced' || cfg.encoding.quality === 'compact') {
       quality = cfg.encoding.quality;
     }
-    if (cfg.output.dir) outputDir = cfg.output.dir;
+    if (Number.isFinite(cfg.encoding.bitrate_kbps)) bitrateKbps = cfg.encoding.bitrate_kbps;
+    if (cfg.record_output === 'video' || cfg.record_output === 'frames') recordOutput = cfg.record_output;
+    if (cfg.frames) {
+      const ff = cfg.frames.format;
+      if (ff === 'png' || ff === 'jpg' || ff === 'webp') frameFormat = ff;
+      if (Number.isFinite(cfg.frames.sample_fps)) frameSampleFps = Math.min(60, Math.max(1, Math.trunc(cfg.frames.sample_fps)));
+      if (Number.isFinite(cfg.frames.max_width)) frameMaxWidth = Math.max(0, Math.trunc(cfg.frames.max_width));
+    }
+    if (cfg.output.dir) { outputDir = cfg.output.dir; outputDirExplicit = true; }
     const fmt = cfg.output.screenshot_format;
     if (fmt === 'png' || fmt === 'jpg' || fmt === 'webp') screenshotFormat = fmt;
     if (typeof cfg.output.copy_screenshot_to_clipboard === 'boolean') copyToClipboard = cfg.output.copy_screenshot_to_clipboard;
@@ -304,20 +416,27 @@ function createRecorderStore() {
     const cfg: TytoRecorderConfig = {
       default_mode:   mode,
       default_target: targetKind,
+      record_output:  recordOutput,
       capture:  { fps, system_audio: systemAudio, mic_id: micId ?? '', countdown_secs: countdownSecs },
-      encoding: { quality, bitrate_kbps: QUALITY_BITRATE[quality], codec: 'mp4' },
-      output:   { dir: outputDir, filename_template: 'tyto_%Y%m%d_%H%M%S', screenshot_format: screenshotFormat, copy_screenshot_to_clipboard: copyToClipboard },
+      encoding: { quality, bitrate_kbps: bitrateKbps },
+      output:   { dir: outputDirExplicit ? outputDir : '', filename_template: 'tyto_%Y%m%d_%H%M%S', screenshot_format: screenshotFormat, copy_screenshot_to_clipboard: copyToClipboard },
+      frames:   { format: frameFormat, sample_fps: frameSampleFps, max_width: frameMaxWidth },
     };
-    void setTytoConfig(cfg).catch(() => {});
+    // Adopt ONLY the derived values from the round trip — re-applying the whole
+    // config would clobber anything the user changed while it was in flight.
+    void setTytoConfig(cfg)
+      .then((normalized) => { bitrateKbps = normalized.encoding.bitrate_kbps; })
+      .catch(() => {});
   }
 
   function mapCapture(c: CaptureWire): Capture {
     let h = 0;
     for (let i = 0; i < c.id.length; i++) h = (h * 31 + c.id.charCodeAt(i)) % 360;
     return {
-      id: c.id, name: c.name, kind: c.kind as CaptureMode, target: c.target,
+      id: c.id, name: c.name, kind: c.kind as CaptureKind, target: c.target,
       durationMs: c.duration_ms, sizeBytes: c.size_bytes, createdAt: c.created_at, hue: h,
       path: c.path,
+      poster: c.poster ?? '',
     };
   }
 
@@ -326,15 +445,29 @@ function createRecorderStore() {
    *  list only replaces the mock when the backend returns something. */
   async function refreshFromBackend() {
     try { const cfg = await getTytoConfig(); backendUp = true; hydrateFromConfig(cfg); } catch { return; }
+    // An empty `output.dir` means "the OS default" — only the backend knows which.
+    if (!outputDir) { try { outputDir = await getOutputDir(); } catch { /* leave it blank */ } }
     try {
       const s = await listCaptureSources();
-      if (s.monitors.length) {
-        monitors = s.monitors.map(m => ({ id: m.id, name: m.name, resolution: m.resolution, scale: m.scale, primary: m.primary }));
-        if (!monitors.some(m => m.id === selectedMonitorId)) selectedMonitorId = monitors[0].id;
-      }
-      if (s.windows.length) {
-        windows = s.windows.map(w => ({ id: w.id, title: w.title, app: w.app }));
-        if (!windows.some(w => w.id === selectedWindowId)) selectedWindowId = windows[0].id;
+      captureUnavailable = s.unavailable ?? null;
+      captureDiagnosis = null;
+      if (captureUnavailable) {
+        // Only worth a round trip when something is actually wrong.
+        void screenRecordingStatus().then((st) => { captureDiagnosis = st.hint; }).catch(() => {});
+        // Deliberately NOT the mock fixtures: offering a "Dell U2723QE" that cannot be
+        // captured turns a permission problem into a mystery. Empty lists plus the
+        // reason is the honest state.
+        monitors = [];
+        windows = [];
+      } else {
+        if (s.monitors.length) {
+          monitors = s.monitors.map(m => ({ id: m.id, name: m.name, resolution: m.resolution, scale: m.scale, primary: m.primary }));
+          if (!monitors.some(m => m.id === selectedMonitorId)) selectedMonitorId = monitors[0].id;
+        }
+        if (s.windows.length) {
+          windows = s.windows.map(w => ({ id: w.id, title: w.title, app: w.app }));
+          if (!windows.some(w => w.id === selectedWindowId)) selectedWindowId = windows[0].id;
+        }
       }
     } catch { /* keep mock sources */ }
     try {
@@ -366,6 +499,7 @@ function createRecorderStore() {
       system_audio: systemAudio,
       mic_id: micId,
       region: region ? { ...region.physical } : null,
+      output: recordOutput,
     };
   }
 
@@ -485,8 +619,18 @@ function createRecorderStore() {
     get micId() { return micId; },
     get fps() { return fps; },
     get quality() { return quality; },
+    /** What a recording produces: an mp4, or a `.frames` image sequence. */
+    get recordOutput() { return recordOutput; },
+    /** Image format of each frame in a sequence. */
+    get frameFormat() { return frameFormat; },
+    /** Sampling ceiling for a frame sequence — the real rate is lower on a still screen. */
+    get frameSampleFps() { return frameSampleFps; },
+    /** Frame downscale width (0 = captured resolution). */
+    get frameMaxWidth() { return frameMaxWidth; },
     get countdownSecs() { return countdownSecs; },
-    get bitrateKbps() { return QUALITY_BITRATE[quality]; },
+    /** Bitrate of the active quality preset, as tyto-core derived it. 0 until the
+     *  backend has answered — the UI shows the codec alone rather than a made-up number. */
+    get bitrateKbps() { return bitrateKbps; },
     get outputDir() { return outputDir; },
     /** Screenshot image format (`png` | `jpg` | `webp`). */
     get screenshotFormat() { return screenshotFormat; },
@@ -502,6 +646,16 @@ function createRecorderStore() {
 
     /** True when the active target is fully specified (region needs a rectangle). */
     get targetReady() { return isTargetReady(); },
+    /** Why capture is impossible right now, or null. A standing condition (a refused
+     *  screen-recording permission), not a transient error. */
+    get captureUnavailable() { return captureUnavailable; },
+    /** The shell's diagnosis of that refusal — which of the several ways a granted
+     *  permission still fails to reach the recorder this one is. Null when there is
+     *  nothing to add beyond [`captureUnavailable`]. */
+    get captureDiagnosis() { return captureDiagnosis; },
+    /** Why the primary action is disabled — the permission problem when there is one,
+     *  otherwise the missing region. One source for every tooltip that explains it. */
+    get notReadyReason() { return captureUnavailable ?? 'Pick a capture region first'; },
 
     // ── In-window Snip-style selector (reads) ──
     /** True while the Tyto window is acting as the in-window fullscreen selector. */
@@ -689,8 +843,12 @@ function createRecorderStore() {
     setMic(id: string | null) { micId = id; persistConfig(); },
     setFps(v: Fps) { fps = v; persistConfig(); },
     setQuality(q: Quality) { quality = q; persistConfig(); },
+    setRecordOutput(v: RecordOutput) { recordOutput = v; persistConfig(); },
+    setFrameFormat(v: FrameFormat) { frameFormat = v; persistConfig(); },
+    setFrameSampleFps(v: number) { frameSampleFps = Math.min(60, Math.max(1, Math.trunc(v))); persistConfig(); },
+    setFrameMaxWidth(v: number) { frameMaxWidth = Math.max(0, Math.trunc(v)); persistConfig(); },
     setCountdownSecs(v: number) { countdownSecs = Math.max(0, Math.trunc(v)); persistConfig(); },
-    setOutputDir(dir: string) { outputDir = dir; persistConfig(); },
+    setOutputDir(dir: string) { outputDir = dir; outputDirExplicit = true; persistConfig(); },
     setScreenshotFormat(f: ScreenshotFormat) { screenshotFormat = f; persistConfig(); },
     setCopyToClipboard(v: boolean) { copyToClipboard = v; persistConfig(); },
     /** Abort a running in-window countdown (Esc) — the waiting starter restores the panel. */
@@ -823,6 +981,27 @@ function createRecorderStore() {
       }
     },
 
+    /** Load a saved frame sequence for playback: geometry, per-frame presentation
+     *  times and the frames themselves as asset URLs. Null when the backend is down
+     *  or the capture isn't a sequence. */
+    async loadFrameSequence(id: string): Promise<FrameSequence | null> {
+      if (!backendUp) return null;
+      try {
+        const seq: FrameSequenceWire = await readFrameSequence(id);
+        return {
+          width: seq.width,
+          height: seq.height,
+          durationMs: seq.duration_ms,
+          sampleFps: seq.sample_fps,
+          frames: seq.frames.map((p) => convertFileSrc(p)),
+          times: seq.times,
+        };
+      } catch (e) {
+        lastError = String(e);
+        return null;
+      }
+    },
+
     /** Reveal a capture in the OS file manager (backend reverse-channel). */
     async revealCapture(id: string) {
       try { await beReveal(id); } catch (e) { lastError = String(e); }
@@ -866,6 +1045,12 @@ function createRecorderStore() {
         lastError = e.message;
         uiStore.showToast(e.message, 'warning');
       });
+      // The OS answered the screen-recording permission. The shell asks when Tyto
+      // opens and the dialog outlives our first source fetch, so a grant has to be
+      // able to replace the "not available" panel without reopening the window.
+      // Re-fetch whatever the answer was: the backend owns the wording, including the
+      // way out, and a second copy of it here is how two messages start to disagree.
+      void listen(TYTO_CAPTURE_PERMISSION, () => { void refreshFromBackend(); });
       // The HUD (or shell) stopped the recording — sync our UI + reload the library.
       void listen(TYTO_RECORDING_STOPPED, () => {
         if (!recording && !beSession) return;

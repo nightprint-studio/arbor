@@ -134,6 +134,9 @@
     if (mod && e.shiftKey && e.code === 'Digit2') { recorderStore.setTargetKind('window');  e.preventDefault(); return; }
     if (mod && e.shiftKey && e.code === 'Digit3') { recorderStore.setTargetKind('region');   e.preventDefault(); return; }
     if (mod && e.shiftKey && key === 'a')      { if (recorderStore.mode === 'record') recorderStore.toggleSystemAudio(); e.preventDefault(); return; }
+    // Video ↔ frame sequence. The two produce very different files from the same
+    // gesture, so the switch deserves to be reachable without leaving the keyboard.
+    if (mod && e.shiftKey && key === 'f')      { recorderStore.setRecordOutput(recorderStore.recordOutput === 'frames' ? 'video' : 'frames'); e.preventDefault(); return; }
     if (mod && !e.shiftKey && key === '1')     { recorderStore.setMode('record'); e.preventDefault(); return; }
     if (mod && !e.shiftKey && key === '2')     { recorderStore.setMode('screenshot'); e.preventDefault(); return; }
     if (mod && key === 'enter')                { primaryCapture(); e.preventDefault(); return; }

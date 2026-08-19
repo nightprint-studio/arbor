@@ -59,6 +59,8 @@ pub mod launcher;
 pub mod merula;
 pub mod picus;
 pub mod placement;
+/// The OS screen-recording permission — asked by the bundle, not by a helper.
+pub mod screen_capture;
 pub mod tyto;
 pub mod workspace;
 
@@ -89,17 +91,70 @@ pub const WEBVIEW_BROWSER_ARGS: &str =
 // it. The frontend hides its faux controls and reserves a left gutter on macOS.
 
 /// Horizontal inset (logical px) of the macOS traffic-light cluster from the
-/// window's left edge.
+/// window's left edge — the close button's `origin.x`, with the other two spaced
+/// after it at whatever gap AppKit already had.
+///
+/// 7 is macOS's own: the point of using the real traffic lights rather than drawing
+/// three circles is that they land where a Mac user's hand already goes, and any
+/// value chosen for how it looks against *our* chrome moves them somewhere no other
+/// window on the machine puts them. This was 19 — "breathing room from the edge" —
+/// which read as visibly indented next to every native window beside it.
+///
+/// The frontend's `--mac-traffic-gutter` (80px) still clears the cluster with room
+/// to spare: three buttons at 20pt spacing end around x=59.
 #[cfg(target_os = "macos")]
-const MAC_TRAFFIC_LIGHT_X: f64 = 19.0;
-/// Vertical inset (logical px). tao grows the native title-bar container to
-/// `button_height + y` and pins it to the window top, so a LARGER `y` pushes the
-/// lights DOWN. At the small default the cluster centers in a ~28px band and
-/// reads high against our 42px bar (`--titlebar-h`); ~22 drops it to the bar's
-/// centre. The position is fixed at build time, so a compact bar sits slightly
-/// low — an accepted minor offset.
+const MAC_TRAFFIC_LIGHT_X: f64 = 7.0;
+
+/// Frame height (logical px) of a macOS standard window button — `close.frame()`,
+/// which is what tao reads and what [`mac_traffic_light_y`] does arithmetic on.
+///
+/// 12 on Big Sur and later: the button's frame is the circle, not a padded box around
+/// it. This was 20 (a guess at padding that isn't there) and every position derived
+/// from it landed 4px high — including the hand-tuned 22 this replaced, which is
+/// exactly `42 - 20`. The number is worth stating rather than folding into a tuned
+/// constant: get it right and the formula is right at every bar height, get it wrong
+/// and each one is off by the same amount in a way that reads as "nearly centered".
 #[cfg(target_os = "macos")]
-const MAC_TRAFFIC_LIGHT_Y: f64 = 22.0;
+const MAC_WINDOW_BUTTON_H: f64 = 12.0;
+
+/// Our title bar's height in logical px, mirroring `--titlebar-h` in `app.css`
+/// (42 normally, 28 under the compact-title-bar appearance).
+///
+/// A pinned pair, and the only honest way to have one: Tauri fixes the traffic-light
+/// position when the window is **built**, and the height is a CSS variable the
+/// frontend owns. Neither side can read the other's value at the moment it needs it,
+/// so if one changes the other must change with it.
+#[cfg(target_os = "macos")]
+const MAC_TITLEBAR_H: f64 = 42.0;
+#[cfg(target_os = "macos")]
+const MAC_TITLEBAR_H_COMPACT: f64 = 28.0;
+
+/// Vertical inset (logical px) that centers the traffic lights in our title bar.
+///
+/// tao resizes the native button container to `button_height + y` and pins it to the
+/// window top, so the cluster ends up centered at `(button_height + y) / 2` from the
+/// top — meaning a LARGER `y` pushes the lights DOWN. Centering it in a bar of height
+/// `H` therefore wants `(button_height + y) / 2 == H / 2`, i.e.:
+///
+/// ```text
+/// y = H - button_height
+/// ```
+///
+/// which is 30 for the standard 42px bar and 16 for the compact one. The compact bar
+/// used to inherit the standard bar's number outright; both were derived from a wrong
+/// button height and sat high.
+///
+/// Build-time only: Tauri exposes the position on the builder and nowhere else, so
+/// toggling the compact appearance re-centers the lights on windows opened *after*
+/// the change, not the ones already up.
+#[cfg(target_os = "macos")]
+fn mac_traffic_light_y() -> f64 {
+    let compact = crate::config::app_config::load()
+        .map(|c| c.appearance.compact_title_bar)
+        .unwrap_or(false);
+    let bar = if compact { MAC_TITLEBAR_H_COMPACT } else { MAC_TITLEBAR_H };
+    bar - MAC_WINDOW_BUTTON_H
+}
 
 /// Apply Arbor's window chrome to a builder. macOS → native Overlay title bar
 /// (real traffic lights over the custom bar); elsewhere → frameless. Call it in
@@ -118,7 +173,7 @@ pub fn native_titlebar<'a, R: Runtime, M: Manager<R>>(
             .hidden_title(true)
             .traffic_light_position(LogicalPosition::new(
                 MAC_TRAFFIC_LIGHT_X,
-                MAC_TRAFFIC_LIGHT_Y,
+                mac_traffic_light_y(),
             ))
     }
     #[cfg(not(target_os = "macos"))]

@@ -28,6 +28,7 @@ export const TYTO_SHORTCUTS: TytoShortcutGroup[] = [
       { keys: ['Ctrl', '2'], description: 'Switch to Screenshot mode' },
       { keys: ['Ctrl', 'Enter'], description: 'Primary action — record / stop, or take a screenshot' },
       { keys: ['Ctrl', 'Shift', 'A'], description: 'Toggle system audio (recording)' },
+      { keys: ['Ctrl', 'Shift', 'F'], description: 'Recording output: video ↔ frame sequence' },
     ],
   },
   {
@@ -46,6 +47,19 @@ export const TYTO_SHORTCUTS: TytoShortcutGroup[] = [
       { keys: ['Ctrl', 'Shift', 'B'], description: 'Toggle the captures library' },
       { keys: ['Ctrl', 'Shift', 'O'], description: 'Reveal the output folder' },
       { keys: ['Ctrl', 'Shift', 'C'], description: 'Snip capture (in-window selector)' },
+    ],
+  },
+  {
+    label: 'Frame sequence player',
+    shortcuts: [
+      { keys: ['Space'], description: 'Play / pause' },
+      { keys: ['←'], description: 'Previous frame' },
+      { keys: ['→'], description: 'Next frame' },
+      { keys: ['Shift', '←'], description: 'Back 10 frames' },
+      { keys: ['Shift', '→'], description: 'Forward 10 frames' },
+      { keys: ['Home'], description: 'First frame' },
+      { keys: ['End'], description: 'Last frame' },
+      { keys: ['L'], description: 'Toggle loop' },
     ],
   },
   {

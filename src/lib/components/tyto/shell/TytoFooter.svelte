@@ -4,10 +4,14 @@
    * target + recording state on the left, and the output folder + capture count
    * on the right.
    */
-  import { Circle, Video, Camera, FolderOpen } from 'lucide-svelte';
+  import { Circle, Video, Camera, Images, FolderOpen } from 'lucide-svelte';
   import { recorderStore, formatDuration } from '$lib/stores/tyto/recorder.svelte';
 
   const captureCount = $derived(recorderStore.captures.length);
+  const frames = $derived(recorderStore.mode === 'record' && recorderStore.recordOutput === 'frames');
+  const readyLabel = $derived(
+    recorderStore.mode !== 'record' ? 'Ready to capture' : frames ? 'Ready to record frames' : 'Ready to record',
+  );
 </script>
 
 <footer class="tyto-footer">
@@ -18,8 +22,10 @@
         REC · {formatDuration(recorderStore.elapsedMs)}
       </span>
     {:else}
-      {#if recorderStore.mode === 'record'}<Video size={12} />{:else}<Camera size={12} />{/if}
-      <span class="muted">{recorderStore.mode === 'record' ? 'Ready to record' : 'Ready to capture'}</span>
+      {#if frames}<Images size={12} />
+      {:else if recorderStore.mode === 'record'}<Video size={12} />
+      {:else}<Camera size={12} />{/if}
+      <span class="muted">{readyLabel}</span>
     {/if}
     <span class="sep">·</span>
     <span class="target">{recorderStore.currentTargetLabel}</span>

@@ -13,19 +13,69 @@ use crate::capture;
 pub struct Capture {
     pub id: String,
     pub name: String,
-    /// `record` | `screenshot`.
+    /// `record` (mp4) | `screenshot` (still image) | `frames` (image sequence).
     pub kind: String,
     pub target: String,
     pub duration_ms: Option<u64>,
     pub size_bytes: u64,
     pub created_at: i64,
+    /// The file, or the `.frames` directory for a sequence.
     pub path: String,
+    /// Thumbnail to show in the list. Only a frame sequence has one — a video is
+    /// its own poster frame and a screenshot is its own thumbnail.
+    pub poster: Option<String>,
+}
+
+/// A frame sequence, resolved for playback.
+///
+/// Every frame's absolute path travels in `frames`, deliberately: the alternative is
+/// the player re-deriving `frame_%06d.<ext>` from a directory and an extension, which
+/// puts the on-disk naming convention in two languages at once. One of them would
+/// eventually drift.
+#[derive(Serialize)]
+pub struct FrameSequence {
+    /// The sequence directory.
+    pub dir: String,
+    pub width: u32,
+    pub height: u32,
+    /// Sampling ceiling the recording ran at (the real rate is data, not this).
+    pub sample_fps: u32,
+    /// Total length in ms — how long the last frame is held.
+    pub duration_ms: u64,
+    pub target: String,
+    pub size_bytes: u64,
+    /// Absolute path of every frame, in playback order.
+    pub frames: Vec<String>,
+    /// Presentation time of each frame, ms from the start (`times[0] == 0`).
+    pub times: Vec<u32>,
 }
 
 /// List every capture in the output dir (newest first).
 #[arbor_rpc::handler]
 fn list_captures(_state: &TytoState) -> Result<Vec<Capture>, String> {
     Ok(capture::library::scan(&capture::output_dir()))
+}
+
+/// Read a frame sequence for playback: its geometry, its per-frame presentation
+/// times and the absolute path of every frame, in order.
+#[arbor_rpc::handler]
+fn read_frame_sequence(_state: &TytoState, id: String) -> Result<FrameSequence, String> {
+    let dir = capture::library::resolve_sequence(&capture::output_dir(), &id)?;
+    let m = capture::frames::read_manifest(&dir)?;
+    let frames = (0..m.frame_count)
+        .map(|i| capture::frames::frame_path(&dir, i, &m.format).to_string_lossy().to_string())
+        .collect();
+    Ok(FrameSequence {
+        dir: dir.to_string_lossy().to_string(),
+        width: m.width,
+        height: m.height,
+        sample_fps: m.sample_fps,
+        duration_ms: m.duration_ms,
+        target: m.target,
+        size_bytes: m.size_bytes,
+        frames,
+        times: m.times,
+    })
 }
 
 /// Rename a capture on disk (extension preserved).

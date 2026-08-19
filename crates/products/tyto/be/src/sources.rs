@@ -39,6 +39,10 @@ pub struct AudioInput {
 pub struct CaptureSources {
     pub monitors: Vec<MonitorSource>,
     pub windows: Vec<WindowSource>,
+    /// `None` when capture is available. Otherwise why the lists are empty, in
+    /// words meant for the user — a refused screen-recording permission produces an
+    /// empty picker, and an empty picker with no explanation reads as a broken app.
+    pub unavailable: Option<String>,
 }
 
 /// List what can be captured right now: every monitor, and every open application

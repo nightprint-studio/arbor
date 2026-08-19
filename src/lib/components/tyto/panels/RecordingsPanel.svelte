@@ -5,7 +5,7 @@
    * item count AND the total size on disk. Mocked: reveal toasts, the rest mutate
    * the in-memory list.
    */
-  import { Video, Camera, Trash2, FolderOpen, Eye, Pencil, Search } from 'lucide-svelte';
+  import { Video, Camera, Images, Trash2, FolderOpen, Eye, Pencil, Search } from 'lucide-svelte';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { fly } from 'svelte/transition';
   import { flip } from 'svelte/animate';
@@ -67,7 +67,7 @@
       <span class="stat size">{formatBytes(recorderStore.totalBytes)}</span>
     </div>
     {#if captures.length > 0}
-      <button type="button" class="lib-clear" onclick={() => (clearConfirmOpen = true)} use:tooltip={'Remove all captures from the list'}>Clear</button>
+      <button type="button" class="lib-clear" onclick={() => (clearConfirmOpen = true)} use:tooltip={'Delete every capture from disk'}>Delete all</button>
     {/if}
   </header>
 
@@ -99,7 +99,10 @@
           in:fly={{ y: -10, duration: animStore.dBase, easing: cubicOut }}
         >
           <button class="cap-thumb" onclick={() => (previewId = cap.id)} use:tooltip={'View'} aria-label={`View ${cap.name}`}>
-            {#if cap.path && cap.kind === 'screenshot'}
+            {#if cap.poster}
+              <!-- A frame sequence is a directory, so it ships its own poster frame. -->
+              <img class="cap-thumb-img" src={convertFileSrc(cap.poster)} alt={cap.name} loading="lazy" />
+            {:else if cap.path && cap.kind === 'screenshot'}
               <img class="cap-thumb-img" src={convertFileSrc(cap.path)} alt={cap.name} loading="lazy" />
             {:else if cap.path && cap.kind === 'record'}
               <!-- A poster frame from the video itself (media fragment → first frame),
@@ -107,9 +110,10 @@
               <!-- svelte-ignore a11y_media_has_caption -->
               <video class="cap-thumb-img" src={`${convertFileSrc(cap.path)}#t=0.1`} preload="metadata" muted playsinline></video>
             {:else}
-              <TytoThumb hue={cap.hue} kind={cap.kind} />
+              <TytoThumb hue={cap.hue} kind={cap.kind === 'screenshot' ? 'screenshot' : 'record'} />
             {/if}
-            {#if cap.kind === 'record' && cap.durationMs}<span class="cap-dur">{formatDuration(cap.durationMs)}</span>{/if}
+            {#if cap.durationMs}<span class="cap-dur">{formatDuration(cap.durationMs)}</span>{/if}
+            {#if cap.kind === 'frames'}<span class="cap-tag">FRAMES</span>{/if}
             <span class="cap-thumb-hover"><Eye size={16} /></span>
           </button>
 
@@ -124,7 +128,9 @@
             {:else}
               <div class="cap-name" title={cap.name}>{cap.name}</div>
               <div class="cap-meta">
-                {#if cap.kind === 'record'}<Video size={11} />{:else}<Camera size={11} />{/if}
+                {#if cap.kind === 'record'}<Video size={11} />
+                {:else if cap.kind === 'frames'}<Images size={11} />
+                {:else}<Camera size={11} />{/if}
                 {cap.target} · {formatBytes(cap.sizeBytes)} · {formatAgo(cap.createdAt)}
               </div>
             {/if}
@@ -146,11 +152,11 @@
 
 {#if clearConfirmOpen}
   <ConfirmModal
-    title="Clear the library"
-    message={`Remove all ${captures.length} ${captures.length === 1 ? 'capture' : 'captures'} from the list?`}
-    detail="This only clears the list here — it does not delete any files from disk."
+    title="Delete every capture"
+    message={`Permanently delete all ${captures.length} ${captures.length === 1 ? 'capture' : 'captures'}?`}
+    detail="The files are removed from disk — recordings, screenshots and whole frame-sequence folders. This cannot be undone."
     variant="danger"
-    confirmLabel="Clear list"
+    confirmLabel="Delete all"
     onConfirm={() => { recorderStore.clearCaptures(); clearConfirmOpen = false; }}
     onCancel={() => (clearConfirmOpen = false)}
   />
@@ -227,6 +233,14 @@
     overflow: hidden;
   }
   .cap-thumb-img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+  /* Marks a capture that is a directory of stills rather than a single file — the
+     thumbnail alone can't tell you, and reveal/delete behave differently. */
+  .cap-tag {
+    position: absolute; left: 3px; top: 3px;
+    font-size: var(--font-size-3xs); font-weight: 700; letter-spacing: 0.4px;
+    background: color-mix(in srgb, var(--accent) 88%, #000); color: #fff;
+    padding: 0 4px; border-radius: 3px;
+  }
   .cap-dur {
     position: absolute; right: 3px; bottom: 3px;
     font-size: var(--font-size-3xs); font-weight: 600; font-variant-numeric: tabular-nums;

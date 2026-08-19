@@ -1,16 +1,20 @@
 <script lang="ts">
   /**
-   * TytoCapturePreview — a capture's detail / preview modal (mock). Shows a large
-   * stand-in frame + full metadata + quick actions. The real frame/thumbnail will
-   * come from the capture backend.
+   * TytoCapturePreview — a capture's detail / preview modal: the media itself
+   * (image, video, or a played frame sequence) plus its metadata and quick actions.
+   * The stylized stand-in only shows when there is no file behind the entry (the
+   * backend-down mock).
    */
-  import { Video, Camera, FolderOpen, Trash2, Clock, HardDrive, Crosshair, CalendarClock } from 'lucide-svelte';
+  import { Video, Camera, Images, FolderOpen, Trash2, Clock, HardDrive, Crosshair, CalendarClock } from 'lucide-svelte';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import TytoThumb from './TytoThumb.svelte';
-  import { formatDuration, formatBytes, type Capture } from '$lib/stores/tyto/recorder.svelte';
+  import TytoFramePlayer from './TytoFramePlayer.svelte';
+  import { recorderStore, formatDuration, formatBytes, type Capture, type FrameSequence } from '$lib/stores/tyto/recorder.svelte';
 
   let { capture, onClose, onReveal, onDelete }:
     { capture: Capture; onClose: () => void; onReveal: () => void; onDelete: () => void } = $props();
@@ -19,18 +23,56 @@
   // The on-disk file as an asset URL (empty in the mock → falls back to the stylized
   // stand-in). The asset-protocol scope already covers png/mp4 (tauri.conf.json).
   const mediaUrl = $derived(capture.path ? convertFileSrc(capture.path) : '');
+
+  const kindLabel = $derived(
+    capture.kind === 'record' ? 'Recording' :
+    capture.kind === 'frames' ? 'Frame sequence' : 'Screenshot',
+  );
+
+  // A frame sequence is a directory of images, so it is loaded (manifest + frame
+  // list) rather than pointed at. `null` while loading, `false` once it failed.
+  let sequence = $state<FrameSequence | null>(null);
+  let sequenceFailed = $state(false);
+  $effect(() => {
+    const id = capture.kind === 'frames' ? capture.id : null;
+    sequence = null;
+    sequenceFailed = false;
+    if (!id) return;
+    void recorderStore.loadFrameSequence(id).then((seq) => {
+      if (seq && seq.frames.length) sequence = seq;
+      else sequenceFailed = true;
+    });
+  });
 </script>
 
-<Modal {onClose} width="600px" ariaLabel="Capture preview">
+<!-- A sequence brings a transport bar the other kinds don't have; 600px squeezes it. -->
+<Modal {onClose} width={capture.kind === 'frames' ? '720px' : '600px'} ariaLabel="Capture preview">
   {#snippet header()}
     <ModalHeader {onClose}>
-      {#if capture.kind === 'record'}<Video size={15} />{:else}<Camera size={15} />{/if}
+      {#if capture.kind === 'record'}<Video size={15} />
+      {:else if capture.kind === 'frames'}<Images size={15} />
+      {:else}<Camera size={15} />{/if}
       <span class="modal-title">{capture.name}</span>
-      <span class="kind-badge">{capture.kind === 'record' ? 'Recording' : 'Screenshot'}</span>
+      <span class="kind-badge">{kindLabel}</span>
     </ModalHeader>
   {/snippet}
 
   <div class="preview-body">
+    {#if capture.kind === 'frames'}
+      {#if sequence}
+        <TytoFramePlayer {sequence} />
+      {:else if sequenceFailed}
+        <div class="frame media">
+          <StateBlock tone="error">
+            {#snippet icon()}<Images size={22} />{/snippet}
+            <div class="seq-title">This sequence can't be played</div>
+            <div class="seq-desc">Its manifest is missing or unreadable — reveal it in the folder to inspect the frames.</div>
+          </StateBlock>
+        </div>
+      {:else}
+        <div class="frame media loading"><Spinner size={22} /></div>
+      {/if}
+    {:else}
     <div class="frame" class:media={!!mediaUrl}>
       {#if mediaUrl && capture.kind === 'record'}
         <!-- svelte-ignore a11y_media_has_caption -->
@@ -38,13 +80,14 @@
       {:else if mediaUrl}
         <img class="media-el" src={mediaUrl} alt={capture.name} />
       {:else}
-        <TytoThumb hue={capture.hue} kind={capture.kind} />
+        <TytoThumb hue={capture.hue} kind={capture.kind === 'screenshot' ? 'screenshot' : 'record'} />
         {#if capture.kind === 'record'}
           <span class="frame-dur">{formatDuration(capture.durationMs ?? 0)}</span>
         {/if}
         <span class="frame-note">Stylized preview · real frame comes with the backend</span>
       {/if}
     </div>
+    {/if}
 
     <ul class="meta">
       <li><Crosshair size={13} /> <span>Target</span><b>{capture.target}</b></li>
@@ -89,6 +132,9 @@
   }
   /* Real media: letterbox on a dark backing so non-16:9 frames look intentional. */
   .frame.media { background: #05070b; }
+  .frame.loading { display: flex; align-items: center; justify-content: center; }
+  .seq-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-secondary); }
+  .seq-desc { font-size: var(--font-size-xs); color: var(--text-muted); margin-top: 3px; max-width: 280px; }
   .media-el { display: block; width: 100%; height: 100%; object-fit: contain; }
   .frame-note {
     position: absolute; left: 10px; bottom: 10px;

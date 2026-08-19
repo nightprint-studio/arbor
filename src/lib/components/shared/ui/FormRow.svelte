@@ -16,13 +16,38 @@
      * which point the control collapses to the width of its own chevron.
      */
     wideControl?: boolean;
+    /**
+     * A small glyph for the row, rendered in a tinted square at its left edge.
+     *
+     * It also switches the row to the **compact** layout: icon · label over
+     * description · control, all on one line. The two go together rather than being
+     * separate options, because the icon is what makes the compact layout readable —
+     * it anchors the left column so the description no longer needs the row's full
+     * width to be found. A settings list scans far faster this way; a bare form
+     * column, with nothing to anchor it, still wants the default.
+     */
+    icon?: Snippet;
     /** Right-aligned control (toggle, input, select, button…). */
     children: Snippet;
   }
 
-  let { label, description, wideControl = false, children }: Props = $props();
+  let { label, description, wideControl = false, icon, children }: Props = $props();
 </script>
 
+{#if icon}
+  <!-- Compact: the icon carries the left edge, so label and description stack beside
+       it and the control keeps the right. -->
+  <div class="fr-row fr-compact">
+    <span class="fr-icon">{@render icon()}</span>
+    <div class="fr-text">
+      <span class="fr-title">{label}</span>
+      {#if description}<span class="fr-hint">{description}</span>{/if}
+    </div>
+    <div class="fr-control" class:fr-wide={wideControl}>
+      {@render children()}
+    </div>
+  </div>
+{:else}
 <div class="fr-row">
   <!-- Header: label on the left, control on the right.
        Keeping the label compact (no description here) prevents narrow controls
@@ -39,6 +64,7 @@
     <p class="fr-desc">{description}</p>
   {/if}
 </div>
+{/if}
 
 <style>
   /* `fr-` prefixed class names so SettingsPanel's `.content :global(.row-title)`
@@ -89,5 +115,31 @@
     font-size: 0.77rem;
     color: var(--text-secondary);
     line-height: 1.55;
+  }
+
+  /* ── Compact (icon) variant ─────────────────────────────────────────────── */
+  .fr-compact {
+    flex-direction: row;
+    align-items: center;
+    gap: 11px;
+    padding: 10px 14px;
+    min-height: 46px;
+  }
+  .fr-icon {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; flex-shrink: 0;
+    border-radius: 8px;
+    color: var(--accent);
+    background: var(--accent-subtle);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  .fr-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  /* The title is a flex child of `.fr-text` here, not of the header row. */
+  .fr-compact .fr-title { flex: none; }
+  .fr-hint {
+    font-size: var(--font-size-2xs);
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
 </style>

@@ -104,67 +104,66 @@ fn point_in_polygon(px: f32, py: f32, poly: &[[i32; 2]]) -> bool {
 #[cfg(feature = "jpeg-screenshots")]
 const JPEG_QUALITY: u8 = 90;
 
-/// Encode `img` in the requested format into `out_dir` and return `(extension,
-/// path)`. `jpg`/`jpeg` → JPEG (quality ~90, alpha dropped), `webp` → WebP,
-/// anything else → PNG.
+/// The extension a requested format **actually** resolves to, accounting for which
+/// encoders are compiled in: `jpg`/`jpeg` → `jpg`, `webp` → `webp`, anything else
+/// → `png`; a format whose `image` feature is off resolves to `png` instead of
+/// failing.
 ///
-/// JPEG and WebP encoders are only compiled when the matching `image` feature is
-/// enabled (see `Cargo.toml`). When a requested format's encoder isn't compiled,
-/// this transparently falls back to PNG (with a `.png` extension) so the capture
-/// still lands — a working screenshot beats a hard failure.
+/// Callers name the file from this, never from the raw request — otherwise a
+/// `.webp` on disk could hold PNG bytes on a lean build. The frame-sequence writer
+/// records the resolved extension in its manifest for the same reason.
+pub fn resolve_format(fmt: &str) -> &'static str {
+    match fmt.to_ascii_lowercase().as_str() {
+        #[cfg(feature = "jpeg-screenshots")]
+        "jpg" | "jpeg" => "jpg",
+        #[cfg(feature = "webp-screenshots")]
+        "webp" => "webp",
+        _ => "png",
+    }
+}
+
+/// Encode `img` into `path` using the encoder for `ext` (a value already run
+/// through [`resolve_format`], so it is always one this build can write).
+///
+/// The single encode seam in the capture engine: screenshots and every frame of a
+/// frame sequence go through it, so "which formats exist" is answered in one place.
+pub fn encode_to(img: &image::RgbaImage, path: &std::path::Path, ext: &str) -> Result<(), String> {
+    match ext {
+        #[cfg(feature = "jpeg-screenshots")]
+        "jpg" => {
+            let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+            let mut w = std::io::BufWriter::new(file);
+            let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut w, JPEG_QUALITY);
+            // JPEG has no alpha — drop it rather than letting the encoder guess.
+            let rgb = image::DynamicImage::ImageRgba8(img.clone()).to_rgb8();
+            enc.encode_image(&rgb).map_err(|e| e.to_string())
+        }
+        #[cfg(feature = "webp-screenshots")]
+        "webp" => img.save_with_format(path, image::ImageFormat::WebP).map_err(|e| e.to_string()),
+        _ => img.save_with_format(path, image::ImageFormat::Png).map_err(|e| e.to_string()),
+    }
+}
+
+/// Encode `img` in the requested format into `out_dir` and return `(extension,
+/// path)`. The extension is the RESOLVED one (see [`resolve_format`]), so the file
+/// name never promises a format the bytes aren't in.
 fn save_in_format(
     img: &image::RgbaImage,
     out_dir: &Path,
     template: &str,
     fmt: &str,
 ) -> Result<(&'static str, PathBuf), String> {
-    let base = render_template(template);
-    match fmt.to_ascii_lowercase().as_str() {
-        "jpg" | "jpeg" => save_jpeg(img, out_dir, &base),
-        "webp" => save_webp(img, out_dir, &base),
-        _ => save_png(img, out_dir, &base),
-    }
+    let ext = resolve_format(fmt);
+    let path = out_dir.join(format!("{}.{ext}", render_template(template)));
+    encode_to(img, &path, ext)?;
+    Ok((ext, path))
 }
 
-/// Save `img` as PNG.
+/// Save `img` as PNG (the masked-screenshot path, which must keep its alpha).
 fn save_png(img: &image::RgbaImage, out_dir: &Path, base: &str) -> Result<(&'static str, PathBuf), String> {
     let path = out_dir.join(format!("{base}.png"));
-    img.save_with_format(&path, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+    encode_to(img, &path, "png")?;
     Ok(("png", path))
-}
-
-/// Save `img` as JPEG (quality ~90, alpha dropped). Falls back to PNG when the
-/// `jpeg-screenshots` feature isn't enabled.
-#[cfg(feature = "jpeg-screenshots")]
-fn save_jpeg(img: &image::RgbaImage, out_dir: &Path, base: &str) -> Result<(&'static str, PathBuf), String> {
-    let path = out_dir.join(format!("{base}.jpg"));
-    let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
-    let mut w = std::io::BufWriter::new(file);
-    let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut w, JPEG_QUALITY);
-    let rgb = image::DynamicImage::ImageRgba8(img.clone()).to_rgb8();
-    enc.encode_image(&rgb).map_err(|e| e.to_string())?;
-    Ok(("jpg", path))
-}
-
-/// Fallback: `jpeg-screenshots` disabled → save as PNG.
-#[cfg(not(feature = "jpeg-screenshots"))]
-fn save_jpeg(img: &image::RgbaImage, out_dir: &Path, base: &str) -> Result<(&'static str, PathBuf), String> {
-    save_png(img, out_dir, base)
-}
-
-/// Save `img` as WebP. Falls back to PNG when the `webp-screenshots` feature
-/// isn't enabled.
-#[cfg(feature = "webp-screenshots")]
-fn save_webp(img: &image::RgbaImage, out_dir: &Path, base: &str) -> Result<(&'static str, PathBuf), String> {
-    let path = out_dir.join(format!("{base}.webp"));
-    img.save_with_format(&path, image::ImageFormat::WebP).map_err(|e| e.to_string())?;
-    Ok(("webp", path))
-}
-
-/// Fallback: `webp-screenshots` disabled → save as PNG.
-#[cfg(not(feature = "webp-screenshots"))]
-fn save_webp(img: &image::RgbaImage, out_dir: &Path, base: &str) -> Result<(&'static str, PathBuf), String> {
-    save_png(img, out_dir, base)
 }
 
 /// Widest edge of a source preview thumbnail, in pixels.

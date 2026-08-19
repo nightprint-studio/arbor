@@ -15,8 +15,21 @@
   it or <kbd>Ctrl</kbd>+<kbd>Enter</kbd>. If a <b>countdown</b> is set, a big 3-2-1
   counts down over the frozen screen first (<kbd>Esc</kbd> cancels); then the Tyto
   window steps aside so it isn't in the capture and the recording <b>control bar</b>
-  takes over. Options:
+  takes over.
 </p>
+<p>
+  The first option decides what the recording <i>produces</i>, and the rest of the
+  options follow from it. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> switches
+  between the two.
+</p>
+<ul>
+  <li><b>Video</b> — one H.264 MP4 with audio. The default, and what you want for
+    anything that has sound or runs long.</li>
+  <li><b>Frames</b> — a playable sequence of still images. Lossless, so text and
+    thin lines stay exactly as captured, and no audio.</li>
+</ul>
+
+<h3>Video options</h3>
 <ul>
   <li><b>System audio</b> — capture what you hear (game, browser, app output) via
     the Windows render loopback.</li>
@@ -24,9 +37,41 @@
     are on they're mixed down into one track in the final MP4.</li>
   <li><b>Frame rate</b> — 30 or 60 fps.</li>
   <li><b>Quality</b> — High, Balanced or Compact (trades file size for fidelity).</li>
-  <li><b>Countdown</b> — Off, 3, 5 or 10 seconds of on-screen count before capture
-    starts, so you have a beat to get ready.</li>
 </ul>
+
+<h3>Frame options</h3>
+<ul>
+  <li><b>Frame format</b> — <b>PNG</b> (lossless, keeps text crisp), <b>JPG</b> or
+    <b>WebP</b>.</li>
+  <li><b>Sample rate</b> — how often the screen is looked at, at most. Frames
+    identical to the one before are never written, so a still screen costs one frame
+    however long it stays still, and each frame records the moment it belongs to.
+    Playback follows those moments, so the sequence runs at real speed.</li>
+  <li><b>Frame width</b> — downscale every frame to a fixed width, or keep the
+    captured resolution. This is the largest single lever on how much disk a
+    sequence takes.</li>
+</ul>
+
+<p>
+  <b>Countdown</b> — Off, 3, 5 or 10 seconds of on-screen count before capture
+  starts, so you have a beat to get ready — applies to both.
+</p>
+
+<div class="callout">
+  A frame sequence is saved as a <b>folder</b> named <code>&lt;name&gt;.frames</code>
+  next to your other captures, holding the numbered frames and a manifest describing
+  their timing. Renaming, revealing and deleting it from the library work exactly as
+  they do for a single file.
+</div>
+
+<div class="callout">
+  <b>macOS</b> asks for screen-recording permission when you open Tyto, and remembers
+  the answer — the system only ever asks once. If it was refused, the source picker
+  says so in place of the displays it can't see, with an <b>Open Settings</b> button
+  that takes you straight to the right pane (<b>Privacy &amp; Security → Screen
+  Recording</b>). Turn Arbor on there, then quit and reopen Arbor: a permission granted
+  from System Settings reaches the next launch, not the running app.
+</div>
 
 <h2>The recording control bar</h2>
 <p>

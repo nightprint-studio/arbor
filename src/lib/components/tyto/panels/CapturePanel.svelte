@@ -33,10 +33,20 @@
     recorderStore.micId ? 'Microphone only' : 'No audio',
   );
 
+  const frames = $derived(recorderStore.mode === 'record' && recorderStore.recordOutput === 'frames');
+
   const detailLine = $derived(
-    recorderStore.mode === 'record'
-      ? `${recorderStore.fps} fps · ${recorderStore.quality} · ${audioLabel}`
-      : 'PNG · saved to file + clipboard',
+    recorderStore.mode !== 'record'
+      ? `${recorderStore.screenshotFormat.toUpperCase()} · saved to file${recorderStore.copyToClipboard ? ' + clipboard' : ''}`
+      : frames
+        // No bitrate and no audio to report — what matters is the sampling ceiling and
+        // that a still screen costs nothing.
+        ? `up to ${recorderStore.frameSampleFps} fps · ${recorderStore.frameFormat.toUpperCase()} frames · identical frames skipped`
+        : `${recorderStore.fps} fps · ${recorderStore.quality} · ${audioLabel}`,
+  );
+
+  const kicker = $derived(
+    recorderStore.mode !== 'record' ? 'Screenshot' : frames ? 'Frame sequence' : 'Recording',
   );
 </script>
 
@@ -53,7 +63,7 @@
         {/key}
       </div>
       <div class="stage-body">
-        <div class="stage-kicker">{recorderStore.mode === 'record' ? 'Recording' : 'Screenshot'} · {recorderStore.targetKind}</div>
+        <div class="stage-kicker">{kicker} · {recorderStore.targetKind}</div>
         {#key recorderStore.currentTargetLabel}
           <div class="stage-target" in:fade={{ duration: animStore.dFast }}>{recorderStore.currentTargetLabel}</div>
         {/key}
@@ -64,6 +74,8 @@
           <span class="stage-rec"><Circle size={9} fill="currentColor" /> REC {formatDuration(recorderStore.elapsedMs)}</span>
         {:else if recorderStore.targetReady}
           <span class="stage-ready">Ready</span>
+        {:else if recorderStore.captureUnavailable}
+          <span class="stage-blocked">No permission</span>
         {:else}
           <span class="stage-wait">Pick a region</span>
         {/if}
@@ -177,6 +189,14 @@
     font-size: var(--font-size-xs); font-weight: 600;
     color: var(--warning);
     background: color-mix(in srgb, var(--warning) 15%, transparent);
+    padding: 3px 10px; border-radius: 999px;
+  }
+  /* Not "waiting for you" but "blocked by the OS" — a different colour, because the
+     two ask for very different things from the reader. */
+  .stage-blocked {
+    font-size: var(--font-size-xs); font-weight: 600;
+    color: var(--error);
+    background: color-mix(in srgb, var(--error) 15%, transparent);
     padding: 3px 10px; border-radius: 999px;
   }
 

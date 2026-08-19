@@ -22,7 +22,9 @@
   import { themeStore } from '$lib/stores/theme.svelte';
 
   const ready = $derived(recorderStore.targetReady);
-  const notReadyTip = 'Pick a capture region first';
+  // The store owns the reason — a refused screen-recording permission and a missing
+  // region are both "not ready", and only it knows which.
+  const notReadyTip = $derived(recorderStore.notReadyReason);
   const target = $derived(recorderStore.currentTargetLabel);
 
   // Reduced mode switcher, mirrored from the body. Each carries its digit hint

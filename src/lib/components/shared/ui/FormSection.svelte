@@ -17,28 +17,45 @@
   import type { Snippet } from 'svelte';
 
   interface Props {
-    /** Rendered in small caps. Two or three words — it names the group, it does not explain it. */
-    label: string;
+    /**
+     * Rendered in small caps. Two or three words — it names the group, it does not
+     * explain it. Omit it for a group that already sits under a heading of its own:
+     * the band is still the unit, it just doesn't need naming twice.
+     */
+    label?: string;
     /** One line under the label, for a group whose purpose is not obvious from its name. */
     hint?: string;
     /** Right-aligned content in the label row: a count, a small action, a filter. */
     aside?: Snippet;
     /** Drop the top margin — for the first section of a form, where it would be dead space. */
     first?: boolean;
+    /**
+     * Draw the body as a single bordered card with its rows separated by hairlines
+     * instead of by gaps.
+     *
+     * For a list of **settings**, where each row is one decision of the same kind: the
+     * enclosure is what says "these belong together", and it makes a `FormRow`'s own
+     * bottom border read as a divider rather than as a stray underline. A form of
+     * unlike fields still wants the default — boxing those groups things that only
+     * happen to be adjacent.
+     */
+    boxed?: boolean;
     children: Snippet;
   }
 
-  let { label, hint, aside, first = false, children }: Props = $props();
+  let { label, hint, aside, first = false, boxed = false, children }: Props = $props();
 </script>
 
-<section class="fs" class:first>
-  <div class="fs-head">
-    <span class="fs-label">{label}</span>
-    <span class="fs-rule" aria-hidden="true"></span>
-    {#if aside}<span class="fs-aside">{@render aside()}</span>{/if}
-  </div>
+<section class="fs" class:first class:headless={!label && !aside}>
+  {#if label || aside}
+    <div class="fs-head">
+      {#if label}<span class="fs-label">{label}</span>{/if}
+      <span class="fs-rule" aria-hidden="true"></span>
+      {#if aside}<span class="fs-aside">{@render aside()}</span>{/if}
+    </div>
+  {/if}
   {#if hint}<p class="fs-hint">{hint}</p>{/if}
-  <div class="fs-body">{@render children()}</div>
+  <div class="fs-body" class:boxed>{@render children()}</div>
 </section>
 
 <style>
@@ -66,4 +83,18 @@
   }
 
   .fs-body { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
+  /* Boxed: one card, hairline-separated rows. The gap goes — two separators for the
+     same boundary read as a gap that failed to close. */
+  /* No head to sit under — the margin was spacing it away from a label that isn't
+     there, which is just a gap at the top of the group. */
+  .fs.headless .fs-body.boxed { margin-top: 0; }
+  .fs-body.boxed {
+    gap: 0;
+    margin-top: 10px;
+    padding-top: 0;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
 </style>

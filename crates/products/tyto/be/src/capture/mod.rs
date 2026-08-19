@@ -5,19 +5,27 @@
 //!
 //! One capture backend: **scap** (native OS capture — WGC / ScreenCaptureKit /
 //! PipeWire) for monitor, window AND region, both streaming and one-shot. Threading
-//! (see [`session`]): a producer thread stashes the latest BGRA frame and an emit loop
-//! samples it onto the encoder at an exact fps cadence; an encoder thread pipes raw
-//! frames to ffmpeg (libx264 → mp4, `-pix_fmt bgra`). Optional audio threads capture
+//! (see [`session`]): a producer thread stashes the latest BGRA frame, and a **sink**
+//! consumes it. There are two sinks, and the capture side cannot tell them apart:
+//! [`video`] emits at an exact fps cadence into ffmpeg (libx264 → mp4, `-pix_fmt
+//! bgra`), while [`frames`] samples with deduplication into a pool of image writers
+//! and records each survivor's timestamp in a manifest. Optional audio threads capture
 //! the mic (cpal, [`audio`]) and/or system output (WASAPI render loopback,
 //! [`sysaudio`]) to temp WAVs that a final ffmpeg pass muxes in (mixed when both are
 //! on). Source enumeration metadata comes from windows-capture on Windows (see
 //! [`source`]); scap's thin enumeration is the fallback elsewhere.
 
+/// The single guarded entry point into scap (permission + panic containment).
+pub mod access;
 pub mod audio;
+/// The frame-sequence sink: a deduplicating sampler + image writer pool.
+pub mod frames;
 /// GDI monitor grab for the region freeze — Windows-only (no WGC yellow border).
 #[cfg(target_os = "windows")]
 pub mod gdi;
 pub mod library;
+/// Minimal MP4 header reading — the duration of a recorded video, without ffprobe.
+pub mod mp4;
 pub mod screenshot;
 pub mod session;
 pub mod source;
@@ -25,12 +33,14 @@ pub mod sysaudio;
 pub mod target;
 /// UI Automation element enumeration for the "smart" region pick (empty off Windows).
 pub mod uia;
+/// The video sink: exact-fps emission → ffmpeg → mp4, with the audio mux.
+pub mod video;
 pub mod wav;
 /// Whole-window + whole-monitor pick targets for the on-screen picker overlay
 /// (empty off Windows).
 pub mod winpick;
 
-pub use session::{RecordingEngine, SessionSnapshot, StartConfig, ENGINE};
+pub use session::{RecordingEngine, RecordingOutput, SessionSnapshot, StartConfig, ENGINE};
 pub use target::{CaptureTarget, CropRect};
 
 use std::path::PathBuf;

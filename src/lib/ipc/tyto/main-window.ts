@@ -35,3 +35,31 @@ export function resetTytoBounds(): Promise<void> {
 export function takeTytoSnipIntent(): Promise<boolean> {
   return invoke('take_tyto_snip_intent');
 }
+
+/** Open the OS privacy settings for screen recording. Resolves `false` when the
+ *  platform has no such screen to send the user to — macOS has one, Windows and
+ *  Linux don't, and the caller says something useful instead of leaving a button
+ *  that quietly does nothing. */
+export function openScreenRecordingSettings(): Promise<boolean> {
+  return invoke('open_screen_recording_settings');
+}
+
+/** The shell's view of the screen-recording permission, plus how Arbor was
+ *  launched. Read it when capture is refused: "granted but still refused",
+ *  "granted to a different binary" and "granted to the terminal that started
+ *  Arbor" are three different problems with three different fixes, and the
+ *  recorder's own refusal can't tell them apart. */
+export interface ScreenRecordingStatus {
+  /** Whether the shell process — the app itself — has the permission. */
+  granted: boolean;
+  /** Whether the running executable lives inside a `.app` bundle. */
+  bundled: boolean;
+  /** The running executable's path. */
+  executable: string;
+  /** The likeliest cause when capture is refused anyway, or null. */
+  hint: string | null;
+}
+
+export function screenRecordingStatus(): Promise<ScreenRecordingStatus> {
+  return invoke('screen_recording_status');
+}

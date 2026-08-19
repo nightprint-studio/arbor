@@ -40,6 +40,13 @@ static SNIP_INTENT: AtomicBool = AtomicBool::new(false);
 /// window can miss it during mount, so it uses the pull-flag [`take_tyto_snip_intent`]).
 const TYTO_ENTER_SNIP_EVENT: &str = "tyto://enter-snip";
 
+/// Pushed to the Tyto window once the OS has answered the screen-recording
+/// permission (payload: granted). The window is usually already up by then — the
+/// dialog blocks for as long as the user reads it — so the frontend re-enumerates
+/// its sources instead of keeping the "no permission" state it fetched a moment too
+/// early.
+const TYTO_CAPTURE_PERMISSION_EVENT: &str = "tyto://capture-permission";
+
 /// Event pushed to the recording HUD to stop the active recording — fired when the
 /// OS-global Tyto shortcut is pressed *while a recording is running* (so the same key
 /// that starts a capture also stops it, from anywhere, without surfacing Tyto). The HUD
@@ -122,7 +129,40 @@ pub fn open_or_focus(app: &AppHandle) {
 /// global shortcut) so the backend is coming up while the window boots. A missing/slow
 /// backend is harmless — the window opens regardless and the FE degrades to its mock
 /// state until the engine attaches. Mirrors [`super::explorer`]'s `ensure_backend`.
+///
+/// A sibling thread asks for the **screen-recording permission**, and this is the
+/// right moment for both reasons: opening the recorder is when the user has said what
+/// they want the permission for, and the ask comes from the app bundle rather than
+/// from a headless child whose TCC identity is inherited rather than owned. It blocks
+/// while the system dialog is up, which is why it lives on a detached thread and not
+/// on the UI thread or a runtime worker. The window opens regardless — a refusal is
+/// reported by the source picker, not by a missing window.
+///
+/// `tyto-be` keeps its own ask (see its `capture::access`) rather than trusting this
+/// one: it can be spawned without a window at all, by an AI client calling the record
+/// tool. macOS shows one dialog however many times it is asked, so the overlap costs
+/// nothing and the backend stays able to stand on its own.
 fn ensure_backend(app: &AppHandle) {
+    // TWO threads, not two statements: the permission dialog blocks for as long as the
+    // user takes to read it, and the backend spawn must not queue behind that — a
+    // recorder whose engine only starts once a dialog is dismissed is a recorder that
+    // looks broken for the whole time the dialog is up.
+    {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let granted = super::screen_capture::request_if_needed();
+            if !granted {
+                tracing::info!("tyto: screen-recording permission not granted — the picker will say so");
+            }
+            // The window exists by now in the case that matters (the dialog took time);
+            // when the permission was already settled this returns instantly and the
+            // emit is a harmless no-op against a window that may not be up yet.
+            if let Some(w) = app.get_webview_window(TYTO_WINDOW_LABEL) {
+                let _ = w.emit(TYTO_CAPTURE_PERMISSION_EVENT, granted);
+            }
+        });
+    }
+
     let app = app.clone();
     std::thread::spawn(move || crate::ipc::ensure_tyto_be(&app));
 }

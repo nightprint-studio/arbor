@@ -7,5 +7,6 @@
 pub use crate::state::TytoState;
 
 pub use crate::config::{
-    TytoCaptureConfig, TytoConfig, TytoEncodingConfig, TytoOutputConfig,
+    preset_bitrate_kbps, TytoCaptureConfig, TytoConfig, TytoEncodingConfig, TytoFramesConfig,
+    TytoOutputConfig,
 };

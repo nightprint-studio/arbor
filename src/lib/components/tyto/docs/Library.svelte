@@ -19,12 +19,17 @@
   <li><b>View</b> — open the preview: screenshots show the real image, recordings
     play inline with full controls, alongside the metadata (target, size, when it
     was taken).</li>
+  <li><b>Play a frame sequence</b> — a recording saved as frames opens in its own
+    player: play/pause (<kbd>Space</kbd>), a draggable timeline, single-frame steps
+    with <kbd>←</kbd> / <kbd>→</kbd> (hold <kbd>Shift</kbd> for ten), <kbd>Home</kbd>
+    / <kbd>End</kbd>, looping (<kbd>L</kbd>) and 0.5× / 1× / 2× speed. It plays at
+    real speed: each frame is shown for exactly as long as it was on screen.</li>
   <li><b>Rename</b> — edit the name inline.</li>
   <li><b>Reveal in folder</b> — jump to the file on disk.</li>
   <li><b>Delete</b> — remove a single capture.</li>
 </ul>
 
 <div class="callout">
-  <b>Clear</b> empties the list here; it asks for confirmation first and never
-  deletes files from disk.
+  <b>Delete all</b> removes every capture from disk — files and whole frame-sequence
+  folders alike. It asks for confirmation first, and cannot be undone.
 </div>

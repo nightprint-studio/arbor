@@ -22,6 +22,12 @@ import { tyto } from '../rpc';
 export const TYTO_BE_UP = 'arbor://tyto-be-up';
 export const TYTO_BE_DOWN = 'arbor://tyto-be-down';
 
+/** The OS answered the screen-recording permission (payload: granted). Emitted by
+ *  the shell, which asks when the Tyto window opens — the dialog can outlive the
+ *  window's first source fetch, so the answer arrives as an event rather than being
+ *  something the frontend could have waited for. */
+export const TYTO_CAPTURE_PERMISSION = 'tyto://capture-permission';
+
 /**
  * Subscribe to `tyto-be` attach/detach. `onUp` fires when the backend attaches
  * (the window should (re)fetch its sources / config / library); `onDown` when it
@@ -44,8 +50,9 @@ export interface TytoCaptureConfig {
 }
 export interface TytoEncodingConfig {
   quality: string;
+  /** Derived backend-side from `quality` — sent for completeness, never authored
+   *  here. Read it to display the bitrate; don't compute it. */
   bitrate_kbps: number;
-  codec: string;
 }
 export interface TytoOutputConfig {
   dir: string;
@@ -55,18 +62,38 @@ export interface TytoOutputConfig {
   /** Copy a screenshot to the OS clipboard right after saving (screenshots only). */
   copy_screenshot_to_clipboard: boolean;
 }
+/** Frame-sequence recording defaults (`record_output === 'frames'`). */
+export interface TytoFramesConfig {
+  /** Image format of each frame: `png` | `jpg` | `webp`. */
+  format: string;
+  /** Sampling ceiling in fps — the real rate is lower whenever the screen is still. */
+  sample_fps: number;
+  /** Downscale each frame to at most this width (0 = captured resolution). */
+  max_width: number;
+}
 /** The typed product config (`…/tyto/config.toml`). Distinct from the launcher's
  *  `TytoConfig` (the OS-global open shortcut), which lives in `types/config.ts`. */
 export interface TytoRecorderConfig {
   default_mode: string;
   default_target: string;
+  /** What a recording produces: `video` (H.264 mp4) | `frames` (image sequence). */
+  record_output: string;
   capture: TytoCaptureConfig;
   encoding: TytoEncodingConfig;
   output: TytoOutputConfig;
+  frames: TytoFramesConfig;
 }
 
 export const getTytoConfig = () => tyto<TytoRecorderConfig>('get_tyto_config');
-export const setTytoConfig = (config: TytoRecorderConfig) => tyto<void>('set_tyto_config', { config });
+
+/** Where captures actually land, with the platform default resolved. `output.dir`
+ *  is empty by default and *means* "the OS videos folder", so this is the only thing
+ *  that can answer "where do my captures go" without the frontend guessing an OS. */
+export const getOutputDir = () => tyto<string>('output_dir');
+/** Persist the config and get back what was actually written — **normalized**, so
+ *  the derived fields (the bitrate the quality preset implies) come from the one
+ *  place that owns them instead of being recomputed here. */
+export const setTytoConfig = (config: TytoRecorderConfig) => tyto<TytoRecorderConfig>('set_tyto_config', { config });
 
 // ── Sources ───────────────────────────────────────────────────────────────────
 
@@ -90,6 +117,10 @@ export interface AudioInputSource {
 export interface CaptureSources {
   monitors: MonitorSource[];
   windows: WindowSource[];
+  /** `null` when capture is available. Otherwise why the lists are empty, phrased
+   *  for the user (a refused screen-recording permission, chiefly) — show it rather
+   *  than an empty picker, which reads as a broken app. */
+  unavailable: string | null;
 }
 
 export const listCaptureSources = () => tyto<CaptureSources>('list_capture_sources');
@@ -120,12 +151,18 @@ export interface StartRecordingArgs {
    *  Honoured only by take_screenshot for a region target — pixels outside are made
    *  transparent and the file is forced to PNG. Recordings ignore it. */
   mask_points?: number[][] | null;
+  /** `video` | `frames` — what this recording should produce. Omitted = the
+   *  persisted default. Only the CHOICE travels: how a sequence is written (frame
+   *  format, sampling ceiling, downscale) comes from the persisted config. */
+  output?: string | null;
 }
 export interface SessionStateWire {
   session_id: string | null;
   recording: boolean;
   paused: boolean;
   elapsed_ms: number;
+  /** What the running session produces: `video` | `frames`. */
+  output: string;
 }
 
 /** `tyto://recording-progress` event payload (emitted by the engine ~5×/s). */
@@ -224,13 +261,35 @@ export const enumerateWindowRects = (monitorId: string) =>
 export interface CaptureWire {
   id: string;
   name: string;
+  /** `record` (mp4) | `screenshot` (still) | `frames` (image sequence). */
   kind: string;
   target: string;
   duration_ms: number | null;
   size_bytes: number;
   created_at: number;
+  /** The file, or the `.frames` directory for a sequence. */
   path: string;
+  /** Thumbnail path — only a frame sequence has one. */
+  poster: string | null;
 }
+
+/** A frame sequence resolved for playback (`read_frame_sequence`). */
+export interface FrameSequenceWire {
+  dir: string;
+  width: number;
+  height: number;
+  sample_fps: number;
+  duration_ms: number;
+  target: string;
+  size_bytes: number;
+  /** Absolute path of every frame, in playback order. */
+  frames: string[];
+  /** Presentation time of each frame, ms from the start (`times[0] === 0`). */
+  times: number[];
+}
+
+/** Read a saved frame sequence: geometry, per-frame timings and frame paths. */
+export const readFrameSequence = (id: string) => tyto<FrameSequenceWire>('read_frame_sequence', { id });
 
 export const listCaptures = () => tyto<CaptureWire[]>('list_captures');
 export const renameCapture = (id: string, name: string) => tyto<void>('rename_capture', { id, name });
