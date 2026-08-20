@@ -16,7 +16,14 @@ pub use crate::conflict::{warnable, Conflict, Ordering, OrderIndex, Reason, MAX_
 // prelude should not be where they collide.
 pub use crate::editor;
 pub use crate::model::{
-    access_keys, Access, AccessKind, BevyModel, Filter, Role, SystemDecl, TypeDecl,
+    access_keys, Access, AccessKind, BevyModel, BindingDecl, Filter, MaterialDecl, Role,
+    ShaderRefDecl, ShaderUse, SystemDecl, TypeDecl, UniformField, UniformStruct,
+};
+
+// The material half: what a `#[derive(AsBindGroup)]` promises, and whether the shader agrees.
+pub use crate::shader::{BindingKind, ShaderScan};
+pub use crate::shader_link::{
+    asset_path_of, link as link_shaders, Severity, ShaderFile, ShaderLink, ShaderProblem,
 };
 
 // The parameters whose body is not in the scan, and what they stand for.

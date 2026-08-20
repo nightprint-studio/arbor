@@ -24,6 +24,7 @@
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info, Bot, Activity as ActivityIcon,
     Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck, History,
+    Palette,
     TextCursorInput, ListChecks, BookOpen, FlaskConical, ListRestart, Bug, Braces, Languages,
     Cog, Network,
   } from 'lucide-svelte';
@@ -44,6 +45,8 @@
   import BennuCustomizeRailsModal from './BennuCustomizeRailsModal.svelte';
   import BennuOnboardingModal from './BennuOnboardingModal.svelte';
   import { bennuOnboardingStore } from '$lib/stores/bennu/onboarding.svelte';
+  import { terminalStore } from '$lib/stores/terminal.svelte';
+  import { bennuPanelSizes } from '$lib/stores/bennu/panel-sizes.svelte';
   import { bennuRailsStore, BENNU_MANDATORY, type RailSection } from '$lib/stores/bennu/rails.svelte';
   import { applyRailOrder } from '$lib/utils/rail-order';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
@@ -147,6 +150,14 @@
     // for the first frame and reorders when this lands, which is a reorder nobody sees —
     // blocking the window on a config read to avoid it would be the visible cost.
     void bennuRailsStore.load();
+    // The integrated terminal's shell catalogue, config and detection. The same three calls
+    // Arbor's shell makes, and for the same reason: Bennu's Terminal is Arbor's Terminal —
+    // one store, one backend — and a window that never asked showed a shell picker with
+    // nothing in it until you happened to open Arbor's settings. `ensureDetected` is a no-op
+    // if this window has already looked.
+    terminalStore.loadCatalogue();
+    terminalStore.loadConfig();
+    void terminalStore.ensureDetected().catch(() => {});
     // The welcome tour, on the first launch only. Awaited before asking, because the store
     // defaults to "already seen" until the read lands — the alternative is a tour that
     // flashes for everybody on every start.
@@ -898,6 +909,7 @@
     'refresh-cw': RotateCw as unknown as IconComponent,
     'indent': IndentIncrease as unknown as IconComponent,
     'shield': ShieldCheck as unknown as IconComponent,
+    'palette': Palette as unknown as IconComponent,
     'history': History as unknown as IconComponent,
     // The two framework catalogs that were falling through to the generic `command` glyph:
     // a bound-properties list and the property reference read out of the dependency jars.
@@ -1542,7 +1554,13 @@
 
       {#snippet panels()}
         {#if showLeft}
-          <PanelCard orientation="left" initialSize={260} minSize={180} maxSize={460}>
+          <PanelCard
+            orientation="left"
+            initialSize={bennuPanelSizes.left}
+            minSize={180}
+            maxSize={460}
+            onResize={bennuPanelSizes.setLeft}
+          >
             {#if bennuUiStore.leftPanel === 'project'}<BennuSidebar />
             {:else if bennuUiStore.leftPanel === 'structure'}<BennuStructurePanel />
             {:else if bennuUiStore.leftPanel === 'dependencies'}<BennuDependenciesPanel />{/if}
@@ -1554,11 +1572,23 @@
             <BennuEditor bind:this={editor} onGenerate={openGenerateFromIntention} />
           </div>
           {#if showJobOutput}
-            <PanelCard orientation="bottom" initialSize={220} minSize={120} maxSize={560}>
+            <PanelCard
+              orientation="bottom"
+              initialSize={bennuPanelSizes.bottom}
+              minSize={120}
+              maxSize={560}
+              onResize={bennuPanelSizes.setBottom}
+            >
               <JobOutputPanel />
             </PanelCard>
           {:else if showBottom}
-            <PanelCard orientation="bottom" initialSize={220} minSize={120} maxSize={560}>
+            <PanelCard
+              orientation="bottom"
+              initialSize={bennuPanelSizes.bottom}
+              minSize={120}
+              maxSize={560}
+              onResize={bennuPanelSizes.setBottom}
+            >
               <BennuBottomDock />
             </PanelCard>
           {/if}
@@ -1573,9 +1603,10 @@
           {#key wideRight}
           <PanelCard
             orientation="right"
-            initialSize={wideRight ? 400 : 280}
+            initialSize={bennuPanelSizes.rightFor(wideRight)}
             minSize={wideRight ? 280 : 200}
             maxSize={wideRight ? 760 : 520}
+            onResize={(px) => bennuPanelSizes.setRight(px, wideRight)}
           >
             {#if bennuUiStore.rightPanel === 'maven'}<BennuMavenPanel />{/if}
             {#if bennuUiStore.rightPanel === 'cargo'}<BennuCargoPanel />{/if}

@@ -13,7 +13,7 @@
    */
   import type { Component } from 'svelte';
   import type { SurfaceId } from '$lib/stores/surfaces.svelte';
-  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import SurfaceBoot from './SurfaceBoot.svelte';
 
   interface Props {
     id: SurfaceId;
@@ -43,7 +43,9 @@
   {#if Shell}
     <Shell />
   {:else}
-    <div class="surface-loading"><Spinner size="md" /></div>
+    <!-- The SECOND half of one wait, not a screen of its own: the container showed the same
+         thing while the backend came up, and only the line at the bottom changes here. -->
+    <SurfaceBoot {id} phase="interface" />
   {/if}
 </div>
 
@@ -56,11 +58,4 @@
   }
   .surface.hidden { display: none; }
 
-  .surface-loading {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg-elevated);
-  }
 </style>

@@ -105,7 +105,9 @@ export const dtdMode: StreamParser<DtdState> = {
 
     const name = stream.match(/^[A-Za-z_:][\w.:-]*/) as RegExpMatchArray | null;
     if (name) {
-      if (TYPES.has(name[0])) return 'variable-3';
+      // `type`, not `variable-3`: CodeMirror 6's legacy table has no entry for the CM5 name,
+      // so it resolved to nothing and every content-model keyword rendered as plain text.
+      if (TYPES.has(name[0])) return 'type';
       state.names += 1;
       // The first name in a declaration is the thing being declared; in an `<!ATTLIST` the
       // rest are attribute names, and everything else is an element name in a content model.

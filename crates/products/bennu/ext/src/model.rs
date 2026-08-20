@@ -108,6 +108,19 @@ pub struct ProjectScan<'a> {
     /// Empty is normal and must stay harmless: a project whose dependencies are not resolved
     /// yet has none, and an extension is expected to go quiet rather than guess a vocabulary.
     pub taglibs: &'a [ScannedFile],
+    /// **Shader sources** — every `.wgsl` in the tree.
+    ///
+    /// Its own bucket because a shader is the other half of something written in Rust: a Bevy
+    /// material declares its bindings in a `#[derive(AsBindGroup)]` struct and names a `.wgsl`
+    /// by path, and neither file says on its own whether the two agree. That question is
+    /// exactly the kind an extension exists to answer, and it cannot be answered from
+    /// [`Self::rust`] alone.
+    ///
+    /// Handed over rather than read, like everything else here — see the module note on why an
+    /// extension never opens a file itself.
+    ///
+    /// Empty is normal and must stay harmless: most projects have no shaders.
+    pub shaders: &'a [ScannedFile],
 }
 
 impl<'a> ProjectScan<'a> {
@@ -141,6 +154,7 @@ impl<'a> ProjectScan<'a> {
             schemas: &[],
             descriptors: &[],
             taglibs: &[],
+            shaders: &[],
         }
     }
 }

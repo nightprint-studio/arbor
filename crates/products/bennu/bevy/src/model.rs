@@ -37,6 +37,14 @@ pub enum Role {
     States,
     /// A `#[derive(SystemParam)]` struct: not data, but the accesses of the systems that take one.
     SystemParam,
+    /// A `#[derive(Asset)]` type — loaded rather than spawned.
+    ///
+    /// Not an ECS role in the strict sense, and here anyway: what makes it belong in the same
+    /// list is that the question is the same one. "Who touches `SpiralHoverMaterial`" is
+    /// answered by the same signatures — a `ResMut<Assets<SpiralHoverMaterial>>` that creates
+    /// one, a `Query<&MeshMaterial3d<…>>` that reads it — and answering it in a different panel
+    /// would split one question in two. `Bundle` is here on the same argument.
+    Asset,
 }
 
 impl Role {
@@ -50,6 +58,7 @@ impl Role {
             Role::Bundle => "Bundle",
             Role::States => "States",
             Role::SystemParam => "SystemParam",
+            Role::Asset => "Asset",
         }
     }
 
@@ -64,6 +73,7 @@ impl Role {
             Role::Bundle => "bundle",
             Role::States => "states",
             Role::SystemParam => "systemparam",
+            Role::Asset => "asset",
         }
     }
 
@@ -81,6 +91,7 @@ impl Role {
             "Bundle" => Some(Role::Bundle),
             "States" | "SubStates" | "ComputedStates" | "DomainState" => Some(Role::States),
             "SystemParam" => Some(Role::SystemParam),
+            "Asset" => Some(Role::Asset),
             _ => None,
         }
     }
@@ -102,6 +113,12 @@ pub fn access_keys(name: &str, roles: &[Role]) -> Vec<String> {
     let mut keys = vec![name.to_string()];
     if roles.iter().any(|r| r.buffered()) {
         keys.push(format!("Messages<{name}>"));
+    }
+    // An asset is never named directly by a system: it is reached through the `Assets<T>`
+    // resource that stores it. Keying an asset by its own name alone is why every material in a
+    // project read as touched by nothing — the same mistake, and the same fix, as a message.
+    if roles.contains(&Role::Asset) {
+        keys.push(format!("Assets<{name}>"));
     }
     keys
 }
@@ -213,12 +230,112 @@ impl SystemDecl {
     }
 }
 
+/// One `fn fragment_shader()` — a material naming a shader, and where it said so.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShaderRefDecl {
+    /// `fragment`, `vertex`, `prepass_fragment`, …
+    pub stage: String,
+    /// The asset path as written.
+    pub path: String,
+    /// Byte offsets of the path INSIDE its quotes — a go-to lands on the path, not the quote.
+    pub offset: usize,
+    pub end: usize,
+    pub line: u32,
+}
+
+/// One binding a material's `#[derive(AsBindGroup)]` declares.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BindingDecl {
+    pub index: u32,
+    pub kind: crate::shader::BindingKind,
+    pub field: String,
+    pub ty: String,
+    pub offset: usize,
+    pub line: u32,
+}
+
+/// A `#[derive(AsBindGroup)]` type — what a material supplies the pipeline, and which shaders
+/// it runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MaterialDecl {
+    pub name: String,
+    pub file: PathBuf,
+    pub offset: usize,
+    pub line: u32,
+    pub bindings: Vec<BindingDecl>,
+    pub shaders: Vec<ShaderRefDecl>,
+}
+
+/// A `#[derive(ShaderType)]` struct: the layout a uniform is written in, which a `struct` in the
+/// shader has to match byte for byte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UniformStruct {
+    pub name: String,
+    pub file: PathBuf,
+    pub offset: usize,
+    pub line: u32,
+    pub fields: Vec<UniformField>,
+}
+
+/// One field of a [`UniformStruct`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UniformField {
+    pub name: String,
+    /// Verbatim Rust type.
+    pub ty: String,
+    pub offset: usize,
+    pub line: u32,
+}
+
+/// One material naming one shader — the row under a shader in the catalog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShaderUse {
+    pub material: String,
+    pub stage: String,
+    /// The `.rs` that said so.
+    pub file: PathBuf,
+    pub offset: usize,
+    pub end: usize,
+    pub line: u32,
+}
+
+/// One site where a declaration is put into the world.
+///
+/// The answer to "who creates one of these", which no signature carries: a `Query<&Health>` says
+/// who reads it, and until something spawns a `Health` there is nothing to read. It is also the
+/// first place to look when a component is not behaving — not who consumes it, but who put it
+/// there and with what.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InsertSite {
+    pub type_name: String,
+    pub kind: crate::items::InsertKind,
+    pub file: PathBuf,
+    pub offset: usize,
+    pub line: u32,
+    /// The argument as written — `Health(100.0)`, `Transform::from_xyz(x, y, 0.0)`.
+    pub arg: String,
+    /// The function it happens in, when the site is inside one. Empty for a call at module scope.
+    ///
+    /// Approximate by construction: the enclosing function is taken to be the last one declared
+    /// above the site, which is right for everything but a call inside a nested item. Wrong only
+    /// in the label, never in the jump.
+    pub in_fn: String,
+}
+
 /// Everything the project's Rust sources said, ready to be queried.
 #[derive(Debug, Clone, Default)]
 pub struct BevyModel {
     pub types: Vec<TypeDecl>,
     pub systems: Vec<SystemDecl>,
     pub conflicts: Vec<crate::conflict::Conflict>,
+    /// The `#[derive(AsBindGroup)]` types.
+    pub materials: Vec<MaterialDecl>,
+    /// The `#[derive(ShaderType)]` layouts, by which the uniforms are checked.
+    pub uniforms: Vec<UniformStruct>,
+    /// One entry per shader a material names, with what the two disagree about.
+    pub shaders: Vec<crate::shader_link::ShaderLink>,
+    /// Every `spawn` / `insert` / `insert_resource` site, by the type it names.
+    pub inserts: Vec<InsertSite>,
 }
 
 impl BevyModel {
@@ -273,5 +390,30 @@ impl BevyModel {
     /// The declarations in one file, for the gutter.
     pub fn types_in<'a>(&'a self, file: &std::path::Path) -> Vec<&'a TypeDecl> {
         self.types.iter().filter(|t| t.file == file).collect()
+    }
+
+    /// Where `name` is put into the world.
+    pub fn inserted<'a>(&'a self, name: &str) -> Vec<&'a InsertSite> {
+        self.inserts.iter().filter(|i| i.type_name == name).collect()
+    }
+
+    /// The materials declared in one file.
+    pub fn materials_in<'a>(&'a self, file: &std::path::Path) -> Vec<&'a MaterialDecl> {
+        self.materials.iter().filter(|m| m.file == file).collect()
+    }
+
+    /// Every problem this file is the place to report — from either side of the seam, because a
+    /// layout mismatch is reported where the layout is written and a missing asset where the
+    /// path is.
+    pub fn shader_problems_in<'a>(
+        &'a self,
+        file: &std::path::Path,
+    ) -> Vec<&'a crate::shader_link::ShaderProblem> {
+        self.shaders.iter().flat_map(|l| l.problems.iter()).filter(|p| p.file == file).collect()
+    }
+
+    /// The shader entry for one asset path.
+    pub fn shader<'a>(&'a self, asset_path: &str) -> Option<&'a crate::shader_link::ShaderLink> {
+        self.shaders.iter().find(|l| l.asset_path == asset_path)
     }
 }

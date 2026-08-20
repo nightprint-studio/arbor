@@ -38,4 +38,6 @@ pub mod mask;
 pub mod model;
 pub mod params;
 pub mod prelude;
+pub mod shader;
+pub mod shader_link;
 pub mod wrappers;

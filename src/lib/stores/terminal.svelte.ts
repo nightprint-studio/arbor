@@ -82,6 +82,27 @@ function createTerminalStore() {
   /// new one, and listeners are detached once `-done` fires.
   let activeDetection: { dispose: () => void } | null = null;
 
+  /// Detection, once per window.
+  ///
+  /// Every product with a terminal wants the shell list at startup, and every one of them
+  /// used to have to remember to ask — which is how Bennu shipped with a terminal whose
+  /// picker was empty until you opened Arbor's settings. It is idempotent in both directions
+  /// that matter: a completed detection is not repeated, and a second call while one is in
+  /// flight joins it rather than restarting it (`detectShells` disposes the previous stream,
+  /// so two callers racing would leave the first one's listeners torn down and its result
+  /// dropped).
+  ///
+  /// Per window, not per machine: a window is its own JS realm, so each has its own copy of
+  /// this store to fill.
+  let detecting: Promise<void> | null = null;
+
+  async function ensureDetected(): Promise<void> {
+    if (detectionDone) return;
+    if (detecting) return detecting;
+    detecting = detectShells().finally(() => { detecting = null; });
+    return detecting;
+  }
+
   async function detectShells(): Promise<void> {
     activeDetection?.dispose();
     activeDetection = null;
@@ -140,7 +161,7 @@ function createTerminalStore() {
     get detectionDone()  { return detectionDone;  },
     get config()         { return config;         },
     addTab, removeTab, setActive, renameTab, clear,
-    loadCatalogue, loadConfig, detectShells, pickerOptions,
+    loadCatalogue, loadConfig, detectShells, ensureDetected, pickerOptions,
     setConfig(c: TerminalsConfig)        { config = c; },
     setDetectedShells(d: DetectedShell[]) { detectedShells = d; detectionDone = true; },
   };

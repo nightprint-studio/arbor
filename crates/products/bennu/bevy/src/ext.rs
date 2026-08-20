@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 
 use bennu_ext::prelude::{
-    ExtEntry, ExtGutterMark, ExtStat, FileCtx, FrameworkExtension, ProjectScan,
+    ExtEntry, ExtGutterMark, ExtStat, ExtTarget, FileCtx, FrameworkExtension, ProjectScan,
 };
 use bennu_proto::prelude::{CapabilitySet, Diagnostic};
 
@@ -60,7 +60,7 @@ impl FrameworkExtension for BevyExtension {
     }
 
     fn reindex(&self, scan: &ProjectScan<'_>) {
-        self.store(build(scan.rust));
+        self.store(build(scan.rust, scan.shaders));
     }
 
     fn is_ready(&self) -> bool {
@@ -71,10 +71,21 @@ impl FrameworkExtension for BevyExtension {
     /// with. Held to the seam's standard — under-report rather than risk a false positive — which
     /// here means only the pairs [`warnable`](crate::conflict::warnable) will stand behind.
     fn diagnostics(&self, ctx: &FileCtx<'_>) -> Vec<Diagnostic> {
-        if ctx.extension() != "rs" || !self.is_ready() {
+        if !self.is_ready() {
             return Vec::new();
         }
-        editor::diagnostics(&self.model(), ctx.source)
+        let model = self.model();
+        match ctx.extension().as_str() {
+            // A `.wgsl` gets the half of the material check that belongs in it — a layout the
+            // shader declares differently from the Rust that fills it. Nothing about the ECS.
+            "wgsl" => editor::shader_diagnostics(&model, ctx.path, ctx.source),
+            "rs" => {
+                let mut out = editor::diagnostics(&model, ctx.source);
+                out.extend(editor::shader_diagnostics(&model, ctx.path, ctx.source));
+                out
+            }
+            _ => Vec::new(),
+        }
     }
 
     /// A mark beside every ECS declaration, pointing at the systems that touch it.
@@ -87,7 +98,19 @@ impl FrameworkExtension for BevyExtension {
         if ctx.extension() != "rs" || !self.is_ready() {
             return Vec::new();
         }
-        editor::gutter(&self.model(), ctx.source)
+        let model = self.model();
+        let mut marks = editor::gutter(&model, ctx.source);
+        marks.extend(editor::shader_gutter(&model, ctx.source));
+        marks
+    }
+
+    /// Across the seam, in whichever direction the caret points: a shader path in a `.rs` answers
+    /// with the shader, a `.wgsl` answers with the materials that run it.
+    fn navigate(&self, ctx: &FileCtx<'_>, offset: usize) -> Vec<ExtTarget> {
+        if !self.is_ready() {
+            return Vec::new();
+        }
+        editor::shader_navigate(&self.model(), ctx.path, ctx.source, offset)
     }
 
     fn catalog(&self, kind: &str) -> Vec<ExtEntry> {
@@ -96,6 +119,7 @@ impl FrameworkExtension for BevyExtension {
             "components" => catalog::components(&model),
             "systems" => catalog::systems(&model),
             "conflicts" => catalog::conflicts(&model),
+            "shaders" => catalog::shaders(&model),
             _ => Vec::new(),
         }
     }
@@ -119,6 +143,16 @@ impl FrameworkExtension for BevyExtension {
                 catalog: Some("conflicts".to_string()),
             },
         ];
+        // Shaders, only when the project has any. A row reading "Shaders 0" on a game with no
+        // materials is a panel offering to open an empty list, which is what the `rail` gate on
+        // a catalog exists to avoid.
+        if !model.shaders.is_empty() {
+            stats.push(ExtStat {
+                label: "Shaders".to_string(),
+                value: model.shaders.len(),
+                catalog: Some("shaders".to_string()),
+            });
+        }
         // A schedule too big to pair is reported rather than left to look like a clean one — the
         // count above would otherwise be an under-count nobody could see.
         let skipped = skipped_schedules(&model.systems);

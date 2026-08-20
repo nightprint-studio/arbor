@@ -18,8 +18,8 @@
   import {
     takeWorkspaceIntent, WORKSPACE_OPEN_PRODUCT_EVENT,
   } from '$lib/ipc/window';
-  import { surfaceStore, surfaceDef, SURFACES, type SurfaceId } from '$lib/stores/surfaces.svelte';
-  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import { surfaceStore, SURFACES, type SurfaceId } from '$lib/stores/surfaces.svelte';
+  import SurfaceBoot from './SurfaceBoot.svelte';
   import { keybindingsStore } from '$lib/stores/keybindings.svelte';
   import { matchesBinding } from '$lib/utils/keybindings';
   import SurfaceHost from './SurfaceHost.svelte';
@@ -76,9 +76,7 @@
        shell fires its first backend call on mount and doesn't retry), so the
        first open of a product shows this instead of an empty window. -->
   {#if surfaceStore.active && !surfaceStore.mounted.includes(surfaceStore.active)}
-    <div class="workspace-booting">
-      <Spinner size="md" label="Starting {surfaceDef(surfaceStore.active).label}…" />
-    </div>
+    <SurfaceBoot id={surfaceStore.active} phase="backend" />
   {/if}
 </div>
 
@@ -90,13 +88,5 @@
     height: 100vh;
     overflow: hidden;
     background: var(--bg-elevated);
-  }
-
-  .workspace-booting {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
   }
 </style>

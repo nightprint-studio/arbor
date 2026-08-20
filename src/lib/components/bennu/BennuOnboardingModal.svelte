@@ -55,7 +55,7 @@
   }
 </script>
 
-<OnboardingShell steps={STEPS} title="Welcome to Bennu" onFinish={finish}>
+<OnboardingShell steps={STEPS} title="Welcome" onFinish={finish}>
   {#snippet content(stepId: string)}
     {#if stepId === 'welcome'}
       <section class="hero">

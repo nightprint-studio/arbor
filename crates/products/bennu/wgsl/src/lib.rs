@@ -7,6 +7,9 @@
 //!   error the shader would really have hit at pipeline creation, rather than one an
 //!   editor's own approximation of the grammar decided to invent. It answers the question
 //!   "would this run".
+//! * **[`bindings`]** reads the resources a shader declares — `@group @binding` — which is the
+//!   half a Bevy material's `#[derive(AsBindGroup)]` has to agree with, and the only place the
+//!   two files can be checked against each other.
 //! * **[`symbols`]** is a tolerant text scanner. It answers "what is in this file" while
 //!   you are still typing it — which is exactly when the compiler cannot answer anything,
 //!   because half of what you have written is not valid yet. Outline, completion and
@@ -23,6 +26,7 @@
 //! what a project gets *without* installing anything, which for a shader in a Bevy game is
 //! the overwhelmingly common case.
 
+pub mod bindings;
 pub mod builtins;
 pub mod imports;
 pub mod prelude;

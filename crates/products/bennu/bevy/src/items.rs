@@ -59,6 +59,55 @@ pub struct FileScan {
     pub registrations: Vec<Registration>,
     /// `impl Component for Health` — the hand-written half of what a derive usually says.
     pub trait_impls: Vec<(String, Role)>,
+    /// Where a declaration is actually **put into the world**: a `spawn`, an `insert`, an
+    /// `insert_resource`.
+    ///
+    /// The question a signature cannot answer. "Who reads `Health`" comes from parameter lists;
+    /// "who ever *creates* one" comes from call sites, and without it a component that six
+    /// systems read looks like it appears by magic. It is also the first thing you want when a
+    /// component is not behaving: not who consumes it, but who put it there.
+    pub inserts: Vec<RawInsert>,
+}
+
+/// How a declaration entered the world.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InsertKind {
+    /// `commands.spawn((Health(5.0), Player))` — a new entity carrying it.
+    Spawn,
+    /// `commands.entity(e).insert(Health(5.0))` — added to an entity that already exists.
+    Insert,
+    /// `app.insert_resource(Score::default())` / `init_resource::<Score>()`.
+    Resource,
+    /// `app.add_message::<HudCommand>()` / `add_event::<…>()` — the registration that makes the
+    /// buffer exist at all.
+    Register,
+    /// `app.insert_state(Menu::Main)` / `init_state::<Menu>()`.
+    State,
+}
+
+impl InsertKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            InsertKind::Spawn => "spawned",
+            InsertKind::Insert => "inserted",
+            InsertKind::Resource => "resource",
+            InsertKind::Register => "registered",
+            InsertKind::State => "state",
+        }
+    }
+}
+
+/// One site where a declaration is put into the world.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawInsert {
+    pub type_name: String,
+    pub kind: InsertKind,
+    /// Byte offset of the CALL — `spawn`, `insert_resource` — so a jump lands on the statement
+    /// rather than on the type name inside it, which may not be a token at all
+    /// (`Transform::default()`).
+    pub offset: usize,
+    /// The argument as written, for the row's second column.
+    pub arg: String,
 }
 
 /// Keywords that may sit between an attribute and the item it belongs to.
@@ -110,6 +159,9 @@ pub fn scan_file(masked: &str) -> FileScan {
             }
             "add_systems" => {
                 i = read_add_systems(masked, after, &mut out);
+            }
+            w if insert_kind(w).is_some() => {
+                i = read_insert(masked, i, after, insert_kind(w).unwrap_or(InsertKind::Spawn), &mut out);
             }
             w if MODIFIERS.contains(&w) => {
                 // `pub(crate)` — the restriction is part of the modifier, not a new item.
@@ -275,6 +327,113 @@ fn read_add_systems(src: &str, at: usize, out: &mut FileScan) -> usize {
     close + 1
 }
 
+/// Which call this is, if it is one that puts something into the world.
+///
+/// A closed list, deliberately. Anything that merely *looks* like an insert — a method on the
+/// project's own type called `spawn`, a `HashMap::insert` — would contribute a row naming
+/// whatever its first argument happens to be, and a catalog that invents sites is worse than one
+/// that misses a few. What is here is Bevy's own vocabulary.
+fn insert_kind(word: &str) -> Option<InsertKind> {
+    match word {
+        "spawn" | "spawn_batch" | "spawn_empty" => Some(InsertKind::Spawn),
+        "insert" | "insert_if_new" | "try_insert" => Some(InsertKind::Insert),
+        "insert_resource" | "init_resource" | "insert_non_send_resource"
+        | "init_non_send_resource" => Some(InsertKind::Resource),
+        "add_message" | "add_event" => Some(InsertKind::Register),
+        "insert_state" | "init_state" | "add_sub_state" | "add_computed_state" => {
+            Some(InsertKind::State)
+        }
+        _ => None,
+    }
+}
+
+/// After an insert-shaped call name: the types its argument names.
+///
+/// Two forms, and both are read the same way. A turbofish carries the type
+/// (`init_resource::<Score>()`); an argument list carries one or more values
+/// (`spawn((Health(5.0), Player))`), each of which begins with the type's path. What is taken is
+/// the **head** of each top-level part — `Health(5.0)` is a `Health`, `Transform::default()` is a
+/// `Transform`, `PlayerBundle { … }` is a `PlayerBundle` — and a part that does not begin with a
+/// path is skipped rather than guessed at.
+fn read_insert(
+    masked: &str,
+    call_at: usize,
+    after: usize,
+    kind: InsertKind,
+    out: &mut FileScan,
+) -> usize {
+    let b = masked.as_bytes();
+    let mut j = skip_ws(b, after);
+    // A turbofish names the type outright.
+    if masked[j..].starts_with("::") {
+        let open = skip_ws(b, j + 2);
+        if b.get(open) == Some(&b'<') {
+            if let Some(close) = matching(b, open) {
+                for part in split_top(&masked[open + 1..close], b',') {
+                    if let Some(name) = head_type(&part) {
+                        out.inserts.push(RawInsert {
+                            type_name: name,
+                            kind,
+                            offset: call_at,
+                            arg: part.trim().to_string(),
+                        });
+                    }
+                }
+                j = skip_ws(b, close + 1);
+            }
+        }
+    }
+    let Some(close) = (if b.get(j) == Some(&b'(') { matching(b, j) } else { None }) else {
+        return j.max(after);
+    };
+    let inner = &masked[j + 1..close];
+    // `spawn((A, B))` — one argument that is a tuple. Unwrapped so each component is its own
+    // row, which is what a bundle-as-tuple means.
+    let unwrapped = match inner.trim().strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
+        Some(t) if split_top(inner, b',').len() == 1 => t.to_string(),
+        _ => inner.to_string(),
+    };
+    for part in split_top(&unwrapped, b',') {
+        if let Some(name) = head_type(&part) {
+            out.inserts.push(RawInsert {
+                type_name: name,
+                kind,
+                offset: call_at,
+                arg: part.trim().to_string(),
+            });
+        }
+    }
+    close + 1
+}
+
+/// The type a value expression names: the last segment of the path it starts with.
+///
+/// `None` for anything that does not start with an upper-case path — a variable, a literal, a
+/// reference to something computed elsewhere. Those are real arguments and this cannot say what
+/// type they are, so it says nothing.
+fn head_type(expr: &str) -> Option<String> {
+    let e = expr.trim().trim_start_matches('&').trim();
+    let e = e.strip_prefix("mut ").unwrap_or(e).trim();
+    let end = e
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == ':'))
+        .unwrap_or(e.len());
+    let path = e[..end].trim_end_matches(':');
+    if path.is_empty() {
+        return None;
+    }
+    // The last segment that looks like a TYPE, not simply the last segment: `Transform::from_xyz`
+    // is a `Transform`, and taking the tail would answer `from_xyz` and then reject it for being
+    // lower-case — which is how every `Type::constructor()` in a spawn went unrecorded.
+    //
+    // Rust's own casing convention is the whole of the signal here, and for the argument of a
+    // `spawn` it is a reliable one. A one-letter name is skipped: it is a generic parameter far
+    // more often than a type somebody wrote.
+    path.split("::")
+        .filter(|seg| seg.len() > 1 && seg.starts_with(|c: char| c.is_ascii_uppercase()))
+        .last()
+        .map(str::to_string)
+}
+
 /// A schedule expression as a label: module prefixes off, the rest verbatim — `OnEnter(Playing)`
 /// says which state, and dropping that would merge every state transition into one column.
 fn schedule_label(expr: &str) -> String {
@@ -285,7 +444,7 @@ fn schedule_label(expr: &str) -> String {
     }
 }
 
-fn last_segment(path: &str) -> String {
+pub(crate) fn last_segment(path: &str) -> String {
     path.trim().rsplit("::").next().unwrap_or(path).trim().to_string()
 }
 
@@ -423,11 +582,11 @@ fn is_ident_start(c: u8) -> bool {
     c.is_ascii_alphabetic() || c == b'_'
 }
 
-fn is_ident_byte(c: u8) -> bool {
+pub(crate) fn is_ident_byte(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_'
 }
 
-fn skip_ws(b: &[u8], mut i: usize) -> usize {
+pub(crate) fn skip_ws(b: &[u8], mut i: usize) -> usize {
     while i < b.len() && b[i].is_ascii_whitespace() {
         i += 1;
     }
@@ -435,7 +594,7 @@ fn skip_ws(b: &[u8], mut i: usize) -> usize {
 }
 
 /// The identifier at `at`, and the offset after it.
-fn ident_at(src: &str, at: usize) -> Option<(String, usize)> {
+pub(crate) fn ident_at(src: &str, at: usize) -> Option<(String, usize)> {
     let b = src.as_bytes();
     if at >= b.len() || !is_ident_start(b[at]) {
         return None;
@@ -454,7 +613,7 @@ fn read_ident(src: &str, at: usize) -> (String, usize) {
 
 /// Offset of the bracket closing the one at `open`, honouring every bracket kind in between so a
 /// `(` inside `<…>` cannot end the group early.
-fn matching(b: &[u8], open: usize) -> Option<usize> {
+pub(crate) fn matching(b: &[u8], open: usize) -> Option<usize> {
     let (o, c) = match b.get(open)? {
         b'(' => (b'(', b')'),
         b'[' => (b'[', b']'),
@@ -483,7 +642,7 @@ fn matching(b: &[u8], open: usize) -> Option<usize> {
 }
 
 /// Split at `sep`, ignoring anything nested inside brackets of any kind.
-fn split_top(s: &str, sep: u8) -> Vec<String> {
+pub(crate) fn split_top(s: &str, sep: u8) -> Vec<String> {
     let b = s.as_bytes();
     let mut parts = Vec::new();
     let mut depth = 0i32;

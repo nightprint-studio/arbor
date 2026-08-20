@@ -191,7 +191,10 @@
       </div>
 
       <div class="boot-wordmark">Arbor</div>
-      <div class="boot-tagline">Git workspace</div>
+      <!-- Not "Git workspace": that was true when Arbor WAS the git client, and it has been a
+           suite of seven products for a while — the splash is in front of somebody about to open
+           any one of them. -->
+      <div class="boot-tagline">Developer workspace</div>
 
       <div class="boot-progress-area">
         {#if progress.total && progress.total > 0}

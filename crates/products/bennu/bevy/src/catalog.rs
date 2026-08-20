@@ -10,11 +10,17 @@
 //!   badge groups by schedule.
 //! * **conflicts** — *which pairs can never run at the same time, and why?* See
 //!   [`crate::conflict`] for what that claim is worth under a partial scan.
+//! * **shaders** — *which `.wgsl` does each material run, and do the two agree?* Its own catalog
+//!   rather than a section of the components one, because the row is a **file** and the sub-rows
+//!   are the materials that name it — the opposite direction from every other list here, and
+//!   frequently one-to-many. It is the same pair of panels a Struts project gets: one keyed on
+//!   the declaration, one keyed on the thing it points at.
 
 use bennu_ext::prelude::ExtEntry;
 
 use crate::conflict::Conflict;
-use crate::model::{access_keys, Access, BevyModel, Role, SystemDecl, TypeDecl};
+use crate::model::{access_keys, Access, BevyModel, InsertSite, Role, SystemDecl, TypeDecl};
+use crate::shader_link::{Severity, ShaderLink};
 
 /// Absolute, forward-slashed — the form every contributed site uses, so the frontend never has to
 /// care which separator the host prefers.
@@ -74,6 +80,63 @@ fn component_row(model: &BevyModel, t: &TypeDecl) -> ExtEntry {
             )
         }))
         .collect();
+    // Where it is put into the world. First, above everything that merely reads it: a type that
+    // six systems read and nothing ever creates is a type whose row was previously all
+    // consumers and no producer, and the producer is what you actually go looking for.
+    for site in model.inserted(&t.name) {
+        children.insert(0, insert_child(site));
+    }
+
+    // A material is an asset that also runs a shader, and the shader is the first thing anybody
+    // reading its row wants. Badged rather than given a role of its own: `Material` is a trait
+    // impl on top of `#[derive(Asset)]`, and an enum of ECS roles is not where a trait impl goes.
+    if let Some(material) = model.materials.iter().find(|m| m.name == t.name) {
+        // The bind group, above the shaders: what the material SUPPLIES, then what runs on it.
+        // A binding row also says what the shader declares at that index, which is the whole
+        // point of having read both files — `@binding(0) var<uniform> params: SpiralHoverParams`
+        // beside `#[uniform(0)] params: SpiralHoverParams` is the agreement, visible.
+        for (n, b) in material.bindings.iter().enumerate().rev() {
+            let declared = model
+                .shaders
+                .iter()
+                .filter(|l| material.shaders.iter().any(|s| s.path == l.asset_path))
+                .find_map(|l| l.wgsl_binding(b.index));
+            let secondary = match declared {
+                Some(d) => format!("{} · shader: {d}", b.ty),
+                None => b.ty.clone(),
+            };
+            let mut child = at(
+                row(
+                    format!("@binding({}) {}", b.index, b.field),
+                    secondary,
+                    b.kind.label().to_string(),
+                ),
+                &material.file,
+                b.offset,
+                b.line,
+            );
+            child.id = format!("{}#binding#{n}", t.name);
+            children.insert(0, child);
+        }
+        for used in &material.shaders {
+            let resolved = model.shader(&used.path).and_then(|l| l.file.clone());
+            let mut child = row(
+                used.path.clone(),
+                match resolved {
+                    Some(_) => format!("{} shader", used.stage),
+                    None => format!("{} shader — no such asset", used.stage),
+                },
+                "shader".to_string(),
+            );
+            child.id = format!("{}#shader#{}", t.name, used.stage);
+            if let Some(file) = resolved {
+                child.file = Some(file_of(&file));
+                child.offset = Some(0);
+                child.line = Some(1);
+            }
+            children.insert(0, child);
+        }
+    }
     // Fields first for a bundle: what it inserts is what the row is *about*, and it is the only
     // catalog row whose own declaration lists other rows.
     if t.roles.contains(&Role::Bundle) {
@@ -235,4 +298,97 @@ fn conflict_row(model: &BevyModel, c: &Conflict) -> ExtEntry {
         })
         .collect();
     entry
+}
+
+/// One row per shader a material names, with the materials under it and whatever the two
+/// disagree about.
+///
+/// A shader with problems sorts to the top: the list is read to find out whether anything is
+/// wrong, and a file with a layout mismatch buried under nine correct ones is a file nobody
+/// sees.
+pub fn shaders(model: &BevyModel) -> Vec<ExtEntry> {
+    let mut rows: Vec<ExtEntry> = model.shaders.iter().map(|l| shader_row(l)).collect();
+    rows.sort_by_key(|r| (r.tags.is_empty(), r.primary.clone()));
+    rows
+}
+
+fn shader_row(link: &ShaderLink) -> ExtEntry {
+    let name = link.asset_path.rsplit('/').next().unwrap_or(&link.asset_path).to_string();
+    let errors = link.problems.iter().filter(|p| p.severity == Severity::Error).count();
+    let warnings = link.problems.len() - errors;
+
+    let secondary = match link.file {
+        // Not resolved. Said first and said plainly: every other row under it is about a file
+        // that is not there.
+        None => format!("{} — no such asset", link.asset_path),
+        Some(_) => link.asset_path.clone(),
+    };
+    // "No material here" rather than "0 material(s)": on a game whose materials live in the
+    // engine crate it depends on, that is every row, and a column of zeroes reads as a fault.
+    let kind = match link.uses.len() {
+        0 => "no material in this project".to_string(),
+        n => format!("{n} material(s)"),
+    };
+    let mut entry = row(name, secondary, kind);
+    entry.id = format!("shader:{}", link.asset_path);
+    if let Some(file) = &link.file {
+        entry.file = Some(file_of(file));
+        entry.offset = Some(0);
+        entry.line = Some(1);
+    }
+    if errors > 0 {
+        entry.tags.push(format!("{errors} error(s)"));
+    }
+    if warnings > 0 {
+        entry.tags.push(format!("{warnings} warning(s)"));
+    }
+
+    // The materials that name it, then what is wrong. In that order because the first answers
+    // "whose is this" and the second only makes sense once you know.
+    for used in &link.uses {
+        let mut child = at(
+            row(
+                used.material.clone(),
+                format!("{} stage", used.stage),
+                "material".to_string(),
+            ),
+            &used.file,
+            used.offset,
+            used.line,
+        );
+        child.id = format!("{}#{}#{}", link.asset_path, used.material, used.stage);
+        entry.children.push(child);
+    }
+    for (n, problem) in link.problems.iter().enumerate() {
+        let mut child = at(
+            row(problem.message.clone(), problem.code.clone(), problem.severity.as_str().to_string()),
+            &problem.file,
+            problem.start,
+            // The line is not carried on a problem — the panel jumps by offset, and the editor
+            // resolves the line from it. `0` rather than a wrong number.
+            0,
+        );
+        child.id = format!("{}#problem#{n}", link.asset_path);
+        entry.children.push(child);
+    }
+    entry
+}
+
+/// One site that puts a declaration into the world.
+fn insert_child(site: &InsertSite) -> ExtEntry {
+    let primary = match site.in_fn.is_empty() {
+        true => site.file.file_name().map_or_else(
+            || site.type_name.clone(),
+            |n| n.to_string_lossy().into_owned(),
+        ),
+        false => site.in_fn.clone(),
+    };
+    let mut e = at(
+        row(primary, site.arg.clone(), site.kind.label().to_string()),
+        &site.file,
+        site.offset,
+        site.line,
+    );
+    e.id = format!("{}#at#{}#{}", site.type_name, site.file.to_string_lossy(), site.offset);
+    e
 }

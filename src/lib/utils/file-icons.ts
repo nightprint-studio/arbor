@@ -73,6 +73,7 @@ import pdfIcon         from '@iconify-icons/vscode-icons/file-type-pdf2';
 // Shaders. `.wgsl` is what a Bevy material is written in, and until now it fell through to
 // the plain-text mark in a folder where every file is one.
 import wgslIcon        from '@iconify-icons/vscode-icons/file-type-wgsl';
+import fontIcon        from '@iconify-icons/vscode-icons/file-type-font';
 import glslIcon        from '@iconify-icons/vscode-icons/file-type-glsl';
 import hlslIcon        from '@iconify-icons/vscode-icons/file-type-hlsl';
 
@@ -168,6 +169,9 @@ const EXT_ICONS: Record<string, IconifyIcon> = {
   wgsl: wgslIcon,
   glsl: glslIcon, vert: glslIcon, frag: glslIcon, comp: glslIcon,
   hlsl: hlslIcon,
+  // The three the browser can load open in the font viewer; `.eot` gets the mark too — it is
+  // still a font, it just cannot be shown.
+  ttf: fontIcon, otf: fontIcon, woff: fontIcon, woff2: fontIcon, eot: fontIcon,
   docx: wordIcon, doc: wordIcon, dotx: wordIcon,
   xlsx: excelIcon, xls: excelIcon, csv: excelIcon,
   pptx: powerpointIcon, ppt: powerpointIcon,

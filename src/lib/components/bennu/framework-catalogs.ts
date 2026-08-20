@@ -34,7 +34,8 @@ export type FrameworkCatalogId =
   | 'taglibs'
   | 'bevycomponents'
   | 'bevysystems'
-  | 'bevyconflicts';
+  | 'bevyconflicts'
+  | 'bevyshaders';
 
 /** How rows can be grouped. Which of these a catalog offers is per-catalog. */
 export type GroupMode = 'none' | 'path' | 'owner' | 'kind' | 'namespace';
@@ -171,6 +172,27 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
       { id: 'none', label: 'No grouping' },
     ],
     columns: { primary: 'system', secondary: 'accesses' },
+  },
+  {
+    // Keyed on the SHADER, not on the material — which is the opposite direction from every other
+    // Bevy catalog, and deliberately so. A `.wgsl` has no declaration to jump to and frequently
+    // more than one material behind it, so "who runs this file" is a question only a list keyed
+    // this way can answer. The material's own row (in Components) answers the other direction.
+    //
+    // Rows with a finding sort first: this list is opened to find out whether anything disagrees,
+    // and a layout mismatch under nine clean shaders is a mismatch nobody sees.
+    id: 'bevyshaders',
+    kind: 'bevy.shaders',
+    title: 'Shaders',
+    command: 'Bevy shaders and the materials that run them',
+    icon: 'palette',
+    placeholder: 'Filter by shader, material or finding…',
+    empty: 'No material in this project names a shader.',
+    groups: [
+      { id: 'kind', label: 'Group by material count' },
+      { id: 'none', label: 'No grouping' },
+    ],
+    columns: { primary: 'shader', secondary: 'asset path' },
   },
   {
     // Pairs the engine must serialise. NOT a bug list: two conflicting systems that are explicitly
@@ -467,6 +489,55 @@ export function kindClass(kind: string): string {
     case 'locale':
       return 'k-service';
     case 'use':
+      return 'k-get';
+
+    // ── Bevy ──────────────────────────────────────────────────────────────────
+    //
+    // Every one of these fell through to `k-neutral` before, which is why an ECS catalog — the
+    // one list in Bennu where the badge IS the information — read as a column of grey. The
+    // colours follow what a thing IS, not where it sits:
+    //
+    //   the data on an entity · global state · things that flow · composition · the rest
+    //
+    // and an ACCESS follows what it costs you: a write is the one that serialises systems and
+    // the one a conflict is made of, so it takes the strong colour.
+    case 'Component':
+      return 'k-service';
+    case 'Resource':
+      return 'k-post';
+    case 'Message':
+    case 'Event':
+      return 'k-put';
+    case 'Bundle':
+      return 'k-bundle';
+    case 'States':
+      return 'k-states';
+    case 'Asset':
+      return 'k-asset';
+    case 'SystemParam':
+      return 'k-config';
+    case 'read':
+    case 'read (resource)':
+      return 'k-get';
+    case 'write':
+    case 'write (resource)':
+      return 'k-delete';
+    // A filter reads nothing and contends with nothing. Muted on purpose: colouring it like an
+    // access is what would make the panel decorative rather than informative.
+    case 'filter':
+      return 'k-any';
+    case 'in bundle':
+    case 'inserts':
+      return 'k-bundle';
+    case 'spawned':
+    case 'inserted':
+      return 'k-spawn';
+    case 'shader':
+    case 'material':
+      return 'k-asset';
+    case 'unordered':
+      return 'k-delete';
+    case 'ordered':
       return 'k-get';
     default:
       return 'k-neutral';

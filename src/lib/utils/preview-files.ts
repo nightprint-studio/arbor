@@ -24,7 +24,20 @@ export function isWordFile(path: string | null | undefined): boolean {
   return /\.docx$/i.test(name);
 }
 
+/** A font file the browser can load.
+ *
+ *  `.eot` is not here and will not be: it is an Internet Explorer format no engine has
+ *  supported for years, so `FontFace` refuses it — and a viewer that opens a file and then says
+ *  it cannot render it is worse than one that never claimed to. It stays with the files Bennu
+ *  says it cannot open, which is at least true. `.woff2` is, because every current engine reads
+ *  it and a project that ships web fonts ships those. */
+export function isFontFile(path: string | null | undefined): boolean {
+  if (!path) return false;
+  const name = path.split(/[\\/]/).pop() ?? path;
+  return /\.(ttf|otf|woff2?)$/i.test(name);
+}
+
 /** Whether this file opens as a preview instead of as an editable buffer. */
 export function opensAsPreview(path: string | null | undefined): boolean {
-  return isImageFile(path) || isWordFile(path);
+  return isImageFile(path) || isWordFile(path) || isFontFile(path);
 }

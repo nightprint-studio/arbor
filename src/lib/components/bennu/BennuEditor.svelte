@@ -24,6 +24,7 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import BennuImageView from './BennuImageView.svelte';
   import BennuDocxView from './BennuDocxView.svelte';
+  import BennuFontView from './BennuFontView.svelte';
   import { CodeEditor } from '$lib/components/shared/ui/code-editor';
   import { tooltip } from '$lib/actions/tooltip';
   import { languageForPath } from './languages';
@@ -93,7 +94,7 @@
   // the editor, and both are read-only here: the store owns them and persists them.
   import { bennuDebugStore, canonFile } from '$lib/stores/bennu/debug.svelte';
   // Which lines compile to bytecode — the gutter offers a breakpoint only on those.
-  import { isWordFile } from '$lib/utils/preview-files';
+  import { isFontFile, isWordFile, opensAsPreview } from '$lib/utils/preview-files';
   import { breakpointableLines } from './breakpoint-lines';
   import { buildDiagnosticsFor } from './build-diags';
   import { spellcheck as ipcSpellcheck, type SpellHit } from '$lib/ipc/bennu/spell';
@@ -195,6 +196,12 @@
    */
   const isImageTab = $derived(isImageFile(activePath));
   const isDocxTab = $derived(isWordFile(activePath));
+  const isFontTab = $derived(isFontFile(activePath));
+  /** A tab with no buffer behind it — a viewer, not an editor. The toolbar and the caret
+   *  footer are both about a document, so neither belongs above or below one. Keyed on the
+   *  shared predicate rather than on the kinds listed above, because the last kind added
+   *  (`.docx`) got its viewer and kept the toolbar — two rows naming the same file. */
+  const isPreviewTab = $derived(opensAsPreview(activePath));
 
   // Per-tab cursor + scroll, so switching away and back restores where you left off.
   // The editor remounts on tab switch ({#key activePath}); it emits `onViewState` while
@@ -2173,8 +2180,10 @@
    *
    * One call covers every framework target because the backend resolves them behind one
    * seam: a `${property}` key, a `@Qualifier` / SpEL `@bean` reference, an injected
-   * field's candidate beans, and — in a bean XML — `class=`, `ref=` and
-   * `<property name=>`. Empty on a caret that is none of those, which is most of a file.
+   * field's candidate beans, — in a bean XML — `class=`, `ref=` and `<property name=>`, and
+   * across the Bevy material seam: a `"shaders/x.wgsl"` inside an `impl Material` → the shader,
+   * and a `.wgsl` → the materials that run it. Empty on a caret that is none of those, which is
+   * most of a file.
    *
    * With several candidates it **asks**, anchoring the menu at the caret — a bean with six
    * injection points has six real answers, and picking one silently hides that there were
@@ -2251,7 +2260,16 @@
     // 1. BE go-to-declaration — any Java symbol (class/method/field/local) — when we have
     //    a byte offset to classify at. Authoritative + precise (jumps to the exact line).
     if (offset != null && (await tryGoToDeclarationBE(offset, action))) return;
-    // 1a. A server-backed buffer stops here. Everything below is a Java-stack resolver — a JSP
+    // 1a. Framework extensions, BEFORE the server-backed stop below — because one of them now
+    //     has something to say about a Rust file, and about a shader. A `"shaders/x.wgsl"`
+    //     inside an `impl Material` is a string literal: rust-analyzer answers nothing about the
+    //     inside of one by construction, and this is the only step that can. Same in the other
+    //     direction, from a `.wgsl` to the materials that run it.
+    //
+    //     After the language's own answer, so a real symbol still wins; before the stop, because
+    //     the stop is what kept this unreachable on exactly the two file kinds it is for.
+    if (offset != null && (await tryGoToFrameworkExt(offset))) return;
+    // 1b. A server-backed buffer stops here. Everything below is a Java-stack resolver — a JSP
     //     page variable, a Struts action, a MyBatis statement, a library class from the
     //     classpath — and none of them has anything to say about a Rust file. Falling through
     //     would spend five round-trips to reach the same "nothing", and the last of them
@@ -2272,13 +2290,6 @@
       }
       return;
     }
-    // 1a-bis. Framework extensions (Spring): a `${property}` key → its `application*.yml`
-    //     entry, a `@Qualifier` / SpEL `@bean` → the bean declaration, an injected field →
-    //     its candidate beans, and in a bean XML a `class=`, a `ref=` or a
-    //     `<property name=>` → the member it names. Runs AFTER the language's own answer,
-    //     because a caret inside a string literal or an XML attribute is invisible to the
-    //     Java resolver by construction — this is the only place those can resolve.
-    if (offset != null && (await tryGoToFrameworkExt(offset))) return;
     // 1b. JSP page-scoped variable (a `<c:set var>`/`${var}` under the caret) — single-file,
     //     resolved off the buffer with no project index (only runs for non-`.java` files).
     if (offset != null && (await tryGoToJspVar(offset))) return;
@@ -2592,10 +2603,11 @@
 
     <!-- The editor toolbar: breadcrumb (left) + file-type-specific actions (right). This is
          THE per-file action bar — new file-type tools slot into `.ed-actions`.
-         Skipped for an image, which brings its own bar: every action here is about a document
-         (go to line, reformat, the breadcrumb's symbol path) and a second row repeating the file
-         name above a preview is just two toolbars. -->
-    {#if !isImageTab}
+         Skipped for anything that opens as a preview — an image, a Word document — because each
+         brings its own bar: every action here is about a document (go to line, reformat, the
+         breadcrumb's symbol path) and a second row repeating the file name above a preview is
+         just two toolbars. -->
+    {#if !isPreviewTab}
     <div class="ed-toolbar">
       <div class="ed-crumbs">
         {#if isValidationFile}<ShieldCheck size={12} class="crumb-icon" />{/if}
@@ -2749,6 +2761,10 @@
     <!-- Same bargain as an image: no buffer, its own viewer. A `.docx` is a ZIP of XML, and
          the only useful thing to do with one in a project tree is read it. -->
     <BennuDocxView path={activePath} />
+  {:else if activePath && isFontTab}
+    <!-- Same again, and every question about a font is visual: what it looks like, whether it
+         has the accents this project needs, how it holds up small. -->
+    <BennuFontView path={activePath} />
   {:else if activePath}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="ed-editor-wrap" oncontextmenu={onEditorContextMenu}>
@@ -2808,7 +2824,7 @@
     </div>
   {/if}
 
-  {#if activePath && !isImageTab}
+  {#if activePath && !isPreviewTab}
     <div class="ed-footer">
       <span class="ed-pos"><MapPin size={11} /> Ln {caretLine}, Col {caretCol}</span>
       <span class="ed-foot-sep">·</span>

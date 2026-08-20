@@ -229,6 +229,18 @@ pub(crate) fn declaration(
     let Some(sym) = scan_symbols(source).into_iter().find(|s| s.name == name) else {
         return Some(None);
     };
+    // The caret is already ON the declaration. There is nothing to go to *in this file*, and
+    // answering with the span the caret is standing in is a jump to itself — which reads as
+    // "go-to is broken" rather than as "you are there".
+    //
+    // It matters beyond the cosmetics: the empty answer is what lets the chain continue to the
+    // framework extensions, and for a shader that is where the interesting jump lives. A
+    // `struct SpiralHoverParams` in a shader has a Rust half — the `#[derive(ShaderType)]` it
+    // has to match byte for byte — and until this returned nothing, that jump was unreachable
+    // because this one always won first.
+    if offset >= sym.start && offset <= sym.end {
+        return Some(None);
+    }
     let (line, col) = line_col(source, sym.start);
     Some(Some(DeclarationTarget {
         file: file.to_string(),
@@ -611,5 +623,41 @@ fn fragment() -> @location(0) vec4<f32> {
         assert_eq!(declaration("s.wgsl", BEVY, at), Some(None));
         let usages = references("s.wgsl", BEVY, at).unwrap().expect("no usages");
         assert!(usages.target_label.contains("not declared in this file"));
+    }
+}
+
+#[cfg(test)]
+mod declaration_tests {
+    use super::*;
+
+    const SRC: &str = concat!(
+        "struct Params {\n",
+        "    sand_color: vec4<f32>,\n",
+        "};\n\n",
+        "@group(2) @binding(0)\n",
+        "var<uniform> params: Params;\n\n",
+        "fn use_it() -> vec4<f32> {\n",
+        "    return params.sand_color;\n",
+        "}\n",
+    );
+
+    #[test]
+    fn a_use_still_goes_to_its_declaration() {
+        let at = SRC.rfind("params.sand_color").unwrap() + 2;
+        let target = declaration("s.wgsl", SRC, at).unwrap().expect("the var declaration");
+        assert_eq!(&SRC[target.start..target.end], "params");
+        assert!(target.start < at, "it jumped backwards to the declaration");
+    }
+
+    #[test]
+    fn a_caret_on_the_declaration_answers_nothing_rather_than_itself() {
+        // Both because a jump to where you already are reads as a broken feature, and because
+        // the empty answer is what lets the chain reach the framework extensions — which is
+        // where a shader struct's Rust half lives.
+        let at = SRC.find("struct Params").unwrap() + "struct Pa".len();
+        assert_eq!(declaration("s.wgsl", SRC, at), Some(None));
+
+        let member = SRC.find("sand_color").unwrap() + 3;
+        assert_eq!(declaration("s.wgsl", SRC, member), Some(None));
     }
 }

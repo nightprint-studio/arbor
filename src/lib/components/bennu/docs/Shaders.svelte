@@ -57,3 +57,71 @@
   not take the language over, so everything on this page is what a <code>.wgsl</code> file gets by
   default. See <em>Installing a language server</em> for the rule.
 </p>
+
+<h2>The material on the other side</h2>
+<p>
+  A shader is half of something. The other half is a Rust <code>#[derive(AsBindGroup)]</code>
+  struct that says what the pipeline supplies and an <code>impl Material</code> that names the
+  file — and <strong>nothing in the toolchain checks that the two agree</strong>. Write
+  <code>f32</code> where the shader says <code>vec4&lt;f32&gt;</code>, or put two fields in the
+  other order, and it all still compiles: the uniform is simply read with a different layout than
+  it was written with, and what you get is a colour that is not the colour you asked for.
+</p>
+<p>Bennu reads both files and says so.</p>
+<ul>
+  <li><strong>The layout, field by field.</strong> Names, order and types, with
+    <code>Vec4</code> ↔ <code>vec4&lt;f32&gt;</code>, <code>Mat4</code> ↔
+    <code>mat4x4&lt;f32&gt;</code> and the rest of the scale. A type it does not recognise on
+    either side ends the comparison for that field rather than guessing.</li>
+  <li><strong>The bindings.</strong> Every <code>#[uniform(0)]</code>, <code>#[texture(1)]</code>
+    and <code>#[sampler(2)]</code> has to exist in the shader's material bind group. One that is
+    declared in <em>another</em> group is told apart from one that is absent — the two send you
+    looking in different places.</li>
+  <li><strong>The entry point.</strong> A material naming a shader for the fragment stage wants a
+    <code>@fragment</code> in it.</li>
+  <li><strong>The file.</strong> A path that resolves to no asset at all.</li>
+</ul>
+
+<h2>Getting from one to the other</h2>
+<p>
+  The seam has three joins, and <kbd>Ctrl</kbd> + <kbd>B</kbd> follows whichever the caret is on.
+  Each works <strong>both ways</strong>: a declaration split over two files has no primary half,
+  and you are as likely to be reading the shader and wanting the Rust as the other way round.
+</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Caret on</th><th>Goes to</th></tr></thead>
+  <tbody>
+    <tr><td>the path in <code>fragment_shader()</code></td><td>the <code>.wgsl</code></td></tr>
+    <tr><td>a <code>#[uniform(0)]</code> field</td><td>the shader's <code>@binding(0)</code></td></tr>
+    <tr><td>a <code>ShaderType</code> struct or field</td><td>the shader's <code>struct</code>, or that member</td></tr>
+    <tr><td>a shader <code>struct</code> or member</td><td>the Rust layout, or that field</td></tr>
+    <tr><td>a shader binding variable</td><td>the Rust field that supplies it</td></tr>
+    <tr><td>anywhere else in a <code>.wgsl</code></td><td>the materials that run it</td></tr>
+  </tbody>
+</table>
+<ul>
+  <li>The shader path works when it is written as a <code>const</code> too, which is how a crate
+    that embeds its shaders writes them.</li>
+  <li>The last row is a fallback rather than an answer: a shader has no single declaration to
+    jump to, and more than one material may run it.</li>
+  <li>A mark in the gutter beside every material, naming its shaders.</li>
+  <li>The <strong>Shaders</strong> panel — in the Command Palette — is the list keyed the other
+    way round: one row per shader, the materials that run it underneath, and whatever the two
+    disagree about.</li>
+</ul>
+
+<div class="callout">
+  Two forms of asset path are understood: <code>shaders/x.wgsl</code>, relative to the project's
+  <code>assets/</code> directory, and <code>embedded://crate_name/shaders/x.wgsl</code>, which is
+  how a library crate ships shaders under its own <code>src/</code>.
+</div>
+
+<h2>What it will not claim</h2>
+<p>
+  A project that ships no shaders <em>of a given form</em> is told nothing about missing ones. An
+  engine crate declares the materials and the game that depends on it ships the
+  <code>assets/</code> — so an unresolved file path there belongs to somebody else's project, and
+  a warning would be permanently wrong. Likewise a shader <code>struct</code> that arrives through
+  an <code>#import</code> rather than being declared in the file: this side does not resolve
+  naga_oil's composition, so it says nothing instead of comparing against something it cannot see.
+</p>

@@ -4,6 +4,7 @@
 //! `bennu_wgsl::prelude::...`. The submodules stay `pub` for rustdoc navigation, but the
 //! prelude is the canonical call-site path.
 
+pub use crate::bindings::{scan as scan_bindings, Binding};
 pub use crate::builtins::{
     completions_for, Builtin, ATTRIBUTES, BUILTIN_FUNCTIONS, BUILTIN_TYPES, BUILTIN_VALUES,
     KEYWORDS,

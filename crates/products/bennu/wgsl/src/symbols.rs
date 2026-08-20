@@ -54,7 +54,7 @@ pub struct WgslSymbol {
 /// WGSL block comments **nest** (`/* /* */ */` is one comment), which is why this counts a
 /// depth rather than looking for the first `*/` — getting that wrong swallows the rest of
 /// the file, or ends the comment halfway through it.
-fn blank_comments(src: &str) -> String {
+pub(crate) fn blank_comments(src: &str) -> String {
     let bytes = src.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -325,7 +325,11 @@ fn fields_of(src: &str, from: usize, owner: &str) -> Vec<WgslSymbol> {
                                 kind: WgslSymbolKind::Field,
                                 start: s,
                                 end: e,
-                                detail: "field".into(),
+                                // The member's TYPE, not the word "field". A structure row that
+                                // says `field` says nothing the name did not, and the type is the
+                                // half a Bevy material has to agree with byte for byte — so it is
+                                // also what the layout check compares.
+                                detail: field_type(src, k + 1),
                                 container: Some(owner.to_string()),
                             });
                         }
@@ -338,6 +342,27 @@ fn fields_of(src: &str, from: usize, owner: &str) -> Vec<WgslSymbol> {
         i += 1;
     }
     out
+}
+
+/// The text of a member's type: everything from after the `:` to the `,` that ends the member.
+///
+/// Kept verbatim rather than reduced. `vec4<f32>` and `array<vec4<f32>, 4>` are both types a
+/// member can have, and the only reader that has to *understand* one is the layout check, which
+/// would rather be handed the text than a lossy parse of it.
+fn field_type(src: &str, from: usize) -> String {
+    let bytes = src.as_bytes();
+    let mut i = from;
+    let mut depth = 0i32;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'<' | b'(' | b'[' => depth += 1,
+            b'>' | b')' | b']' => depth -= 1,
+            b',' | b'}' if depth <= 0 => break,
+            _ => {}
+        }
+        i += 1;
+    }
+    src[from..i.min(src.len())].trim().to_string()
 }
 
 /// The identifier under `offset`, as `(name, start, end)`.

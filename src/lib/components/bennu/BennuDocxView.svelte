@@ -24,7 +24,7 @@
    * Nothing here edits. The file never enters the source cache (see `opensAsPreview`), so
    * there is no buffer for a stray Ctrl+S to write back over the document.
    */
-  import { FileText, ExternalLink } from 'lucide-svelte';
+  import { FileText, ExternalLink, Lock } from 'lucide-svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import { fsReadBytes } from '$lib/ipc/fs';
@@ -96,7 +96,9 @@
     <FileText size={13} />
     <span class="dv-name">{baseName(path)}</span>
     {#if bytes}<span class="dv-meta">{formatBytes(bytes)}</span>{/if}
-    <span class="dv-ro">read-only</span>
+    <span class="dv-ro" use:tooltip={'Bennu renders this document; it never writes to it'}>
+      <Lock size={10} /> Read-only
+    </span>
     <button
       class="dv-open"
       type="button"
@@ -135,10 +137,19 @@
   }
   .dv-name { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dv-meta { color: var(--text-faint); }
+  /* A badge rather than a grey word at the end of the row. It was the quietest thing in the
+     bar, which is backwards: it is the one piece of information that changes what you can do
+     here, and a viewer that looks like an editor is a viewer you try to type into. */
   .dv-ro {
     margin-left: auto;
-    font-size: var(--font-size-2xs); text-transform: uppercase; letter-spacing: 0.05em;
-    color: var(--text-faint);
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 17px; padding: 0 7px;
+    border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    color: var(--warning);
+    font-size: var(--font-size-2xs); font-weight: 600;
+    letter-spacing: 0.04em; white-space: nowrap;
   }
   .dv-open {
     display: inline-flex; align-items: center; justify-content: center;

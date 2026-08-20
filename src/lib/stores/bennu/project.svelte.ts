@@ -68,7 +68,9 @@ const BINARY_EXTENSIONS = new Set([
   'pdf', 'zip', 'jar', 'war', 'ear', 'class', 'exe', 'dll', 'so', 'dylib', 'bin',
   'o', 'obj', 'a', 'lib', '7z', 'gz', 'bz2', 'xz', 'tar', 'rar', 'iso', 'dmg',
   'mp3', 'mp4', 'm4a', 'wav', 'flac', 'ogg', 'avi', 'mov', 'mkv', 'webm',
-  'ttf', 'otf', 'woff', 'woff2', 'eot', 'db', 'sqlite', 'mdb', 'keystore', 'jks',
+  // `.eot` stays: no engine loads it, so there is nothing a viewer could show. Its three
+  // siblings moved to `opensAsPreview` — see `isFontFile`.
+  'eot', 'db', 'sqlite', 'mdb', 'keystore', 'jks',
 ]);
 
 function isBinaryPath(path: string): boolean {

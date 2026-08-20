@@ -32,7 +32,7 @@
  *
  * ## The token names are the legacy vocabulary
  *
- * It returns CM5-style names (`keyword`, `def`, `property`, `variable-3`, …) so it drops into the
+ * It returns CM5-style names (`keyword`, `def`, `property`, `type`, …) so it drops into the
  * injection path in `highlight.ts` with no special case — plus `callee` and `self`, which that
  * file maps onto two classes the theme already had and the CM5 vocabulary never did.
  */
@@ -347,13 +347,17 @@ function readName(stream: StringStream, state: JsState): string {
   mark(state, 'value', 'a');
 
   if (wasDeclaring) return 'def';
-  if (wasConstructing) return 'variable-3';
+  // `type` rather than the CM5 name `variable-3`: CodeMirror 6's legacy token table has no
+  // entry for `variable-3` and no tag of that name, so everything returning it resolved to
+  // nothing and rendered as plain text — `new Foo`, `Promise`, `Math` and every capitalised
+  // name in the file.
+  if (wasConstructing) return 'type';
   if (next === ':' && isKeyPosition(prevChar)) return 'property';
   if (next === '(') return 'callee';
-  if (GLOBALS.has(word)) return 'variable-3';
+  if (GLOBALS.has(word)) return 'type';
   // A capitalised name is a constructor or a namespace by every convention this code follows —
   // `Math`, `JSON`, `Date`, `OrderDialog`.
-  if (/^[A-Z]/.test(word)) return 'variable-3';
+  if (/^[A-Z]/.test(word)) return 'type';
   return 'variable';
 }
 

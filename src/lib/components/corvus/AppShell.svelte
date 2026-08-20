@@ -730,7 +730,10 @@
     // is handled inside `detectShells`).
     terminalStore.loadCatalogue();
     terminalStore.loadConfig();
-    terminalStore.detectShells().catch(() => {/* HMR */});
+    // `ensureDetected` rather than `detectShells`: the settings page also asks, and a second
+    // detection started under the first tears the first one's listeners down and drops its
+    // result.
+    terminalStore.ensureDetected().catch(() => {/* HMR */});
   });
 
   // Keep cacheStore in sync with the active tab so the scheduler and

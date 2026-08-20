@@ -109,6 +109,37 @@
   declares is read from its own fields and needs no table.
 </p>
 
+<h2>Where a component is created</h2>
+<p>
+  A signature says who <em>reads</em> a component. Nothing in a signature says who ever
+  <strong>makes</strong> one — so a type that six systems read has, on the evidence of its
+  parameters alone, no origin at all. Under every declaration is therefore a row per site that
+  puts it into the world: a <code>spawn</code>, an <code>insert</code> on an entity that already
+  exists, an <code>insert_resource</code>, an <code>add_message</code>, an
+  <code>init_state</code>. Each names the function it happens in and the argument it was given.
+</p>
+<p>
+  Read from call sites rather than from signatures, so a <code>spawn((Health(100.0), Player))</code>
+  is one row under <code>Health</code> and one under <code>Player</code> — which is what a
+  bundle-as-tuple means. A value whose type cannot be named from the expression is skipped rather
+  than guessed at, and the call names are a closed list: a method on your own type called
+  <code>insert</code> contributes nothing.
+</p>
+
+<h2>Materials and shaders</h2>
+<p>
+  A <code>#[derive(Asset)]</code> type is a row in the components list like any other — the
+  question "who touches <code>SpiralHoverMaterial</code>" is answered by the same signatures, so
+  splitting it into a panel of its own would split one question in two. An asset is reached
+  through the <code>Assets&lt;T&gt;</code> resource that stores it rather than by its own name,
+  which is how it is looked up here.
+</p>
+<p>
+  A material — an asset that also runs a shader — carries its shaders as the first rows under it,
+  and the whole relationship is described under <em>Shaders (WGSL)</em>: what the two files have
+  to agree about, what Bennu checks, and how to get from one to the other.
+</p>
+
 <h2>What it does not claim</h2>
 <p>
   Bennu reads <strong>this project's own sources</strong> and nothing else. The engine's plugins and

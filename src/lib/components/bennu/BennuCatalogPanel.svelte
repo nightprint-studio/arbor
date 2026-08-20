@@ -603,6 +603,12 @@
   .k-controller { color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent); }
   .k-config { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
   .k-xml { color: var(--text-secondary); background: var(--bg-overlay); }
+  /* Bevy's own families. Three hues the list above did not have, so a Bundle, a States enum and
+     an Asset are told apart from a Component at a glance rather than by reading. */
+  .k-bundle { color: var(--color-tag); background: color-mix(in srgb, var(--color-tag) 14%, transparent); }
+  .k-states { color: var(--color-workspace); background: color-mix(in srgb, var(--color-workspace) 14%, transparent); }
+  .k-asset  { color: var(--color-reflog); background: color-mix(in srgb, var(--color-reflog) 16%, transparent); }
+  .k-spawn  { color: var(--color-file-added); background: color-mix(in srgb, var(--color-file-added) 14%, transparent); }
   .k-neutral { color: var(--text-secondary); background: var(--bg-overlay); }
 
   .row-main {

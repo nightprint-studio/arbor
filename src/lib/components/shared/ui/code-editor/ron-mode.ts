@@ -100,7 +100,16 @@ export const ronMode: StreamParser<RonState> = {
       // the whole mode is for.
       if (/^\s*:/.test(after)) return 'property';
       // A struct, an enum variant or a tuple-struct: an identifier applied to something.
-      if (/^\s*[([]/.test(after)) return 'variable-3';
+      //
+      // `type`, not the CM5 name `variable-3` this used to return. CodeMirror 6's legacy
+      // token table has no entry for `variable-3` and no tag of that name, so it resolved to
+      // nothing at all — which is why a RON file rendered as a wall of white: every
+      // constructor in it, which is most of the words on the page, was unstyled.
+      if (/^\s*[([]/.test(after)) return 'type';
+      // A bare capitalised identifier is a **unit variant** (`blend: Additive`). Nothing
+      // follows it to give it away, but in RON a capitalised name is a type name — there are
+      // no variables to confuse it with.
+      if (/^[A-Z]/.test(word[0])) return 'type';
       return 'variable';
     }
 

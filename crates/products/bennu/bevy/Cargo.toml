@@ -14,3 +14,6 @@ bennu-ext   = { path = "../ext" }
 bennu-proto = { path = "../proto" }
 # Byte-offset mechanics (`line_number`) — the same helper every other extension reports lines with.
 bennu-complete = { path = "../complete" }
+# The shader half of a material. A `#[derive(AsBindGroup)]` promises bindings and a layout that
+# only a `.wgsl` can confirm, and this crate is where the two are read together.
+bennu-wgsl  = { path = "../wgsl" }

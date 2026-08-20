@@ -257,6 +257,7 @@ impl FrameworkService {
             taglibs: &taglibs,
             rust: &walked.rust,
             ron: &walked.ron,
+            shaders: &walked.shaders,
         });
         // Each extension keeps only what its own `applies` admitted it to; a handle to one the
         // registry dropped would be a model nobody ever fills.
@@ -291,6 +292,9 @@ struct WalkedFiles {
     /// Only filled when an extension asked for them — see [`collect_config_files`].
     rust: Vec<ScannedFile>,
     ron: Vec<ScannedFile>,
+    /// `.wgsl` shaders. Walked with the Rust sources and for the same reason: they are the
+    /// other half of a Bevy material, and nothing in a `.rs` says whether the two agree.
+    shaders: Vec<ScannedFile>,
 }
 
 /// Whether a file name is a server-rendered page — the JSP family, including the `.tag` files
@@ -343,6 +347,8 @@ fn collect_config_files(root: &Path, wants_sources: bool) -> WalkedFiles {
                 &mut out.rust
             } else if wants_sources && lower.ends_with(".ron") {
                 &mut out.ron
+            } else if wants_sources && lower.ends_with(".wgsl") {
+                &mut out.shaders
             } else {
                 continue;
             };

@@ -956,6 +956,7 @@ dependencies = [
  "bennu-complete",
  "bennu-ext",
  "bennu-proto",
+ "bennu-wgsl",
 ]
 
 [[package]]
