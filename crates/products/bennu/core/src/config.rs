@@ -113,6 +113,20 @@ pub struct BennuConfig {
     /// Doesn't affect the one-shot initial index build. `#[serde(default)]` fills a missing key with
     /// `0`, so existing config files get the auto behaviour.
     pub validation_threads: usize,
+    /// **Local history**: keep a private record of what every project file used to be, so a
+    /// save, a refactor or a delete can be undone long after the editor's own undo stack has
+    /// moved on. `true` by default. Stored in Arbor's data directory, never inside the
+    /// project — a history folder inside a repository is a folder that gets committed.
+    pub local_history: bool,
+    /// How many days of local history to keep. Labelled revisions, and each file's newest
+    /// one, are kept regardless — a label is a promise, and a file whose only revision aged
+    /// out would quietly stop having a history exactly when it is the last copy.
+    pub local_history_days: u32,
+    /// Ceiling on one project's local history, in megabytes. Over it, the oldest revisions go.
+    pub local_history_max_mb: u64,
+    /// Files bigger than this (megabytes) are not recorded. One 40 MB binary would spend the
+    /// whole budget on a single revision that no diff can show anyway.
+    pub local_history_max_file_mb: u64,
     /// Extra JDK install directories to search, **before** `JAVA_HOME` and each platform's standard
     /// install roots (see `bennu_classpath`'s `jdk_install_roots`). For a JDK installed somewhere
     /// non-standard — a portable SDK, an unpacked tarball — so the index can still resolve the
@@ -170,6 +184,30 @@ pub struct BennuConfig {
     ///
     /// A table: it stays at the end with the others.
     pub cargo: CargoConfig,
+    /// **First-run tour** — whether the user has been through Bennu's, and at which schema
+    /// version. See [`OnboardingConfig`].
+    ///
+    /// Bennu's own, not the shell's: Corvus keeps the same two fields in `corvus/config.toml`,
+    /// and finishing one tour is no reason to stop introducing the other product.
+    ///
+    /// A table: it stays at the end with the others.
+    #[serde(default)]
+    pub onboarding: OnboardingConfig,
+}
+
+/// Whether the user has been through Bennu's welcome tour.
+///
+/// `version` is a schema knob rather than a build number: the frontend re-opens the tour when
+/// its own `CURRENT_ONBOARDING_VERSION` exceeds the stored one, which is how a release that
+/// adds a genuinely new step gets to show it to somebody who has already been through the old
+/// ones. `0` means never seen.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct OnboardingConfig {
+    /// Finished or skipped at least once.
+    pub completed: bool,
+    /// The schema version that happened at.
+    pub version: u32,
 }
 
 /// Cargo settings — specifically, Bennu's use of the crates.io index.
@@ -354,6 +392,10 @@ impl Default for BennuConfig {
             // Empty = the backend's defaults. Writing the list here would freeze a user's
             // config to whatever the defaults were the day they first saved it.
             step_excludes: Vec::new(),
+            local_history: true,
+            local_history_days: 7,
+            local_history_max_mb: 256,
+            local_history_max_file_mb: 4,
             search_dependencies: false,
             auto_import: true,
             validation_threads: 0,
@@ -365,6 +407,7 @@ impl Default for BennuConfig {
             library_beans: LibraryBeansConfig::default(),
             lsp: LspConfig::default(),
             cargo: CargoConfig::default(),
+            onboarding: OnboardingConfig::default(),
         }
     }
 }

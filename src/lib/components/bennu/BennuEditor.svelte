@@ -13,6 +13,7 @@
   import {
     Hash, FileCode2, MapPin, Scissors, Copy, ClipboardPaste, Target, SearchCode,
     PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed, ShieldCheck, Plus, BookOpen,
+    History,
     Braces, ArrowLeftRight, Package, FolderInput, CircleAlert, TriangleAlert, Check,
     DownloadCloud, FileDown, Variable, Database, Clock, Columns3, ListPlus, SquarePen,
     Languages,
@@ -22,6 +23,7 @@
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import BennuImageView from './BennuImageView.svelte';
+  import BennuDocxView from './BennuDocxView.svelte';
   import { CodeEditor } from '$lib/components/shared/ui/code-editor';
   import { tooltip } from '$lib/actions/tooltip';
   import { languageForPath } from './languages';
@@ -48,6 +50,8 @@
   import SymbolKindIcon from './SymbolKindIcon.svelte';
   import { javaKindStore } from '$lib/stores/bennu/java-kinds.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
+  import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuI18nStore } from '$lib/stores/bennu/i18n.svelte';
   import { isI18nBundle } from './i18n/bundle-path';
@@ -89,7 +93,9 @@
   // the editor, and both are read-only here: the store owns them and persists them.
   import { bennuDebugStore, canonFile } from '$lib/stores/bennu/debug.svelte';
   // Which lines compile to bytecode — the gutter offers a breakpoint only on those.
+  import { isWordFile } from '$lib/utils/preview-files';
   import { breakpointableLines } from './breakpoint-lines';
+  import { buildDiagnosticsFor } from './build-diags';
   import { spellcheck as ipcSpellcheck, type SpellHit } from '$lib/ipc/bennu/spell';
   import { mojibakeCheck as ipcMojibakeCheck } from '$lib/ipc/bennu/mojibake';
   import { intentionsAt as ipcIntentionsAt } from '$lib/ipc/bennu/intentions';
@@ -188,6 +194,7 @@
    * every keystroke is an edit to a file that has no text.
    */
   const isImageTab = $derived(isImageFile(activePath));
+  const isDocxTab = $derived(isWordFile(activePath));
 
   // Per-tab cursor + scroll, so switching away and back restores where you left off.
   // The editor remounts on tab switch ({#key activePath}); it emits `onViewState` while
@@ -512,7 +519,22 @@
   // "JSP not found" / "not a property of action" on a Struts config XML's `<result>` targets (live
   // buffer, debounced, re-run on index rebuild).
   let strutsDiags = $state<EditorDiagnostic[]>([]);
-  const allDiags = $derived([...diags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags]);
+  // The last build's compiler errors/warnings for THIS file, placed in the buffer. Derived
+  // rather than fetched: the run store already holds them, and re-deriving on every build
+  // means a rebuild that fixes an error clears its mark without anyone clearing anything.
+  const buildDiags = $derived(
+    activePath && projectStore.project
+      ? buildDiagnosticsFor(
+          projectStore.project.root,
+          activePath,
+          projectStore.sourceOf(activePath),
+          bennuRunStore.diagnostics,
+        )
+      : [],
+  );
+  const allDiags = $derived([
+    ...diags, ...buildDiags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags,
+  ]);
 
   // ── Semantic highlight (language-server backed languages) ───────────────────────
   //
@@ -2452,6 +2474,11 @@
         ? [{ id: 'generate', label: 'Generate…', icon: Wand2, shortcut: 'Alt+Insert' } as MenuItem]
         : []),
       { id: 'save', label: 'Save', icon: Save, shortcut: 'Ctrl+S' },
+      { id: 's4', label: '', separator: true },
+      // Reachable from the buffer as well as from the tree: the moment you want the
+      // previous version of a file is while you are looking at the current one, and going
+      // to find its row in the tree first is the trip this saves.
+      { id: 'history', label: 'Local History', icon: History, shortcut: 'Alt+Shift+H' },
     ];
     bennuContextMenuStore.show(e.clientX, e.clientY, items, onEditorMenuSelect);
   }
@@ -2461,6 +2488,9 @@
       case 'copy': editorComp?.copySelection(); break;
       case 'paste': void editorComp?.pasteClipboard(); break;
       case 'gotodef': goToDefinition(); break;
+      case 'history':
+        if (projectStore.project && activePath) bennuHistoryStore.show(projectStore.project.root, activePath);
+        break;
       case 'usages': void findUsages(); break;
       case 'rename': openRename(); break;
       case 'generate':
@@ -2715,6 +2745,10 @@
     <!-- An image has no buffer to edit, so it gets its own view rather than an editor with an
          empty document in it. The tab strip, the tree selection and Ctrl+W all behave the same. -->
     <BennuImageView path={activePath} />
+  {:else if activePath && isDocxTab}
+    <!-- Same bargain as an image: no buffer, its own viewer. A `.docx` is a ZIP of XML, and
+         the only useful thing to do with one in a project tree is read it. -->
+    <BennuDocxView path={activePath} />
   {:else if activePath}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="ed-editor-wrap" oncontextmenu={onEditorContextMenu}>

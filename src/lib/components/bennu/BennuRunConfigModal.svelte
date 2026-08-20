@@ -236,7 +236,10 @@
     })),
   );
 
-  function createConfig(kind: RunConfigKind = 'application') {
+  /** `kind` è obbligatoria di proposito: aveva un default `'application'`, ed è così che
+   *  un bottone ha finito per creare una configurazione Java su un progetto Cargo. La kind
+   *  la decide chi ha in mano `offeredKinds`, non questa funzione. */
+  function createConfig(kind: RunConfigKind) {
     if (!root) return;
     // Seed from the project when the answer is not in doubt: a JVM configuration on a project
     // with exactly one entry point (or a Spring Boot one with exactly one Boot entry point)
@@ -468,10 +471,24 @@
         {#if configs.length === 0}
           <div class="list-empty">
             <EmptyState message="No run configurations yet." compact />
-            <Button variant="secondary" size="sm" onclick={() => createConfig('application')}>
-              {#snippet iconStart()}<Plus size={13} />{/snippet}
-              Add configuration
-            </Button>
+            <!-- Lo **stesso** menu del `+`, non una scorciatoia che indovina: cablava
+                 `application`, cioè creava una configurazione Java anche su un progetto
+                 Cargo, dove quella kind non è nemmeno fra quelle offerte. Due bottoni che
+                 dicono «aggiungi» devono aggiungere la stessa cosa. -->
+            <Dropdown items={addItems} position="fixed" direction="down" width="220px">
+              {#snippet trigger({ toggle, open })}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onclick={toggle}
+                  ariaHaspopup="menu"
+                  ariaExpanded={open}
+                >
+                  {#snippet iconStart()}<Plus size={13} />{/snippet}
+                  Add configuration
+                </Button>
+              {/snippet}
+            </Dropdown>
           </div>
         {:else}
           <!-- Grouped by category, like IntelliJ's — a flat list of eight names says nothing

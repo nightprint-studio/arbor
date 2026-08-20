@@ -72,6 +72,14 @@ fn bennu_completion(_ctx: &BennuState, args: CompletionArgs) -> Result<Vec<Compl
     {
         return Ok(items);
     }
+    // A shader, with no server to ask. Routed here for the same reason: the Java index has
+    // nothing to say about a `.wgsl`, and letting it answer would offer Java members inside
+    // a fragment shader.
+    if let Some(items) =
+        crate::wgsl_intel::completion(&args.file, args.offset, args.source.as_deref())
+    {
+        return Ok(items);
+    }
     Ok(IndexService::global().completion(&args.file, args.offset, args.source.as_deref()))
 }
 
@@ -134,6 +142,12 @@ pub(crate) fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Res
     // little about a manifest, and what it does report arrives only after a reload — whereas a typo
     // in a key name is worth a squiggle the moment it is typed.
     if let Some(diags) = crate::cargo_intel::diagnostics(&args.file, args.source.as_deref()) {
+        return Ok(diags);
+    }
+    // A shader, compiled by naga right here. Below the language-server route on purpose:
+    // `wgsl-analyzer` knows about the whole composed module and this knows about one file,
+    // so when the server is installed it wins. This is what a shader gets without it.
+    if let Some(diags) = crate::wgsl_intel::diagnostics(&args.file, args.source.as_deref()) {
         return Ok(diags);
     }
     // Action refs to check: the FE's explicit list when present, else — for a JSP — the

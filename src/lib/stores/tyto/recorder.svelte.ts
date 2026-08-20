@@ -23,12 +23,17 @@ import {
   startRecording as beStart, stopRecording as beStop, takeScreenshot as beScreenshot,
   removeCapture as beRemove, renameCapture as beRename, clearCaptures as beClear,
   revealCapture as beReveal, openCapture as beOpen, revealOutput as beRevealOutput,
+  exportAtlas as beExportAtlas,
   selectRegion as beSelectRegion, freezeScreen, previewSource,
   enumerateUiElements, enumerateWindowRects,
   type CaptureWire, type StartRecordingArgs, type PixelRectWire, type WindowPickRectWire,
-  type FrozenFrame, type FrameSequenceWire,
+  type FrozenFrame, type FrameSequenceWire, type AtlasExportWire,
 } from '$lib/ipc/tyto/recorder';
 import { uiStore } from '$lib/stores/ui.svelte';
+// The app's single "show me this folder" entry point (built-in explorer when the
+// user opted in, OS file manager otherwise) — an atlas export lands in a folder.
+import { openFolder } from '$lib/utils/reveal';
+import { formatBytes } from '$lib/utils/format';
 import { setTytoSelection, resetTytoBounds, screenRecordingStatus } from '$lib/ipc/tyto/main-window';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { openRecordingHud, closeRecordingHud, TYTO_RECORDING_STOPPED } from '$lib/ipc/tyto/hud-window';
@@ -305,6 +310,9 @@ function createRecorderStore() {
   let beSession = false;
   // Last backend error surfaced to the UI (empty = none).
   let lastError = $state<string | null>(null);
+  // The capture whose atlas is being written, if any. An export walks every frame
+  // and re-encodes whole pages, so it is one of the few things here worth a spinner.
+  let exportingId = $state<string | null>(null);
   // Why capture can't run at all (a refused OS screen-recording permission), as the
   // backend phrased it. Distinct from `lastError`: this is a standing condition the
   // picker must explain, not an event that just happened.
@@ -1002,6 +1010,34 @@ function createRecorderStore() {
       }
     },
 
+    /** Fold a frame sequence into a sprite atlas (PNG pages + an `atlas.ron` sheet)
+     *  next to the recording, and say where it landed.
+     *
+     *  The result is a folder, not a file, so the toast offers to open it: an export
+     *  the user can't find is an export that didn't happen. `null` on failure — the
+     *  reason is in the toast AND in `lastError`, because a caller that wants to chain
+     *  something after the export shouldn't have to read a toast to know it worked. */
+    async exportAtlas(id: string): Promise<AtlasExportWire | null> {
+      exportingId = id;
+      try {
+        const out = await beExportAtlas(id);
+        const pages = out.pages.length === 1 ? '1 page' : `${out.pages.length} pages`;
+        uiStore.showToast(
+          `Atlas exported — ${out.frame_count} frames on ${pages} (${formatBytes(out.size_bytes)})`,
+          'success',
+          6000,
+          { label: 'Open folder', onClick: () => void openFolder(out.dir).catch(() => {}) },
+        );
+        return out;
+      } catch (e) {
+        lastError = String(e);
+        uiStore.showToast(`Atlas export failed: ${e}`, 'error');
+        return null;
+      } finally {
+        exportingId = null;
+      }
+    },
+
     /** Reveal a capture in the OS file manager (backend reverse-channel). */
     async revealCapture(id: string) {
       try { await beReveal(id); } catch (e) { lastError = String(e); }
@@ -1064,6 +1100,8 @@ function createRecorderStore() {
     },
     /** Last backend error (recording/screenshot/library), or null. */
     get lastError() { return lastError; },
+    /** The capture whose atlas is being written, or null. */
+    get exportingId() { return exportingId; },
 
     /** Total bytes across every capture in the library. */
     get totalBytes() { return captures.reduce((sum, c) => sum + c.sizeBytes, 0); },
@@ -1083,22 +1121,5 @@ export function formatDuration(ms: number): string {
   return h > 0 ? `${h}:${p(m)}:${p(s)}` : `${m}:${p(s)}`;
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB'];
-  let v = bytes / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
-  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`;
-}
-
-export function formatAgo(ts: number): string {
-  const sec = Math.floor((Date.now() - ts) / 1000);
-  if (sec < 60) return 'just now';
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min} min ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr} h ago`;
-  const day = Math.floor(hr / 24);
-  return `${day} d ago`;
-}
+// `formatBytes` / `formatAgo` moved to `$lib/utils/format` — they are about reading a
+// number, not about recording anything, and Bennu's local history needed the same two.

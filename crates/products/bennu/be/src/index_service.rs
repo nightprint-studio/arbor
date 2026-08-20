@@ -978,6 +978,9 @@ impl IndexService {
     /// by longest root prefix). Returns `[]` when no project owns the file, or its
     /// index is still building.
     pub fn completion(&self, file: &str, offset: usize, source: Option<&str>) -> Vec<CompletionItem> {
+        if !understands(file) {
+            return Vec::new();
+        }
         let Some(slot) = self.slot_for_file(file) else {
             return Vec::new();
         };
@@ -1588,6 +1591,9 @@ impl IndexService {
     }
 
     pub fn find_usages(&self, file: &str, source: &str, offset: usize) -> Option<ReferencesResult> {
+        if !understands(file) {
+            return None;
+        }
         let slot = self.slot_for_file(file)?;
         let engine = {
             let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
@@ -1603,6 +1609,9 @@ impl IndexService {
     /// is still building, the caret isn't on a resolvable symbol, or the declaration lives
     /// in a JDK / dep-jar (no project source to open). Mirrors [`find_usages`](Self::find_usages).
     pub fn declaration(&self, file: &str, source: &str, offset: usize) -> Option<DeclarationTarget> {
+        if !understands(file) {
+            return None;
+        }
         let slot = self.slot_for_file(file)?;
         let engine = {
             let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
@@ -1637,6 +1646,9 @@ impl IndexService {
     /// `None` when no project owns the file, the engine is still building, or the caret
     /// isn't on a symbol we can classify. Mirrors [`find_usages`](Self::find_usages).
     pub fn hover(&self, file: &str, source: &str, offset: usize) -> Option<HoverInfo> {
+        if !understands(file) {
+            return None;
+        }
         let slot = self.slot_for_file(file)?;
         // 1. The reference-index classifier: fields / methods / types (with Javadoc).
         let engine = {
@@ -3016,6 +3028,39 @@ fn is_java(file: &str) -> bool {
     Path::new(file).extension().and_then(|e| e.to_str()) == Some("java")
 }
 
+/// Whether the Java engine has anything to say about `file`.
+///
+/// The fall-through guard, and it is a guard rather than an optimisation. Every caret handler
+/// ends here after the language-server route and the shader route have declined, and the
+/// resolver behind it parses whatever it is given **as Java**. So a buffer in another language
+/// that reaches this point does not fail: it answers, confidently, about the wrong language —
+/// an identifier that happens to exist somewhere in the index becomes a go-to into an unrelated
+/// file, and a hover card describes a method the user has never heard of.
+///
+/// Reaching this point used to be impossible for a `.rs`, because a served extension was routed
+/// away whether or not its server was installed. Now that "not installed" falls through (see
+/// `LspRegistry::is_lsp_file`), it is reachable — and this is what makes that safe.
+///
+/// The list is what the index actually holds: Java sources, the JSP family, and the XML /
+/// properties configuration Bennu resolves symbols through.
+fn understands(file: &str) -> bool {
+    matches!(
+        Path::new(file).extension().and_then(|e| e.to_str()),
+        Some(
+            "java"
+                | "jsp"
+                | "jspf"
+                | "jspx"
+                | "tag"
+                | "tagf"
+                | "tagx"
+                | "tld"
+                | "xml"
+                | "properties"
+        )
+    )
+}
+
 /// Whether `file` is an `.xml` config fragment (a struts/spring/tiles edit → rebuild the
 /// config graph on save rather than mis-parsing it as Java).
 fn is_xml_config(file: &str) -> bool {
@@ -3341,6 +3386,39 @@ pub struct MapperDefinition {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_java_engine_declines_every_language_that_is_not_its_own() {
+        // The guard behind `understands`. Reaching the Java resolver with one of these is not
+        // a missed answer, it is a wrong one: the resolver parses whatever it is handed as
+        // Java, so a name that happens to exist in the index becomes a confident go-to into
+        // an unrelated file. A `.rs` gets here for real whenever rust-analyzer is not
+        // installed, which is the case this was written for.
+        for foreign in [
+            "/proj/src/main.rs",
+            "/proj/assets/shaders/spiral.wgsl",
+            "/proj/Cargo.toml",
+            "/proj/script.py",
+            "/proj/notes.md",
+            "/proj/style.css",
+        ] {
+            assert!(!understands(foreign), "`{foreign}` must not reach the Java resolver");
+        }
+    }
+
+    #[test]
+    fn the_java_engine_still_owns_the_java_ecosystem() {
+        for mine in [
+            "/proj/src/main/java/com/acme/Order.java",
+            "/proj/web/list.jsp",
+            "/proj/web/parts.jspf",
+            "/proj/WEB-INF/struts-config.xml",
+            "/proj/messages.properties",
+            "/proj/WEB-INF/acme.tld",
+        ] {
+            assert!(understands(mine), "`{mine}` is the Java engine's");
+        }
+    }
 
     #[test]
     fn scans_setter_properties_from_source() {

@@ -352,6 +352,10 @@ pub struct ServerAvailability {
     pub enabled: bool,
     /// `true` when it came from the user's own config rather than the built-in catalogue.
     pub custom: bool,
+    /// The command that installs it, argv-style. Empty when there is none Bennu will run —
+    /// a system package, or a server the user defined themselves. The settings page offers
+    /// an Install button exactly when this is non-empty.
+    pub install: Vec<String>,
 }
 
 #[cfg(test)]

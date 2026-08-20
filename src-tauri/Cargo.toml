@@ -116,7 +116,7 @@ tauri-plugin-global-shortcut  = "2"
 # lookups moved to corvus-be `repo_origin_url` + sitta-be `fs_repo_root`), and no
 # PortableGit path resolver (corvus-be self-computes the fixed global path).
 # `similar` stays for in-shell text diffing.
-similar = { version = "2",    features = ["text", "unicode", "bytes", "inline"] }
+similar = { workspace = true }
 
 # --- Plugin system ---
 mlua = { workspace = true }

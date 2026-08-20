@@ -34,10 +34,15 @@
     type CaptureMode, type ScreenshotFormat, type FrameFormat, type RecordOutput,
   } from '$lib/stores/tyto/recorder.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
+  import AppearanceSettings from '$lib/components/shared/internal/AppearanceSettings.svelte';
+  import AnimationsSettings from '$lib/components/shared/internal/AnimationsSettings.svelte';
+  import ThemeEditorModal from '$lib/components/shared/ThemeEditorModal.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
   let capturing = $state(false);
+  /** The shared theme editor, reachable from the Interface section. */
+  let themeEditorOpen = $state(false);
   let folderPickerOpen = $state(false);
 
   const frames = $derived(recorderStore.recordOutput === 'frames');
@@ -194,6 +199,17 @@
         </FormRow>
       {/if}
     </FormSection>
+
+    <!-- The shell's appearance settings, not Tyto's. They already govern this window — every
+         product loads them on mount — and until now could only be changed from Corvus. The
+         section header is the FormSection's, so the component does not draw its own. -->
+    <FormSection label="Interface" boxed>
+      <AppearanceSettings showHeader={false} onOpenThemeEditor={() => { themeEditorOpen = true; }} />
+    </FormSection>
+
+    <FormSection label="Animations" boxed>
+      <AnimationsSettings showHeader={false} />
+    </FormSection>
   </div>
 
   {#snippet footer()}
@@ -210,6 +226,10 @@
     onCancel={() => (folderPickerOpen = false)}
     onClose={() => (folderPickerOpen = false)}
   />
+{/if}
+
+{#if themeEditorOpen}
+  <ThemeEditorModal onClose={() => (themeEditorOpen = false)} />
 {/if}
 
 <style>

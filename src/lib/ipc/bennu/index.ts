@@ -23,9 +23,22 @@ import type {
 } from '$lib/types/bennu';
 
 /** Open a Java project folder: resolve the build model (modules / JDK) + capabilities.
- *  Wire: `bennu_open_project` — `OpenProjectArgs { root }`. */
-export function openProject(root: string): Promise<ProjectInfo> {
-  return bennu('bennu_open_project', { args: { root } });
+ *
+ *  `active` says whether this project is the one about to be on screen. Pass `false` for a
+ *  workspace member being loaded in the background: it reads the manifest without warm-starting
+ *  a language server, which is what stops a five-project workspace from starting five
+ *  rust-analyzers at launch. Announce the one you activate with {@link activateProject}.
+ *
+ *  Wire: `bennu_open_project` — `OpenProjectArgs { root, active? }`. */
+export function openProject(root: string, active = true): Promise<ProjectInfo> {
+  return bennu('bennu_open_project', { args: { root, active } });
+}
+
+/** Say that an already-open project is now the one on screen — starts its language server if it
+ *  has none, and claims it so an idle reaper leaves it alone.
+ *  Wire: `bennu_activate_project` — `ActivateProjectArgs { root }`. */
+export function activateProject(root: string): Promise<void> {
+  return bennu('bennu_activate_project', { args: { root } });
 }
 
 /** Read the project file tree (directories + files) rooted at `root`. Wire:
@@ -93,12 +106,14 @@ export function moveToPackage(file: string, source: string): Promise<{ new_path:
  *  they land in the undo history. Empty for a file no language cares about.
  *
  *  Refuses rather than overwriting an existing file. Save the buffer first — this renames what is on
- *  disk. Wire: `bennu_rename_path` — `{ file, new_path }`. */
+ *  disk. `root` is the project the file belongs to — the local history is keyed by it, and a
+ *  rename is one of the events it records. Wire: `bennu_rename_path` — `{ root, file, new_path }`. */
 export function renamePath(
+  root: string,
   file: string,
   newPath: string,
 ): Promise<{ new_path: string; edits: SourceEdit[] }> {
-  return bennu('bennu_rename_path', { args: { file, new_path: newPath } });
+  return bennu('bennu_rename_path', { args: { root, file, new_path: newPath } });
 }
 
 /** Re-detect the domain capabilities (Spike-D bitset) for the open project. Wire:

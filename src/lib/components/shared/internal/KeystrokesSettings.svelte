@@ -15,6 +15,7 @@
     Keyboard, MousePointerClick, Filter, Type, Repeat,
     Tag, AlignJustify,
   } from 'lucide-svelte';
+  import SettingsCard from './SettingsCard.svelte';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
@@ -99,14 +100,20 @@
   // Sample chord shown by the always-on live preview card.
   const SAMPLE_PARTS  = ['Ctrl', 'Shift', 'K'];
   const SAMPLE_ACTION = 'Open Command Palette';
+
+  /** Some hosts draw their own section header — a flat settings page with its own group
+   *  headings, or a `FormSection` that already labels the block. */
+  let { showHeader = true }: { showHeader?: boolean } = $props();
 </script>
 
-<SectionHeader
-  title="Keyboard Inputs"
-  description="Display a floating overlay of every key, chord and (optionally) mouse click — paired with the human-readable action each shortcut triggers. Perfect for demos, screencasts and pair-programming."
-/>
+{#if showHeader}
+  <SectionHeader
+    title="Keyboard Inputs"
+    description="Display a floating overlay of every key, chord and (optionally) mouse click — paired with the human-readable action each shortcut triggers. Perfect for demos, screencasts and pair-programming."
+  />
+{/if}
 
-<div class="card">
+<SettingsCard>
   <FormRow
     label="Show keyboard inputs"
     description="Render a floating overlay of recent key presses. Toggle anytime with the global shortcut — even from inside a modal."
@@ -116,12 +123,12 @@
       <Toggle bind:checked={enabled} />
     </div>
   </FormRow>
-</div>
+</SettingsCard>
 
 <!-- Once enabled, expose all the customisation knobs. -->
 {#if enabled}
   <!-- ── Position picker ──────────────────────────────────────────────── -->
-  <div class="card">
+  <SettingsCard>
     <div class="card-head">
       <div>
         <div class="card-title">Position</div>
@@ -172,7 +179,7 @@
         aria-label="Edge offset"
       />
     </FormRow>
-  </div>
+  </SettingsCard>
 
   <!-- ── Live preview ─────────────────────────────────────────────────── -->
   <div class="card preview-card">
@@ -207,7 +214,7 @@
   </div>
 
   <!-- ── Appearance ───────────────────────────────────────────────────── -->
-  <div class="card">
+  <SettingsCard>
     <FormRow label="Size" description="Overall scale of each key pill">
       <RadioGroup bind:value={size} options={SIZE_OPTIONS} appearance="segment" size="md" />
     </FormRow>
@@ -261,10 +268,10 @@
     <FormRow label="Show action label" description="Display the name of the action each shortcut triggers (e.g. Ctrl+K → Command palette). Off makes the overlay purely typographic.">
       <div class="row-icon"><Tag size={14} /><Toggle bind:checked={showAction} /></div>
     </FormRow>
-  </div>
+  </SettingsCard>
 
   <!-- ── Behaviour ────────────────────────────────────────────────────── -->
-  <div class="card">
+  <SettingsCard>
     <FormRow label="Only show shortcuts" description="Hide plain printable keys — only chords using Ctrl, Alt, Shift or Meta will appear.">
       <div class="row-icon"><Filter size={14} /><Toggle bind:checked={onlyShortcuts} /></div>
     </FormRow>
@@ -280,7 +287,7 @@
     <FormRow label="Group rapid repeats" description="Collapse the same chord pressed multiple times in a row into a single pill with a ×N counter.">
       <div class="row-icon"><Repeat size={14} /><Toggle bind:checked={groupRepeats} /></div>
     </FormRow>
-  </div>
+  </SettingsCard>
 
   <!-- ── Try it out ───────────────────────────────────────────────────── -->
   <div class="card try-card">

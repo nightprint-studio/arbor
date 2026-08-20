@@ -160,12 +160,17 @@ function docDom(text: string): HTMLElement {
 }
 
 
-/** The completion source shared by every server-backed language.
+/** The completion source for anything the **backend** answers about.
  *
  *  Fires on an in-progress identifier, and on the trigger characters a server cares about. The
  *  backend works out *which* trigger the caret follows from the buffer itself, so this does not
- *  need to know that Rust triggers on `::` and not only on `.`. */
-const lspCompletionSource: CompletionSource = async (
+ *  need to know that Rust triggers on `::` and not only on `.`.
+ *
+ *  Exported because "server-backed" is not the boundary it looks like. This calls
+ *  `bennu_completion`, which the backend answers with *whichever engine owns the file* — a
+ *  language server for a `.rs`, its own scanner for a `.wgsl` with nothing installed. A language
+ *  whose only difference is that no server exists for it still wants exactly this. */
+export const backendCompletionSource: CompletionSource = async (
   ctx: CompletionContext,
 ): Promise<CompletionResult | null> => {
   // A conservative trigger set that covers the languages in the catalogue: a word being typed,
@@ -223,14 +228,14 @@ function compareBySortText(a: CompletionItem, b: CompletionItem): number {
 }
 
 /**
- * The hover source.
+ * The hover source, for anything the backend answers about.
  *
  * Goes through the **shared** `bennu_hover`, which the backend answers from whichever engine
- * owns the file. The card's three slots (signature / container / doc) are filled by the backend
+ * owns the file — including one with no language server behind it at all. The card's three slots (signature / container / doc) are filled by the backend
  * from the server's markdown, so there is nothing language-specific here — which is why this is
  * not a per-language function.
  */
-function lspHoverSource(
+export function backendHoverSource(
   view: EditorView,
   pos: number,
   _side: -1 | 1,
@@ -344,6 +349,6 @@ export function lspLanguage(
     cmFold: false,
     serverFold: true,
     commentTokens,
-    intel: { completion: lspCompletionSource, hover: lspHoverSource },
+    intel: { completion: backendCompletionSource, hover: backendHoverSource },
   };
 }

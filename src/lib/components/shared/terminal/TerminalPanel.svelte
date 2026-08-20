@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Plus, ChevronDown, TerminalSquare, Settings as SettingsIcon } from 'lucide-svelte';
-  import { terminalCreate, terminalClose } from '$lib/ipc/corvus/terminal';
-  import { terminalStore } from '$lib/stores/corvus/terminal.svelte';
+  import { terminalCreate, terminalClose } from '$lib/ipc/terminal';
+  import { terminalStore } from '$lib/stores/terminal.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import TerminalInstance from './TerminalInstance.svelte';

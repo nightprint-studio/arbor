@@ -392,6 +392,111 @@ fn frame_at(times: &[u32], at_ms: u32) -> usize {
     }
 }
 
+// ── Export: a sequence → a sprite atlas ──────────────────────────────────────
+
+/// Arguments of `tyto_export_atlas`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ExportAtlasArgs {
+    /// The recording to fold, as it appears in the library (the name
+    /// `tyto_record_frames` returned).
+    pub sequence: String,
+    /// Where to write the atlas. Omit to write an `<id>.atlas` directory next to the
+    /// recording.
+    #[serde(default)]
+    pub out_dir: Option<String>,
+    /// Widest edge of one atlas page, in pixels. Bigger pages mean fewer files and
+    /// more memory while the atlas is assembled. Default 4096, hard ceiling 8192 —
+    /// the size no mainstream GPU will exceed.
+    #[serde(default)]
+    pub max_side: Option<u32>,
+    /// Name the sequence takes inside the sheet's timeline. Default `play`.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Whether the sequence loops. Default true.
+    #[serde(default)]
+    pub looping: Option<bool>,
+    /// Pixels of guard around each frame, filled by repeating its border, so a renderer
+    /// that filters the texture cannot sample a neighbouring frame's pixels along an
+    /// edge. Default 1; set 0 for a tight pack when the atlas is only ever drawn 1:1.
+    #[serde(default)]
+    pub gutter: Option<u32>,
+}
+
+/// Where an exported atlas landed.
+#[derive(Debug, Serialize)]
+pub struct AtlasExportSummary {
+    /// The directory holding the pages and the sheet.
+    pub dir: String,
+    /// The sidecar that describes the atlas.
+    pub sheet: String,
+    /// The page PNGs, in index order.
+    pub pages: Vec<String>,
+    pub frame_count: usize,
+    /// How many frames fit on one full page.
+    pub frames_per_page: usize,
+    pub frame_width: u32,
+    pub frame_height: u32,
+    pub duration_ms: u64,
+    /// Bytes written across pages and sheet.
+    pub size_bytes: u64,
+}
+
+/// Fold a recorded frame sequence into a **sprite atlas**: one or more PNG pages plus
+/// an `atlas.ron` sheet that says where every frame sits and how long it is held.
+///
+/// Use this to hand a recording to a game engine or any renderer that draws from a
+/// texture: a directory of several hundred PNGs is one texture upload per frame, an
+/// atlas is one upload and a UV lookup. The sheet carries each frame's real duration,
+/// so playback keeps the original timing even though identical frames were never
+/// stored — a still screen costs one frame, not thirty a second.
+///
+/// Frames are packed into pages of at most `max_side` pixels per edge; a recording too
+/// long for one page spills into `atlas_001.png`, `atlas_002.png` and so on, and every
+/// region records which page it belongs to. Nothing is re-encoded lossily: the pages
+/// are PNG regardless of the format the frames were recorded in.
+#[arbor_rpc::handler(mcp(
+    name = "tyto_export_atlas",
+    title = "Export a recording as a sprite atlas",
+    safety = write,
+))]
+fn tyto_export_atlas(_state: &TytoState, args: ExportAtlasArgs) -> Result<AtlasExportSummary, String> {
+    let root = capture::output_dir();
+    let dir = capture::library::resolve_sequence(&root, &args.sequence)?;
+    let out = match args.out_dir.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(p) => std::path::PathBuf::from(p),
+        // Next to the recording, under a sibling name: the atlas is a second artefact
+        // of the same capture, and burying it inside the `.frames` directory would
+        // make the library scanner count its pages as frames.
+        None => dir.with_extension("atlas"),
+    };
+
+    let opts = capture::atlas::AtlasOptions {
+        max_side: args.max_side.unwrap_or(capture::atlas::DEFAULT_MAX_SIDE),
+        sequence: args
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("play")
+            .to_string(),
+        looping: args.looping.unwrap_or(true),
+        gutter: args.gutter.unwrap_or(capture::atlas::DEFAULT_GUTTER),
+    };
+
+    let report = capture::atlas::export(&dir, &out, &opts)?;
+    Ok(AtlasExportSummary {
+        dir: report.dir.to_string_lossy().to_string(),
+        sheet: report.sheet.to_string_lossy().to_string(),
+        pages: report.pages.iter().map(|p| p.to_string_lossy().to_string()).collect(),
+        frame_count: report.frame_count,
+        frames_per_page: report.per_page,
+        frame_width: report.frame_width,
+        frame_height: report.frame_height,
+        duration_ms: report.duration_ms,
+        size_bytes: report.size_bytes,
+    })
+}
+
 // `write_image` lives on this trait.
 use image::ImageEncoder as _;
 

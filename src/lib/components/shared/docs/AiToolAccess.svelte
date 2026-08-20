@@ -264,6 +264,13 @@
   have if you had started the run yourself: it is the same run, and its events still reach
   the window. Watching what a model is running is a matter of opening the panel.
 </p>
+<p>
+  A test run always comes back. A test that never terminates would otherwise hold the call
+  open for as long as anyone is willing to wait — which reads as the tool being broken —
+  so the run is stopped after ten minutes and the answer says it was stopped, with whatever
+  had finished by then. A stopped run is never reported as a pass. A client that wants a
+  shorter leash can ask for one.
+</p>
 
 <h2>Activity</h2>
 <p>
@@ -323,7 +330,9 @@
   <li><strong>Tyto</strong> — list capturable screens and windows, capture one (by window
     title, returned as an image), read the on-screen accessibility layout, check whether a
     recording is running, record the screen for a fixed number of seconds as a frame
-    sequence, and read any one of those frames back — by index or by the moment it was on
-    screen. Recording writes into your capture library and needs your approval; it refuses
-    rather than interfering when a recording is already running.</li>
+    sequence, read any one of those frames back — by index or by the moment it was on
+    screen — and fold a whole sequence into a <b>sprite atlas</b>: PNG pages plus a sheet
+    that carries every frame's position and duration, ready for a game engine. Recording
+    and exporting write into your capture library and need your approval; recording
+    refuses rather than interfering when a recording is already running.</li>
 </ul>

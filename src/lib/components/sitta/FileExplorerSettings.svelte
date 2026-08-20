@@ -8,7 +8,7 @@
    * main SettingsPanel → File Explorer section. Reset actions are owned by the
    * parent explorer (it holds the ephemeral localStorage state) and passed in.
    */
-  import { ArrowLeft, GitCompare, LayoutGrid, Keyboard, RotateCcw, PanelLeft, Eye, EyeOff, ChevronUp, ChevronDown, Link2, KeyRound } from 'lucide-svelte';
+  import { ArrowLeft, GitCompare, LayoutGrid, Keyboard, RotateCcw, PanelLeft, Eye, EyeOff, ChevronUp, ChevronDown, Link2, KeyRound, Monitor, Sparkles, Command } from 'lucide-svelte';
   import { explorerStore, mergeSidebarSections, EXPLORER_SECTIONS, MAX_RECENTS_MIN, MAX_RECENTS_MAX } from '$lib/stores/sitta/explorer.svelte';
   import { credentialsStore } from '$lib/stores/credentials.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
@@ -21,6 +21,13 @@
   import Button from '../shared/ui/Button.svelte';
   import NumberStepper from '../shared/ui/NumberStepper.svelte';
   import GlobalShortcutCapture from '../shared/internal/GlobalShortcutCapture.svelte';
+  import AppearanceSettings from '../shared/internal/AppearanceSettings.svelte';
+  import AnimationsSettings from '../shared/internal/AnimationsSettings.svelte';
+  import KeystrokesSettings from '../shared/internal/KeystrokesSettings.svelte';
+  import ThemeEditorModal from '../shared/ThemeEditorModal.svelte';
+
+  /** The shared theme editor, reachable from the Interface group. */
+  let themeEditorOpen = $state(false);
 
   let {
     onExit,
@@ -202,6 +209,19 @@
       </FormRow>
     </div>
 
+    <!-- ── Interface ── -->
+    <!-- Not the explorer's own settings: the shell's, which already govern this window and
+         previously had no dialog outside Corvus. Rendered without its header, so it reads as a
+         group of this page rather than as a second page inside it. -->
+    <h3 class="fxs-group"><Monitor size={13} /> Interface</h3>
+    <AppearanceSettings showHeader={false} onOpenThemeEditor={() => { themeEditorOpen = true; }} />
+
+    <h3 class="fxs-group"><Sparkles size={13} /> Animations</h3>
+    <AnimationsSettings showHeader={false} />
+
+    <h3 class="fxs-group"><Command size={13} /> Keyboard inputs</h3>
+    <KeystrokesSettings showHeader={false} />
+
     <!-- ── Address bar ── -->
     <h3 class="fxs-group"><Link2 size={13} /> Address bar</h3>
     <div class="fxs-card">
@@ -243,6 +263,10 @@
     </div>
   </div>
 </div>
+
+{#if themeEditorOpen}
+  <ThemeEditorModal onClose={() => (themeEditorOpen = false)} />
+{/if}
 
 <style>
   .fxs {

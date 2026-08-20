@@ -18,7 +18,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import type { FrameSequence } from '$lib/stores/tyto/recorder.svelte';
 
-  let { sequence }: { sequence: FrameSequence } = $props();
+  let { sequence, onExport }: { sequence: FrameSequence; onExport?: () => void } = $props();
 
   /** Frames fetched ahead of the playhead. Roughly five seconds at 12 fps. */
   const PREFETCH_AHEAD = 60;
@@ -145,6 +145,9 @@
       case 'Home':       playing = false; seek(0); break;
       case 'End':        playing = false; seek(count - 1); break;
       case 'l': case 'L': looping = !looping; break;
+      // `E` esiste solo se chi ci ospita sa quale cattura siamo: il player riceve una
+      // sequenza già risolta, non un id, quindi l'azione è del chiamante.
+      case 'e': case 'E': if (!onExport) return; onExport(); break;
       default: return;
     }
     e.preventDefault();

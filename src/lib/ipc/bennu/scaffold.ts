@@ -6,12 +6,25 @@
 
 import { bennu } from '../rpc';
 
-/** The file kinds the "New…" menu can scaffold. */
+/** The file kinds the "New…" menu can scaffold.
+ *
+ *  Two families, because the two languages ask for different things: a Java file is named
+ *  by the type it declares, a Rust one names its own module and the types inside are free.
+ *  Which family is offered follows the project — a Cargo root has no use for a Java class. */
 export type NewFileKind =
   | 'class' | 'interface' | 'enum' | 'record' | 'annotation' | 'exception'
-  | 'jsp' | 'xml' | 'file';
+  | 'jsp' | 'xml' | 'file'
+  | 'rust_file' | 'rust_struct' | 'rust_enum' | 'rust_trait' | 'rust_module' | 'rust_tests';
 
-/** Resolved new-file path + content — mirrors the BE `NewFileResult`. */
+/** Whether `kind` is one of the Rust templates. */
+export function isRustKind(kind: NewFileKind): boolean {
+  return kind.startsWith('rust_');
+}
+
+/** Resolved new-file path + content — mirrors the BE `NewFileResult`.
+ *
+ *  `path` may name a file in a **sub-directory** of the one that was chosen: a Rust module
+ *  scaffolds `name/mod.rs`, which is the one kind that creates a directory. */
 export interface NewFileResult {
   /** Absolute path (forward slashes) of the file to create. */
   path: string;

@@ -291,6 +291,45 @@ export interface FrameSequenceWire {
 /** Read a saved frame sequence: geometry, per-frame timings and frame paths. */
 export const readFrameSequence = (id: string) => tyto<FrameSequenceWire>('read_frame_sequence', { id });
 
+/** Where an exported sprite atlas landed (`tyto_export_atlas`). */
+export interface AtlasExportWire {
+  /** Directory holding the pages and the sheet. */
+  dir: string;
+  /** The `atlas.ron` sheet. */
+  sheet: string;
+  /** Page PNGs, in index order. */
+  pages: string[];
+  frame_count: number;
+  /** How many frames fit on one full page. */
+  frames_per_page: number;
+  frame_width: number;
+  frame_height: number;
+  duration_ms: number;
+  size_bytes: number;
+}
+
+/** Options of an atlas export. All optional — the backend holds the defaults. */
+export interface AtlasExportArgs {
+  /** Output directory. Omitted → `<recording>.atlas` next to the sequence. */
+  out_dir?: string;
+  /** Widest edge of one page in pixels (default 4096, ceiling 8192). */
+  max_side?: number;
+  /** Name the sequence takes in the sheet's timeline (default `play`). */
+  name?: string;
+  looping?: boolean;
+  /** Pixels of guard around each frame, filled by repeating its border, so a filtered
+   *  draw can't sample the neighbouring frame along an edge. Default 1. */
+  gutter?: number;
+}
+
+/** Fold a frame sequence into a sprite atlas: PNG pages + an `atlas.ron` sheet.
+ *
+ * The handler takes a single struct parameter, and the seam keys params by parameter
+ * NAME — so the payload is `{ args: … }`, not the fields at the top level. (The MCP
+ * side flattens the wrapper away; this side can't.) */
+export const exportAtlas = (sequence: string, opts: AtlasExportArgs = {}) =>
+  tyto<AtlasExportWire>('tyto_export_atlas', { args: { sequence, ...opts } });
+
 export const listCaptures = () => tyto<CaptureWire[]>('list_captures');
 export const renameCapture = (id: string, name: string) => tyto<void>('rename_capture', { id, name });
 export const removeCapture = (id: string) => tyto<void>('remove_capture', { id });

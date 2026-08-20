@@ -87,6 +87,9 @@ fn bennu_project_summary(
         ctx,
         &args.root,
         crate::lsp_registry::SessionOrigin::Background,
+        // Warm: this door opens ONE project, the one the client just asked about. It is the
+        // workspace restore's many-at-once that must not.
+        true,
     )?;
     let stats = IndexService::global().index_stats(&args.root);
     let capabilities = detected_capabilities(&info.capabilities);
@@ -1092,7 +1095,21 @@ pub struct RunTestsAtArgs {
     /// `@Disabled` test can only be re-enabled by editing it.
     #[serde(default)]
     pub include_ignored: bool,
+    /// Give up after this many seconds and report what had finished. Default 600, capped
+    /// at 3600. Lower it when you are running one crate and a hang would be a finding.
+    #[serde(default)]
+    pub timeout_seconds: Option<u64>,
 }
+
+/// How long a waited-on run may take before the watchdog stops it.
+///
+/// Ten minutes is above a real workspace run and below "nobody is still reading". It is a
+/// ceiling on the *call*, not a promise about the tests: a run that hits it comes back
+/// saying it was stopped, which is the one thing a silent hang cannot do.
+const DEFAULT_TEST_TIMEOUT_SECS: u64 = 600;
+/// The most a caller may ask for. Past an hour the answer is not "wait longer", it is
+/// "run less".
+const MAX_TEST_TIMEOUT_SECS: u64 = 3_600;
 
 /// Run a project's tests and wait for the result.
 ///
@@ -1109,6 +1126,12 @@ pub struct RunTestsAtArgs {
 ///
 /// A run that compiles nothing and tests nothing is reported as such rather than as a pass
 /// — "0 failed" out of a build that never started is the one result worth distrusting.
+///
+/// It always comes back. A test that never terminates would otherwise hold the call open
+/// for as long as anyone is willing to wait, which is indistinguishable from the tool being
+/// broken; instead the run is stopped after `timeout_seconds` (600 by default) and the
+/// answer says so, with whatever had finished by then. A stopped run is never reported as a
+/// pass.
 #[arbor_rpc::handler(mcp(
     title = "Run the tests and report what failed",
     safety = destructive,
@@ -1117,6 +1140,10 @@ fn bennu_test_run(
     ctx: &BennuState,
     args: RunTestsAtArgs,
 ) -> Result<crate::test_report::TestRunReport, String> {
+    let limit = std::time::Duration::from_secs(
+        args.timeout_seconds.unwrap_or(DEFAULT_TEST_TIMEOUT_SECS).clamp(1, MAX_TEST_TIMEOUT_SECS),
+    );
+
     if is_cargo_root(&args.root) {
         let scope = cargo_scope(ctx, &args)?;
         let run = crate::cargo_tests::start_cargo_run(
@@ -1127,10 +1154,15 @@ fn bennu_test_run(
                 include_ignored: args.include_ignored,
             },
         )?;
-        let widened = run.handle().widened;
+        let handle = run.handle();
+        // Armed before the wait, disarmed after it: the window in which a hang could hold
+        // this call open is exactly the window the watchdog covers.
+        let deadline = crate::tests::Deadline::arm(handle.run_id, limit);
         let collector = std::sync::Arc::new(crate::test_report::Collector::default());
         let end = run.drive(Some(collector.clone()));
-        return Ok(report_of(&collector, "cargo", end, widened, args.tests.len()));
+        let mut report = report_of(&collector, "cargo", end, handle.widened, args.tests.len());
+        note_deadline(&mut report, deadline.disarm());
+        return Ok(report);
     }
 
     let (scope, widened) = maven_scope(&args.tests, args.module.as_deref());
@@ -1141,10 +1173,32 @@ fn bennu_test_run(
     // The plan's own widening (a selection too long for one command line) matters more than
     // ours, and both must reach the caller: a run that quietly ran more than it was asked to
     // is a run whose green is about something else.
-    let widened = run.handle().widened.or(widened);
+    let handle = run.handle();
+    let widened = handle.widened.or(widened);
+    let deadline = crate::tests::Deadline::arm(handle.run_id, limit);
     let collector = crate::test_report::Collector::default();
     let end = run.drive(Some(&collector));
-    Ok(report_of(&collector, "maven", end, widened, args.tests.len()))
+    let mut report = report_of(&collector, "maven", end, widened, args.tests.len());
+    note_deadline(&mut report, deadline.disarm());
+    Ok(report)
+}
+
+/// Say, in the report, that the run was stopped rather than finished.
+///
+/// It goes first in the note because it changes what every other number means: the counts
+/// are what had been reported when the run was killed, not what the project has.
+fn note_deadline(report: &mut crate::test_report::TestRunReport, fired: Option<std::time::Duration>) {
+    let Some(limit) = fired else { return };
+    let notice = format!(
+        "The run was stopped after {}s and did not finish — the counts below are what had \
+         reported by then, not the project's. Something is hanging, or the selection is too \
+         big for this timeout: name one crate or module, or raise `timeout_seconds`.",
+        limit.as_secs()
+    );
+    report.note = Some(match report.note.take() {
+        Some(existing) => format!("{notice} {existing}"),
+        None => notice,
+    });
 }
 
 /// Build the report, folding a widened selection into the note.

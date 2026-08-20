@@ -23,7 +23,7 @@
   import {
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info, Bot, Activity as ActivityIcon,
-    Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck,
+    Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck, History,
     TextCursorInput, ListChecks, BookOpen, FlaskConical, ListRestart, Bug, Braces, Languages,
     Cog, Network,
   } from 'lucide-svelte';
@@ -40,7 +40,12 @@
 
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
   import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
-  import ActivityBar, { type ActivityRailItem } from '$lib/components/shared/ui/ActivityBar.svelte';
+  import ActivityBar, { type ActivityRailButton } from '$lib/components/shared/ui/ActivityBar.svelte';
+  import BennuCustomizeRailsModal from './BennuCustomizeRailsModal.svelte';
+  import BennuOnboardingModal from './BennuOnboardingModal.svelte';
+  import { bennuOnboardingStore } from '$lib/stores/bennu/onboarding.svelte';
+  import { bennuRailsStore, BENNU_MANDATORY, type RailSection } from '$lib/stores/bennu/rails.svelte';
+  import { applyRailOrder } from '$lib/utils/rail-order';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
   import ContextMenu from '$lib/components/shared/ContextMenu.svelte';
   import FeedbackHost from '$lib/feedback/FeedbackHost.svelte';
@@ -57,12 +62,12 @@
   import BennuCargoPanel from './BennuCargoPanel.svelte';
   import BennuTestsCatalogPanel from './BennuTestsCatalogPanel.svelte';
   import BennuCargoTestsPanel from './BennuCargoTestsPanel.svelte';
-  import RustTestIcon from './RustTestIcon.svelte';
   import BevyIcon from './BevyIcon.svelte';
   import SyntaxTreePanel from '$lib/components/shared/internal/SyntaxTreePanel.svelte';
   import { bennuAstStore } from '$lib/stores/bennu/ast.svelte';
   import MavenIcon from './MavenIcon.svelte';
   import JUnitIcon from './JUnitIcon.svelte';
+  import { testIcon } from './test-icon';
   import BennuBottomDock from './BennuBottomDock.svelte';
   import BennuEditor from './BennuEditor.svelte';
   import BennuDocsPanel from './BennuDocsPanel.svelte';
@@ -85,6 +90,8 @@
   import BennuUsagesPopover from './BennuUsagesPopover.svelte';
   import BennuGotoModal from './BennuGotoModal.svelte';
   import BennuIndexInspectorModal from './BennuIndexInspectorModal.svelte';
+  import BennuLocalHistoryModal from './BennuLocalHistoryModal.svelte';
+  import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
   import BennuModuleGraphModal from './BennuModuleGraphModal.svelte';
   import BennuMojibakeScanModal from './BennuMojibakeScanModal.svelte';
   import BennuTomcatConfigModal from './BennuTomcatConfigModal.svelte';
@@ -136,6 +143,16 @@
   onMount(() => {
     themeStore.init();
     void appearanceStore.loadConfig();
+    // The rail arrangement. Loaded rather than awaited: the bar draws in its natural order
+    // for the first frame and reorders when this lands, which is a reorder nobody sees —
+    // blocking the window on a config read to avoid it would be the visible cost.
+    void bennuRailsStore.load();
+    // The welcome tour, on the first launch only. Awaited before asking, because the store
+    // defaults to "already seen" until the read lands — the alternative is a tour that
+    // flashes for everybody on every start.
+    void bennuOnboardingStore.loadConfig().then(() => {
+      if (bennuOnboardingStore.shouldAutoOpen()) bennuOnboardingStore.show();
+    });
     void animStore.loadConfig();
     // Hydrate the config-backed editor toggles (autosave / auto-import) from the persisted config.
     void bennuSettingsStore.loadConfig();
@@ -676,7 +693,7 @@
     untrack(() => bennuHierarchyStore.clear());
   });
 
-  const leftTop = $derived<ActivityRailItem[]>([
+  const leftTopRaw = $derived<ActivityRailButton[]>([
     { id: 'project',   tooltip: 'Project',   shortcut: 'Alt+1', icon: FolderTree, active: bennuUiStore.leftPanel === 'project',   onclick: () => bennuUiStore.toggleLeft('project') },
     ...(javaTools
       ? [
@@ -691,7 +708,7 @@
   // Docs/Settings moved to the titlebar's right cluster (IntelliJ/Corvus layout).
   // These drive the BOTTOM dock (BennuBottomDock), not a side panel — the active
   // state mirrors the dock's open tab.
-  const leftBottom = $derived<ActivityRailItem[]>([
+  const leftBottomRaw = $derived<ActivityRailButton[]>([
     { id: 'build',    tooltip: 'Build', shortcut: 'Alt+0',      icon: Hammer,         active: bennuUiStore.bottomPanel === 'build',    onclick: () => bennuUiStore.toggleBottom('build') },
     // ONE button for running and debugging, because they are one activity: the same launch with
     // more to look at. The icon says which it currently is, and the dot is a WARNING while the
@@ -719,12 +736,12 @@
   ]);
   /** The build tool's own window — Maven's goals or Cargo's crates. One slot, because a project is
    *  one or the other, and Alt+8 means "the build tool" either way. */
-  const buildToolRail = $derived<ActivityRailItem>(
+  const buildToolRail = $derived<ActivityRailButton>(
     projectStore.isCargo
       ? { id: 'cargo', tooltip: 'Cargo — the crates, and what you can run on them', shortcut: 'Alt+8', icon: Cog, active: bennuUiStore.rightPanel === 'cargo', onclick: () => bennuUiStore.toggleRight('cargo') }
       : { id: 'maven', tooltip: 'Maven', shortcut: 'Alt+8', icon: MavenIcon, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') },
   );
-  const rightTop = $derived<ActivityRailItem[]>([
+  const rightTopRaw = $derived<ActivityRailButton[]>([
     buildToolRail,
     // The CATALOGUE of tests, not the runs — those are tabs of the Run console. Present on both
     // ecosystems: a Cargo workspace enumerates its `#[test]`s exactly as a Maven project does, and
@@ -733,7 +750,7 @@
       id: 'tests',
       tooltip: 'Tests',
       shortcut: 'Alt+5',
-      icon: projectStore.isCargo ? RustTestIcon : JUnitIcon,
+      icon: testIcon(),
       active: bennuUiStore.rightPanel === 'tests',
       onclick: () => bennuUiStore.toggleRight('tests'),
     },
@@ -752,7 +769,7 @@
   ]);
   // Forms drives the BOTTOM dock (wide, horizontal data), not a side panel — its toggle sits
   // in the right rail's bottom cluster; the active state mirrors the dock's open tab.
-  const rightBottom = $derived<ActivityRailItem[]>([
+  const rightBottomRaw = $derived<ActivityRailButton[]>([
     ...(jspTools
       ? [{ id: 'forms', tooltip: 'Forms', shortcut: 'Alt+3', icon: TextCursorInput, active: bennuUiStore.bottomPanel === 'forms', onclick: () => bennuUiStore.toggleBottom('forms') }]
       : []),
@@ -774,6 +791,23 @@
         onclick: () => bennuUiStore.toggleBottom(c.id),
       })),
   ]);
+
+  // ── The user's arrangement ───────────────────────────────────────────────────
+  //
+  // The four arrays above are what this project OFFERS; these four are what the bar SHOWS.
+  // Keeping the two apart is what lets the arrangement survive a project switch: a saved
+  // order names ids, and the ids a Cargo root has nothing to say about are simply not in the
+  // list it is applied to — they come back, in place, on the next Maven project.
+  const rails = $derived<Record<RailSection, ActivityRailButton[]>>({
+    leftTop: leftTopRaw,
+    leftBottom: leftBottomRaw,
+    rightTop: rightTopRaw,
+    rightBottom: rightBottomRaw,
+  });
+  const leftTop     = $derived(applyRailOrder(leftTopRaw,     bennuRailsStore.saved('leftTop'),     BENNU_MANDATORY));
+  const leftBottom  = $derived(applyRailOrder(leftBottomRaw,  bennuRailsStore.saved('leftBottom'),  BENNU_MANDATORY));
+  const rightTop    = $derived(applyRailOrder(rightTopRaw,    bennuRailsStore.saved('rightTop'),    BENNU_MANDATORY));
+  const rightBottom = $derived(applyRailOrder(rightBottomRaw, bennuRailsStore.saved('rightBottom'), BENNU_MANDATORY));
 
   // Switching projects can take rail icons away — a Cargo root loses the Java tools, a
   // project with no JSP loses Forms, a project whose Spring model has no routes loses Endpoints.
@@ -864,6 +898,7 @@
     'refresh-cw': RotateCw as unknown as IconComponent,
     'indent': IndentIncrease as unknown as IconComponent,
     'shield': ShieldCheck as unknown as IconComponent,
+    'history': History as unknown as IconComponent,
     // The two framework catalogs that were falling through to the generic `command` glyph:
     // a bound-properties list and the property reference read out of the dependency jars.
     // (`list` is declared once, above — a second entry here silently shadowed it.)
@@ -889,6 +924,18 @@
     const editorItems = [
       { id: 'goto', title: 'Go to line', icon: 'hash', shortcut: 'Ctrl+G',
         action: () => run(() => editor?.openGoto()), when: !!projectStore.activeFilePath },
+      // Local history. Three entries and not one, because the three answer different
+      // questions and only one of them has a file to be about — an entry that opens on
+      // nothing is the same lie as a panel that can only say "not here".
+      { id: 'history', title: 'Local history: this file', icon: 'history', shortcut: 'Alt+Shift+H',
+        action: () => run(() => bennuHistoryStore.show(projectStore.project!.root, projectStore.activeFilePath!)),
+        when: !!projectStore.project && !!projectStore.activeFilePath },
+      { id: 'historyproject', title: 'Local history: project', icon: 'history',
+        action: () => run(() => bennuHistoryStore.showProject(projectStore.project!.root)),
+        when: !!projectStore.project },
+      { id: 'historydeleted', title: 'Local history: deleted files…', icon: 'history',
+        action: () => run(() => bennuHistoryStore.showDeleted(projectStore.project!.root)),
+        when: !!projectStore.project },
       { id: 'gotodef', title: 'Go to declaration', icon: 'target', shortcut: 'Ctrl+B',
         action: () => run(() => editor?.goToDefinition()), when: canNav },
       // Not gated on the ecosystem: the navigator has two engines behind it. A Java project's
@@ -1145,7 +1192,11 @@
         action: () => run(() => { const r = projectStore.project?.root; if (r) void bennuIndexStore.rebuild(r); }),
         when: !!projectStore.project && javaTools && !bennuIndexStore.indexing },
       { id: 'docs', title: 'Documentation', icon: 'command', shortcut: 'F1', action: () => run(() => bennuUiStore.toggleDocs()), when: true },
+      { id: 'tour', title: 'Welcome tour', icon: 'book',
+        action: () => run(() => bennuOnboardingStore.show()), when: true },
       { id: 'settings', title: 'Settings', icon: 'command', shortcut: 'Ctrl+,', action: () => run(() => bennuUiStore.openSettings()), when: true },
+      { id: 'customizerails', title: 'Customize Activity Bar…', icon: 'sliders',
+        action: () => run(() => bennuUiStore.openCustomizeRails()), when: true },
       { id: 'mcpactivity', title: 'AI activity…', icon: 'activity',
         action: () => run(() => window.dispatchEvent(new CustomEvent('arbor:open-mcp-activity'))), when: true },
       { id: 'mcptools', title: 'AI tools…', icon: 'bot',
@@ -1317,6 +1368,17 @@
 
     // Workspace manager (Ctrl+Shift+W) — create / switch / manage named workspaces.
     if (mod && e.shiftKey && !e.altKey && isKey(e, 'w')) { e.preventDefault(); bennuUiStore.openWorkspaceManager(); return; }
+
+    // Local history of the open file (Alt+Shift+H). Not Ctrl+Alt+<letter>, which Chromium
+    // drops on IT/DE/FR/ES layouts to preserve AltGr — so IntelliJ's own binding is out.
+    if (e.altKey && e.shiftKey && !mod && isKey(e, 'h')) {
+      const root = projectStore.project?.root;
+      const file = projectStore.activeFilePath;
+      if (!root || !file) return;
+      e.preventDefault();
+      bennuHistoryStore.show(root, file);
+      return;
+    }
 
     // Bevy components (Alt+Shift+B) — the ECS catalog, which on a Bevy project is the thing you
     // read code beside. Same shape as the Spring beans door below: silent when the project has
@@ -1599,6 +1661,11 @@
   <BennuIndexInspectorModal onClose={() => bennuUiStore.closeIndexInspector()} />
 {/if}
 
+<!-- Owns its own visibility: it is opened from three different places (the tree, the
+     editor's context menu, the palette) and each of them opens it AT something, so the
+     open flag and the subject belong together in the store. -->
+<BennuLocalHistoryModal />
+
 {#if bennuUiStore.moduleGraphOpen}
   <BennuModuleGraphModal onClose={() => bennuUiStore.closeModuleGraph()} />
 {/if}
@@ -1665,6 +1732,14 @@
 
 {#if bennuUiStore.docsOpen}
   <BennuDocsPanel onClose={() => bennuUiStore.closeDocs()} />
+{/if}
+
+{#if bennuUiStore.customizeRailsOpen}
+  <BennuCustomizeRailsModal {rails} onClose={() => bennuUiStore.closeCustomizeRails()} />
+{/if}
+
+{#if bennuOnboardingStore.open}
+  <BennuOnboardingModal />
 {/if}
 
 <Tooltip />

@@ -4,4 +4,4 @@ export * from './corvus/stage';
 export * from './corvus/branch';
 export * from './corvus/remote';
 export * from './plugin';
-export * from './corvus/terminal';
+export * from './terminal';

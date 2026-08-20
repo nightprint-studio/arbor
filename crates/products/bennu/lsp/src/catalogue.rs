@@ -34,7 +34,27 @@ pub struct ServerSpec {
     pub root_markers: &'static [&'static str],
     /// What to tell the user when the binary isn't there. A bare "not found" leaves them
     /// with no next step, which is the whole reason this field exists.
+    ///
+    /// It says **where the server comes from**, not what to type: when [`install`] is
+    /// non-empty the command is shown from that, verbatim and copy-pasteable, beside the
+    /// button that runs it. Spelling it here too would print it twice on the same row. The
+    /// servers with no install command are the exception — for those this carries the whole
+    /// instruction, because nothing else does.
+    ///
+    /// [`install`]: ServerSpec::install
     pub install_hint: &'static str,
+    /// The command that installs it, argv-style, or empty when there is none to run.
+    ///
+    /// A *command*, not a download. Every server here ships through a package manager its
+    /// own ecosystem already has — `rustup`, `cargo`, `go`, `npm` — and running that is both
+    /// far shorter than a downloader (no release-asset naming, no archive formats, no
+    /// signature story, no upgrade path to invent) and the thing the user would have run.
+    /// It also means the binary lands where the rest of their toolchain is, so it keeps
+    /// working after Arbor is updated or removed.
+    ///
+    /// Empty for the ones whose install is a system package (clangd is LLVM, lua-language-
+    /// server is Homebrew): Bennu will not run a package manager that manages the machine.
+    pub install: &'static [&'static str],
 }
 
 /// Every built-in server, in the order the settings panel lists them.
@@ -47,8 +67,8 @@ pub const BUILTIN_SERVERS: &[ServerSpec] = &[
         args: &[],
         extensions: &["rs"],
         root_markers: &["Cargo.toml"],
-        install_hint: "Install it with `rustup component add rust-analyzer`, \
-                       or point Bennu at a binary in Settings → Language Servers.",
+        install_hint: "It ships with the Rust toolchain.",
+        install: &["rustup", "component", "add", "rust-analyzer"],
     },
     ServerSpec {
         id: "gopls",
@@ -58,7 +78,8 @@ pub const BUILTIN_SERVERS: &[ServerSpec] = &[
         args: &[],
         extensions: &["go"],
         root_markers: &["go.mod", "go.work"],
-        install_hint: "Install it with `go install golang.org/x/tools/gopls@latest`.",
+        install_hint: "It is installed with the Go toolchain.",
+        install: &["go", "install", "golang.org/x/tools/gopls@latest"],
     },
     ServerSpec {
         id: "pyright",
@@ -68,7 +89,8 @@ pub const BUILTIN_SERVERS: &[ServerSpec] = &[
         args: &["--stdio"],
         extensions: &["py", "pyi"],
         root_markers: &["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"],
-        install_hint: "Install it with `npm install -g pyright`.",
+        install_hint: "It is distributed on npm.",
+        install: &["npm", "install", "-g", "pyright"],
     },
     ServerSpec {
         id: "clangd",
@@ -79,6 +101,8 @@ pub const BUILTIN_SERVERS: &[ServerSpec] = &[
         extensions: &["c", "cc", "cpp", "cxx", "h", "hh", "hpp", "hxx", "m", "mm"],
         root_markers: &["compile_commands.json", "compile_flags.txt", "CMakeLists.txt"],
         install_hint: "Install the `clangd` package (LLVM), or Xcode's command-line tools.",
+        // A system package. Bennu installs language servers, not toolchains.
+        install: &[],
     },
     ServerSpec {
         id: "typescript",
@@ -88,7 +112,8 @@ pub const BUILTIN_SERVERS: &[ServerSpec] = &[
         args: &["--stdio"],
         extensions: &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"],
         root_markers: &["tsconfig.json", "jsconfig.json", "package.json"],
-        install_hint: "Install it with `npm install -g typescript-language-server typescript`.",
+        install_hint: "It is distributed on npm.",
+        install: &["npm", "install", "-g", "typescript-language-server", "typescript"],
     },
     ServerSpec {
         id: "lua",
@@ -100,6 +125,39 @@ pub const BUILTIN_SERVERS: &[ServerSpec] = &[
         root_markers: &[".luarc.json", "plugin.toml", ".luacheckrc"],
         install_hint: "Install the `lua-language-server` package \
                        (Homebrew: `brew install lua-language-server`).",
+        // Homebrew / the distro. Same rule as clangd.
+        install: &[],
+    },
+    ServerSpec {
+        id: "wgsl-analyzer",
+        name: "wgsl-analyzer",
+        language: "wgsl",
+        cmd: "wgsl-analyzer",
+        args: &[],
+        extensions: &["wgsl"],
+        // A shader lives in a Cargo project (Bevy) or beside the code that loads it. Both
+        // markers, because a `.wgsl` in an `assets/` folder of a non-Rust project is still a
+        // shader — and without a marker above it nothing would start.
+        root_markers: &["Cargo.toml", ".git"],
+        install_hint: "It is not published on crates.io, so it is built from its repository \
+                       — a few minutes the first time.",
+        // Not on crates.io, so the git form. The package is `wgsl-analyzer` with a HYPHEN —
+        // the repository is a workspace of twenty crates and only this one has a binary, and
+        // naming it with an underscore (as some install instructions do) fails with
+        // "could not find `wgsl_analyzer` … with version `*`", which reads like a version
+        // problem and is a spelling one.
+        install: &[
+            "cargo",
+            "install",
+            "--git",
+            "https://github.com/wgsl-analyzer/wgsl-analyzer",
+            // Build against the lockfile the repository ships. Without it cargo re-resolves
+            // every dependency to its newest compatible version, and a language server built
+            // from source is exactly the kind of large dependency tree where that turns a
+            // working install into a compile error in somebody else's crate.
+            "--locked",
+            "wgsl-analyzer",
+        ],
     },
 ];
 

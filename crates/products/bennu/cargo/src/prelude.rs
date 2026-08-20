@@ -40,3 +40,4 @@ pub use crate::registry::{
 pub use crate::commands::{
     argv, command, display as display_command, CommandDef, Invocation, TargetSelector, COMMANDS,
 };
+pub use crate::scaffold::{module_name, scaffold as scaffold_rust_file, type_name, RustFileKind, RustScaffold};

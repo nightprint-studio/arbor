@@ -69,7 +69,7 @@
   import BennuTestActions from './BennuTestActions.svelte';
   import BennuTestSummary from './BennuTestSummary.svelte';
   import BennuRunActions from './BennuRunActions.svelte';
-  import JUnitIcon from './JUnitIcon.svelte';
+  import { testIcon } from './test-icon';
   import ResizablePanel from '$lib/components/shared/ui/ResizablePanel.svelte';
   import { bennuDebugLayout } from './debug-layout.svelte';
 
@@ -132,7 +132,7 @@
           label: testStore.label || 'Tests',
           title: 'The test run',
           closable: true,
-          icon: testStore.running ? Play : JUnitIcon,
+          icon: testStore.running ? Play : testIcon(),
           iconSize: 11,
         }]
       : []),
@@ -298,7 +298,7 @@
          debugger is attached, which is the panel saying what it currently is. -->
     {#snippet icon()}
       <span class="rp-run-icon" class:debugging class:testing={onTests}>
-        {#if onTests}<JUnitIcon size={13} />
+        {#if onTests}{@const TestIcon = testIcon()}<TestIcon size={13} />
         {:else if debugging}<Bug size={13} />
         {:else}<Play size={13} />{/if}
       </span>

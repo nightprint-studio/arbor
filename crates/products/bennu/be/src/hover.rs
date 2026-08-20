@@ -37,5 +37,10 @@ fn bennu_hover(_ctx: &BennuState, args: HoverArgs) -> Result<Option<HoverInfo>, 
     if let Some(card) = crate::lsp_route::hover(&args.file, &args.source, args.offset) {
         return Ok(card);
     }
+    // A shader: its own declarations with the comment block above them as documentation, and
+    // the language's built-ins with what the language says they are.
+    if let Some(card) = crate::wgsl_intel::hover(&args.file, &args.source, args.offset) {
+        return Ok(card);
+    }
     Ok(IndexService::global().hover(&args.file, &args.source, args.offset))
 }

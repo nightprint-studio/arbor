@@ -60,6 +60,7 @@ export const TYTO_SHORTCUTS: TytoShortcutGroup[] = [
       { keys: ['Home'], description: 'First frame' },
       { keys: ['End'], description: 'Last frame' },
       { keys: ['L'], description: 'Toggle loop' },
+      { keys: ['E'], description: 'Export the sequence as a sprite atlas' },
     ],
   },
   {

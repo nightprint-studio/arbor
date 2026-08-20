@@ -17,7 +17,9 @@
     FolderOpen, Folder, FileCode2, FolderTree, Plus, Crosshair,
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
     Copy, LocateFixed, ChevronDown, ChevronRight, FileText, FlaskConical, FileType2,
+    History, Tag, Trash2,
   } from 'lucide-svelte';
+  import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { tick } from 'svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import Tree from '$lib/components/shared/ui/Tree.svelte';
@@ -36,8 +38,11 @@
   import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
   import { bennuCargoTestStore } from '$lib/stores/bennu/cargo-tests.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
+  import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
+  import { bennuFileOpsStore } from '$lib/stores/bennu/file-ops.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import type { DiscoveredRustTest, DiscoveredTest, TreeNode } from '$lib/types/bennu';
+  import type { NewFileKind } from '$lib/ipc/bennu/scaffold';
   import { packageTree, isInPackageRoot } from './package-tree';
   // The shared file-icon vocabulary — the same one Corvus's tree and Sitta's explorer draw
   // from, so a `pom.xml` looks like a `pom.xml` wherever you meet it.
@@ -110,7 +115,7 @@
   /** What a row draws: a lucide glyph this file tints itself, or one of the shared VS Code
    *  file icons (which carry their own colour and must not be tinted). */
   type RowIcon =
-    | { shape: 'glyph'; icon: typeof FileCode2; color: string }
+    | { shape: 'glyph'; icon: typeof FileCode2; color: string; filled?: boolean }
     | { shape: 'file'; icon: IconifyIcon }
     | { shape: 'kind'; kind: string };
 
@@ -125,8 +130,33 @@
    *
    *  This panel used to carry its own by-extension table of lucide glyphs. It was a second
    *  vocabulary for the same job, always the poorer of the two, and drifting. */
+  /** The manifests that make a directory a **build unit** rather than a container of files.
+   *
+   *  One list, both ecosystems: a Cargo package and a Maven module are the same idea wearing
+   *  two names — the folder where a build target is declared. */
+  const MANIFESTS = ['Cargo.toml', 'pom.xml'];
+
+  /** Whether this directory *defines* something the build knows about, i.e. holds a manifest.
+   *
+   *  Answered from the children the tree already carries, so it costs a scan of one level and
+   *  no round-trip. A not-yet-expanded directory answers `false` — the tree is materialised
+   *  in one shot today, and the day it isn't, an unexpanded folder is drawn as a folder,
+   *  which is the honest default rather than a wrong claim. */
+  function isBuildUnit(node: TreeNode): boolean {
+    return node.children.some((c) => !c.is_dir && MANIFESTS.includes(c.name));
+  }
+
   function iconFor(node: TreeNode): RowIcon {
     if (node.is_dir) {
+      // A crate / Maven module root is where a build target is DECLARED, and everything
+      // under it belongs to that target — a different kind of thing from a folder that
+      // merely holds files. It stays a FOLDER glyph, because that is what it is; what
+      // changes is the weight: filled and accented against everyone else's outline. A
+      // second shape would have been a second vocabulary to learn for a distinction the
+      // eye can read as emphasis.
+      if (isBuildUnit(node)) {
+        return { shape: 'glyph', icon: Folder, color: 'var(--accent)', filled: true };
+      }
       // A directory inside a source root is a package, and reads as one — the row says
       // `it.acme.portal`, so a folder icon next to it would be describing the storage
       // rather than the thing. The source root itself keeps its folder icon: it is the
@@ -238,10 +268,39 @@
    *  those are the two the tree is actually used to create; the dialog behind the first one
    *  is where the choice between class / interface / enum / … is made, exactly where
    *  IntelliJ puts it. Adding a third here is one line plus a case below. */
-  const NEW_SUBMENU: MenuItem[] = [
-    { id: 'new-class', label: 'Java Class', icon: FileCode2 },
-    { id: 'new-file',  label: 'File',       icon: FileText },
+  const NEW_SUBMENU: MenuItem[] = $derived(
+    projectStore.isCargo
+      ? [
+          { id: 'new-class', label: 'Rust File', icon: FileCode2 },
+          { id: 'new-file',  label: 'File',      icon: FileText },
+        ]
+      : [
+          { id: 'new-class', label: 'Java Class', icon: FileCode2 },
+          { id: 'new-file',  label: 'File',       icon: FileText },
+        ],
+  );
+
+  /** The Local History submenu.
+   *
+   *  The same three entries in the same order wherever it appears — the tree, the editor's
+   *  tab — so where they are is learned once. `Show Deleted Files` lives in here rather
+   *  than somewhere of its own because the question "where did that file go" is asked while
+   *  looking at the folder it went from. */
+  const HISTORY_SUBMENU: MenuItem[] = [
+    { id: 'hist-show',    label: 'Show History',        icon: History, shortcut: 'Alt+Shift+H' },
+    { id: 'hist-label',   label: 'Put Label…',          icon: Tag },
+    { separator: true, id: 'sep-hist', label: '' },
+    { id: 'hist-deleted', label: 'Show Deleted Files…', icon: Trash2 },
   ];
+
+  /** Open the history at whatever the row stands for — a directory opens the folder scope,
+   *  a file its own. */
+  function showHistory(node: TreeNode) {
+    const root = projectStore.project?.root;
+    if (!root) return;
+    if (node.is_dir) bennuHistoryStore.showFolder(root, node.path);
+    else bennuHistoryStore.show(root, node.path);
+  }
 
   /**
    * The test classes a tree node stands for: everything under a directory, or the ones a
@@ -303,6 +362,10 @@
           { id: 'new', label: 'New', icon: Plus, children: NEW_SUBMENU },
           { separator: true, id: 'sep-new', label: '' },
           ...runItem,
+          { id: 'delete', label: 'Delete…', icon: Trash2, shortcut: 'Del', danger: true },
+          { separator: true, id: 'sep-del-dir', label: '' },
+          { id: 'history', label: 'Local History', icon: History, children: HISTORY_SUBMENU },
+          { separator: true, id: 'sep-hist-dir', label: '' },
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
           { separator: true, id: 'sep-dir', label: '' },
@@ -318,8 +381,11 @@
           // module path, and `willRenameFiles` would have to be asked per file inside it — so it is
           // absent rather than offered and then half-done.
           { id: 'rename',        label: 'Rename…',            icon: FileType2, shortcut: 'F2' },
+          { id: 'delete',        label: 'Delete…',            icon: Trash2, shortcut: 'Del', danger: true },
           { separator: true, id: 'sep-rename', label: '' },
           ...runItem,
+          { id: 'history', label: 'Local History', icon: History, children: HISTORY_SUBMENU },
+          { separator: true, id: 'sep-hist-file', label: '' },
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
           { id: 'reveal',        label: 'Reveal in Project',  icon: LocateFixed },
@@ -328,18 +394,69 @@
       switch (id) {
         // The submenu leaf decides which shape the dialog opens in — a Java type, with its
         // kind list, or a plain file that only wants a name.
-        case 'new-class': newFileKind = 'class'; newFileDir = newDir; break;
+        case 'new-class': newFileKind = defaultKind(); newFileDir = newDir; break;
         case 'new-file':  newFileKind = 'file';  newFileDir = newDir; break;
         case 'run-tests': runTestsFor(node); break;
         case 'rename':    renamePath = node.path; break;
+        case 'delete':    deleting = node; break;
         case 'open':      void projectStore.openFile(node.path); break;
         case 'copy-path': copyText(node.path); break;
         case 'copy-rel':  copyText(relativePath(node.path)); break;
         case 'reveal':    void revealPath(node.path); break;
+        case 'hist-show':  showHistory(node); break;
+        // Labelling needs a revision to pin the name on, and the dialog is where one is
+        // chosen — so this opens it rather than inventing a second way to pick.
+        case 'hist-label': showHistory(node); break;
+        case 'hist-deleted':
+          if (projectStore.project) bennuHistoryStore.showDeleted(projectStore.project.root);
+          break;
         case 'expand':    bennuUiStore.setExpanded(node.path, true); break;
         case 'collapse':  bennuUiStore.setExpanded(node.path, false); break;
       }
     });
+  }
+
+  // ── Delete ──────────────────────────────────────────────────────────────────
+  /** The node a delete confirmation is open for (null = closed). */
+  let deleting = $state<TreeNode | null>(null);
+
+  /** What the confirmation says will happen.
+   *
+   *  A directory is spelled out as "and everything in it" rather than counted: counting
+   *  means walking the tree to produce a number that is stale by the time it is read, and
+   *  the sentence that matters is the one about the folder, not the arithmetic. */
+  const deleteDetail = $derived.by(() => {
+    const node = deleting;
+    if (!node) return '';
+    const what = node.is_dir
+      ? `${relativePath(node.path)} and everything in it`
+      : relativePath(node.path);
+    return `${what}\n\nIt goes into Bennu's local history, not the system trash — undo it right away with Ctrl/Cmd+Z, or restore it later from Local History › Deleted.`;
+  });
+
+  async function confirmDelete() {
+    const node = deleting;
+    const root = projectStore.project?.root;
+    deleting = null;
+    if (!node || !root) return;
+    await bennuFileOpsStore.delete(root, [node.path]);
+  }
+
+  /**
+   * The tree's own undo.
+   *
+   * Bound here and not at the window level on purpose: <kbd>⌘Z</kbd> in the editor means
+   * "un-type that" and here it means "un-delete that", and a single handler for both is
+   * how you press it expecting a keystroke back and get a file instead. Whoever has focus
+   * answers.
+   */
+  function onTreeKeydown(e: KeyboardEvent) {
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'z') return;
+    if (!bennuFileOpsStore.undoable) return;
+    e.preventDefault();
+    e.stopPropagation();
+    void bennuFileOpsStore.undo();
   }
 
   /** Parent directory of a path (forward-slash aware). */
@@ -360,6 +477,13 @@
    * only the tree knows. Directories are skipped for the same reason the menu entry is files-only.
    */
   function onRowKeydown(node: TreeNode, e: KeyboardEvent) {
+    // Delete on the focused row — the key every file manager binds, and the one the
+    // context menu advertises. Backspace too, because that is what deletes on a Mac.
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      deleting = node;
+      return;
+    }
     if (e.key !== 'F2' || node.is_dir) return;
     e.preventDefault();
     renamePath = node.path;
@@ -371,8 +495,15 @@
   // The directory a New-file modal is open for (null = closed).
   let newFileDir = $state<string | null>(null);
   /** Which shape the New dialog opens in — set by the submenu leaf that opened it. The
-   *  header's `＋` leaves it at `class`, the overwhelmingly common thing to create here. */
-  let newFileKind = $state<'class' | 'file'>('class');
+   *  header's `＋` leaves it at the typed default, the overwhelmingly common thing to create
+   *  here; which template that is follows the project (a struct on Cargo, a class on Maven). */
+  let newFileKind = $state<NewFileKind>('class');
+
+  /** The typed default for this project. Read at the moment the dialog is opened rather
+   *  than held in state — the project can change under a long-lived panel. */
+  function defaultKind(): NewFileKind {
+    return projectStore.isCargo ? 'rust_struct' : 'class';
+  }
 
   // ── Options kebab ────────────────────────────────────────────────────────────
   const optionsMenu: DropdownItem[] = [
@@ -382,14 +513,14 @@
     { kind: 'item', id: 'reveal',   label: 'Select opened file', icon: Crosshair, onclick: revealActive },
     { kind: 'separator' },
     { kind: 'item', id: 'newfile',  label: 'New file…', icon: Plus,
-      onclick: () => { newFileDir = defaultNewDir(); } },
+      onclick: () => { newFileKind = defaultKind(); newFileDir = defaultNewDir(); } },
   ];
 </script>
 
 <PanelShell title="Project">
   {#snippet icon()}<FolderTree size={13} />{/snippet}
   {#snippet actions()}
-    <button class="ps-btn" type="button" onclick={() => { newFileDir = defaultNewDir(); }} disabled={!projectStore.project} use:tooltip={'New file'} aria-label="New file">
+    <button class="ps-btn" type="button" onclick={() => { newFileKind = defaultKind(); newFileDir = defaultNewDir(); }} disabled={!projectStore.project} use:tooltip={'New file'} aria-label="New file">
       <Plus size={14} />
     </button>
     <button class="ps-btn" type="button" onclick={revealActive} disabled={!projectStore.activeFilePath} use:tooltip={'Select opened file'} aria-label="Select opened file">
@@ -416,7 +547,8 @@
   {/if}
 
   {#if projectStore.project}
-    <div class="bs-tree">
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div class="bs-tree" onkeydown={onTreeKeydown} role="presentation">
       <Tree
         bind:this={treeRef}
         nodes={rootChildren}
@@ -434,21 +566,28 @@
       >
         {#snippet row(ctx: RowSnippetCtx<TreeNode>)}
           {@const meta = iconFor(ctx.node)}
+          <!-- Two ways of being present-but-not-part-of-the-project, and they stack: a
+               gitignored entry reads faintest, a merely hidden one sits between it and a
+               normal row. Both stay legible — this is a de-emphasis, not a strikethrough. -->
+          {@const faint = ctx.node.ignored ? 'faint-ignored' : ctx.node.hidden ? 'faint-hidden' : ''}
           {#if meta.shape === 'glyph'}
             {@const Glyph = meta.icon}
-            <span class="tree-icon" style="color: {meta.color}">
-              <Glyph size={14} />
+            <span class="tree-icon {faint}" style="color: {meta.color}">
+              <Glyph size={14} fill={meta.filled ? 'currentColor' : 'none'} />
             </span>
           {:else if meta.shape === 'kind'}
-            <span class="tree-icon"><SymbolKindIcon kind={meta.kind} /></span>
+            <span class="tree-icon {faint}"><SymbolKindIcon kind={meta.kind} /></span>
           {:else}
             <!-- A file-type icon carries its own colours (it IS the brand mark), so this one
                  is not tinted — a `color` here would only fight it. -->
-            <span class="tree-icon">
+            <span class="tree-icon {faint}">
               <IconifyIconView icon={meta.icon} width={15} height={15} />
             </span>
           {/if}
-          <span class="tree-label">{ctx.node.name}</span>
+          <span
+            class="tree-label {faint}"
+            use:tooltip={ctx.node.ignored ? 'Ignored by git' : ''}
+          >{ctx.node.name}</span>
         {/snippet}
       </Tree>
     </div>
@@ -482,6 +621,19 @@
 
 {#if renamePath !== null}
   <BennuRenameFileModal path={renamePath} onClose={() => (renamePath = null)} />
+{/if}
+
+{#if deleting}
+  <ConfirmModal
+    title={deleting.is_dir ? 'Delete this folder?' : 'Delete this file?'}
+    message={deleting.name}
+    detail={deleteDetail}
+    variant="danger"
+    confirmLabel="Delete"
+    busy={bennuFileOpsStore.busy}
+    onConfirm={() => void confirmDelete()}
+    onCancel={() => (deleting = null)}
+  />
 {/if}
 
 <style>
@@ -520,4 +672,10 @@
   }
   .tree-icon :global(svg) { width: 1em; height: 1em; }
   .tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Hidden and gitignored rows. Opacity rather than a colour so the icon's own palette (a
+     `.gitignore`'s brand mark, a package's tint) fades with the text instead of being
+     overridden by it — the row still says what kind of thing it is, quietly. */
+  .faint-hidden  { opacity: 0.62; }
+  .faint-ignored { opacity: 0.42; }
 </style>

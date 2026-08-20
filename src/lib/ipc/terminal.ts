@@ -1,9 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
-import { platform } from '../rpc';
+import { platform } from './rpc';
 import type {
   TerminalInfo, TerminalExecResult,
   BuiltinShellInfo, TerminalsConfig,
-} from '$lib/types/corvus/terminal';
+} from '$lib/types/terminal';
 
 export function terminalCreate(opts: {
   shell?: string;

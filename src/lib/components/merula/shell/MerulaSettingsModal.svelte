@@ -7,7 +7,7 @@
    * Arbor's settings (the shared `SettingsShell`).
    */
   import { onMount } from 'svelte';
-  import { Settings, Music, FileAudio, Volume2, Boxes } from 'lucide-svelte';
+  import { Settings, Music, FileAudio, Volume2, Boxes, Monitor, Sparkles, Command } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import SettingsShell, { type SettingsNavGroup } from '$lib/components/shared/ui/SettingsShell.svelte';
@@ -18,11 +18,25 @@
   import TranscriptionModels from './TranscriptionModels.svelte';
   import { configStore, LOG_LEVELS, type MerulaLogThreshold } from '../stores/config.svelte';
   import { merulaAudioDevices, type MerulaAudioDevice } from '$lib/ipc/merula/merula';
+  import AppearanceSettings from '$lib/components/shared/internal/AppearanceSettings.svelte';
+  import AnimationsSettings from '$lib/components/shared/internal/AnimationsSettings.svelte';
+  import KeystrokesSettings from '$lib/components/shared/internal/KeystrokesSettings.svelte';
+  import ThemeEditorModal from '$lib/components/shared/ThemeEditorModal.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
+  /** The shared theme editor, reachable from the Appearance page. */
+  let themeEditorOpen = $state(false);
+
   // Grouped sidebar — new config groups slot in here as they appear.
   const groups: SettingsNavGroup[] = [
+    // The shell's own appearance settings. They already applied to this window — every product
+    // loads them on mount — and simply had nowhere here to be changed from.
+    { label: 'Interface', items: [
+      { id: 'appearance', label: 'Appearance', icon: Monitor },
+      { id: 'animations', label: 'Animations', icon: Sparkles },
+      { id: 'keystrokes', label: 'Keyboard Inputs', icon: Command },
+    ] },
     { label: 'Editor', items: [{ id: 'general', label: 'General', icon: Music }] },
     { label: 'Audio',  items: [
       { id: 'audio',  label: 'Output', icon: Volume2 },
@@ -58,6 +72,13 @@
 
   <SettingsShell {groups} bind:active>
     {#snippet content()}
+      {#if active === 'appearance'}
+        <AppearanceSettings onOpenThemeEditor={() => { themeEditorOpen = true; }} />
+      {:else if active === 'animations'}
+        <AnimationsSettings />
+      {:else if active === 'keystrokes'}
+        <KeystrokesSettings />
+      {/if}
       {#if active === 'general'}
         <div class="section-header">
           <h2>General</h2>
@@ -118,6 +139,10 @@
     {/snippet}
   </SettingsShell>
 </Modal>
+
+{#if themeEditorOpen}
+  <ThemeEditorModal onClose={() => (themeEditorOpen = false)} />
+{/if}
 
 <style>
   .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }

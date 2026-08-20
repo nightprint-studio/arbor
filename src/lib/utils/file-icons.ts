@@ -61,6 +61,20 @@ import editorconfigIcon from '@iconify-icons/vscode-icons/file-type-editorconfig
 import helmIcon        from '@iconify-icons/vscode-icons/file-type-helm';
 import logIcon         from '@iconify-icons/vscode-icons/file-type-log';
 import keyIcon         from '@iconify-icons/vscode-icons/file-type-key';
+// RON — geode's content format, and what a Bevy asset is written in. It has its own mark in
+// the set, so it no longer has to borrow Rust's and read as a source file.
+import ronIcon         from '@iconify-icons/vscode-icons/file-type-ron';
+// Office documents. Bennu renders `.docx` in a tab (`BennuDocxView`); the rest are listed so a
+// folder of hand-offs reads as what it is instead of as a wall of plain-text marks.
+import wordIcon        from '@iconify-icons/vscode-icons/file-type-word';
+import excelIcon       from '@iconify-icons/vscode-icons/file-type-excel';
+import powerpointIcon  from '@iconify-icons/vscode-icons/file-type-powerpoint';
+import pdfIcon         from '@iconify-icons/vscode-icons/file-type-pdf2';
+// Shaders. `.wgsl` is what a Bevy material is written in, and until now it fell through to
+// the plain-text mark in a folder where every file is one.
+import wgslIcon        from '@iconify-icons/vscode-icons/file-type-wgsl';
+import glslIcon        from '@iconify-icons/vscode-icons/file-type-glsl';
+import hlslIcon        from '@iconify-icons/vscode-icons/file-type-hlsl';
 
 // ── Folder icons ─────────────────────────────────────────────────────────────
 import folderDefault       from '@iconify-icons/vscode-icons/default-folder';
@@ -150,7 +164,17 @@ const EXT_ICONS: Record<string, IconifyIcon> = {
   zip: zipIcon, gz: zipIcon, tar: zipIcon, bz2: zipIcon,
   xz: zipIcon, rar: zipIcon, '7z': zipIcon, tgz: zipIcon,
   sql: sqlIcon, sqlite: sqlIcon, sqlite3: sqlIcon,
-  txt: textIcon, log: textIcon, rtf: textIcon,
+  ron: ronIcon,
+  wgsl: wgslIcon,
+  glsl: glslIcon, vert: glslIcon, frag: glslIcon, comp: glslIcon,
+  hlsl: hlslIcon,
+  docx: wordIcon, doc: wordIcon, dotx: wordIcon,
+  xlsx: excelIcon, xls: excelIcon, csv: excelIcon,
+  pptx: powerpointIcon, ppt: powerpointIcon,
+  pdf: pdfIcon,
+  // `log` is NOT repeated here: it is already mapped to the log mark above, and a second
+  // entry in the same literal silently replaced it with the plain-text one.
+  txt: textIcon, rtf: textIcon,
 };
 
 /** Exact filename (lowercased) → icon. Takes priority over extension. */

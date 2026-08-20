@@ -9,6 +9,13 @@
 <h2>Interface</h2>
 
 <h3>Appearance</h3>
+<p>
+  This page is shared. The same section is in Bennu's settings, in merula's, in Picus's, in the
+  File Explorer's and in Tyto's, and it is the same page rather than a copy of it — the values
+  live in your profile's <code>config.toml</code> and have always applied to every Arbor window.
+  Two of the rows below are Arbor-only, because they name behaviour only this window has:
+  <em>Compact file tree folders</em> and <em>Activity bar</em> position.
+</p>
 <ul>
   <li><strong>Window controls</strong> — switches the close / minimize / maximize buttons in the title bar between the Mac-inspired coloured trio (default) and a flat Windows-/IntelliJ-style set. The Mac trio sits on the <strong>left</strong> of the bar like real traffic lights — close, minimize, zoom — and all three reveal their glyphs together as soon as the pointer enters the group; the Windows set runs the full height of the bar and reaches the right edge. The same switch also restyles the close button used in modal and panel headers. On macOS this setting is hidden: the window uses the real system traffic lights (top-left), so you also get the native window menu, and the green button zooms instead of going full-screen. macOS also drops the title-bar hamburger entirely and puts its entries in the <strong>system menu bar</strong>, keyboard shortcuts included; the docs, command-palette and settings buttons stay in the title bar. Each window publishes its own menus when it comes to the front.</li>
   <li><strong>Zoom menu</strong> — with the Mac trio, the green button zooms the window on click and opens a <strong>Move &amp; Resize</strong> panel when the pointer rests on it (or on <kbd>↓</kbd> when it has focus). The panel is grouped the way the zones are: <em>Fill &amp; Center</em>, <em>Halves</em>, <em>Quarters</em>, and — when more than one monitor is attached — <em>Displays</em>, which sends the window to another screen keeping its size and where it sat. <strong>Return to Previous Size</strong> puts it back where it was before the first snap. Arrows walk the grid, <kbd>Enter</kbd> applies, <kbd>Esc</kbd> closes, and the caption line names whatever is under the pointer.</li>
@@ -236,6 +243,11 @@
 <p>
   The layout is persisted to <code>~/.config/arbor/config.toml</code> and restored on next launch.
   Hidden items are still active in the background — hiding the Stage button does not disable staging.
+</p>
+<p>
+  <strong>Bennu has the same editor</strong>, over its own two rails, reached from its gear menu or
+  its Command Palette. Each product's arrangement is kept separately, so rearranging one leaves the
+  other alone.
 </p>
 
 <h2>Git</h2>

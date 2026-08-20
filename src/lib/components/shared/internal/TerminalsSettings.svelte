@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import SettingsCard from './SettingsCard.svelte';
   import {
     Plus, Trash2, Check, RefreshCw, CircleCheck, CircleX, FolderOpen,
   } from 'lucide-svelte';
-  import { terminalStore } from '$lib/stores/corvus/terminal.svelte';
+  import { terminalStore } from '$lib/stores/terminal.svelte';
   import {
     getTerminalsConfig, setTerminalsConfig,
-  } from '$lib/ipc/corvus/terminal';
+  } from '$lib/ipc/terminal';
   import { uiStore } from '$lib/stores/ui.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
@@ -14,7 +15,7 @@
   import FormField from '$lib/components/shared/ui/FormField.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
   import { tooltip } from '$lib/actions/tooltip';
-  import type { TerminalsConfig, TerminalEntry } from '$lib/types/corvus/terminal';
+  import type { TerminalsConfig, TerminalEntry } from '$lib/types/terminal';
 
   let config = $state<TerminalsConfig>(
     terminalStore.config ?? { default_shell: null, custom_shells: [], path_overrides: {} }
@@ -136,7 +137,7 @@
   description="Detect installed shells, set executable paths, and define custom terminals available from the integrated terminal panel."
 />
 
-<div class="card">
+<SettingsCard spaced>
   <FormRow label="Default shell" description="Opened by the bare “+” button">
     <Select
       value={config.default_shell ?? ''}
@@ -144,9 +145,9 @@
       onchange={(v) => setDefault(v)}
     />
   </FormRow>
-</div>
+</SettingsCard>
 
-<div class="card">
+<SettingsCard spaced>
   <div class="card-section-title">
     Detected Shells
     <button
@@ -216,9 +217,9 @@
       </button>
     </div>
   {/each}
-</div>
+</SettingsCard>
 
-<div class="card">
+<SettingsCard spaced>
   <div class="card-section-title">
     Custom Terminals
     <button class="add-btn" onclick={() => addOpen = !addOpen}>
@@ -279,7 +280,7 @@
       </div>
     {/each}
   {/if}
-</div>
+</SettingsCard>
 
 <div class="save-row">
   <button class="btn btn-primary" onclick={save} disabled={saving}>
@@ -288,14 +289,6 @@
 </div>
 
 <style>
-  .card {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-    margin-bottom: 12px;
-  }
-
   .card-section-title {
     display: flex;
     align-items: center;

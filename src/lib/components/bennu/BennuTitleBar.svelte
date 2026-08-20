@@ -19,7 +19,7 @@
     FolderOpen, FolderPlus, LogOut, Settings, Keyboard, FlaskConical,
     Play, Bug, Unplug, MoreVertical, Palette, SlidersHorizontal, Info, Hammer, Square, TriangleAlert,
     UserCog, Bot,
-    ListChecks, ChevronDown, RotateCw, ListRestart,
+    ListChecks, ChevronDown, RotateCw, ListRestart, LayoutDashboard,
   } from 'lucide-svelte';
   import type { BuildType } from '$lib/stores/bennu/run.svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -257,6 +257,10 @@
   const settingsMenu = $derived<DropdownItem[]>([
     { kind: 'item', id: 'settings',  label: 'Settings…',           icon: Settings,  shortcut: 'Ctrl+,',   onclick: () => bennuUiStore.openSettings() },
     { kind: 'item', id: 'shortcuts', label: 'Keyboard shortcuts…', icon: Keyboard,  shortcut: 'F1',       onclick: () => bennuUiStore.toggleDocs() },
+    // Same place Corvus keeps it — the gear rather than the hamburger, because it is about the
+    // window's chrome and not about the project.
+    { kind: 'item', id: 'customize-rails', label: 'Customize Activity Bar…', icon: LayoutDashboard,
+      onclick: () => bennuUiStore.openCustomizeRails() },
     ...(mcpRoot
       ? [
           { kind: 'separator' as const },

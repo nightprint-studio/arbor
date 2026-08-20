@@ -118,6 +118,20 @@ enum Slot {
     Ready(Arc<LspSession>),
     /// It could not be started. Sticky — see the module docs.
     Failed { info: SlotInfo, message: String, log_tail: Vec<String> },
+    /// Its binary is not installed, so nothing was spawned.
+    ///
+    /// A state of its own rather than a [`Failed`](Slot::Failed), because the two are
+    /// different facts and the difference is what the user sees. A *failure* is a server
+    /// that should be running and is not: worth a row in the Running list, worth a Restart.
+    /// A server that is simply **not installed** is not a failure of this project — it is
+    /// the same sentence the Language Servers page already says, with an Install button next
+    /// to it, and repeating it here per open project turns "what is running" into a list of
+    /// things that are not, each offering a Restart that can only fail again.
+    ///
+    /// So it is remembered and not shown. Remembered because `ensure` runs on the way to
+    /// every completion and a forgotten answer means scanning `PATH` per keystroke; not
+    /// shown because there is nothing here to act on.
+    Missing { info: SlotInfo },
 }
 
 /// A server description resolved against the config — a catalogue entry or a user-defined
@@ -134,6 +148,9 @@ struct ResolvedServer {
     init_options: Option<serde_json::Value>,
     install_hint: String,
     custom: bool,
+    /// The command that installs it, argv-style. Empty for a user-defined server and for
+    /// the ones whose install is a system package.
+    install: Vec<String>,
 }
 
 impl ResolvedServer {
@@ -150,6 +167,7 @@ impl ResolvedServer {
             root_markers: spec.root_markers.iter().map(|s| s.to_string()).collect(),
             init_options: spec.init_options(check_command),
             install_hint: spec.install_hint.to_string(),
+            install: spec.install.iter().map(|s| s.to_string()).collect(),
             custom: false,
         }
     }
@@ -176,6 +194,9 @@ impl ResolvedServer {
             init_options,
             install_hint: String::new(),
             custom: true,
+            // Nothing to offer: the user brought this server, so they know where it came
+            // from — and running an install command Bennu invented for it would be a guess.
+            install: Vec::new(),
         })
     }
 
@@ -251,6 +272,15 @@ pub struct LspRegistry {
     /// The latest event sink, so a background start can report its own outcome. One window per
     /// backend, so the newest is the right one.
     sink: RwLock<Option<Arc<dyn EventSink>>>,
+    /// Per-server-id memo of "is this binary anywhere on this machine".
+    ///
+    /// Keyed by server id rather than by project root, because the answer is about `PATH` and
+    /// the rustup / extension directories — machine-wide facts that do not vary per project.
+    /// Separate from the `Missing` slot because the question is asked *before* a slot exists:
+    /// [`Self::is_lsp_file`] needs it on the keystroke path, where `locate_for`'s directory
+    /// scan cannot be paid every time. Cleared by [`Self::forget_missing`], which is what an
+    /// install calls.
+    installed: Mutex<HashMap<String, bool>>,
 }
 
 static REGISTRY: OnceLock<LspRegistry> = OnceLock::new();
@@ -263,6 +293,7 @@ impl LspRegistry {
             leases: Mutex::new(HashMap::new()),
             reaping: AtomicBool::new(false),
             sink: RwLock::new(None),
+            installed: Mutex::new(HashMap::new()),
         })
     }
 
@@ -406,7 +437,12 @@ impl LspRegistry {
         let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
         match slots.get(key) {
             Some(Slot::Ready(s)) => Existing::Ready(Arc::clone(s)),
-            Some(Slot::Starting(_)) | Some(Slot::Failed { .. }) => Existing::Pending,
+            // `Missing` is Pending for the same reason `Failed` is: there is nothing to serve
+            // and nothing to start. It is the whole point of remembering it — without this
+            // the slot is absent and `ensure` scans `PATH` again on the next keystroke.
+            Some(Slot::Starting(_)) | Some(Slot::Failed { .. }) | Some(Slot::Missing { .. }) => {
+                Existing::Pending
+            }
             None => Existing::Absent,
         }
     }
@@ -434,13 +470,9 @@ impl LspRegistry {
         };
         let slot = match &command {
             Some(_) => Slot::Starting(info),
-            // Not installed. Recorded rather than ignored, so the panel can say so *with the
-            // install hint* — a project that silently has no intelligence explains nothing.
-            None => Slot::Failed {
-                info,
-                message: not_found_message(&server),
-                log_tail: Vec::new(),
-            },
+            // Not installed. Remembered so the next keystroke does not scan `PATH` again, and
+            // kept out of the Running list — see `Slot::Missing`.
+            None => Slot::Missing { info },
         };
         {
             let mut slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
@@ -711,11 +743,22 @@ impl LspRegistry {
     }
 
     /// Whether a language server is the engine for `file` — true even while it is starting or
-    /// after it failed.
+    /// after it failed, false when its binary is not installed.
     ///
-    /// The routing predicate. It has to be independent of whether the server is *up*, or a
-    /// request for a `.rs` file would fall through to the Java engine during startup and get a
-    /// confidently wrong answer from a resolver that has never seen Rust.
+    /// The routing predicate, and the two halves of it are answering different questions.
+    ///
+    /// It is independent of whether the server is **up**: a request for a `.rs` file during
+    /// rust-analyzer's startup must not fall through to the Java engine, which parses whatever
+    /// it is given as Java and would answer confidently about the wrong language. A server that
+    /// is starting, indexing or even stuck is still the engine for that file; the correct answer
+    /// there is "nothing yet".
+    ///
+    /// It is **not** independent of whether the server exists. A binary that is not installed is
+    /// never going to answer, so claiming the file would not defer an answer — it would cancel
+    /// one. That is what took Bennu's own WGSL intelligence off the air the moment wgsl-analyzer
+    /// joined the catalogue: `.wgsl` became a served extension, every shader request stopped at
+    /// an empty server answer, and go-to, find-usages, hover and the naga diagnostics behind them
+    /// went quiet on machines that had never installed it.
     pub fn is_lsp_file(&self, file: &str) -> bool {
         let cfg = load_config();
         if !cfg.lsp.enabled {
@@ -724,7 +767,37 @@ impl LspRegistry {
         let Some(server) = self.server_for(file, &cfg.lsp) else {
             return false;
         };
-        find_root(Path::new(file), &server.markers()).is_some()
+        if find_root(Path::new(file), &server.markers()).is_none() {
+            return false;
+        }
+        self.binary_present(&server, &cfg.lsp.server_paths)
+    }
+
+    /// Whether `server`'s executable can be found on this machine, memoised.
+    ///
+    /// `locate_for` walks the catalogue's preferred directories and then `PATH`; this sits on
+    /// the keystroke path, so the walk is paid once per server id per session. The memo goes
+    /// stale in exactly one direction — a binary appears — and [`Self::forget_missing`] is
+    /// called by both things that can make one appear.
+    fn binary_present(
+        &self,
+        server: &ResolvedServer,
+        overrides: &std::collections::BTreeMap<String, String>,
+    ) -> bool {
+        if let Some(known) = self
+            .installed
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&server.id)
+        {
+            return *known;
+        }
+        let found = locate_for(server, overrides).is_some();
+        self.installed
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(server.id.clone(), found);
+        found
     }
 
     /// What the server serving `file` can say right now — **without starting one**.
@@ -757,6 +830,10 @@ impl LspRegistry {
             Some(Slot::Failed { info, message, .. }) => {
                 ServerReadiness::Failed { name: info.name.clone(), message: message.clone() }
             }
+            // Not installed is not a failure of this file. Reported as `Absent`, the same as a
+            // language nothing in the catalogue serves — which is what the footer should say,
+            // because for this project it is the same situation.
+            Some(Slot::Missing { .. }) => ServerReadiness::Absent,
             Some(Slot::Ready(session)) => {
                 let status = session.status();
                 if !session.is_alive() {
@@ -784,6 +861,10 @@ impl LspRegistry {
         let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
         let mut out: Vec<bennu_proto::prelude::LspStatus> = slots
             .values()
+            // A server that is not installed has no status to report: it is not running, not
+            // starting, and not failing. It is remembered so `ensure` stops looking for it —
+            // see `Slot::Missing` — and the Language Servers page is where it is offered.
+            .filter(|slot| !matches!(slot, Slot::Missing { .. }))
             .map(|slot| match slot {
                 Slot::Ready(session) => {
                     let s = session.status();
@@ -805,11 +886,33 @@ impl LspRegistry {
                 Slot::Failed { info, message, log_tail } => {
                     status_of(info, SessionState::Failed, message.clone(), log_tail.clone())
                 }
+                // Unreachable — filtered out above. Matched rather than `_` so adding a state
+                // is a compile error here instead of a silently missing row.
+                Slot::Missing { .. } => unreachable!("filtered before the map"),
             })
             .collect();
         // Deterministic order, or the settings list reshuffles on every poll.
         out.sort_by(|a, b| (&a.language, &a.root).cmp(&(&b.language, &b.root)));
         out
+    }
+
+    /// Forget every "this server is not installed" memo.
+    ///
+    /// The memo exists so `ensure` stops scanning `PATH` on every keystroke (see
+    /// [`Slot::Missing`]), and it has exactly one way of going stale: the binary appears.
+    /// So it is cleared by the two things that can make one appear — installing a server,
+    /// and pointing Bennu at an executable by hand. Without this, installing a server from
+    /// the settings page would leave the editor certain it is still missing for the rest of
+    /// the session, which is precisely the bug the memo would be blamed for.
+    ///
+    /// Only the missing ones: a slot that is running, starting or genuinely failed is
+    /// untouched, because none of those are about a binary that was not there.
+    pub fn forget_missing(&'static self) {
+        let mut slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        slots.retain(|_, slot| !matches!(slot, Slot::Missing { .. }));
+        // The routing memo is the same fact asked earlier, so it goes stale at the same moment.
+        // Leaving it would keep `is_lsp_file` answering false for a server that is now there.
+        self.installed.lock().unwrap_or_else(|p| p.into_inner()).clear();
     }
 
     /// Restart the server for `(root, language)`, or start it if it never ran.
@@ -877,6 +980,7 @@ impl LspRegistry {
                 command: s.command,
                 install_hint: s.install_hint,
                 custom: s.custom,
+                install: s.install,
             })
             .collect()
     }
@@ -1163,10 +1267,71 @@ mod tests {
 
     #[test]
     fn a_missing_binary_produces_a_message_that_says_what_to_do() {
-        // "not found" alone leaves the user with no next step, which is the whole reason the
-        // catalogue carries install hints.
-        let spec = spec_by_id("rust-analyzer").unwrap();
-        assert!(spec.install_hint.contains("rustup component add"));
+        // "not found" alone leaves the user with no next step. The next step now lives in one
+        // of two places and every server must have it in one of them: a runnable `install`
+        // command, or — for the ones installed as a system package — the whole instruction
+        // spelled out in the hint. A server with neither is a dead end in the settings list.
+        for spec in bennu_lsp::prelude::BUILTIN_SERVERS {
+            let actionable = !spec.install.is_empty()
+                || spec.install_hint.to_lowercase().contains("install");
+            assert!(actionable, "{} tells the user nothing to do about being missing", spec.id);
+        }
+        // And the command really is the one that installs it, not a paraphrase.
+        let ra = spec_by_id("rust-analyzer").unwrap();
+        assert_eq!(ra.install, ["rustup", "component", "add", "rust-analyzer"]);
+    }
+
+    #[test]
+    fn a_server_that_is_not_installed_stays_out_of_the_running_list() {
+        // The Running list answers "what is serving this project". A server whose binary was
+        // never there is not failing at that — it is the sentence the Language Servers page
+        // already says, and repeating it once per open project is how that list fills with
+        // rows offering a Restart that can only fail again.
+        let info = SlotInfo {
+            id: "ghost".into(),
+            name: "ghost".into(),
+            language: "ghost".into(),
+            root: "/tmp/does-not-matter".into(),
+            command: "ghost".into(),
+        };
+        let reg = LspRegistry::global();
+        let key = slot_key("/lsp-missing-test", "ghost");
+        reg.slots
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(key.clone(), Slot::Missing { info });
+
+        assert!(
+            !reg.statuses().iter().any(|s| s.language == "ghost"),
+            "a missing server must not appear as a status"
+        );
+        // …and it is still remembered, or `ensure` would scan PATH again on the next keystroke.
+        assert!(matches!(reg.peek(&key), Existing::Pending));
+
+        // Until something says the binary might be there now.
+        reg.forget_missing();
+        assert!(matches!(reg.peek(&key), Existing::Absent));
+    }
+
+    #[test]
+    fn an_install_command_never_repeats_the_hint() {
+        // The two say different things by design — where it comes from, and what to run — so
+        // a hint that also spells the command prints it twice on the same row.
+        for spec in bennu_lsp::prelude::BUILTIN_SERVERS {
+            if spec.install.is_empty() {
+                continue;
+            }
+            // The full command line, not the program name: "It is distributed on npm" is a
+            // fine thing for a hint to say — it is where the server comes from. What must
+            // not be there is the line the button already shows underneath it.
+            let command = spec.install.join(" ");
+            assert!(
+                !spec.install_hint.contains(&command),
+                "{}'s hint repeats the command the button already shows: {}",
+                spec.id,
+                spec.install_hint
+            );
+        }
     }
 }
 

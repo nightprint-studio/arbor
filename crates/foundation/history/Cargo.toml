@@ -1,0 +1,19 @@
+[package]
+name         = "arbor-history"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Local history — a content store of file revisions, independent of any VCS. Speaks paths and bytes only: no product concepts, no git, no Tauri. Consumed today by Bennu, designed for Garrulus and Picus."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+# Content addressing. A revision is named by what it contains, so saving the same bytes
+# twice costs one blob and reverting is a lookup rather than a replay of diffs.
+sha2       = { workspace = true }
+# Diffing two revisions. Shared pin with the shell's git diff, so "what changed" means
+# the same thing in the Local History dialog and in Corvus.
+similar    = { workspace = true }

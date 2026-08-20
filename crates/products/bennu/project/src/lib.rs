@@ -23,6 +23,7 @@ pub mod capability;
 pub mod cargo;
 pub mod encoding;
 pub mod error;
+pub mod ignored;
 pub mod jdk;
 pub mod model;
 pub mod pom;

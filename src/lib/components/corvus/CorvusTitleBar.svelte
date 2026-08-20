@@ -25,14 +25,14 @@
   import { firePluginAction } from '$lib/ipc/plugin';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
-  import Contribution from '$lib/components/corvus/Contribution.svelte';
+  import Contribution from './Contribution.svelte';
   import PluginIcon   from '$lib/components/plugins/PluginIcon.svelte';
   import ProductIcon  from '$lib/components/shared/internal/ProductIcon.svelte';
   import WorkspaceTabs from '$lib/components/shared/internal/WorkspaceTabs.svelte';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
-  import WindowControls from './WindowControls.svelte';
-  import WorkspaceDropdown from '../corvus/workspace/WorkspaceDropdown.svelte';
-  import CustomizeActivityBarModal from '../corvus/CustomizeActivityBarModal.svelte';
+  import WindowControls from '$lib/components/shared/WindowControls.svelte';
+  import WorkspaceDropdown from './workspace/WorkspaceDropdown.svelte';
+  import CustomizeActivityBarModal from './CustomizeActivityBarModal.svelte';
   import ProfileManagerModal from '$lib/components/shared/ProfileManagerModal.svelte';
   import RecentReposModal from '$lib/components/shared/RecentReposModal.svelte';
   import { tooltipForAction } from '$lib/utils/shortcut';

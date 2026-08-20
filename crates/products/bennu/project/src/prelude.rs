@@ -13,6 +13,7 @@ pub use crate::encoding::{
     project_encoding_label, restore_crlf, source_encoding_label, IndexDecode, UTF8,
 };
 pub use crate::error::ProjectError;
+pub use crate::ignored::IgnoreStack;
 pub use crate::jdk::detect as detect_jdk;
 pub use crate::model::{
     file_stamp, open_project, read_file, rename_path, write_file, OpenOptions,

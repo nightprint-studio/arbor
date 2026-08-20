@@ -28,6 +28,14 @@ export interface BennuConfig {
   /** Autosave a modified buffer to disk automatically (after a short idle, on tab switch, and on
    *  window blur). `true` by default; off saves only on Ctrl+S. */
   autosave: boolean;
+  /** Keep a private record of what every project file used to be. */
+  local_history: boolean;
+  /** How many days of it to keep. Labelled revisions never expire. */
+  local_history_days: number;
+  /** Ceiling on one project's history, in megabytes. */
+  local_history_max_mb: number;
+  /** Files bigger than this (megabytes) are not recorded. */
+  local_history_max_file_mb: number;
   /** Fold runs of library frames in the debugger's call stack into one expandable row. */
   collapse_library_frames: boolean;
   /** Offer the classes and files inside the dependency jars in the Go-to navigator, as two extra
@@ -183,4 +191,24 @@ export function getBennuWorkspaces(): Promise<BennuWorkspaces> {
 /** Persist the workspace store — call debounced on tab/project/switch/CRUD changes. */
 export function setBennuWorkspaces(workspaces: BennuWorkspaces): Promise<void> {
   return bennu('set_bennu_workspaces', { workspaces });
+}
+
+/** Mirrors the BE `OnboardingConfig` — whether the user has been through Bennu's welcome tour,
+ *  and at which schema version. `version: 0` means never seen.
+ *
+ *  Bennu's own rather than the shell's: Corvus keeps the same two fields in its own backend
+ *  config, and finishing one product's tour is no reason to stop introducing the other. */
+export interface BennuOnboarding {
+  completed: boolean;
+  version: number;
+}
+
+/** Read the welcome-tour state (defaults — never seen — on a missing/corrupt file). */
+export function getBennuOnboarding(): Promise<BennuOnboarding> {
+  return bennu('get_bennu_onboarding', {});
+}
+
+/** Record that the tour was finished or skipped. */
+export function setBennuOnboarding(config: BennuOnboarding): Promise<void> {
+  return bennu('set_bennu_onboarding', { config });
 }

@@ -7,7 +7,7 @@
 //! signature requires the ctx.
 
 use bennu_core::config::{
-    load, load_workspaces, save, save_workspaces, BennuConfig, BennuWorkspaces,
+    load, load_workspaces, save, save_workspaces, BennuConfig, BennuWorkspaces, OnboardingConfig,
 };
 use bennu_core::prelude::BennuState;
 
@@ -25,6 +25,11 @@ fn set_bennu_config(_state: &BennuState, config: BennuConfig) -> Result<(), Stri
     bennu_classpath::prelude::set_extra_jdk_homes(
         config.jdk_paths.iter().map(std::path::PathBuf::from).collect(),
     );
+    // A language server Bennu had recorded as "not installed" is not looked for again until
+    // something says it might be there now (see `LspRegistry::forget_missing`). Saving the
+    // config is one of those things: it is how an executable path is pinned by hand, and how
+    // a disabled server is turned back on.
+    crate::lsp_registry::LspRegistry::global().forget_missing();
     save(&config)
 }
 
@@ -41,4 +46,24 @@ fn get_bennu_workspaces(_state: &BennuState) -> Result<BennuWorkspaces, String> 
 #[arbor_rpc::handler]
 fn set_bennu_workspaces(_state: &BennuState, workspaces: BennuWorkspaces) -> Result<(), String> {
     save_workspaces(&workspaces)
+}
+
+// ── onboarding ──
+// Its own pair rather than a field of the big config the settings modal round-trips: the tour
+// finishing is one boolean written once, and routing it through `set_bennu_config` would mean
+// the tour serialising every setting the user has — including any a settings dialog open at
+// the same moment is in the middle of editing.
+
+/// Whether the user has been through Bennu's welcome tour.
+#[arbor_rpc::handler]
+fn get_bennu_onboarding(_state: &BennuState) -> Result<OnboardingConfig, String> {
+    Ok(load().onboarding)
+}
+
+/// Record that the tour was finished or skipped.
+#[arbor_rpc::handler]
+fn set_bennu_onboarding(_state: &BennuState, config: OnboardingConfig) -> Result<(), String> {
+    let mut current = load();
+    current.onboarding = config;
+    save(&current)
 }

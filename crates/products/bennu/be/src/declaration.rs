@@ -44,5 +44,11 @@ fn bennu_declaration(
     if let Some(target) = crate::lsp_route::declaration(&args.file, &args.source, args.offset) {
         return Ok(target);
     }
+    // A shader. Before the index for the same reason a `.rs` is: the Java resolver parses
+    // anything as Java, so an identifier that happens to exist in the Java index becomes a
+    // confident jump into the wrong file.
+    if let Some(target) = crate::wgsl_intel::declaration(&args.file, &args.source, args.offset) {
+        return Ok(target);
+    }
     Ok(IndexService::global().declaration(&args.file, &args.source, args.offset))
 }

@@ -82,12 +82,24 @@ export interface ActivityBarItemConfig {
   visible: boolean;
 }
 
+/** One product's four rail sections, named by position rather than by content. */
+export interface ActivityBarSections {
+  top_items?: ActivityBarItemConfig[];
+  bottom_items?: ActivityBarItemConfig[];
+  right_top_items?: ActivityBarItemConfig[];
+  right_bottom_items?: ActivityBarItemConfig[];
+}
+
 export interface ActivityBarConfig {
   top_items: ActivityBarItemConfig[];
   bottom_items: ActivityBarItemConfig[];
   /** Ordering + visibility for the right-side ActivityBar (plugins only). */
   right_top_items?: ActivityBarItemConfig[];
   right_bottom_items?: ActivityBarItemConfig[];
+  /** The same four lists for every product other than Corvus, keyed by product id.
+   *  Corvus stayed on the flat fields because they are already on disk everywhere;
+   *  see the Rust struct for why relocating them would reset existing bars. */
+  products?: Record<string, ActivityBarSections>;
 }
 
 /** Activity-timeline filter defaults for the MR/PR detail modal.

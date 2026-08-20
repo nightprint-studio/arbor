@@ -1,0 +1,51 @@
+<!-- Bennu docs — XML with a DTD or XSD behind it: completion and validation from the schema. -->
+<h1>XML schemas</h1>
+<p class="doc-lead">
+  When an XML file declares a DTD or an XSD, Bennu fetches it once and then uses it — completion
+  of the elements that are actually allowed there, and a warning about the ones that are not.
+</p>
+
+<h2>XML with a schema behind it</h2>
+<p>
+  An XML file in a Java project is a configuration language whose vocabulary is written down
+  precisely — in the DTD or XSD the document names — and normally nothing reads it. Bennu does.
+  Open a <code>struts.xml</code>, a <code>web.xml</code>, a <code>pom.xml</code> or a
+  <code>beans.xml</code> and typing <code>&lt;</code> lists the elements that may go there, with
+  the schema's own description of each.
+</p>
+<p>
+  <strong>Where the schema comes from.</strong> A document names it by URL, and Bennu never fetches
+  one. It does not have to: frameworks ship their grammar inside their own jar —
+  <code>struts2-core.jar</code> carries <code>struts-2.5.dtd</code>, <code>spring-beans.jar</code>
+  carries every <code>spring-beans.xsd</code> ever published — so the file the URL names is already
+  on the machine. Schemas kept in the project itself are found too, and win over a jar copy of the
+  same name. The Maven POM is the one exception nobody ships, so its vocabulary is built in.
+</p>
+<p>
+  <strong>What you get.</strong> Element names filtered by what the parent may contain; attribute
+  names, with the ones already written removed; attribute <em>values</em> where the schema closes
+  the set. Ghost text where exactly one thing can follow — and never where the rest of the name is
+  already written, which is most carets in a document whose closing tags the editor typed for you.
+  Hover with the schema's documentation,
+  the required attributes, and which grammar answered. <kbd>Ctrl</kbd> + <kbd>B</kbd> on a tag or
+  an attribute jumps to its declaration in the schema — which turns
+  <code>&lt;result type="…"&gt;</code> from a word into something you can read.
+</p>
+<p>
+  <strong>Following the schema itself.</strong> <kbd>Ctrl</kbd> + <kbd>B</kbd> on the
+  <code>DOCTYPE</code> or the <code>xsi:schemaLocation</code> opens the grammar the file is
+  actually checked against — the copy out of the jar, not the address it is written as. When
+  nobody ships one, Bennu downloads it once and caches it, and that is worth more than the
+  reading: the cached copy joins the catalog, so a <code>pom.xml</code> stops being answered by
+  the built-in table and starts being answered by the real Maven schema. Nothing is ever fetched
+  during a scan — only when you follow the link.
+</p>
+<p>
+  <strong>What it will not do.</strong> Say anything at all without a schema. No grammar resolved
+  means no completion, no ghost text and no warnings — a vocabulary guessed from the tags already
+  in the file would confidently propose whatever typo is already there. And where a schema says
+  content is unconstrained (<code>ANY</code>, <code>xs:any</code>, a POM
+  <code>&lt;configuration&gt;</code>) nothing inside is checked. Prefixed names are never reported
+  either: a document mixing four namespaces usually has schemas for one of them, and the rest must
+  be invisible rather than wrong.
+</p>

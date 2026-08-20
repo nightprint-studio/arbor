@@ -39,11 +39,22 @@ mod config_cmds;
 // pom parse + capability detection + JDK/encoding detection + file tree + decoded
 // reads, all driven through the leaf `bennu-project` crate.
 mod project;
+// Local history — the record of what every project file used to be. Sits beside
+// `project` because it is fed by the same write paths: a save, a rename, a change
+// detected on disk.
+mod history;
+// Deleting project files, and taking it back — the two halves of one operation, built on
+// the history that makes the second half possible.
+mod file_ops;
 // Capabilities: `bennu_capabilities` — re-detect the Spike-D capability bitset for a
 // project without re-opening it.
 mod capabilities;
 mod cargo_cmd;
 mod cargo_intel;
+// WGSL, for a project with no language server installed: naga for the diagnostics (the
+// compiler wgpu really runs), a tolerant scanner for everything the editor wants while the
+// file is still being typed.
+mod wgsl_intel;
 // The crates.io index — the only part of the Cargo tooling that reaches the network. Its own module
 // because of that, not because of its size: the switch, the cache and the TTL all live with it.
 mod crates_io;

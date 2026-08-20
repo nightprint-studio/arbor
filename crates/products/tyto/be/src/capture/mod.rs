@@ -17,6 +17,8 @@
 
 /// The single guarded entry point into scap (permission + panic containment).
 pub mod access;
+/// Folds a recorded sequence into a sprite atlas + `.ron` sheet (pages, UVs, timing).
+pub mod atlas;
 pub mod audio;
 /// The frame-sequence sink: a deduplicating sampler + image writer pool.
 pub mod frames;

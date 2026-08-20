@@ -88,6 +88,14 @@ pub struct LspServerInfo {
     pub enabled: bool,
     /// `true` when it comes from the user's `[[lsp.servers]]` rather than the catalogue.
     pub custom: bool,
+    /// The command that installs it, argv-style — `["cargo", "install", …]`. Empty when
+    /// there is none Bennu will run: a system package, or a server the user defined
+    /// themselves. The settings page offers an Install button exactly when this is non-empty.
+    ///
+    /// `#[serde(default)]` so a frontend talking to an older backend gets an empty list —
+    /// i.e. no button — rather than a missing field.
+    #[serde(default)]
+    pub install: Vec<String>,
 }
 
 /// One semantically-highlighted span.

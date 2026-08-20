@@ -41,6 +41,15 @@ const TREE_DEPTH: usize = 64;
 pub struct OpenProjectArgs {
     /// Absolute path to the project root (the dir holding the root `pom.xml`).
     pub root: String,
+    /// Whether this project is the one about to be **on screen**. Absent means yes.
+    ///
+    /// Only a workspace restore says otherwise, and it is the reason this field exists: it opens
+    /// every member of the workspace to read its manifest and stash its session, and exactly one
+    /// of them is then activated. Warm-starting a language server for each was a rust-analyzer
+    /// per Cargo project — five projects, five indexing runs, several gigabytes — for four
+    /// projects nobody was looking at.
+    #[serde(default)]
+    pub active: Option<bool>,
 }
 
 /// Open a project (Maven or Cargo — the leaf dispatches on the manifest): parse the
@@ -63,7 +72,31 @@ pub struct OpenProjectArgs {
 /// Both are off-thread and neither blocks the other; a polyglot root gets both.
 #[arbor_rpc::handler]
 fn bennu_open_project(ctx: &BennuState, args: OpenProjectArgs) -> Result<ProjectInfo, String> {
-    open_and_start(ctx, &args.root, SessionOrigin::Window)
+    let warm = args.active.unwrap_or(true);
+    open_and_start(ctx, &args.root, SessionOrigin::Window, warm)
+}
+
+/// Args for [`bennu_activate_project`].
+#[derive(Deserialize)]
+pub struct ActivateProjectArgs {
+    /// Absolute path to the project root now on screen.
+    pub root: String,
+}
+
+/// Say that an already-open project is now the one on screen.
+///
+/// The other half of `active: false`. Opening a project and *looking at* one are two different
+/// events, and only the second is a reason to spend a language server: a workspace restore does
+/// the first for every member and the second for exactly one, and switching between members
+/// afterwards does the second again with no re-open.
+///
+/// Idempotent and cheap — a server already up is claimed rather than restarted, which is what
+/// stops it being reclaimed as idle while somebody is reading it.
+#[arbor_rpc::handler]
+fn bennu_activate_project(ctx: &BennuState, args: ActivateProjectArgs) -> Result<(), String> {
+    crate::lsp_registry::LspRegistry::global().set_sink(ctx.event_sink());
+    crate::lsp_registry::LspRegistry::global().warm_start(&args.root, SessionOrigin::Window);
+    Ok(())
 }
 
 /// Open `root` and start everything that opening it starts: the language-server warm-up,
@@ -84,8 +117,9 @@ pub(crate) fn open_and_start(
     ctx: &BennuState,
     root: &str,
     origin: SessionOrigin,
+    warm: bool,
 ) -> Result<ProjectInfo, String> {
-    let args = OpenProjectArgs { root: root.to_string() };
+    let args = OpenProjectArgs { root: root.to_string(), active: Some(warm) };
     let cfg = bennu_core::config::load();
     let jdk_override = cfg.jdk_overrides.get(&args.root).map(|s| s.as_str());
     let opts = OpenOptions { default_encoding: &cfg.default_encoding, jdk_override };
@@ -95,12 +129,22 @@ pub(crate) fn open_and_start(
     // itself only claims slots and spawns threads — the handshake happens on those, so this
     // never blocks the open.
     crate::lsp_registry::LspRegistry::global().set_sink(ctx.event_sink());
-    crate::lsp_registry::LspRegistry::global().warm_start(&args.root, origin);
+    // Not for a project being loaded as an inactive workspace member: see `OpenProjectArgs::active`.
+    // Nothing is lost by waiting — the first request against one of its files starts the server on
+    // its own, and switching to it says so through `bennu_activate_project`.
+    if warm {
+        crate::lsp_registry::LspRegistry::global().warm_start(&args.root, origin);
+    }
 
     // Every project kind, and BEFORE the early return below: the framework-extension host resolves a
     // file's project through this, and a Cargo root that never registered made every caret-based
     // framework query on it answer "no project owns this file" — see `frameworks::register_root`.
     crate::frameworks::register_root(&args.root);
+
+    // Retention, off-thread. Opening a project is the one moment that is already slow for
+    // other reasons and happens once per session — which is exactly what a policy that
+    // deletes things should be attached to, rather than to a timer nobody can predict.
+    crate::history::purge_in_background(&args.root);
 
     if !info.kind.is_java() {
         return Ok(info);
@@ -253,6 +297,12 @@ fn bennu_write_file(_ctx: &BennuState, args: WriteFileArgs) -> Result<WriteResul
         .get(&args.file)
         .or_else(|| cfg.encoding_overrides.get(&args.root))
         .map(|s| s.as_str());
+    // Read BEFORE the write: once it has happened, what the file used to be exists
+    // nowhere else. Only needed for a file history has never heard of — after the first
+    // revision, the previous save is the "before" — and `on_write` is what decides that,
+    // so this is a read of a file that is about to be written anyway.
+    let disk_before = std::fs::read(&args.file).ok();
+
     let result: WriteResult = write_file(
         Path::new(&args.root),
         Path::new(&args.file),
@@ -262,6 +312,10 @@ fn bennu_write_file(_ctx: &BennuState, args: WriteFileArgs) -> Result<WriteResul
         args.expect_stamp.as_deref(),
     )
     .map_err(|e| -> String { e.into() })?;
+
+    // After the write and after the guard: a refused save must not leave a revision
+    // claiming something happened.
+    crate::history::on_write(&args.root, &args.file, disk_before, &Default::default());
 
     // Tell a language server the file was saved. This is where the real diagnostics come from:
     // rust-analyzer runs `cargo check` on save, so a type or borrow error only exists after
@@ -275,6 +329,8 @@ fn bennu_write_file(_ctx: &BennuState, args: WriteFileArgs) -> Result<WriteResul
 /// Args for [`bennu_rename_path`].
 #[derive(Deserialize)]
 pub struct RenamePathArgs {
+    /// Absolute path to the project root — the history is keyed by it.
+    pub root: String,
     /// Absolute path of the file to rename.
     pub file: String,
     /// Its absolute path afterwards. The caller builds it, so this is also how a file is *moved*.
@@ -313,6 +369,7 @@ fn bennu_rename_path(_ctx: &BennuState, args: RenamePathArgs) -> Result<RenamePa
     let edits = crate::lsp_route::will_rename(&args.file, &args.new_path);
     rename_path(Path::new(&args.file), Path::new(&args.new_path))
         .map_err(|e| -> String { e.into() })?;
+    crate::history::on_rename(&args.root, &args.file, &args.new_path);
     Ok(RenamePathResult { new_path: args.new_path, edits })
 }
 

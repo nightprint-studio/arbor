@@ -8,7 +8,7 @@
   import { recordRecentProject, onOpenIntent } from '$lib/ipc/recents';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import TitleBar from '../shared/TitleBar.svelte';
+  import TitleBar from './CorvusTitleBar.svelte';
   import TabBar from './TabBar.svelte';
   import StatusBar from './StatusBar.svelte';
   import ParkedModalsDock from './ParkedModalsDock.svelte';
@@ -45,7 +45,7 @@
   import MarkdownEditorModal from '../shared/MarkdownEditorModal.svelte';
   import { markdownStore } from '$lib/stores/markdown.svelte';
   import { hasOpenModal } from '../shared/Modal.svelte';
-  import TerminalPanel from './terminal/TerminalPanel.svelte';
+  import TerminalPanel from '$lib/components/shared/terminal/TerminalPanel.svelte';
   import JobOutputPanel from './jobs/JobOutputPanel.svelte';
   import PluginLogsPanel from '../plugins/PluginLogsPanel.svelte';
   import { pluginLogsStore } from '$lib/stores/pluginLogs.svelte';
@@ -153,7 +153,7 @@
   import { commitConfigStore } from '$lib/stores/corvus/commit_config.svelte';
   import { branchesConfigStore } from '$lib/stores/corvus/branches-config.svelte';
   import { branchGroupingStore } from '$lib/stores/corvus/branch-grouping.svelte';
-  import { terminalStore } from '$lib/stores/corvus/terminal.svelte';
+  import { terminalStore } from '$lib/stores/terminal.svelte';
   import { pipelinesStore } from '$lib/stores/corvus/pipelines.svelte';
   import { linkedWorktreesStore } from '$lib/stores/corvus/linkedWorktrees.svelte';
   import { openRepo, checkIsGitRepo, initRepo } from '$lib/ipc/corvus/graph';
@@ -163,7 +163,7 @@
   } from '$lib/ipc/corvus/missing';
   import type { MissingProjectsConfig } from '$lib/ipc/corvus/missing';
   import type { InitRepoOptions } from '$lib/types/corvus/git';
-  import { terminalCreate } from '$lib/ipc/corvus/terminal';
+  import { terminalCreate } from '$lib/ipc/terminal';
   import { keybindingsStore } from '$lib/stores/keybindings.svelte';
   import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import { mrStore } from '$lib/stores/corvus/mr.svelte';

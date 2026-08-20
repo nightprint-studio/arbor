@@ -46,6 +46,10 @@ pub(crate) fn bennu_references(
     if let Some(usages) = crate::lsp_route::references(&args.file, &args.source, args.offset) {
         return Ok(usages);
     }
+    // A shader, scoped to its own file — see `wgsl_intel::references` for why not wider.
+    if let Some(usages) = crate::wgsl_intel::references(&args.file, &args.source, args.offset) {
+        return Ok(usages);
+    }
     let service = IndexService::global();
     let result = match &args.origin_file {
         Some(origin) => service.find_usages_from(origin, &args.file, &args.source, args.offset),

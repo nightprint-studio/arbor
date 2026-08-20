@@ -10,21 +10,33 @@
    *
    * The Project group stays read-only: it reflects the resolved facts about the
    * open project — the JDK, the detected capabilities and their evidence, and the
-   * active file's encoding. No theme section here — theme lives in the titlebar
-   * gear submenu.
+   * active file's encoding.
+   *
+   * The first group is not Bennu's at all: `Interface → Appearance` is the shell's shared
+   * settings (font scale, window controls, the compact title bar), which already applied to
+   * this window and simply had no dialog in it. It is the same component Corvus's settings
+   * panel renders.
    */
   import {
     Settings, Coffee, Boxes, FileType, TextCursorInput, ListTree, Bug,
     FoldVertical, Braces, RotateCcw, Wand2, Plus, Trash2, TriangleAlert, FolderOpen,
-    Database, Package, ServerCog, RefreshCw, CircleCheck,
+    Database, Package, ServerCog, RefreshCw, CircleCheck, Download, Monitor,
+    Sparkles, Command, Terminal,
   } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
   import SettingsShell, { type SettingsNavGroup } from '$lib/components/shared/ui/SettingsShell.svelte';
+  import AppearanceSettings from '$lib/components/shared/internal/AppearanceSettings.svelte';
+  import AnimationsSettings from '$lib/components/shared/internal/AnimationsSettings.svelte';
+  import KeystrokesSettings from '$lib/components/shared/internal/KeystrokesSettings.svelte';
+  import TerminalsSettings from '$lib/components/shared/internal/TerminalsSettings.svelte';
+  import ThemeEditorModal from '$lib/components/shared/ThemeEditorModal.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
@@ -46,6 +58,11 @@
   import { getStepExcludes } from '$lib/ipc/bennu/debug';
 
   let { onClose }: { onClose: () => void } = $props();
+
+  /** The theme editor, opened from the Appearance page. Mounted here as well as on the title
+   *  bar's gear because a settings page that names the theme and cannot change it sends you
+   *  looking through the chrome for the button — the modal itself is stateless and shared. */
+  let themeEditorOpen = $state(false);
 
   // ── JDK search paths (real bennu config, not the mock settings store) ─────────
   // Loaded once on mount; edits persist through `set_bennu_config`, which also re-seeds
@@ -174,6 +191,17 @@
    *  has nothing to resolve (Rust is UTF-8 by definition). Editor / Completion / Folding
    *  apply to every buffer and stay. */
   const groups = $derived<SettingsNavGroup[]>([
+    // First, and above the editor: it is the group that answers "why is everything so small",
+    // which is a question asked before any of the others. The settings under it are the shell's
+    // and apply to every Arbor window — Bennu is simply one of the places you can reach them.
+    { label: 'Interface', items: [
+      { id: 'appearance', label: 'Appearance', icon: Monitor },
+      { id: 'animations', label: 'Animations', icon: Sparkles },
+      { id: 'keystrokes', label: 'Keyboard Inputs', icon: Command },
+      // The shells the built-in Terminal offers. Bennu's terminal is the same one Arbor's is
+      // — same store, same backend — so this is not a copy of that page, it is that page.
+      { id: 'terminals',  label: 'Terminals', icon: Terminal },
+    ] },
     { label: 'Editor', items: [
       { id: 'editor',     label: 'Editor',     icon: TextCursorInput },
       { id: 'completion', label: 'Completion', icon: ListTree },
@@ -281,6 +309,18 @@
     const next = on ? lspDisabled.filter((d) => d !== id) : [...new Set([...lspDisabled, id])];
     await saveConfigPatch({ lsp: { ...lspCfg, disabled: next } });
     await bennuLspStore.reloadServers();
+  }
+
+  /**
+   * Install a language server from its own package manager, streaming into the Build panel.
+   *
+   * The toast is where the outcome lands rather than an inline banner: the interesting part
+   * of a `cargo install --git` is the three minutes of log, which is already on screen in the
+   * panel, and what is left to say afterwards is one sentence.
+   */
+  async function installServer(id: string) {
+    const res = await bennuLspStore.install(id);
+    toastStore.show(res.message, res.ok ? 'success' : 'error', res.ok ? 5000 : 9000);
   }
 
   async function commitServerPath(id: string, path: string) {
@@ -410,7 +450,18 @@
 
   <SettingsShell {groups} bind:active>
     {#snippet content()}
-      {#if active === 'editor'}
+      {#if active === 'appearance'}
+        <AppearanceSettings
+          onOpenThemeEditor={() => { themeEditorOpen = true; }}
+          onCustomizeBars={() => { onClose(); bennuUiStore.openCustomizeRails(); }}
+        />
+      {:else if active === 'animations'}
+        <AnimationsSettings />
+      {:else if active === 'keystrokes'}
+        <KeystrokesSettings />
+      {:else if active === 'terminals'}
+        <TerminalsSettings />
+      {:else if active === 'editor'}
         <div class="section-header">
           <h2>Editor</h2>
           <p>How source is rendered and how the Tab key indents.</p>
@@ -424,6 +475,23 @@
           <FormRow label="Autosave" description="Write a modified file to disk automatically — after a short idle, when you switch tabs, and when the window loses focus. Off saves only on Ctrl+S.">
             <Toggle checked={s.autosave} onchange={(v) => s.setAutosave(v)} ariaLabel="Autosave" />
           </FormRow>
+          <FormRow label="Local history" description="Keep a private record of what every project file used to be, so a save, a refactor or a delete can be undone long after the editor's own undo has moved on. Stored in Arbor's data folder, never inside the project. Files git ignores are skipped.">
+            <Toggle checked={s.localHistory} onchange={(v) => s.setLocalHistory(v)} ariaLabel="Local history" />
+          </FormRow>
+          {#if s.localHistory}
+            <FormRow label="Keep history for" description="Labelled revisions, and each file's newest one, are kept regardless — a label is a promise, and a file whose only revision aged out would stop having a history exactly when it is the last copy.">
+              <NumberStepper value={s.localHistoryDays} min={1} max={90} narrow suffix="days"
+                             onchange={(v) => s.setLocalHistoryDays(v)} ariaLabel="Days of local history" />
+            </FormRow>
+            <FormRow label="History size limit" description="Per project. Over it, the oldest revisions go first.">
+              <NumberStepper value={s.localHistoryMaxMb} min={16} max={4096} step={16} narrow suffix="MB"
+                             onchange={(v) => s.setLocalHistoryMaxMb(v)} ariaLabel="Local history size limit" />
+            </FormRow>
+            <FormRow label="Skip files larger than" description="One large binary would spend the whole budget on a single revision that no diff can show anyway.">
+              <NumberStepper value={s.localHistoryMaxFileMb} min={1} max={128} narrow suffix="MB"
+                             onchange={(v) => s.setLocalHistoryMaxFileMb(v)} ariaLabel="Local history file size ceiling" />
+            </FormRow>
+          {/if}
           <FormRow label="Show line numbers" description="Gutter line numbers on the left margin.">
             <Toggle checked={s.showLineNumbers} onchange={(v) => s.setShowLineNumbers(v)} ariaLabel="Show line numbers" />
           </FormRow>
@@ -671,10 +739,31 @@
                   <div class="lsp-srv-path" title={srv.path}>{srv.path}</div>
                 {:else}
                   <!-- Not "not found" full stop: the hint is what turns a dead end into a next
-                       step, which is the whole reason the catalogue carries one. -->
+                       step, which is the whole reason the catalogue carries one. The hint says
+                       where the server comes from; the command below is what to run, shown
+                       whether or not there is a button — a user who prefers their own terminal
+                       needs it, and a failed install leaves them with exactly that. -->
                   <div class="lsp-srv-hint">
                     <code>{srv.command}</code> was not found. {srv.install_hint}
                   </div>
+                  {#if srv.install?.length}
+                    <div class="lsp-install">
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={bennuLspStore.installing !== null}
+                        loading={bennuLspStore.installing === srv.id}
+                        onclick={() => void installServer(srv.id)}
+                      >
+                        {#snippet iconStart()}<Download size={13} />{/snippet}
+                        {bennuLspStore.installing === srv.id ? 'Installing…' : 'Install'}
+                      </Button>
+                      <code class="lsp-install-cmd" title={srv.install.join(' ')}>
+                        {srv.install.join(' ')}
+                      </code>
+                      <CopyButton value={srv.install.join(' ')} title="Copy the install command" />
+                    </div>
+                  {/if}
                 {/if}
                 <label class="lsp-override">
                   <span>Executable path</span>
@@ -997,6 +1086,10 @@ initialization_options = ""`}</pre>
   />
 {/if}
 
+{#if themeEditorOpen}
+  <ThemeEditorModal onClose={() => (themeEditorOpen = false)} />
+{/if}
+
 <style>
   .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
 
@@ -1020,6 +1113,12 @@ initialization_options = ""`}</pre>
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .lsp-run-msg { font-size: var(--font-size-xs); color: var(--warning); line-height: 1.4; }
+  .lsp-install { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  .lsp-install-cmd {
+    font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-faint);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
   .lsp-srv-hint { font-size: var(--font-size-xs); color: var(--text-muted); line-height: 1.45; }
   .lsp-srv-hint code, .lsp-note code { font-family: var(--font-code); color: var(--text-primary); }
   .lsp-log, .lsp-sample {

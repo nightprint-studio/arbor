@@ -12,7 +12,7 @@ arbor-studio-types = { path = "../types" }
 serde_json   = { workspace = true }
 async-trait  = { workspace = true }
 # Line-level unified diff (core::diff). Mirrors the launcher's pin.
-similar      = { version = "2", features = ["text", "unicode", "bytes", "inline"] }
+similar = { workspace = true }
 # JSONPath query engine (core::query).
 serde_json_path = "0.7"
 # Encoding-aware read/write flush (core::persist) — preserves each file's

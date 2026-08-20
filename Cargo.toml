@@ -13,6 +13,7 @@ members = [
     "crates/platform/feedback",
     "crates/foundation/core",
     "crates/foundation/be",
+    "crates/foundation/history",
     "crates/foundation/fs",
     # The one HTTP server in the workspace. Listening (MCP, and the OAuth redirect
     # catcher once `arbor-auth` migrates onto it) — never outbound, that is `reqwest`.
@@ -24,6 +25,7 @@ members = [
     "crates/foundation/sql-abbrev",
     "crates/foundation/syntax",
     "crates/foundation/logscan",
+    "crates/products/bennu/wgsl",
     "crates/products/corvus/core",
     "crates/products/corvus/plugin",
     "crates/products/corvus/plugin-ns",
@@ -197,9 +199,18 @@ uuid   = { version = "1", features = ["v4"] }
 schemars = "1.2"
 dirs   = "6.0.0"
 regex  = "1"
+# gitignore semantics (nested `.gitignore` stacks, negations, `.git/info/exclude`, the
+# user's global excludes). Used by bennu-project's file tree to MARK ignored entries —
+# the walk itself stays ours, because the tree shows what git ignores rather than
+# hiding it.
+ignore = "0.4"
 # MIDI (SMF) read/write — pure-Rust, zero-dep. Used by the merula import/transcribe
 # crates: parse an external/transient `.mid` and write `.mid` on disk.
 midly  = "0.5"
+# Text diffing. ONE pin shared by the studio value-differ, the shell's git diff and
+# arbor-history's revision diff — three places that must agree on what "changed"
+# means, or the same two files read differently depending on which panel is open.
+similar = { version = "2", features = ["text", "unicode", "bytes", "inline"] }
 
 # Tauri (member crates that need AppHandle / Manager pull this in)
 tauri = { version = "2.11.0", features = ["tray-icon", "image-png", "image-ico", "protocol-asset"] }

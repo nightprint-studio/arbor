@@ -193,13 +193,16 @@ function createActivityBarConfigStore() {
 
   // ── Persist ────────────────────────────────────────────────────────────────
 
+  // Takes anything with an id and a visibility: the customise dialog edits rows that carry a
+  // label and an icon as well, and asking it to reconstruct the full display item just to have
+  // both fields read off it would be ceremony.
   async function saveItems(
-    newTop:    ActivityBarDisplayItem[],
-    newBottom: ActivityBarDisplayItem[],
-    newRightTop?:    ActivityBarDisplayItem[],
-    newRightBottom?: ActivityBarDisplayItem[],
+    newTop:    ActivityBarItemConfig[],
+    newBottom: ActivityBarItemConfig[],
+    newRightTop?:    ActivityBarItemConfig[],
+    newRightBottom?: ActivityBarItemConfig[],
   ) {
-    const toConfig = (items: ActivityBarDisplayItem[]): ActivityBarItemConfig[] =>
+    const toConfig = (items: ActivityBarItemConfig[]): ActivityBarItemConfig[] =>
       items.map(i => ({ id: i.id, visible: MANDATORY_IDS.has(i.id) ? true : i.visible }));
 
     const top_items          = toConfig(newTop);
@@ -210,7 +213,14 @@ function createActivityBarConfigStore() {
     bottomItems      = bottom_items;
     rightTopItems    = right_top_items;
     rightBottomItems = right_bottom_items;
-    await setActivityBarConfig({ top_items, bottom_items, right_top_items, right_bottom_items });
+    // Re-read before writing: the setter replaces the whole `activity_bar` table, and every
+    // other product's bar lives in `products` inside it. Writing only these four fields would
+    // reset Bennu's rails every time somebody rearranged Corvus's.
+    const existing = await getActivityBarConfig().catch(() => null);
+    await setActivityBarConfig({
+      ...(existing ?? {}),
+      top_items, bottom_items, right_top_items, right_bottom_items,
+    });
   }
 
   return {

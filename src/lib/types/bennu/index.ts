@@ -103,6 +103,12 @@ export interface TreeNode {
   is_dir: boolean;
   /** Children for a directory (empty for a file or a not-yet-expanded dir). */
   children: TreeNode[];
+  /** Hidden by the platform's convention (a leading `.`, or the Windows attribute).
+   *  Omitted on the wire when false — the overwhelmingly common case. */
+  hidden?: boolean;
+  /** Ignored by git. The tree **marks** these rather than hiding them: a stale ignored
+   *  artifact you cannot see is one you cannot explain. Omitted on the wire when false. */
+  ignored?: boolean;
 }
 
 /** Result of `bennu_read_file`: the decoded text and the encoding it was decoded

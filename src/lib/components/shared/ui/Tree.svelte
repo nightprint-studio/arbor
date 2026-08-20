@@ -630,16 +630,31 @@
             </span>
           {/if}
 
+          <!-- Il chevron apre e chiude **sempre**, anche quando `toggleOnClick` è falso.
+               Non l'aveva, e il click sulla riga era l'unico modo: nei pannelli in cui
+               cliccare una riga significa selezionarla (i test, dove il click apre il
+               risultato) non restava **nessun** modo di collassare col mouse — solo
+               «expand/collapse all». `toggleOnClick` governa il corpo della riga, non
+               questo: il chevron è il comando di apertura, è l'unica cosa che fa. -->
           {#if showChevron}
-            <span class="tree-caret" class:tree-caret-empty={!r.hasChildren}>
-              {#if r.hasChildren}
+            {#if r.hasChildren}
+              <button
+                type="button"
+                class="tree-caret"
+                tabindex="-1"
+                aria-hidden="true"
+                onclick={(e) => { e.stopPropagation(); toggle(r.node); }}
+                ondblclick={(e) => e.stopPropagation()}
+              >
                 {#if r.expanded}
                   <ChevronDown size={11} />
                 {:else}
                   <ChevronRight size={11} />
                 {/if}
-              {/if}
-            </span>
+              </button>
+            {:else}
+              <span class="tree-caret tree-caret-empty"></span>
+            {/if}
           {/if}
 
           {@render row(ctx)}
@@ -726,7 +741,14 @@
     height: 12px;
     flex-shrink: 0;
     color: var(--text-muted);
+    /* È un `button` quando ha figli: va spogliato, non ridisegnato. */
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
   }
+  :global(.tree button.tree-caret) { cursor: pointer; }
+  :global(.tree button.tree-caret:hover) { color: var(--text-primary); }
 
   /* Indent guides — opt-in via the `guides` prop. With a flat windowed
      list we can no longer rely on nested DOM containers to draw guides,

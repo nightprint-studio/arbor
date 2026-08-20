@@ -20,9 +20,9 @@
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
-  import TerminalInstance from '$lib/components/corvus/terminal/TerminalInstance.svelte';
-  import { terminalCreate, terminalClose } from '$lib/ipc/corvus/terminal';
-  import { terminalStore } from '$lib/stores/corvus/terminal.svelte';
+  import TerminalInstance from '$lib/components/shared/terminal/TerminalInstance.svelte';
+  import { terminalCreate, terminalClose } from '$lib/ipc/terminal';
+  import { terminalStore } from '$lib/stores/terminal.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 

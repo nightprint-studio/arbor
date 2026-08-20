@@ -25,6 +25,10 @@
     /** Set when this button opens something — a dropdown, a disclosure. Omitted
      *  entirely when absent, so an ordinary button gains no spurious state. */
     ariaExpanded?: boolean;
+    /** Che **cosa** apre, per chi legge con uno screen reader: `aria-expanded` da solo
+     *  dice «aperto/chiuso» e non dice di che. Va insieme a `ariaExpanded`, e come quello
+     *  sparisce del tutto quando non c'è. */
+    ariaHaspopup?: 'menu' | 'listbox' | 'tree' | 'grid' | 'dialog' | true;
     /** Optional CSS color override (e.g. 'var(--brand-linear)') applied to background for primary,
         text for ghost/icon. Use sparingly — most callers should pick a variant. */
     color?: string;
@@ -49,6 +53,7 @@
     tooltip,
     ariaLabel,
     ariaExpanded,
+    ariaHaspopup,
     color,
     onclick,
     iconStart,
@@ -106,6 +111,7 @@
   use:tooltipAction={tipInput}
   aria-label={ariaLabel}
   aria-expanded={ariaExpanded}
+  aria-haspopup={ariaHaspopup}
   aria-busy={loading || undefined}
   aria-disabled={inert || undefined}
   disabled={inert && !ariaInert}

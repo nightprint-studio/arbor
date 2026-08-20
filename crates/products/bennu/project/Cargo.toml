@@ -19,3 +19,7 @@ serde_json = { workspace = true }
 # workspace tree (foundation/fs, corvus/git). Decode only; the round-trip save `encode`
 # stays hand-rolled (its unmappable-char fallback semantics differ from encoding_rs').
 encoding_rs = "0.8"
+# Gitignore semantics for the file tree's "ignored" flag: nested `.gitignore` stacks,
+# negations, `.git/info/exclude` and the user's global excludes. Matching only — the
+# tree still walks and returns ignored entries, it just marks them.
+ignore = { workspace = true }

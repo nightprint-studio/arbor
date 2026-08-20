@@ -31,7 +31,7 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
-  import JUnitIcon from './JUnitIcon.svelte';
+  import { testIcon } from './test-icon';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -130,7 +130,7 @@
 </script>
 
 <PanelShell title="Tests">
-  {#snippet icon()}<JUnitIcon size={13} />{/snippet}
+  {#snippet icon()}{@const TestIcon = testIcon()}<TestIcon size={13} />{/snippet}
   {#snippet actions()}
     <Dropdown items={sortItems} position="fixed" direction="down">
       {#snippet trigger()}

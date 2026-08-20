@@ -19,7 +19,7 @@
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
-  lspServers, lspStatus, lspRestart, lspStop,
+  lspServers, lspStatus, lspRestart, lspStop, lspInstall,
   type LspServerInfo, type LspStatus,
 } from '$lib/ipc/bennu/lsp';
 import type { SourceEdit } from '$lib/types/bennu';
@@ -54,6 +54,7 @@ function extensionOf(path: string | null | undefined): string {
 
 function createLspStore() {
   let servers = $state<LspServerInfo[]>([]);
+  let installing = $state<string | null>(null);
   let statuses = $state<LspStatus[]>([]);
   /** The extensions of every ENABLED server, so routing is one lookup. */
   let servedExtensions = $state<Set<string>>(new Set());
@@ -79,6 +80,8 @@ function createLspStore() {
 
   return {
     get servers() { return servers; },
+    /** The id currently being installed, so its row can say so and the button can wait. */
+    get installing() { return installing; },
     get statuses() { return statuses; },
 
     /** The servers that are installed and enabled — what actually has a chance of running. */
@@ -202,6 +205,33 @@ function createLspStore() {
     /** Re-read the live statuses. */
     async reloadStatuses(): Promise<void> {
       statuses = await lspStatus().catch(() => []);
+    },
+
+    /**
+     * Install a server by running the command its ecosystem ships it through.
+     *
+     * Answers with the outcome instead of throwing, because both endings are ordinary here:
+     * a `cargo install --git` builds from source and can fail on a toolchain that is too
+     * old, and the caller has to say something either way. The catalogue is re-read on the
+     * way out, so a success flips the row from "not found" to a path without a reload.
+     */
+    async install(id: string): Promise<{ ok: boolean; message: string }> {
+      installing = id;
+      try {
+        const res = await lspInstall(id);
+        await this.reloadServers();
+        if (res.ok) return { ok: true, message: `Installed — ${res.path}` };
+        // The diagnosis when there is one, the output when there is not, and a pointer at
+        // the panel when there was nothing to say at all.
+        return {
+          ok: false,
+          message: res.hint || res.tail.trim() || `\`${res.command}\` failed. The Build panel has the log.`,
+        };
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      } finally {
+        installing = null;
+      }
     },
 
     /** Restart a server — the way out of a failed slot, and the fix for "I just installed it". */

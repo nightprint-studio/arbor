@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Zap } from 'lucide-svelte';
+  import SettingsCard from './SettingsCard.svelte';
   import { animStore, type AnimSpeed } from '$lib/stores/animations.svelte';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
@@ -23,11 +24,17 @@
   // Bump to replay the CSS animation on the preview chip.
   let previewKey = $state(0);
   function replay() { previewKey++; }
+
+  /** Some hosts draw their own section header — a flat settings page with its own group
+   *  headings, or a `FormSection` that already labels the block. */
+  let { showHeader = true }: { showHeader?: boolean } = $props();
 </script>
 
-<SectionHeader title="Animations" description="Control the speed and behaviour of UI transitions and motion effects." />
+{#if showHeader}
+  <SectionHeader title="Animations" description="Control the speed and behaviour of UI transitions and motion effects." />
+{/if}
 
-<div class="card">
+<SettingsCard>
   <!-- Enable toggle -->
   <FormRow label="Enable animations" description="Toggles all transitions and motion effects globally">
     <Toggle bind:checked={enabled} />
@@ -58,7 +65,7 @@
       </div>
     </FormRow>
   {/if}
-</div>
+</SettingsCard>
 
 <style>
   /* Preview row */

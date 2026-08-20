@@ -115,6 +115,8 @@ function createBennuUiStore() {
   /** A specific Settings page to land on, when something opened it *for a reason*. */
   let settingsSection = $state<string | null>(null);
   let docsOpen = $state(false);
+  /** The dialog that rearranges the two activity rails. */
+  let customizeRailsOpen = $state(false);
   let paletteOpen = $state(false);
   // Find-in-project modal (Ctrl+Shift+F).
   let findOpen = $state(false);
@@ -220,6 +222,7 @@ function createBennuUiStore() {
     get bottomPanel() { return bottomPanel; },
     get settingsOpen() { return settingsOpen; },
     get docsOpen()     { return docsOpen; },
+    get customizeRailsOpen() { return customizeRailsOpen; },
     get paletteOpen()  { return paletteOpen; },
     get findOpen()     { return findOpen; },
     get projectConfigOpen() { return projectConfigOpen; },
@@ -307,6 +310,8 @@ function createBennuUiStore() {
     consumeSettingsSection() { settingsSection = null; },
     toggleDocs()    { docsOpen = !docsOpen; },
     closeDocs()     { docsOpen = false; },
+    openCustomizeRails()  { customizeRailsOpen = true; },
+    closeCustomizeRails() { customizeRailsOpen = false; },
     togglePalette() { paletteOpen = !paletteOpen; },
     closePalette()  { paletteOpen = false; },
     /** Open Find-in-project, optionally pre-filling the query (e.g. the editor selection). */

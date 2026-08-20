@@ -101,7 +101,18 @@ function isAnalyzedFile(path: string | null | undefined): boolean {
  * offered.
  */
 export function supportsCodeNav(path: string | null | undefined): boolean {
-  return isAnalyzedFile(path) || isLspFile(path);
+  return isAnalyzedFile(path) || isLspFile(path) || isWgslFile(path);
+}
+
+/** A WGSL shader.
+ *
+ *  In the navigation and diagnostics sets **whether or not** a language server is installed,
+ *  which is what makes it different from every other non-Java entry here: the backend answers
+ *  for a shader either way — `wgsl-analyzer` when it is there, and naga plus its own scanner
+ *  when it is not. Gating this on {@link isLspFile} would withhold find-usages from a file
+ *  that has it. */
+export function isWgslFile(path: string | null | undefined): boolean {
+  return ext(path) === 'wgsl';
 }
 
 /**
@@ -116,7 +127,7 @@ export function supportsCodeNav(path: string | null | undefined): boolean {
  * nothing to say about going to a declaration in it.
  */
 export function supportsDiagnostics(path: string | null | undefined): boolean {
-  return isAnalyzedFile(path) || isLspFile(path) || isCargoManifest(path);
+  return isAnalyzedFile(path) || isLspFile(path) || isCargoManifest(path) || isWgslFile(path);
 }
 
 /**
@@ -131,5 +142,7 @@ export function supportsDiagnostics(path: string | null | undefined): boolean {
 export function hasPushedDiagnostics(path: string | null | undefined): boolean {
   // A manifest is computed on demand from the buffer, like the Java path — so it wants the ordinary
   // debounce and not the single cheap read a server-backed file wants.
+  // A shader is computed on demand too, unless a server took it over — and when one has,
+  // `isLspFile` is already true, so this needs no second clause.
   return !isAnalyzedFile(path) && !isCargoManifest(path) && isLspFile(path);
 }

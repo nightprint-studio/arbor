@@ -23,7 +23,7 @@ use bennu_proto::prelude::{
     LspHighlight, LspLens, LspMacroExpansion, LspServerInfo, LspSignature, LspStatus, LspSymbol,
     LspToken, SourceEdit, UsagesResult,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::lsp_registry::LspRegistry;
 use crate::lsp_route;
@@ -81,6 +81,7 @@ fn bennu_lsp_servers(_ctx: &BennuState) -> Result<Vec<LspServerInfo>, String> {
             install_hint: a.install_hint,
             enabled: a.enabled,
             custom: a.custom,
+            install: a.install,
         })
         .collect())
 }
@@ -491,4 +492,140 @@ fn bennu_lsp_problems(
     args: LspProblemsArgs,
 ) -> Result<Vec<FileDiagnostics>, String> {
     Ok(lsp_route::problems(&args.file))
+}
+
+// ── installing a server ─────────────────────────────────────────────────────────
+
+/// Args for [`bennu_lsp_install`].
+#[derive(Deserialize)]
+pub struct LspInstallArgs {
+    /// The catalogue id — `"wgsl-analyzer"`, `"rust-analyzer"`, …
+    pub id: String,
+}
+
+/// Whether it worked, and what it said.
+#[derive(Serialize)]
+pub struct LspInstallResult {
+    pub ok: bool,
+    /// The command that ran, as it would be typed. Shown so the user can run it themselves
+    /// (or read what went wrong in their own terminal) rather than being told only that
+    /// something failed.
+    pub command: String,
+    /// The path the server resolved to afterwards, when it is now there.
+    pub path: Option<String>,
+    /// The last lines of output, for the failure case. The whole log went to the Build
+    /// panel while it ran; this is what a toast can say.
+    pub tail: String,
+    /// A one-line diagnosis, when the failure is one with a known fix. Shown instead of
+    /// [`tail`](Self::tail) — the raw output is still in the Build panel, and a toast has
+    /// room for the answer or for the evidence but not for both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
+/// Turn a failed install's output into a sentence with a next step in it, when it is one of
+/// the failures that has one.
+///
+/// Only the ones where the raw message is actively misleading about what to do. Everything
+/// else keeps its own words: a build error inside a dependency says more than any summary
+/// this could write, and replacing it with a guess would be worse than showing it.
+fn diagnose(tail: &str) -> Option<String> {
+    // `cannot install package `x 0.0.0`, it requires rustc 1.97.1 or newer, while the
+    // currently active rustc version is 1.97.0` — a toolchain problem wearing the clothes
+    // of a package problem. The fix is one command and it is not in the message.
+    if let Some(at) = tail.find("requires rustc ") {
+        let needed = tail[at + "requires rustc ".len()..]
+            .split_whitespace()
+            .next()
+            .unwrap_or("a newer version");
+        return Some(format!(
+            "Your Rust toolchain is too old — this server needs rustc {needed}.              Run `rustup update` and try again."
+        ));
+    }
+    // The package manager itself is missing. Different problem, different fix, and the
+    // shell's own wording ("command not found") does not say which server it was for.
+    if tail.contains("is not on your PATH") {
+        return Some(tail.trim().to_string());
+    }
+    None
+}
+
+/// Install a language server by running the command its own ecosystem ships it through.
+///
+/// A **command**, not a download, and that is the whole design. Every server in the
+/// catalogue is distributed through a package manager the user already has — `rustup`,
+/// `cargo`, `go`, `npm` — so running it is shorter than a downloader by everything a
+/// downloader has to invent: release-asset naming per platform, archive formats, checksums,
+/// where to put the binary, how to upgrade it, what happens when Arbor is uninstalled. It
+/// also lands the binary where the rest of the toolchain lives, so it keeps working
+/// afterwards and `wgsl-analyzer --version` says the same thing in a terminal.
+///
+/// Streams into the **Build** panel as it goes: a `cargo install --git` builds a language
+/// server from source and takes minutes, and a button that goes quiet for three minutes is
+/// a button people press twice.
+///
+/// Refused for a server with no install command — a system package (clangd, Homebrew's
+/// lua-language-server) or a user-defined one. Bennu installs language servers; it does not
+/// manage the machine.
+#[arbor_rpc::handler]
+fn bennu_lsp_install(ctx: &BennuState, args: LspInstallArgs) -> Result<LspInstallResult, String> {
+    let server = LspRegistry::global()
+        .availability()
+        .into_iter()
+        .find(|s| s.id == args.id)
+        .ok_or_else(|| format!("no language server called {}", args.id))?;
+
+    if server.install.is_empty() {
+        return Err(format!(
+            "{} is installed through your system's package manager — {}",
+            server.name, server.install_hint
+        ));
+    }
+    let printed = server.install.join(" ");
+    let out = crate::child::run_streamed(&server.install, ctx.event_sink(), "Installing")?;
+
+    // Whatever happened, stop remembering that this server was missing — an install that
+    // worked has just made the memo wrong, and one that failed costs a single `PATH` scan
+    // to re-establish.
+    LspRegistry::global().forget_missing();
+
+    // Re-resolve rather than trusting the exit code: `cargo install` can succeed having put
+    // the binary somewhere that is not on `PATH`, and the only answer that matters to the
+    // editor is whether it can find it now.
+    let path = LspRegistry::global().availability().into_iter().find(|s| s.id == args.id).and_then(|s| s.path);
+    let hint = if out.ok && path.is_none() {
+        // Built fine, and the editor still cannot find it. Worth saying explicitly: it is
+        // the one outcome where "installed" and "working" come apart, and the field below
+        // is where the user fixes it.
+        Some(format!(
+            "It installed, but `{}` is still not on your PATH — set the executable path below.",
+            server.command
+        ))
+    } else {
+        diagnose(&out.tail)
+    };
+    Ok(LspInstallResult { ok: out.ok && path.is_some(), command: printed, path, tail: out.tail, hint })
+}
+
+#[cfg(test)]
+mod install_tests {
+    use super::diagnose;
+
+    #[test]
+    fn a_toolchain_too_old_is_named_as_one() {
+        let tail = "error: cannot install package `wgsl-analyzer 0.0.0`, it requires rustc \
+                    1.97.1 or newer, while the currently active rustc version is 1.97.0";
+        let hint = diagnose(tail).expect("this failure has a known fix");
+        assert!(hint.contains("1.97.1"), "the version it needs is the actionable part: {hint}");
+        assert!(hint.contains("rustup update"), "and so is the command: {hint}");
+    }
+
+    #[test]
+    fn an_ordinary_build_error_keeps_its_own_words() {
+        let tail = "error[E0432]: unresolved import `foo::bar`\n  --> src/lib.rs:3:5";
+        assert!(
+            diagnose(tail).is_none(),
+            "a compiler error says more than any summary this could write"
+        );
+    }
 }

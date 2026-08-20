@@ -1,10 +1,28 @@
 <script lang="ts">
-  import { Palette } from 'lucide-svelte';
+  /**
+   * The appearance settings — for every product, not just Corvus.
+   *
+   * ## Why this is shared
+   *
+   * All of it was already global. `appearanceStore` reads and writes
+   * `~/.config/arbor/config.toml`, and every product window calls `loadConfig()` on mount, so
+   * the font scale, the window-control style and the compact title bar have always applied to
+   * Bennu, merula, Picus and the explorer as much as to Corvus. The only thing that was not
+   * shared was the *dialog*: turning any of it on meant opening Corvus, changing it there, and
+   * coming back — for a setting that had already changed under you.
+   *
+   * ## What is optional, and why it is not simply always shown
+   *
+   * Two rows are gated rather than global, because they name a behaviour a product must
+   * actually implement. `activityBar` mirrors or hides Corvus's rail through its `AppShell`;
+   * `compactFileTree` collapses single-child folder chains in Corvus's three file lists.
+   * Showing either in a product that ignores it would be a switch that does nothing, which is
+   * worse than an absent one: an absent setting is a missing feature, a dead one is a bug.
+   */
+  import { Palette, LayoutDashboard } from 'lucide-svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
   import { appearanceStore, PARKED_MODALS_MAX_MIN, PARKED_MODALS_MAX_MAX } from '$lib/stores/appearance.svelte';
-  import type {
-    WindowControlsStyle, ActivityBarPosition,
-  } from '$lib/types/config';
+  import type { WindowControlsStyle, ActivityBarPosition } from '$lib/types/config';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import RadioGroup from '$lib/components/shared/ui/RadioGroup.svelte';
@@ -12,17 +30,35 @@
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { isMac } from '$lib/utils/platform';
+  import SettingsCard from './SettingsCard.svelte';
 
-  let { onOpenThemeEditor }: { onOpenThemeEditor: () => void } = $props();
+  let {
+    onOpenThemeEditor,
+    onCustomizeBars,
+    activityBar = false,
+    compactFileTree = false,
+    showHeader = true,
+  }: {
+    /** Opens the theme editor. The theme row is hidden when a product has no route to one. */
+    onOpenThemeEditor?: () => void;
+    /** Opens this product's "Customize Activity Bar" dialog, when it has one. */
+    onCustomizeBars?: () => void;
+    /** This product mirrors / hides its icon rail from `activity_bar_position`. */
+    activityBar?: boolean;
+    /** This product collapses single-child folder chains in its file lists. */
+    compactFileTree?: boolean;
+    /** Some shells draw their own section header. */
+    showHeader?: boolean;
+  } = $props();
 
   const FONT_PRESETS = [0.85, 1.0, 1.15, 1.3];
 
-  // Reactive read-through to the store so the slider and chip auto-update
-  // if any other surface (e.g. command palette) changes the scale.
-  const fontScale          = $derived(appearanceStore.fontScale);
-  const activityBarPos     = $derived(appearanceStore.activityBarPosition);
-  const compactTitleBar    = $derived(appearanceStore.compactTitleBar);
-  const parkedModalsMax    = $derived(appearanceStore.parkedModalsMax);
+  // Read-through to the store, so a change made anywhere else (the Command Palette scales the
+  // font too) moves the slider here without this component being told.
+  const fontScale           = $derived(appearanceStore.fontScale);
+  const activityBarPos      = $derived(appearanceStore.activityBarPosition);
+  const compactTitleBar     = $derived(appearanceStore.compactTitleBar);
+  const parkedModalsMax     = $derived(appearanceStore.parkedModalsMax);
   const compactFileTreeDirs = $derived(appearanceStore.compactFileTreeDirs);
 
   function onScaleInput(e: Event) {
@@ -46,18 +82,25 @@
   ];
 </script>
 
-<SectionHeader title="Appearance" description="Customize the look and feel of the interface." />
+{#if showHeader}
+  <SectionHeader
+    title="Appearance"
+    description="The look of the interface. These settings are shared by every Arbor window."
+  />
+{/if}
 
-<div class="card">
-  <FormRow label="Color theme" description="Active theme applied across the entire UI">
-    <div class="theme-row">
-      <span class="theme-name">{themeStore.activeTheme.name}</span>
-      <button class="btn-open-editor" onclick={onOpenThemeEditor}>
-        <Palette size={13} />
-        Open Theme Editor
-      </button>
-    </div>
-  </FormRow>
+<SettingsCard>
+  {#if onOpenThemeEditor}
+    <FormRow label="Color theme" description="Active theme applied across the entire UI">
+      <div class="theme-row">
+        <span class="theme-name">{themeStore.activeTheme.name}</span>
+        <button class="btn-open-editor" onclick={onOpenThemeEditor}>
+          <Palette size={13} />
+          Open Theme Editor
+        </button>
+      </div>
+    </FormRow>
+  {/if}
 
   <!-- macOS paints the real traffic lights over the title bar, so this faux-control
        toggle has no effect there and is hidden. -->
@@ -74,21 +117,17 @@
   {/if}
 
   <FormRow label="Compact title bar" description="Reduce the title-bar height for narrow displays.">
-    <Toggle
-      checked={compactTitleBar}
-      onchange={(v) => appearanceStore.setCompactTitleBar(v)}
-    />
+    <Toggle checked={compactTitleBar} onchange={(v) => appearanceStore.setCompactTitleBar(v)} />
   </FormRow>
 
-  <FormRow
-    label="Compact file tree folders"
-    description="IntelliJ-style — collapse chains of single-child folders into one row across the file panel, stage area, and commit detail file list. Conflict lists always compact regardless of this setting."
-  >
-    <Toggle
-      checked={compactFileTreeDirs}
-      onchange={(v) => appearanceStore.setCompactFileTreeDirs(v)}
-    />
-  </FormRow>
+  {#if compactFileTree}
+    <FormRow
+      label="Compact file tree folders"
+      description="IntelliJ-style — collapse chains of single-child folders into one row across the file panel, stage area, and commit detail file list. Conflict lists always compact regardless of this setting."
+    >
+      <Toggle checked={compactFileTreeDirs} onchange={(v) => appearanceStore.setCompactFileTreeDirs(v)} />
+    </FormRow>
+  {/if}
 
   <FormRow
     label="Minimized dialogs cap"
@@ -104,15 +143,26 @@
     />
   </FormRow>
 
-  <FormRow label="Activity bar" description="Position of the icon rail. Hidden collapses the bar — hover the screen edge to bring it back temporarily.">
-    <RadioGroup
-      value={activityBarPos}
-      options={ACTIVITY_BAR_OPTIONS}
-      appearance="segment"
-      size="sm"
-      onchange={(v) => appearanceStore.setActivityBarPosition(v as ActivityBarPosition)}
-    />
-  </FormRow>
+  {#if activityBar}
+    <FormRow label="Activity bar" description="Position of the icon rail. Hidden collapses the bar — hover the screen edge to bring it back temporarily.">
+      <RadioGroup
+        value={activityBarPos}
+        options={ACTIVITY_BAR_OPTIONS}
+        appearance="segment"
+        size="sm"
+        onchange={(v) => appearanceStore.setActivityBarPosition(v as ActivityBarPosition)}
+      />
+    </FormRow>
+  {/if}
+
+  {#if onCustomizeBars}
+    <FormRow label="Activity bar contents" description="Reorder the icons on the rails, and hide the tools you do not use.">
+      <button class="btn-open-editor" onclick={onCustomizeBars}>
+        <LayoutDashboard size={13} />
+        Customize Activity Bar…
+      </button>
+    </FormRow>
+  {/if}
 
   <FormRow label="Font scale" description="Scales all UI text proportionally">
     <div class="inline-control">
@@ -141,14 +191,10 @@
       <span class="value-chip">{(fontScale * 100).toFixed(0)}%</span>
     </div>
   </FormRow>
-</div>
+</SettingsCard>
 
 <style>
-  .theme-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
+  .theme-row { display: flex; align-items: center; gap: 10px; }
 
   .theme-name {
     font-family: var(--font-ui-sans);
@@ -177,6 +223,11 @@
     border-color: var(--accent);
   }
 
+  /* Owned here rather than by the host shell: Corvus's settings panel used to supply the gap
+     as a `:global` rule, which made the row look right in exactly one of the five places this
+     now renders. */
+  .inline-control { display: flex; align-items: center; gap: 10px; }
+
   .preset-row {
     display: inline-flex;
     gap: 2px;
@@ -199,8 +250,5 @@
     min-width: 32px;
   }
   .preset-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
-  .preset-btn.active {
-    background: var(--accent-subtle);
-    color: var(--accent);
-  }
+  .preset-btn.active { background: var(--accent-subtle); color: var(--accent); }
 </style>

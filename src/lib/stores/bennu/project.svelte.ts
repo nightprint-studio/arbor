@@ -20,6 +20,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import {
   moveToPackage as ipcMoveToPackage,
   openProject as ipcOpenProject,
+  activateProject as ipcActivateProject,
   projectTree as ipcProjectTree,
   readFile as ipcReadFile,
   writeFile as ipcWriteFile,
@@ -31,11 +32,15 @@ import {
 // Splicing byte-offset edits into a source string — shared with the rename-preview apply, which is
 // where it started.
 import { applyByteEdits } from '$lib/components/bennu/rename-apply';
-// Which files open as a preview instead of as text — the shared list, so the explorer, the markdown
-// editor and this store cannot disagree about what an image is.
-import { isImageFile } from '$lib/utils/image-files';
+// Which files open as a preview instead of as text — one predicate, so the store (which
+// decides whether to read the file at all), `saveText` (which refuses to write one) and the
+// editor (which decides what to mount) cannot disagree about what has a buffer behind it.
+import { opensAsPreview } from '$lib/utils/preview-files';
 // Live re-index — kept in its own IPC file to avoid racing edits on index.ts.
 import { didChange as ipcDidChange } from '$lib/ipc/bennu/nav';
+// Local history — told about the one kind of change the editor cannot infer from its own
+// actions. Kept in its own IPC file, like the rest of the per-domain bennu surface.
+import { noteExternal as ipcNoteExternal } from '$lib/ipc/bennu/history';
 // The Problems store — a save triggers a silent cross-file re-validation that refreshes it.
 import { bennuDiagnosticsStore } from './diagnostics.svelte';
 // Workspace store owns the SET of named workspaces + persistence; this store is the live runtime
@@ -54,8 +59,8 @@ import { DEMO_PROJECT, DEMO_TREE, DEMO_ROOT, isDemoPath, demoReadFile } from './
  *  make `bennu_read_file` (UTF-8 decode) choke — a `.xcf` once froze the window. The
  *  guard is by extension (cheap, no read).
  *
- *  **Images are not in this set** — they open as a preview instead (see {@link isImageFile} and
- *  `BennuImageView`). What makes that safe is that they never enter the source cache at all: no
+ *  **Previewed files are not in this set** — images and `.docx` open as a preview instead (see
+ *  {@link opensAsPreview}). What makes that safe is that they never enter the source cache at all: no
  *  text is read for them, so nothing downstream can mistake one for an empty buffer and write it
  *  back. `saveText` refuses them outright as the second line of that defence. */
 const BINARY_EXTENSIONS = new Set([
@@ -230,10 +235,16 @@ function createProjectStore() {
       return; // BE absent / busy — try again on the next tick
     }
 
+    // Every file whose on-disk state no longer matches what we read. Collected and sent in
+    // one call rather than one per file: the poll runs on every focus, and a round trip per
+    // watched tab would make noticing a change cost more than the change.
+    const changed: string[] = [];
+
     for (const entry of current) {
       const known = stamps.get(entry.file);
       // `known` may have gone (tab closed, project switched) while the stat was in flight.
       if (known === undefined || known === entry.stamp) continue;
+      changed.push(entry.file);
 
       if (!entry.exists) {
         // Deleted — see the note above. Dropping the stamp both stops the every-tick report
@@ -249,6 +260,14 @@ function createProjectStore() {
         // eslint-disable-next-line no-await-in-loop
         await adoptFromDisk(entry.file, true);
       }
+    }
+
+    // Tell the local history what the outside world did — including the deletions, which is
+    // how an `rm` from a terminal ends up in the Deleted list with its content still there.
+    // Fire-and-forget and last: it must never delay adopting a change, and a history that
+    // cannot be written is not a reason to stop editing.
+    if (changed.length && project?.root) {
+      void ipcNoteExternal(project.root, changed).catch(() => { /* history is best-effort */ });
     }
   }
 
@@ -349,9 +368,9 @@ function createProjectStore() {
       toastStore.show(`Can't open ${path.split(/[\\/]/).pop()} — binary file`, 'info');
       return;
     }
-    // An image gets a tab but no buffer: the preview reads the file itself, through the asset
-    // protocol, so nothing decodes megabytes of PNG as UTF-8 on the way to a text editor.
-    if (isImageFile(path)) {
+    // A previewed file gets a tab but no buffer: the viewer reads the bytes itself, so nothing
+    // decodes megabytes of PNG — or a ZIP of XML — as UTF-8 on the way to a text editor.
+    if (opensAsPreview(path)) {
       activeFilePath = path;
       if (!openFilePaths.includes(path)) openFilePaths = [...openFilePaths, path];
       return;
@@ -476,10 +495,10 @@ function createProjectStore() {
    * (the package move) must not proceed on `false`.
    */
   async function saveText(path: string, text: string, force = false): Promise<boolean> {
-    // An image has no buffer, so anything asking to write one is asking to overwrite the file with
-    // an empty string. Refused here rather than trusted not to happen: a stray Ctrl+S on a preview
-    // tab would otherwise be silent data loss.
-    if (isImageFile(path)) return false;
+    // A previewed file has no buffer, so anything asking to write one is asking to overwrite the
+    // file with an empty string. Refused here rather than trusted not to happen: a stray Ctrl+S on
+    // a preview tab would otherwise be silent data loss.
+    if (opensAsPreview(path)) return false;
     sources.set(path, text);
     if (isDemoPath(path)) {
       // MOCK — no disk behind a demo file; treat it as saved so the tab goes clean.
@@ -709,6 +728,9 @@ function createProjectStore() {
       if (!s) return;
       stashActive();
       loadSession(s);
+      // Somebody is now looking at this one. Idempotent when its server is already up — and it
+      // is what starts one for a member that was restored in the background.
+      void ipcActivateProject(root).catch(() => {});
       if (activeFilePath) await ensureLoaded(activeFilePath);
       persistWorkspace();
     },
@@ -776,10 +798,18 @@ function createProjectStore() {
       openFilePaths = [];
       activeFilePath = null;
       isDemo = false;
+      // Which one will end up on screen, decided before the loop so the others can be opened
+      // WITHOUT a language server. Opening five Cargo projects used to warm-start five
+      // rust-analyzers — one indexing run and up to a gigabyte apiece — for four projects
+      // nobody was looking at. The rest start on the first request against one of their files,
+      // or when `switchProject` announces them.
+      const wanted = canonPath(active);
       for (const p of projects) {
         let info;
         // eslint-disable-next-line no-await-in-loop
-        try { info = await ipcOpenProject(p.root); } catch { continue; } // a project that's gone
+        try {
+          info = await ipcOpenProject(p.root, canonPath(p.root) === wanted);
+        } catch { continue; } // a project that's gone
         const root = canonPath(info.root);
         sessions.set(root, {
           info: { ...info, root },
@@ -793,8 +823,11 @@ function createProjectStore() {
       }
       if (!workspaceRoots.length) return; // nothing opened (all gone / BE down)
       // Activate the remembered active project (or the first that opened), then load its active file.
-      const wantActive = canonPath(active);
-      const target = workspaceRoots.includes(wantActive) ? wantActive : workspaceRoots[0];
+      const target = workspaceRoots.includes(wanted) ? wanted : workspaceRoots[0];
+      // The fallback case is the one that needs saying so: the remembered project was gone, so
+      // the project now on screen is one that was opened as a background member and has no
+      // server. Announcing it is what starts one.
+      if (target !== wanted) void ipcActivateProject(target).catch(() => {});
       loadSession(sessions.get(target)!);
       if (!activeFilePath && openFilePaths.length) activeFilePath = openFilePaths[0];
       if (activeFilePath) await ensureLoaded(activeFilePath);
@@ -845,7 +878,7 @@ function createProjectStore() {
         throw new Error('The file changed on disk — resolve that first, then rename it');
       }
 
-      const res = await ipcRenamePath(path, target);
+      const res = await ipcRenamePath(project?.root ?? '', path, target);
       const newPath = canonPath(res.new_path);
 
       // Carry the cached text / encoding to the new key so a reopened tab is instant, and drop the

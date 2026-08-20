@@ -27,7 +27,8 @@
 
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor';
 import {
-  sqlHighlight, dtdLanguage, javascriptStream, type SqlDialect,
+  sqlHighlight, dtdLanguage, ronLanguageExtension, wgslLanguageExtension,
+  javascriptStream, type SqlDialect,
 } from '$lib/components/shared/ui/code-editor';
 import type { Extension } from '@codemirror/state';
 import { StreamLanguage, type StreamParser } from '@codemirror/language';
@@ -42,7 +43,7 @@ import { json as jsonLang } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { html } from '@codemirror/lang-html';
 import { javaLanguage } from './java-lang';
-import { lspLanguage } from './lsp-lang';
+import { lspLanguage, backendCompletionSource, backendHoverSource } from './lsp-lang';
 import { isSpringPropertyFile, springPropsLang } from './spring-props-lang';
 import { cargoTomlLang, isCargoManifest } from './cargo-toml-lang';
 import { xmlSchemaLang } from './xml-schema-lang';
@@ -60,6 +61,27 @@ function cmLang(id: string, ext: Extension, fold = false): LanguageDescriptor {
     classify: () => null,
     cmExtension: ext,
     cmFold: fold,
+  };
+}
+
+/**
+ * A CodeMirror-highlighted language whose **completion and hover come from the backend**, with
+ * no language server anywhere in it.
+ *
+ * The distinction {@link lspLanguage} draws is not the one that matters here. Completion and
+ * hover go through `bennu_completion` / `bennu_hover`, which the backend answers with whichever
+ * engine owns the file — so a language Bennu serves itself needs exactly the same two hooks and
+ * none of the rest of `lspLanguage` (its semantic-token layer and its `serverFold`, both of
+ * which describe a server that is not there).
+ *
+ * Leaving them off is what took the hover card off shaders while go-to and find-usages worked:
+ * those are host gestures routed by path, and these two are language-descriptor hooks. A
+ * language can have one and not the other, silently.
+ */
+function backendIntelLang(id: string, ext: Extension): LanguageDescriptor {
+  return {
+    ...cmLang(id, ext),
+    intel: { completion: backendCompletionSource, hover: backendHoverSource },
   };
 }
 
@@ -102,15 +124,20 @@ const rustLang = lspLanguage('rust', rust, {
   block: { open: '/*', close: '*/' },
 });
 /**
- * RON — geode's content format, and the shape a debugger value is dumped in.
+ * RON — geode's content format, what a Bevy asset is written in, and the shape a debugger value
+ * is dumped in.
  *
- * Coloured by the Rust mode (same comments, strings, numbers, and the identifier-before-`(` shape)
- * but **not Rust to a language server**: asking rust-analyzer about a `.ron` would be asking about a
- * file it has never heard of, and a dumped value is not a file at all. So it keeps a plain descriptor
- * of its own, and one instance is shared by both uses — the identity has to be stable or an editor
- * remounts on every keystroke.
+ * It used to borrow the **Rust** mode, on the grounds that RON borrows Rust's syntax. It does,
+ * and that is exactly why the result was wrong: RON has none of Rust's vocabulary but very
+ * plausibly has fields called `type:`, `mod:` or `ref:`, every one of which came out as a
+ * keyword — and the one thing a RON file is mostly made of, the **field names**, had no
+ * colour at all. It now has a mode of its own (`ron-mode.ts`).
+ *
+ * Still **not Rust to a language server**: asking rust-analyzer about a `.ron` would be asking
+ * about a file it has never heard of, and a dumped value is not a file at all. One instance is
+ * shared by both uses — the identity has to be stable or an editor remounts on every keystroke.
  */
-export const ronLanguage = streamLang('ron', rust);
+export const ronLanguage = cmLang('ron', ronLanguageExtension);
 /**
  * Rust source that is **not a file** — a macro expansion.
  *
@@ -119,6 +146,20 @@ export const ronLanguage = streamLang('ron', rust);
  * exists nowhere. Its own descriptor rather than the `.rs` one for exactly that reason.
  */
 export const rustTextLanguage = streamLang('rust-text', rust);
+/**
+ * WGSL — the shader language, and what a Bevy material is written in.
+ *
+ * A descriptor of its own rather than one borrowed from the C family: `@group(0) @binding(0)`
+ * is most of what the top of a shader is and no C-family mode has heard of it, while the
+ * Rust mode gets `fn` right and then has nothing to say about `vec4<f32>` or `textureSample`.
+ *
+ * **Not** language-server backed here, deliberately: `wgsl-analyzer` serves the file when it
+ * is installed (it is in the LSP catalogue, and Bennu can install it), and when it is not,
+ * the backend answers completion, hover, find-usages and diagnostics itself — naga for the
+ * diagnostics, a scanner for the rest. Either way the colour comes from here, and the
+ * completion and hover hooks are the same two every other language uses.
+ */
+const wgslLang = backendIntelLang('wgsl', wgslLanguageExtension);
 const tomlLang = streamLang('toml', toml);
 // A `Cargo.toml` is TOML the backend has a great deal to say about: the manifest schema behind its
 // completion and its diagnostics. Built once — the identity has to be stable or the editor remounts
@@ -197,10 +238,8 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     case 'md': case 'markdown': return markdownDesc;
     case 'yml': case 'yaml': return yamlLang;
     case 'properties': case 'ini': case 'conf': case 'cfg': return propsLang;
-    // RON (geode's content format) is close enough to a struct literal that the Rust mode
-    // colours it well: same comments, strings, numbers and identifier-before-`(` shape. Its own
-    // descriptor, though — see `ronLang`.
     case 'ron': return ronLanguage;
+    case 'wgsl': return wgslLang;
     case 'sql': return sqlLangFor(bennuSettingsStore.sqlDialect);
     case 'sh': case 'bash': case 'zsh': return shellLang;
     default: return plainLang;

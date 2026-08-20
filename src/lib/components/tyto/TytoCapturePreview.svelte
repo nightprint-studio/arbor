@@ -5,7 +5,7 @@
    * The stylized stand-in only shows when there is no file behind the entry (the
    * backend-down mock).
    */
-  import { Video, Camera, Images, FolderOpen, Trash2, Clock, HardDrive, Crosshair, CalendarClock } from 'lucide-svelte';
+  import { Video, Camera, Images, FolderOpen, Trash2, Clock, HardDrive, Crosshair, CalendarClock, Grid2x2 } from 'lucide-svelte';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -14,10 +14,16 @@
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import TytoThumb from './TytoThumb.svelte';
   import TytoFramePlayer from './TytoFramePlayer.svelte';
-  import { recorderStore, formatDuration, formatBytes, type Capture, type FrameSequence } from '$lib/stores/tyto/recorder.svelte';
+  import { recorderStore, formatDuration, type Capture, type FrameSequence } from '$lib/stores/tyto/recorder.svelte';
+  import { formatBytes } from '$lib/utils/format';
 
   let { capture, onClose, onReveal, onDelete }:
     { capture: Capture; onClose: () => void; onReveal: () => void; onDelete: () => void } = $props();
+
+  const exporting = $derived(recorderStore.exportingId === capture.id);
+  function exportAtlas() {
+    if (!exporting) void recorderStore.exportAtlas(capture.id);
+  }
 
   const created = $derived(new Date(capture.createdAt).toLocaleString());
   // The on-disk file as an asset URL (empty in the mock → falls back to the stylized
@@ -60,7 +66,7 @@
   <div class="preview-body">
     {#if capture.kind === 'frames'}
       {#if sequence}
-        <TytoFramePlayer {sequence} />
+        <TytoFramePlayer {sequence} onExport={exportAtlas} />
       {:else if sequenceFailed}
         <div class="frame media">
           <StateBlock tone="error">
@@ -105,6 +111,12 @@
       Delete
     </Button>
     <div style="flex:1"></div>
+    {#if capture.kind === 'frames'}
+      <Button variant="secondary" size="sm" onclick={exportAtlas} loading={exporting}>
+        {#snippet iconStart()}<Grid2x2 size={13} />{/snippet}
+        {exporting ? 'Exporting…' : 'Export atlas'}
+      </Button>
+    {/if}
     <Button variant="secondary" size="sm" onclick={onReveal}>
       {#snippet iconStart()}<FolderOpen size={13} />{/snippet}
       Reveal

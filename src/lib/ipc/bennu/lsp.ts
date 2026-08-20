@@ -141,6 +141,32 @@ export interface LspServerInfo {
   enabled: boolean;
   /** True when it comes from the user's own `[[lsp.servers]]`. */
   custom: boolean;
+  /** The command that installs it, argv-style. Empty when there is none Bennu will run —
+   *  a system package (clangd is LLVM), or a server the user defined themselves. The
+   *  settings page offers an Install button exactly when this is non-empty.
+   *
+   *  **Optional on purpose.** The frontend and `bennu-be` are separate binaries with
+   *  separate build times, so a field added to the wire is absent until the backend is
+   *  rebuilt — and a consumer that assumes it is there crashes the settings page on the
+   *  version of the backend that was running when it was added. Read it with `?.`. */
+  install?: string[];
+}
+
+/** What an install attempt did. */
+export interface LspInstallResult {
+  ok: boolean;
+  /** The command that ran, as it would be typed — so a failure leaves something to try by
+   *  hand rather than only the news that it failed. */
+  command: string;
+  /** Where the server resolved to afterwards, when it is now there. */
+  path: string | null;
+  /** The last lines of output, for the failure message. The whole log went to the Build panel. */
+  tail: string;
+  /** A one-line diagnosis, when the failure is one with a known fix (a toolchain too old, a
+   *  package manager that is not there). Shown instead of {@link tail} — the raw output is
+   *  still in the Build panel, and a toast has room for the answer or for the evidence but
+   *  not for both. */
+  hint?: string;
 }
 
 /** One semantically-classified span, in **UTF-8 byte offsets**. */
@@ -218,6 +244,14 @@ export function lspStatus(): Promise<LspStatus[]> {
  *  are NOT installed, with their install hints. Wire: `bennu_lsp_servers`. */
 export function lspServers(): Promise<LspServerInfo[]> {
   return bennu('bennu_lsp_servers', { args: {} });
+}
+
+/** Install a language server by running the command its own ecosystem ships it through —
+ *  `rustup component add`, `cargo install --git`, `npm install -g`. Streams into the Build
+ *  panel while it runs, which for a `cargo install` is minutes. Rejects for a server whose
+ *  install is a system package. Wire: `bennu_lsp_install`. */
+export function lspInstall(id: string): Promise<LspInstallResult> {
+  return bennu('bennu_lsp_install', { args: { id } });
 }
 
 /** Restart a server. The only way out of a failed slot (failures are sticky on purpose), and

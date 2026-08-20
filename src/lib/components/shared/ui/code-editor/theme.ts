@@ -35,6 +35,12 @@ const lezerHighlightStyle = HighlightStyle.define([
   // function, a `def` in the JS mode); without it a file of definitions reads as flat text.
   { tag: t.definition(t.variableName), color: 'var(--syntax-function, #ffc66d)', fontWeight: '600' },
   { tag: t.variableName, color: 'var(--text-primary)' },
+  // A name the LANGUAGE brings, as opposed to one the file does. Legacy stream modes emit this
+  // as `builtin` (`textureSample` in a shader, `echo` in a shell, `count` in SQL) and until now
+  // nothing styled it, so every one of them rendered as ordinary text — which is the same as
+  // saying the language has no standard library. Between a call's orange and plain text on
+  // purpose: it IS a call, and it is not one you wrote.
+  { tag: t.standard(t.variableName), color: 'var(--syntax-builtin, #8888c6)' },
   { tag: t.tagName, color: 'var(--syntax-keyword, #cc7832)' },
   // `this` / `super`. A keyword in weight, italic in shape — it names something rather than
   // doing something, and the same two rules apply to `cm-tok-self` on the tree-sitter path.

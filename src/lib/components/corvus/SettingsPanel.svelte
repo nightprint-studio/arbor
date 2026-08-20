@@ -12,20 +12,20 @@
     compileQuery, highlightLabel, textMatches,
     injectHighlights, clearHighlights,
   } from '$lib/utils/text-search';
-  import AppearanceSection            from './settings/AppearanceSection.svelte';
+  import AppearanceSettings           from '$lib/components/shared/internal/AppearanceSettings.svelte';
   import GraphSection                 from './settings/GraphSection.svelte';
   import DiffSection                  from './settings/DiffSection.svelte';
   import GitSection                   from './settings/GitSection.svelte';
   import IssueTrackersSection         from './settings/IssueTrackersSection.svelte';
   import RepositorySection            from './settings/RepositorySection.svelte';
   import ProjectIssueTrackerSection   from './settings/ProjectIssueTrackerSection.svelte';
-  import AnimationsSection            from './settings/AnimationsSection.svelte';
-  import KeystrokesSection             from './settings/KeystrokesSection.svelte';
+  import AnimationsSettings           from '$lib/components/shared/internal/AnimationsSettings.svelte';
+  import KeystrokesSettings            from '$lib/components/shared/internal/KeystrokesSettings.svelte';
   import GitFlowSection               from './settings/GitFlowSection.svelte';
   import ExperimentalSection          from './settings/ExperimentalSection.svelte';
   import CacheSection                 from './settings/CacheSection.svelte';
   import IdeSection                   from './settings/IdeSection.svelte';
-  import TerminalsSection              from './settings/TerminalsSection.svelte';
+  import TerminalsSettings             from '$lib/components/shared/internal/TerminalsSettings.svelte';
   import StatsSection                 from './settings/StatsSection.svelte';
   import RecoverySection              from './settings/RecoverySection.svelte';
   import MissingProjectsSection       from './settings/MissingProjectsSection.svelte';
@@ -49,9 +49,9 @@
   let activeSection = $state<Section>('appearance');
 
   const sectionComponents: Record<Section, any> = {
-    appearance:                  AppearanceSection,
-    animations:                  AnimationsSection,
-    keystrokes:                  KeystrokesSection,
+    appearance:                  AppearanceSettings,
+    animations:                  AnimationsSettings,
+    keystrokes:                  KeystrokesSettings,
     graph:                       GraphSection,
     diff:                        DiffSection,
     explorer:                    ExplorerSection,
@@ -66,7 +66,7 @@
     experimental:                ExperimentalSection,
     cache:                       CacheSection,
     ide:                         IdeSection,
-    terminals:                   TerminalsSection,
+    terminals:                   TerminalsSettings,
     stats:                       StatsSection,
     recovery:                    RecoverySection,
     'missing-projects':          MissingProjectsSection,
@@ -415,7 +415,9 @@
       {@const SectionComponent = sectionComponents[activeSection]}
       <div class="content" bind:this={contentEl} in:fade={{ duration: animStore.dFast }}>
         <SectionComponent
-          {...(activeSection === 'appearance' ? { onOpenThemeEditor } : {})}
+          {...(activeSection === 'appearance'
+            ? { onOpenThemeEditor, activityBar: true, compactFileTree: true }
+            : {})}
         />
       </div>
     {/key}
@@ -430,7 +432,9 @@
         {@const SectionComponent = sectionComponents[item.id]}
         <div data-section={item.id}>
           <SectionComponent
-            {...(item.id === 'appearance' ? { onOpenThemeEditor: () => {} } : {})}
+            {...(item.id === 'appearance'
+              ? { onOpenThemeEditor: () => {}, activityBar: true, compactFileTree: true }
+              : {})}
           />
         </div>
       {/each}
@@ -640,9 +644,8 @@
   /* ── Row layout ─────────────────────────────────────────────────── */
   /* Title / description / control rules live in the `<FormRow>` widget
      (`fr-row`/`fr-title`/`fr-desc`/`fr-control` classes).  Only the
-     legacy `.inline-control` helper used by AppearanceSection's font
-     slider remains here. */
-  .content :global(.inline-control) { gap: 10px; }
+     `.inline-control` helper moved into `AppearanceSettings` with the section
+     itself — it was the only rule here that belonged to one section. */
 
   /* ── Inputs ─────────────────────────────────────────────────────── */
   .content :global(.text-input),

@@ -4,8 +4,8 @@
   import { Terminal }    from '@xterm/xterm';
   import { FitAddon }    from '@xterm/addon-fit';
   import { WebLinksAddon } from '@xterm/addon-web-links';
-  import { terminalWrite, terminalResize, terminalClose } from '$lib/ipc/corvus/terminal';
-  import { terminalStore } from '$lib/stores/corvus/terminal.svelte';
+  import { terminalWrite, terminalResize, terminalClose } from '$lib/ipc/terminal';
+  import { terminalStore } from '$lib/stores/terminal.svelte';
   import '@xterm/xterm/css/xterm.css';
 
   // ── Props ─────────────────────────────────────────────────────────────────

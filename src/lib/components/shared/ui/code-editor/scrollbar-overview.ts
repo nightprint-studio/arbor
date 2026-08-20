@@ -5,7 +5,12 @@
  * coloured bar at its proportional position, so you see at a glance WHERE the errors and
  * warnings are, and (b) on hover pops a small preview of the document around that position
  * (the IntelliJ scrollbar lens). Click / drag the strip to jump / scroll — it takes over the
- * vertical scroll affordance from the (hidden) native scrollbar.
+ * vertical scroll affordance from the (hidden) native scrollbar, which is why it also draws
+ * a **thumb**: a scroll affordance that never says where you are is half a scrollbar.
+ *
+ * Clicking lands ON a mark when you aimed at one. Proportional scrolling would put the line
+ * near the click rather than at it, and "near" is exactly the difference between jumping to
+ * an error and going looking for it — which is the trip this strip exists to save.
  *
  * App-agnostic and opt-in (a host enables it INSTEAD of the minimap). Reads diagnostics from
  * the `@codemirror/lint` state, so it stays in sync with whatever the host pushed.
@@ -20,6 +25,10 @@ import { highlightToHtml } from './mini-highlight';
 const STRIP_W = 14;
 /** Lines of context shown above/below the hovered line in the preview lens. */
 const PREVIEW_RADIUS = 6;
+/** How far (px) a click may miss a mark and still count as aimed at it. Generous, because
+ *  a 3px bar on a 14px strip is a hard target and the cost of over-reaching is landing one
+ *  problem away — while the cost of under-reaching is the scroll-and-squint this replaces. */
+const MARK_HIT_SLOP = 5;
 
 /** A cheap signature of the current diagnostic set (count + folded positions/severities), so the
  *  strip only re-renders its marks when the diagnostics actually change — not on every keystroke. */
@@ -36,13 +45,20 @@ export function scrollbarOverview(): Extension {
     class {
       readonly strip: HTMLElement;
       readonly marks: HTMLElement;
+      readonly thumb: HTMLElement;
       readonly preview: HTMLElement;
       lastSig = '';
       dragging = false;
+      /** Every rendered mark's document line, keyed by its position down the strip as a
+       *  [0,1] fraction — what a click is matched against. */
+      markLines: { frac: number; line: number }[] = [];
 
       constructor(readonly view: EditorView) {
         this.strip = document.createElement('div');
         this.strip.className = 'cm-overview';
+        this.thumb = document.createElement('div');
+        this.thumb.className = 'cm-overview-thumb';
+        this.strip.appendChild(this.thumb);
         this.marks = document.createElement('div');
         this.marks.className = 'cm-overview-marks';
         this.strip.appendChild(this.marks);
@@ -59,8 +75,12 @@ export function scrollbarOverview(): Extension {
         this.strip.addEventListener('pointerleave', this.onPointerLeave);
         // A drag can end anywhere — a window-level pointerup clears the drag even off the strip.
         window.addEventListener('pointerup', this.onPointerUp);
+        // The thumb follows the scroll, and a scroll is not a state change: CodeMirror does
+        // not dispatch an update for it, so the element that owns the scroll is asked directly.
+        view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
 
         this.renderMarks();
+        this.renderThumb();
       }
 
       update(u: ViewUpdate) {
@@ -71,6 +91,48 @@ export function scrollbarOverview(): Extension {
           const sig = diagnosticSignature(u.view);
           if (sig !== this.lastSig) this.renderMarks();
         }
+        if (u.docChanged || u.geometryChanged) this.renderThumb();
+      }
+
+      onScroll = () => this.renderThumb();
+
+      /** Size and place the thumb from the scroller's own geometry. Hidden when the whole
+       *  document fits — an unscrollable buffer has no position to report. */
+      renderThumb() {
+        const sc = this.view.scrollDOM;
+        const range = sc.scrollHeight - sc.clientHeight;
+        if (range <= 0 || sc.scrollHeight <= 0) {
+          this.thumb.style.display = 'none';
+          return;
+        }
+        this.thumb.style.display = 'block';
+        // A floor in percent of the strip, so a 30k-line file still leaves something to grab.
+        const height = Math.max((sc.clientHeight / sc.scrollHeight) * 100, 3);
+        this.thumb.style.height = `${height}%`;
+        this.thumb.style.top = `${(sc.scrollTop / range) * (100 - height)}%`;
+      }
+
+      /** The document line of the mark a click at `clientY` was aimed at, if any. */
+      markAtY(clientY: number): number | null {
+        const rect = this.strip.getBoundingClientRect();
+        if (rect.height <= 0) return null;
+        let best: { line: number; dist: number } | null = null;
+        for (const m of this.markLines) {
+          const dist = Math.abs(rect.top + m.frac * rect.height - clientY);
+          if (dist <= MARK_HIT_SLOP && (!best || dist < best.dist)) best = { line: m.line, dist };
+        }
+        return best?.line ?? null;
+      }
+
+      /** Put the caret at the start of `line` and centre it — a jump you can then act on
+       *  (F2, quick-fix, copy) rather than one you have to click into first. */
+      jumpToLine(line: number) {
+        const pos = this.view.state.doc.line(line).from;
+        this.view.dispatch({
+          selection: { anchor: pos },
+          effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+        });
+        this.view.focus();
       }
 
       /** The [0,1] vertical fraction of the strip a Y coordinate maps to. */
@@ -94,6 +156,13 @@ export function scrollbarOverview(): Extension {
 
       onPointerDown = (e: PointerEvent) => {
         e.preventDefault();
+        // Aimed at a mark → land on it exactly. Anywhere else → the strip is a scrollbar.
+        const line = this.markAtY(e.clientY);
+        if (line != null) {
+          this.preview.style.display = 'none';
+          this.jumpToLine(line);
+          return;
+        }
         this.dragging = true;
         this.strip.setPointerCapture(e.pointerId);
         this.scrollToFraction(this.fractionAtY(e.clientY));
@@ -123,14 +192,17 @@ export function scrollbarOverview(): Extension {
       renderMarks() {
         this.lastSig = diagnosticSignature(this.view);
         this.marks.textContent = '';
+        this.markLines = [];
         const doc = this.view.state.doc;
         const total = Math.max(1, doc.lines);
         forEachDiagnostic(this.view.state, (d, from) => {
           const line = doc.lineAt(Math.max(0, Math.min(from, doc.length))).number;
+          const frac = (line - 0.5) / total;
           const mark = document.createElement('div');
           mark.className = `cm-overview-mark cm-overview-${d.severity}`;
-          mark.style.top = `${((line - 0.5) / total) * 100}%`;
+          mark.style.top = `${frac * 100}%`;
           this.marks.appendChild(mark);
+          this.markLines.push({ frac, line });
         });
       }
 
@@ -162,6 +234,7 @@ export function scrollbarOverview(): Extension {
         this.strip.removeEventListener('pointermove', this.onPointerMove);
         this.strip.removeEventListener('pointerleave', this.onPointerLeave);
         window.removeEventListener('pointerup', this.onPointerUp);
+        this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
         this.strip.remove();
         this.preview.remove();
         this.view.dom.classList.remove('cm-has-overview');
@@ -192,6 +265,19 @@ const overviewTheme = EditorView.baseTheme({
     background: 'transparent',
   },
   '.cm-overview:hover': { background: 'color-mix(in srgb, var(--text-muted, #808080) 8%, transparent)' },
+  // The scroll position. Behind the marks (they are the reason to look at the strip) and
+  // quiet enough not to read as a highlight.
+  '.cm-overview-thumb': {
+    position: 'absolute',
+    left: '3px',
+    right: '3px',
+    borderRadius: '4px',
+    background: 'color-mix(in srgb, var(--text-muted, #808080) 30%, transparent)',
+    pointerEvents: 'none',
+  },
+  '.cm-overview:hover .cm-overview-thumb': {
+    background: 'color-mix(in srgb, var(--text-muted, #808080) 48%, transparent)',
+  },
   '.cm-overview-marks': { position: 'absolute', inset: '0', pointerEvents: 'none' },
   '.cm-overview-mark': {
     position: 'absolute',

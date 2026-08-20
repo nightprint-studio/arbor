@@ -791,6 +791,32 @@ pub struct ActivityBarConfig {
     /// Ordered item list for the bottom section of the RIGHT bar.
     #[serde(default)]
     pub right_bottom_items: Vec<ActivityBarItemConfig>,
+    /// The same four lists, for every product **other than** Corvus, keyed by product id
+    /// (`"bennu"`).
+    ///
+    /// Corvus keeps the four flat fields above rather than moving into this map, and that is
+    /// deliberate: they are already on disk in every existing profile, and relocating them
+    /// would silently reset the bar of everyone who had arranged one. A new product starts
+    /// here, where the shape is per-product from the first line.
+    #[serde(default)]
+    pub products: std::collections::BTreeMap<String, ActivityBarSections>,
+}
+
+/// One product's four rail sections.
+///
+/// Named by *position* rather than by what a product happens to put there — Corvus's left bar
+/// holds sidebar toggles and Bennu's holds tool windows, and a name that picked one of those
+/// would be wrong for the other half of its users.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ActivityBarSections {
+    #[serde(default)]
+    pub top_items: Vec<ActivityBarItemConfig>,
+    #[serde(default)]
+    pub bottom_items: Vec<ActivityBarItemConfig>,
+    #[serde(default)]
+    pub right_top_items: Vec<ActivityBarItemConfig>,
+    #[serde(default)]
+    pub right_bottom_items: Vec<ActivityBarItemConfig>,
 }
 
 fn default_ide_id() -> String { "vscode".into() }

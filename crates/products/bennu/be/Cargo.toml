@@ -31,6 +31,11 @@ bennu-proto = { path = "../proto" }
 # The leaf project model: capability detection, pom parse, encoding/JDK detection, the
 # file tree, open_project / read_file orchestration.
 bennu-project = { path = "../project" }
+# Local history: the content store behind "what did this file used to be". A foundation
+# crate on purpose — it speaks paths and bytes, so Garrulus and Picus can take the same
+# one. Which files are worth recording is decided HERE, not there: only Bennu knows what
+# git ignores in this project.
+arbor-history = { path = "../../../foundation/history" }
 # The code-intel seam: completion + the config-graph resolver (C1 chain + view chain +
 # conservative action diagnostic) the native provider ingests and serves.
 bennu-intel = { path = "../intel" }
@@ -123,6 +128,9 @@ bennu-deps = { path = "../deps" }
 # The Cargo side: the manifest schema behind Cargo.toml validation + completion, the crate
 # graph the Rust tool window shows, and the cargo command catalogue.
 bennu-cargo = { path = "../cargo" }
+# WGSL: naga-backed validation and a tolerant scanner, for a shader with no language
+# server installed. Leaf crate — no Tauri, no IPC.
+bennu-wgsl = { path = "../wgsl" }
 # `NoWindowExt` — suppress the console window on the short-lived mvn/javac/java children.
 arbor-process-ext = { path = "../../../platform/process-ext" }
 # The log interpreter behind the Run/Build consoles: a line of a child's output → its level

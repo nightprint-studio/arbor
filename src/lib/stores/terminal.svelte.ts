@@ -1,9 +1,9 @@
 import type {
   TerminalTab, BuiltinShellInfo, DetectedShell, TerminalsConfig,
-} from '$lib/types/corvus/terminal';
+} from '$lib/types/terminal';
 import {
   listBuiltinShells, getTerminalsConfig,
-} from '$lib/ipc/corvus/terminal';
+} from '$lib/ipc/terminal';
 import { startStream } from '$lib/ipc/stream';
 
 // ---------------------------------------------------------------------------

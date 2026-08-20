@@ -174,6 +174,26 @@ pub struct TreeNode {
     pub is_dir: bool,
     /// Children for a directory (empty for a file, or for a not-yet-expanded dir).
     pub children: Vec<TreeNode>,
+    /// Whether the entry is **hidden** by its platform's convention (a leading `.`).
+    ///
+    /// Answered here rather than left to the FE's `name.startsWith('.')` because
+    /// "hidden" is a property of the filesystem, not of the string: on Windows it is a
+    /// file attribute and nothing about the name says so. One node, one place that
+    /// decides what its status is.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
+    /// Whether **git ignores** the entry (see `crate::ignored`). Marked, never hidden:
+    /// a tree that omits ignored files omits the answer to "why is this stale artifact
+    /// still being picked up".
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub ignored: bool,
+}
+
+/// `skip_serializing_if` for the two status flags: a tree is thousands of nodes and
+/// the overwhelming majority are neither hidden nor ignored, so the common node stays
+/// exactly the three fields it has always been on the wire.
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 // ── read_file ────────────────────────────────────────────────────────────────

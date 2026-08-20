@@ -1,0 +1,15 @@
+[package]
+name         = "bennu-wgsl"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "WGSL intelligence for Bennu — LEAF crate. Validation through naga (the compiler wgpu and Bevy actually use), plus a tolerant declaration scanner for outline, completion and find-usages. No Tauri, no IPC."
+
+[dependencies]
+# The WGSL front end and validator wgpu itself runs, so an error reported here is an error
+# the shader would really have hit. `wgsl-in` only: Bennu reads shaders, it does not
+# translate them, and the SPIR-V / MSL / HLSL backends are megabytes of code for a question
+# nobody asks in an editor.
+naga = { version = "30", features = ["wgsl-in"] }

@@ -2,10 +2,17 @@
   /**
    * BennuNewFileModal — scaffold a new file in a project directory (the tree "New…" action).
    *
-   * Pick a kind (Java class/interface/enum/record/annotation, JSP, XML, plain file) and a name; the
-   * backend resolves the content (a Java template with the **package inferred** from the target
-   * directory, a JSP/XML header, or empty) + the final path. We write it (encoding-aware), open it,
-   * refresh the tree and reveal it. Refuses to overwrite an existing file.
+   * Pick a kind and a name; the backend resolves the content and the final path. We write it
+   * (encoding-aware), open it, refresh the tree and reveal it. Refuses to overwrite an existing file.
+   *
+   * **The kinds follow the project.** A Cargo root is offered Rust shapes — file, struct, enum,
+   * trait, module, test module — and a Maven one the Java shapes. Offering "Java Class" on a
+   * workspace of crates is offering a template that produces a file the toolchain will not
+   * compile, which is worse than offering nothing.
+   *
+   * The two families also ask for different things, and the field label says so: a Java file is
+   * named by the **type** it declares, a Rust one names its own **module** and derives the type
+   * from it (`atlas_player` → `AtlasPlayer`).
    *
    * Keyboard-first: the name auto-focuses; Esc cancels (Modal owns it); Enter / Ctrl+Enter create.
    */
@@ -29,7 +36,9 @@
   /** The Java shapes, in IntelliJ's order — the frequent ones first, not alphabetical.
    *  `iconKind` is what {@link SymbolKindIcon} draws; an exception is a class and wears a
    *  class's ring, because that is what it is. */
-  const JAVA_KINDS: { value: NewFileKind; label: string; iconKind: string }[] = [
+  interface KindOption { value: NewFileKind; label: string; iconKind: string }
+
+  const JAVA_KINDS: KindOption[] = [
     { value: 'class',      label: 'Class',      iconKind: 'class' },
     { value: 'interface',  label: 'Interface',  iconKind: 'interface' },
     { value: 'record',     label: 'Record',     iconKind: 'record' },
@@ -38,8 +47,23 @@
     { value: 'exception',  label: 'Exception',  iconKind: 'class' },
   ];
 
-  // The caller decides which shape this opens in: "New › Java Class" lands on a type, "New ›
-  // File" on a plain one. Read once, at mount — it is the starting point, not a binding.
+  /** The Rust shapes. `Module` is the one that creates a directory (`name/mod.rs`) — a kind
+   *  of its own rather than a checkbox, because `foo.rs` and `foo/mod.rs` are two different
+   *  decisions about how the module is going to grow. */
+  const RUST_KINDS: KindOption[] = [
+    { value: 'rust_file',   label: 'Empty file',  iconKind: 'file' },
+    { value: 'rust_struct', label: 'Struct',      iconKind: 'class' },
+    { value: 'rust_enum',   label: 'Enum',        iconKind: 'enum' },
+    { value: 'rust_trait',  label: 'Trait',       iconKind: 'interface' },
+    { value: 'rust_module', label: 'Module',      iconKind: 'record' },
+    { value: 'rust_tests',  label: 'Test module', iconKind: 'annotation' },
+  ];
+
+  const KINDS = $derived(projectStore.isCargo ? RUST_KINDS : JAVA_KINDS);
+
+  // The caller decides which shape this opens in: "New › Java Class" (or "New › Rust File")
+  // lands on a typed template, "New › File" on a plain one. Read once, at mount — it is the
+  // starting point, not a binding.
   let kind = $state<NewFileKind>(initialKind);
   let name = $state('');
   let busy = $state(false);
@@ -72,7 +96,22 @@
   /** Whether this dialog is choosing a Java type at all. `false` for "New › File", where the
    *  only question is the name — showing a kind list there would be offering a choice that
    *  was already made by the menu leaf you clicked. */
-  const isJava = $derived(kind !== 'file');
+  const isTyped = $derived(kind !== 'file');
+
+  /** What the dialog is called, and what the field is asking for. Both follow the family,
+   *  because "Name" means the type in Java and the module in Rust — and a Rust user typing
+   *  `AtlasPlayer` into a field asking for a file name would be right to expect
+   *  `AtlasPlayer.rs`, which is not what a Rust project wants. */
+  const title = $derived(
+    !isTyped ? 'New File' : projectStore.isCargo ? 'New Rust File' : 'New Java Class',
+  );
+  const namePlaceholder = $derived(
+    !isTyped
+      ? 'File name (with extension)'
+      : projectStore.isCargo
+        ? 'Module name (snake_case)'
+        : 'Name',
+  );
 
   /**
    * The whole dialog is driven from the name field: it holds focus the entire time, and the
@@ -82,11 +121,11 @@
    */
   function onKey(e: KeyboardEvent) {
     if (e.key === 'Enter') { e.preventDefault(); void create(); return; }
-    if (!isJava || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+    if (!isTyped || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
     e.preventDefault();
-    const at = JAVA_KINDS.findIndex((k) => k.value === kind);
-    const next = (at + (e.key === 'ArrowDown' ? 1 : -1) + JAVA_KINDS.length) % JAVA_KINDS.length;
-    kind = JAVA_KINDS[next].value;
+    const at = KINDS.findIndex((k) => k.value === kind);
+    const next = (at + (e.key === 'ArrowDown' ? 1 : -1) + KINDS.length) % KINDS.length;
+    kind = KINDS[next].value;
   }
 
   let nameEl = $state<HTMLInputElement | undefined>();
@@ -104,7 +143,7 @@
   {#snippet header()}
     <ModalHeader {onClose}>
       <FilePlus2 size={14} />
-      <span class="modal-title">{isJava ? 'New Java Class' : 'New File'}</span>
+      <span class="modal-title">{title}</span>
       <span class="nf-dir">in <code>{dirLabel}</code></span>
     </ModalHeader>
   {/snippet}
@@ -114,21 +153,21 @@
          and a field with one obvious purpose does not need a word above it repeating the
          placeholder. The icon marks which kind the name will become, live. -->
     <div class="nf-name">
-      {#if isJava}<SymbolKindIcon kind={JAVA_KINDS.find((k) => k.value === kind)?.iconKind ?? 'class'} />{/if}
+      {#if isTyped}<SymbolKindIcon kind={KINDS.find((k) => k.value === kind)?.iconKind ?? 'class'} />{/if}
       <input
         class="nf-input"
         bind:this={nameEl}
         bind:value={name}
-        placeholder={isJava ? 'Name' : 'File name (with extension)'}
+        placeholder={namePlaceholder}
         spellcheck="false"
         autocomplete="off"
         aria-label="Name"
       />
     </div>
 
-    {#if isJava}
+    {#if isTyped}
       <ul class="nf-kinds" role="listbox" aria-label="Kind" tabindex="-1">
-        {#each JAVA_KINDS as k (k.value)}
+        {#each KINDS as k (k.value)}
           <li>
             <button
               type="button"

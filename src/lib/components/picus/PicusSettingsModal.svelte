@@ -11,9 +11,13 @@
    */
   import {
     Settings, FileType, PenLine, FormInput, Database, FolderCog, Hash, Tags, Wand2,
-    ShieldCheck, Save,
+    ShieldCheck, Save, Monitor, Sparkles, Command,
   } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
+  import AppearanceSettings from '$lib/components/shared/internal/AppearanceSettings.svelte';
+  import AnimationsSettings from '$lib/components/shared/internal/AnimationsSettings.svelte';
+  import KeystrokesSettings from '$lib/components/shared/internal/KeystrokesSettings.svelte';
+  import ThemeEditorModal from '$lib/components/shared/ThemeEditorModal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import SettingsShell, { type SettingsNavGroup } from '$lib/components/shared/ui/SettingsShell.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
@@ -44,10 +48,20 @@
    */
   let { onClose, initialSection = '' }: { onClose: () => void; initialSection?: string } = $props();
 
+  /** The shared theme editor, reachable from the Appearance page. */
+  let themeEditorOpen = $state(false);
+
   // svelte-ignore state_referenced_locally
   let active = $state(initialSection || 'project');
 
   const groups: SettingsNavGroup[] = [
+    // The shell's appearance settings — already in effect in this window, previously only
+    // changeable from Corvus.
+    { label: 'Interface', items: [
+      { id: 'appearance', label: 'Appearance', icon: Monitor },
+      { id: 'animations', label: 'Animations', icon: Sparkles },
+      { id: 'keystrokes', label: 'Keyboard Inputs', icon: Command },
+    ] },
     {
       label: 'Project',
       items: [
@@ -244,7 +258,13 @@
 
   <SettingsShell {groups} bind:active>
     {#snippet content()}
-      {#if active === 'project'}
+      {#if active === 'appearance'}
+        <AppearanceSettings onOpenThemeEditor={() => { themeEditorOpen = true; }} />
+      {:else if active === 'animations'}
+        <AnimationsSettings />
+      {:else if active === 'keystrokes'}
+        <KeystrokesSettings />
+      {:else if active === 'project'}
         <div class="section-header">
           <h2>Project</h2>
           <p>
@@ -662,6 +682,10 @@
     {/snippet}
   </SettingsShell>
 </Modal>
+
+{#if themeEditorOpen}
+  <ThemeEditorModal onClose={() => (themeEditorOpen = false)} />
+{/if}
 
 <style>
   .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }

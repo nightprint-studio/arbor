@@ -60,4 +60,5 @@ pub mod commands;
 pub mod home;
 // The crates.io index — the one thing here that needs the network, with the fetch left to the caller.
 pub mod registry;
+pub mod scaffold;
 pub mod prelude;

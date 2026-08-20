@@ -5,7 +5,7 @@
    * item count AND the total size on disk. Mocked: reveal toasts, the rest mutate
    * the in-memory list.
    */
-  import { Video, Camera, Images, Trash2, FolderOpen, Eye, Pencil, Search } from 'lucide-svelte';
+  import { Video, Camera, Images, Trash2, FolderOpen, Eye, Pencil, Search, Grid2x2 } from 'lucide-svelte';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { fly } from 'svelte/transition';
   import { flip } from 'svelte/animate';
@@ -18,7 +18,8 @@
   import TytoThumb from '../TytoThumb.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { animStore } from '$lib/stores/animations.svelte';
-  import { recorderStore, formatDuration, formatBytes, formatAgo } from '$lib/stores/tyto/recorder.svelte';
+  import { recorderStore, formatDuration } from '$lib/stores/tyto/recorder.svelte';
+  import { formatBytes, formatAgo } from '$lib/utils/format';
 
   let query = $state('');
   let clearConfirmOpen = $state(false);
@@ -55,6 +56,9 @@
   function remove(id: string) {
     recorderStore.removeCapture(id);
     if (previewId === id) previewId = null;
+  }
+  function exportAtlas(id: string) {
+    void recorderStore.exportAtlas(id);
   }
 </script>
 
@@ -140,6 +144,16 @@
             <div class="cap-actions">
               <button type="button" class="cap-act" use:tooltip={'View'} aria-label="View capture" onclick={() => (previewId = cap.id)}><Eye size={14} /></button>
               <button type="button" class="cap-act" use:tooltip={'Rename'} aria-label="Rename capture" onclick={() => (editingId = cap.id)}><Pencil size={13} /></button>
+              {#if cap.kind === 'frames'}
+                <button
+                  type="button"
+                  class="cap-act"
+                  use:tooltip={'Export as sprite atlas'}
+                  aria-label="Export as sprite atlas"
+                  disabled={recorderStore.exportingId === cap.id}
+                  onclick={() => exportAtlas(cap.id)}
+                ><Grid2x2 size={14} /></button>
+              {/if}
               <button type="button" class="cap-act" use:tooltip={'Reveal in folder'} aria-label="Reveal in folder" onclick={() => reveal(cap.id)}><FolderOpen size={14} /></button>
               <button type="button" class="cap-act danger" use:tooltip={'Delete'} aria-label="Delete capture" onclick={() => remove(cap.id)}><Trash2 size={14} /></button>
             </div>
@@ -274,4 +288,8 @@
   }
   .cap-act:hover { background: var(--bg-overlay); color: var(--text-primary); }
   .cap-act.danger:hover { color: var(--error); }
+  /* Un export in corso: il bottone resta al suo posto (niente salto della fila) ma
+     non si ripreme — riscrivere le stesse pagine due volte in parallelo è l'unico
+     modo di ottenere un atlante a metà. */
+  .cap-act:disabled { opacity: 0.45; cursor: default; pointer-events: none; }
 </style>

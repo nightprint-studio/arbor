@@ -41,7 +41,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -389,15 +389,90 @@ pub struct CancelTestsArgs {
 /// unknown or it had already finished.
 #[arbor_rpc::handler]
 fn bennu_cancel_tests(_ctx: &BennuState, args: CancelTestsArgs) -> Result<bool, String> {
+    Ok(cancel_run(&args.run_id))
+}
+
+/// Kill a live run by id. `false` when the id is unknown or the run had already finished —
+/// which is how a watchdog tells "I stopped it" from "it beat me to it", and the reason a
+/// late deadline never reports a healthy run as timed out.
+///
+/// On Windows the child is `mvn.cmd`/`cargo.exe` and the real work is a grandchild, so this
+/// goes through [`crate::child::kill_tree`]: killing the handle alone would leave the tests
+/// running and still holding `target/`.
+pub(crate) fn cancel_run(run_id: &str) -> bool {
     let live = {
         let reg = registry().lock().unwrap_or_else(|p| p.into_inner());
-        reg.get(&args.run_id).map(|r| (r.child.clone(), r.cancelled.clone()))
+        reg.get(run_id).map(|r| (r.child.clone(), r.cancelled.clone()))
     };
-    let Some((child, cancelled)) = live else { return Ok(false) };
+    let Some((child, cancelled)) = live else { return false };
     *cancelled.lock().unwrap_or_else(|p| p.into_inner()) = true;
     let mut child = child.lock().unwrap_or_else(|p| p.into_inner());
     crate::child::kill_tree(&mut child);
-    Ok(true)
+    true
+}
+
+// ── The deadline ───────────────────────────────────────────────────────────────
+
+/// A watchdog that kills a run which outlives its limit.
+///
+/// ## Perché esiste
+///
+/// Because the caller that *waits* has no hand on the stop button. The editor's runners
+/// return the moment the child is up and a human watches the panel; the agent facade drives
+/// the same run to its end, and a test that never terminates turns that into a call that
+/// never answers — the failure mode that looks exactly like the tool being broken, for as
+/// long as anyone is willing to wait.
+///
+/// ⚠️ **It is not a per-test timeout.** `cargo test` runs a target's cases in one process,
+/// so there is no way from out here to kill the one case that hung and let the rest finish —
+/// the whole run goes. `cargo nextest` gives each test its own process and can do exactly
+/// that; wiring it up means a second output parser, and until then this is the honest floor:
+/// the call comes back, and it says it was stopped rather than reporting a green.
+pub(crate) struct Deadline {
+    fired: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    limit: Duration,
+}
+
+impl Deadline {
+    /// Start the watchdog for `run_id`. A failure to spawn the thread is not fatal: the run
+    /// simply has no deadline, which is where we were before.
+    pub(crate) fn arm(run_id: String, limit: Duration) -> Self {
+        let fired = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (f, s) = (fired.clone(), stop.clone());
+        let thread = std::thread::Builder::new()
+            .name(format!("bennu-deadline-{run_id}"))
+            .spawn(move || {
+                // Sliced rather than one long sleep: a finished run must not leave a thread
+                // parked for the rest of the limit, and ten minutes is a long time to park.
+                let tick = Duration::from_millis(200);
+                let mut waited = Duration::ZERO;
+                while waited < limit {
+                    if s.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    std::thread::sleep(tick);
+                    waited += tick;
+                }
+                if !s.load(Ordering::Relaxed) && cancel_run(&run_id) {
+                    f.store(true, Ordering::Relaxed);
+                }
+            })
+            .ok();
+        Self { fired, stop, thread, limit }
+    }
+
+    /// Stop watching. `Some(limit)` when the watchdog had already killed the run — the
+    /// caller turns that into the note that says so.
+    pub(crate) fn disarm(mut self) -> Option<Duration> {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+        self.fired.load(Ordering::Relaxed).then_some(self.limit)
+    }
 }
 
 /// A run the canceller can reach.
@@ -589,6 +664,25 @@ fn sweep_reports(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ⚠️ **Un deadline disarmato non deve sparare.** È il caso normale — la corsa finisce
+    /// prima — e se sparasse comunque ogni esito verrebbe marcato come interrotto.
+    #[test]
+    fn un_deadline_disarmato_non_riporta_niente() {
+        let d = Deadline::arm("run-che-non-esiste".to_string(), Duration::from_millis(50));
+        assert_eq!(d.disarm(), None, "disarmato subito: non ha avuto tempo di sparare");
+    }
+
+    /// ⚠️ **Una corsa già finita non è una corsa scaduta.** Il watchdog non sa quando la
+    /// corsa termina; sa solo che il registro non la conosce più, ed è quella la differenza
+    /// fra «l'ho fermata io» e «aveva già finito». Senza questo, ogni corsa più lunga del
+    /// limite tornerebbe marcata come interrotta anche quando è arrivata in fondo.
+    #[test]
+    fn un_id_sconosciuto_non_diventa_un_timeout() {
+        let d = Deadline::arm("run-che-non-esiste".to_string(), Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(400));
+        assert_eq!(d.disarm(), None, "ha provato a fermarla e non c'era: niente da riportare");
+    }
 
     /// The root's own reports directory is always watched, whether or not it exists yet —
     /// a first-ever run has no `target/` at all, and a watcher built from what is on disk

@@ -60,6 +60,16 @@ export interface BennuSettingsSnapshot {
   /** Autosave a modified buffer to disk (after a short idle, on tab switch, on window blur).
    *  Config-backed (persists to `…/bennu/config.toml`). */
   autosave: boolean;
+  /** Keep a private record of what every project file used to be, so a save, a refactor or a
+   *  delete can be undone long after the editor's own undo stack has moved on. Config-backed. */
+  localHistory: boolean;
+  /** Days of history to keep. Labelled revisions, and each file's newest one, are kept
+   *  regardless. Config-backed. */
+  localHistoryDays: number;
+  /** Ceiling on one project's history, in megabytes. Config-backed. */
+  localHistoryMaxMb: number;
+  /** Files bigger than this (megabytes) are not recorded at all. Config-backed. */
+  localHistoryMaxFileMb: number;
   /** Fold runs of library frames in the debugger's call stack into one expandable row.
    *  Config-backed — a preference about how you read a stack, not about a project. */
   collapseLibraryFrames: boolean;
@@ -103,6 +113,10 @@ const DEFAULTS: BennuSettingsSnapshot = {
   rightMargin: 120,
   sqlDialect: 'portable',
   autosave: true,
+  localHistory: true,
+  localHistoryDays: 7,
+  localHistoryMaxMb: 256,
+  localHistoryMaxFileMb: 4,
   collapseLibraryFrames: true,
   searchDependencies: false,
   autoPopup: true,
@@ -136,6 +150,10 @@ function createSettingsStore() {
   let rightMargin = $state(DEFAULTS.rightMargin);
   let sqlDialect = $state<SqlDialectSetting>(DEFAULTS.sqlDialect);
   let autosave = $state(DEFAULTS.autosave);
+  let localHistory = $state(DEFAULTS.localHistory);
+  let localHistoryDays = $state(DEFAULTS.localHistoryDays);
+  let localHistoryMaxMb = $state(DEFAULTS.localHistoryMaxMb);
+  let localHistoryMaxFileMb = $state(DEFAULTS.localHistoryMaxFileMb);
   let collapseLibraryFrames = $state(DEFAULTS.collapseLibraryFrames);
   let searchDependencies = $state(DEFAULTS.searchDependencies);
   // Completion
@@ -163,6 +181,7 @@ function createSettingsStore() {
       fontSize, tabSize, indentStyle, wordWrap, showWhitespace,
       highlightCurrentLine, showLineNumbers, minimap, indentGuides, stickyScroll, rightMargin,
       sqlDialect, autosave, collapseLibraryFrames, searchDependencies,
+      localHistory, localHistoryDays, localHistoryMaxMb, localHistoryMaxFileMb,
       autoPopup, popupDelayMs, caseSensitive, autoImport,
       foldingEnabled, foldBlockComments,
       finalParams, useLombokVal, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
@@ -193,6 +212,10 @@ function createSettingsStore() {
         sql_dialect: sqlDialect,
         collapse_library_frames: collapseLibraryFrames,
         search_dependencies: searchDependencies,
+        local_history: localHistory,
+        local_history_days: localHistoryDays,
+        local_history_max_mb: localHistoryMaxMb,
+        local_history_max_file_mb: localHistoryMaxFileMb,
       });
     } catch {
       /* non-critical — the in-memory value still applies for this session */
@@ -234,6 +257,14 @@ function createSettingsStore() {
     setSqlDialect(v: SqlDialectSetting) { sqlDialect = v; void persistConfigBacked(); },
     get autosave() { return autosave; },
     setAutosave(v: boolean) { autosave = v; void persistConfigBacked(); },
+    get localHistory() { return localHistory; },
+    setLocalHistory(v: boolean) { localHistory = v; void persistConfigBacked(); },
+    get localHistoryDays() { return localHistoryDays; },
+    setLocalHistoryDays(v: number) { localHistoryDays = Math.max(1, v); void persistConfigBacked(); },
+    get localHistoryMaxMb() { return localHistoryMaxMb; },
+    setLocalHistoryMaxMb(v: number) { localHistoryMaxMb = Math.max(16, v); void persistConfigBacked(); },
+    get localHistoryMaxFileMb() { return localHistoryMaxFileMb; },
+    setLocalHistoryMaxFileMb(v: number) { localHistoryMaxFileMb = Math.max(1, v); void persistConfigBacked(); },
     get collapseLibraryFrames() { return collapseLibraryFrames; },
     get searchDependencies() { return searchDependencies; },
     async setSearchDependencies(v: boolean) {
@@ -295,6 +326,10 @@ function createSettingsStore() {
       try {
         const cfg = await getBennuConfig();
         autosave = cfg.autosave;
+        localHistory = cfg.local_history ?? DEFAULTS.localHistory;
+        localHistoryDays = cfg.local_history_days ?? DEFAULTS.localHistoryDays;
+        localHistoryMaxMb = cfg.local_history_max_mb ?? DEFAULTS.localHistoryMaxMb;
+        localHistoryMaxFileMb = cfg.local_history_max_file_mb ?? DEFAULTS.localHistoryMaxFileMb;
         collapseLibraryFrames = cfg.collapse_library_frames ?? DEFAULTS.collapseLibraryFrames;
         searchDependencies = cfg.search_dependencies ?? DEFAULTS.searchDependencies;
         autoImport = cfg.auto_import;
@@ -323,6 +358,10 @@ function createSettingsStore() {
       rightMargin = DEFAULTS.rightMargin;
       sqlDialect = DEFAULTS.sqlDialect;
       autosave = DEFAULTS.autosave;
+      localHistory = DEFAULTS.localHistory;
+      localHistoryDays = DEFAULTS.localHistoryDays;
+      localHistoryMaxMb = DEFAULTS.localHistoryMaxMb;
+      localHistoryMaxFileMb = DEFAULTS.localHistoryMaxFileMb;
       autoPopup = DEFAULTS.autoPopup;
       popupDelayMs = DEFAULTS.popupDelayMs;
       caseSensitive = DEFAULTS.caseSensitive;
