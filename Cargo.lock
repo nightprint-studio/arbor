@@ -976,6 +976,7 @@ dependencies = [
  "bennu-web",
  "bennu-wgsl",
  "bennu-xml",
+ "notify",
  "reqwest 0.12.28",
  "schemars 1.2.1",
  "serde",

@@ -64,6 +64,19 @@
 </p>
 <h2>Project tree</h2>
 <p>
+  The tree <strong>follows the disk</strong>. A <code>git checkout</code>, a <code>cargo new</code>,
+  an <code>npm install</code> or another editor saving a file all show up on their own — there is
+  nothing to press and nothing to reopen. Changes arrive in bursts, so a checkout touching four
+  hundred files is one reload rather than four hundred.
+</p>
+<p>
+  Generated directories are deliberately not watched at all — <code>target</code>,
+  <code>node_modules</code>, <code>.git</code>, <code>.svelte-kit</code>, <code>coverage</code> and
+  their kind. Not filtered afterwards: <em>unwatched</em>. A build writing into
+  <code>target</code> would otherwise be a burst that never goes quiet, which would mean the tree
+  refusing to settle at exactly the moment the machine is busiest.
+</p>
+<p>
   The <strong>Project</strong> panel header carries quick actions: create a new file, locate the open
   file in the tree, collapse or expand the whole tree, and an options menu. Right-clicking a file or
   folder opens a context menu (Open · Rename · Delete · Local History · Copy path · Reveal in

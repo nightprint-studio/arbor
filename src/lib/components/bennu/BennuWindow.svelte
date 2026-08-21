@@ -122,6 +122,7 @@
   import BennuFileStructureModal from './BennuFileStructureModal.svelte';
   import type { GenerateMode } from './bennu-intentions';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { watchRoots, TREE_CHANGED, type TreeChanged } from '$lib/ipc/bennu/tree-watch';
   import { workspacesStore } from '$lib/stores/bennu/workspaces.svelte';
   import { isJavaFile, isJspFile, isLspFile, supportsCodeNav } from './file-kind';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -298,6 +299,20 @@
       void workspacesStore.restore();
       void bennuSettingsStore.loadConfig();
     }).then((un) => { unlistenBeUp = un; });
+    // The Project tree's filesystem watcher. Two halves and they are separate on purpose: this one
+    // is the subscription, and the `$effect` below is what tells the backend which roots to watch —
+    // that set changes as members are added and removed, and the subscription must not be torn
+    // down and rebuilt every time it does.
+    //
+    // The tree is reloaded wholesale rather than patched from the named paths. A reload is one
+    // call the backend already serves, it is right for every shape of change including a rename
+    // and a directory move, and the alternative is a second model of the tree that has to agree
+    // with the first one. The paths are still worth carrying: they say WHICH root changed.
+    let unlistenTree: (() => void) | undefined;
+    void listen<TreeChanged>(TREE_CHANGED, (e) => {
+      if (e.payload?.root) projectStore.refreshTreeOf(e.payload.root);
+    }).then((un) => { unlistenTree = un; });
+
     // Subscribe to the build/run + index-progress event streams for this window;
     // detach on unmount.
     let detachRun: (() => void) | undefined;
@@ -334,6 +349,7 @@
       detachCargoTests?.();
       unlistenClose?.();
       unlistenBeUp?.();
+      unlistenTree?.();
       document.removeEventListener('visibilitychange', onHidden);
       detachDebug?.(); detachLsp?.();
       unlistenContributions();
@@ -778,6 +794,20 @@
     hierarchyRoot = root;
     // `untrack`: clearing touches store state this effect must not then react to.
     untrack(() => bennuHierarchyStore.clear());
+  });
+
+  /**
+   * Tell the backend which roots to watch, whenever the set changes.
+   *
+   * A `$effect` on the roots themselves, so adding or removing a workspace member re-registers the
+   * watcher without anybody having to remember to. The call is idempotent for an unchanged set —
+   * the backend compares before restarting its thread — so this being reactive costs nothing when
+   * the roots have not moved.
+   */
+  $effect(() => {
+    const roots = projectStore.workspaceRoots;
+    if (projectStore.isDemo) return;
+    void watchRoots([...roots]).catch(() => { /* no live updates; the tree still refreshes by hand */ });
   });
 
   const leftTopRaw = $derived<ActivityRailButton[]>([

@@ -132,6 +132,10 @@ bennu-dap = { path = "../dap" }
 bennu-deps = { path = "../deps" }
 # The Cargo side: the manifest schema behind Cargo.toml validation + completion, the crate
 # graph the Rust tool window shows, and the cargo command catalogue.
+# The Project tree's filesystem watcher. Already in the workspace (garrulus-be and the shell
+# use it); a project changes under the editor constantly — a checkout, an install, another
+# editor — and until this arrived none of it was visible until the project was reopened.
+notify = "6"
 bennu-cargo = { path = "../cargo" }
 # `package.json` with spans, the npm registry's URL and cache shape, and the range test that
 # decides whether an "update available" is honest. Opens no sockets — this crate is the half

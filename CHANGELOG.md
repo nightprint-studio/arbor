@@ -9,6 +9,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **Bennu's project tree follows the disk.** It reloaded only when Bennu itself changed something — a New file, a Delete, a Rename — so a `git checkout`, a `cargo new`, an `npm install` or another editor stayed invisible until the project was reopened. Changes now arrive as one settled burst per project. Generated directories are never watched: not filtered afterwards, unwatched, because a build writing into `target/` is a burst that never goes quiet.
+
 - **`package.json` gets the treatment `Cargo.toml` has.** Its sections read as headings and a script's command as code; a version is coloured by how pinned it is — floats on install, pinned, or not from the registry at all. Each script carries a ▶ control that names the command it will run, with the package manager read off the lockfile beside the manifest, streaming into the same Run console `cargo run` uses. And a dependency that is behind gets the same *↑ available* offer, honouring the same *Look crates up online* switch and cache.
 
 - **Structure opens on every project, not only a Java one.** The panel already answered for Rust, TypeScript, JavaScript and Svelte through their language servers; the rail button, `Alt+2` and the palette entry were still gated on the project being Java, so a Cargo project had a working Structure panel and no way to open it.

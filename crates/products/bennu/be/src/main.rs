@@ -68,6 +68,9 @@ mod crates_io;
 // the two answer the same question about two ecosystems, and the day one of them grows a private
 // registry or an auth token the other must not inherit it.
 mod npm;
+// The Project tree's filesystem watcher — what makes a `git checkout` or an `npm install` show up
+// without reopening the project.
+mod tree_watch;
 // Code-intel: `bennu_completion` / `bennu_diagnostics` — completion serves from the
 // per-project index the `index_service` builds; diagnostics stay a stub for now.
 mod intel;

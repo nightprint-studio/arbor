@@ -636,6 +636,9 @@ function createProjectStore() {
     },
     /** True when the workspace holds more than one project (drives showing the switcher UI). */
     get hasWorkspace(): boolean { return workspaceRoots.length > 1; },
+    /** Every open project root. Read by the filesystem watcher, which wants the whole set rather
+     *  than one root at a time — see `bennu_watch_roots`. */
+    get workspaceRoots(): string[] { return workspaceRoots; },
     /** True when `path` isn't under the active project's root — a "foreign" tab (opened from
      *  another workspace project), which the tab strip badges (mirrors Corvus). */
     isForeign(path: string): boolean {
@@ -765,6 +768,23 @@ function createProjectStore() {
     refreshTree() {
       const r = project?.root;
       if (r && !isDemo) loadTreeInto(r);
+    },
+
+    /**
+     * Re-fetch the tree of `root`, whichever project it belongs to.
+     *
+     * What the filesystem watcher calls. Keyed by root and not "the active one" because a change
+     * can land in a workspace member that is not on screen: reloading the active tree for it would
+     * be a reload that fixes nothing, and the member's tree would stay wrong until it was next
+     * switched to. A root this window does not have open is ignored.
+     */
+    refreshTreeOf(root: string) {
+      if (isDemo) return;
+      if (project?.root === root) {
+        loadTreeInto(root);
+        return;
+      }
+      if (workspaceRoots.includes(root)) loadTreeInto(root);
     },
 
     /** The active workspace's session snapshot (open tabs per member project). The workspace store
