@@ -30,7 +30,8 @@
   import { syncPushNow } from '$lib/ipc/corvus/sync';
   import type { WorkspaceDef, RepoRegistryEntry } from '$lib/types/corvus/workspace';
   import { activityBarConfigStore } from '$lib/stores/corvus/activityBarConfig.svelte';
-  import { firePluginAction, reloadPlugins } from '$lib/ipc/plugin';
+  import { reloadPlugins } from '$lib/ipc/plugin';
+  import { pluginPaletteCommands } from '$lib/contributions/command-palette';
   import { openExplorerWindow } from '$lib/ipc/app';
   import { openProduct, detachSurface } from '$lib/utils/open-product';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
@@ -1828,23 +1829,18 @@
       }
     }
 
-    // Plugin commands — leaf actions registered by plugins.
-    const pluginItems: PaletteItem[] = contributionStore.forPoint('arbor:command-palette')
-      .map(c => {
-        const p = c.payload as { title?: string; description?: string; icon?: string };
-        return {
-          id:       `plugin:${c.plugin_name}:${c.item_id}`,
-          kind:     'plugin' as PaletteItemKind,
-          icon:     p.icon ?? 'Zap',
-          title:    p.title ?? '',
-          subtitle: p.description ?? c.plugin_name,
-          score:    score((p.title ?? '') + ' ' + (p.description ?? '') + ' ' + c.plugin_name, q),
-          action: () => {
-            firePluginAction(c.plugin_name, `command:${c.item_id}`, '{}').catch(() => {});
-            onClose();
-          },
-        };
-      })
+    // Plugin commands — leaf actions registered by plugins. Read through the shared mapper
+    // so Bennu's palette offers the same set; only the scoring below is ours.
+    const pluginItems: PaletteItem[] = pluginPaletteCommands()
+      .map(c => ({
+        id:       c.id,
+        kind:     'plugin' as PaletteItemKind,
+        icon:     c.icon,
+        title:    c.title,
+        subtitle: c.subtitle,
+        score:    score(c.haystack, q),
+        action:   () => { c.run(); onClose(); },
+      }))
       .filter(p => p.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, 8);

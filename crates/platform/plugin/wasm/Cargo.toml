@@ -1,0 +1,49 @@
+[package]
+name         = "arbor-plugin-wasm"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The wasm extension host — resolves which package implements which interface, gates what a guest may reach, and instantiates components. Guests implement interfaces Arbor defines (see wit/); this is the side that calls into them."
+
+[dependencies]
+arbor-core         = { path = "../../../foundation/core" }
+arbor-plugin-types = { path = "../types" }
+
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+
+# The component-model runtime. `component-model` is the whole point — Arbor's interfaces are
+# WIT worlds, not core-wasm exports. Deliberately NOT `wasi:http` or `wasi:filesystem`: a
+# guest reaches the network by asking the host, so there is nothing for a WASI implementation
+# to provide.
+#
+# OPTIONAL, and off by default. The index and the capability gates are the load-bearing half
+# and they are pure — they resolve which package implements what and decide what a guest may
+# reach, and both are useful (and tested) with no runtime present. Keeping the engine behind a
+# feature means bringing wasmtime up is an isolated exercise rather than something the whole
+# workspace waits on.
+wasmtime = { version = "27", default-features = false, features = ["runtime", "cranelift", "component-model", "std"], optional = true }
+
+# WASI, linked and granted nothing.
+#
+# Not a change of mind about ambient capability — a necessity, and the honest version is
+# better than the one that was planned. `wasm32-wasip2` links the WASI standard library into
+# every guest whether it uses it or not, so a component built for that target imports
+# `wasi:io/poll` before it has run a line of its own code. Refusing to link WASI does not
+# produce a guest without it; it produces a guest that will not instantiate.
+#
+# So it is linked with an EMPTY context: no preopened directories, no sockets, no inherited
+# environment, no stdio. The guarantee is unchanged — a guest still cannot open a file or a
+# connection — and it is now enforced by what the context contains rather than by what the
+# linker omits.
+wasmtime-wasi = { version = "27", optional = true }
+
+[features]
+default = []
+## Instantiate components. Turn on once the engine layer compiles against the WIT in `wit/`.
+runtime = ["dep:wasmtime", "dep:wasmtime-wasi"]
+

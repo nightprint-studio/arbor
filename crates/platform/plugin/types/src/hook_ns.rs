@@ -71,8 +71,34 @@ pub const PRODUCT_MERULA: &str = "merula";
 /// The capture / recorder product (`tyto-be`).
 pub const PRODUCT_TYTO: &str = "tyto";
 
+/// The code-intelligence product (`bennu-be`).
+pub const PRODUCT_BENNU: &str = "bennu";
+
+/// The container product (`picus-be`).
+pub const PRODUCT_PICUS: &str = "picus";
+
 /// The launcher shell's own in-process plugin host.
 pub const PRODUCT_LAUNCHER: &str = "launcher";
+
+/// Every product that can host plugins.
+///
+/// A list rather than a derived set because it has one job: when the user installs a package
+/// **for one product**, the others need an explicit "not here" written for them. Deriving that
+/// from whichever backends happen to be running would make the answer depend on what was open
+/// at the time, which is the opposite of a recorded decision.
+///
+/// `arbor` is absent on purpose — it is the namespace shared by every host, not a product a
+/// plugin can be installed for.
+pub const HOSTING_PRODUCTS: &[&str] = &[
+    PRODUCT_CORVUS,
+    PRODUCT_BENNU,
+    PRODUCT_GARRULUS,
+    PRODUCT_SITTA,
+    PRODUCT_MERULA,
+    PRODUCT_TYTO,
+    PRODUCT_PICUS,
+    PRODUCT_LAUNCHER,
+];
 
 /// Copy `ns`, a separator and `event` into a fixed-size byte buffer.
 ///

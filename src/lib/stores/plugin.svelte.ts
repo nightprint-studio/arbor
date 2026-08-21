@@ -31,9 +31,26 @@ function tryLoadComboSelection(key: string): string | null {
   try { return localStorage.getItem(`arbor:combo:${key}`); } catch { return null; }
 }
 
+/** What `arbor.ui.pick_file(opts)` asked for. `action` is fired with the chosen path — an
+ *  empty one on cancel, so the plugin tells "cancelled" from "never opened" without a
+ *  second action name. */
+export type PluginPickFile = {
+  plugin_name:   string;
+  mode?:         'file' | 'folder' | 'save';
+  title?:        string;
+  extensions?:   string[];
+  initial_path?: string;
+  action:        string;
+  extra?:        Record<string, unknown>;
+};
+
 function createPluginStore() {
   let pendingForm     = $state<PluginFormConfig | null>(null);
   let formKey         = $state(0);
+  /** The open plugin file picker, if any. In the store rather than local to the component
+   *  that renders it for the same reason `pendingForm` is: a shell has to know a modal is up
+   *  before it decides a keystroke was meant for it. */
+  let pickFile        = $state<PluginPickFile | null>(null);
   let disabledPlugins = $state<Set<string>>(loadDisabled());
   /** Per-combo selected value: key = "pluginName::comboId". Lazily populated
    *  by `setComboSelection` and the `plugin:combo-select` listener; reads
@@ -114,6 +131,9 @@ function createPluginStore() {
   function setPendingForm(form: PluginFormConfig) { formKey++; pendingForm = form; }
   function clearPendingForm()                     { pendingForm = null; }
 
+  function setPickFile(req: PluginPickFile)       { pickFile = req; }
+  function clearPickFile()                        { pickFile = null; }
+
   /** Read the current combo selection. Falls back to the persisted value in
    *  localStorage, then to the empty string — callers (RepoActions /
    *  ActivityBar) display "—" when this returns ''.
@@ -135,6 +155,7 @@ function createPluginStore() {
   return {
     get pendingForm()     { return pendingForm; },
     get formKey()         { return formKey; },
+    get pickFile()        { return pickFile; },
     get disabledPlugins() { return disabledPlugins; },
     setupListeners,
     syncFromInfos,
@@ -142,6 +163,8 @@ function createPluginStore() {
     isEnabled,
     setPendingForm,
     clearPendingForm,
+    setPickFile,
+    clearPickFile,
     getComboSelection,
     setComboSelection,
   };

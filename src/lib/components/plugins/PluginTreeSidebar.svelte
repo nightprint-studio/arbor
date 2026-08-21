@@ -48,6 +48,7 @@
   import PluginTreeNode    from './tree-sidebar/PluginTreeNode.svelte';
   import PluginTreeFooter  from './tree-sidebar/PluginTreeFooter.svelte';
   import './tree-sidebar/tree-sidebar-styles.css';
+  import { toArr } from './form-nodes/helpers';
 
   interface Props {
     pluginName: string;
@@ -74,13 +75,13 @@
   // ── Tree snapshot ─────────────────────────────────────────────────────────
   const snapshot = $derived(contributionStore.tree(pluginName, panelId));
   const title    = $derived(snapshot?.title ?? section?.label ?? '');
-  const baseNodes = $derived(snapshot?.nodes ?? []);
+  const baseNodes = $derived(toArr<any>(snapshot?.nodes));
   // Breadcrumb band: pushed alongside the nodes via `arbor.ui.tree.set`.
   // Mapped to the shared Breadcrumb widget shape. Segments with empty
   // `action` render as non-interactive (last/current).
   type BcPayload = { action?: string | null; data?: unknown };
   const breadcrumbSegments = $derived<BCSeg<BcPayload>[]>(
-    (snapshot?.breadcrumb ?? []).map(s => ({
+    toArr<any>(snapshot?.breadcrumb).map((s: any) => ({
       label:       s.label,
       icon:        s.icon ?? null,
       badge:       s.badge ?? null,
@@ -107,7 +108,7 @@
   // segment's payload carries the absolute prefix in `data.prefix` for the
   // cloud-storage plugin; for other plugins we fall back to the label trail.
   const breadcrumbEditValue = $derived.by(() => {
-    const segs = snapshot?.breadcrumb ?? [];
+    const segs = toArr<any>(snapshot?.breadcrumb);
     // Prefer the data.prefix of the LAST segment if any segment exposes it.
     for (let i = segs.length - 1; i >= 0; i--) {
       const d = segs[i]?.data as { prefix?: string } | undefined;

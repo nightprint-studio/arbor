@@ -237,6 +237,8 @@ fn local_plugin_entry(
     enabled: bool,
 ) -> MarketplacePlugin {
     let dependencies = m.dependencies.clone();
+    let credentials  = m.credentials.clone();
+    let provides     = m.provides.clone();
     let repository_for_entry = m.repository.clone().unwrap_or_default();
     MarketplacePlugin {
         name:        m.name,
@@ -261,12 +263,21 @@ fn local_plugin_entry(
             source:     MarketplaceSource::Local,
             pinned_sha: None,
             external:   false,
+            // Empty, and it has to be: artifact digests are what a registry entry APPROVED,
+            // and a local row was never listed anywhere. Filling this from the package itself
+            // would be the package vouching for its own bytes.
+            artifacts:  Default::default(),
         },
         experimental:      if m.experimental { Some(true) } else { None },
         doc:               None,
         update_available:  None,
         installed_version: Some(m.version),
         dependencies,
+        // A local row is built from the manifest on disk, so it reports what that manifest
+        // declares — the Plugin Manager's extensions section reads these, and a hand-copied
+        // package that provides something should appear there like any other.
+        credentials,
+        provides,
     }
 }
 
@@ -324,6 +335,7 @@ fn load_local_themes() -> Vec<MarketplaceTheme> {
                 source:     MarketplaceSource::Local,
                 pinned_sha: None,
                 external:   false,
+                artifacts:  Default::default(),
             },
         });
     }

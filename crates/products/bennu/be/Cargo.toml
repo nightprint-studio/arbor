@@ -18,6 +18,11 @@ arbor-rpc  = { path = "../../../foundation/rpc" }
 # runtime) + the `App` builder (pre-serve inits, serve loop). bennu-be uses the slim
 # path — no plugin host, no API installer, no scheduler (like merula-be).
 arbor-be   = { path = "../../../foundation/be" }
+# The host-pure plugin surface: bennu hosts plugins, so it needs the host and the `arbor.*`
+# namespaces that do not belong to any one product.
+arbor-plugin-core = { path = "../../../platform/plugin/core" }
+# The Plugin Manager's RPC surface, generic over a context — see `plugin_rpc.rs`.
+arbor-plugin-rpc  = { path = "../../../platform/plugin/rpc" }
 # The profile-aware config/data-path resolver: `init_active_profile()` seeds the
 # active profile FIRST in `main`, so the `bennu_*` config/data dirs resolve under the
 # launcher's profile.
@@ -130,7 +135,12 @@ bennu-deps = { path = "../deps" }
 bennu-cargo = { path = "../cargo" }
 # WGSL: naga-backed validation and a tolerant scanner, for a shader with no language
 # server installed. Leaf crate — no Tauri, no IPC.
+bennu-plugin      = { path = "../plugin" }
 bennu-wgsl = { path = "../wgsl" }
+
+# The rendered shader preview crosses the MCP seam as base64 PNG — the same shape and the same
+# workspace dependency tyto-be uses for its screenshots.
+base64 = { workspace = true }
 # `NoWindowExt` — suppress the console window on the short-lived mvn/javac/java children.
 arbor-process-ext = { path = "../../../platform/process-ext" }
 # The log interpreter behind the Run/Build consoles: a line of a child's output → its level

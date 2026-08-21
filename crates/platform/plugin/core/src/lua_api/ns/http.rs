@@ -125,36 +125,16 @@ fn parse_get_args(
     Ok((url, opts, callback))
 }
 
+/// The network gate, in Lua's error type.
+///
+/// The rule itself lives in `arbor_plugin_types::network` — a wasm guest asks the host to
+/// perform requests too, and one definition of "may this package reach this host" is the
+/// difference between a rule and two rules that agree until they do not. All this adds is
+/// the caller's name in front of the message.
 fn permission_gate(pname: &str, net_perm: &[String], url: &str) -> mlua::Result<()> {
-    if net_perm.is_empty() {
-        return Err(mlua::Error::RuntimeError(format!(
-            "arbor.http.get: '{}' requires `network` permission. \
-             Add to plugin.toml: network = [\"<host>\"] (or [\"*\"]).",
-            pname)));
-    }
-    // Extract host: split on `://`, then on `/`, `:`, `?`, `#`.
-    let host = url.split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or(url)
-        .split(['/', ':', '?', '#'])
-        .next()
-        .unwrap_or("")
-        .to_string();
-    if host.is_empty() {
-        return Err(mlua::Error::RuntimeError(
-            format!("arbor.http.get: cannot parse host from URL '{url}'")));
-    }
-    let allowed = net_perm.iter().any(|h| {
-        h == "*"
-        || h == &host
-        || (host.ends_with(&format!(".{h}")))
-    });
-    if !allowed {
-        return Err(mlua::Error::RuntimeError(format!(
-            "arbor.http.get: host '{host}' not in plugin's network allowlist {:?}",
-            net_perm)));
-    }
-    Ok(())
+    arbor_plugin_types::prelude::network_check(pname, net_perm, url)
+        .map(|_| ())
+        .map_err(|e| mlua::Error::RuntimeError(format!("arbor.http.get: {e}")))
 }
 
 fn parse_opts(opts: Option<mlua::Table>) -> (Vec<(String, String)>, u64) {

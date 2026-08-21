@@ -95,6 +95,9 @@ arbor.log.LEVELS.ERROR  -- "error"
     <tr><td><code>arbor:view_open</code></td><td>view_id, label? — fired on the owning plugin when one of its <code>add_view</code> views opens; respond with <code>set_panel_content</code></td></tr>
     <tr><td><code>arbor:view_close</code></td><td>view_id, label? — fired when the view is closed (toggled off, replaced, or plugin reloaded)</td></tr>
     <tr><td><code>arbor:theme_changed</code></td><td>theme_id, theme_name, vars (merged effective stylesheet), source ("user"|"plugin"|"init")</td></tr>
+    <tr><td colspan="2" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Bennu: the editor (<code>bennu:</code>) ───────────</td></tr>
+    <tr><td><code>bennu:file_opened</code></td><td>path, name, ext? — the editor's active file changed (tab switched, file opened, reopened from history). What a panel about the file being edited follows.</td></tr>
+    <tr><td><code>bennu:file_closed</code></td><td>— fired when the last editor tab closes and nothing is being edited</td></tr>
     <tr><td colspan="2" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Host: which project is open (<code>arbor:</code>) — every product, not just git ──</td></tr>
     <tr><td><code>arbor:repo_open</code></td><td>tab_id, path, name — fired on open and again after a plugin reload</td></tr>
     <tr><td><code>arbor:repo_close</code></td><td>tab_id, path, name</td></tr>
@@ -278,6 +281,10 @@ end)`, '.lua')}</pre>
 <h4>Debug helpers</h4>
 <pre class="language-lua">{@html highlight(`arbor.service.list()        -- every "<plugin>.<method>" exported by any enabled plugin
 arbor.service.list_own()    -- only the services this plugin has exported`, '.lua')}</pre>
+<p>
+  <code>list()</code> is sorted by plugin, then method, and omits the exports of a
+  disabled plugin — <code>call</code> would refuse them anyway.
+</p>
 <Callout variant="info" title="Delivery semantics">
   Each call spawns a short-lived worker thread that acquires the plugin host mutex, runs the target handler, then invokes the caller's callback — in that order, under the same lock. The callback executes on the worker thread, so don't assume Svelte-side state is in any particular state; prefer to <code>arbor.events.emit</code> a follow-up event for UI reactions.
 </Callout>

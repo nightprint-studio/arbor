@@ -132,6 +132,17 @@
 ---@field view_id string   Id of the view (matches the `add_view` config)
 ---@field label   string|nil  Display label of the view
 
+---@class arbor.HookCtxFileOpened
+---Payload of the `bennu:file_opened` hook — the editor's active file changed.
+---
+---Fired on a tab switch, on opening a file, and on reopening one from history: any
+---way the file under the caret changes. A panel about the file being edited follows
+---this; without it a preview opened on one source keeps showing it while you edit
+---another. `bennu:file_closed` is the other end and carries no context.
+---@field path string      Absolute path of the file now being edited
+---@field name string      File name, without the directory
+---@field ext  string|nil  Lower-case extension without the dot, when the name has one
+
 ---@class arbor.HookCtxVault
 ---Payload of the `garrulus:vault_opened` hook (Garrulus note vaults).
 ---@field vault_id   string   Stable vault id — also the key of its index cache
@@ -630,9 +641,11 @@ function Meta.plugin_dir() end
 ---Synchronously check whether another plugin (by manifest name) is currently
 ---loaded AND enabled. Useful for sibling plugins that need to branch on
 ---another plugin's presence WITHOUT going through the async, fire-and-forget
----`arbor.service.call` mechanism (which races against startup and can silently
----no-op on host mutex contention). Returns false on unknown names, dormant
+---`arbor.service.call` mechanism. Returns false on unknown names, dormant
 ---entries, or any lookup failure.
+---
+---Safe to call from any hook, including `arbor:plugin_load` — which is where
+---a plugin usually wants it, to decide whether an optional companion is there.
 ---@param name string  manifest name of the plugin to check
 ---@return boolean
 function Meta.plugin_loaded(name) end
@@ -640,6 +653,290 @@ function Meta.plugin_loaded(name) end
 ---Return "windows" | "macos" | "linux".
 ---@return string
 function Meta.os() end
+
+
+-- =============================================================================
+-- arbor.credentials — a plugin's own secrets, and only its own
+-- =============================================================================
+--
+-- A plugin reaches EXACTLY the slots its plugin.toml declared:
+--
+--   [[credentials]]
+--   key   = "oauth"
+--   label = "Google account"
+--
+-- Arbor's own credentials — git provider tokens, refresh tokens, issue tracker
+-- keys — live in the same store and cannot be named from here. Not filtered:
+-- every name this API can build is `plugin/<your-name>/<key>`, so there is no
+-- way to spell one that is outside it.
+--
+-- Values are stored in the OS keychain, never in settings and never on disk in
+-- the plugin's own directory.
+
+---@class arbor.CredentialSlot
+---@field key    string   The slot key, as declared in plugin.toml.
+---@field filled boolean  Whether a value is currently stored in it.
+
+---@class arbor.Credentials
+local CredentialsApi = {}
+
+---Read one of your own credentials. Returns nil when the slot is empty.
+---Raises if `key` was not declared in your plugin.toml.
+---@param  key string
+---@return string|nil
+function CredentialsApi.get(key) end
+
+---Create or replace one of your own credentials.
+---Raises if `key` was not declared, or if `value` is empty — use `delete` to
+---clear a slot, so a stored-but-blank secret never has to be special-cased.
+---@param key   string
+---@param value string
+function CredentialsApi.set(key, value) end
+
+---Remove one of your own credentials. Clearing an already-empty slot succeeds.
+---@param key string
+function CredentialsApi.delete(key) end
+
+---List your declared slots and whether each currently holds a value.
+---Returns which slots are FILLED, never the values — a settings panel asks
+---"is this connected?", and that question does not need the secret to move.
+---@return arbor.CredentialSlot[]
+function CredentialsApi.list() end
+
+
+-- =============================================================================
+-- The `embed` form node — a page your package ships
+-- =============================================================================
+--
+-- Arbor gives the folder a URL, isolates the frame and relays messages. It never
+-- reads what crosses: whatever runs inside is yours.
+--
+-- The files are served on Arbor's own `plugin:` scheme, with real content types —
+-- including `application/wasm`, so a WebAssembly module streams instead of being
+-- buffered whole and compiled in one blocking go. Only paths inside a plugin
+-- root are served.
+--
+--   {
+--     type       = "embed",
+--     id         = "viewport",
+--     src        = arbor.fs.join(arbor.meta.plugin_dir(), "web", "index.html"),
+--     height     = 380,                         -- px, or "fill" (see below)
+--     min_height = 260,                         -- floor when filling; default 320
+--     send        = outbox,                     -- appending is what sends
+--     on_message  = "myplugin:message",         -- scoped slot, fired with what it posts
+--     same_origin = false,                      -- see below; default false
+--   }
+--
+-- `height = "fill"` takes whatever vertical space the surface has left, down to
+-- `min_height`. That is what a viewport in a PANEL wants — the user drags the
+-- split to make the picture bigger and a fixed number ignores them. A modal
+-- still wants a number: a modal is sized by its content, not the reverse.
+--
+-- `send` is an OUTBOX, not a value: the node remembers how many entries it has
+-- already delivered, so a patch that changes one slider does not replay the
+-- first message. Anything appended before the page is listening is queued.
+--
+-- Appending to your own copy is NOT what delivers — the node has to see the new
+-- array. Rebuilding the panel (`set_panel_content`) does that, but it remounts
+-- the frame and throws away whatever was running inside. To reach a frame that
+-- is already up, patch the node in place:
+--
+--   arbor.ui.form.patch{ { id = "viewport", set = { "send" }, value = outbox } }
+--
+-- Give the node a stable `id` for that. Handing the node a SHORTER list than it
+-- has already delivered means "this is the new full replay set" and it starts
+-- again from the beginning — which is how you stop an outbox growing without
+-- bound: when a message supersedes everything before it, make it the only entry.
+--
+-- Better still, stamp each message with a `seq` that only goes up. Delivery is
+-- then "everything above the highest seq already delivered", so the array can be
+-- REWRITTEN rather than appended to, and the outbox can be kept as the answer to
+-- "what would a frame mounting right now need" — the scene, plus the latest of
+-- each thing after it. A surface driven at pointer rate otherwise appends
+-- thousands of entries that exist only to be skipped, and re-serialises the
+-- whole list on every one:
+--
+--   seq = seq + 1
+--   message.seq = seq
+--   if message.type == "open" then replay = { open = message }
+--   else replay[message.type] = message end
+--   -- flatten `replay` sorted by seq → outbox, then patch
+--
+-- The frame runs `allow-scripts` WITHOUT `allow-same-origin`, so it has an
+-- opaque origin: no storage, no cookies, no reach into the app around it.
+-- postMessage is the only way through — which is also why the page inside has to
+-- be written to talk that way.
+--
+-- Set `same_origin = true` if your page FETCHES its own files — a wasm module, a
+-- texture, a data file. WebKit refuses custom-scheme sub-resource loads from an
+-- opaque origin, and the symptom is a 403 plus "Not allowed to download due to
+-- sandboxing", which reads like a permissions bug rather than the fetch failure
+-- it is. The frame then shares the `asset:` origin with other plugin files —
+-- never with Arbor itself, which is on a different scheme. A page that only
+-- draws and posts messages should leave it off.
+
+-- =============================================================================
+-- arbor.shader — what a WGSL material declares  (Bennu only)
+-- =============================================================================
+--
+--   local u = arbor.shader.uniform{ source = text }   -- or { path = "…" }
+--
+-- `nil` when the shader binds nothing in the material's group. Otherwise:
+--
+--   {
+--     group     = "#{MATERIAL_BIND_GROUP}",  -- verbatim; there is no number
+--     struct    = "SpiralHoverParams",       -- absent if there is no parameter block
+--     variable  = "params",
+--     binding   = 0,
+--     size      = 64,                        -- bytes, rounded up as a uniform buffer is
+--     fields    = { { name, type, offset, size, columns, rows, column_stride, hints? }, … },
+--     resources = { { binding, name, type, kind }, … },  -- textures, samplers, storage
+--   }
+--
+-- Offsets honour WGSL's alignment, which is the part worth not writing yourself: a `vec3`
+-- aligns to 16 and not 12, and a `mat3x3<f32>` is three columns each padded to 16 — 48
+-- bytes, not 36. Getting it wrong is quiet: every value lands in the next field along and
+-- the shader draws something plausible that is not what you asked for.
+--
+-- `resources` is there because a material is two things. A parameter block is values you
+-- write; a texture is something you bind. Both live in the same group, and a panel built
+-- from the parameters alone omits inputs the pipeline still refuses to run without.
+--
+-- Published by Bennu, not by the host: it is the product that already reads WGSL, for
+-- highlighting and for checking a material's Rust half against its shader half. Under any
+-- other product `arbor.shader` is nil.
+--
+--   local p = arbor.shader.preview{ source = text }   -- or { path = "…" }
+--
+-- The same shader RENUMBERED onto the fixed bind-group layout a previewer has, plus the map
+-- back. `nil` when there is no material group.
+--
+--   {
+--     source     = "…",      -- the rewritten copy; identical when nothing had to move
+--     rewritten  = true,     -- whether anything did
+--     owns_group = false,    -- it extends StandardMaterial rather than owning the group
+--     group      = "#{MATERIAL_BIND_GROUP}",
+--     layout     = { binding = 100, uniforms = 8, textures = 12, samplers = 3 },
+--     uniforms   = { { name, type, slot, from, to, hint? }, … },
+--     textures   = { { name, type, kind, index, from, to, key, image, aliased, hint? }, … },
+--     samplers   = { { name, type, slot, from, to }, … },
+--     rejected   = { { name, type, binding, reason }, … },
+--   }
+--
+-- Why it exists: `AsBindGroup::bind_group_layout_entries` is a STATIC method, so one material
+-- type has exactly one layout and a viewer cannot build one to match whatever indices a
+-- shader happens to use. Widening a layout answers "the binding is missing" and "the binding
+-- is too small"; it cannot answer "the binding is the wrong kind", because binding 101 is a
+-- buffer in one material and a sampler in the next. Moving the SHADER is the answer that
+-- works for all three.
+--
+-- Nothing is written back — the rewrite is a copy, and a preview replaces its shader asset on
+-- every keystroke anyway. Names, offsets and `// @preview` lines are untouched: only the
+-- numbers inside `@binding(…)` move.
+--
+-- `key` is WHAT a texture is — `diffuse`, `normal`, `pbr`, `ao`, `height` — guessed from the
+-- variable's name and overridable with `// @preview <key>` above the declaration. Textures
+-- with the same key SHARE a slot, deliberately: a preview has no assets, so `top_normal` and
+-- `side_normal` would be handed byte-identical generated pictures and giving each its own
+-- spends a scarce slot on nothing. An author who wants them apart writes two keys
+-- (`normal.top`, `normal.side`).
+--
+-- `image` is the picture that key opens on (`white` `black` `grey` `normal` `checker` `noise`
+-- `uv`); a panel may offer any of them instead. `index` is the position in the runtime's FLAT
+-- slot list — the 2D slots, then the array textures, then the cubes — which is the list a
+-- viewer fills by position; several textures sharing a key share an index. `aliased` means
+-- something else: the previewer ran OUT of slots for a new kind, so this one reads a picture
+-- meant for something different. That is worth showing; sharing by key is not.
+--
+-- `rejected` is what no renumbering reaches: a storage buffer, a storage texture, a
+-- comparison sampler, a depth texture, or anything past the slot counts. Each carries the
+-- sentence to say why, because a layout mismatch inside a viewport is a validation abort and
+-- a dead canvas rather than a message.
+
+-- =============================================================================
+-- arbor.ext — calling an installed extension
+-- =============================================================================
+--
+-- An extension is a compiled WebAssembly component that IMPLEMENTS an interface
+-- rather than consuming the Lua API — a shader translator, a mesh generator, a
+-- format backend. It answers; it does not decide. Which one to call, with what,
+-- and what to do with the result is YOUR plugin's, because your plugin is the
+-- one with a panel and a user in front of it.
+--
+-- Arbor knows nothing about what any of them do. It checks that you are allowed
+-- to call one, resolves the address, and passes JSON through in both directions.
+-- That is why adding a kind of extension is installing a package rather than a
+-- new version of Arbor.
+--
+--   local kinds = arbor.ext.call{
+--     interface = "mesh-source", id = "fulcrum", method = "catalogue",
+--   }
+--
+--   local mesh = arbor.ext.call{
+--     interface = "mesh-source", id = "fulcrum", method = "build",
+--     args = { "geode", '{"facets":9}' },
+--   }
+--
+-- REQUIRES `service_call = true` in [permissions]. Calling an extension is
+-- invoking another package's code, and an installed extension carries its own
+-- credentials and its own network allowlist — a plugin that could call one
+-- unasked could use them.
+--
+-- `args` is POSITIONAL. A component's type information carries parameter types
+-- but not their names, so there is nothing to key a table on. The shapes inside
+-- are still named: a record argument is an ordinary table keyed by its fields.
+--
+-- Field names cross in BOTH spellings, in BOTH directions. A WIT identifier is
+-- kebab-case, so a record field is `params-schema`; a table you pass IN may use
+-- either that or `params_schema`, and a record you get BACK carries both keys.
+-- Read whichever reads better in Lua — `entry.params_schema` needs no brackets.
+--
+-- Until recently only the hyphen came back, and that asymmetry cost a mesh
+-- package every one of its parameter controls with nothing anywhere reporting
+-- it: in Lua a missing key is not a failure, it is `nil`, and a schema that
+-- never arrived is indistinguishable from a shape that declares no knobs.
+
+---@class arbor.ExtFunc
+---@field name    string  The function name, as the interface declares it.
+---@field params  integer How many positional arguments it takes.
+---@field results integer 0 or 1 — a WIT function returns at most one value.
+
+---@class arbor.ExtInterface
+---@field name  string             Full export name, e.g. "arbor:extensions/mesh-source@1.0.0".
+---@field funcs arbor.ExtFunc[]
+
+---@class arbor.ExtEntry
+---@field interface string             What it provides, from the package's [[provides]].
+---@field version   integer
+---@field id        string
+---@field plugin    string             The package that provides it.
+---@field exports   arbor.ExtInterface[]  Read from the module itself, not from the manifest —
+---                                       a package that claimed an interface it does not
+---                                       export shows up here with nothing in it.
+
+---@class arbor.ExtCallSpec
+---@field interface string    Which contract, e.g. "mesh-source".
+---@field version   integer?  Defaults to 1.
+---@field id        string    Which member of it, e.g. "fulcrum".
+---@field method    string    The function to call.
+---@field args      any[]?    Positional arguments. Omit for none.
+---@field export    string?   Which exported interface to look in, when the module
+---                           exports more than one and the names are ambiguous.
+
+---@class arbor.Ext
+local ExtApi = {}
+
+---Every installed extension and what it actually exports.
+---@return arbor.ExtEntry[]
+function ExtApi.list() end
+
+---Call one function on one extension. Returns whatever it returns, as Lua.
+---Raises when the extension is not installed, the function does not exist, an
+---argument does not fit the shape it declares, or the extension itself fails —
+---in which case the error is the one IT reported.
+---@param  spec arbor.ExtCallSpec
+---@return any
+function ExtApi.call(spec) end
 
 
 -- =============================================================================
@@ -1417,6 +1714,7 @@ function Ui.clear_theme_tokens() end
 --   arbor:title-bar:right              arbor.ui.add_toolbar_action(target="title-bar:right")    ›
 --   arbor:commit-detail:action         arbor.ui.add_toolbar_action(target="commit-detail")  {label, icon?, action, tooltip?}     (ctx: oid)
 --   arbor:commit-form:action           arbor.ui.add_toolbar_action(target="commit-form")    {label, icon?, action, tooltip?}     (ctx: staged summary)
+--   arbor:editor-toolbar               arbor.ui.add_toolbar_action(target="editor")         {icon, action, label?, tooltip?, color?, path_pattern?}  (ctx: {path})
 --   arbor:activitybar                  arbor.ui.add_graph_combo / Separator{kind="combo"|"separator", …}
 --   arbor:command-palette              arbor.command.register            {title, description?, icon?, group?}
 --   arbor:keybinding                   arbor.keybinding.register         {key, ctrl?, shift?, alt?, action, description?}
@@ -1786,7 +2084,9 @@ function Service.list_own() end
 function Service.call(qualified, args, cb) end
 
 ---List every "<plugin>.<method>" currently exported across all enabled
----plugins — useful for debugging / discovery. Requires `service_call = true`.
+---plugins — useful for debugging / discovery. Sorted by plugin, then method.
+---A disabled plugin's exports are omitted: `arbor.service.call` would refuse
+---them. Requires `service_call = true`.
 ---@return string[]
 function Service.list() end
 
@@ -2063,6 +2363,7 @@ function Ci.runs(opts) end
 ---@field issues       arbor.Issues
 ---@field meta         arbor.Meta
 ---@field settings     arbor.Settings
+---@field credentials arbor.Credentials   Your own secrets, in the OS keychain
 ---@field terminal     arbor.Terminal
 ---@field job          arbor.Job
 ---@field timer        arbor.Timer
@@ -3547,6 +3848,8 @@ function CoreAssert.register() end
 ---@field card        boolean|nil       Dark card chrome
 ---@field count       integer|nil       Counter pill shown in card title
 ---@field add_action  string|nil        Plugin action fired when the + button is clicked
+---@field variant     string|nil        `"quiet"` (non-card): no border or fill, uppercase muted caption. For a panel that is a stack of several groups in a narrow column, where a box per group reads as competing panes instead of one list.
+---@field note        string|nil        Right-aligned muted caption beside the title — what the group is ABOUT (an item count, the struct being edited).
 
 ---Two-column label + controls row — use inside a card `section`. The label
 ---(and optional description) go on the left; `children` (inputs, buttons) on

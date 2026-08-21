@@ -33,4 +33,16 @@ pub trait MarketplaceHost: Send + Sync + 'static {
     /// would be shadowed by the dev copy at load time anyway, so the
     /// collision is surfaced as an error rather than silently lost.
     fn dev_plugin_dir(&self) -> PathBuf;
+
+    /// Forget every credential a plugin owned, as part of uninstalling it.
+    ///
+    /// Removing the install directory does not remove secrets — they live in the OS
+    /// keychain, and a plugin the user deleted has no business leaving a token behind that
+    /// nothing on disk explains any more. The host is asked rather than told how, because
+    /// the marketplace crate has no business knowing what a keychain is.
+    ///
+    /// Best-effort by design: a keychain that refuses is not a reason to leave the plugin
+    /// half-installed, so the implementation logs and the uninstall carries on. Default is a
+    /// no-op for hosts with no credential store at all.
+    fn forget_plugin_credentials(&self, _plugin: &str) {}
 }

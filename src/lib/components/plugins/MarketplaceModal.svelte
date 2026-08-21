@@ -1,4 +1,16 @@
 <script lang="ts">
+  import { currentProduct } from '$lib/utils/products';
+  import { surfaceStore } from '$lib/stores/surfaces.svelte';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+
+  /** Which product this modal is installing FOR.
+   *
+   *  A package installed from Corvus must not turn up in Bennu's palette — the download is
+   *  shared, the decision is not. `null` from a surface that hosts no plugins, which leaves
+   *  the package unscoped rather than scoping it to nowhere. */
+  const installTarget = () =>
+    currentProduct(getCurrentWindow().label, surfaceStore.inContainer, surfaceStore.active);
+
   /**
    * MarketplaceModal — browse plugins + themes from the `arbor-registry` repo
    * and from user-added custom git URLs.
@@ -298,7 +310,7 @@
   /** Install a single plugin via the existing IPC + patch the catalog row.
    *  Throws on failure so the caller's cascade can abort cleanly. */
   async function installOne(p: MarketplacePlugin): Promise<void> {
-    const updated = await ipcInstallPlugin(p.name);
+    const updated = await ipcInstallPlugin(p.name, installTarget());
     patchPlugin(updated);
   }
 
@@ -441,7 +453,7 @@
     } catch { /* non-fatal — we'll still update the target */ }
 
     try {
-      const updated = await ipcSetPluginEnabled(name, next);
+      const updated = await ipcSetPluginEnabled(name, next, installTarget());
       patchPlugin(updated);
       if (cascaded.length > 0) {
         const set = new Set(cascaded);

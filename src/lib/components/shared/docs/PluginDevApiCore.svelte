@@ -107,6 +107,88 @@ arbor.settings.project.set("profile", "prod")
 local p = arbor.settings.project.get("profile")
 local all_proj = arbor.settings.project.get_all()`, '.lua')}</pre>
 
+<h2>arbor.credentials — your own secrets</h2>
+<p>
+  Settings are for preferences; a token is not a preference. Anything secret goes here
+  instead, and lands in the OS keychain rather than in a JSON file inside your plugin's
+  directory.
+</p>
+<p>
+  A plugin reaches <strong>exactly the slots it declared</strong> in its manifest, and nothing
+  else. Declare them first:
+</p>
+<pre class="language-toml">{@html highlight(`[[credentials]]
+key   = "oauth"
+label = "Google account"     # shown in the consent dialog and the Plugin Manager`, '.toml')}</pre>
+<pre class="language-lua">{@html highlight(`arbor.credentials.set("oauth", token)
+local token = arbor.credentials.get("oauth")   -- nil when the slot is empty
+arbor.credentials.delete("oauth")
+
+-- Which slots hold a value — never the values themselves.
+for _, slot in ipairs(arbor.credentials.list()) do
+  print(slot.key, slot.filled)
+end`, '.lua')}</pre>
+<p>
+  Arbor's own credentials — git provider tokens, refresh tokens, issue-tracker keys — live in
+  the same keychain and <strong>cannot be named from here</strong>. Not because they are
+  filtered out: every name this API can build is <code>plugin/&lt;your-name&gt;/&lt;key&gt;</code>,
+  so a name outside your own space is not something you can spell. A denylist would have a gap
+  the day somebody adds a new kind of Arbor credential; this has nothing to forget.
+</p>
+<p>
+  Two things raise rather than failing quietly: a <code>key</code> your manifest did not
+  declare (the error tells you the exact <code>[[credentials]]</code> block to add), and
+  <code>set</code> with an empty value — use <code>delete</code> to clear a slot, so a
+  stored-but-blank secret never has to be special-cased by whatever reads it.
+</p>
+<p>
+  The slot list is a snapshot taken when the plugin loads, the same as
+  <code>[permissions]</code>: editing <code>plugin.toml</code> under a running plugin cannot
+  widen what it reaches.
+</p>
+
+<h2>arbor.ext — calling an installed extension</h2>
+<p>
+  An extension is a compiled WebAssembly component that <em>implements</em> an interface
+  instead of consuming the Lua API — a shader translator, a mesh generator, a format backend.
+  It answers; it does not decide. Which one to call, with what, and what to do with the result
+  is your plugin's, because your plugin is the one with a panel and a user in front of it.
+</p>
+<pre class="language-lua">{@html highlight(`local kinds = arbor.ext.call{
+  interface = "mesh-source", id = "fulcrum", method = "catalogue",
+}
+
+local mesh = arbor.ext.call{
+  interface = "mesh-source", id = "fulcrum", method = "build",
+  args = { "geode", '{"facets":9}' },
+}
+
+for _, e in ipairs(arbor.ext.list()) do
+  print(e.plugin, e.interface, #e.exports)
+end`, '.lua')}</pre>
+<p>
+  Arbor knows nothing about what any extension does. It checks that you may call one, resolves
+  the address against what is installed, and passes JSON through in both directions — which is
+  why adding a <em>kind</em> of extension is installing a package rather than shipping a new
+  version of Arbor.
+</p>
+<p>
+  <code>args</code> is <strong>positional</strong>. A component's type information carries
+  parameter types but not their names, so there is nothing to key a table on. The shapes inside
+  are still named: a record argument is an ordinary table keyed by its fields.
+</p>
+<p>
+  Requires <code>service_call = true</code> in <code>[permissions]</code>. Calling an extension
+  is invoking another package's code, and an installed extension carries <em>its own</em>
+  credentials and network allowlist — a plugin that could call one unasked could use them.
+</p>
+<p>
+  Two shapes cannot cross this boundary and say so rather than misbehaving: a
+  <strong>resource handle</strong>, which means nothing outside the component that owns it, and
+  an <strong>option inside an option</strong>, because <code>nil</code> would have to mean both
+  <code>none</code> and <code>some(none)</code>.
+</p>
+
 <h2>arbor.json — encode / decode</h2>
 <pre class="language-lua">{@html highlight(`local s, err = arbor.json.encode({ key = "val", n = 42 })
 -- s = '{"key":"val","n":42}'   err = nil on success
@@ -338,8 +420,9 @@ arbor.meta.plugin_loaded("other")     -- true / false (live + enabled check)`, '
   <code>plugin_loaded(name)</code> is a synchronous check against the host's
   plugin registry — use it to branch on whether a sibling plugin is active
   right now without going through the async, fire-and-forget
-  <code>arbor.service.call</code> path (which races against startup and can
-  silently no-op on host mutex contention).
+  <code>arbor.service.call</code> path. It is safe from any hook, including
+  <code>arbor:plugin_load</code>, which is usually where you want it: a plugin
+  that needs an optional companion decides that as it comes up.
 </p>
 <p>Use <code>arbor.meta.os()</code> to build platform-correct commands and paths:</p>
 <pre class="language-lua">{@html highlight(`local is_win = arbor.meta.os() == "windows"

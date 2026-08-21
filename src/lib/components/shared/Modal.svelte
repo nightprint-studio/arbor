@@ -59,6 +59,12 @@
     topGap          = false,
     zIndex,
     ariaLabel,
+    /** Stamped on the modal root as `data-scope-id`.
+     *
+     *  A hook for CSS that must apply to ONE modal and stop at its edge — the plugin form's
+     *  author-supplied stylesheet is the case it exists for. Optional and inert when unset,
+     *  so no existing caller changes. */
+    scopeId,
     minimizable     = false,
     parkId,
     parkTitle,
@@ -113,6 +119,9 @@
      *  so they're never trapped behind their caller. */
     zIndex?:          string;
     ariaLabel?:       string;
+    /** Stamped on the modal root as `data-scope-id` — a hook for CSS that must apply to
+     *  ONE modal and stop at its edge. Inert when unset. */
+    scopeId?:         string;
     /** When true, the header shows a minimize button that parks the modal
      *  into the status-bar dock. Requires `onRestoreFromScratch` —
      *  minimize closes the modal AND records a re-open action; the chip
@@ -189,7 +198,7 @@
   }
 
   function handleBackdrop(e: MouseEvent) {
-    const dismiss = mouseDownOnBackdrop && e.target === e.currentTarget && closeOnBackdrop;
+    const dismiss = !closing && mouseDownOnBackdrop && e.target === e.currentTarget && closeOnBackdrop;
     mouseDownOnBackdrop = false;
     if (dismiss) onClose();
   }
@@ -294,7 +303,24 @@
     }
   }
 
+  // ── Closing window ──────────────────────────────────────────────────────
+  //
+  // The panel and backdrop animate out, so for `dPanel` ms after the consumer
+  // decides to close, a fully clickable modal is still on screen — while the
+  // state that drives it is already gone. A parent that renders
+  // `{#if data}<Modal … />{/if}` updates the props BEFORE it tears the branch
+  // down, so during the outro every handler inside reads a null `data`. That
+  // is not a hypothetical: it is where "null is not an object" comes from when
+  // someone clicks × twice because the first click looked ignored.
+  //
+  // So: once the outro starts, the modal stops accepting input. Pointer events
+  // are dropped in CSS (which covers the panel too, being a child) and the
+  // Escape/Tab handler bails, since a window listener isn't affected by
+  // `pointer-events`.
+  let closing = $state(false);
+
   function handleKeydown(e: KeyboardEvent) {
+    if (closing) return;
     if (e.key === 'Escape') {
       // Only the topmost modal reacts to ESC; everything below it must
       // ignore the keystroke so a nested confirm/picker doesn't close its
@@ -312,6 +338,7 @@
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="backdrop"
+     class:closing
      role="dialog"
      aria-modal="true"
      aria-label={ariaLabel}
@@ -320,8 +347,9 @@
      onmousedown={handleBackdropMouseDown}
      onclick={handleBackdrop}
      transition:fade={{ duration: animStore.dBase }}
+     onoutrostart={() => { closing = true; }}
 >
-  <div class="modal" data-size={size} style={sizeStyle}
+  <div class="modal" data-size={size} data-scope-id={scopeId} style={sizeStyle}
        role="presentation"
        tabindex="-1"
        bind:this={modalEl}
@@ -359,6 +387,10 @@
 </div>
 
 <style>
+  /* Animating out: on screen, but no longer a control surface. See the
+     `closing` note in the script. */
+  .backdrop.closing { pointer-events: none; }
+
   .backdrop {
     position: fixed;
     inset: 0;

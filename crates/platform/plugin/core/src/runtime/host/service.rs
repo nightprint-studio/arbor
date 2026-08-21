@@ -105,20 +105,4 @@ impl PluginHost {
             );
         }
     }
-
-    /// Return "<plugin>.<method>" for every service exported by any enabled
-    /// plugin. Used by `arbor.service.list()` for debugging / discovery.
-    pub fn list_all_services(&self) -> Vec<String> {
-        let mut out = Vec::new();
-        for plugin in &self.plugins {
-            if !plugin.is_enabled() { continue; }
-            let reg: mlua::Result<mlua::Table> = plugin.lua.globals().get("__arbor_services__");
-            if let Ok(reg) = reg {
-                for (k, _) in reg.pairs::<String, mlua::Function>().flatten() {
-                    out.push(format!("{}.{}", plugin.manifest.name, k));
-                }
-            }
-        }
-        out
-    }
 }

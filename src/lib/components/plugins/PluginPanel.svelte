@@ -4,6 +4,7 @@
   import { cubicOut } from 'svelte/easing';
   import { animStore } from '$lib/stores/animations.svelte';
   import { RefreshCw, ChevronDown, ChevronRight, Package, Power, Globe, HardDrive, GitBranch, Zap, TerminalSquare, Settings, Info, Trash, AlertTriangle, Network, FolderOpen, Wand2, Store } from 'lucide-svelte';
+  import PluginExtensionsSection from './PluginExtensionsSection.svelte';
   import PluginDepGraphModal           from './manager/PluginDepGraphModal.svelte';
   import PluginDisableConfirmModal     from './manager/PluginDisableConfirmModal.svelte';
   import PluginEnableConfirmModal      from './manager/PluginEnableConfirmModal.svelte';
@@ -142,6 +143,11 @@
     }
   }
 
+  /** Bumped after a reload so the extensions section refetches with everything else.
+   *  A counter rather than a store subscription: the section has one input and re-reading it
+   *  is the whole of what "refresh" means there. */
+  let extensionsKey = $state(0);
+
   async function reload() {
     if (reloading) return;
     reloading = true;
@@ -158,6 +164,7 @@
       uiStore.showToast(`${err}`, 'error');
     } finally {
       reloading = false;
+      extensionsKey += 1;
     }
   }
 
@@ -694,6 +701,11 @@
         {/each}
       {/if}
     </div>
+
+    <!-- Its own section, not rows in the list above: an extension implements an interface
+         Arbor calls into, so it has no hooks, no settings and no on/off of its own. Hidden
+         entirely when there are none, which is almost every install. -->
+    <PluginExtensionsSection refreshKey={extensionsKey} />
 
   {#snippet footer()}
     <div class="panel-footer">

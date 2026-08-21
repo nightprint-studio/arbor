@@ -14,7 +14,7 @@
   pane, so the row stays scannable.
 -->
 <script lang="ts">
-  import { CheckCircle2, PowerOff, RefreshCw, FlaskConical } from 'lucide-svelte';
+  import { CheckCircle2, PowerOff, RefreshCw, FlaskConical, ShieldCheck } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { sourceIcon, sourceBadgeTooltip } from '$lib/marketplace/ui-helpers';
   import type { MarketplaceSource } from '$lib/types/marketplace';
@@ -32,6 +32,12 @@
     installedVersion?: string;
     /** Plugin-only. */
     experimental?:    boolean;
+    /** Plugin-only. Number of release assets the registry entry pins by digest.
+     *
+     *  Worth its own glyph because it is the one thing about a listing a reader cannot check
+     *  for themselves: a `.wasm` is not reviewable, so what a reviewer approved is a hash, and
+     *  the glyph says that a hash is what will be enforced. */
+    verifiedArtifacts?: number;
   }
 
   let {
@@ -41,6 +47,7 @@
     updateAvailable,
     installedVersion,
     experimental = false,
+    verifiedArtifacts = 0,
   }: Props = $props();
 
   const SrcIcon = $derived(sourceIcon(source));
@@ -73,6 +80,13 @@
     </span>
   {/if}
 
+  {#if verifiedArtifacts > 0}
+    <span class="rowicon rowicon-verified"
+          use:tooltip={`Ships ${verifiedArtifacts} compiled file${verifiedArtifacts === 1 ? '' : 's'} — installed from a release and refused unless every one matches the digest the registry approved`}>
+      <ShieldCheck size={12} />
+    </span>
+  {/if}
+
   {#if experimental}
     <span class="rowicon rowicon-experimental"
           use:tooltip={'Flagged experimental in its manifest'}>
@@ -98,6 +112,7 @@
   .rowicon-installed    { color: var(--success);     }
   .rowicon-off          { color: var(--text-muted);  }
   .rowicon-update       { color: var(--color-stash); }
+  .rowicon-verified { color: var(--success); }
   .rowicon-experimental { color: var(--warning);     }
   .rowicon-official     { color: var(--success);     }
   .rowicon-community    { color: var(--accent);      }

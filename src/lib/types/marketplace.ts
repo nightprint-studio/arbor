@@ -9,7 +9,9 @@
 // from the raw URL and shows it in the UI.  No duplicated metadata in the
 // registry → authors update one file (their own plugin.toml).
 
-import type { PluginPermissions, PluginDependency } from './plugin';
+import type {
+  PluginPermissions, PluginDependency, PluginCredentialSlot, PluginProvides,
+} from './plugin';
 
 // ─── Tab + source classification ──────────────────────────────────────────────
 
@@ -72,6 +74,19 @@ export interface RegistryEntry {
    * `pinned_sha` is absent on a community entry.
    */
   external?: boolean;
+  /**
+   * `file name → sha256` for the release assets this entry approves.
+   *
+   * Empty (or absent) for an ordinary Lua plugin, which installs from a source archive
+   * whose integrity is `pinned_sha` — git is content-addressed, so pinning the commit pins
+   * the source. A package carrying a build artifact has no such luxury: a `.wasm` is not in
+   * the tree the commit names, so the registry records the digest of the exact file a
+   * reviewer approved and the installer refuses anything else.
+   *
+   * Recorded in the registry rather than in the package's own manifest: a digest the author
+   * supplies verifies only that the author is consistent with themselves.
+   */
+  artifacts?: Record<string, string>;
 }
 
 // ─── Resolved plugin metadata ─────────────────────────────────────────────────
@@ -144,6 +159,18 @@ export interface MarketplacePlugin {
    * whether to also install required deps that aren't on disk yet.
    */
   dependencies?: PluginDependency[];
+  /**
+   * Credential slots the package declares. Rendered in the install-confirm dialog, so the
+   * consent can say WHAT will be stored — "this plugin uses credentials" is a formality,
+   * "this plugin stores your Google account token" is a question.
+   */
+  credentials?: PluginCredentialSlot[];
+  /**
+   * Host interfaces the package implements. Non-empty means it carries a compiled module —
+   * the one thing about a listing a user cannot discover by reading its source, and the
+   * reason its install verifies a digest.
+   */
+  provides?: PluginProvides[];
 }
 
 // ─── Resolved theme metadata ──────────────────────────────────────────────────

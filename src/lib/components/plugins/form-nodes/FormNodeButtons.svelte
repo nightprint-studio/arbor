@@ -13,6 +13,7 @@
 
   import type { FormNode } from '$lib/types/plugin';
   import type { FormNodeCtx } from './ctx';
+  import { toArr } from './helpers';
 
   interface Props {
     node: FormNode;
@@ -73,7 +74,7 @@
 {:else if node.type === 'suggest_grid'}
   {@const n = node as any}
   <div class="pf-suggest-grid {(node as any).class ?? ''}" style={(node as any).style}>
-    {#each n.items ?? [] as item}
+    {#each toArr<any>(n.items) as item}
       <div class="pf-suggest-item">
         <div class="pf-suggest-name">{item.name}</div>
         {#if item.cmd}<div class="pf-suggest-cmd">{item.cmd}</div>{/if}

@@ -129,6 +129,12 @@ export const wgslMode: StreamParser<WgslState> = {
     }
     if (stream.eatSpace()) return null;
 
+    // A `// @preview` line is a comment to the compiler and a declaration to the preview: it
+    // is where a `vec4` packing four unrelated quantities says which lane is which, since WGSL
+    // gives the four of them one name and `naga` rejects any attribute that would carry more.
+    // Marked apart so it reads as something that DOES something — a comment that is load-
+    // bearing and looks like prose is one people delete while tidying.
+    if (stream.match(/^\/\/\s*@preview\b/)) { stream.skipToEnd(); return 'preview'; }
     if (stream.match(/^\/\//)) { stream.skipToEnd(); return 'comment'; }
     if (stream.match(/^\/\*/)) { state.comment = 1; return 'comment'; }
 
@@ -198,6 +204,9 @@ export const wgslMode: StreamParser<WgslState> = {
   tokenTable: {
     callee: t.function(t.variableName),
     punct: t.punctuation,
+    // Against `meta`, which is what a theme already colours for annotations and pragmas —
+    // visible as machine-read rather than shouting like a keyword.
+    preview: t.meta,
   },
 
   languageData: {

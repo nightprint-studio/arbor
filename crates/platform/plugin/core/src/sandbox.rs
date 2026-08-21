@@ -26,7 +26,7 @@ use mlua::{Lua, LuaOptions, StdLib};
 use crate::contribution::ContributionRegistry;
 use crate::error::{PluginCoreError, Result};
 use crate::runtime::host::PluginHost;
-use crate::runtime::loaded::{TimerCancels, TimerCounter};
+use crate::runtime::loaded::{PluginActivity, ServiceIndex, TimerCancels, TimerCounter};
 use crate::tree::{IconRegistry, TreeStore};
 
 // Embedded built-in Lua utility modules. Injected as require("arbor.*") preloads.
@@ -65,6 +65,37 @@ const CORE_ASSERT_LUA:  &str = include_str!("lua_builtins/core/assert.lua");
 // `arbor-plugin-core::sandbox::create_sandbox` only sees the trait.
 // ---------------------------------------------------------------------------
 
+/// The long-lived registries a sandbox shares with the runtime that owns it.
+///
+/// All six are handles — `Arc` inside — so this whole struct is cheap to clone and cloning
+/// it shares the registry rather than copying it. They travel together because they have
+/// the same lifetime and the same reason to exist: a plugin's Lua closures write into them
+/// and the host reads them back out, long after `create_sandbox` has returned.
+///
+/// Grouped rather than passed flat because six of [`create_sandbox`]'s thirteen parameters
+/// were these, all of the same shape, in an order nothing but the compiler was checking —
+/// and two of them (`timer_cancels`, `timer_counter`) are a pair whose swap type-checks.
+#[derive(Clone)]
+pub struct SandboxRegistries {
+    /// Cancellation handles for `arbor.timer.after` / `.every`, keyed by timer id.
+    pub timer_cancels: TimerCancels,
+    /// Monotonic source of those ids.
+    pub timer_counter: TimerCounter,
+    /// Schedules declared through `arbor.scheduler`.
+    pub schedules: ScheduleRegistry,
+    /// What the plugin contributes to host surfaces (panels, menus, actions).
+    pub contributions: ContributionRegistry,
+    /// Tree models built through `arbor.ui.tree`.
+    pub tree_store: TreeStore,
+    /// Icons the plugin registered, resolvable by name from any of its nodes.
+    pub icon_registry: IconRegistry,
+    /// Which sibling plugins are live, readable without the host mutex — see
+    /// [`PluginActivity`] for why that distinction is load-bearing.
+    pub activity: PluginActivity,
+    /// Which cross-plugin services exist, on the same terms.
+    pub services: ServiceIndex,
+}
+
 /// Bag of parameters the [`LuaApiInstaller`] needs to wire the `arbor.*`
 /// namespace into a fresh sandbox. Packaged as a struct so adding new
 /// fields doesn't churn every call site.
@@ -86,14 +117,14 @@ pub struct ApiInstallParams {
     /// through a `PluginHost` (e.g. the standalone `load_plugin` helper
     /// called from a unit test).
     pub host_weak:          Option<Weak<Mutex<PluginHost>>>,
-    pub timer_cancels:      TimerCancels,
-    pub timer_counter:      TimerCounter,
-    pub schedules:          ScheduleRegistry,
+    /// The shared registries, intact from the caller — see [`SandboxRegistries`].
+    pub registries:         SandboxRegistries,
     pub scheduler_enabled:  bool,
     pub permissions:        Permissions,
-    pub contributions:      ContributionRegistry,
-    pub tree_store:         TreeStore,
-    pub icon_registry:      IconRegistry,
+    /// Keys of the `[[credentials]]` slots the manifest declared. A snapshot, like the
+    /// permissions beside it: the set a plugin may reach is fixed when it loads, so an edit
+    /// to `plugin.toml` cannot widen a running plugin's reach.
+    pub credential_slots:   Vec<String>,
     pub enabled:            Arc<AtomicBool>,
 }
 
@@ -115,7 +146,6 @@ impl LuaApiInstaller for NoopApiInstaller {
 }
 
 /// Create a sandboxed Lua runtime for a plugin.
-#[allow(clippy::too_many_arguments)]
 pub fn create_sandbox(
     manifest:      &Manifest,
     // Product id of the loading host — see `ApiInstallParams::product`.
@@ -123,12 +153,7 @@ pub fn create_sandbox(
     app_ctx:       Option<Arc<dyn AppCtx>>,
     host_weak:     Option<Weak<Mutex<PluginHost>>>,
     api_installer: &dyn LuaApiInstaller,
-    timer_cancels: TimerCancels,
-    timer_counter: TimerCounter,
-    schedules:     ScheduleRegistry,
-    contributions: ContributionRegistry,
-    tree_store:    TreeStore,
-    icon_registry: IconRegistry,
+    registries:    SandboxRegistries,
     // Live enable flag — captured by long-lived closures (e.g. arbor.log.*)
     // so they can short-circuit when the plugin is disabled mid-call.
     enabled:       Arc<AtomicBool>,
@@ -154,15 +179,11 @@ pub fn create_sandbox(
         product,
         app_ctx,
         host_weak,
-        timer_cancels,
-        timer_counter,
-        schedules,
+        registries,
         scheduler_enabled:  manifest.scheduler.enabled,
         // Permissions snapshot — captured at load time, never re-read from Lua.
         permissions:        manifest.permissions.clone(),
-        contributions,
-        tree_store,
-        icon_registry,
+        credential_slots:   manifest.credentials.iter().map(|c| c.key.clone()).collect(),
         enabled,
     })?;
 
@@ -391,3 +412,79 @@ package.preload["arbor.service"]    = function() return a.service end
 package.preload["arbor.workspace"]  = function() return a.workspace end
 package.preload["arbor.hooks"]      = function() return a.hooks end
 "#;
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::BUILDERS_LUA;
+    use mlua::Lua;
+
+    /// Exec the builder chunk against a hand-built `arbor` global.
+    ///
+    /// The chunk is the last thing `create_sandbox` runs, and it runs for *every* plugin in
+    /// *every* product — so what it assumes about the namespace table is a cross-product
+    /// invariant. Driving it directly keeps that invariant testable without standing up a
+    /// manifest, an `AppCtx` and eight registries.
+    fn exec_builders(setup: &str) -> mlua::Result<()> {
+        let lua = Lua::new();
+        lua.load(setup).exec()?;
+        lua.load(BUILDERS_LUA).set_name("arbor:builders").exec()
+    }
+
+    /// The shape a shell-hosted product has: `arbor.pipeline` is a callable table.
+    const WITH_PIPELINE: &str = r#"
+        arbor = {
+          pipeline = setmetatable({ define = function(cfg) return cfg end }, {}),
+          ui = { form = setmetatable({}, { __call = function(_, cfg) return cfg end }) },
+        }
+    "#;
+
+    /// The shape a host-pure backend has: no `pipeline` at all — the shell publishes it.
+    const WITHOUT_PIPELINE: &str = r#"
+        arbor = {
+          ui = { form = setmetatable({}, { __call = function(_, cfg) return cfg end }) },
+        }
+    "#;
+
+    #[test]
+    fn the_pipeline_builder_is_installed_when_the_namespace_exists() {
+        let lua = Lua::new();
+        lua.load(WITH_PIPELINE).exec().unwrap();
+        lua.load(BUILDERS_LUA).set_name("arbor:builders").exec().unwrap();
+
+        // `arbor.pipeline("id")` now returns a builder rather than erroring on a
+        // non-callable table.
+        let id: String = lua
+            .load(r#"return arbor.pipeline("deploy"):name("Deploy")._cfg.id"#)
+            .eval()
+            .unwrap();
+        assert_eq!(id, "deploy");
+    }
+
+    #[test]
+    fn a_host_without_a_pipeline_namespace_still_loads_the_chunk() {
+        // Regression: `setmetatable(arbor.pipeline, …)` on a nil raised "bad argument #1 to
+        // 'setmetatable'", which aborted sandbox setup — so under bennu/sitta/tyto/garrulus
+        // *every* plugin failed to load, all with the same error about a namespace none of
+        // them had asked for.
+        exec_builders(WITHOUT_PIPELINE).expect("builders must load where the shell does not");
+    }
+
+    #[test]
+    fn the_form_builder_survives_the_absence_of_a_pipeline() {
+        // The two halves of the chunk are independent: losing the pipeline sugar must not
+        // cost the form sugar, which every product does have.
+        let lua = Lua::new();
+        lua.load(WITHOUT_PIPELINE).exec().unwrap();
+        lua.load(BUILDERS_LUA).set_name("arbor:builders").exec().unwrap();
+
+        let title: String = lua
+            .load(r#"return arbor.ui.form():title("Hi")._cfg.title"#)
+            .eval()
+            .unwrap();
+        assert_eq!(title, "Hi");
+    }
+}

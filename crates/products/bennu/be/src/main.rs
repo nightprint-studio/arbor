@@ -54,7 +54,13 @@ mod cargo_intel;
 // WGSL, for a project with no language server installed: naga for the diagnostics (the
 // compiler wgpu really runs), a tolerant scanner for everything the editor wants while the
 // file is still being typed.
+mod shader_render;
+mod shader_uniform;
 mod wgsl_intel;
+// The modules a shader can `#import` — the project's own, plus the `bevy_*` crate sources
+// the project resolved. On this side because finding them is a question about a machine
+// (which version cargo unpacked, and where), which `bennu-wgsl` will not ask.
+mod wgsl_library;
 // The crates.io index — the only part of the Cargo tooling that reaches the network. Its own module
 // because of that, not because of its size: the switch, the cache and the TTL all live with it.
 mod crates_io;
@@ -281,6 +287,8 @@ mod frameworks;
 // with the stylesheet and the other languages beside it. Answers off the LIVE buffer, so it is right
 // on a line that is being typed — which the indexed catalogue behind `frameworks` cannot be.
 mod fulcrum_i18n;
+mod host_handle;
+mod plugin_rpc;
 // Tomcat JSP hot-swap (per-repo `[bennu.tomcat]`): `bennu_get/set_tomcat_config` (the link) +
 // `bennu_detect_tomcat` (validate a Tomcat root + resolve the deployed context) + `bennu_hotswap_jsp`
 // (copy one/all JSPs into the exploded webapp so Jasper recompiles them — no redeploy/restart).
@@ -321,10 +329,23 @@ fn main() {
         bennu_core::config::load().jdk_paths.iter().map(std::path::PathBuf::from).collect(),
     );
 
-    // The framed-stdio plumbing (writer / sink / reverse channel / runtime), in one
-    // call. No `plugin_host` / `api_installer` — bennu-be loads no plugins in Phase 0
-    // (like merula-be).
-    let app = arbor_be::App::new(arbor_be::BackendIo::new());
+    // The framed-stdio plumbing (writer / sink / reverse channel / runtime), plus the
+    // host-pure plugin host: `plugin_host` builds the `PluginHost` filtered to the `bennu`
+    // product, its headless `AppCtx` and the hook dispatcher; `api_installer` publishes the
+    // `arbor.*` namespaces that belong to no single product.
+    //
+    // Host-pure and not a bennu namespace set: there is no `bennu:` hook catalog yet, so a
+    // plugin here gets `arbor:plugin_load`, the filesystem, settings, commands, the form DSL
+    // and `arbor.ext` — which is what a plugin that draws a viewport over a shader needs. A
+    // `bennu_plugin_ns` joins this line the day bennu has events of its own to fire.
+    let mut app = arbor_be::App::new(arbor_be::BackendIo::new());
+    app.plugin_host("bennu", arbor_plugin_core::prelude::host_pure_hook_dispatcher);
+    // NOT host-pure any more: bennu publishes `arbor.shader`, so a plugin can ask the editor
+    // what a WGSL material declares instead of parsing it again. See `plugin_ns`.
+    app.api_installer(bennu_plugin::prelude::bennu_api_installer());
+    // Published so the plugin RPC adapter can reach the same host the App just built. Without
+    // it the Plugin Manager opened from Bennu answers `unknown command: list_plugin_info`.
+    host_handle::install(app.plugin_host_handle());
 
     // The state every handler gets: event egress + the reverse channel (for host
     // round-trips like reveal-in-explorer). `Arc`-shared across the dispatcher + any
@@ -333,11 +354,17 @@ fn main() {
 
     // The method routing, declared as the inventory of `#[handler]`s this binary
     // links. `inventory("")` covers them all — bennu-be links only its own handlers.
-    let dispatcher =
-        arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle()).inventory("");
+    let dispatcher = arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle())
+        .inventory("")
+        // The Plugin Manager's own surface — enable/disable, reload, the info list, the
+        // dependency graph. Generic in `arbor-plugin-rpc`, monomorphised onto bennu's state.
+        .group(plugin_rpc::methods(), {
+            let state = Arc::clone(&state);
+            move || plugin_rpc::BennuRpcCtx::new(Arc::clone(&state))
+        });
 
-    // Serve over framed stdio until the shell disconnects. No plugin host means the
-    // `App`'s default post-`Hello` hook is a clean no-op (nothing to reload).
+    // Serve over framed stdio until the shell disconnects. The `App`'s post-`Hello` hook
+    // boot-loads the plugins that target bennu (or target nothing, meaning any product).
     let outcome = app.run(dispatcher);
 
     // Stop the language servers before this process goes away.

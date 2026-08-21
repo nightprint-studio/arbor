@@ -9,6 +9,118 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **An extension's record fields reach Lua under the name a plugin would write.** A WIT identifier is kebab-case, so a record came back with `params-schema` while every plugin read `params_schema` — and in Lua a missing key is `nil`, not an error. The way IN had accepted both spellings all along; the way out did not, which cost every mesh package all of its parameter controls with nothing anywhere reporting it. Both keys now cross in both directions.
+
+- **A mesh parameter schema that will not parse says so.** It was decoded inside a `pcall` that returned an empty field list, so a broken schema and a shape with no knobs produced the identical empty panel.
+
+- **`bennu_shader_render` renders a material that extends `StandardMaterial`.** It failed with `wgpu error: Out of Memory`, which is what `create_pipeline_layout` reports when a pipeline exceeds a **sampler** limit — Metal allows sixteen per fragment stage, and the preview material's five plus `StandardMaterial`'s six plus the engine's own went over. A sampler is not tied to a texture, so three now serve every texture in the group, which is what `tile.wgsl` does on purpose with ten atlases.
+
+- **Two textures of the same kind get two bindings.** They share a picture — a preview has no assets, so two normal maps are the same flat normal — but sharing the *binding* is a pipeline wgpu refuses, and it refuses it with a message about shader requirements that names neither texture.
+
+- **An annotated colour stays one control.** Any `// @preview` line on a vector meant "name the lanes", so declaring a colour turned it into four sliders — the annotation made it worse than no annotation. A hex default is a statement about the whole vector, not a lane name.
+
+- **`// @preview` can declare a colour and where it starts** — `// @preview hot = #ff6b14`. Whether a `vec4` is a colour was guessed from the variable's name, which works for `sand_color` and fails for `hot`, `deep` and `foam`; a material whose colours are named that way opened entirely black. Even a correct guess opened on a palette entry rather than on the colour the author chose.
+
+- **A plugin's file picker opens.** `arbor.ui.pick_file` serialises its options and emits them, so the `on_confirm` callback the shader preview passed could not cross the boundary — the call raised and no picker ever appeared. It uses the documented `action` event now.
+
+- **Opening a shader no longer rebuilds the preview panel when nothing about it changed.** The rebuild re-keys the renderer and remounts the viewport's iframe, which tears the canvas out from under a running Bevy app and surfaces as `RefCell already borrowed` from winit.
+
+- **A previewed shader can bring its own vertex stage.** A `@vertex fn vertex(…)` beside the fragment one is noticed and the material built to match — which is a different material type, because `Material::vertex_shader` is static and a type either always overrides the stage or never does. The plane is tessellated now for the same reason: four corners have nothing to displace.
+
+- **The shader preview ships five example materials.** Magma, waterfall, kaleidoscope, nebula and a Gerstner wave surface that displaces the mesh, openable from the Command Palette. Each is one technique carried far enough to look like something — domain warping, anisotropic noise, angular folding, ridged noise — with every lane annotated, so opening one fills the panel with named controls.
+
+- **The shader preview can show a material on the game's own geometry.** A new `fulcrum-preview-meshes` package puts Fulcrum's hex tiles and Geode's crystal habits in the mesh picker beside sphere, cube, plane and torus. It is not a copy of the geometry — it calls the same functions the game does, through a pure half `fulcrum-mesh` grew for the purpose.
+
+- **The mesh picker lists every installed mesh package, not one.** It asked a hard-coded `primitives`, so a second package could be installed, loaded and exporting correctly and never have its name appear — which is the promise the interface makes in its own documentation. Shapes are addressed as `<package>/<shape>` now, so two packages offering a `cube` do not collide.
+
+- **`bennu_shader_render` produced a black image.** The camera was never pointed at the render target: `Camera` lists `RenderTarget` among its required components, so the filter looking for a camera *without* one matched nothing, and the capture saved an untouched texture. Nothing errored, which is why it was silent.
+
+- **A `// @preview` line no longer leaks onto the declaration below it.** A shader writing each binding on one line — `@group(3) @binding(100) var top_albedo: …;`, which is how a texture-heavy material is usually written — had every texture inherit the annotation written for the first.
+
+- **The shader preview's clock stops.** Pause, step and scrub, so *change one number and look at the difference* works on a material that animates — until now the before and the after had everything else moving between them. Scrubbing implies pausing: a running virtual clock is recomputed every frame and would overwrite the instant before anything is drawn.
+
+- **The shader preview is reachable from the keyboard.** Every action has a Command Palette entry — preview, reload, pause, random parameters, reset camera, save look — and two have keys: `Alt+Shift+P` previews the shader you are editing without asking which file, `Alt+Shift+R` reloads it.
+
+- **A saved look holds the light rig and the mesh, not just the numbers.** Tuning a material is in large part tuning the light on it, and a term that reads right on a sphere can be wrong in a saddle; a look that restored only the parameters put them back under a different lamp on a different shape. Looks saved before this still load.
+
+- **Copy as Rust.** The tuned values as a struct literal for the material's `Default` impl, built from the packed uniform buffer rather than from the controls — so a `vec4` split across four annotated sliders, a padding lane and a matrix all come back in the shape the Rust side declares.
+
+- **Materials with textures can be previewed and rendered.** A shader binding textures and samplers used to be refused — a viewer's bind-group layout is fixed when the viewer is compiled, so it cannot grow a sampler because your shader wants one. The shader is renumbered onto slots that exist instead, in a copy, and the panel gives one row per **kind** of texture to choose what fills it: a chequer, white, grey, a flat normal, noise, or the UV coordinates. What no renumbering reaches — storage buffers, storage textures, comparison samplers, depth textures — is named with the reason instead of killing the viewport.
+
+- **A texture's kind is a key, and textures of one kind share a slot.** `// @preview normal` above a declaration says what a texture is; otherwise it is read from the variable's name. A preview has no assets, so `top_normal` and `side_normal` would be handed identical generated pictures — sharing the slot costs nothing and is what lets a material sampling ten textures fit a viewport with four. Write `normal.top` and `normal.side` to keep them apart. `bennu_shader_render` takes the same keys, so `{"normal": "uv"}` reaches every face at once.
+
+- **Preview meshes carry tangents and a second UV channel.** A material branching on `VERTEX_TANGENTS` or `VERTEX_UVS_B` was silently taking its fallback path, which looks correct and is a different material. The second channel is derived from the shape and reads as depth — 1 in the middle, 0 at the rim.
+
+- **A lit shader preview has a blend mode.** A material extending `StandardMaterial` inherits its blend mode from underneath, and Bevy's default is opaque — so a shader computing its own alpha rendered as a sheet of paint. It is a control now, under Material.
+
+- **An assistant can render a shader and look at it.** The new `bennu_shader_render` compiles a WGSL material, renders it with the parameters you name, and answers with the image — so a change to a shader can be judged instead of guessed at, and a material that does not compile comes back as the compiler's own lines with their line numbers. Paired with `bennu_shader_uniform` it is a loop: ask what the material declares, set values by name, look, adjust. It renders through the `bevy-runtime` package's own headless renderer, so the picture is the picture the preview panel would show; without that package built, it says so.
+
+- **The shader preview has a backdrop grid, on by default.** A material that computes its own alpha looks identical over any single colour — 60% opacity and 100% are the same picture until there is something behind it with structure. The squares are made from the scene's own background colour, so that control still sets the ground.
+
+- **The shader preview is live, and the whole rig is on knobs.** Moving a control repaints immediately — nothing to press — because a parameter change now sends new bytes for the material's uniform instead of rebuilding the scene. The panel grew the light rig with it: environment, key and fill light, and a lit material's own colour and roughness, each folded into its own group. **Random params** moves the controls as well as the picture, and a mesh that declares knobs (tessellation, so far) shows them.
+
+- **A form section can be a caption instead of a card.** `variant = "quiet"` on a `section` drops the border and the fill for a small uppercase heading, and `note` adds a right-aligned muted caption beside the title. A panel that is six groups stacked in a narrow column reads as six competing boxes with card chrome and as one list with this.
+
+- **Dense field rows line up.** A container can pin the label column with `--pf-label-col`, so a stack of `compact` fields starts every control at the same x instead of stepping in and out with the length of each name. A `color` field takes `show_hex = false` to be just its swatch, and a `vec_field` slider takes `debounce_ms` for a lane whose handler does real work per event.
+
+- **A plugin's form, file picker and settings modal appear in Bennu.** They only ever existed in Corvus's shell, so in Bennu a plugin's action fired, the backend answered, and nothing happened anywhere — no error, because as far as the backend was concerned the message had been delivered.
+
+- **A page a plugin ships loads, and its WebAssembly streams.** Files a package ships are served on their own `plugin:` scheme instead of through the media-oriented asset protocol, which had no scope for them and — worse — no MIME type for `wasm`: a module typed `application/octet-stream` makes streaming compilation reject, so the loader buffered the whole thing and compiled it in one go, taking the app with it. A symlinked package (how a plugin under development is usually installed) resolves to where its files really are.
+
+- **An embedded page's own scripts and assets resolve.** The page URL packed the whole filesystem path into a single URL segment, so a relative `import './runtime.js'` inside the page resolved to the root and came back 403 naming a bare filename — the page loaded and stopped at its first import.
+
+- **An embedded page can fetch its own files.** `same_origin = true` on an `embed` node, for a page that loads a wasm module or a texture: WebKit refuses those from the opaque origin the frame otherwise runs on. Off by default — a page that only draws and posts messages stays isolated.
+
+- **`embed` can fill its surface.** `height = "fill"` takes whatever vertical space is left instead of a fixed number of pixels, so a viewport in a resizable panel grows when you drag the split.
+
+- **A plugin's view opens beside Bennu's editor.** Bennu renders plugin-registered views in the resizable split next to the code rather than in the body: a preview, a rendered document, a live result is worth nothing if opening it hides the file it is about. `shader-preview` is that — a viewport and its parameters beside the shader, no dialog.
+
+- **`vec_field` can carry sliders.** Opt-in per node with a `min`/`max`/`step` the plugin declares, rendered as one row per lane with the slider and the typed value side by side: drag to find a value, type one you already know.
+
+- **Changing a material's parameters no longer moves the camera.** Rebuilding the preview kept the angle you had chosen and left the turntable where it was: watching a value change is the point, and it needs everything else to hold still. The reset button is still there for putting the view back.
+
+- **A shader that declares its own parameters can be previewed.** The viewport gained a material that is entirely the caller's shader — its own uniform block at binding 0, its own colour and alpha out of `fragment`, no PBR underneath. The block arrives as bytes at the offsets its struct implies, so the viewport uploads it without ever learning a field name.
+
+- **Bennu's Plugin Logs panel shows the logs.** It rendered a store nothing fed — no initial fetch of the backend's buffer and no subscription to the stream — so the panel was permanently empty while every line was recorded. That also silenced the one channel a plugin has for saying what went wrong.
+
+- **The preview's texture slots fit inside WebGL2's budget.** The browser gives a fragment stage sixteen texture units in total and wgpu's GL backend spends one per layout entry whether the shader samples it or not — so declaring a generous set crashed materials that have no textures at all, inside the driver shim, with a dead canvas. The viewport now declares two slots for a material extending `StandardMaterial` and four for one that owns its bind group; the headless renderer keeps twelve.
+
+- **A preview that cannot build its scene says so instead of showing an empty viewport.** The message was a toast titled "shader did not compile", which for a malformed scene document sends you to read a file that is fine; it now names which of the two failed and stays put.
+
+- **A uniform block bigger than one `vec4` reaches the shader whole.** A material extension binding a struct or a matrix at binding 100 had everything past its first four floats cut off on the way to the preview, and the missing part read as zero.
+
+- **A dropdown with no options no longer crashes the panel it is in.** A plugin shipping an empty option list sends `{}` — Lua has one table type — and the select's item builder was reading it with a nullish fallback that an object never triggers, so the panel died with "{} is not iterable" instead of showing an empty list.
+
+- **Bennu tells you what a WGSL material declares.** The new `bennu_shader_uniform` reports a shader's parameter block — struct, fields, types, and the byte offset to write each at — plus the textures and samplers bound beside it, which a caller reading only the parameters would have silently omitted. The offsets honour WGSL's alignment, including the `mat3x3<f32>` that occupies 48 bytes rather than the 36 its components add up to.
+
+- **A plugin can ask Bennu about a shader.** `arbor.shader.uniform{ source = … }` answers the same thing from Lua, so a preview panel builds its controls from what the shader actually declares instead of pattern-matching the source itself.
+
+- **A plugin can put a button on the code editor's toolbar.** The new `arbor:editor-toolbar` contribution point takes a `path_pattern`, so the button appears only on the files it is about — that bar's contents are the answer to "what kind of file is this", and a plugin icon sitting on every file would undo it. `shader-preview` uses it: with a `.wgsl` open, one click previews that file instead of asking which.
+
+- **Bennu's command palette lists plugin commands.** A plugin could register one and nothing in the window could invoke it.
+
+- **Bennu runs plugins.** It hosted none until now, so a plugin that belonged next to code — a shader preview, a linter, a generator — had nowhere to run. Its hamburger gained the Tools section Corvus has: Marketplace, Plugin Manager and a Plugin Logs panel docked in the bottom tool window.
+
+- **Installing a plugin installs it for one product.** Installing from Corvus no longer puts it in Bennu's command palette. The download is still shared — a package already on disk is never fetched twice, so turning it on somewhere else is a flag, not a second download — and a package that was enabled before this keeps working everywhere it did.
+
+- **A plugin can ship a page and show it.** The new `embed` form node mounts a package's own HTML in an isolated frame and relays messages both ways — so a plugin that needs a viewport, a graph or a map brings one instead of asking for a feature. The frame has an opaque origin: no storage, no cookies, no reach into the app around it.
+
+- **A plugin can call an installed extension.** `arbor.ext.call` invokes any function a compiled extension exports, with the plugin deciding which one and why — so a shader translator, a mesh generator or a format backend is a package somebody installs, not a version of Arbor. Arbor passes the arguments through without knowing what they mean; what it does still decide is what the extension may *reach*, which comes from that package's own manifest. Requires `service_call`, because calling an extension is invoking another package's code with that package's credentials.
+
+- **Extensions: packages that implement an interface Arbor calls into.** A Studio format backend or a cloud provider is not a plugin — it does not react to hooks or draw anything, it answers when the host needs a parse or a listing. Those interfaces are defined in `wit/`, packages declare which they implement, and Arbor instantiates them as sandboxed WebAssembly: no filesystem, no sockets, and network only through the host, which checks every URL against the allowlist the user consented to. The Plugin Manager lists them and says which actually run — a declaration that resolves is a different fact from a module that loads — along with what is broken: a module that did not ship, or an id two packages both claim.
+
+- **Cloud storage can be served by an installed provider package.** Listing, stat, delete, copy, connection-test and the bytes of a download or upload route to a wasm provider when one is installed for that kind of connection, and fall through to Arbor's built-in implementation when none is — so installing one can never break a connection that was working, and uninstalling it changes nothing. Progress, cancellation and the transfer's place in the job list are unchanged, because they never belonged to the provider. Sync and streaming listings stay built-in.
+
+- **The marketplace flags a package that ships compiled code.** A shield on the row, and a line in the install dialog naming the interfaces it implements. It is the one thing about a listing a reader cannot check for themselves, so the badge says what *is* checked: every artifact is verified against the digest the registry recorded, and a mismatch refuses the install.
+
+- **Plugins can store their own secrets.** `arbor.credentials` puts a token in the OS keychain instead of a JSON file, scoped to the slots the manifest declared in `[[credentials]]`. A plugin reaches those and nothing else — Arbor's own git-provider and issue-tracker credentials share the keychain and cannot be named from a plugin at all.
+
+- **A plugin package can carry more than Lua.** The manifest gained `[lua]`, `[[provides]]` and `[wasm]`, so a package can declare implementations of host-defined interfaces beside its Lua half. `entry = "main.lua"` moved into `[lua]`; a package that declares no `[lua]` and provides nothing still loads `main.lua`, so existing plugins are unaffected.
+
+- **Marketplace entries can pin exact artifacts.** A registry entry may record a `sha256` per release asset, and packages carrying built artifacts install from a GitHub release with every file verified before anything is written. Source-archive installs are unchanged and keep `pinned_sha`.
+
+- **A Bevy shader's imported names complete, hover and navigate.** Bennu reads the modules a `.wgsl` imports — your project's own, plus the shader sources of the `bevy_*` crates at the versions in `Cargo.lock` — so `VertexOutput`, `globals` and `apply_pbr_lighting` behave like declarations you wrote: offered in completion with the module they came from, hovered with their real signature and comment, and <kbd>Ctrl</kbd>+<kbd>B</kbd> opens the file that declares them. An `#import` line now completes the names inside a module, not only the module path.
+
 - **A material's two halves navigate to each other.** <kbd>Ctrl</kbd>+<kbd>B</kbd> on a shader `struct` or one of its members opens the `#[derive(ShaderType)]` it has to match — the same field, not just the file — and from the Rust side it goes the other way. A binding variable in the shader reaches the `#[uniform(n)]` field that supplies it, and back. A declaration split over two files has no primary half, so every join works in both directions.
 
 - **The Bevy components panel says where each thing is created.** A signature answers who *reads* a component; nothing answers who ever makes one — so a type six systems read used to look like it appeared by magic. Every `spawn`, `insert`, `insert_resource`, `add_message` and `init_state` site is now a row under the declaration, naming the function it happens in and the argument it was given (`spawn_player — Health(100.0)`). It reads call sites rather than signatures, so a spawned tuple is one row per component.
@@ -252,6 +364,68 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **An assistant can compile the project and read the errors.** Checking a file answered from whatever the language server last published — which is the last check *your editor* ran, on the file *as you saved it* — so after an assistant edited something, nothing could tell it whether the edit compiled. Now it can run the compile itself and get the diagnostics back, each at its file and line, errors first. Name a crate or a Maven module to compile just that, which on a large workspace is the difference between a check you wait out and one you read. It needs your approval, because compiling runs code the project supplies — build scripts, proc macros, Maven plugins. A failure that produced no diagnostic carries the end of the compiler's output rather than reporting only that it failed.
 
 ### Fixed
+
+- **A plugin panel's close button works outside Corvus.** It was wired to Corvus's main-view store, which is where a plugin view lives in Corvus and nowhere else — so in Bennu, where these open in the right split, the × cleared something nothing was reading and the panel stayed put.
+
+- **An open shader preview follows the editor.** Switching to another `.wgsl` kept the panel on the file it was opened with, and the only thing that admitted it was the file name in the panel's own title. Bennu now announces its active file to plugins (`bennu:file_opened`), which is the event a panel *about the file you are editing* needs and which nothing was firing.
+
+- **Previewing on a plane no longer shows you its back.** A quad has one side and the renderer culls the other, so the turntable carried it out of sight for half of every revolution and picking it mid-spin landed on the blank half. Choosing a flat mesh now brings the framing home and stops the turntable; choosing a solid one again starts it back up.
+
+- **A shader preview opens on values its own sliders can produce.** Starting values were computed from a field's range without regard for its step, so a parameter stepped in whole numbers could open at 4.25 — a number the slider displayed as 4 while the panel kept sending 4.25. On a spiral shader that reads as a hard seam across the material, because an arm count only comes out periodic at whole numbers.
+
+- **A `// @preview` line on a scalar is honoured.** Its label, range, starting value and description were all read and then dropped: the expander had a branch for "no annotations" and a branch for "a vector to split into lanes", and a plain `f32` with one annotation fell between them. Silently, because a control with a guessed range still looks like a control.
+
+- **A hint on a compact field is a tooltip, not a second line.** `compact` means the row is one line, and a sentence under every control is what it exists to avoid; hovering the label is where people look for the description anyway. Outside compact rows it stays a line under the field.
+
+- **A shader can name the lanes of its own `vec4`.** A `// @preview <label> [min..max] [= default]` line above a declaration says what each lane is, and the preview builds a control per lane with the range and starting value you gave instead of guessing from the variable's name. A comment because it must be one — WGSL rejects any attribute outside its own list, so a custom `@range(…)` would stop the shader compiling in the game too. The lines are highlighted apart from ordinary comments; a shader without them is read exactly as before.
+
+- **A material that needs textures says so instead of crashing the viewport.** A shader binding a sampler where the previewer offers a buffer is not a missing parameter — it is `create_render_pipeline` refusing outright, which in the viewport is a panic and a dead canvas. A texture is a GPU resource rather than a value, and the previewing material's layout is fixed when *it* is compiled, so it cannot grow a sampler because one shader wants one. The panel now names the bindings and says why, and the render tool refuses before it starts anything.
+
+- **A material binding an array can be previewed.** A shader declaring `array<vec4<f32>, 32>` — a list of light sources, an ordinary thing to want — was handed a 16-byte slot for 512 bytes of declaration, and wgpu answered by refusing the pipeline, which in the viewport is a panic and a dead canvas. Every slot is now sized for the largest such binding; a shader reads however much of it it declared.
+
+- **A material extension's parameters are read, and it renders at all.** A shader that binds bare values — `var<uniform> rock_params: vec4<f32>`, with no struct — was reported as having no parameter block, and its bindings were listed among the textures. It has one; a lone value is a block with a single field. And an extension does not have *one* block but one per binding from 100 up, so reading only the lowest drove a fifth of a five-uniform material — while the other four bindings had no slot in the preview's material at all, which is not a missing parameter but a pipeline wgpu refuses outright (*"binding 104 is not available in the pipeline layout"*). The preview now offers eight slots and fills them by binding.
+
+- **A shader is previewed as the kind of material it actually is.** Whether it owns its whole bind group or extends `StandardMaterial` is read from its binding indices rather than inferred from whether its parameters could be described — the two need different materials, and the wrong one fails pipeline validation instead of merely looking wrong.
+
+- **A vector field keeps the lane you just moved.** It holds no value in the form — each lane is dispatched and the plugin owns the number — so the inputs were read straight off the node and snapped back the instant anything re-rendered. Something always did: the very handler the drag fires patches another node, the renderer re-runs, and four lanes returned to zero. The plugin can still move them, which is what loading a preset does.
+
+- **A vector's lanes are only sliders when the range is known.** A shader's own `vec4` has none anybody can guess — one lane is a count in the tens, the next a depth in [0,1] — and a slider pinned to an invented 0..1 could not reach the value the shader wanted. Those lanes are typed now; a light direction or a colour channel still drags.
+
+- **A colour field's value reaches the plugin.** The `color` node had no change handler at all: it painted a swatch, wrote the value into the form, and never told anybody — so in a live panel it was the one editable control whose value could not leave, and a shader preview showed grey no matter what colour you picked.
+
+- **Reloading a shader preview keeps the values you found.** Reload re-read the file and reset every parameter to its default, which is the opposite of what a preview is for: the values you dragged your way to are the work, and they now survive for every field that still exists with the shape it had.
+
+- **Listing the available cross-plugin services no longer freezes the backend either.** Same cause as the entry below, same shape of fix; `arbor.service.list` is now sorted by plugin and method instead of by load order.
+
+- **Enabling a plugin that asks about another plugin no longer freezes the backend.** `arbor.meta.plugin_loaded` needed the plugin host's lock, and the most natural place to call it — a plugin's own load hook — is fired while the host already holds it, so the whole backend stopped with no error and every later action queued behind it forever.
+
+- **A plugin form with nothing to submit no longer shows a Submit button.** Pressing it fired a null action at the backend and answered with "invalid type: null, expected a string" — a shrug in the user's face for pressing the most prominent control in the dialog.
+
+- **Plugins load in a product that is not Corvus.** The builder sugar installed at sandbox setup assumed `arbor.pipeline` existed; outside Corvus it does not, and the failure aborted the whole runtime — so every plugin in Bennu (and in Sitta, Tyto and Garrulus) failed to load, all with the same error about a namespace none of them used.
+
+- **Browse opens the Marketplace on top of the Plugin Manager.** In Bennu it opened underneath it, which read as the button doing nothing.
+
+- **A package installed before this keeps the product it was installed from.** Every existing install was made from Corvus — the Marketplace opens from its title bar and nowhere else — so that is where they stay, instead of appearing in every product that later gained a plugin host. A package switched off stays off.
+
+- **The Plugin Manager asks the backend that actually hosts the plugins.** It always asked Corvus's, which was true when Corvus was the only product with a plugin host — from anywhere else it reported "no plugins found", or nothing at all when that backend was not running.
+
+- **An extension of any interface can be probed.** The check that says whether a package's module really runs knew two interfaces by name and called every other one unknown — a refusal to look, reported as if the package were broken.
+
+- **The Plugin Manager no longer freezes when a package provides an extension.** Probing them read and wrote the same state inside an effect, which Svelte stops by tearing the panel down.
+
+- **The cloud panel has one backend instead of two.** A second, unused copy of every cloud operation survived from when the panel was built into the app; it did not go through an installed provider, so a call that reached it would have quietly ignored one.
+
+- **A plugin form no longer breaks on an empty list.** A Lua plugin that ships an empty table for a tree's nodes, a tab's children or a menu's options sends an object rather than an array, and the form it belonged to failed to render.
+
+- **A closing dialog no longer accepts clicks.** Controls stayed live for the length of the close animation, after the data behind them was already gone — so a second click on a × that looked ignored could fail instead of closing.
+
+- **Uninstalling a plugin now forgets its credentials.** Removing the folder left every secret it had stored sitting in the OS keychain, with nothing on disk left to explain them and no manifest left to enumerate them.
+
+- **The install dialog says which credentials a package will store.** It listed permissions and stopped there, so a package that would keep a token said nothing about it. It now names each slot, and flags a package that ships a compiled module.
+
+- **A marketplace install no longer destroys the installed copy when the download fails.** The install directory was emptied before the new version had been fetched, so a dropped connection left nothing behind.
+
+- **A plugin's custom form CSS no longer leaks into the rest of Arbor.** `arbor.ui.form`'s `css` was injected into the document unscoped, so a rule meant for one dialog applied everywhere; it is now scoped to that dialog's own modal.
 
 - **Go-to in a shader no longer jumps to where the caret already is.** With the caret on a declaration, go-to answered with that declaration's own span — which reads as a broken feature, and worse, it won before the framework extensions could answer. It is what kept a shader `struct` from ever reaching its Rust layout.
 

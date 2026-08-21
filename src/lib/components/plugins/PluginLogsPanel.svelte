@@ -7,11 +7,19 @@
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { pluginLogsStore, NON_PIPELINE_SENTINEL } from '$lib/stores/pluginLogs.svelte';
-  import { uiStore } from '$lib/stores/ui.svelte';
   import type { PluginLogEntry, PluginLogLevel } from '$lib/types/plugin-logs';
   import { renderStructuredLogLine, formatLogTime, shortRunId } from '$lib/utils/log-highlight';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
+
+  /** How this panel closes itself.
+   *
+   *  A prop, not a call into one product's store: this component lives under
+   *  `components/plugins/` because it belongs to no single product, and it reached into
+   *  Corvus's `uiStore` to close — which meant mounting it anywhere else wrote to a store
+   *  that window does not own. Every host says how its own dock closes. */
+  interface Props { onClose: () => void }
+  let { onClose }: Props = $props();
 
   const LEVELS: PluginLogLevel[] = ['debug', 'info', 'warn', 'error'];
 
@@ -272,7 +280,7 @@
 </script>
 
 <div class="pl-root">
-  <BottomPanelHeader title="Plugin Logs" count={filtered.length} onClose={() => uiStore.setActiveBottomSection(null)}>
+  <BottomPanelHeader title="Plugin Logs" count={filtered.length} {onClose}>
     {#snippet actions()}
     <button
       class="pl-action-btn follow-btn"

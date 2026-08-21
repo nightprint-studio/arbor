@@ -27,7 +27,7 @@
 
 use std::borrow::Cow;
 
-use crate::hook_names::{arbor, corvus, garrulus, pipeline};
+use crate::hook_names::{arbor, bennu, corvus, garrulus, pipeline};
 use crate::hook_ns;
 
 #[derive(Copy, Clone, Debug)]
@@ -803,6 +803,24 @@ pub static HOOK_CATALOG: &[HookDef] = &[
             field!("status",      String, req, "Final status: 'success' | 'failure' | 'cancelled'."),
         ],
     },
+    // ── Bennu (the editor) ─────────────────────────────────────────────────
+    HookDef {
+        name: bennu::FILE_OPENED,
+        category: "editor",
+        description: "Fired when the editor's active file changes — switched to, opened, or reopened. What a companion panel follows: one that keeps showing the previous file is showing the wrong one.",
+        ctx: &[
+            field!("path", String, req, "Absolute path of the file now being edited."),
+            field!("name", String, req, "File name, without the directory."),
+            field!("ext",  String, opt, "Lower-case extension without the dot, when the name has one."),
+        ],
+    },
+    HookDef {
+        name: bennu::FILE_CLOSED,
+        category: "editor",
+        description: "Fired when the last editor tab closes and nothing is being edited.",
+        ctx: NO_CTX,
+    },
+
     HookDef {
         name: pipeline::RUN_REQUEST,
         category: "pipeline",

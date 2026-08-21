@@ -24,6 +24,7 @@
   import BennuFormsPanel from './BennuFormsPanel.svelte';
   import BennuCatalogPanel from './BennuCatalogPanel.svelte';
   import { isFrameworkCatalog } from './framework-catalogs';
+  import PluginLogsPanel from '$lib/components/plugins/PluginLogsPanel.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
 
   const active = $derived(bennuUiStore.bottomPanel ?? 'problems');
@@ -53,6 +54,13 @@
   <div class="dock-section" class:hidden={active !== 'hierarchy'}>
     <BennuHierarchyPanel />
   </div>
+  <!-- Mounted only while shown: unlike the terminal or a run, the log is a store the panel
+       renders — closing it loses a scroll position and nothing else. -->
+  {#if active === 'plugin-logs'}
+    <div class="dock-section">
+      <PluginLogsPanel onClose={() => bennuUiStore.toggleBottom('plugin-logs')} />
+    </div>
+  {/if}
   {#if active === 'forms'}
     <div class="dock-section">
       <BennuFormsPanel dock />

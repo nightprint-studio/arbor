@@ -5,9 +5,11 @@
 //! truth for the field set; this file just ports it to Rust so Tauri commands
 //! can return native types and serde handles the wire format.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
-use arbor_plugin_types::prelude::{Dependency, Permissions};
+use arbor_plugin_types::prelude::{CredentialSlot, Dependency, Permissions, Provides};
 
 // ---------------------------------------------------------------------------
 // Where a listing came from
@@ -59,6 +61,19 @@ pub struct RegistryEntry {
     /// and to encourage `pinned_sha` for moving refs.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub external:    bool,
+    /// `file name → sha256` for the release assets this entry approves.
+    ///
+    /// Empty for an ordinary Lua plugin, which installs from a source archive and whose
+    /// integrity story is `pinned_sha` — a git SHA is content-addressed, so pinning the
+    /// commit pins the source. A package that carries a build artifact has no such luxury:
+    /// a `.wasm` is not in the tree the commit names, so the registry records the digest of
+    /// the exact file a reviewer approved, and any later substitution fails to install.
+    ///
+    /// Recorded **in the registry** rather than in the package's own manifest on purpose: a
+    /// digest supplied by the author verifies only that the author is consistent with
+    /// themselves. This is the one place a human signed off.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub artifacts:   BTreeMap<String, String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +132,15 @@ pub struct MarketplacePlugin {
     /// install-confirm modal so the user can pre-install required deps.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dependencies: Vec<Dependency>,
+    /// Credential slots the package declares. Surfaced in the install-confirm dialog so the
+    /// consent says **what** will be stored — "this plugin uses credentials" is a formality,
+    /// "this plugin stores your Google account token" is a question.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub credentials: Vec<CredentialSlot>,
+    /// Host interfaces the package implements. Non-empty means it carries a compiled module,
+    /// which is the one thing about a listing a user cannot discover by reading its source.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provides: Vec<Provides>,
 }
 
 // ---------------------------------------------------------------------------

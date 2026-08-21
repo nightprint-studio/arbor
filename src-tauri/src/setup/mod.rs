@@ -65,6 +65,12 @@ pub fn build_builder() -> tauri::Builder<tauri::Wry> {
     }
 
     builder
+        // Files a plugin package ships, for the `embed` form node's frame. Its own scheme
+        // rather than a widened `asset:` — see `crate::plugin_assets`.
+        .register_uri_scheme_protocol(
+            crate::plugin_assets::SCHEME,
+            |_ctx, request| crate::plugin_assets::handle(request),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         // OS-global shortcuts — the dedicated File Explorer window (Ctrl+Shift+E)
@@ -140,6 +146,12 @@ fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // run after the event sink is wired above (the host stores the sink for
     // `emit_event`).
     crate::cloud::install(app.handle());
+
+    // Give every previously-installed package a product, once, BEFORE any host reads the
+    // states file. Runs here rather than lazily because the first reader is a plugin host
+    // deciding what to load, and it must not see the un-scoped answer even once.
+    crate::marketplace::scope_existing_installs_to_their_product();
+
 
     // Park the launcher (main window) bottom-right, JetBrains-Toolbox-style.
     crate::window::placement::place_launcher_bottom_right(app.handle());

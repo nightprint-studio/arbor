@@ -19,7 +19,7 @@
    *                         Forms · Terminal.
    * Find-in-project is a modal (Ctrl+Shift+F / palette), not a rail tool.
    */
-  import { onMount, untrack } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import {
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info, Bot, Activity as ActivityIcon,
@@ -54,6 +54,16 @@
   import FeedbackHost from '$lib/feedback/FeedbackHost.svelte';
   import FeedbackStatusButtons from '$lib/feedback/FeedbackStatusButtons.svelte';
   import CommandPaletteShell, { type PaletteSection } from '$lib/components/shared/ui/CommandPaletteShell.svelte';
+  import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
+  import { containerStore } from '$lib/stores/corvus/container.svelte';
+  import { pluginLogsStore } from '$lib/stores/pluginLogs.svelte';
+  import { pluginStore } from '$lib/stores/plugin.svelte';
+  import { listPluginInfo } from '$lib/ipc/plugin';
+  import { pluginPaletteCommands } from '$lib/contributions/command-palette';
+  import PluginOverlays from '$lib/components/plugins/PluginOverlays.svelte';
+  import PluginViewPanel from '$lib/components/plugins/PluginViewPanel.svelte';
+  import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
+  import { setupTauriListeners } from '$lib/utils/tauri-listeners';
   import type { IconComponent } from '$lib/types/icon';
 
   import BennuTitleBar from './BennuTitleBar.svelte';
@@ -78,6 +88,11 @@
   import BennuFindInFilesModal from './BennuFindInFilesModal.svelte';
   import BennuProjectConfigModal from './BennuProjectConfigModal.svelte';
   import BennuAboutModal from './BennuAboutModal.svelte';
+  // The plugin surface. Both halves load lazily inside `PluginTools`: a window that never
+  // opens the Plugin Manager should not carry it, and the marketplace pulls the whole
+  // catalogue view with it.
+  import PluginTools from '$lib/components/plugins/PluginTools.svelte';
+  import { notifyActiveFile, resetActiveFileNotifier } from '$lib/contributions/bennu-file-hook';
   import BennuGenerateModal from './BennuGenerateModal.svelte';
   import BennuJpaGenerateModal from './BennuJpaGenerateModal.svelte';
   import { JPA_PALETTE_ACTIONS } from './jpa-actions';
@@ -143,6 +158,17 @@
   import { discoverCargoTests } from '$lib/ipc/bennu/cargo-tests';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 
+  // Which file the editor is on, announced to the plugins as `bennu:file_opened`.
+  //
+  // Component scope, NOT inside `onMount` — `$effect` may only be created while the component
+  // initialises, and one created in a lifecycle callback throws `effect_orphan`.
+  //
+  // One watcher on the one value rather than a fire at each of the five places that write it:
+  // opening, switching tab, restoring a session, closing the last tab and changing project all
+  // go through here, and so will the sixth way somebody adds later.
+  $effect(() => { notifyActiveFile(projectStore.activeFilePath); });
+  onDestroy(() => { resetActiveFileNotifier(); });
+
   onMount(() => {
     themeStore.init();
     void appearanceStore.loadConfig();
@@ -170,6 +196,50 @@
     // The profile list + which one is active, for the titlebar's switcher. Idempotent, so a Bennu
     // that shares its webview with Corvus does not subscribe twice.
     void profileStore.init();
+    // ── The plugin surface ────────────────────────────────────────────────────────
+    // Five subscriptions, and a window that hosts plugins needs all five. Bennu had none of
+    // them, which is why a plugin here could run perfectly and be invisible: the backend
+    // emitted, and nobody in this window was listening.
+    //
+    // What the loaded plugins contribute — the palette's plugin commands and the editor
+    // toolbar's buttons read this.
+    const unlistenContributions = contributionStore.setupListeners();
+    contributionStore.reloadAll();
+    // Combo option updates + plugin reload events.
+    const unlistenCombo = pluginStore.setupListeners();
+    // The container/settings models `PluginOverlays` renders.
+    const unlistenContainers = containerStore.setupListeners();
+    containerStore.reloadDefs();
+    // `arbor.log.*`, for the Plugin Logs dock. Both halves are needed and for different
+    // reasons: `load()` fetches the backend's ring buffer, which already holds everything
+    // logged before this window opened, and the listener carries the lines that arrive after.
+    // Without them the dock renders a store nobody feeds — permanently empty while the
+    // backend records every line, which is the worst way for a panel to fail. It is also how
+    // a plugin's only channel for saying what went wrong goes silent.
+    const unlistenPluginLogs = pluginLogsStore.setupListeners();
+    void pluginLogsStore.load();
+    // Reconcile the frontend's disabled set with the backend's, before any contribution
+    // filter runs off a stale one.
+    listPluginInfo()
+      .then((infos) => pluginStore.syncFromInfos(infos))
+      .catch(() => { /* backend not up yet — the Plugin Manager syncs on open */ });
+    // `arbor.ui.open_panel(id)` — a plugin revealing its own view. It knows its id, not where
+    // this product decided to put it, which is the point: in Bennu that is the right split.
+    const unlistenOpenPanel = setupTauriListeners([
+      {
+        event: 'plugin:ui-open-panel',
+        handler: (e: { payload: { plugin: string; panel_id: string } }) => {
+          const { plugin, panel_id } = e.payload;
+          if (!plugin || !panel_id) return;
+          // Unknown ids are ignored rather than opening an empty panel: a plugin asking for
+          // something it never registered is a plugin bug, and a blank split is a worse way
+          // to report it than its own log.
+          const known = pluginViews.some((v) => v.plugin_name === plugin && v.id === panel_id);
+          if (!known) return;
+          bennuUiStore.showRight(`plugin:${plugin}:${panel_id}`);
+        },
+      },
+    ]);
     // Autosave on frame deactivation (the window loses OS focus) — IntelliJ-style. Guarded by the
     // setting; saves whatever has unsaved edits. `blur` on the window fires when you switch apps.
     const onWindowBlur = () => { if (bennuSettingsStore.autosave) void projectStore.saveAllDirty(); };
@@ -266,6 +336,11 @@
       unlistenBeUp?.();
       document.removeEventListener('visibilitychange', onHidden);
       detachDebug?.(); detachLsp?.();
+      unlistenContributions();
+      unlistenCombo();
+      unlistenContainers();
+      unlistenPluginLogs();
+      unlistenOpenPanel();
       bennuIndexStore.reset();
     };
   });
@@ -854,7 +929,23 @@
   const showLeft   = $derived(bennuUiStore.leftPanel !== null);
   const showRight  = $derived(bennuUiStore.rightPanel !== null);
   /** Whether the open right panel wants the wider column — see the card below. */
-  const wideRight  = $derived(bennuUiStore.rightPanel === 'i18n');
+  /** The views the loaded plugins registered, as `plugin:<plugin>:<id>` panel keys. */
+  const pluginViews = $derived(
+    contributionStore.forPoint(VIEW_POINT)
+      .filter((c) => pluginStore.isEnabled(c.plugin_name))
+      .map(parseViewSection),
+  );
+  /** The one showing in the right split, if the active panel is a plugin's. */
+  const activePluginView = $derived.by(() => {
+    const key = bennuUiStore.rightPanel;
+    if (!key || !key.startsWith('plugin:')) return null;
+    return pluginViews.find((v) => `plugin:${v.plugin_name}:${v.id}` === key) ?? null;
+  });
+
+  // A plugin view gets the wide default too: whatever it renders (a viewport, a chart, a
+  // rendered document) is the kind of thing 200px cannot show, or the plugin would have
+  // written a list.
+  const wideRight  = $derived(bennuUiStore.rightPanel === 'i18n' || activePluginView !== null);
   const showBottom = $derived(bennuUiStore.bottomPanel !== null);
   // A job's output was opened from the (shared) Jobs overlay — the shared uiStore drives it, exactly
   // like corvus. It takes the bottom slot while shown; closing it (its back/close button clears the
@@ -1225,6 +1316,21 @@
     const ps = pack(projectSwitchItems); if (ps.length) out.push({ id: 'switch-project', label: 'Switch project', items: ps });
     const ws = pack(workspaceItems); if (ws.length) out.push({ id: 'switch-workspace', label: 'Switch workspace', items: ws });
     const ap = pack(appItems);    if (ap.length) out.push({ id: 'app', label: 'Application', items: ap });
+
+    // Whatever the loaded plugins registered with `arbor.command.register`. Last, because a
+    // plugin's verbs should not push Bennu's own out of reach — but present, which they were
+    // not: the commands registered in the backend and had no door in this window.
+    const pluginItems = pluginPaletteCommands()
+      .filter((c) => !q || c.haystack.toLowerCase().includes(q))
+      .map((c) => ({
+        id:       c.id,
+        title:    c.title,
+        subtitle: c.subtitle,
+        icon:     c.icon,
+        action:   () => run(c.run),
+      }));
+    if (pluginItems.length) out.push({ id: 'plugins', label: 'Plugin Commands', items: pluginItems });
+
     return out;
   });
 
@@ -1629,6 +1735,20 @@
                  move, so there is nothing to preserve — and while hidden it would keep asking the
                  backend about a panel nobody is looking at. -->
             {#if bennuUiStore.rightPanel === 'i18n'}<BennuI18nPanel />{/if}
+            <!-- A plugin's own view, mounted with the FULL form renderer — so an `embed`
+                 viewport, a split layout and live parameter fields all work here exactly as
+                 they do in a modal, minus the modal. -->
+            {#if activePluginView}
+              {@const v = activePluginView}
+              <PluginViewPanel
+                pluginName={v.plugin_name}
+                viewId={v.id}
+                label={v.label}
+                icon={v.icon}
+                placement={v.placement}
+                onClose={() => bennuUiStore.closeRight()}
+              />
+            {/if}
           </PanelCard>
           {/key}
         {/if}
@@ -1709,6 +1829,19 @@
   <BennuTomcatConfigModal onClose={() => bennuUiStore.closeTomcatConfig()} />
 {/if}
 
+<!-- The plugin host's two modal doors. `PluginTools` owns the order they mount in, which is
+     load-bearing and easy to get wrong — see its header. The third door, Plugin Logs, is a
+     docked panel and lives in `BennuBottomDock`. -->
+<PluginTools
+  managerOpen={bennuUiStore.pluginsOpen}
+  onCloseManager={() => bennuUiStore.closePlugins()}
+/>
+
+<!-- Every surface a plugin uses to talk to the user: the form it opens, the file picker it
+     asks for, its settings container. Without this a plugin's action fires, the backend
+     emits, and nothing happens anywhere. AFTER `PluginTools` — see its header for why the
+     order matters. -->
+<PluginOverlays />
 {#if bennuUiStore.aboutOpen}
   <BennuAboutModal onClose={() => bennuUiStore.closeAbout()} />
 {/if}
@@ -1790,6 +1923,7 @@
 <FeedbackHost id="bennu" />
 
 <style>
+
   .shell {
     position: fixed; inset: 0;
     display: flex; flex-direction: column;

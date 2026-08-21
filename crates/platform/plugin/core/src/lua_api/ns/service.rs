@@ -11,8 +11,12 @@
 //!   service_export = true  -> .export / .unexport / .list_own
 //!   service_call   = true  -> .call / .list
 //!
-//! Calls are always dispatched on a background thread so the caller never
-//! blocks and we can't deadlock on the non-reentrant PluginHost mutex.
+//! Nothing in this module takes the `PluginHost` mutex on the calling thread. `.call`
+//! dispatches on a background thread; `.export` / `.unexport` / `.list_own` touch only the
+//! plugin's own VM; `.list` reads the shared `ServiceIndex`. That is the whole point: the
+//! host fires hooks while holding its mutex, so a synchronous lock here deadlocks the
+//! backend the first time a plugin calls it from `arbor:plugin_load` — which `.list` did,
+//! under a header that already promised it did not.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -36,7 +40,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let svc_table = lua.create_table().map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
 
     if ctx.service_export {
-        install_export(lua, &svc_table)?;
+        install_export(ctx, lua, &svc_table)?;
     }
     if ctx.service_call {
         install_call(ctx, lua, &svc_table)?;
@@ -47,19 +51,31 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     Ok(())
 }
 
-fn install_export(lua: &Lua, svc_table: &Table) -> Result<()> {
+fn install_export(ctx: &ApiCtx, lua: &Lua, svc_table: &Table) -> Result<()> {
+    // The Lua table stays the source of truth for *dispatch* — `invoke_service` calls the
+    // function out of it. The index beside it is the source of truth for *discovery*, which
+    // is the half a reader needs without a Lua VM in hand. Both are written here so they
+    // cannot drift: an export that reached one and not the other would be either an
+    // uncallable listing or an invisible service.
+    let plugin = ctx.plugin_name.clone();
+    let index  = ctx.services.clone();
+
     // export(method, fn)
-    let fn_ = lua.create_function(|lua_ctx, (method, func): (String, mlua::Function)| {
+    let (p, idx) = (plugin.clone(), index.clone());
+    let fn_ = lua.create_function(move |lua_ctx, (method, func): (String, mlua::Function)| {
         let reg: Table = lua_ctx.globals().get("__arbor_services__")?;
-        reg.set(method, func)?;
+        reg.set(method.clone(), func)?;
+        idx.export(&p, &method);
         Ok(())
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     svc_table.set("export", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
 
     // unexport(method)
-    let fn_ = lua.create_function(|lua_ctx, method: String| {
+    let (p, idx) = (plugin.clone(), index.clone());
+    let fn_ = lua.create_function(move |lua_ctx, method: String| {
         let reg: Table = lua_ctx.globals().get("__arbor_services__")?;
-        reg.set(method, mlua::Value::Nil)?;
+        reg.set(method.clone(), mlua::Value::Nil)?;
+        idx.unexport(&p, &method);
         Ok(())
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     svc_table.set("unexport", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -133,14 +149,15 @@ fn install_call(ctx: &ApiCtx, lua: &Lua, svc_table: &Table) -> Result<()> {
 }
 
 fn install_list(ctx: &ApiCtx, lua: &Lua, svc_table: &Table) -> Result<()> {
-    let host = ctx.host_weak.clone();
+    // Answered from the index, NOT by locking the host — see `ServiceIndex`. This used to
+    // reflect over every plugin's Lua globals under the host mutex, which deadlocked the
+    // backend outright when called from a hook (the host fires hooks while holding it) and
+    // paid a full Lua table walk per plugin per call even when it did not.
+    let index    = ctx.services.clone();
+    let activity = ctx.activity.clone();
     let fn_ = lua.create_function(move |lua_ctx, _: ()| {
         let out = lua_ctx.create_table()?;
-        if let Some(arc) = host.clone().and_then(|w| w.upgrade()) {
-            if let Ok(host) = arc.lock() {
-                for s in host.list_all_services() { out.push(s)?; }
-            }
-        }
+        for s in index.qualified(&activity) { out.push(s)?; }
         Ok(out)
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     svc_table.set("list", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;

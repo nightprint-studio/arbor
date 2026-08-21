@@ -12,7 +12,6 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let pdir     = ctx.plugin_dir.clone();
     let api_ver  = ctx.arbor_api;
     let app_ctx  = ctx.app_ctx.clone();
-    let host     = ctx.host_weak.clone();
 
     let pn = pname.clone();
     meta_table.set("plugin_name", lua.create_function(move |lua_ctx, ()| {
@@ -65,15 +64,18 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     // name is currently loaded AND enabled. Used by sibling plugins that
     // need to decide their behaviour based on whether another plugin is
     // active right now (e.g. run-action checks for run-monitor to decide
-    // whether to spawn Services jobs as hidden). Synchronous: reads the
-    // host's plugin list under the plugin_host mutex. Returns false on
-    // any lookup failure so callers can chain it as a soft check.
+    // whether to spawn Services jobs as hidden). Returns false on any
+    // lookup failure so callers can chain it as a soft check.
+    //
+    // Answered from `PluginActivity`, NOT by locking the host. The moment a plugin most
+    // wants to ask this is its own `arbor:plugin_load` hook — and the host fires that hook
+    // while holding its own mutex, so locking here re-entered a `std::sync::Mutex` on the
+    // same thread and hung the backend outright. See `PluginActivity` for the full story;
+    // the short version is that any *synchronous* host lock reachable from Lua is a
+    // deadlock waiting for a plugin to call it from a hook.
+    let activity = ctx.activity.clone();
     meta_table.set("plugin_loaded", lua.create_function(move |_, name: String| {
-        let loaded = host.as_ref()
-            .and_then(|w| w.upgrade())
-            .and_then(|arc| arc.lock().ok().map(|h| h.is_plugin_enabled(&name)))
-            .unwrap_or(false);
-        Ok(loaded)
+        Ok(activity.is_enabled(&name))
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?)
         .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
 

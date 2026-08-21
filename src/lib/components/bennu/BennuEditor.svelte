@@ -27,6 +27,10 @@
   import BennuFontView from './BennuFontView.svelte';
   import { CodeEditor } from '$lib/components/shared/ui/code-editor';
   import { tooltip } from '$lib/actions/tooltip';
+  import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
+  import { editorToolbarButtons, EDITOR_TOOLBAR_POINT } from '$lib/contributions/editor-toolbar';
+  import { firePluginAction } from '$lib/ipc/plugin';
+  import PluginIcon from '$lib/components/plugins/PluginIcon.svelte';
   import { languageForPath } from './languages';
   import {
     isImageFile, isJavaFile as isJavaFileOf, isJspFile as isJspFileOf,
@@ -2412,6 +2416,15 @@
   };
   const actionIcon = (kind: string) => ACTION_ICONS[kind] ?? Wand2;
 
+  /** Buttons the loaded plugins put on THIS file's toolbar.
+   *
+   *  A plugin declares which files it belongs on (`path_pattern`), so the bar keeps meaning
+   *  "what kind of file is this" rather than growing a fixed row of plugin icons. Nothing
+   *  here knows what any of them do — the host fires the action and the plugin decides. */
+  const pluginToolbar = $derived(
+    editorToolbarButtons(contributionStore.forPoint(EDITOR_TOOLBAR_POINT), activePath),
+  );
+
   /** A dropdown built from one contributed action's children. */
   function actionMenu(a: ExtAction): DropdownItem[] {
     return a.children.map((c) => ({
@@ -2653,6 +2666,27 @@
                 <Icon size={13} />
               </IconButton>
             {/if}
+          {/each}
+          <span class="ed-tsep"></span>
+        {/if}
+        {#if pluginToolbar.length}
+          <!-- What the loaded plugins put on THIS file's toolbar. First in the row, because a
+               plugin's button is the least expected thing here and burying it behind the
+               file-type tools is how it stays undiscovered — which is the whole reason it is
+               not only a palette entry. -->
+          {#each pluginToolbar as b (b.id)}
+            <IconButton
+              tooltip={b.tooltip}
+              size={26}
+              onclick={() => {
+                firePluginAction(b.pluginName, b.action, JSON.stringify({ path: activePath }))
+                  .catch((e) => console.error(`plugin '${b.pluginName}': action '${b.action}' failed`, e));
+              }}
+            >
+              <span class="ed-plugin-icon" style:color={b.color ?? undefined}>
+                <PluginIcon name={b.icon} size={13} />
+              </span>
+            </IconButton>
           {/each}
           <span class="ed-tsep"></span>
         {/if}
@@ -2903,6 +2937,14 @@
     border-bottom: 1px solid var(--border-subtle);
   }
   .ed-tabs :global(.tabs) { flex: 1; min-width: 0; }
+
+  /* A contributed icon inherits the IconButton's colour unless the plugin named one. */
+  .ed-plugin-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+  }
 
   .ed-toolbar {
     display: flex; align-items: center;

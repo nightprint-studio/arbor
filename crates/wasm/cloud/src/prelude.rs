@@ -10,4 +10,7 @@ pub use crate::error::{CloudError, Result};
 pub use crate::host::{
     CloudCancellations, CloudHost, CloudJobInfo, CloudJobStatus, CloudPendingOps,
 };
+pub use crate::transport::{
+    install_resolver, ObjectTransport, TransportReader, MAX_WHOLE_WRITE,
+};
 pub use crate::types::CloudConnection;

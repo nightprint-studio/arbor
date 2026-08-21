@@ -78,16 +78,28 @@ export function setMarketplaceRefreshHours(hours: number | null): Promise<void> 
 
 // ── Plugin mutations ────────────────────────────────────────────────────────
 
-export function installPlugin(name: string): Promise<MarketplacePlugin> {
-  return platform<MarketplacePlugin>('marketplace_install_plugin', { name });
+/**
+ * Install a package **for one product**.
+ *
+ * `product` is which one — installing from Corvus must not put a package in Bennu's palette.
+ * The bytes are global: a package already on disk is not downloaded again, only recorded as
+ * wanted here too.
+ */
+export function installPlugin(name: string, product: string | null): Promise<MarketplacePlugin> {
+  return platform<MarketplacePlugin>('marketplace_install_plugin', { name, product });
 }
 
 export function uninstallPlugin(name: string): Promise<MarketplacePlugin> {
   return platform<MarketplacePlugin>('marketplace_uninstall_plugin', { name });
 }
 
-export function setPluginEnabled(name: string, enabled: boolean): Promise<MarketplacePlugin> {
-  return platform<MarketplacePlugin>('marketplace_set_plugin_enabled', { name, enabled });
+/** Turn a package on or off **for one product**, leaving the others alone. */
+export function setPluginEnabled(
+  name: string,
+  enabled: boolean,
+  product: string | null,
+): Promise<MarketplacePlugin> {
+  return platform<MarketplacePlugin>('marketplace_set_plugin_enabled', { name, enabled, product });
 }
 
 // ── Theme mutations ─────────────────────────────────────────────────────────

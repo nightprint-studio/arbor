@@ -84,8 +84,10 @@
       if (modsApply && plan) {
         for (const m of plan.mods) {
           try {
-            if (!m.installed) await installPlugin(m.name);
-            await setPluginEnabled(m.name, m.enabled);
+            // Corvus by name, not by whichever surface is on screen: this is Corvus's own
+            // sync restoring Corvus's own plugin set.
+            if (!m.installed) await installPlugin(m.name, 'corvus');
+            await setPluginEnabled(m.name, m.enabled, 'corvus');
             modsDone++;
           } catch {
             modsFailed++;

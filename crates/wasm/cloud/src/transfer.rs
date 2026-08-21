@@ -29,6 +29,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::error::{CloudError, Result};
 use crate::host::{CloudHost, CloudJobInfo, CloudJobStatus};
 use crate::operator::{build, map_op_err};
+use crate::transport::{self, ObjectTransport, TransportReader};
 use crate::types::{CloudConnection, CloudProgress};
 
 const PLUGIN_NAME:    &str = "cloud-storage";
@@ -625,9 +626,25 @@ async fn stream_one_file(
     index:      usize,
 ) -> Result<()> {
     let _ = host; // reserved for per-file events later if we add them
-    let op = build(conn, bucket).await?;
-    let meta = op.stat(remote).await.map_err(map_op_err)?;
-    let total = if meta.is_file() { meta.content_length() } else { 0 };
+
+    // Same choice as a single download, made per file: `download_many` is N of these, and a
+    // provider that served one of them but not the rest would be the worst of both.
+    let via = transport::resolve_off_thread(conn, bucket).await;
+
+    // Two shapes of the same two facts: something to read from, and how much of it there is.
+    let (op, mut rd, total) = match via {
+        Some(t) => {
+            let rd = TransportReader::open(t, remote).await?;
+            let total = rd.total();
+            (None, Some(rd), total)
+        }
+        None => {
+            let op = build(conn, bucket).await?;
+            let meta = op.stat(remote).await.map_err(map_op_err)?;
+            let total = if meta.is_file() { meta.content_length() } else { 0 };
+            (Some(op), None, total)
+        }
+    };
     {
         let mut s = states.lock().await;
         s[index].bytes_total = total;
@@ -641,19 +658,30 @@ async fn stream_one_file(
         }
     }
 
-    let mut reader = op.reader(remote).await.map_err(map_op_err)?
-        .into_bytes_stream(0..)
-        .await.map_err(map_op_err)?;
     let mut file = tokio::fs::File::create(local_path).await
         .map_err(|e| CloudError::Other(format!("create {}: {e}", local_path.display())))?;
 
-    while let Some(chunk) = reader.next().await {
-        if cancel.load(Ordering::Relaxed) { return Err(CloudError::Cancelled); }
-        let bytes = chunk.map_err(|e| CloudError::Other(format!("opendal read: {e}")))?;
-        file.write_all(&bytes).await
-            .map_err(|e| CloudError::Other(format!("write {}: {e}", local_path.display())))?;
-        let mut s = states.lock().await;
-        s[index].bytes_done += bytes.len() as u64;
+    if let Some(rd) = rd.as_mut() {
+        while let Some(bytes) = rd.next_chunk().await? {
+            if cancel.load(Ordering::Relaxed) { return Err(CloudError::Cancelled); }
+            file.write_all(&bytes).await
+                .map_err(|e| CloudError::Other(format!("write {}: {e}", local_path.display())))?;
+            let mut s = states.lock().await;
+            s[index].bytes_done += bytes.len() as u64;
+        }
+    } else {
+        let op = op.expect("an opendal operator exists whenever no transport was resolved");
+        let mut reader = op.reader(remote).await.map_err(map_op_err)?
+            .into_bytes_stream(0..)
+            .await.map_err(map_op_err)?;
+        while let Some(chunk) = reader.next().await {
+            if cancel.load(Ordering::Relaxed) { return Err(CloudError::Cancelled); }
+            let bytes = chunk.map_err(|e| CloudError::Other(format!("opendal read: {e}")))?;
+            file.write_all(&bytes).await
+                .map_err(|e| CloudError::Other(format!("write {}: {e}", local_path.display())))?;
+            let mut s = states.lock().await;
+            s[index].bytes_done += bytes.len() as u64;
+        }
     }
     file.flush().await
         .map_err(|e| CloudError::Other(format!("flush {}: {e}", local_path.display())))?;
@@ -695,6 +723,11 @@ async fn run_download(
     conn: &CloudConnection, bucket: &str, remote: &str, local: &Path,
     cancel: Arc<AtomicBool>,
 ) -> Result<()> {
+    // A provider package serves this bucket, or nothing is installed and this is `None` —
+    // in which case everything below is exactly what it always was.
+    if let Some(t) = transport::resolve_off_thread(conn, bucket).await {
+        return download_via_transport(host, job_id, conn, bucket, remote, local, cancel, t).await;
+    }
     let op = build(conn, bucket).await?;
     let meta = op.stat(remote).await.map_err(map_op_err)?;
     let total = if meta.is_file() { meta.content_length() } else { 0 };
@@ -733,6 +766,24 @@ async fn run_upload(
     conn: &CloudConnection, bucket: &str, remote: &str, local: &Path,
     overwrite: bool, cancel: Arc<AtomicBool>,
 ) -> Result<()> {
+    // Size decides before the provider does. `write` hands over a whole body, so above the
+    // cap the answer is the in-process path — which streams — rather than a provider that
+    // would try to hold the file twice in 32-bit memory.
+    if transport::is_installed() {
+        let len = tokio::fs::metadata(local).await.map(|m| m.len()).unwrap_or(u64::MAX);
+        if len <= transport::MAX_WHOLE_WRITE {
+            if let Some(t) = transport::resolve_off_thread(conn, bucket).await {
+                return upload_via_transport(
+                    host, job_id, conn, bucket, remote, local, overwrite, cancel, t,
+                ).await;
+            }
+        } else {
+            tracing::info!(
+                "cloud: {remote} is {len} bytes — above the {} a provider can take in one write,                  streaming it in-process instead",
+                transport::MAX_WHOLE_WRITE
+            );
+        }
+    }
     let op = build(conn, bucket).await?;
 
     if !overwrite {
@@ -773,6 +824,84 @@ async fn run_upload(
         ticker.maybe_emit(host, job_id, &conn.config_id, "upload", bucket, remote);
     }
     writer.close().await.map_err(map_op_err)?;
+    ticker.final_emit(host, job_id, &conn.config_id, "upload", bucket, remote);
+    Ok(())
+}
+
+// ── the same two transfers, served by a provider ───────────────────────────
+//
+// Mirror images of `run_download` / `run_upload` above, and deliberately so: the job, the
+// ticker, the cancellation check and the emitted events are the same, because from the
+// outside these ARE the same operation. Only the bytes arrive differently.
+
+#[allow(clippy::too_many_arguments)]
+async fn download_via_transport(
+    host: &dyn CloudHost, job_id: &str,
+    conn: &CloudConnection, bucket: &str, remote: &str, local: &Path,
+    cancel: Arc<AtomicBool>, transport: Arc<dyn ObjectTransport>,
+) -> Result<()> {
+    let mut rd = TransportReader::open(transport, remote).await?;
+
+    if let Some(parent) = local.parent() {
+        if !parent.as_os_str().is_empty() {
+            tokio::fs::create_dir_all(parent).await
+                .map_err(|e| CloudError::Other(format!("mkdir {}: {e}", parent.display())))?;
+        }
+    }
+    let mut file = tokio::fs::File::create(local).await
+        .map_err(|e| CloudError::Other(format!("create {}: {e}", local.display())))?;
+
+    let mut ticker = ProgressTicker::new(rd.total());
+    while let Some(bytes) = rd.next_chunk().await? {
+        // Checked after the read rather than before it: a ranged read is one request, and
+        // cancelling between requests is the finest grain this shape offers.
+        if cancel.load(Ordering::Relaxed) { return Err(CloudError::Cancelled); }
+        file.write_all(&bytes).await
+            .map_err(|e| CloudError::Other(format!("write {}: {e}", local.display())))?;
+        ticker.advance(bytes.len() as u64);
+        ticker.maybe_emit(host, job_id, &conn.config_id, "download", bucket, remote);
+    }
+    file.flush().await
+        .map_err(|e| CloudError::Other(format!("flush {}: {e}", local.display())))?;
+    ticker.final_emit(host, job_id, &conn.config_id, "download", bucket, remote);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn upload_via_transport(
+    host: &dyn CloudHost, job_id: &str,
+    conn: &CloudConnection, bucket: &str, remote: &str, local: &Path,
+    overwrite: bool, cancel: Arc<AtomicBool>, transport: Arc<dyn ObjectTransport>,
+) -> Result<()> {
+    if !overwrite {
+        let t = transport.clone();
+        let key = remote.to_string();
+        if transport::spawn_blocking_or_err(move || t.exists(&key)).await? {
+            return Err(CloudError::Other(format!(
+                "destination already exists: {bucket}:{remote} (pass overwrite=true to replace)"
+            )));
+        }
+    }
+
+    // Read whole, then write whole. `write` takes a complete body, so there is no point
+    // streaming the file in: the caller already refused to come here above the cap.
+    let body = tokio::fs::read(local).await
+        .map_err(|e| CloudError::Other(format!("read {}: {e}", local.display())))?;
+    let total = body.len() as u64;
+
+    // The last moment cancelling costs nothing. After this the request is in flight and there
+    // is no chunk boundary to stop at — which is the honest trade for a whole-body write, and
+    // the reason the cap is where it is.
+    if cancel.load(Ordering::Relaxed) { return Err(CloudError::Cancelled); }
+
+    let mut ticker = ProgressTicker::new(total);
+    ticker.maybe_emit(host, job_id, &conn.config_id, "upload", bucket, remote);
+
+    let t = transport.clone();
+    let key = remote.to_string();
+    transport::spawn_blocking_or_err(move || t.write_whole(&key, body, None)).await?;
+
+    ticker.advance(total);
     ticker.final_emit(host, job_id, &conn.config_id, "upload", bucket, remote);
     Ok(())
 }

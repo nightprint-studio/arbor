@@ -72,6 +72,7 @@
   import FormNodeEditor        from './form-nodes/FormNodeEditor.svelte';
   import FormNodeDiff          from './form-nodes/FormNodeDiff.svelte';
   import FormNodeTree          from './form-nodes/FormNodeTree.svelte';
+  import FormNodeEmbed         from './form-nodes/FormNodeEmbed.svelte';
   import FormNodeVecField      from './form-nodes/FormNodeVecField.svelte';
   import FormNodePropertyGrid  from './form-nodes/FormNodePropertyGrid.svelte';
   import FormNodePipelineEditor from './form-nodes/FormNodePipelineEditor.svelte';
@@ -210,8 +211,8 @@
           fill((n as any).nodes);
         }
         if ('children' in n && Array.isArray((n as any).children)) walk((n as any).children);
-        if (n.type === 'tabs')   for (const t of (n as any).tabs ?? []) walk(t.children ?? []);
-        if (n.type === 'wizard') for (const s of (n as any).steps ?? []) walk(s.children ?? []);
+        if (n.type === 'tabs')   for (const t of toArr<any>((n as any).tabs)) walk(t.children);
+        if (n.type === 'wizard') for (const s of toArr<any>((n as any).steps)) walk(s.children);
         if (n.type === 'switch') {
           const s = n as any;
           for (const arr of Object.values(s.cases ?? {})) walk(arr as FormNode[]);
@@ -249,8 +250,8 @@
           }
         }
         if ('children' in n && Array.isArray((n as any).children)) walk((n as any).children);
-        if (n.type === 'tabs')   for (const t of (n as any).tabs ?? []) walk(t.children ?? []);
-        if (n.type === 'wizard') for (const s of (n as any).steps ?? []) walk(s.children ?? []);
+        if (n.type === 'tabs')   for (const t of toArr<any>((n as any).tabs)) walk(t.children);
+        if (n.type === 'wizard') for (const s of toArr<any>((n as any).steps)) walk(s.children);
         if (n.type === 'tree_layout') {
           walk((n as any).nav_children ?? []);
           walk((n as any).content_children ?? []);
@@ -307,8 +308,8 @@
           }
         }
         if ('children' in n && Array.isArray((n as any).children)) walk((n as any).children);
-        if (n.type === 'tabs')   for (const t of (n as any).tabs ?? []) walk(t.children ?? []);
-        if (n.type === 'wizard') for (const s of (n as any).steps ?? []) walk(s.children ?? []);
+        if (n.type === 'tabs')   for (const t of toArr<any>((n as any).tabs)) walk(t.children);
+        if (n.type === 'wizard') for (const s of toArr<any>((n as any).steps)) walk(s.children);
         if (n.type === 'tree_layout') {
           walk((n as any).nav_children ?? []);
           walk((n as any).content_children ?? []);
@@ -366,7 +367,7 @@
     const overrideOpts = resolvedOptions(field as any);
     const base =
       field.source_action ? (autoDynOptions[field.id] ?? [])
-      : ((overrideOpts ?? field.options ?? []) as any[]).map(o =>
+      : toArr<any>(overrideOpts ?? field.options).map(o =>
           typeof o === 'string' ? { value: o, label: prettify(o) } : o
         );
     const lq = (q ?? '').toLowerCase();
@@ -452,7 +453,7 @@
           state?: Record<string, unknown>;
           set_values?: Record<string, unknown>;
         };
-        const newNodes = (cfg.nodes ?? []).map(normalizeNode);
+        const newNodes = toArr<FormNode>(cfg.nodes).map(normalizeNode);
 
         const snapshot = { ...values };
         const fresh: Record<string, any> = {};
@@ -707,10 +708,10 @@
 
   function wizardStepIndex(w: any): number {
     const cur = wizardStepMap[w.id];
-    return Math.max(0, (w.steps ?? []).findIndex((s: any) => s.id === cur));
+    return Math.max(0, toArr<any>(w.steps).findIndex((s: any) => s.id === cur));
   }
   function wizardGoTo(w: any, idx: number) {
-    const steps = w.steps ?? [];
+    const steps = toArr<any>(w.steps);
     const clamped = Math.max(0, Math.min(steps.length - 1, idx));
     wizardStepMap[w.id] = steps[clamped]?.id ?? wizardStepMap[w.id];
   }
@@ -719,22 +720,24 @@
   // Listens in the CAPTURE phase and `stopImmediatePropagation` so AppShell's
   // window-level handler doesn't see the event when a modal owns the binding.
   onMount(() => {
-    function firstCollapsibleTreeLayoutId(list: FormNode[]): string | null {
-      for (const n of list) {
+    function firstCollapsibleTreeLayoutId(list: unknown): string | null {
+      if (!Array.isArray(list)) return null;
+      for (const n of list as FormNode[]) {
         if (n.type === 'tree_layout' && (n as any).nav_collapsible) return n.id ?? null;
         if ('children' in n && Array.isArray((n as any).children)) {
           const hit = firstCollapsibleTreeLayoutId((n as any).children);
           if (hit) return hit;
         }
         if (n.type === 'tabs') {
-          for (const t of (n as any).tabs ?? []) {
-            const hit = firstCollapsibleTreeLayoutId(t.children ?? []);
+          for (const t of toArr<any>((n as any).tabs)) {
+            const hit = firstCollapsibleTreeLayoutId(toArr(t.children));
             if (hit) return hit;
           }
         }
         if (n.type === 'tree_layout') {
           const hit = firstCollapsibleTreeLayoutId(
-            [...((n as any).nav_children ?? []), ...((n as any).content_children ?? [])]);
+            [...toArr<FormNode>((n as any).nav_children),
+             ...toArr<FormNode>((n as any).content_children)]);
           if (hit) return hit;
         }
       }
@@ -1045,10 +1048,10 @@
     const hay = `${t.label ?? ''}\n${t.group ?? ''}\n${t.meta ?? ''}\n${t.tooltip ?? ''}`.toLowerCase();
     return hay.includes(navQuery);
   }}
-  {@const filteredTabs = (sidebarNode.tabs ?? []).filter(tabMatches)}
+  {@const filteredTabs = toArr<any>(sidebarNode.tabs).filter(tabMatches)}
   {@const visibleActive = filteredTabs.find((t: any) => t.id === sidebarTabId) ?? filteredTabs[0]}
-  {@const sidebarActiveTab = visibleActive ?? (sidebarNode.tabs ?? []).find((t: any) => t.id === sidebarTabId)}
-  {@const totalTabs = (sidebarNode.tabs ?? []).length}
+  {@const sidebarActiveTab = visibleActive ?? toArr<any>(sidebarNode.tabs).find((t: any) => t.id === sidebarTabId)}
+  {@const totalTabs = toArr<any>(sidebarNode.tabs).length}
   {@const hiddenTabs = Math.max(0, totalTabs - filteredTabs.length)}
   {@const navGroups = (() => {
     const groups: { label?: string; items: any[] }[] = [];
@@ -1126,7 +1129,7 @@
     </nav>
     <div class="pf-sidebar-content" class:pf-sidebar-content-flush={sidebarActiveTab?.flush}>
       {#if sidebarActiveTab}
-        {#each (sidebarActiveTab.children ?? []) as child (child.id)}
+        {#each toArr<any>(sidebarActiveTab.children) as child (child.id)}
           {@render renderNode(child)}
         {/each}
       {/if}
@@ -1165,7 +1168,7 @@
       role="menu"
       in:fly={{ y: -4, duration: animStore.dFast, easing: cubicOut }}
     >
-      {#each (mn.options ?? []) as opt, i (i)}
+      {#each toArr<any>(mn.options) as opt, i (i)}
         {#if opt.separator || (!opt.label && !opt.action)}
           <div class="pf-menu-sep" role="separator"></div>
         {:else if opt.heading}
@@ -1221,6 +1224,8 @@
       <FormNodeDiff {node} {ctx} />
     {:else if (node.type as string) === 'tree'}
       <FormNodeTree {node} {ctx} {renderNode} />
+    {:else if (node.type as string) === 'embed'}
+      <FormNodeEmbed {node} {ctx} />
     {:else if (node.type as string) === 'vec_field'}
       <FormNodeVecField {node} {ctx} />
     {:else if (node.type as string) === 'property_grid'}

@@ -25,8 +25,8 @@ use arbor_plugin_types::prelude::{
 
 use crate::contribution::ContributionRegistry;
 use crate::runtime::host::PluginHost;
-use crate::runtime::loaded::{TimerCancels, TimerCounter};
-use crate::sandbox::ApiInstallParams;
+use crate::runtime::loaded::{PluginActivity, ServiceIndex, TimerCancels, TimerCounter};
+use crate::sandbox::{ApiInstallParams, SandboxRegistries};
 use crate::tree::{IconRegistry, TreeStore};
 
 /// Snapshot of everything a namespace closure may capture. All fields are
@@ -80,11 +80,22 @@ pub struct ApiCtx {
     pub service_call:        bool,
     pub settings_read_others: bool,
     pub command_invoke:      bool,
+    /// Keys of the credential slots the manifest declared. The whole of what
+    /// `arbor.credentials` will resolve — anything else is refused before it can reach the
+    /// store. See `arbor_plugin_types::credentials` for why this is a namespace and not a
+    /// denylist.
+    pub credential_slots:    Vec<String>,
 
     // ── Shared registries ────────────────────────────────────────────────
     pub contributions: ContributionRegistry,
     pub tree_store:    TreeStore,
     pub icon_registry: IconRegistry,
+    /// Which sibling plugins are live. Read by `arbor.meta.plugin_loaded`, which must answer
+    /// from inside a hook — i.e. while the host holds its own mutex.
+    pub activity:      PluginActivity,
+    /// Which cross-plugin services exist. Written by `arbor.service.export`, read by
+    /// `arbor.service.list`, for the same reason.
+    pub services:      ServiceIndex,
 
     /// Live enable flag — closures consult this to no-op cleanly when the
     /// plugin is disabled mid-call.
@@ -104,16 +115,25 @@ impl ApiCtx {
             product,
             app_ctx,
             host_weak,
+            registries,
+            scheduler_enabled,
+            permissions,
+            credential_slots,
+            enabled,
+        } = params;
+
+        // Flattened here on purpose: `ApiCtx` is what a namespace closure captures, and a
+        // closure wants the one handle it uses, not the bag the sandbox was built from.
+        let SandboxRegistries {
             timer_cancels,
             timer_counter,
             schedules,
-            scheduler_enabled,
-            permissions,
             contributions,
             tree_store,
             icon_registry,
-            enabled,
-        } = params;
+            activity,
+            services,
+        } = registries;
 
         // env_read is consumed by sandbox.rs (harden_os_table); not used here.
         let Permissions {
@@ -165,9 +185,12 @@ impl ApiCtx {
             service_call,
             settings_read_others,
             command_invoke,
+            credential_slots,
             contributions,
             tree_store,
             icon_registry,
+            activity,
+            services,
             enabled,
         }
     }

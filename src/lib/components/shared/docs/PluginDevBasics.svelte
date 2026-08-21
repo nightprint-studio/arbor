@@ -10,7 +10,7 @@
 <dl class="meta-grid">
   <dt>Runtime</dt><dd>Lua 5.4 (vendored) — no system Lua needed</dd>
   <dt>Manifest</dt><dd><code>plugin.toml</code> — required</dd>
-  <dt>Entry point</dt><dd><code>main.lua</code> by default; override with <code>entry</code></dd>
+  <dt>Entry point</dt><dd><code>main.lua</code> by default; override with <code>[lua] entry</code></dd>
   <dt>API version</dt><dd>Declare minimum required via <code>arbor_api</code></dd>
   <dt>Sandbox</dt><dd><code>require()</code> scoped to the plugin dir; dangerous stdlib removed</dd>
 </dl>
@@ -19,7 +19,7 @@
 <pre><code>plugins/
   my-plugin/
     plugin.toml       ← manifest (required)
-    main.lua          ← entry point (default; override with entry = "…")
+    main.lua          ← entry point (default; override with [lua] entry = "…")
     doc.html          ← optional: HTML docs shown in this panel under Plugins
     lib/utils.lua     ← require("lib.utils") works inside the plugin sandbox
     config/
@@ -88,6 +88,42 @@
 </div>
 <div class="hint">The Info modal stays in sync with backend events — reloading plugins or toggling the master switch refreshes its content automatically.</div>
 
+<h2>Plugins and extensions</h2>
+<p>
+  Two kinds of package can sit in <code>plugins/</code>, and the difference is which way the
+  call goes.
+</p>
+<div class="feature-grid two-col">
+  <div class="feature-card">
+    <div class="fc-title">A plugin calls Arbor</div>
+    <div class="fc-desc">
+      Lua. It reacts to a hook, opens a form, registers a command, reads a setting. Everything
+      on this page is about writing one, and it is what almost every package is.
+    </div>
+  </div>
+  <div class="feature-card">
+    <div class="fc-title">An extension answers Arbor</div>
+    <div class="fc-desc">
+      A compiled WebAssembly component implementing an interface the host defines — a Studio
+      format backend, a cloud provider. Arbor calls <em>into</em> it when it needs a parse or a
+      listing, so it has no hooks, no settings and no on/off of its own. Declared with
+      <code>[[provides]]</code>, and listed in its own section of the Plugin Manager.
+    </div>
+  </div>
+</div>
+<p>
+  One package can be both — a cloud connector is a panel and a backend — but the cleaner shape
+  is two packages, one depending on the other, so somebody who only uses S3 never carries
+  Google's OAuth code. An extension needs none of the <code>arbor.*</code> API: it implements a
+  contract rather than consuming one.
+</p>
+<p>
+  An interface is drawn at whole answers, not at operations. A cloud provider is asked to list,
+  to stat, and to read a byte range — so a download's progress bar, its Cancel button and its
+  row in the job list stay Arbor's, and only the bytes come from the package. That is why an
+  extension can be replaced or uninstalled without any of that changing: it never owned it.
+</p>
+
 <h2>plugin.toml</h2>
 <pre class="language-toml">{@html highlight(`[plugin]
 name        = "my-plugin"
@@ -101,8 +137,13 @@ min_arbor_version = "0.1.0"  # optional; rejects plugin on older builds (semver)
 arbor_api         = 1        # minimum Arbor plugin API version required
 os                = []       # ["windows", "linux", "macos"] — empty = cross-platform
 targets           = []       # products this plugin runs on, e.g. ["corvus"]; empty = every product
-entry             = "main.lua" # default; can be changed
 doc_file          = "doc.html" # optional: HTML file shown in the Docs panel
+
+# The Lua half of the package. Omit the whole section to accept main.lua — which is
+# what every ordinary plugin does. A package that carries no Lua at all omits it too,
+# and says so by declaring what it provides instead (see below).
+[lua]
+entry = "main.lua"
 
 [permissions]
 network              = []          # allowed hostnames for arbor.http.get
@@ -119,6 +160,40 @@ env_read             = ["PATH", "JAVA_HOME"]
 # service_export       = false    # arbor.service.export — expose callable services
 # settings_read_others = false    # arbor.settings.read other plugins' globals
 # command_invoke       = false    # arbor.command.fire — invoke registered commands
+
+# What this package implements beyond Lua. A Studio format backend, a cloud
+# provider — an interface the host defines and calls INTO, rather than an API the
+# plugin calls out to. Omit it entirely for an ordinary plugin, which is what
+# almost every package is.
+#
+#   interface — which contract
+#   version   — the version of THAT contract, independent of this package's own
+#               version and of arbor_api: the three move for different reasons
+#   id        — which member of the interface this is
+#   module    — the compiled file, shipped as a release asset (never committed)
+#
+# A package with any [[provides]] installs from a GitHub release instead of a
+# source archive, and every asset is verified against a digest the registry
+# recorded. See the marketplace README for how to cut one.
+[[provides]]
+interface = "studio-format"
+version   = 1
+id        = "json"
+module    = "studio_json.wasm"
+
+[wasm]
+target = "wasm32-wasip2"   # the ABI the modules were built for
+
+# Credential slots this package owns. A plugin can create and read the slots it
+# declared here and NOTHING else — it can never reach the credentials Arbor keeps for
+# itself (git provider tokens, the MCP token). Enforced as a namespace rather than a
+# filter: the API resolves a key inside the declaring package's own space, so Arbor's
+# entries are not hidden from a plugin, they are unnameable by one.
+# Declaring the slots rather than a flag is what lets the consent dialog say WHAT will
+# be stored instead of "this plugin uses credentials".
+[[credentials]]
+key   = "oauth"
+label = "Google account"
 
 # Hook names are "<product>:<event>"; quote them, a colon is not a legal
 # bare TOML key. "arbor:" hooks fire under every product; "corvus:" ones only

@@ -39,6 +39,7 @@
     PluginFormConfig, FormNode, FormActivityBarItem, FormSidecarCfg,
   } from '$lib/types/plugin';
   import { firePluginAction } from '$lib/ipc/plugin';
+  import { toArr }           from './form-nodes/helpers';
   import { uiStore }          from '$lib/stores/ui.svelte';
 
   let {
@@ -112,10 +113,26 @@
   validationRules = collectValidation(form.nodes);
 
   // ── Custom CSS injection ────────────────────────────────────────────────
+  //
+  // Scoped to THIS modal, and that is the whole point. The stylesheet is authored by a
+  // plugin, and injecting it bare into `document.head` — which is what this did — meant a
+  // plugin styling its own form was styling the application: one `button { display: none }`
+  // and every button in Arbor disappears, including the ones that would let you uninstall
+  // the plugin that did it.
+  //
+  // Wrapped in the modal's own `data-scope-id` rather than rewritten selector by selector.
+  // A textual prefixer has to understand `@media`, `@supports`, `:is()` and comments to be
+  // right, and one that is wrong is worse than none — CSS nesting already does exactly this
+  // and is implemented by the engine.
+  //
+  // Nesting is Chromium 112 / Safari 16.5 / WebKitGTK 2.42. A viewer older than that
+  // ignores the block, so a plugin's styling stops applying rather than escaping.
+  const cssScopeId = $derived(`plugin-${form.plugin_name.replace(/[^a-zA-Z0-9_-]/g, '-')}`);
+
   onMount(() => {
     if (!form.css) return;
     const el = document.createElement('style');
-    el.textContent = form.css;
+    el.textContent = `[data-scope-id="${cssScopeId}"] {\n${form.css}\n}`;
     el.dataset.arborPlugin = form.plugin_name;
     document.head.appendChild(el);
     return () => el.remove();
@@ -157,12 +174,15 @@
 
   function pickItems(side: 'left' | 'right'): FormActivityBarItem[] {
     if (!activityBar) return [];
+    // `toArr`, not `?? []` — an activity bar declared with no items on one
+    // side arrives from Lua as `{}`, and an object survives the nullish
+    // fallback only to break `.length` and `{#each}` downstream.
     if (activityBar.side === 'both') {
       return side === 'left'
-        ? (activityBar.left_items ?? [])
-        : (activityBar.right_items ?? []);
+        ? toArr<FormActivityBarItem>(activityBar.left_items)
+        : toArr<FormActivityBarItem>(activityBar.right_items);
     }
-    return activityBar.side === side ? (activityBar.items ?? []) : [];
+    return activityBar.side === side ? toArr<FormActivityBarItem>(activityBar.items) : [];
   }
   const leftItems  = $derived(pickItems('left'));
   const rightItems = $derived(pickItems('right'));
@@ -268,6 +288,16 @@
   // ── Submit / cancel ─────────────────────────────────────────────────────
   let submitting = $state(false);
 
+  /** Whether this form has anything to submit.
+   *
+   *  `hide_submit` is the plugin asking; a missing `submit_action` is the form telling. Some
+   *  forms are not questions — a preview, a live monitor, a report — and they say so by
+   *  declaring no submit action. Rendering a Submit for one of those produced a button that
+   *  fired `null` at the backend and came back as
+   *  "arg 'action': invalid type: null, expected a string": a shrug in the user's face for
+   *  pressing the most prominent control in the dialog. */
+  const canSubmit = $derived(!form.hide_submit && !!form.submit_action);
+
   function collectAllRefs(): ZoneRef[] {
     const refs: ZoneRef[] = [bodyRenderer];
     if (headerLeftRef)   refs.push(headerLeftRef);
@@ -319,6 +349,9 @@
   }
 
   async function handleSubmit() {
+    // Belt and braces: the button is gated on the same condition, but an action fired from a
+    // node (`submit` on a button) reaches here too.
+    if (!form.submit_action) return;
     const values = aggregateValues();
     for (const [name, rule] of Object.entries(validationRules)) {
       const v = String(values[name] ?? '');
@@ -345,7 +378,12 @@
   }
 
   async function handleCancel() {
-    if (form.cancel_action) {
+    // `form` is typed non-null, and during the modal's close animation it is
+    // not: the parent's `{#if pendingPluginForm}` nulls the prop before the
+    // branch is torn down. Modal now refuses input while it animates out, so
+    // this is belt-and-braces — but a cancel handler is the last thing that
+    // should throw on the way out.
+    if (form?.cancel_action) {
       const liveState = bodyRenderer?.getLiveState();
       try {
         await firePluginAction(form.plugin_name, form.cancel_action,
@@ -434,6 +472,7 @@
   height={form.height}
   padBody={false}
   ariaLabel="Plugin Form"
+  scopeId={cssScopeId}
   showLeftRail={hasActivityBar && (activityBarSide === 'left'  || activityBarSide === 'both') && leftItems.length  > 0}
   showRightRail={hasActivityBar && (activityBarSide === 'right' || activityBarSide === 'both') && rightItems.length > 0}
 >
@@ -667,7 +706,7 @@
               {form.cancel_label ?? 'Cancel'}
             </Button>
           {/if}
-          {#if !form.hide_submit}
+          {#if canSubmit}
             <Button variant="primary" onclick={handleSubmit} disabled={submitting}>
               {#snippet iconStart()}<Send size={12} />{/snippet}
               {form.submit_label ?? 'Submit'}
@@ -696,13 +735,13 @@
             {wizardInfo.nextLabel}
             {#snippet iconEnd()}<ChevronRight size={12} />{/snippet}
           </Button>
-        {:else if !form.hide_submit}
+        {:else if canSubmit}
           <Button variant="primary" onclick={handleSubmit} disabled={submitting}>
             {#snippet iconStart()}<Send size={12} />{/snippet}
             {form.submit_label ?? 'Submit'}
           </Button>
         {/if}
-      {:else if !form.hide_submit}
+      {:else if canSubmit}
         <Button variant="primary" onclick={handleSubmit} disabled={submitting}>
           {#snippet iconStart()}<Send size={12} />{/snippet}
           {form.submit_label ?? 'Submit'}

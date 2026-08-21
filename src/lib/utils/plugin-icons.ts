@@ -14,7 +14,7 @@ import {
   // Core / placeholders
   Zap, Circle,
   // Run / playback
-  Play, Pause, Square, SkipForward, RotateCw, RefreshCw,
+  Play, Pause, Square, SkipForward, RotateCw, RefreshCw, Shuffle,
   // Build / packaging
   Hammer, Wrench, Package, PackageSearch, PackageCheck, PackagePlus,
   Rocket, Upload, Download, Save, Trash, Trash2, Archive,
@@ -86,7 +86,7 @@ import {
 
 export const PLUGIN_ICONS: Record<string, any> = {
   Zap, Circle,
-  Play, Pause, Square, SkipForward, RotateCw, RefreshCw,
+  Play, Pause, Square, SkipForward, RotateCw, RefreshCw, Shuffle,
   Hammer, Wrench, Package, PackageSearch, PackageCheck, PackagePlus,
   Rocket, Upload, Download, Save, Trash, Trash2, Archive,
   Plus, Minus, Check, X, Pencil, PenSquare, PencilLine, Edit, Edit2,

@@ -58,6 +58,55 @@ impl AppCtx for TauriAppCtx {
         crate::plugin_logs::record(&self.handle, level, plugin, message.to_string());
     }
 
+    // ── Plugin-owned credentials ──────────────────────────────────────────
+    //
+    // Stored in the same single-keychain-item vault as everything else, under an account
+    // `arbor_plugin_types::credentials::account` builds. That function is the only way to
+    // name one, and it can only produce `plugin/<name>/<key>` — so the git-provider tokens
+    // and issue-tracker keys sitting beside them in the same map are not filtered out of a
+    // plugin's reach, they are unnameable from it.
+    //
+    // Whether the plugin was allowed to ask for this key at all was decided at the API gate,
+    // against the slots its manifest declared. This layer re-validates the key's *shape*
+    // because that is what keeps the namespace intact, and shape is cheap to check twice.
+
+    // ── Extensions ───────────────────────────────────────────────────────
+    //
+    // The shell owns the wasm engine, so this is where a call actually happens. `plugin` is
+    // carried for the log line and nothing else: the gate ran at the API boundary, and the
+    // extension's own capabilities come from ITS manifest, never from the caller's.
+
+    fn ext_surface(&self, _plugin: &str) -> Result<String, String> {
+        serde_json::to_string(&crate::ext::surface()).map_err(|e| e.to_string())
+    }
+
+    fn ext_call(&self, plugin: &str, spec_json: &str) -> Result<String, String> {
+        let spec: crate::ext::CallSpec = serde_json::from_str(spec_json)
+            .map_err(|e| format!("arbor.ext.call: {e}"))?;
+        tracing::debug!("[{plugin}] ext.call {}@{}/{} {}",
+            spec.interface, spec.version, spec.id, spec.method);
+        let out = crate::ext::call(&spec)?;
+        serde_json::to_string(&out).map_err(|e| e.to_string())
+    }
+
+    fn credential_get(&self, plugin: &str, key: &str) -> Result<Option<String>, String> {
+        let account = arbor_plugin_types::prelude::credential_account(plugin, key)
+            .map_err(|e| e.to_string())?;
+        crate::auth::credential_store::get(&account, "").map_err(|e| e.to_string())
+    }
+
+    fn credential_set(&self, plugin: &str, key: &str, value: &str) -> Result<(), String> {
+        let account = arbor_plugin_types::prelude::credential_account(plugin, key)
+            .map_err(|e| e.to_string())?;
+        crate::auth::credential_store::save(&account, "", value).map_err(|e| e.to_string())
+    }
+
+    fn credential_delete(&self, plugin: &str, key: &str) -> Result<(), String> {
+        let account = arbor_plugin_types::prelude::credential_account(plugin, key)
+            .map_err(|e| e.to_string())?;
+        crate::auth::credential_store::delete(&account, "").map_err(|e| e.to_string())
+    }
+
     fn active_repo_path(&self) -> Option<PathBuf> {
         // Read the cached active-tab path (kept fresh by `set_active_tab`). The
         // launcher holds no repo registry, and this can run inside a corvus-be

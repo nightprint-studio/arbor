@@ -44,6 +44,7 @@
     FormTableColumn, FormFieldAutocomplete, FormSelectOption,
   } from '$lib/types/plugin';
   import type { FormNodeCtx } from './ctx';
+  import { toArr } from './helpers';
 
   interface Props {
     node: FormNode;
@@ -77,8 +78,12 @@
     style={(node as any).style}
   >
     {#if n.label}
+      <!-- Same rule as the value-bearing branch below: in a compact row the tooltip carries
+           the hint, or the label when the fixed-width column clipped it. -->
       <!-- svelte-ignore a11y_label_has_associated_control -->
-      <label class="pf-label">{n.label}</label>
+      <label class="pf-label" use:tooltip={n.compact ? (n.hint ?? n.label ?? '') : ''}>
+        {n.label}
+      </label>
     {/if}
 
     {#if fk === 'readonly'}
@@ -118,7 +123,7 @@
       </label>
 
     {:else if fk === 'select'}
-      {@const opts = (n.options as any[]) ?? []}
+      {@const opts = toArr<any>(n.options)}
       <select
         class="pf-input pf-select-trigger"
         value={String(n.value ?? '')}
@@ -152,7 +157,16 @@
   >
     <!-- Label — skipped for checkbox/toggle (have their own inline label). -->
     {#if node.type !== 'checkbox' && node.type !== 'toggle' && n.label}
-      <label class="pf-label" for="pf-{n.name}">
+      <!-- In a compact row the tooltip carries the hint, and the label when there is no
+           hint — the column is fixed-width, so a long name is clipped and needs somewhere to
+           be read in full. The hint moves here rather than staying a line below because
+           `compact` means "this row is one line", and a sentence under every control in a
+           ten-parameter material is the panel that made compact worth having. -->
+      <label
+        class="pf-label"
+        for="pf-{n.name}"
+        use:tooltip={n.compact ? (n.hint ?? n.label ?? '') : ''}
+      >
         {n.label}
         {#if n.required}<span class="pf-required" aria-hidden="true">*</span>{/if}
       </label>
@@ -443,20 +457,38 @@
       </div>
 
     {:else if node.type === 'color'}
-      <div class="pf-color-row">
+      <!-- `show_hex = false` leaves the swatch alone, which then takes the whole
+           control column — the shape a dense colour row wants (mirrors the
+           `show_value` opt-out on `range`). Both inputs fire `actions.change`:
+           without it a colour was the one editable field whose value never left
+           the panel. -->
+      <div class="pf-color-row" class:pf-color-swatch-only={n.show_hex === false}>
         <input
           id="pf-{n.name}"
           class="pf-color-swatch"
           type="color"
-          disabled={n.readonly ?? false}
+          disabled={(n.readonly ?? false) || ctx.resolvedDisabled(n)}
+          oninput={() => {
+            const v = ctx.values[n.name];
+            ctx.notifyChange(n.name, v);
+            if (n.actions?.change) ctx.fireFieldChangeDebounced(n, v, n.debounce_ms ?? 250);
+          }}
           bind:value={ctx.values[n.name]}
         />
-        <input
-          class="pf-input pf-color-hex"
-          type="text"
-          placeholder="#000000"
-          bind:value={ctx.values[n.name]}
-        />
+        {#if n.show_hex !== false}
+          <input
+            class="pf-input pf-color-hex"
+            type="text"
+            placeholder="#000000"
+            disabled={ctx.resolvedDisabled(n)}
+            oninput={() => {
+              const v = ctx.values[n.name];
+              ctx.notifyChange(n.name, v);
+              if (n.actions?.change) ctx.fireFieldChangeDebounced(n, v, n.debounce_ms ?? 250);
+            }}
+            bind:value={ctx.values[n.name]}
+          />
+        {/if}
       </div>
 
     {:else if node.type === 'file'}
@@ -588,7 +620,7 @@
           />
           {#if n.suggestions}
             <datalist id={`pf-tagsrc-${n.id}`}>
-              {#each n.suggestions as sug}<option value={sug}></option>{/each}
+              {#each toArr<string>(n.suggestions) as sug}<option value={sug}></option>{/each}
             </datalist>
           {/if}
         {/if}
@@ -596,7 +628,7 @@
 
     {:else if node.type === 'table'}
       {@const rows = Array.isArray(ctx.values[n.name]) ? (ctx.values[n.name] as Record<string, any>[]) : []}
-      {@const cols = (n.columns ?? []) as FormTableColumn[]}
+      {@const cols = toArr<FormTableColumn>(n.columns)}
       {@const tableReadonly = n.readonly ?? false}
       {@const rowActions = Array.isArray(n.row_actions) ? n.row_actions : []}
       {@const showDeleteSlot = !n.hide_delete && !tableReadonly}
@@ -769,7 +801,8 @@
     {#if ctx.validationErrors[n.name]}
       <span class="pf-validation-error">{ctx.validationErrors[n.name]}</span>
     {/if}
-    {#if n.hint}
+    <!-- Not in a compact row: there it is the label's tooltip, above. -->
+    {#if n.hint && !n.compact}
       <span class="pf-hint">{n.hint}</span>
     {/if}
     {#if n.pill}

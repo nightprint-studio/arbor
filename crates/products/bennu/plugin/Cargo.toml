@@ -1,0 +1,17 @@
+[package]
+name         = "bennu-plugin"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The Bennu product's headless `arbor.*` API installer: the host-pure namespaces plus `arbor.shader`, so a plugin can ask the editor what a WGSL material declares instead of parsing it again."
+
+[dependencies]
+arbor-plugin-core = { path = "../../../platform/plugin/core" }
+bennu-wgsl        = { path = "../wgsl" }
+
+# Workspace-pinned (see root) so the installer's `&Lua` is the very same type as
+# arbor-plugin-core's — one shared mlua artifact. Naming it here is why `bennu-be`
+# does not have to.
+mlua = { workspace = true }

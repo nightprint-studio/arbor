@@ -34,7 +34,8 @@
   import Lazy from '../shared/Lazy.svelte';
   // Re-enable together with the dev-warmup block below when needed.
   // import { dev } from '$app/environment';
-  import PluginPanel from '../plugins/PluginPanel.svelte';
+  import PluginTools from '../plugins/PluginTools.svelte';
+  import PluginOverlays from '../plugins/PluginOverlays.svelte';
   import GitFlowPanel from './sidebar/GitFlowPanel.svelte';
   // PluginFormModal + ContributableModal are loaded lazily through <Lazy />
   // below so the whole FormNode* sub-renderer tree + PluginPipelineEditor
@@ -174,7 +175,6 @@
   import { linearGetIssue, jiraGetIssue } from '$lib/ipc/corvus/issues';
   import { matchesBinding } from '$lib/utils/keybindings';
   import { firePluginAction, listPluginInfo, setActiveTab } from '$lib/ipc/plugin';
-  import type { PluginFormConfig } from '$lib/types/plugin';
   import type { MergeRequest } from '$lib/types/corvus/mr';
   import type { Issue } from '$lib/types/corvus/issues';
   import { getDeepLinkRemoteUrl } from '$lib/utils/deep-link-builder';
@@ -400,21 +400,6 @@
   $effect(() => {
     if (gitCliStore.phase === 'ready') gitBouncerDismissed = false;
   });
-
-  // ── Plugin-requested file picker state ─────────────────────────────────────
-  // Populated when any plugin calls `arbor.ui.pick_file(opts)`. On confirm we
-  // call firePluginAction with the chosen path; on cancel we fire the action
-  // with an empty path so the plugin can differentiate vs. a successful pick.
-  type PluginPickFile = {
-    plugin_name: string;
-    mode?: 'file' | 'folder' | 'save';
-    title?: string;
-    extensions?: string[];
-    initial_path?: string;
-    action: string;
-    extra?: Record<string, unknown>;
-  };
-  let pluginPickFile = $state<PluginPickFile | null>(null);
 
   function handleOpenRepo(path?: string) {
     if (path) {
@@ -1354,7 +1339,7 @@
         uiStore.stashConflictModalOpen ||
         uiStore.checkoutConflictModalOpen ||
         pluginStore.pendingForm !== null ||
-        pluginPickFile !== null ||
+        pluginStore.pickFile !== null ||
         mrModalOpen ||
         issuesStore.selectedIssue !== null ||
         createMrOpen ||
@@ -1568,35 +1553,9 @@
     // cleanup fires before the async listen() Promise resolves, the promise
     // callback immediately unlistens the ghost listener.
     const unlistenPlugin = setupTauriListeners([
-      {
-        event: 'plugin:form',
-        handler: (e: { payload: PluginFormConfig }) => {
-          pluginStore.setPendingForm(e.payload);
-        },
-      },
-      {
-        // File/folder/save picker opened by a plugin via `arbor.ui.pick_file`.
-        // The payload carries the plugin name + the requested options + a
-        // callback action name; we show FileExplorerModal and round-trip the
-        // chosen path back as a plugin action (empty path on cancel).
-        event: 'plugin:pick-file',
-        handler: (e: { payload: PluginPickFile }) => {
-          pluginPickFile = e.payload;
-        },
-      },
-      {
-        // `arbor.ui.copy_to_clipboard(text)` — browser clipboard API runs in
-        // the webview context, not Rust, so we route through an event. The
-        // plugin can customise the confirmation toast via the `toast` field.
-        event: 'plugin:ui-clipboard-write',
-        handler: async (e: { payload: { plugin: string; text: string; toast?: string } }) => {
-          const { text, toast } = e.payload;
-          await copyToClipboard(text, {
-            successToast: toast ?? 'Copied to clipboard',
-            errorToast: true,
-          });
-        },
-      },
+      // `plugin:form`, `plugin:pick-file` and `plugin:ui-clipboard-write` are handled by
+      // `PluginOverlays` — they belong to the overlays it renders. What is left here is
+      // the handful that move Corvus's own furniture.
       {
         // `arbor.ui.show_pipeline_run(run_id)` — plugins deep-link into a
         // pipeline run. We open the standalone `PipelineRunDetailModal`
@@ -1733,7 +1692,6 @@
   const showPlugins       = $derived(activePanel === 'plugins');
   const showAbout         = $derived(activePanel === 'about');
   const showDocs          = $derived(activePanel === 'docs');
-  const pendingPluginForm = $derived(pluginStore.pendingForm);
   const bottomSection     = $derived(uiStore.activeBottomSection);
   const showBottomDetail  = $derived(hasRepo && bottomSection === 'detail');
   const showBottomStage   = $derived(hasRepo && bottomSection === 'stage');
@@ -2203,7 +2161,7 @@
                 {:else if showPipelines}
                   <PipelinesPanel />
                 {:else if showPluginLogs}
-                  <PluginLogsPanel />
+                  <PluginLogsPanel onClose={() => uiStore.setActiveBottomSection(null)} />
                 {:else if showPluginBottom && bottomPluginKey}
                   {#if isTreeKind(bottomPluginKey)}
                     <PluginTreeSidebar
@@ -2548,9 +2506,6 @@
     onClose={() => uiStore.setPanel('graph')}
     onOpenThemeEditor={() => { uiStore.setPanel('graph'); themeEditorOpen = true; }}
   />
-  {#if showPlugins}
-    <PluginPanel onClose={() => uiStore.setPanel('graph')} />
-  {/if}
   <Lazy
     gate={showDocs}
     loader={() => import('../shared/DocsPanel.svelte')}
@@ -2601,50 +2556,6 @@
   <Lazy gate={yamlStudioStore.open}       loader={() => import('$lib/components/studio/YamlStudioModal.svelte')} />
   <Lazy gate={propertiesStudioStore.open} loader={() => import('$lib/components/studio/PropertiesStudioModal.svelte')} />
 
-  <!-- Modal: Plugin Form — rendered LAST among the plugin-trigger modals so
-       it paints on top. Plugin actions fired from inside another modal
-       (Plugin Manager, Workspace Manager row contributions, …) need to be
-       visible to the user; otherwise the form opens behind the source modal
-       and the user sees nothing happen. -->
-  {#if pendingPluginForm}
-    <!-- #key forces full remount when the form config changes (e.g. action → new form).
-         After the first load the module is cached in V8's module map, so the
-         dynamic import resolves in the same microtask and the swap is seamless. -->
-    {#key pluginStore.formKey}
-      <Lazy
-        loader={() => import('../plugins/PluginFormModal.svelte')}
-        form={pendingPluginForm}
-        onClose={() => pluginStore.clearPendingForm()}
-      />
-    {/key}
-  {/if}
-
-  <!-- Plugin-requested file picker (arbor.ui.pick_file) — rendered AFTER
-       PluginFormModal so a plugin that opens a picker FROM INSIDE its own
-       form (e.g. source-export's "Import profile" button) sees the picker
-       paint on top of the form. Without this ordering, the picker disappears
-       behind the modal that triggered it (visible on Windows/WebView2). -->
-  {#if pluginPickFile}
-    {@const req = pluginPickFile}
-    <FileExplorerModal
-      mode={req.mode ?? 'file'}
-      title={req.title ?? 'Select a file'}
-      extensions={req.extensions}
-      initialPath={req.initial_path}
-      onConfirm={(path) => {
-        const ctx = { path, ...(req.extra ?? {}) };
-        firePluginAction(req.plugin_name, req.action, JSON.stringify(ctx)).catch(() => {});
-        pluginPickFile = null;
-      }}
-      onCancel={() => {
-        // Fire with empty path so the plugin can distinguish "cancelled" from
-        // "never opened" without needing a separate cancel action.
-        const ctx = { path: '', ...(req.extra ?? {}) };
-        firePluginAction(req.plugin_name, req.action, JSON.stringify(ctx)).catch(() => {});
-        pluginPickFile = null;
-      }}
-    />
-  {/if}
 
   <!-- Pipeline run deep-link modal (opens when pipelinesStore.activeRunId
        is set — by arbor.ui.show_pipeline_run or any other store writer).
@@ -2654,28 +2565,22 @@
        the form, not behind it. -->
   <PipelineRunDetailModal />
 
-  <!-- Modal: ContributableModal — opened by arbor.ui.container.open() (or its
-       sugar arbor.ui.settings.open()). Stacks above PluginFormModal because
-       it paints later in source order (settings can be invoked from inside
-       a form). -->
-  {#if containerStore.openContainerId}
-    {@const cid = containerStore.openContainerId}
-    <Lazy
-      loader={() => import('../plugins/ContributableModal.svelte')}
-      containerId={cid}
-      onClose={() => containerStore.close()}
-    />
-  {/if}
 
-  <!-- Modal: Plugin Marketplace — mounted globally so the open_marketplace
-       shortcut and the Command Palette can reach it without having to open
-       the Plugin Manager first. Lazy-loaded: drags in the registry catalog,
-       install-confirm and a heap of icons that aren't needed at startup. -->
-  <Lazy
-    gate={uiStore.marketplaceOpen}
-    loader={() => import('../plugins/MarketplaceModal.svelte')}
-    onClose={() => uiStore.closeMarketplace()}
+  <!-- The plugin host's two modal doors: Plugin Manager and Marketplace. Both mounted here
+       rather than under the panel router, so the open_marketplace shortcut and the Command
+       Palette reach the marketplace without going through the manager first. `PluginTools`
+       owns the order the two stack in — see its header. The third door, Plugin Logs, is a
+       docked bottom section and stays up in the tool window. -->
+  <PluginTools
+    managerOpen={showPlugins}
+    onCloseManager={() => uiStore.setPanel('graph')}
   />
+
+  <!-- Every surface a plugin uses to talk to the user: the form it opens, the file picker it
+       asks for, its settings container. AFTER `PluginTools`, and that is the rule: a plugin
+       action is very often fired from inside the Plugin Manager, and a form that paints under
+       the modal that triggered it looks exactly like a button that did nothing. -->
+  <PluginOverlays />
 
   <!-- Modal: Active Schedules — read-only inspector for arbor-scheduler.
        Opened from the Command Palette only (no shortcut). Lazy-loaded;

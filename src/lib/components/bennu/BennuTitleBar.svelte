@@ -20,6 +20,7 @@
     Play, Bug, Unplug, MoreVertical, Palette, SlidersHorizontal, Info, Hammer, Square, TriangleAlert,
     UserCog, Bot,
     ListChecks, ChevronDown, RotateCw, ListRestart, LayoutDashboard,
+    Store, Package, ScrollText,
   } from 'lucide-svelte';
   import type { BuildType } from '$lib/stores/bennu/run.svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -38,6 +39,7 @@
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import McpProjectRuleModal from '$lib/components/shared/McpProjectRuleModal.svelte';
+  import { uiStore } from '$lib/stores/ui.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
@@ -206,6 +208,12 @@
     { kind: 'item', id: 'projectcfg', label: 'Project Configuration…', icon: SlidersHorizontal, disabled: !hasProject, onclick: () => bennuUiStore.openProjectConfig() },
     // MOCK — remove the "Load demo project" entry when bennu-be serves real data.
     { kind: 'item', id: 'demo',  label: 'Load demo project', icon: FlaskConical, onclick: () => projectStore.loadDemo() },
+    // The same Tools section Corvus has. Bennu hosts plugins, so it needs the three doors a
+    // host needs: install one, see which are loaded, and read why one did not start.
+    { kind: 'separator', label: 'Tools' },
+    { kind: 'item', id: 'marketplace', label: 'Plugin Marketplace', icon: Store,      action: 'open_marketplace', onclick: () => uiStore.openMarketplace() },
+    { kind: 'item', id: 'plugins',     label: 'Plugin Manager',     icon: Package,    action: 'plugins',          onclick: () => bennuUiStore.togglePlugins() },
+    { kind: 'item', id: 'plogs',       label: 'Plugin Logs',        icon: ScrollText, action: 'plugin_logs',      onclick: () => bennuUiStore.togglePluginLogs() },
     ...windowMenuItems(),
     { kind: 'separator' },
     { kind: 'item', id: 'about', label: 'About Bennu', icon: Info, onclick: () => bennuUiStore.openAbout() },

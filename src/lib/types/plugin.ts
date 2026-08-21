@@ -135,7 +135,10 @@ export interface PluginManifest {
   arbor_api:   number;
   /** Supported operating systems. Empty/missing = cross-platform. */
   os?:         string[];
-  entry?:      string;
+  /** The Lua half, when the package has one. Absent means "no Lua part" only for a
+   *  package that `provides` something else — a package that provides nothing is a Lua
+   *  plugin whose entry point is the default. */
+  lua?:        { entry?: string };
   /** When true, the Plugin Manager renders an orange EXPERIMENTAL pill on the
    *  row. Use for plugins still iterating on settings / hooks / storage. */
   experimental?: boolean;
@@ -143,6 +146,70 @@ export interface PluginManifest {
   hooks:       PluginHooks;
   scheduler?:  PluginSchedulerSection;
   dependencies?: PluginDependency[];
+  /** Implementations of host-defined interfaces carried by this package. Empty for an
+   *  ordinary Lua plugin. Its presence is what makes a package install from a release
+   *  rather than from a source archive. */
+  provides?:   PluginProvides[];
+  /** Shared settings for every module in `provides`. */
+  wasm?:       { target?: 'wasm32-wasip2' | 'wasm32-unknown-unknown' };
+  /** Credential slots this package owns — it can create and read these and nothing else. */
+  credentials?: PluginCredentialSlot[];
+}
+
+/** One implementation of one host interface, carried by a package. */
+export interface PluginProvides {
+  /** Which contract — `studio-format`, `cloud-provider`. */
+  interface: string;
+  /** The version of THAT contract. Independent of the package's `version` and of
+   *  `arbor_api`, because the three move for different reasons. */
+  version:   number;
+  /** Which member of the interface this is — the `json` of `studio-format`. */
+  id:        string;
+  /** The module file, relative to the package directory. */
+  module:    string;
+}
+
+/** One working wasm extension, as `list_extensions` reports it. */
+export interface ExtensionRow {
+  /** The package that provides it. */
+  plugin:    string;
+  interface: string;
+  version:   number;
+  id:        string;
+  module:    string;
+}
+
+/** One thing wrong with an extension declaration.
+ *
+ *  `message` arrives already written — the explanation lives next to the code that decided
+ *  something was broken, rather than being reassembled here from fields that would have to
+ *  stay in step with the Rust variant forever. Match on `kind` for an icon; never on the
+ *  sentence. */
+export interface ExtensionProblemRow {
+  kind:    'missing-module' | 'conflict' | 'unsupported-target';
+  plugin?: string;
+  /** Every package involved. One for most problems, several for a conflict. */
+  plugins: string[];
+  /** `interface@version/id`. */
+  key:     string;
+  message: string;
+}
+
+/** What the Plugin Manager's extensions section renders. */
+export interface ExtensionsReport {
+  entries:  ExtensionRow[];
+  problems: ExtensionProblemRow[];
+  /** Whether this build can actually instantiate what it listed. Distinct from having found
+   *  it: "correctly declared" and "running" are different facts, and a panel that conflated
+   *  them would be wrong in whichever direction the build happened to be. */
+  runtime_available: boolean;
+}
+
+/** A credential slot a package owns. It may create and read the slots it declared and no
+ *  others, and can never reach the credentials Arbor keeps for itself. */
+export interface PluginCredentialSlot {
+  key:   string;
+  label: string;
 }
 
 // ── PluginInfo — returned by list_plugin_info ─────────────────────────────────
@@ -1053,6 +1120,14 @@ export interface FormFieldTime extends FormFieldBase {
 export interface FormFieldColor extends FormFieldBase {
   type:     'color';
   default?: string;
+  /** Show the `#rrggbb` text field beside the swatch. Default `true`; set
+   *  `false` for a dense row where the swatch alone is the control. */
+  show_hex?: boolean;
+  /** Fire a slot live as the colour changes (debounced). Same shape as
+   *  `FormFieldRange.actions.change`. */
+  actions?:  { change?: string | DispatchTarget };
+  /** Debounce window in ms for `actions.change` (trailing-edge). Default `250`. */
+  debounce_ms?: number;
 }
 
 /** Key-value pair editor. Submitted value is a Record<string, string>. */
@@ -1257,11 +1332,18 @@ export interface FormNodeSection extends FormNodeBase {
   collapsed?:   boolean;
   /** Render with card chrome (dark title bar, border, bg-base background). */
   card?:        boolean;
-  /** Visual variant for `card` mode. Default: standard.
-   *  - `"component"` — IntelliJ-style data card: status dot, two-tone
-   *    `namespace::Name` title with namespace dimmed, dense 2-column body
-   *    grid, and `header_actions` rendered as round ghost icons. */
-  variant?:     'component';
+  /** Visual variant. Default: standard.
+   *  - `"component"` — (card mode) IntelliJ-style data card: status dot,
+   *    two-tone `namespace::Name` title with namespace dimmed, dense
+   *    2-column body grid, and `header_actions` as round ghost icons.
+   *  - `"quiet"` — (non-card) no border, no fill, uppercase muted caption.
+   *    For panels that stack several groups in a narrow column, where a
+   *    box per group reads as competing panes instead of one list. */
+  variant?:     'component' | 'quiet';
+  /** Right-aligned muted caption in the header — what the group is ABOUT
+   *  (an item count, the struct being edited) next to what it is called.
+   *  Non-card sections; `count` is the card-mode equivalent. */
+  note?:        string;
   /** When `variant = "component"`, the small dot before the title.
    *  Tone picks the colour. Defaults to a muted/idle look when absent. */
   status_dot?:  { tone?: 'success' | 'info' | 'warning' | 'error' | 'muted' | 'accent'; tooltip?: string };
@@ -2737,7 +2819,40 @@ export type FormLayoutNode =
   | FormNodeProviderUserBadge
   | FormNodeDiff;
 
-export type FormNode = FormFieldNode | FormLayoutNode;
+/**
+ * `embed` — a page the plugin ships, in a sandboxed frame.
+ *
+ * The host gives the folder a URL, isolates the frame and relays messages. It never reads
+ * what crosses: whatever runs inside — a Bevy viewport, a graph, a map — is the package's,
+ * and a schema here would be Arbor learning what the page is for.
+ *
+ * The frame runs `allow-scripts` WITHOUT `allow-same-origin`, so it has an opaque origin: no
+ * storage, no cookies, no reach into the app. `postMessage` is the only way through.
+ */
+export interface FormEmbed {
+  type: 'embed';
+  id?: string;
+  show_if?: FormCondition;
+  /** Absolute path to the page, or an `https:` / `data:` / `blob:` URL. */
+  src: string;
+  /** Frame height in px. Default 360. */
+  height?: number;
+  /** Accessible name for the frame. */
+  label?: string;
+  /**
+   * Messages to post in. Appending is what sends — the node tracks how many it has already
+   * delivered, so a patch that changes one value does not replay the whole list.
+   *
+   * Anything posted before the page is listening is queued until it says something.
+   */
+  send?: unknown[];
+  /** Scoped slot fired with whatever the page posts back. */
+  on_message?: string | DispatchTarget;
+  /** State keys to ship with `on_message`. */
+  scope_state?: string[];
+}
+
+export type FormNode = FormFieldNode | FormLayoutNode | FormEmbed;
 
 // ─── Studio-shaped modal sub-configs ──────────────────────────────────────────
 

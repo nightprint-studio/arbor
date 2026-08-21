@@ -97,6 +97,20 @@ pub fn archive_url(owner: &str, repo: &str, r#ref: &str) -> String {
 /// Join a repo-relative subpath with a file leaf, handling empty / leading
 /// / trailing slashes uniformly. `"" + "plugin.toml" → "plugin.toml"`,
 /// `"a/b/" + "/plugin.toml" → "a/b/plugin.toml"`.
+/// Direct download URL for a file attached to a release.
+///
+/// The plain `releases/download` form rather than the REST API: it needs no token, no
+/// second round trip to list the assets, and it 404s cleanly when a release does not carry
+/// what the registry said it would — which is the same failure the API would report, one
+/// request earlier.
+///
+/// A **tag** rather than a ref in general. A release belongs to a tag by construction, and an
+/// entry that records artifact digests cannot ride a branch anyway: the digests would be
+/// pinned to a target that moves.
+pub fn release_asset_url(owner: &str, repo: &str, tag: &str, asset: &str) -> String {
+    format!("https://github.com/{owner}/{repo}/releases/download/{tag}/{asset}")
+}
+
 pub fn join_subpath(subpath: &str, file: &str) -> String {
     let s = subpath.trim_end_matches('/');
     let f = file.trim_start_matches('/');

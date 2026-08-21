@@ -25,6 +25,7 @@ members = [
     "crates/foundation/sql-abbrev",
     "crates/foundation/syntax",
     "crates/foundation/logscan",
+    "crates/products/bennu/plugin",
     "crates/products/bennu/wgsl",
     "crates/products/corvus/core",
     "crates/products/corvus/plugin",
@@ -56,6 +57,11 @@ members = [
     "crates/platform/plugin/marketplace",
     "crates/platform/plugin/rpc",
     "crates/platform/plugin/types",
+    # The wasm extension host. Separate from `plugin/core` (the Lua host) because the two
+    # share nothing but the manifest: a Lua plugin CALLS Arbor's API, an extension IMPLEMENTS
+    # an interface Arbor calls into, and merging them would put a multi-megabyte runtime
+    # dependency in front of every plugin that will never need one.
+    "crates/platform/plugin/wasm",
     # The AI tool surface: MCP protocol only. What the tools DO stays in the shell,
     # which is also where the user can see and gate it.
     "crates/platform/mcp",

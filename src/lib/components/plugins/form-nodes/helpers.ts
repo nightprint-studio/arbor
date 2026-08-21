@@ -83,7 +83,7 @@ export type RawOption =
   | { value: string; label: string; disabled?: boolean; description?: string };
 
 export function normalizeOptions(raw: RawOption[] | undefined) {
-  return (raw ?? []).map(o =>
+  return toArr<RawOption>(raw).map(o =>
     typeof o === 'string' ? { value: o, label: prettify(o) } : o
   );
 }
@@ -100,7 +100,7 @@ function _walkSelectItems(
   raw: FormSelectOption[] | undefined,
   fn: (it: { value: string; label: string }) => void,
 ) {
-  for (const o of (raw ?? [])) {
+  for (const o of toArr<FormSelectOption>(raw)) {
     if (o == null) continue;
     if (typeof o === 'string') {
       fn({ value: o, label: prettify(o) });
@@ -141,7 +141,11 @@ export function buildSelectDropdownItems(
   setValue: (fieldName: string, multiple: boolean, value: string) => void,
 ): DropdownItem[] {
   const out: DropdownItem[] = [];
-  for (const o of (raw ?? [])) {
+  // `toArr`, not `?? []`. A plugin that ships an empty option list sends `{}` — Lua has one
+  // table type and an empty one serialises as an object — which is not nullish, so the
+  // fallback never fires and the loop throws "{} is not iterable" from inside a `{#each}`.
+  // Every array prop crossing this boundary has to go through `toArr`; this one was missed.
+  for (const o of toArr<FormSelectOption>(raw)) {
     if (o == null) continue;
 
     if (_isSelectSeparator(o)) {

@@ -10,6 +10,7 @@
 //! `bennu_read_file` exactly — the FE is built against them.
 
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 
 use bennu_core::prelude::BennuState;
 use bennu_proto::prelude::{
@@ -73,7 +74,34 @@ pub struct OpenProjectArgs {
 #[arbor_rpc::handler]
 fn bennu_open_project(ctx: &BennuState, args: OpenProjectArgs) -> Result<ProjectInfo, String> {
     let warm = args.active.unwrap_or(true);
+    if warm {
+        set_active_root(&args.root);
+    }
     open_and_start(ctx, &args.root, SessionOrigin::Window, warm)
+}
+
+// ── The project on screen ────────────────────────────────────────────────────────
+//
+// Kept here because this module owns both events that change it: opening a project as the
+// active one, and switching to one already open. A plugin asking "what is open?" is asking
+// this, and until now nothing in the backend could answer — the root travelled as an argument
+// on every call and was never remembered.
+
+static ACTIVE_ROOT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+fn active_slot() -> &'static Mutex<Option<String>> {
+    ACTIVE_ROOT.get_or_init(|| Mutex::new(None))
+}
+
+fn set_active_root(root: &str) {
+    if let Ok(mut slot) = active_slot().lock() {
+        *slot = Some(root.to_string());
+    }
+}
+
+/// The project currently on screen, or `None` before one is opened.
+pub fn active_root() -> Option<String> {
+    active_slot().lock().ok().and_then(|s| s.clone())
 }
 
 /// Args for [`bennu_activate_project`].
@@ -94,6 +122,7 @@ pub struct ActivateProjectArgs {
 /// stops it being reclaimed as idle while somebody is reading it.
 #[arbor_rpc::handler]
 fn bennu_activate_project(ctx: &BennuState, args: ActivateProjectArgs) -> Result<(), String> {
+    set_active_root(&args.root);
     crate::lsp_registry::LspRegistry::global().set_sink(ctx.event_sink());
     crate::lsp_registry::LspRegistry::global().warm_start(&args.root, SessionOrigin::Window);
     Ok(())

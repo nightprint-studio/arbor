@@ -66,6 +66,7 @@
   import type { FormNode } from '$lib/types/plugin';
   import type { FormNodeCtx } from './ctx';
   import { getPersistedActiveTab, setPersistedActiveTab } from './tabs-state.svelte';
+  import { toArr } from './helpers';
 
   interface Props {
     node:       FormNode;
@@ -123,16 +124,20 @@
   }
 </script>
 
+<!-- `toArr`, not the raw prop. A plugin whose children list came out empty sends `{}` —
+     Lua has one table type and an empty one serialises as an object — which an `{#each}`
+     refuses with "{} is not iterable", taking the whole panel down with it. Every array
+     crossing this boundary goes through it. -->
 {#if node.type === 'container'}
   <div class="pf-container {(node as any).class ?? ''}" style={ctx.containerStyle(node as any)}>
-    {#each (node as any).children as child (child.id)}
+    {#each toArr<any>((node as any).children) as child (child.id)}
       {@render renderNode(child)}
     {/each}
   </div>
 
 {:else if node.type === 'row'}
   <div class="pf-row {(node as any).class ?? ''}" style={ctx.rowStyle(node as any)}>
-    {#each (node as any).children as child (child.id)}
+    {#each toArr<any>((node as any).children) as child (child.id)}
       {@render renderNode(child)}
     {/each}
   </div>
@@ -256,7 +261,17 @@
     </div>
   {:else}
     {@const isCollapsed = (node as any).collapsible && ctx.collapsedMap[node.id!]}
-    <div class="pf-section {(node as any).class ?? ''}" style={(node as any).style}>
+    <!-- `variant = "quiet"` drops the card chrome — no border, no fill, an
+         uppercase caption instead of a title bar. For a panel that is a stack
+         of six groups in a narrow column, six bordered boxes read as six
+         competing things; the caption alone reads as one list with headings.
+         `note` is a right-aligned muted caption for what the group is ABOUT
+         (a count, the struct being edited) rather than what it is called. -->
+    <div
+      class="pf-section {(node as any).class ?? ''}"
+      class:pf-section-quiet={(node as any).variant === 'quiet'}
+      style={(node as any).style}
+    >
       {#if (node as any).title !== undefined || (node as any).collapsible}
         <button
           class="pf-section-header"
@@ -273,6 +288,9 @@
           {/if}
           {#if (node as any).title}
             <span class="pf-section-title">{(node as any).title}</span>
+          {/if}
+          {#if (node as any).note}
+            <span class="pf-section-note">{(node as any).note}</span>
           {/if}
         </button>
       {/if}
@@ -394,11 +412,11 @@
       monogram={ic.monogram}
       accentColor={ic.accent}
       status={ic.status}
-      badges={ic.badges ?? []}
-      meta={ic.meta ?? []}
+      badges={toArr<any>(ic.badges)}
+      meta={toArr<any>(ic.meta)}
       variant={ic.variant ?? 'elevated'}
       bordered={ic.bordered ?? true}
-      actions={(ic.actions ?? []).map((a: any) => ({
+      actions={toArr<any>(ic.actions).map((a: any) => ({
         icon: a.icon,
         label: a.label,
         tooltip: a.tooltip,
@@ -432,7 +450,7 @@
   {@const bc = node as any}
   <div class={(node as any).class ?? ''} style={(node as any).style}>
     <Breadcrumb
-      segments={(bc.segments ?? []) as BreadcrumbSegment<any>[]}
+      segments={toArr<BreadcrumbSegment<any>>(bc.segments)}
       max={bc.max ?? 6}
       editable={!!bc.editable}
       editValue={bc.edit_value ?? ''}
@@ -499,7 +517,7 @@
 <!-- ── step_indicator (visual-only; sibling of the `wizard` container) ─ -->
 {:else if node.type === 'step_indicator'}
   {@const si = node as any}
-  {@const siSteps = (si.steps ?? []).map((s: any) => ({
+  {@const siSteps = toArr<any>(si.steps).map((s: any) => ({
     id:    s.id,
     label: s.label,
     icon:  s.icon ? (PLUGIN_ICONS as any)[s.icon] : undefined,
@@ -520,10 +538,10 @@
 <!-- ── status_list ───────────────────────────────────────────────────── -->
 {:else if node.type === 'status_list'}
   {@const sl = node as any}
-  {@const slItems = (sl.items ?? []).map((it: any) => ({
+  {@const slItems = toArr<any>(sl.items).map((it: any) => ({
     id:    String(it.id ?? ''),
     label: String(it.label ?? ''),
-    chips: (it.chips ?? []).map((c: any) => ({
+    chips: toArr<any>(it.chips).map((c: any) => ({
       severity: c.severity as StatusSeverity,
       text:     String(c.text ?? ''),
       // Icon: plugin sends a Lucide name string; we map it via PLUGIN_ICONS
@@ -701,7 +719,7 @@
           {/each}
         {/snippet}
       {/if}
-      {#each (bp.children ?? []) as child (child.id)}
+      {#each toArr<any>(bp.children) as child (child.id)}
         {@render renderNode(child)}
       {/each}
     </BottomPanelHeader>
@@ -743,7 +761,7 @@
         {/each}
       {/snippet}
     {/if}
-    {#each (ps.children ?? []) as child (child.id)}
+    {#each toArr<any>(ps.children) as child (child.id)}
       {@render renderNode(child)}
     {/each}
   </PanelShell>
@@ -766,7 +784,7 @@
     <div class="pf-tooltip-wrap pf-tooltip-wrap-block {(node as any).class ?? ''}"
          style={(node as any).style}
          use:tooltip={ttOpts}>
-      {#each (tt.children ?? []) as child (child.id)}
+      {#each toArr<any>(tt.children) as child (child.id)}
         {@render renderNode(child)}
       {/each}
     </div>
@@ -774,7 +792,7 @@
     <span class="pf-tooltip-wrap {(node as any).class ?? ''}"
           style={(node as any).style}
           use:tooltip={ttOpts}>
-      {#each (tt.children ?? []) as child (child.id)}
+      {#each toArr<any>(tt.children) as child (child.id)}
         {@render renderNode(child)}
       {/each}
     </span>
@@ -818,7 +836,7 @@
           {/each}
         {/snippet}
       {/if}
-      {#each (ff.children ?? []) as child (child.id)}
+      {#each toArr<any>(ff.children) as child (child.id)}
         {@render renderNode(child)}
       {/each}
     </FormField>
@@ -827,7 +845,7 @@
 <!-- ── switch ────────────────────────────────────────────────────────── -->
 {:else if node.type === 'switch'}
   {@const s = node as any}
-  {@const branch = s.cases?.[String(ctx.values[s.field])] ?? s.default ?? []}
+  {@const branch = toArr<any>(s.cases?.[String(ctx.values[s.field])] ?? s.default)}
   {#each branch as child (child.id)}
     {@render renderNode(child)}
   {/each}
@@ -835,7 +853,7 @@
 <!-- ── tabs ──────────────────────────────────────────────────────────── -->
 {:else if node.type === 'tabs'}
   {@const tn = node as any}
-  {@const tabItems = ((tn.tabs ?? []) as Array<{ id: string; label: string; icon?: string; badge?: string | number; disabled?: boolean; tooltip?: string }>).map((t): TabItem => ({
+  {@const tabItems = toArr<{ id: string; label: string; icon?: string; badge?: string | number; disabled?: boolean; tooltip?: string }>(tn.tabs).map((t): TabItem => ({
     id:       t.id,
     label:    t.label,
     icon:     t.icon ? PLUGIN_ICONS[t.icon] : undefined,
@@ -885,7 +903,7 @@
          tabs widget that owns the actual content under the same
          `persist_key`. -->
     {#if !stripOnly}
-      {#each tn.tabs as tab (tab.id)}
+      {#each toArr<any>(tn.tabs) as tab (tab.id)}
         <div
           class="pf-tabpanel"
           class:pf-tabpanel-hidden={activeId !== tab.id}
@@ -896,7 +914,7 @@
                panel is heavy (a big syntax-highlighted code dump, hundreds of
                cards). Inactive panels render nothing until selected. -->
           {#if !lazy || activeId === tab.id}
-            {#each tab.children ?? [] as child (child.id)}
+            {#each toArr<any>(tab.children) as child (child.id)}
               {@render renderNode(child)}
             {/each}
           {/if}
@@ -942,7 +960,7 @@
         </button>
       {/if}
       <div class="pf-tl-nav-body">
-        {#each tl.nav_children ?? [] as child (child.id)}
+        {#each toArr<any>(tl.nav_children) as child (child.id)}
           {@render renderNode(child)}
         {/each}
       </div>
@@ -970,7 +988,7 @@
       {/if}
     </aside>
     <div class="pf-tl-content">
-      {#each tl.content_children ?? [] as child (child.id)}
+      {#each toArr<any>(tl.content_children) as child (child.id)}
         {@render renderNode(child)}
       {/each}
     </div>
@@ -989,7 +1007,7 @@
     <div class="pf-wizard-rail">
       <StepIndicator steps={wizardSteps} current={wn.steps[curIdx]?.id ?? wn.steps[0]?.id ?? ''} size="sm" />
     </div>
-    {#each wn.steps as step, i (step.id)}
+    {#each toArr<any>(wn.steps) as step, i (step.id)}
       <div
         class="pf-wizard-panel"
         class:pf-wizard-panel-hidden={i !== curIdx}
@@ -997,7 +1015,7 @@
         {#if step.description}
           <p class="pf-section-desc">{step.description}</p>
         {/if}
-        {#each step.children ?? [] as child (child.id)}
+        {#each toArr<any>(step.children) as child (child.id)}
           {@render renderNode(child)}
         {/each}
       </div>
@@ -1015,7 +1033,7 @@
       </div>
     {/if}
     <div class="pf-row-ctrl">
-      {#each n.children ?? [] as child (child.id)}
+      {#each toArr<any>(n.children) as child (child.id)}
         {@render renderNode(child)}
       {/each}
     </div>
@@ -1030,7 +1048,7 @@
     class="pf-card-grid {(node as any).class ?? ''}"
     style="--pf-card-grid-min:{minc}; --pf-card-grid-gap:{gap}; {(node as any).style ?? ''}"
   >
-    {#each n.children ?? [] as child (child.id)}
+    {#each toArr<any>(n.children) as child (child.id)}
       {@render renderNode(child)}
     {/each}
   </div>
@@ -1039,7 +1057,7 @@
 {:else if node.type === 'cfg_list'}
   {@const n = node as any}
   <div class="pf-cfg-list {(node as any).class ?? ''}" style={(node as any).style}>
-    {#each n.items ?? [] as item (item.id)}
+    {#each toArr<any>(n.items) as item (item.id)}
       {@const CfgIcon = item.icon ? PLUGIN_ICONS[item.icon] : null}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <div class="pf-cfg-item"
@@ -1059,7 +1077,7 @@
           <div class="pf-cfg-dot"></div>
         {/if}
         <span class="pf-cfg-name">{item.label}</span>
-        {#each item.tags ?? [] as tag}
+        {#each toArr<any>(item.tags) as tag}
           <span class="pf-cfg-tag pf-cfg-tag-{tag.variant ?? 'neutral'}">{tag.text}</span>
         {/each}
         <div class="pf-cfg-actions">

@@ -58,9 +58,12 @@ pub use crate::user_registry::{
     save as save_user_registry, UserRegistry, UserSource,
 };
 
+// ── Artifact content verification ───────────────────────────────────────────
+pub use crate::integrity::{sha256_hex, verify as verify_artifact};
+
 // ── GitHub-API surface (URL helpers shared with consumers / docs) ───────────
 pub use crate::github_api::{
     archive_url, client as github_client, github_url, join_subpath, normalise_github_url,
-    parse_github_repo, raw_url, resolve_ref_sha, verify_pinned_sha, RAW_HOST,
-    REQUEST_TIMEOUT,
+    parse_github_repo, raw_url, release_asset_url, resolve_ref_sha, verify_pinned_sha,
+    RAW_HOST, REQUEST_TIMEOUT,
 };

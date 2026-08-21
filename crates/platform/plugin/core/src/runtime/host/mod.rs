@@ -21,7 +21,7 @@ use arbor_scheduler::prelude::Scheduler;
 
 use arbor_plugin_types::prelude::{hook_names, LoadFailure};
 
-use super::loaded::{DormantPlugin, LoadedPlugin};
+use super::loaded::{DormantPlugin, LoadedPlugin, PluginActivity, ServiceIndex};
 use crate::contribution::ContributionRegistry;
 use crate::sandbox::LuaApiInstaller;
 use crate::tree::{IconRegistry, TreeStore};
@@ -70,6 +70,15 @@ pub struct PluginHost {
     pub tree_store:    TreeStore,
     /// Plugin-supplied custom SVG icons (arbor.ui.icon.register).
     pub icon_registry: IconRegistry,
+    /// Which plugins have a live VM, and whether each is enabled — the lock-free answer to
+    /// `arbor.meta.plugin_loaded`. Maintained wherever `plugins` gains or loses an entry;
+    /// enable/disable need no upkeep because the flags are the very `Arc<AtomicBool>`s the
+    /// loaded plugins hold.
+    pub activity: PluginActivity,
+    /// Which cross-plugin services each loaded plugin exports — the lock-free answer to
+    /// `arbor.service.list`. Written from inside the exporting plugin's VM; the host only
+    /// retires entries when a VM goes away.
+    pub services: ServiceIndex,
 }
 
 impl PluginHost {
@@ -87,6 +96,8 @@ impl PluginHost {
             contributions:      ContributionRegistry::new(),
             tree_store:         TreeStore::new(),
             icon_registry:      IconRegistry::new(),
+            activity:           PluginActivity::new(),
+            services:           ServiceIndex::new(),
         }
     }
 
@@ -184,6 +195,8 @@ impl PluginHost {
         self.plugins.clear();
         self.dormant.clear();
         self.load_failures.clear();
+        self.activity.clear();
+        self.services.clear();
     }
 }
 

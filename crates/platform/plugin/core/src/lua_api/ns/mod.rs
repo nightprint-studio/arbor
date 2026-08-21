@@ -10,6 +10,8 @@
 
 pub(crate) mod command;
 pub(crate) mod contribution;
+pub(crate) mod credentials;
+pub(crate) mod ext;
 pub(crate) mod events;
 pub(crate) mod fs;
 pub(crate) mod hooks;

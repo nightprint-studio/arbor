@@ -65,6 +65,29 @@ pub mod arbor {
     }
 }
 
+/// Hooks owned by Bennu, the code editor.
+///
+/// Bennu's concept is a FILE being edited, not a repository being open — the
+/// project-lifecycle hooks it shares with every other product stay in
+/// [`arbor`]. What only Bennu can say is which source the caret is in.
+pub mod bennu {
+    use crate::hook_ns::PRODUCT_BENNU;
+
+    crate::declare_hook_names! {
+        ns = PRODUCT_BENNU;
+
+        /// Fired when the editor's active file changes — a tab switched to, a
+        /// file opened, a file reopened from history.
+        ///
+        /// The event a companion panel needs: a preview, a linter or a
+        /// reference pane that keeps showing the previous file is showing the
+        /// wrong one, and until this existed nothing announced the change.
+        FILE_OPENED = "file_opened";
+        /// Fired when the editor's last file closes and nothing is being edited.
+        FILE_CLOSED = "file_closed";
+    }
+}
+
 /// Hooks owned by Corvus, the Git product.
 pub mod corvus {
     use crate::hook_ns::PRODUCT_CORVUS;
@@ -197,6 +220,7 @@ pub mod pipeline {
 /// wired into the catalog is a name that documents itself as absent.
 pub const NAMESPACES: &[(&str, &[&str])] = &[
     (arbor::NS, arbor::ALL),
+    (bennu::NS, bennu::ALL),
     (corvus::NS, corvus::ALL),
     (garrulus::NS, garrulus::ALL),
     (pipeline::NS, pipeline::ALL),

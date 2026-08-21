@@ -141,7 +141,14 @@ end
 -- Install __call on arbor.pipeline so `arbor.pipeline("id")` returns a builder.
 -- arbor.pipeline.define / .run / .list_ops etc. are unaffected — those are
 -- index lookups on the table, not __call invocations.
-do
+--
+-- Guarded on the namespace existing at all. `arbor.pipeline` is published by the shell, not
+-- by the host-pure installer, so under a pure-OOP backend (bennu, sitta, tyto, garrulus) it
+-- is nil — and `setmetatable(nil, …)` is a hard error that kills this chunk, which runs
+-- during sandbox setup. That failure has nothing to do with the plugin being loaded, so every
+-- plugin in such a product fails identically with "builders: bad argument #1 to
+-- 'setmetatable'". Sugar over a namespace that is not there is simply absent.
+if type(arbor.pipeline) == "table" then
   local pmeta = getmetatable(arbor.pipeline) or {}
   pmeta.__call = function(_self, id_or_cfg)
     local cfg

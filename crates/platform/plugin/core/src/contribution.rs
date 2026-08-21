@@ -132,6 +132,16 @@ pub mod points {
     /// Payload: `{ label?, icon, action, tooltip? }` — fired with the file path.
     pub const DIFF_TOOLBAR: &str = "arbor:diff-toolbar";
 
+    /// Toolbar button in the code editor's own action bar, beside the file-type tools.
+    /// Payload: `{ icon, action, label?, tooltip?, color?, path_pattern? }` — fired with
+    /// `{ path }`, the open file.
+    ///
+    /// `path_pattern` is what makes this point worth having separately from the toolbars
+    /// above: that bar's contents are the answer to "what kind of file is this", so a button
+    /// that shows on everything is furniture. A plugin that means "only my file type" writes
+    /// `*.wgsl` and gets exactly that.
+    pub const EDITOR_TOOLBAR: &str = "arbor:editor-toolbar";
+
     /// Decorator badge / icon next to a branch in the BranchTree sidebar.
     /// Payload: `{ branch_pattern?, label?, icon?, color?, tooltip? }`.
     /// `branch_pattern` is a glob (`*` matches anything); omit to apply to all.
@@ -314,6 +324,23 @@ pub mod payloads {
         #[serde(default)] pub color:        Option<String>,
     }
 
+    /// A toolbar item that belongs on some files and not others.
+    ///
+    /// Separate from [`ToolbarItemPayload`] only for `path_pattern`: the bars that use the
+    /// plain shape are about the window, this one is about the document in it.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct EditorToolbarPayload {
+        #[serde(default)] pub label:        Option<String>,
+        #[serde(default)] pub icon:         Option<String>,
+        #[serde(default)] pub action:       Option<String>,
+        #[serde(default)] pub tooltip:      Option<String>,
+        #[serde(default)] pub color:        Option<String>,
+        /// Glob against the open file's path — `*` within a path segment, `**` across them.
+        /// Also tried against the bare file name, so `*.wgsl` means what its author meant
+        /// rather than only matching a file at the filesystem root. Omit to show always.
+        #[serde(default)] pub path_pattern: Option<String>,
+    }
+
     /// Quick-action card on the welcome screen.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct WelcomeActionPayload {
@@ -404,6 +431,7 @@ pub fn validate_built_in(point: &str, payload: &serde_json::Value) -> Result<(),
         | points::COMMIT_DETAIL_ACTION
         | points::DIFF_TOOLBAR
         | points::COMMIT_FORM_ACTION => validate::<ToolbarItemPayload>(payload),
+        points::EDITOR_TOOLBAR       => validate::<EditorToolbarPayload>(payload),
         points::WELCOME_ACTION       => validate::<WelcomeActionPayload>(payload),
         points::BRANCH_DECORATOR     => validate::<BranchDecoratorPayload>(payload),
         points::FILE_DECORATOR       => validate::<FileDecoratorPayload>(payload),

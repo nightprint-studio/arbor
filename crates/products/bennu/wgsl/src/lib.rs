@@ -10,6 +10,14 @@
 //! * **[`bindings`]** reads the resources a shader declares — `@group @binding` — which is the
 //!   half a Bevy material's `#[derive(AsBindGroup)]` has to agree with, and the only place the
 //!   two files can be checked against each other.
+//! * **[`library`]** indexes the modules a shader can `#import` — Bevy's own, and the
+//!   project's — so a name that arrives from another file still has a completion, a
+//!   signature and somewhere to jump. It composes nothing: see its own docs for why an
+//!   index is most of the value of naga_oil at a fraction of the cost.
+//! * **[`preview_layout`]** renumbers a shader's material bindings onto the fixed layout a
+//!   previewer already has. `AsBindGroup::bind_group_layout_entries` is static, so a viewer
+//!   cannot build a layout to match whatever indices a shader happens to use — it can only
+//!   move the shader onto the one it has, which is what this does.
 //! * **[`symbols`]** is a tolerant text scanner. It answers "what is in this file" while
 //!   you are still typing it — which is exactly when the compiler cannot answer anything,
 //!   because half of what you have written is not valid yet. Outline, completion and
@@ -29,6 +37,10 @@
 pub mod bindings;
 pub mod builtins;
 pub mod imports;
+pub mod library;
+pub mod preview_hints;
+pub mod preview_layout;
 pub mod prelude;
 pub mod symbols;
+pub mod uniforms;
 pub mod validate;

@@ -72,6 +72,29 @@ impl AppCtx for BackendAppCtx {
         false
     }
 
+    // Extensions run in the shell, which owns the wasm engine — a second engine per backend
+    // would compile every module again and give a plugin a different instance depending on
+    // which process it happened to load in. Blocks on the reply, like `open_path`.
+    fn ext_surface(&self, _plugin: &str) -> Result<String, String> {
+        match &self.host {
+            Some(h) => h
+                .call("__ext_surface", serde_json::json!({}))
+                .map(|v| v.to_string()),
+            None => Err("arbor.ext: no reverse channel to the shell".to_string()),
+        }
+    }
+
+    fn ext_call(&self, plugin: &str, spec_json: &str) -> Result<String, String> {
+        let spec: serde_json::Value =
+            serde_json::from_str(spec_json).map_err(|e| format!("arbor.ext.call: {e}"))?;
+        match &self.host {
+            Some(h) => h
+                .call("__ext_call", serde_json::json!({ "plugin": plugin, "spec": spec }))
+                .map(|v| v.to_string()),
+            None => Err("arbor.ext: no reverse channel to the shell".to_string()),
+        }
+    }
+
     fn open_path(&self, path: &str) -> Result<(), String> {
         // A headless backend has no window / OS opener, so forward to the
         // shell's `__open_path` handler, which applies the user's OS-vs-built-in

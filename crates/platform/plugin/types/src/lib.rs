@@ -16,13 +16,16 @@
 //!
 //! See `docs/crate-refactor.md` for the full split plan.
 
+pub mod credentials;
 pub mod dependency;
 pub mod hook_catalog;
 pub mod hook_names;
 pub mod hook_ns;
 pub mod hooks;
 pub mod manifest;
+pub mod network;
 pub mod permissions;
+pub mod provides;
 pub mod prelude;
 pub mod sandbox;
 pub mod schedule;

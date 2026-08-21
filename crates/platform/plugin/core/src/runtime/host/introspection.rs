@@ -10,11 +10,12 @@ use crate::runtime::scheduler::plugin_namespace;
 
 impl PluginHost {
     /// Return true when a plugin with the given manifest name is currently
-    /// loaded AND enabled. Used by sibling plugins (via `arbor.meta.plugin_loaded`)
-    /// that need to branch on whether another plugin is active right now,
-    /// without relying on the fire-and-forget `arbor.service.call` mechanism
-    /// (which races against plugin reload + can silently no-op on lock
-    /// poisoning). Returns false for unknown names and dormant entries.
+    /// loaded AND enabled. Returns false for unknown names and dormant entries.
+    ///
+    /// **Not the answer to `arbor.meta.plugin_loaded`** — that reads
+    /// [`PluginActivity`](crate::runtime::loaded::PluginActivity) instead, because reaching
+    /// this method needs the host mutex and the caller is often a hook the host fires while
+    /// already holding it. This one is for callers that hold the lock legitimately.
     pub fn is_plugin_enabled(&self, name: &str) -> bool {
         self.plugins.iter().any(|p| p.manifest.name == name && p.is_enabled())
     }

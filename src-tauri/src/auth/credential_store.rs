@@ -115,6 +115,32 @@ pub fn delete(host: &str, _username: &str) -> Result<()> {
     })
 }
 
+// ── Plugin-owned credentials ───────────────────────────────────────────────────
+
+/// Remove every credential a plugin owned.
+///
+/// Called when a plugin is uninstalled. Deleting its directory does not touch the keychain,
+/// so without this a plugin the user removed leaves tokens behind that nothing on disk
+/// explains — and that nothing will ever clean up, because the manifest listing the slots is
+/// gone with the folder.
+///
+/// Ownership is decided by `arbor_plugin_types::credentials::belongs_to`, the same function
+/// that builds the names in the first place, so there is no second definition of "this
+/// plugin's account" to drift from the first.
+pub fn forget_plugin(plugin: &str) -> Result<()> {
+    let plugin = plugin.to_string();
+    mutate_vault(move |m| {
+        let before = m.len();
+        m.retain(|account, _| {
+            !arbor_plugin_types::prelude::credential_belongs_to(account, &plugin)
+        });
+        let removed = before - m.len();
+        if removed > 0 {
+            tracing::info!("credentials: forgot {removed} entries owned by '{plugin}'");
+        }
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Host-based default credential (used for automatic fetch/push auth)
 //

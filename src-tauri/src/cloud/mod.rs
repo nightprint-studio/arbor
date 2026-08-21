@@ -161,7 +161,12 @@ pub fn install(app: &AppHandle) {
     //    `refresh_with` against the auth_gcs OnceLock.
     arbor_cloud::oauth_google::install_refresher();
 
-    // 2. CloudHost — built once, shared via Arc so spawned tokio tasks
+    // 2. Transport resolver — teaches the transfer loops how to find a provider package.
+    //    Installed unconditionally: it answers `None` when nothing is installed, which is
+    //    what keeps a machine with no packages on exactly the path it was on before.
+    arbor_cloud::transport::install_resolver(crate::cloud_guest::transport_resolver);
+
+    // 3. CloudHost — built once, shared via Arc so spawned tokio tasks
     //    inside arbor-cloud can clone cheaply.
     let state: tauri::State<'_, AppState> = app.state();
     // Cloud is a non-critical plugin feature: if the event sink isn't wired yet

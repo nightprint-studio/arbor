@@ -31,6 +31,7 @@ pub mod fetch;
 pub mod github_api;
 pub mod host;
 pub mod index;
+pub mod integrity;
 pub mod installer;
 pub mod installs;
 pub mod paths;

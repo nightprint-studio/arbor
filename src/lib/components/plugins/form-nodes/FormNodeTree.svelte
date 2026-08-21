@@ -243,8 +243,14 @@
     lastSeedName = nm;
     if (n.expanded !== true) return;          // collapse path relies on fresh keys
     untrack(() => {
-      const walk = (list: any[] | undefined) => {
-        for (const t of list ?? []) {
+      // `Array.isArray`, not `?? []`: a Lua plugin that ships an empty node
+      // list sends `{}` — an object, so the nullish fallback never fires and
+      // `for…of` throws "is not iterable" from inside an effect, which takes
+      // the whole form down. Every walk over plugin-supplied lists guards the
+      // same way (see `collectValidation` in PluginFormModal).
+      const walk = (list: unknown) => {
+        if (!Array.isArray(list)) return;
+        for (const t of list) {
           if (expandable(t)) ctx.treeExpanded[keyOf(t)] = true;
           walk((t as any).children);
         }

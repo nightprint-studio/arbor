@@ -15,12 +15,14 @@ use crate::tree::{IconRegistry, TreeStore};
 
 use super::PluginHost;
 use crate::runtime::consts::{ARBOR_API_VERSION, ARBOR_APP_VERSION};
-use crate::runtime::loaded::{DormantPlugin, LoadedPlugin, TimerCancels, TimerCounter};
+use crate::runtime::loaded::{
+    DormantPlugin, LoadedPlugin, PluginActivity, ServiceIndex, TimerCancels, TimerCounter,
+};
 use arbor_plugin_types::prelude::{hook_names, LoadFailure, Manifest, ScheduleRegistry};
 
 use crate::runtime::manifest::{
-    discover_in_roots, load_plugin_states, plugin_dir,
-    save_plugin_states, topo_sort_manifests,
+    discover_in_roots, forget_plugin_state, load_plugin_states_for, plugin_dir,
+    set_plugin_state_for, topo_sort_manifests,
 };
 
 impl PluginHost {
@@ -83,7 +85,9 @@ impl PluginHost {
     pub fn reload(&mut self) -> Result<()> {
         self.unload_all();
 
-        let states = load_plugin_states();
+        // Scoped to THIS host's product: a package installed from Corvus is not one Bennu
+        // was asked to run, and the two hosts read the same file for different answers.
+        let states = load_plugin_states_for(self.product.as_deref());
         let (all_manifests, bad_manifests) = self.discover_plugins_with_extras()?;
 
         // Surface manifest parse failures the same way we surface load
@@ -272,6 +276,8 @@ impl PluginHost {
                 self.contributions.clone(),
                 self.tree_store.clone(),
                 self.icon_registry.clone(),
+                self.activity.clone(),
+                self.services.clone(),
             );
             let plugin_ms = plugin_started.elapsed().as_millis();
             timings.push((name.clone(), plugin_ms));
@@ -280,6 +286,7 @@ impl PluginHost {
             match result {
                 Ok(p) => {
                     loaded_versions.insert(name.clone(), version);
+                    self.activity.publish(&p.manifest.name, Arc::clone(&p.enabled));
                     self.plugins.push(p);
                 }
                 Err(e) => {
@@ -369,9 +376,7 @@ impl PluginHost {
                 Vec::new()
             };
 
-            let mut states = load_plugin_states();
-            states.insert(name.to_string(), true);
-            save_plugin_states(&states);
+            set_plugin_state_for(self.product.as_deref(), name, true);
 
             // Symmetric counterpart to `disable_plugin`'s on_plugin_unload.
             let ctx = serde_json::json!({
@@ -409,6 +414,8 @@ impl PluginHost {
             self.contributions.clone(),
             self.tree_store.clone(),
             self.icon_registry.clone(),
+            self.activity.clone(),
+            self.services.clone(),
         ) {
             Ok(p)  => p,
             Err(e) => {
@@ -418,9 +425,7 @@ impl PluginHost {
                 // next `reload()` tries to load it again silently because
                 // `enable_plugin`'s `states.insert(true)` ran on the
                 // previous activation and is still on disk.
-                let mut states = load_plugin_states();
-                states.insert(name.to_string(), false);
-                save_plugin_states(&states);
+                set_plugin_state_for(self.product.as_deref(), name, false);
                 return Err(PluginCoreError::Other(format!("Plugin '{name}' failed to load: {err_msg}")));
             }
         };
@@ -432,11 +437,10 @@ impl PluginHost {
             Vec::new()
         };
 
+        self.activity.publish(&loaded.manifest.name, Arc::clone(&loaded.enabled));
         self.plugins.push(loaded);
 
-        let mut states = load_plugin_states();
-        states.insert(name.to_string(), true);
-        save_plugin_states(&states);
+        set_plugin_state_for(self.product.as_deref(), name, true);
 
         for sched in schedules {
             // `on_load` is honoured by the shared engine itself (it fires
@@ -500,9 +504,7 @@ impl PluginHost {
             }
         }
 
-        let mut states = load_plugin_states();
-        states.insert(name.to_string(), false);
-        save_plugin_states(&states);
+        set_plugin_state_for(self.product.as_deref(), name, false);
 
         // Cancel every scheduled entry owned by this plugin in one shot.
         if let Some(sched) = &self.scheduler {
@@ -575,6 +577,8 @@ impl PluginHost {
             self.contributions.remove_plugin(name);
             self.tree_store.remove_plugin(name);
             self.icon_registry.remove_plugin(name);
+            self.activity.retire(name);
+            self.services.retire(name);
             // Drop the LoadedPlugin (Lua VM gets dropped here).
             self.plugins.remove(idx);
         }
@@ -603,11 +607,10 @@ impl PluginHost {
             }
         }
 
-        // Step 4: drop the entry from plugin_states[-dev].json.
-        let mut states = load_plugin_states();
-        if states.remove(name).is_some() {
-            save_plugin_states(&states);
-        }
+        // Step 4: drop every trace from plugin_states.json. Uninstalling removes the folder,
+        // so this is not "not here" for one product — the package is gone, and a decision
+        // about it left behind would apply to whatever is installed under that name next.
+        forget_plugin_state(name);
 
         // Step 5: per-repo project settings cleanup.
         for repo in repo_paths {
@@ -643,6 +646,11 @@ pub fn load_plugin(
     contributions:  ContributionRegistry,
     tree_store:     TreeStore,
     icon_registry:  IconRegistry,
+    // Which siblings are live. Read-only from inside the VM — the host is the only writer,
+    // and it publishes this plugin's own entry once the load has actually succeeded.
+    activity:       PluginActivity,
+    // Where this plugin's `arbor.service.export` calls land.
+    services:       ServiceIndex,
 ) -> Result<LoadedPlugin> {
     // API version compatibility check (integer contract — bumped on breaking changes).
     if manifest.arbor_api > ARBOR_API_VERSION {
@@ -711,12 +719,16 @@ pub fn load_plugin(
         app_ctx,
         host_weak,
         installer.as_ref(),
-        timer_cancels.clone(),
-        timer_counter,
-        schedules.clone(),
-        contributions,
-        tree_store,
-        icon_registry,
+        crate::sandbox::SandboxRegistries {
+            timer_cancels: timer_cancels.clone(),
+            timer_counter,
+            schedules: schedules.clone(),
+            contributions,
+            tree_store,
+            icon_registry,
+            activity,
+            services,
+        },
         enabled.clone(),
     )?;
     let sandbox_ms = sandbox_started.elapsed().as_millis();
@@ -728,10 +740,11 @@ pub fn load_plugin(
         let _ = lua.globals().set("__arbor_current_repo__", path.as_str());
     }
 
-    // Load the entry point.
+    // Load the entry point — when there is one. A package that only provides a wasm
+    // interface has no Lua half to run, and its absence is a shape rather than a failure.
     let exec_started = std::time::Instant::now();
-    let entry_path = manifest.dir.join(&manifest.entry);
-    if entry_path.exists() {
+    let entry_path = manifest.lua_entry().map(|e| manifest.dir.join(e));
+    if let Some(entry_path) = entry_path.filter(|p| p.exists()) {
         let code = std::fs::read_to_string(&entry_path)?;
         lua.load(&code)
             .set_name(manifest.name.clone())

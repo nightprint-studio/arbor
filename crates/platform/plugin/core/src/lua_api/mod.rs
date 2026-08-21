@@ -91,6 +91,8 @@ pub fn register(
     ns::text::install(&ctx, lua, &arbor)?;
     ns::meta::install(&ctx, lua, &arbor)?;
     ns::settings::install(&ctx, lua, &arbor)?;
+    ns::credentials::install(&ctx, lua, &arbor)?;
+    ns::ext::install(&ctx, lua, &arbor)?;
     ns::http::install(&ctx, lua, &arbor)?;
     ns::timer::install(&ctx, lua, &arbor)?;
     ns::scheduler::install(&ctx, lua, &arbor)?;

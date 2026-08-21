@@ -84,6 +84,10 @@ arbor-plugin-api  = { path = "../crates/platform/plugin/api" }
 arbor-plugin-core = { path = "../crates/platform/plugin/core" }
 arbor-plugin-marketplace = { path = "../crates/platform/plugin/marketplace" }
 arbor-plugin-types = { path = "../crates/platform/plugin/types" }
+# The wasm extension host, with the runtime on: the shell is the process that actually
+# instantiates a guest, so a build of it that could only *describe* extensions would be able
+# to list them and never run one. The cost is wasmtime in every build of the shell.
+arbor-plugin-wasm  = { path = "../crates/platform/plugin/wasm", features = ["runtime"] }
 # The AI tool surface. `arbor-mcp` is the protocol (JSON-RPC + MCP + the transport
 # guards); `arbor-http` is the loopback server under it. What the tools DO is
 # `src/mcp/`, here in the shell, because that is where the user's consent lives.

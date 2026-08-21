@@ -9,7 +9,7 @@
    * Wired by `MarketplaceModal` — the modal opens this confirm before
    * calling `marketplace_install_plugin`; cancelling here is a no-op.
    */
-  import { Shield, Globe, FolderGit2, Terminal, Variable, KeyRound, Wrench, MessagesSquare, ArrowDownToLine, Network, Download, AlertTriangle, Package } from 'lucide-svelte';
+  import { Shield, Globe, FolderGit2, Terminal, Variable, KeyRound, Wrench, MessagesSquare, ArrowDownToLine, Network, Download, AlertTriangle, Package, Binary } from 'lucide-svelte';
   import Modal       from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
@@ -183,6 +183,33 @@
         title: 'Read other plugins\' settings',
         detail: 'can read but not write other plugins\' global / project settings',
         tone: 'safe',
+      });
+    }
+
+    // Credentials the package will own. Listed by label, not counted: a consent dialog that
+    // says "stores 2 credentials" has told the user nothing they can act on, and the whole
+    // reason a slot carries a label is so this line can name it.
+    if (p.credentials && p.credentials.length > 0) {
+      rows.push({
+        icon: KeyRound,
+        title: 'Stores credentials',
+        detail: `In your OS keychain: ${p.credentials.map(c => c.label || c.key).join(', ')}. `
+              + 'It can read and write these and no others — Arbor\u2019s own tokens are out of reach.',
+        tone: 'warn',
+      });
+    }
+
+    // A compiled module. Worth its own row precisely because it is the one thing about a
+    // listing a reader cannot check for themselves — so the row says what IS checked.
+    if (p.provides && p.provides.length > 0) {
+      const ifaces = [...new Set(p.provides.map(v => `${v.interface}@${v.version}`))];
+      rows.push({
+        icon: Binary,
+        title: 'Ships a compiled module',
+        detail: `Implements ${ifaces.join(', ')}. Installed from a signed release and `
+              + 'verified against the digest the registry recorded — an artifact that does '
+              + 'not match is refused.',
+        tone: 'warn',
       });
     }
 

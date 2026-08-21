@@ -98,6 +98,12 @@ impl From<arbor_plugin_marketplace::prelude::MarketplaceError> for AppError {
             M::PinMismatch(s)      => AppError::Other(format!("pinned SHA mismatch: {s}")),
             M::InvalidArchive(s)   => AppError::Other(format!("invalid archive: {s}")),
             M::InstallCollision(s) => AppError::Other(s),
+            // Both carry a whole sentence already — an artifact's digest did not match what
+            // the registry approved, or an index entry is internally inconsistent — and both
+            // end up in front of the user. Prefixed like their neighbours so the category
+            // survives, not rewritten.
+            M::IntegrityMismatch(s) => AppError::Other(format!("integrity check failed: {s}")),
+            M::InvalidEntry(s)      => AppError::Other(format!("invalid registry entry: {s}")),
             M::Other(s)            => AppError::Other(s),
         }
     }

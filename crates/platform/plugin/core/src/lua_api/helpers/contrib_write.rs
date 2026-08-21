@@ -3,7 +3,7 @@
 //! schema-validate / coalesce-emit logic lives in one place.
 
 use crate::contribution::{
-    ContributionRegistry, PluginContribution, validate_built_in,
+    points, ContributionRegistry, PluginContribution, validate_built_in,
 };
 
 /// Pushes the payload into the unified ContributionRegistry keyed by
@@ -94,6 +94,9 @@ pub fn toolbar_target_to_point(target: &str) -> String {
         "commit-detail"     => "arbor:commit-detail:action".to_string(),
         "commit-form"       => "arbor:commit-form:action".to_string(),
         "workspace-row"     => "arbor:workspace-row".to_string(),
+        // The code editor's own action bar. Takes `path_pattern` on top of the shared
+        // toolbar payload — see `points::EDITOR_TOOLBAR`.
+        "editor"            => points::EDITOR_TOOLBAR.to_string(),
         other               => other.to_string(),
     }
 }

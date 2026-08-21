@@ -11,6 +11,7 @@ use thiserror::Error;
 use crate::dependency::Dependency;
 use crate::hooks::Hooks;
 use crate::permissions::Permissions;
+use crate::provides::{CredentialSlot, LuaSection, Provides, WasmSection};
 use crate::sandbox::Sandbox;
 use crate::schedule::SchedulerSection;
 
@@ -66,9 +67,10 @@ pub struct Manifest {
     /// ids (`corvus`, `merula`, `sitta`, …).
     #[serde(default)]
     pub targets: Vec<String>,
-    /// Plugin entry point. Defaults to "main.lua".
-    #[serde(default = "default_entry")]
-    pub entry: String,
+    /// The Lua half of the package, when it has one. See [`Manifest::lua_entry`] for the
+    /// rule that decides whether an absent section means "no Lua" or "the default entry".
+    #[serde(default)]
+    pub lua: Option<LuaSection>,
 
     // ── Documentation ────────────────────────────────────────────────────────
     /// Optional path to an HTML file (relative to plugin dir) shown in the
@@ -97,13 +99,26 @@ pub struct Manifest {
     #[serde(default)]
     pub dependencies: Vec<Dependency>,
 
+    /// Implementations of host-defined interfaces carried by this package — a Studio format
+    /// backend, a cloud provider. Empty for an ordinary Lua plugin, which is every package
+    /// that exists today.
+    #[serde(default)]
+    pub provides: Vec<Provides>,
+    /// Settings shared by every module in [`Manifest::provides`]. Meaningless, and ignored,
+    /// when that list is empty.
+    #[serde(default)]
+    pub wasm: WasmSection,
+    /// Credential slots this package owns. It may create and read these and nothing else —
+    /// see [`CredentialSlot`] for why that is a namespace rather than a filter.
+    #[serde(default)]
+    pub credentials: Vec<CredentialSlot>,
+
     /// Path to the plugin directory — not in TOML, filled at discovery time.
     #[serde(skip)]
     pub dir: PathBuf,
 }
 
 fn default_arbor_api() -> u32 { 1 }
-fn default_entry() -> String { "main.lua".to_string() }
 
 // ---------------------------------------------------------------------------
 // Parsing
@@ -117,6 +132,33 @@ pub enum ManifestParseError {
 }
 
 impl Manifest {
+    /// The Lua entry point to load, or `None` for a package that has no Lua half.
+    ///
+    /// The rule, and it is one rule rather than a special case: **a package must contain at
+    /// least one part.** So an absent `[lua]` section means "no Lua" only when the package
+    /// provides something else; a package that provides nothing *is* a Lua plugin, and its
+    /// entry point is the default it has always been.
+    ///
+    /// That is what keeps this change from breaking the packages that exist. None of them
+    /// declares an entry point today — they all rely on the default — and none of them
+    /// provides anything, so all of them keep loading `main.lua` without being touched.
+    pub fn lua_entry(&self) -> Option<&str> {
+        match (&self.lua, self.provides.is_empty()) {
+            (Some(section), _) => Some(section.entry.as_str()),
+            // Provides nothing and says nothing: it can only be a Lua plugin.
+            (None, true) => Some("main.lua"),
+            // Provides something and claims no Lua half. Believe it.
+            (None, false) => None,
+        }
+    }
+
+    /// Whether installing this package requires the release channel rather than a source
+    /// archive. Carrying a built artifact is what forces the stricter path — see
+    /// `docs/extension-repo-layout.md`.
+    pub fn has_binary_parts(&self) -> bool {
+        !self.provides.is_empty()
+    }
+
     /// Parse a `plugin.toml` text payload and stamp the plugin directory on the
     /// resulting [`Manifest`]. No filesystem access — callers (the host's
     /// `discover_plugins`, the marketplace installer, etc.) read the file and
@@ -139,4 +181,84 @@ impl Manifest {
 pub struct ManifestParseFailure {
     pub folder_name: String,
     pub error:       String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The head every fixture below needs — the fields with no default.
+    const HEAD: &str = "\
+name        = \"x\"
+version     = \"1.0.0\"
+description = \"d\"
+author       = \"a\"
+
+[permissions]
+";
+
+    fn parse(extra: &str) -> Manifest {
+        Manifest::from_toml_str(&format!("{HEAD}{extra}"), Path::new("/p")).expect("parse")
+    }
+
+    #[test]
+    fn a_plugin_that_says_nothing_still_loads_main_lua() {
+        // Every package that exists today looks like this: no `[lua]`, no `[[provides]]`.
+        // If this ever fails, the change broke all twenty of them at once.
+        assert_eq!(parse("").lua_entry(), Some("main.lua"));
+    }
+
+    #[test]
+    fn a_lua_section_can_name_a_different_entry() {
+        assert_eq!(parse("\n[lua]\nentry = \"init.lua\"\n").lua_entry(), Some("init.lua"));
+    }
+
+    #[test]
+    fn a_lua_section_without_an_entry_still_means_main_lua() {
+        assert_eq!(parse("\n[lua]\n").lua_entry(), Some("main.lua"));
+    }
+
+    #[test]
+    fn a_package_that_provides_something_and_claims_no_lua_has_none() {
+        let m = parse(
+            "\n[[provides]]\ninterface = \"cloud-provider\"\nversion = 1\n\
+             id = \"gcs\"\nmodule = \"cloud_gcs.wasm\"\n",
+        );
+        assert_eq!(m.lua_entry(), None);
+        assert!(m.has_binary_parts());
+    }
+
+    #[test]
+    fn a_package_can_have_both_halves() {
+        let m = parse(
+            "\n[lua]\nentry = \"main.lua\"\n\n[[provides]]\ninterface = \"cloud-provider\"\n\
+             version = 1\nid = \"gcs\"\nmodule = \"cloud_gcs.wasm\"\n",
+        );
+        assert_eq!(m.lua_entry(), Some("main.lua"));
+        assert!(m.has_binary_parts());
+    }
+
+    #[test]
+    fn an_ordinary_plugin_does_not_need_the_release_channel() {
+        assert!(!parse("").has_binary_parts());
+    }
+
+    #[test]
+    fn credentials_are_declared_slots_rather_than_a_flag() {
+        // The consent dialog has to be able to say WHAT will be stored.
+        let m = parse(
+            "\n[[credentials]]\nkey = \"oauth\"\nlabel = \"Google account\"\n\
+             \n[[credentials]]\nkey = \"hmac\"\nlabel = \"S3 access key\"\n",
+        );
+        assert_eq!(m.credentials.len(), 2);
+        assert_eq!(m.credentials[0].key, "oauth");
+        assert_eq!(m.credentials[1].label, "S3 access key");
+    }
+
+    #[test]
+    fn a_package_declaring_no_credentials_owns_none() {
+        // The default has to be the empty set, not "unspecified" — a plugin that said
+        // nothing must reach nothing.
+        assert!(parse("").credentials.is_empty());
+    }
 }

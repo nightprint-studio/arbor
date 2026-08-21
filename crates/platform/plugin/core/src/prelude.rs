@@ -31,14 +31,17 @@ pub use crate::error::{PluginCoreError, Result as PluginCoreResult};
 
 // ── Sandbox + runtime (Step 4) ──────────────────────────────────────────────
 pub use crate::sandbox::{
-    create_sandbox, ApiInstallParams, LuaApiInstaller, NoopApiInstaller,
+    create_sandbox, ApiInstallParams, LuaApiInstaller, NoopApiInstaller, SandboxRegistries,
 };
 pub use crate::runtime::{
     ARBOR_API_VERSION, ARBOR_APP_VERSION, current_os,
-    discover_in_roots, discover_plugins, load_plugin_states, plugin_dir,
-    save_plugin_states,
+    discover_in_roots, discover_plugins, forget_plugin_state, install_plugin_for,
+    load_plugin_states, load_plugin_states_for, load_states, plugin_dir, plugin_products,
+    save_plugin_states, save_plugin_states_for, save_states, set_plugin_state_for,
+    PluginStates,
     ComboOption, PluginInfo,
-    DormantPlugin, LoadedPlugin, TimerCancel, TimerCancels, TimerCounter,
+    DormantPlugin, LoadedPlugin, PluginActivity, ServiceIndex, TimerCancel, TimerCancels,
+    TimerCounter,
     PluginHost, load_plugin, PipelineOpResult, ServiceError, CommandError,
     host_command_required,
 };

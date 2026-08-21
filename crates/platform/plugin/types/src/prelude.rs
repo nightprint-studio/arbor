@@ -16,14 +16,22 @@ pub use crate::hook_catalog::{
 pub use crate::hook_names;
 pub use crate::hook_ns;
 pub use crate::hook_ns::{
-    HOOK_NS_SEP, PRODUCT_ARBOR, PRODUCT_CORVUS, PRODUCT_GARRULUS, PRODUCT_LAUNCHER, PRODUCT_MERULA,
-    PRODUCT_SITTA, PRODUCT_TYTO,
+    HOOK_NS_SEP, HOSTING_PRODUCTS, PRODUCT_ARBOR, PRODUCT_BENNU, PRODUCT_CORVUS, PRODUCT_GARRULUS,
+    PRODUCT_LAUNCHER, PRODUCT_MERULA, PRODUCT_PICUS, PRODUCT_SITTA, PRODUCT_TYTO,
 };
 // The compile-time name builders. Exported here too so a product crate that
 // declares its own namespace does not have to reach past the prelude.
 pub use crate::{declare_hook_names, hook_name};
 pub use crate::hooks::Hooks;
+pub use crate::credentials::{
+    account as credential_account, account_for as credential_account_for,
+    belongs_to as credential_belongs_to, CredentialError, PLUGIN_PREFIX,
+};
 pub use crate::manifest::{Manifest, ManifestParseError, ManifestParseFailure};
+pub use crate::network::{
+    check as network_check, host_allowed, host_of, NetworkDenial,
+};
+pub use crate::provides::{CredentialSlot, LuaSection, Provides, WasmSection, WasmTarget};
 pub use crate::permissions::{
     AccessLevel, EnvReadPerm, GitLevel, Permissions, RequiredPerm, TerminalLevel,
 };

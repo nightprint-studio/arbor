@@ -33,8 +33,17 @@ mod config;
 mod profile;
 mod terminal;
 mod jobs;
+mod plugin_assets;
 mod plugin_host_commands;
 mod plugin_logs;
+// The effects a wasm extension's host calls turn into. `arbor-plugin-wasm` owns the rules —
+// which package may reach what, and in which order — and none of the reaching; this is the
+// half that touches the keychain and the network.
+mod plugin_wasm;
+// Routing the cloud's five storage primitives through a wasm provider when one is installed,
+// and falling through to the in-process implementation when none is.
+mod cloud_guest;
+mod ext;
 mod pipeline;
 mod git_provider;
 mod provider_connect;

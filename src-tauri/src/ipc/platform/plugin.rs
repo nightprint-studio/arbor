@@ -47,6 +47,48 @@ fn list_plugins(_state: &AppState) -> Result<Vec<Manifest>, AppError> {
     Ok(arbor_plugin_core::prelude::discover_plugins()?)
 }
 
+/// The wasm extensions installed packages provide, and everything wrong with them.
+///
+/// Separate from `list_plugins` because they are a different kind of thing: a plugin *calls*
+/// Arbor's API, an extension *implements* an interface Arbor calls into. Merging them into
+/// one list would put a row that has no hooks, no settings and no on/off in the same shape as
+/// one that has all three.
+///
+/// Problems are the reason this exists at all. A missing module or a claimed-twice id makes a
+/// file type simply not open, with nothing anywhere saying why — so they are reported
+/// alongside the working entries rather than logged and lost.
+#[platform::handler(program = "platform")]
+fn list_extensions(
+    _state: &AppState,
+) -> Result<arbor_plugin_wasm::prelude::ExtensionsReport, AppError> {
+    let manifests = arbor_plugin_core::prelude::discover_plugins()?;
+    let enabled = arbor_plugin_core::prelude::load_plugin_states();
+    let index = arbor_plugin_wasm::prelude::ExtensionIndex::build(&manifests, &enabled);
+    for problem in index.problems() {
+        tracing::warn!("extensions: {problem}");
+    }
+    Ok(arbor_plugin_wasm::prelude::ExtensionsReport::from_index(&index))
+}
+
+/// Bring one extension up and let it go again, reporting whether it came up.
+///
+/// The point is the bringing up. Instantiating exercises the whole chain — the module
+/// compiles, its imports resolve against what this host offers, its exports match the world it
+/// claims — and every one of those failures is otherwise invisible until the first time
+/// somebody opens a file and nothing happens. A declaration that resolves in the index is not
+/// the same fact as a module that runs, and this is the only thing that can tell them apart.
+///
+/// Blocking, which is fine here: every platform handler already runs on the blocking pool.
+#[platform::handler(program = "platform")]
+fn probe_extension(
+    _state:    &AppState,
+    interface: String,
+    version:   u32,
+    id:        String,
+) -> Result<(), AppError> {
+    crate::plugin_wasm::probe(&interface, version, &id).map_err(AppError::Other)
+}
+
 /// Read the master plugin-system kill-switch (Plugin Manager toggle).
 #[platform::handler(program = "platform")]
 fn get_plugins_enabled(state: &AppState) -> Result<bool, AppError> {

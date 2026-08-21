@@ -116,6 +116,10 @@ fn reload_host(state: &AppState) -> Result<()> {
         host.reload()?;
         host.start_all_schedulers();
     }
+    // The wasm engine has its own cache, keyed by module path — and a reinstall writes a
+    // different module to the same path. Reloading the Lua host does nothing for it, so it is
+    // cleared here, where "the plugin set moved" is already known.
+    crate::plugin_wasm::forget_compiled();
     // Also rescan corvus-be — the sole loader of universal + git plugins. Without
     // this a freshly installed (or uninstalled) plugin would never load into /
     // unload from the running Corvus window; only the launcher host saw the folder
@@ -153,7 +157,17 @@ async fn marketplace_refresh_registry(state: &AppState) -> Result<MarketplaceCat
 /// Download a plugin's zipball, extract it, record the install, and reload the
 /// plugin host so it's discovered (still disabled — the user opts in).
 #[platform::handler(program = "platform")]
-async fn marketplace_install_plugin(state: &AppState, name: String) -> Result<MarketplacePlugin> {
+// `product` is which product the user is installing FOR. The bytes are global — a package
+// already on disk is not fetched again — but the decision to run it is recorded for this
+// product and explicitly withheld from the others.
+//
+// `None` only from a surface that hosts no plugins, and then nothing is scoped: the package
+// loads wherever its manifest allows, which is the pre-product behaviour.
+async fn marketplace_install_plugin(
+    state: &AppState,
+    name: String,
+    product: Option<String>,
+) -> Result<MarketplacePlugin> {
     // Resolve the catalog entry — clone out so we drop the mutex before hitting
     // the network. The host reference comes from the same dev-plugin dir the
     // rest of the marketplace surface uses.
@@ -166,6 +180,12 @@ async fn marketplace_install_plugin(state: &AppState, name: String) -> Result<Ma
 
     let installed = mk::install_plugin(&host, &plugin).await?;
     mk::record_plugin(installed);
+
+    // Recorded BEFORE the reload, so the host that reloads already sees the decision — doing
+    // it after means one pass where the package is on disk and nobody has said where it goes.
+    if let Some(p) = product.as_deref() {
+        arbor_plugin_core::prelude::install_plugin_for(p, &name);
+    }
 
     reload_host(state)?;
 
@@ -191,7 +211,7 @@ fn marketplace_uninstall_plugin(state: &AppState, name: String) -> Result<Market
         mk::set_plugin_enabled(other, false);
     }
 
-    mk::uninstall_plugin(&name)?;
+    mk::uninstall_plugin(&marketplace::TauriMarketplaceHost, &name)?;
     mk::forget_plugin(&name);
 
     // Wipe the host's enable-state entry too — keeps the ledger clean.
@@ -212,11 +232,20 @@ fn marketplace_uninstall_plugin(state: &AppState, name: String) -> Result<Market
 }
 
 #[platform::handler(program = "platform")]
+// `product` is whose answer is being changed. The others keep theirs.
 fn marketplace_set_plugin_enabled(
     state: &AppState,
     name: String,
     enabled: bool,
+    product: Option<String>,
 ) -> Result<MarketplacePlugin> {
+    // Written here as well as by whichever host owns the plugin: the toggle has to hold even
+    // for a product whose backend is not running, and a backend that IS running will read the
+    // same file when it reloads.
+    if let Some(p) = product.as_deref() {
+        arbor_plugin_core::prelude::set_plugin_state_for(Some(p), &name, enabled);
+    }
+
     // A plugin lives in exactly one host: the launcher host (this process — only
     // `launcher`-targeted plugins) OR a product backend (corvus-be, the sole
     // loader of universal + git plugins). The marketplace toggle must reach the
@@ -367,12 +396,17 @@ fn stub_plugin(name: &str) -> MarketplacePlugin {
             repo: String::new(), r#ref: None, subpath: None,
             source: MarketplaceSource::Local, pinned_sha: None,
             external: false,
+            artifacts: Default::default(),
         },
         experimental: None,
         doc:         None,
         update_available:  None,
         installed_version: None,
         dependencies: Vec::new(),
+        // A stub stands for an entry that has LEFT the catalog, so there is nothing left to
+        // report about it. Empty here is the truth, not a placeholder.
+        credentials:  Vec::new(),
+        provides:     Vec::new(),
     }
 }
 
@@ -395,6 +429,7 @@ fn stub_theme(id: &str) -> MarketplaceTheme {
             repo: String::new(), r#ref: None, subpath: None,
             source: MarketplaceSource::Local, pinned_sha: None,
             external: false,
+            artifacts: Default::default(),
         },
     }
 }

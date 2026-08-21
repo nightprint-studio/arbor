@@ -27,3 +27,8 @@ semver = "1"
 
 # ZIP extraction for downloaded entries.
 zip = "2"
+
+# Content verification for release artifacts. A `.wasm` is a build output, so a commit pin
+# says nothing about it — the registry entry records its digest and this checks it. Same
+# workspace pin every other hashing site uses.
+sha2 = { workspace = true }

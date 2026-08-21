@@ -50,6 +50,7 @@
   import SidebarNodeConsole from './sidebar-nodes/SidebarNodeConsole.svelte';
 
   import './sidebar-nodes/sidebar-node-styles.css';
+  import { toArr } from './form-nodes/helpers';
 
   interface Props {
     pluginName: string;
@@ -68,8 +69,8 @@
     findPanelContent(contributionStore.forPoint(PANEL_CONTENT_POINT), pluginName, panelId)
   );
   const title   = $derived(content?.title ?? '');
-  const nodes   = $derived((content?.nodes ?? []) as any[]);
-  const actions = $derived((content?.actions ?? []) as any[]);
+  const nodes   = $derived(toArr<any>(content?.nodes));
+  const actions = $derived(toArr<any>(content?.actions));
 
   function firePanelOpen() {
     firePluginAction(pluginName, `panel:open:${panelId}`, '{}').catch(() => {});

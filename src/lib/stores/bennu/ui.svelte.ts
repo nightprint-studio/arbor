@@ -44,7 +44,16 @@ export type LeftPanel = 'project' | 'structure' | 'dependencies';
  *  it is about the caret, and on every file that is not a fulcrum translation bundle it could only ever
  *  say "not here". It is reached from the editor's own toolbar — which appears on a bundle and nowhere
  *  else — from the palette, and from its shortcut. */
-export type RightPanel = 'maven' | 'cargo' | 'tests' | 'ast' | 'i18n';
+export type RightPanel =
+  | 'maven' | 'cargo' | 'tests' | 'ast' | 'i18n'
+  /** A view a plugin registered with `arbor.ui.add_view`, keyed `plugin:<plugin>:<view_id>`.
+   *
+   *  Bennu puts plugin views here rather than in the body, and that is a real choice about
+   *  what a view is FOR in a code editor: Corvus's body is a commit graph you look at
+   *  instead of the diff, Bennu's body is the file you are editing. A shader preview, a
+   *  rendered markdown, a live query result — all of them are worth nothing if opening them
+   *  hides the text they are about. Beside the editor, resizable, is the split. */
+  | `plugin:${string}`;
 /** Bottom tool windows — one panel per rail button, except Build and Problems which share
  *  one. The Forms inspector lives here (wide, horizontal data) rather than in a narrow side
  *  panel; its toggle sits in the right rail's bottom cluster.
@@ -69,6 +78,11 @@ export type BottomPanel =
    *  and one transcript, and the tab strip says which of them you are looking at. See
    *  {@link RunTab}. */
   | 'run'
+  /** The Lua log stream. A bottom panel and not an overlay, for the same reason Corvus docks
+   *  it there: you read it WHILE looking at something else — a plugin that failed to start,
+   *  a form that did nothing — and a panel that covers the thing you are diagnosing is a
+   *  panel you have to keep closing. */
+  | 'plugin-logs'
   | 'todos'
   /** The call / type hierarchy — a tree of callers, callees, supertypes or implementors.
    *
@@ -153,6 +167,12 @@ function createBennuUiStore() {
   let fileStructureOpen = $state(false);
   // About Bennu modal.
   let aboutOpen = $state(false);
+
+  // ── Tools ─────────────────────────────────────────────────────────────────
+  // The same three Corvus keeps under its hamburger's Tools separator. They belong here too
+  // now that bennu hosts plugins: a product that runs plugins has to be able to install one,
+  // see which are loaded, and read why one did not start.
+  let pluginsOpen = $state(false);
   // Generate modal (constructor / getters / setters) + its preselected mode
   // (Alt+Insert opens it fresh; an Alt+Enter "Generate…" intention preselects one).
   let generateOpen = $state(false);
@@ -241,6 +261,7 @@ function createBennuUiStore() {
     get tomcatConfigOpen() { return tomcatConfigOpen; },
     get fileStructureOpen() { return fileStructureOpen; },
     get aboutOpen()    { return aboutOpen; },
+    get pluginsOpen()     { return pluginsOpen; },
     get generateOpen() { return generateOpen; },
     get jpaGenerateOpen() { return jpaGenerateOpen; },
     get jpaGenerateFile() { return jpaGenerateFile; },
@@ -258,6 +279,12 @@ function createBennuUiStore() {
     toggleLeft(p: LeftPanel)  { leftPanel = leftPanel === p ? null : p; },
     /** Toggle a right tool window (clicking the active one closes it). */
     toggleRight(p: RightPanel) { rightPanel = rightPanel === p ? null : p; },
+    /** Open one, without the toggle. `arbor.ui.open_panel` means open — a plugin that asks
+     *  twice (a second click on its toolbar button) must not be answered by closing. */
+    showRight(p: RightPanel) { rightPanel = p; },
+    /** Close whatever is in the right split. The counterpart to `showRight` for a panel that
+     *  owns a close button and must not have to know which panel it is. */
+    closeRight() { rightPanel = null; },
     /** Toggle a bottom dock section (clicking the active one closes the dock). */
     toggleBottom(p: BottomPanel) { bottomPanel = bottomPanel === p ? null : p; },
     /** Switch the bottom dock to a section (opening the dock if closed). */
@@ -290,7 +317,12 @@ function createBennuUiStore() {
      */
     dropUnavailablePanels(keep: { left: LeftPanel[]; right: RightPanel[]; bottom: BottomPanel[] }) {
       if (leftPanel && !keep.left.includes(leftPanel)) leftPanel = 'project';
-      if (rightPanel && !keep.right.includes(rightPanel)) rightPanel = null;
+      // Plugin views are exempt: what a plugin offers is decided by the plugin's own targets
+      // and by whether it is enabled, never by whether the project is Maven or Cargo. Listing
+      // them in `keep.right` would mean the caller enumerating packages it cannot know.
+      if (rightPanel && !rightPanel.startsWith('plugin:') && !keep.right.includes(rightPanel)) {
+        rightPanel = null;
+      }
       if (bottomPanel && !keep.bottom.includes(bottomPanel)) bottomPanel = null;
     },
 
@@ -342,6 +374,11 @@ function createBennuUiStore() {
     closeFileStructure() { fileStructureOpen = false; },
     openAbout()          { aboutOpen = true; },
     closeAbout()         { aboutOpen = false; },
+    togglePlugins()      { pluginsOpen = !pluginsOpen; },
+    closePlugins()       { pluginsOpen = false; },
+    /** Docked in the bottom tool window, not floated: the whole use of a log is reading it
+     *  while looking at the thing it is about. */
+    togglePluginLogs()   { bottomPanel = bottomPanel === 'plugin-logs' ? null : 'plugin-logs'; },
     /** Open the Generate modal, optionally preselecting a mode (an Alt+Enter
      *  "Generate…" intention routes here with the matching mode; Alt+Insert opens
      *  it with the last/default mode). */

@@ -1,12 +1,34 @@
 import { invoke } from '@tauri-apps/api/core';
-import { platform, corvus } from './rpc';
-import type { PluginManifest, PluginInfo } from '../types/plugin';
+import { platform } from './rpc';
+import { host } from './host';
+import type { PluginManifest, PluginInfo, ExtensionsReport } from '../types/plugin';
 
 export const listPlugins = () =>
   platform<PluginManifest[]>('list_plugins');
 
 export const reloadPlugins = () =>
-  corvus<void>('reload_plugins');
+  host<void>('reload_plugins');
+
+/**
+ * The wasm extensions installed packages provide, plus everything wrong with them.
+ *
+ * Separate from `listPlugins` because they are a different kind of thing: a plugin calls
+ * Arbor's API, an extension implements an interface Arbor calls into — so it has no hooks, no
+ * settings panel and no on/off of its own.
+ */
+export const listExtensions = () =>
+  platform<ExtensionsReport>('list_extensions');
+
+/**
+ * Bring one extension up and let it go again, reporting whether it came up.
+ *
+ * Resolves on success and rejects with the reason on failure. The point is the bringing up:
+ * instantiating exercises the whole chain — the module compiles, its imports resolve against
+ * what the host offers, its exports match the world it claims — and every one of those
+ * failures is otherwise invisible until somebody opens a file and nothing happens.
+ */
+export const probeExtension = (iface: string, version: number, id: string) =>
+  platform<void>('probe_extension', { interface: iface, version, id });
 
 /** Master kill-switch — read whether the plugin system is enabled at all. */
 export const getPluginsEnabled = () =>
@@ -19,14 +41,14 @@ export const getPluginsEnabled = () =>
  * Both branches emit `arbor://plugins-reloaded` so listeners refresh.
  */
 export const setPluginsEnabled = (enabled: boolean) =>
-  corvus<void>('set_plugins_enabled', { enabled });
+  host<void>('set_plugins_enabled', { enabled });
 
 export const execHook = (hook: string, contextJson: string) =>
-  corvus<void>('exec_hook', { hook, context_json: contextJson });
+  host<void>('exec_hook', { hook, context_json: contextJson });
 
 /** Fire a specific action on a specific plugin (called by the frontend when user interacts with plugin-registered UI). */
 export const firePluginAction = (pluginName: string, action: string, contextJson: string) =>
-  corvus<void>('fire_plugin_action', { plugin_name: pluginName, action, context_json: contextJson });
+  host<void>('fire_plugin_action', { plugin_name: pluginName, action, context_json: contextJson });
 
 /**
  * Invoke a registered command on behalf of `callerPlugin` (declarative
@@ -39,7 +61,7 @@ export const fireCommand = (
   id: string,
   args: unknown,
   contextJson: string,
-) => corvus<void>('fire_command', { caller_plugin: callerPlugin, id, args, context_json: contextJson });
+) => host<void>('fire_command', { caller_plugin: callerPlugin, id, args, context_json: contextJson });
 
 /**
  * Enable a plugin. Returns the ordered list of plugins that were actually
@@ -48,7 +70,7 @@ export const fireCommand = (
  * first to detect blockers and prompt the user when the cascade is non-trivial.
  */
 export const enablePlugin = (name: string) =>
-  corvus<string[]>('enable_plugin', { name });
+  host<string[]>('enable_plugin', { name });
 
 /**
  * Disable a plugin. Returns the ordered list of plugins that were disabled
@@ -56,7 +78,7 @@ export const enablePlugin = (name: string) =>
  * Call `pluginDisablePreview` first when you need to show a confirmation.
  */
 export const disablePlugin = (name: string) =>
-  corvus<string[]>('disable_plugin', { name });
+  host<string[]>('disable_plugin', { name });
 
 /** One blocker preventing a plugin's enable cascade from running. */
 export interface EnableBlocker {
@@ -75,11 +97,11 @@ export interface EnablePreview {
 
 /** Preview an enable cascade — used to drive the confirmation modal. */
 export const pluginEnablePreview = (name: string) =>
-  corvus<EnablePreview>('plugin_enable_preview', { name });
+  host<EnablePreview>('plugin_enable_preview', { name });
 
 /** Preview a disable cascade — every transitively-required dependent. */
 export const pluginDisablePreview = (name: string) =>
-  corvus<string[]>('plugin_disable_preview', { name });
+  host<string[]>('plugin_disable_preview', { name });
 
 /**
  * Permanently uninstall a plugin. Removes the plugin folder, its global
@@ -92,7 +114,7 @@ export const deletePlugin = (name: string) =>
 
 /** List all loaded plugins with their enabled state and scheduler info. */
 export const listPluginInfo = () =>
-  corvus<PluginInfo[]>('list_plugin_info');
+  host<PluginInfo[]>('list_plugin_info');
 
 export interface DepGraphEdge {
   name:     string;
@@ -114,27 +136,27 @@ export interface DepGraphNode {
 
 /** Return the plugin dependency graph (each plugin with its deps + dependents). */
 export const pluginDepGraph = () =>
-  corvus<DepGraphNode[]>('plugin_dep_graph');
+  host<DepGraphNode[]>('plugin_dep_graph');
 
 /** Return the names of currently-enabled plugins that directly depend on `name`. */
 export const pluginDependents = (name: string) =>
-  corvus<string[]>('plugin_dependents', { name });
+  host<string[]>('plugin_dependents', { name });
 
 /** Start a specific scheduler action for a plugin. */
 export const startPluginScheduler = (name: string, action: string) =>
-  corvus<void>('start_plugin_scheduler', { name, action });
+  host<void>('start_plugin_scheduler', { name, action });
 
 /** Stop a specific scheduler action for a plugin. */
 export const stopPluginScheduler = (name: string, action: string) =>
-  corvus<void>('stop_plugin_scheduler', { name, action });
+  host<void>('stop_plugin_scheduler', { name, action });
 
 /** Return all persisted settings for a plugin as a key→value map. */
 export const pluginSettingsGet = (name: string) =>
-  corvus<Record<string, unknown>>('plugin_settings_get', { name });
+  host<Record<string, unknown>>('plugin_settings_get', { name });
 
 /** Overwrite all settings for a plugin with the provided key→value map. */
 export const pluginSettingsSetAll = (name: string, values: Record<string, unknown>) =>
-  corvus<void>('plugin_settings_set_all', { name, values });
+  host<void>('plugin_settings_set_all', { name, values });
 
 /** Notify the backend whether the app window currently has focus.
  *  Focus-gated schedulers (only_when_focused = true) skip firing while this is false. */
@@ -143,7 +165,7 @@ export const setAppFocus = (focused: boolean) =>
 
 /** Tell the backend which tab is currently active so arbor.repo.fetch_active_tab() works. */
 export const setActiveTab = (tabId: string | null) =>
-  corvus<void>('set_active_tab', { tab_id: tabId });
+  host<void>('set_active_tab', { tab_id: tabId });
 
 // ── Plugin import / export (zip bundles) ───────────────────────────────────
 

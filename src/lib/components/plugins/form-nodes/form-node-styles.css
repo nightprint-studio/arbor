@@ -237,6 +237,15 @@
   .pf-color-swatch:disabled { opacity: 0.5; cursor: default; }
   .pf-color-hex { flex: 1; }
 
+  /* `show_hex = false`: the swatch IS the control, so it takes the row. Shorter
+     too — a 32px square next to 22px sliders is the one row that breaks the
+     rhythm of a dense group. */
+  .pf-color-swatch-only .pf-color-swatch {
+    width: 100%;
+    height: 20px;
+    flex: 1;
+  }
+
   /* ── Container / Row ──────────────────────────────────────────────────────── */
 
   /* Fully styled via inline style — base class just ensures correct box model */
@@ -276,6 +285,48 @@
     font-weight: 600;
     letter-spacing: 0.1px;
   }
+
+  .pf-section-note {
+    margin-left: auto;
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── Quiet sections ───────────────────────────────────────────────────────── */
+  /* A group under a caption instead of a card: for panels that are a stack of
+     several groups in a narrow column, where a border per group turns one list
+     into six competing boxes. */
+  .pf-section-quiet {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    overflow: visible;
+  }
+  .pf-section-quiet > .pf-section-header {
+    padding: 2px 0;
+    background: transparent;
+    border-bottom: none;
+    gap: 5px;
+  }
+  .pf-section-quiet > .pf-section-header:hover { background: transparent; }
+  .pf-section-quiet > .pf-section-header .pf-section-title {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .pf-section-quiet > .pf-section-header:hover .pf-section-title { color: var(--text-secondary); }
+  .pf-section-quiet > div > .pf-section-body {
+    padding: 2px 0 0;
+    gap: 5px;
+    background: transparent;
+  }
+  .pf-section-quiet > div > .pf-section-desc { padding: 4px 0 0; }
 
   /* ChevronRight is rendered as Svelte component; its class is on the SVG element */
   .pf-chevron {
@@ -2140,7 +2191,12 @@
      dozens of fields scannable. */
   .pf-field-compact {
     display: grid;
-    grid-template-columns: minmax(80px, max-content) 1fr auto;
+    /* Each field is its own grid, so a `max-content` label column makes every
+       row start its control at a different x — a stack of sliders that steps
+       in and out as the names change length. A container can set
+       `--pf-label-col` (e.g. `style = "--pf-label-col: 84px"`) to pin the
+       column and line the whole group up. */
+    grid-template-columns: var(--pf-label-col, minmax(80px, max-content)) 1fr auto;
     align-items: center;
     column-gap: 10px;
     row-gap: 2px;
@@ -2154,6 +2210,11 @@
     color: var(--text-secondary);
     text-transform: none;
     letter-spacing: 0;
+    /* Clip rather than push: a long name must not widen a pinned column. */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .pf-field-compact > .pf-validation-error,
   .pf-field-compact > .pf-hint {
@@ -2227,6 +2288,37 @@
   .pf-vec-axis[data-axis="y"] .pf-vec-axis-label { background: #5fa84b; }
   .pf-vec-axis[data-axis="z"] .pf-vec-axis-label { background: #3c7fb4; }
   .pf-vec-axis[data-axis="w"] .pf-vec-axis-label { background: #8a8a8a; }
+  /* Slider mode: the lanes stop being chips in a row and become full-width rows, because a
+     slider needs travel to be worth dragging and four of them side by side have none. */
+  .pf-vec-axes:has(.pf-vec-axis-slider) {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+  .pf-vec-axis-slider {
+    align-items: center;
+    gap: 6px;
+    padding-right: 4px;
+  }
+  .pf-vec-axis-range {
+    flex: 1;
+    min-width: 0;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--accent);
+    background: transparent;
+    cursor: pointer;
+  }
+  .pf-vec-axis-range:disabled { cursor: default; opacity: 0.5; }
+  /* The number keeps a fixed column so four lanes line up their decimal points instead of
+     jittering as the slider moves. */
+  .pf-vec-axis-slider .pf-vec-axis-input {
+    flex: 0 0 auto;
+    width: 62px;
+    text-align: right;
+  }
+
   .pf-vec-axis-input {
     width: 64px;
     min-width: 0;

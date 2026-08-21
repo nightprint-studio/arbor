@@ -27,9 +27,25 @@ pub struct Binding {
     pub name: String,
     /// The declared type, verbatim (`SpiralHoverParams`, `texture_2d<f32>`, `sampler`).
     pub ty: String,
+    /// What is inside `var<…>`, verbatim and without the angle brackets — `"uniform"`,
+    /// `"storage, read"`, or empty for a texture or a sampler, which have none.
+    ///
+    /// Kept because the type alone cannot tell a uniform block from a storage buffer: both are
+    /// a struct name, and only the address space says which. A previewer that gets that wrong
+    /// hands a uniform buffer to a binding declared `var<storage>` and the pipeline is refused.
+    pub address_space: String,
     /// Byte offsets of the NAME, so a jump lands on it.
     pub start: usize,
     pub end: usize,
+    /// Byte span of the INDEX inside `@binding(…)`, so it can be rewritten in place.
+    ///
+    /// Recorded because a preview cannot ask wgpu for a layout that matches whatever indices a
+    /// shader happens to use — `AsBindGroup::bind_group_layout_entries` is a static method, so
+    /// one material type has exactly one layout. What it CAN do is renumber the shader onto a
+    /// layout it already has, which needs to know where each number is written. See
+    /// [`crate::preview_layout`].
+    pub index_start: usize,
+    pub index_end: usize,
 }
 
 impl Binding {
@@ -74,13 +90,17 @@ pub fn scan(source: &str) -> Vec<Binding> {
             i += 1;
             continue;
         }
-        let attrs = attributes_before(&blanked, i);
+        let (attrs, attrs_at) = attributes_before(&blanked, i);
         let after_var = i + 3;
         // `var<uniform>` — the address space, skipped over to reach the name.
         let mut j = after_var;
+        let mut address_space = String::new();
         if bytes.get(j) == Some(&b'<') {
             match blanked[j..].find('>') {
-                Some(k) => j += k + 1,
+                Some(k) => {
+                    address_space = source[j + 1..j + k].trim().to_string();
+                    j += k + 1;
+                }
                 None => {
                     i = after_var;
                     continue;
@@ -106,9 +126,28 @@ pub fn scan(source: &str) -> Vec<Binding> {
             Some(&b':') => type_until_semicolon(source, j + 1),
             _ => String::new(),
         };
-        if let (Some(group), Some(index)) = (arg_of(&attrs, "@group("), arg_of(&attrs, "@binding(")) {
-            if let Ok(index) = index.trim().parse::<u32>() {
-                out.push(Binding { group, index, name, ty, start, end: j.min(source.len()) });
+        if let (Some((group, _)), Some((index, span))) =
+            (arg_of(&attrs, "@group("), arg_of(&attrs, "@binding("))
+        {
+            if let Ok(parsed) = index.trim().parse::<u32>() {
+                // The argument may be padded — `@binding( 100 )` — so the span is narrowed to
+                // the number itself before being made absolute. A rewrite that replaced the
+                // padding too would still compile; keeping it means a renumbered shader reads
+                // like the one that was written.
+                let lead = index.len() - index.trim_start().len();
+                let index_start = attrs_at + span.0 + lead;
+                let index_end = index_start + index.trim().len();
+                out.push(Binding {
+                    group,
+                    index: parsed,
+                    name,
+                    ty,
+                    address_space,
+                    start,
+                    end: j.min(source.len()),
+                    index_start,
+                    index_end,
+                });
             }
         }
         i = after_var;
@@ -133,9 +172,12 @@ fn type_until_semicolon(src: &str, from: usize) -> String {
     src[from..i.min(src.len())].trim().to_string()
 }
 
-/// The attributes immediately before `at`, lower-cased — the same walk-backwards the symbol
-/// scan uses, kept here so this module reads on its own.
-fn attributes_before(src: &str, at: usize) -> String {
+/// The attributes immediately before `at`, and the offset they start at.
+///
+/// The same walk-backwards the symbol scan uses, kept here so this module reads on its own.
+/// The offset comes back too so a span inside the slice can be made absolute — which is what
+/// turns "there is a `@binding(104)` here" into "the `104` is at byte 2117".
+fn attributes_before(src: &str, at: usize) -> (String, usize) {
     let bytes = src.as_bytes();
     let mut start = at;
     let mut depth = 0usize;
@@ -161,11 +203,11 @@ fn attributes_before(src: &str, at: usize) -> String {
         }
         start -= 1;
     }
-    src[start..at].to_string()
+    (src[start..at].to_string(), start)
 }
 
-/// The argument of the first `open(` in `attrs`, verbatim.
-fn arg_of(attrs: &str, open: &str) -> Option<String> {
+/// The argument of the first `open(` in `attrs`, verbatim, and its span within `attrs`.
+fn arg_of(attrs: &str, open: &str) -> Option<(String, (usize, usize))> {
     let lower = attrs.to_ascii_lowercase();
     let at = lower.find(&open.to_ascii_lowercase())? + open.len();
     // Balanced, because `@group(#{MATERIAL_BIND_GROUP})` has a brace group inside it.
@@ -176,7 +218,7 @@ fn arg_of(attrs: &str, open: &str) -> Option<String> {
         match bytes[i] {
             b'(' | b'{' => depth += 1,
             b'}' => depth -= 1,
-            b')' if depth == 0 => return Some(attrs[at..i].trim().to_string()),
+            b')' if depth == 0 => return Some((attrs[at..i].to_string(), (at, i))),
             b')' => depth -= 1,
             _ => {}
         }
@@ -265,6 +307,15 @@ mod tests {
     fn a_commented_out_binding_is_not_one() {
         let all = scan(SHADER);
         assert!(all.iter().all(|b| b.name != "ghost"));
+    }
+
+    #[test]
+    fn the_index_span_points_at_the_number_and_nothing_else() {
+        let all = scan(SHADER);
+        assert_eq!(&SHADER[all[1].index_start..all[1].index_end], "1");
+        let padded = "@group(3) @binding( 104 )\nvar top: texture_2d<f32>;\n";
+        let one = scan(padded);
+        assert_eq!(&padded[one[0].index_start..one[0].index_end], "104");
     }
 
     #[test]

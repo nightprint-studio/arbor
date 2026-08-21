@@ -80,6 +80,58 @@ pub trait AppCtx: Any + Send + Sync {
         Err("open_path: not supported by this host".to_string())
     }
 
+    // ── Plugin-owned credentials ─────────────────────────────────────────
+    //
+    // Three methods rather than one because the storage is the host's and the *policy* is
+    // not: whether a plugin may touch a key at all was already decided at the API gate,
+    // against the slots its manifest declared. What reaches here is a plugin name and a key
+    // that belong together by construction, and the implementation's only job is to resolve
+    // them through `arbor_plugin_types::credentials::account` and hit the store.
+    //
+    // The signatures take `(plugin, key)` and never an account string, so there is no way to
+    // ask a host for a credential outside a plugin's own namespace — Arbor's own entries are
+    // not filtered out of these calls, they are unreachable through them.
+    //
+    // Defaults refuse, so a headless host that has no keychain says so instead of silently
+    // losing a secret.
+
+    /// Read one of a plugin's own credentials. `Ok(None)` when the slot is empty.
+    fn credential_get(&self, _plugin: &str, _key: &str) -> Result<Option<String>, String> {
+        Err("credentials: not supported by this host".to_string())
+    }
+
+    /// Create or replace one of a plugin's own credentials.
+    fn credential_set(&self, _plugin: &str, _key: &str, _value: &str) -> Result<(), String> {
+        Err("credentials: not supported by this host".to_string())
+    }
+
+    /// Remove one of a plugin's own credentials. Removing an empty slot succeeds — the
+    /// caller asked for it to be gone, and it is.
+    fn credential_delete(&self, _plugin: &str, _key: &str) -> Result<(), String> {
+        Err("credentials: not supported by this host".to_string())
+    }
+
+    // ── Extensions ───────────────────────────────────────────────────────
+    //
+    // JSON in, JSON out, and deliberately opaque. Everything past this seam belongs to the
+    // extension's own interface, and a typed signature here would mean this crate learning
+    // what a mesh or a shader is — which is the whole thing the extension seam exists to
+    // avoid. The capability gate already ran against the calling plugin's manifest.
+    //
+    // Defaults refuse, so a host with no wasm runtime says so instead of silently doing
+    // nothing.
+
+    /// Everything installed and what it exports, as a JSON array.
+    fn ext_surface(&self, _plugin: &str) -> Result<String, String> {
+        Err("extensions: not supported by this host".to_string())
+    }
+
+    /// Call one function on one extension. `spec_json` carries the address, the method and
+    /// the positional arguments; the answer is that function's return value as JSON.
+    fn ext_call(&self, _plugin: &str, _spec_json: &str) -> Result<String, String> {
+        Err("extensions: not supported by this host".to_string())
+    }
+
     /// Dispatch a gated host built-in command (`arbor:area.verb`) a plugin
     /// invoked through the command-invocation protocol. Resolution + both
     /// capability gates already ran in the plugin host; this only runs the

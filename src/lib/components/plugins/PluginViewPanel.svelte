@@ -31,6 +31,7 @@
   import PluginIcon       from './PluginIcon.svelte';
   import Button           from '$lib/components/shared/ui/Button.svelte';
   import type { FormNode, ViewPlacement } from '$lib/types/plugin';
+  import { toArr } from './form-nodes/helpers';
 
   interface Props {
     pluginName: string;
@@ -38,16 +39,23 @@
     label?:     string;
     icon?:      string;
     placement?: ViewPlacement;
+    /** What closing means, decided by the shell that mounted this.
+     *
+     *  It used to be hardcoded to Corvus's main-view store, which is where a plugin view
+     *  lives in Corvus and nowhere else — so in Bennu, where these render in the right
+     *  split, the × cleared a value nothing was reading and the panel stayed open. A panel
+     *  should not know which product it is in; the product knows where it put it. */
+    onClose?:   () => void;
   }
-  let { pluginName, viewId, label, icon, placement = 'graph' }: Props = $props();
+  let { pluginName, viewId, label, icon, placement = 'graph', onClose }: Props = $props();
 
   // Reactive view of the cached content. NEVER written from this component.
   const content = $derived(
     findPanelContent(contributionStore.forPoint(PANEL_CONTENT_POINT), pluginName, viewId)
   );
   const title   = $derived(content?.title ?? label ?? pluginName);
-  const nodes   = $derived((content?.nodes ?? []) as FormNode[]);
-  const actions = $derived((content?.actions ?? []) as any[]);
+  const nodes   = $derived(toArr<FormNode>(content?.nodes));
+  const actions = $derived(toArr<any>(content?.actions));
 
   // `set_panel_content` is a full (re)build — re-key the renderer when the
   // serialized content actually changes. `findPanelContent` allocates a fresh
@@ -91,7 +99,12 @@
     };
   });
 
-  function close() { uiStore.setActiveMainView(null); }
+  // Falls back to Corvus's main view when the shell said nothing, which is the arrangement
+  // that existed before the prop and the only one it can guess right.
+  function close() {
+    if (onClose) { onClose(); return; }
+    uiStore.setActiveMainView(null);
+  }
 
   function footerVariant(a: any): 'primary' | 'secondary' | 'danger' {
     if (a?.variant === 'primary' || a?.variant === 'danger') return a.variant;
@@ -191,7 +204,14 @@
   .pv-body {
     flex: 1;
     min-height: 0;
-    overflow: auto;
+    /* A flex column, not a scroll box: the renderer's own `.pf-body` is already a scrolling
+       flex column, and a node that asks to FILL the surface (an `embed` viewport, a canvas)
+       needs a chain of stretched parents to fill anything. With `overflow:auto` here the
+       height was unconstrained, so `flex:1` inside had nothing to divide and the viewport
+       collapsed to its floor. */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
 
   .pv-empty {

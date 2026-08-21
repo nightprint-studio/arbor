@@ -58,6 +58,7 @@
         updateAvailable={p.update_available}
         installedVersion={p.installed_version}
         experimental={p.experimental}
+        verifiedArtifacts={Object.keys(p.entry?.artifacts ?? {}).length}
       />
     </div>
     <span class="desc">{p.description}</span>

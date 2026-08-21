@@ -90,12 +90,17 @@ pub async fn fetch_plugin(
             source,
             pinned_sha: None,
             external:   false,
+            // Filled in by the caller from the index entry: the fetcher resolves a
+            // `plugin.toml`, and what the registry approved is not in it.
+            artifacts:  Default::default(),
         },
         experimental: if manifest.experimental { Some(true) } else { None },
         doc,
         update_available:  None,
         installed_version: None,
         dependencies: manifest.dependencies,
+        credentials:  manifest.credentials,
+        provides:     manifest.provides,
     })
 }
 
@@ -182,6 +187,9 @@ pub async fn fetch_theme(
             source,
             pinned_sha: None,
             external:   false,
+            // Filled in by the caller from the index entry: the fetcher resolves a
+            // `plugin.toml`, and what the registry approved is not in it.
+            artifacts:  Default::default(),
         },
     })
 }

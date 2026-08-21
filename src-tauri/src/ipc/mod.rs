@@ -628,6 +628,32 @@ fn host_dispatch(
     // `AppCtx` has no window/opener, so it forwards here; the shell applies the
     // OS-vs-built-in preference (`explorer.reveal_in_builtin`) and reveals the
     // path (file → select in folder, folder → open) in the chosen file manager.
+    // ── Extensions ───────────────────────────────────────────────────────────
+    //
+    // A plugin loaded in a product backend reaches the wasm engine through here, because the
+    // engine is the shell's: one compile cache, one instance per call, and the same answer
+    // whichever process the plugin happens to run in.
+    //
+    // Nothing domain-shaped crosses. `spec` is opaque — its `args` belong to the extension's
+    // own interface, and a shell that inspected them would be a shell that had to know what
+    // they mean.
+    if method == "__ext_surface" {
+        return serde_json::to_value(crate::ext::surface())
+            .map_err(|e| format!("arbor.ext.list encode: {e}"));
+    }
+    if method == "__ext_call" {
+        let plugin = params.get("plugin").and_then(|v| v.as_str()).unwrap_or("?");
+        let spec_v = params
+            .get("spec")
+            .cloned()
+            .ok_or_else(|| "arbor.ext.call: missing `spec`".to_string())?;
+        let spec: crate::ext::CallSpec = serde_json::from_value(spec_v)
+            .map_err(|e| format!("arbor.ext.call: {e}"))?;
+        tracing::debug!("[{plugin}] ext.call {}@{}/{} {}",
+            spec.interface, spec.version, spec.id, spec.method);
+        return crate::ext::call(&spec);
+    }
+
     if method == "__open_path" {
         let path = params.get("path").and_then(|v| v.as_str()).unwrap_or_default();
         crate::window::explorer::reveal_path(app, path)?;
@@ -1102,6 +1128,11 @@ fn host_dispatch(
             params.get("conn").cloned().ok_or_else(|| format!("{op}: missing required `conn` table"))?,
         ).map_err(|e| format!("invalid conn: {e}"))?;
         let bucket = params.get("bucket").and_then(|v| v.as_str());
+        // A wasm provider first, when one is installed for this connection's kind. `None`
+        // means nothing routes and the in-process implementation below answers, unchanged.
+        if let Some(r) = crate::cloud_guest::test_connection(&conn, bucket) {
+            return serde_json::to_value(&r?).map_err(|e| format!("{op} encode: {e}"));
+        }
         let r = tauri::async_runtime::block_on(crate::cloud::ops::test_connection(&conn, bucket))
             .map_err(|e| e.to_string())?;
         return serde_json::to_value(&r).map_err(|e| format!("{op} encode: {e}"));
@@ -1141,6 +1172,9 @@ fn host_dispatch(
             .ok_or_else(|| format!("{op}: missing required field `bucket`"))?;
         let prefix = params.get("prefix").and_then(|v| v.as_str()).unwrap_or_default();
         let limit = params.get("limit").and_then(|v| v.as_i64()).map(|n| n.max(0) as usize);
+        if let Some(page) = crate::cloud_guest::list(&conn, bucket, prefix, limit) {
+            return serde_json::to_value(&page?).map_err(|e| format!("{op} encode: {e}"));
+        }
         let page = tauri::async_runtime::block_on(crate::cloud::ops::list(&conn, bucket, prefix, limit))
             .map_err(|e| e.to_string())?;
         return serde_json::to_value(&page).map_err(|e| format!("{op} encode: {e}"));
@@ -1152,6 +1186,9 @@ fn host_dispatch(
         ).map_err(|e| format!("invalid conn: {e}"))?;
         let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?;
         let path = params.get("path").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `path`"))?;
+        if let Some(o) = crate::cloud_guest::stat(&conn, bucket, path) {
+            return serde_json::to_value(&o?).map_err(|e| format!("{op} encode: {e}"));
+        }
         let o = tauri::async_runtime::block_on(crate::cloud::ops::stat(&conn, bucket, path)).map_err(|e| e.to_string())?;
         return serde_json::to_value(&o).map_err(|e| format!("{op} encode: {e}"));
     }
@@ -1163,6 +1200,10 @@ fn host_dispatch(
         let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?;
         let path = params.get("path").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `path`"))?;
         let recursive = params.get("recursive").and_then(|v| v.as_bool()).unwrap_or(false);
+        if let Some(r) = crate::cloud_guest::delete(&conn, bucket, path, recursive) {
+            r?;
+            return Ok(serde_json::Value::Null);
+        }
         tauri::async_runtime::block_on(crate::cloud::ops::delete(&conn, bucket, path, recursive)).map_err(|e| e.to_string())?;
         return Ok(serde_json::Value::Null);
     }
@@ -1174,6 +1215,10 @@ fn host_dispatch(
         let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?;
         let src = params.get("src").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `src`"))?;
         let dst = params.get("dst").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `dst`"))?;
+        if let Some(r) = crate::cloud_guest::copy(&conn, bucket, src, dst) {
+            r?;
+            return Ok(serde_json::Value::Null);
+        }
         tauri::async_runtime::block_on(crate::cloud::ops::copy(&conn, bucket, src, dst)).map_err(|e| e.to_string())?;
         return Ok(serde_json::Value::Null);
     }

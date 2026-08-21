@@ -331,6 +331,54 @@ tooling already speaks LSP if it wants to).
 6. **A "index ready" wait/poll verb.** `bennu_index_stats` reports a snapshot; there is no
    "block until warm or timeout", so an agent must busy-poll.
 
+### Shaders — the one tool that leaves the process
+
+`bennu_shader_uniform` reads what a WGSL material declares; `bennu_shader_render` renders it
+and answers with the picture. Together they are a loop — ask the names, set values, look —
+which is the only way an agent can judge a change to a shader at all: one that compiles and is
+wrong looks exactly like one that is right.
+
+The render is the single tool in the surface that **runs something outside the backend**, and
+that is not an accident to tidy away later. The shaders it has to render are Bevy's: an
+`#import bevy_pbr::forward_io::…` is resolved by naga_oil against the engine's own library,
+with the mesh and view bind groups laid out the way Bevy lays them out. A renderer that is not
+a Bevy app cannot do it, and one written inside Arbor would put the whole engine in the
+workspace for a feature most sessions never touch.
+
+So it runs the headless binary that ships with the `bevy-runtime` **plugin package** — the
+same scene format, materials and meshes as the panel's viewport, which is what makes the
+picture the picture the panel would show. Two consequences worth stating plainly:
+
+- The tool is only there when that package is installed **and** its `build-render.sh` has been
+  run once. Absent either, it answers with a sentence saying exactly that, rather than being a
+  verb that silently is not there.
+- The Bevy version is the package's, not the user's project's. A shader importing something
+  that moved between releases renders differently, or not at all — the same caveat the
+  in-app viewport already carries, and for the same reason.
+
+The shader it compiles is **not byte-for-byte the one on disk**. A previewer's bind-group
+layout is decided when the previewer is compiled — `AsBindGroup::bind_group_layout_entries` is
+a static method — so one material type has one layout, and no widening of it can satisfy a
+shader that binds a sampler where another binds a buffer. `bennu_wgsl::preview_layout`
+renumbers the shader onto the slots that exist instead: a copy, with the numbers inside
+`@binding(…)` moved and nothing else. Names, offsets and `// @preview` lines are identical, so
+the parameter names an agent learnt from `bennu_shader_uniform` still mean what they meant, and
+the file is never written back. What no renumbering reaches — a storage buffer, a depth
+texture, anything past the slot counts — comes back as a refusal naming the binding and the
+reason, which is the difference between a sentence and a validation abort inside a child
+process.
+
+Textures are therefore ordinary, and `textures` names what to put in one. A render has no
+assets — the atlas the game feeds a material lives in a project the renderer cannot reach — so
+each slot is filled with an image the runtime generates, chosen by default from the variable's
+name. `uv` is the one worth knowing about: it paints the coordinates themselves, which is how
+an agent distinguishes "this material samples the wrong rectangle of an atlas" from "this
+material's colours are wrong", and those look identical in every other image.
+
+`safety = read`: it reads a file and writes a temporary PNG. It does spawn a process, which is
+the reason the timeout exists — a shader can put a driver in a loop, and a backend thread
+blocked forever on a child is a product that stops answering with no error at all.
+
 ---
 
 ## 6. Tyto — what to expose

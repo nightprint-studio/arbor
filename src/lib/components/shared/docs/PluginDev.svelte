@@ -501,9 +501,9 @@ end)`, '.lua')}</pre>
     <tr><td><code>checkbox</code></td><td>name, label, default</td><td></td></tr>
     <tr><td><code>select</code></td><td>name, label, default, options[]</td><td>options: value+label+disabled?</td></tr>
     <tr><td><code>radio</code></td><td>name, label, default, options[], inline</td><td>options: value+label+description?</td></tr>
-    <tr><td><code>color</code></td><td>name, label, default (#rrggbb)</td><td></td></tr>
+    <tr><td><code>color</code></td><td>name, label, default (#rrggbb), show_hex, actions.change, debounce_ms</td><td><code>show_hex = false</code> → swatch only, taking the whole control column</td></tr>
     <tr><td><code>kv_list</code></td><td>name, label, key_placeholder, value_placeholder, default</td><td>Submitted as JSON object</td></tr>
-    <tr><td><code>section</code></td><td>title, description, children[], collapsible, collapsed, card, count, add_action</td><td><code>card = true</code> → dark title bar + counter pill + optional + button</td></tr>
+    <tr><td><code>section</code></td><td>title, description, children[], collapsible, collapsed, card, count, add_action, variant, note</td><td><code>card = true</code> → dark title bar + counter pill + optional + button. <code>variant = "quiet"</code> → no border or fill, uppercase caption; for panels stacking several groups in a narrow column. <code>note</code> is a right-aligned muted caption.</td></tr>
     <tr><td><code>container</code></td><td>children[], columns, gap</td><td>CSS grid</td></tr>
     <tr><td><code>row</code></td><td>children[], gap, align, wrap</td><td>Flexbox row</td></tr>
     <tr><td><code>separator</code></td><td>label?</td><td>Labelled divider line</td></tr>

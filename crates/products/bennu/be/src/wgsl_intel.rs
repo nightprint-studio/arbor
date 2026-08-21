@@ -13,16 +13,16 @@
 //! Each entry point returns `Option`, `None` meaning "not mine" — the same shape
 //! `cargo_intel` uses, so `intel.rs` reads as a list of routes rather than as a tree of ifs.
 
-use std::path::{Path, PathBuf};
-
 use bennu_proto::prelude::{
     CompletionItem, DeclarationTarget, Diagnostic, HoverInfo, UsageHit, UsagesResult,
 };
 use bennu_wgsl::prelude::{
-    completions_for, defined_path, doc_above, import_context_at, occurrences_of, scan_symbols,
-    signature_at, symbol_at, validate, ImportContext, WgslSeverity, WgslSymbolKind,
-    ATTRIBUTES, BEVY_IMPORTS, BUILTIN_FUNCTIONS, BUILTIN_TYPES, BUILTIN_VALUES, KEYWORDS,
+    completions_for, doc_above, import_context_at, occurrences_of, scan_symbols, signature_at,
+    symbol_at, validate, ImportContext, LibrarySymbol, WgslSeverity, WgslSymbolKind, ATTRIBUTES,
+    BEVY_IMPORTS, BUILTIN_FUNCTIONS, BUILTIN_TYPES, BUILTIN_VALUES, KEYWORDS,
 };
+
+use crate::wgsl_library;
 
 /// Whether this file is ours.
 pub(crate) fn is_wgsl(file: &str) -> bool {
@@ -94,8 +94,9 @@ pub(crate) fn completion(
         return None;
     }
     let text = text_of(file, source)?;
-    // An `#import` line first: what belongs there is module paths, and the file's own
-    // functions would be noise in the one place they cannot be written.
+    // An `#import` line first: what belongs there is module paths and the names inside
+    // them, and the file's own declarations would be noise in the one place they cannot be
+    // written.
     if let Some(items) = import_completion(file, &text, offset) {
         return Some(items);
     }
@@ -119,14 +120,7 @@ pub(crate) fn completion(
         .into_iter()
         .filter(|s| lower.is_empty() || s.name.to_ascii_lowercase().starts_with(&lower))
         .map(|s| {
-            let kind = match s.kind {
-                WgslSymbolKind::Function | WgslSymbolKind::EntryPoint => "function",
-                WgslSymbolKind::Struct => "class",
-                WgslSymbolKind::Field => "field",
-                WgslSymbolKind::Alias => "class",
-                WgslSymbolKind::Const | WgslSymbolKind::Override => "constant",
-                WgslSymbolKind::Var => "variable",
-            };
+            let kind = completion_kind(s.kind);
             let detail = match &s.container {
                 Some(owner) => format!("{owner}.{} — {}", s.name, s.detail),
                 None => s.detail.clone(),
@@ -134,6 +128,25 @@ pub(crate) fn completion(
             item(s.name, kind, detail)
         })
         .collect();
+
+    // What the `#import` lines bring in, ranked between the file's own names and the
+    // language's: more specific than a builtin, less than something declared right here.
+    // For a Bevy shader this is most of what the file actually uses — `VertexOutput`,
+    // `globals`, `apply_pbr_lighting` are all somebody else's declarations.
+    let library = wgsl_library::for_file(file);
+    let declared_here: std::collections::HashSet<&str> =
+        out.iter().map(|i| i.label.as_str()).collect();
+    let imported: Vec<CompletionItem> = library
+        .in_scope(&text)
+        .into_iter()
+        .filter(|s| lower.is_empty() || s.name.to_ascii_lowercase().starts_with(&lower))
+        // A name this file declares shadows the imported one, and the local declaration is
+        // already in the list. Offering both is offering the same word twice with two
+        // different signatures under it.
+        .filter(|s| !declared_here.contains(s.name.as_str()))
+        .map(|s| item(s.name.clone(), completion_kind(s.kind), imported_detail(s)))
+        .collect();
+    out.extend(imported);
 
     out.extend(completions_for(&prefix).into_iter().map(|b| {
         let kind = if b.name.starts_with('@') {
@@ -227,7 +240,10 @@ pub(crate) fn declaration(
     }
     let Some((name, _, _)) = symbol_at(source, offset) else { return Some(None) };
     let Some(sym) = scan_symbols(source).into_iter().find(|s| s.name == name) else {
-        return Some(None);
+        // Not declared here — which in a Bevy shader is the ordinary case, not the odd one:
+        // `VertexOutput` and `apply_pbr_lighting` arrive through an `#import` and are
+        // declared inside a crate the project depends on. The index knows where.
+        return Some(imported_declaration(file, source, &name));
     };
     // The caret is already ON the declaration. There is nothing to go to *in this file*, and
     // answering with the span the caret is standing in is a jump to itself — which reads as
@@ -250,6 +266,91 @@ pub(crate) fn declaration(
         col: col as u32,
         label: format!("{} {}", sym.detail, sym.name),
     }))
+}
+
+
+/// The completion list's kind tag for a declaration.
+///
+/// One mapping for the file's own symbols and the imported ones alike — otherwise the same
+/// struct renders with two different icons depending on which file declared it.
+fn completion_kind(kind: WgslSymbolKind) -> &'static str {
+    match kind {
+        WgslSymbolKind::Function | WgslSymbolKind::EntryPoint => "function",
+        WgslSymbolKind::Struct | WgslSymbolKind::Alias => "class",
+        WgslSymbolKind::Field => "field",
+        WgslSymbolKind::Const | WgslSymbolKind::Override => "constant",
+        WgslSymbolKind::Var => "variable",
+    }
+}
+
+/// The hover card's kind tag. A different vocabulary from the completion list's — the FE
+/// renders the two from different tables — so they are two functions rather than one with a
+/// flag.
+fn hover_kind(kind: WgslSymbolKind) -> &'static str {
+    match kind {
+        WgslSymbolKind::Function | WgslSymbolKind::EntryPoint => "method",
+        WgslSymbolKind::Struct | WgslSymbolKind::Alias => "class",
+        _ => "field",
+    }
+}
+
+/// A completion/usage line for an imported declaration: what it is, and which module it
+/// arrived from. The module is the half the name alone does not tell you, and in a Bevy
+/// shader it is the thing you want to know.
+fn imported_detail(s: &LibrarySymbol) -> String {
+    let what = match &s.container {
+        Some(owner) => format!("{owner}.{} — {}", s.name, s.detail),
+        None => s.detail.clone(),
+    };
+    if what.is_empty() {
+        s.module.clone()
+    } else {
+        format!("{what} · {}", s.module)
+    }
+}
+
+/// Where an indexed module came from, for the line under a completion entry.
+///
+/// Derived from the path rather than recorded at index time, because the indexer is pure and
+/// has no idea what a registry is. A registry checkout always contains the segment
+/// `registry/src/<index>/<name>-<version>`, and that `<name>-<version>` is the most useful
+/// thing to show: it names the crate AND the version, which is the half of "where is this
+/// from" that a bare crate name leaves out.
+fn module_origin(file: &str) -> String {
+    let mut parts = file.split('/');
+    while let Some(seg) = parts.next() {
+        if seg != "registry" {
+            continue;
+        }
+        if parts.next() != Some("src") {
+            continue;
+        }
+        let _index = parts.next();
+        if let Some(krate) = parts.next() {
+            return krate.to_string();
+        }
+    }
+    let base = file.rsplit('/').next().unwrap_or(file);
+    format!("this project — {base}")
+}
+
+/// The declaration of a name that arrived through an `#import`.
+///
+/// Reports a position in a file the editor does not have open, which is exactly what the
+/// index is for: line and column were resolved when the module was scanned, so a jump costs
+/// a lookup rather than a disk read on every miss — and a miss is every identifier the file
+/// does not declare, which is most of the ones a shader touches.
+fn imported_declaration(file: &str, source: &str, name: &str) -> Option<DeclarationTarget> {
+    let library = wgsl_library::for_file(file);
+    let sym = library.resolve(source, name)?;
+    Some(DeclarationTarget {
+        file: sym.file.clone(),
+        start: sym.start,
+        end: sym.end,
+        line: sym.line,
+        col: sym.col,
+        label: format!("{} — {}", sym.signature, sym.module),
+    })
 }
 
 // ── hover ───────────────────────────────────────────────────────────────────────
@@ -286,15 +387,24 @@ pub(crate) fn hover(file: &str, source: &str, offset: usize) -> Option<Option<Ho
     if let Some(sym) = scan_symbols(source).into_iter().find(|s| s.name == name) {
         return Some(Some(HoverInfo {
             signature: signature_at(source, sym.start),
-            kind: match sym.kind {
-                WgslSymbolKind::Function | WgslSymbolKind::EntryPoint => "method",
-                WgslSymbolKind::Struct | WgslSymbolKind::Alias => "class",
-                WgslSymbolKind::Field => "field",
-                _ => "field",
-            }
-            .to_string(),
+            kind: hover_kind(sym.kind).to_string(),
             container: sym.container.clone(),
             doc: doc_above(source, sym.start),
+        }));
+    }
+
+    // An imported declaration outranks a builtin: if the file went to the trouble of
+    // importing a name, that name is what it means.
+    let library = wgsl_library::for_file(file);
+    if let Some(sym) = library.resolve(source, &name) {
+        return Some(Some(HoverInfo {
+            signature: sym.signature.clone(),
+            kind: hover_kind(sym.kind).to_string(),
+            // The module, when the symbol is not a member of something — it is the answer to
+            // "where does this come from", which is the question you hover an imported name
+            // to ask.
+            container: sym.container.clone().or_else(|| Some(sym.module.clone())),
+            doc: sym.doc.clone(),
         }));
     }
 
@@ -316,58 +426,16 @@ pub(crate) fn hover(file: &str, source: &str, offset: usize) -> Option<Option<Ho
 
 // ── import completion ───────────────────────────────────────────────────────────
 
-/// How far the walk for `#define_import_path` will go before giving up.
-///
-/// A completion runs while the user types, and an unbounded walk of somebody's monorepo is
-/// not something to do on a keystroke. Only reached on an import line — a handful of
-/// keystrokes per file — so the bound is generous rather than tight.
-const MAX_SCANNED: usize = 1_500;
-
-/// The nearest ancestor that looks like a project root.
-fn project_root(file: &Path) -> Option<PathBuf> {
-    file.ancestors()
-        .find(|p| p.join("Cargo.toml").is_file() || p.join(".git").exists())
-        .map(Path::to_path_buf)
-}
-
-/// Every `#define_import_path` the project declares, with the file that declares it.
-///
-/// The project's own modules — the half of the answer no catalogue can hold, because the
-/// user wrote them. Bevy's own live inside the `bevy_*` crates' sources, wherever cargo put
-/// them, and guessing at that from an editor is guessing about somebody's machine; those
-/// come from the curated list instead.
-fn project_modules(root: &Path) -> Vec<(String, PathBuf)> {
-    let mut out = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    let mut seen = 0usize;
-    while let Some(dir) = stack.pop() {
-        if seen >= MAX_SCANNED {
-            break;
-        }
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-        for e in entries.flatten() {
-            let p = e.path();
-            let name = e.file_name().to_string_lossy().into_owned();
-            if p.is_dir() {
-                // The three that are always large and never hold a shader anybody imports.
-                if !matches!(name.as_str(), "target" | ".git" | "node_modules") {
-                    stack.push(p);
-                }
-                continue;
-            }
-            if !name.ends_with(".wgsl") {
-                continue;
-            }
-            seen += 1;
-            if let Some(path) = std::fs::read_to_string(&p).ok().and_then(|s| defined_path(&s)) {
-                out.push((path, p));
-            }
-        }
-    }
-    out
-}
-
 /// Completion for an `#import` line, or `None` when the caret is not on one.
+///
+/// Two things belong on an import line and they are not the same thing: a **module path**,
+/// and a **name inside a module**. Which one the caret is asking for cannot be read off the
+/// text — `bevy_pbr::forward_io` and `bevy_pbr::forward_io::VertexOutput` are the same shape
+/// — so it is decided by asking the index whether everything before the last `::` is a
+/// module. If it is, the tail is a name in it, and the names are what to offer.
+///
+/// Both are offered when both apply. A module that has items is still importable whole, and
+/// deciding for the user which of the two they meant would be wrong about half the time.
 fn import_completion(file: &str, source: &str, offset: usize) -> Option<Vec<CompletionItem>> {
     let ctx = import_context_at(source, offset)?;
     let (prefix, start, package) = match &ctx {
@@ -386,36 +454,79 @@ fn import_completion(file: &str, source: &str, offset: usize) -> Option<Vec<Comp
         ..Default::default()
     };
 
-    let modules = project_root(Path::new(file)).map(|r| project_modules(&r)).unwrap_or_default();
+    let library = wgsl_library::for_file(file);
     let mut out = Vec::new();
 
-    // The project's own first: a shader in this repo is the thing you are most likely to be
-    // importing, and it is the half a catalogue can never know.
-    for (path, at) in &modules {
-        let offer = match &package {
-            // Inside `pkg::{ … }` only the tail is typed, so only the tail is offered.
-            Some(pkg) => path.strip_prefix(&format!("{pkg}::")).map(str::to_string),
-            None => Some(path.clone()),
-        };
-        let Some(label) = offer else { continue };
-        if lower.is_empty() || label.to_ascii_lowercase().starts_with(&lower) {
-            let where_ = at.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            out.push(item(label, "module", format!("this project — {where_}")));
+    // The path as written, with the enclosing package put back: inside `bevy_pbr::{ … }`
+    // the caret only ever sees the tail, and the index is keyed by the whole path.
+    let typed = match &package {
+        Some(pkg) if !prefix.is_empty() => format!("{pkg}::{prefix}"),
+        Some(pkg) => pkg.clone(),
+        None => prefix.clone(),
+    };
+
+    // A name inside a module. The label carries everything the accept replaces — the caret's
+    // word runs back through the `::`, so offering the bare name would eat the module.
+    if let Some((module_path, tail)) = typed.rsplit_once("::") {
+        if let Some(m) = library.module(module_path) {
+            let head = &prefix[..prefix.len().saturating_sub(tail.len())];
+            let tail_lower = tail.to_ascii_lowercase();
+            for sym in &m.symbols {
+                // A field cannot be imported on its own — it comes in with its struct.
+                if sym.container.is_some() {
+                    continue;
+                }
+                if !tail_lower.is_empty()
+                    && !sym.name.to_ascii_lowercase().starts_with(&tail_lower)
+                {
+                    continue;
+                }
+                out.push(item(
+                    format!("{head}{}", sym.name),
+                    completion_kind(sym.kind),
+                    format!("{} · {module_path}", sym.detail),
+                ));
+            }
         }
     }
 
-    for b in BEVY_IMPORTS {
-        let offer = match &package {
-            Some(pkg) => b.path.strip_prefix(&format!("{pkg}::")).map(str::to_string),
-            None => Some(b.path.to_string()),
+    // Modules. The index first — it holds the project's own and every `bevy_*` module the
+    // project actually resolved, which is both more complete and more current than any list
+    // compiled into this binary can be.
+    let mut offered: Vec<String> = Vec::new();
+    let mut offer = |path: &str, detail: String, out: &mut Vec<CompletionItem>| {
+        let label = match &package {
+            // Inside `pkg::{ … }` only the tail is typed, so only the tail is offered.
+            Some(pkg) => match path.strip_prefix(&format!("{pkg}::")) {
+                Some(rest) => rest.to_string(),
+                None => return,
+            },
+            None => path.to_string(),
         };
-        let Some(label) = offer else { continue };
-        if lower.is_empty() || label.to_ascii_lowercase().starts_with(&lower) {
-            out.push(item(label, "module", b.detail.to_string()));
+        if !lower.is_empty() && !label.to_ascii_lowercase().starts_with(&lower) {
+            return;
         }
+        if offered.iter().any(|o| o == &label) {
+            return;
+        }
+        offered.push(label.clone());
+        out.push(item(label, "module", detail));
+    };
+
+    for path in library.module_paths() {
+        let detail = library.module(path).map(|m| module_origin(&m.file)).unwrap_or_default();
+        offer(path, detail, &mut out);
     }
+
+    // The compiled-in list last, and only for what the index did not have: on a project
+    // cargo has never resolved it is the whole answer, and on one it has it adds nothing.
+    for b in BEVY_IMPORTS {
+        offer(b.path, b.detail.to_string(), &mut out);
+    }
+
     Some(out)
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -616,9 +727,11 @@ fn fragment() -> @location(0) vec4<f32> {
 
     #[test]
     fn a_name_the_file_does_not_declare_says_so_rather_than_going_quiet() {
-        // `VertexOutput` comes in through the `#import`; this side does not resolve naga_oil,
-        // so there is no declaration to jump to. Find-usages still answers, and the label is
-        // where the user learns why there is no declaration in the list.
+        // `VertexOutput` comes in through the `#import`, and this toy source belongs to no
+        // project — so there is no indexed module to jump into. Find-usages still answers,
+        // and the label is where the user learns why there is no declaration in the list.
+        // (With a real project the same caret DOES jump, into `forward_io.wgsl`; that path
+        // is covered by `a_shader_jumps_into_the_module_it_imports`.)
         let at = caret("VertexOutput", 1);
         assert_eq!(declaration("s.wgsl", BEVY, at), Some(None));
         let usages = references("s.wgsl", BEVY, at).unwrap().expect("no usages");
@@ -659,5 +772,140 @@ mod declaration_tests {
 
         let member = SRC.find("sand_color").unwrap() + 3;
         assert_eq!(declaration("s.wgsl", SRC, member), Some(None));
+    }
+
+    // ── the imported half: completion, hover and go-to across the `#import` ──────
+
+    /// A throwaway project on disk: a `Cargo.toml` (so the root is found), a module that
+    /// declares an import path, and a shader that imports from it.
+    ///
+    /// On disk rather than in memory because the whole point of this seam is that it walks a
+    /// real tree — a test that handed the index its sources would be testing
+    /// `bennu_wgsl::library`, which has its own.
+    struct Fixture {
+        root: std::path::PathBuf,
+        shader: String,
+    }
+
+    impl Fixture {
+        fn new(tag: &str) -> Self {
+            let root = std::env::temp_dir().join(format!("bennu-wgsl-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(root.join("shaders")).unwrap();
+            std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"toy\"\n").unwrap();
+            std::fs::write(
+                root.join("shaders/forward_io.wgsl"),
+                concat!(
+                    "#define_import_path toy::forward_io\n\n",
+                    "// What the vertex stage hands to the fragment stage.\n",
+                    "struct VertexOutput {\n",
+                    "    @location(2) uv: vec2<f32>,\n",
+                    "};\n\n",
+                    "// Runs the lighting model.\n",
+                    "fn apply_toy_lighting(c: vec4<f32>) -> vec4<f32> { return c; }\n",
+                ),
+            )
+            .unwrap();
+            let shader = root.join("shaders/mat.wgsl").to_string_lossy().replace('\\', "/");
+            Self { root, shader }
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    const USES_IMPORT: &str = concat!(
+        "#import toy::forward_io::{VertexOutput, apply_toy_lighting}\n\n",
+        "@fragment\n",
+        "fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {\n",
+        "    return apply_toy_lighting(vec4<f32>(mesh.uv, 0.0, 1.0));\n",
+        "}\n",
+    );
+
+    #[test]
+    fn completion_offers_what_the_imports_brought_in() {
+        let fx = Fixture::new("completion");
+        let at = USES_IMPORT.find("apply_toy_lighting(vec4").unwrap() + "apply_toy".len();
+        let items = completion(&fx.shader, at, Some(USES_IMPORT)).unwrap();
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(labels.contains(&"apply_toy_lighting"), "{labels:?}");
+        // The struct's fields come with it — `mesh.uv` is why it was imported.
+        let all = completion(&fx.shader, USES_IMPORT.len() - 2, Some(USES_IMPORT)).unwrap();
+        assert!(all.iter().any(|i| i.label == "uv"), "the struct's members come along");
+    }
+
+    #[test]
+    fn a_shader_jumps_into_the_module_it_imports() {
+        let fx = Fixture::new("goto");
+        let at = USES_IMPORT.find("apply_toy_lighting(vec4").unwrap() + "apply_toy".len();
+        let target = declaration(&fx.shader, USES_IMPORT, at).unwrap().expect("no declaration");
+        assert!(target.file.ends_with("forward_io.wgsl"), "got {}", target.file);
+        let text = std::fs::read_to_string(&target.file).unwrap();
+        assert_eq!(&text[target.start..target.end], "apply_toy_lighting");
+        // The position must be right in a file the editor has not opened — that is the whole
+        // reason the index stores it.
+        let line = text.lines().nth(target.line as usize - 1).unwrap();
+        assert!(line.contains("fn apply_toy_lighting"), "line {} is {line:?}", target.line);
+    }
+
+    #[test]
+    fn hover_on_an_imported_name_shows_its_real_signature_and_where_it_came_from() {
+        let fx = Fixture::new("hover");
+        let at = USES_IMPORT.find("apply_toy_lighting(vec4").unwrap() + "apply_toy".len();
+        let card = hover(&fx.shader, USES_IMPORT, at).unwrap().expect("no hover card");
+        assert!(card.signature.contains("fn apply_toy_lighting"), "got {:?}", card.signature);
+        assert_eq!(card.container.as_deref(), Some("toy::forward_io"));
+        assert!(
+            card.doc.as_deref().unwrap_or("").contains("lighting model"),
+            "the comment above the declaration IS its doc: {:?}",
+            card.doc
+        );
+    }
+
+    #[test]
+    fn a_name_declared_here_beats_one_that_was_imported() {
+        // Shadowing is legal and the local one is what runs. A card describing the imported
+        // declaration would document code that is not being called.
+        let fx = Fixture::new("shadow");
+        let src = concat!(
+            "#import toy::forward_io::{VertexOutput, apply_toy_lighting}\n\n",
+            "// The local override.\n",
+            "fn apply_toy_lighting(c: vec4<f32>) -> vec4<f32> { return c * 2.0; }\n\n",
+            "fn f() { let x = apply_toy_lighting(vec4<f32>(1.0)); }\n",
+        );
+        let at = src.rfind("apply_toy_lighting").unwrap() + 3;
+        let card = hover(&fx.shader, src, at).unwrap().expect("no hover card");
+        assert!(card.doc.as_deref().unwrap_or("").contains("local override"), "{:?}", card.doc);
+        let target = declaration(&fx.shader, src, at).unwrap().expect("no declaration");
+        assert_eq!(target.file, fx.shader, "the jump stays in this file");
+    }
+
+    #[test]
+    fn an_import_line_completes_the_names_inside_a_module() {
+        // The gap this closes: the module path could always be completed, but the name after
+        // it — the thing actually being imported — could not.
+        let fx = Fixture::new("importitems");
+        let src = "#import toy::forward_io::Vert";
+        let items = completion(&fx.shader, src.len(), Some(src)).unwrap();
+        assert!(
+            items.iter().any(|i| i.label == "toy::forward_io::VertexOutput"),
+            "got {:?}",
+            items.iter().map(|i| &i.label).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn an_import_line_offers_the_projects_own_modules() {
+        let fx = Fixture::new("projectmods");
+        let src = "#import toy::for";
+        let items = completion(&fx.shader, src.len(), Some(src)).unwrap();
+        assert!(
+            items.iter().any(|i| i.label == "toy::forward_io"),
+            "got {:?}",
+            items.iter().map(|i| &i.label).collect::<Vec<_>>()
+        );
     }
 }

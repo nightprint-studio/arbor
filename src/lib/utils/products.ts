@@ -119,3 +119,25 @@ export function productForWindowLabel(label: string): ProductId | null {
   if (base === 'explorer') return 'sitta';
   return isProductId(base) ? base : null;
 }
+
+/**
+ * The product the user is currently looking at.
+ *
+ * In the tabbed container that is the active tab; in a standalone product window it is the
+ * window's own label. Used when an action has to be recorded **for a product** — installing a
+ * package, most of all, because installing from Corvus must not put it in Bennu's palette.
+ *
+ * `null` for the launcher and the welcome tab: neither hosts plugins, so neither is somewhere
+ * a package can be installed for.
+ */
+export function currentProduct(
+  windowLabel: string,
+  inContainer: boolean,
+  activeSurface: string | null,
+): ProductId | null {
+  if (inContainer) {
+    if (!activeSurface || activeSurface === 'home') return null;
+    return isProductId(activeSurface) ? activeSurface : null;
+  }
+  return productForWindowLabel(windowLabel);
+}

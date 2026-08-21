@@ -12,6 +12,7 @@
  */
 import type { FormNode, FormPatchOp } from '$lib/types/plugin';
 import { normalizeNode } from './normalize';
+import { toArr } from './helpers';
 
 type Located = { arr: FormNode[]; idx: number; node: any };
 
@@ -23,9 +24,9 @@ function childArraysOf(n: any): FormNode[][] {
     for (const a of Object.values(n.cases ?? {})) if (Array.isArray(a)) out.push(a as FormNode[]);
     if (Array.isArray(n.default)) out.push(n.default);
   } else if (n.type === 'tabs') {
-    for (const t of n.tabs ?? []) if (Array.isArray(t?.children)) out.push(t.children);
+    for (const t of toArr<any>(n.tabs)) if (Array.isArray(t?.children)) out.push(t.children);
   } else if (n.type === 'wizard') {
-    for (const s of n.steps ?? []) if (Array.isArray(s?.children)) out.push(s.children);
+    for (const s of toArr<any>(n.steps)) if (Array.isArray(s?.children)) out.push(s.children);
   } else if (n.type === 'tree_layout') {
     for (const key of ['nav_children', 'nav_footer_children', 'content_children']) {
       if (Array.isArray(n[key])) out.push(n[key]);

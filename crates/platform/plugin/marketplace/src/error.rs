@@ -39,6 +39,18 @@ pub enum MarketplaceError {
     #[error("pinned SHA mismatch: {0}")]
     PinMismatch(String),
 
+    /// A downloaded artifact's sha256 did not match the digest the registry entry
+    /// recorded for it. Distinct from [`MarketplaceError::PinMismatch`], which is about a
+    /// git ref having moved: this is about the bytes themselves, and it is the only check
+    /// available for an artifact that is a build output rather than a checkout.
+    #[error("integrity check failed: {0}")]
+    IntegrityMismatch(String),
+
+    /// An index entry is internally inconsistent — it records artifact digests but rides a
+    /// moving ref, or names an asset the release does not carry.
+    #[error("invalid registry entry: {0}")]
+    InvalidEntry(String),
+
     /// Archive content didn't match the expected shape (multiple roots,
     /// missing subpath, unsafe paths, …).
     #[error("invalid archive: {0}")]
