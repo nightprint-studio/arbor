@@ -586,6 +586,7 @@
     goToDefinition: () => void;
     openRename: () => void;
     findUsages: () => void;
+    findComponentUsages: () => void;
     showCallHierarchy: () => void;
     showTypeHierarchy: () => void;
     expandMacro: () => void;
@@ -781,11 +782,12 @@
 
   const leftTopRaw = $derived<ActivityRailButton[]>([
     { id: 'project',   tooltip: 'Project',   shortcut: 'Alt+1', icon: FolderTree, active: bennuUiStore.leftPanel === 'project',   onclick: () => bennuUiStore.toggleLeft('project') },
-    ...(javaTools
-      ? [
-          { id: 'structure', tooltip: 'Structure', shortcut: 'Alt+2', icon: ListTree,   active: bennuUiStore.leftPanel === 'structure', onclick: () => bennuUiStore.toggleLeft('structure') },
-        ]
-      : []),
+    // Every project kind. The panel answers for a `.java` from Bennu's own scan, for a JSP or an
+    // XML from the markup one, and for anything a **language server** owns from its
+    // `documentSymbol` — Rust, TypeScript, JavaScript, Svelte. It was gated on the project being
+    // Java from when the outline was the Java scanner and nothing else, and the gate outlived the
+    // reason: a Cargo project had a working Structure panel and no way to open it.
+    { id: 'structure', tooltip: 'Structure', shortcut: 'Alt+2', icon: ListTree,   active: bennuUiStore.leftPanel === 'structure', onclick: () => bennuUiStore.toggleLeft('structure') },
     // Both ecosystems: the panel answers for a Maven reactor and for a Cargo workspace, from one
     // report shape.
     { id: 'dependencies', tooltip: 'Dependencies', shortcut: 'Alt+N', icon: Library, active: bennuUiStore.leftPanel === 'dependencies', onclick: () => bennuUiStore.toggleLeft('dependencies') },
@@ -907,7 +909,7 @@
     // The only dependencies that should re-run this are the three values read above.
     untrack(() =>
       bennuUiStore.dropUnavailablePanels({
-        left: java ? ['project', 'structure', 'dependencies'] : ['project', 'dependencies'],
+        left: ['project', 'structure', 'dependencies'],
         // `i18n` is in both branches and needs no capability gate: it has no rail icon to lose, and
         // whether it applies is a question about the open FILE rather than about the project — a
         // fulcrum content tree can sit in a Maven repo as easily as in a Cargo one.
@@ -1061,6 +1063,13 @@
         action: () => run(() => bennuUiStore.openFileStructure()), when: canNav },
       { id: 'usages', title: 'Find usages', icon: 'search', shortcut: 'Alt+F7',
         action: () => run(() => void editor?.findUsages()), when: canNav },
+      // A verb of its own, and only where it means something. A `.svelte` file has no
+      // declaration inside it to put the caret on — the file IS the component — so Alt+F7 can
+      // never be asked about it. See `findComponentUsages`.
+      { id: 'componentusages', title: 'Find usages of this component', icon: 'search',
+        shortcut: 'Alt+Shift+F7',
+        action: () => run(() => void editor?.findComponentUsages()),
+        when: (path ?? '').toLowerCase().endsWith('.svelte') },
       // Only for a server-backed buffer: the Java engine has find-usages and no hierarchy, so on a
       // `.java` these verbs would open a panel that can only ever say "nothing here".
       { id: 'callhierarchy', title: 'Call hierarchy', icon: 'network', shortcut: 'Ctrl+Shift+H',
@@ -1133,7 +1142,7 @@
       // The Java-only tools are gated on `javaTools`, exactly like their rail icons — a
       // palette entry that opens a permanently-empty panel is the same lie in a different
       // place.
-      { id: 'structure', title: 'Toggle Structure', icon: 'list-tree',   shortcut: 'Alt+2', action: () => run(() => bennuUiStore.toggleLeft('structure')), when: javaTools },
+      { id: 'structure', title: 'Toggle Structure', icon: 'list-tree',   shortcut: 'Alt+2', action: () => run(() => bennuUiStore.toggleLeft('structure')), when: !!projectStore.project },
       { id: 'forms',     title: 'Toggle Forms',     icon: 'list',        shortcut: 'Alt+3', action: () => run(() => bennuUiStore.toggleBottom('forms')), when: jspTools },
       { id: 'dependencies', title: 'Dependencies',  icon: 'library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: true },
       // The same subject from the other angle: the list says what each module needs, the graph says
@@ -1489,6 +1498,15 @@
 
     // Local history of the open file (Alt+Shift+H). Not Ctrl+Alt+<letter>, which Chromium
     // drops on IT/DE/FR/ES layouts to preserve AltGr — so IntelliJ's own binding is out.
+    // Alt+Shift+F7 — usages of the component this file IS. Beside Alt+F7 because it is the same
+    // question about the one subject Alt+F7 cannot reach: a `.svelte` file has no declaration
+    // inside it to put a caret on.
+    if (e.altKey && e.shiftKey && !mod && e.key === 'F7') {
+      if (!(projectStore.activeFilePath ?? '').toLowerCase().endsWith('.svelte')) return;
+      e.preventDefault();
+      void editor?.findComponentUsages();
+      return;
+    }
     if (e.altKey && e.shiftKey && !mod && isKey(e, 'h')) {
       const root = projectStore.project?.root;
       const file = projectStore.activeFilePath;

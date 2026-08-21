@@ -30,6 +30,7 @@ import { javascriptStream, namespaceTokenClass } from '$lib/components/shared/ui
 import { directiveSlot, tagSlot } from './jsp-taglibs';
 import { makeHoverSource } from './bennu-hover';
 import { markupCompletionSource, markupExtHover } from './markup-intel';
+import { jspScriptCompletion, jspScriptHover } from './jsp-script-intel';
 import { actionPropertyHover } from '$lib/ipc/bennu/nav';
 
 const RUNTIME_WASM = '/bennu/tree-sitter.wasm';
@@ -201,9 +202,18 @@ export const jspLanguage: LanguageDescriptor = {
   // Hover asks the libraries first and falls back to the action-property resolver: the two
   // answer disjoint positions (a tag or attribute NAME versus an OGNL root / form field), so
   // the order only decides which of them gets asked about a token neither knows.
+  //
+  // A `<script>` body is answered before either of them, by `jsp-script-intel.ts`: it is
+  // JavaScript, no language server will ever serve a JSP, and the taglib vocabulary has nothing
+  // to say about it. First and not last, because a `<` in JavaScript — `if (a < b)` — reads to
+  // the markup tokenizer as an unclosed tag, so the taglib list used to appear in the middle of
+  // a comparison.
   intel: {
-    completion: markupCompletionSource,
-    hover: makeHoverSource(async (path, src, byteOffset) =>
-      (await markupExtHover(path, src, byteOffset)) ?? (await actionPropertyHover(path, src, byteOffset))),
+    completion: (ctx) => jspScriptCompletion(ctx) ?? markupCompletionSource(ctx),
+    hover: (view, pos, side) =>
+      jspScriptHover(view, pos)
+      ?? makeHoverSource(async (path, src, byteOffset) =>
+        (await markupExtHover(path, src, byteOffset))
+        ?? (await actionPropertyHover(path, src, byteOffset)))(view, pos, side),
   },
 };

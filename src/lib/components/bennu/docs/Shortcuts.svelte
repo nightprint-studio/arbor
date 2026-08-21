@@ -38,6 +38,7 @@
   <li><kbd>Ctrl</kbd> + <kbd>G</kbd> — go to line (or line:column)</li>
   <li><kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click) — go to declaration of the symbol under the caret (or show its usages when already on the declaration)</li>
   <li><kbd>Alt</kbd> + <kbd>F7</kbd> — <strong>find usages</strong> of the symbol under the caret (across the project)</li>
+  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F7</kbd> — <strong>find usages of this component</strong>, in a <code>.svelte</code> file: the file <em>is</em> the component, so there is no name inside it to put the caret on</li>
   <li><kbd>Del</kbd> / <kbd>⌫</kbd> — in the Project tree, <strong>delete</strong> the focused file or folder (it asks first)</li>
   <li><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>Z</kbd> — with the Project tree focused, <strong>undo the last delete</strong>. In the editor the same keys undo typing: two stacks, and whichever has focus answers</li>
   <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> — <strong>local history</strong> of the open file. IntelliJ's own binding is <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + a letter, which Chromium drops on Italian, German, French and Spanish layouts to keep AltGr working</li>

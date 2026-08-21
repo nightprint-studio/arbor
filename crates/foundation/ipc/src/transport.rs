@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -73,17 +73,73 @@ enum Frame {
     },
 }
 
+/// Fill `buf` completely. `Ok(false)` when the peer closed before a single byte arrived — a
+/// clean end of stream — and an error when it closed part-way through, which is a truncated frame.
+///
+/// Not `Read::read_exact`, for one reason that costs a whole product window when it is missing:
+/// that retries `Interrupted` and gives up on **`WouldBlock`**, and a backend's stdin can become
+/// non-blocking without the backend doing anything. Inherited standard streams are the *same open
+/// file description*, so a child process that sets `O_NONBLOCK` on its own stdin sets it on its
+/// parent's — and Node does that to every pipe it is given. The reader then fails with
+/// `Resource temporarily unavailable` on a stream that is perfectly healthy, the serve loop ends,
+/// and the shell reports the backend as disconnected.
+///
+/// A child should not inherit this fd in the first place, and the fix belongs there. This is the
+/// second line: waiting is what a blocking read would have done anyway, so the loop survives a
+/// child that was rude once. The backoff is capped low enough to stay responsive and high enough
+/// that a permanently poisoned stream idles at a few wake-ups a second rather than spinning.
+fn read_all<R: Read + ?Sized>(r: &mut R, buf: &mut [u8]) -> io::Result<bool> {
+    let mut filled = 0;
+    let mut backoff = Duration::from_millis(1);
+    while filled < buf.len() {
+        match r.read(&mut buf[filled..]) {
+            Ok(0) => {
+                return if filled == 0 {
+                    Ok(false)
+                } else {
+                    Err(io::Error::from(io::ErrorKind::UnexpectedEof))
+                };
+            }
+            Ok(n) => {
+                filled += n;
+                backoff = Duration::from_millis(1);
+            }
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                warn_nonblocking_once();
+                std::thread::sleep(backoff);
+                backoff = (backoff * 2).min(Duration::from_millis(20));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(true)
+}
+
+/// Say it once, on stderr, the first time a read finds the stream non-blocking.
+///
+/// Once because it would otherwise print several times a second, and at all because the cause is
+/// always a bug somewhere else — some child was spawned inheriting this process's stdin — and
+/// without a line here that bug is invisible: everything keeps working, slightly more expensively,
+/// forever.
+fn warn_nonblocking_once() {
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    if !WARNED.swap(true, Ordering::Relaxed) {
+        eprintln!(
+            "[ipc] stdin turned non-blocking — some child process was spawned inheriting it.              Polling instead of failing; spawn children with `Stdio::null()` for stdin."
+        );
+    }
+}
+
 /// Read one frame, or `None` at clean EOF (peer closed the stream).
 fn read_frame<R: Read + ?Sized>(r: &mut R) -> io::Result<Option<Frame>> {
     let mut len_buf = [0u8; 4];
-    match r.read_exact(&mut len_buf) {
-        Ok(()) => {}
-        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(e) => return Err(e),
+    if !read_all(r, &mut len_buf)? {
+        return Ok(None);
     }
     let len = u32::from_le_bytes(len_buf) as usize;
     let mut buf = vec![0u8; len];
-    r.read_exact(&mut buf)?;
+    read_all(r, &mut buf)?;
     let frame =
         serde_json::from_slice(&buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     Ok(Some(frame))
@@ -520,6 +576,79 @@ impl Drop for ChildInner {
                 let _ = child.wait();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod read_tests {
+    use super::*;
+
+    /// A reader that answers `WouldBlock` a few times before every real read — a stream some
+    /// child made non-blocking, which is what `Read::read_exact` cannot survive.
+    struct Stuttering {
+        data: Vec<u8>,
+        pos: usize,
+        /// How many `WouldBlock`s to emit before the next byte.
+        stalls: usize,
+        left: usize,
+    }
+
+    impl Read for Stuttering {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.left > 0 {
+                self.left -= 1;
+                return Err(io::Error::from(io::ErrorKind::WouldBlock));
+            }
+            self.left = self.stalls;
+            if self.pos >= self.data.len() {
+                return Ok(0);
+            }
+            // One byte at a time, so a frame is also reassembled across several reads — the
+            // other thing `read_exact` did for us and a hand-rolled loop has to keep doing.
+            buf[0] = self.data[self.pos];
+            self.pos += 1;
+            Ok(1)
+        }
+    }
+
+    fn framed(frame: &Frame) -> Vec<u8> {
+        let mut out = Vec::new();
+        write_frame(&mut out, frame).unwrap();
+        out
+    }
+
+    #[test]
+    fn a_stream_that_says_try_again_is_waited_on_rather_than_treated_as_broken() {
+        let frame = Frame::Request { id: 7, method: "ping".into(), params: Value::Null };
+        let mut r = Stuttering { data: framed(&frame), pos: 0, stalls: 3, left: 3 };
+
+        // The whole point: `read_exact` would have returned `WouldBlock` here and ended the
+        // serve loop, reporting a healthy backend as disconnected.
+        match read_frame(&mut r).unwrap() {
+            Some(Frame::Request { id, method, .. }) => {
+                assert_eq!((id, method.as_str()), (7, "ping"));
+            }
+            other => panic!("expected the request back, got {other:?}"),
+        }
+        // …and the end of the stream is still an end, not a hang.
+        assert!(read_frame(&mut r).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_stream_that_ends_mid_frame_is_an_error_not_a_clean_close() {
+        // Truncated on purpose: a peer that died half-way through a frame has NOT closed
+        // cleanly, and treating it as EOF would turn a crash into a silent shutdown.
+        let frame = Frame::Request { id: 1, method: "x".into(), params: Value::Null };
+        let bytes = framed(&frame);
+        let mut r = Stuttering { data: bytes[..bytes.len() - 2].to_vec(), pos: 0, stalls: 0, left: 0 };
+        let err = read_frame(&mut r).expect_err("a half-read frame is not a clean close");
+        assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn nothing_at_all_is_a_clean_close() {
+        let mut r = Stuttering { data: Vec::new(), pos: 0, stalls: 0, left: 0 };
+        assert!(read_frame(&mut r).unwrap().is_none());
     }
 }
 

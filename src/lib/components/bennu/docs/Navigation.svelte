@@ -79,6 +79,12 @@
 </p>
 <h2>Find usages</h2>
 <p>
+  In a <code>.svelte</code> file, <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F7</kbd> asks for the
+  usages of <strong>the component itself</strong> — the imports and the <code>&lt;Foo /&gt;</code>
+  tags. It is a separate key because it is the one subject <kbd>Alt</kbd> + <kbd>F7</kbd> cannot be
+  pointed at: the file is the component, so there is no name written inside it to put a caret on.
+</p>
+<p>
   Put the caret on a class, method or field and press <kbd>Alt</kbd> + <kbd>F7</kbd> to list every
   place it's used across the project in a popover — pick one to jump to it. It answers once the index
   is warm.

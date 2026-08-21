@@ -30,7 +30,18 @@
   (hex, binary, exponents, separators) are numbers, template literals colour their
   <code>$&lbrace;…&rbrace;</code> holes as code, <code>this</code> stands out, and a regular
   expression is told apart from a division — which is what keeps one <code>/</code> from painting
-  the rest of the line as a literal. The same tokenizer colours a standalone <code>.js</code> file.
+  the rest of the line as a literal.
+</p>
+<p>
+  <strong>Completion and hover work inside it too.</strong> No language server will ever serve a
+  JSP — it is a template that <em>prints</em> JavaScript — so this one is Bennu's own, and it has
+  two things to say. The block's own declarations: <code>var</code>, <code>function</code>, the
+  <code>foo: function (…)</code> form a jQuery-era page is mostly written in, and their parameters,
+  each with the line it was declared on when you hover it. And the platform, by reflection: after
+  <code>document.</code> or <code>location.</code> or <code>Math.</code> the members offered are
+  the ones the object really has, read in the engine the page will run in, so the list cannot be
+  stale the way a hand-written one always is. It stops at jQuery — <code>$</code> is offered as a
+  name, but there is no loaded library to read <code>$(…).</code> off.
 </p>
 <p>
   It also knows the script body is a <strong>template that produces JavaScript</strong> rather

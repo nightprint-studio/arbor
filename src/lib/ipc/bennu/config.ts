@@ -52,6 +52,10 @@ export interface BennuConfig {
    *  cores free for the UI / go-to); set a small number (e.g. `1`) so a big project's validation
    *  can't peg every core and freeze the editor. Doesn't affect the initial index build. */
   validation_threads: number;
+  /** Max worker threads the background sweeps may use — the index build, the reference walk,
+   *  the encoding scan. `1` (serial) by default; `0` = auto. Raise it when indexing feels slow
+   *  and the machine has room to spare. */
+  index_threads: number;
   /** Extra JDK install directories to search, on top of `JAVA_HOME` + the standard roots. */
   jdk_paths: string[];
   /** Per-project JDK override, keyed by absolute project-root path → Java version. */

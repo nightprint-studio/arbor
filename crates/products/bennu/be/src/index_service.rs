@@ -666,6 +666,13 @@ impl IndexService {
         // The reverse channel for the analysis warm-up's tracked job (registered inside the thread).
         let host = self.host();
         std::thread::spawn(move || {
+            // The CPU budget for every background sweep this build sets off — the parse, and the
+            // reference walk that follows it. Read here rather than once at startup so a change in
+            // Settings applies to the next index instead of to the next launch, and set before the
+            // first sweep because `read_java_sources` is already one.
+            bennu_intel::prelude::set_background_workers(
+                bennu_core::config::load().index_threads,
+            );
             if let Err(e) = std::fs::create_dir_all(&index_dir) {
                 eprintln!("bennu-be: index dir {}: {e}", index_dir.display());
                 return;

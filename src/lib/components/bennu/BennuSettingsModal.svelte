@@ -186,6 +186,13 @@
     await saveConfigPatch({ validation_threads: n });
   }
 
+  // ── Indexing CPU threads (1 = serial, the default; 0 = auto) ──────────────────
+  const indexThreads = $derived(cfg?.index_threads ?? 1);
+  async function commitIndexThreads(v: string) {
+    const n = Math.max(0, Math.floor(Number(v) || 0));
+    await saveConfigPatch({ index_threads: n });
+  }
+
   /** The Java-only sections drop out on a Cargo project: JDK, Capabilities and the
    *  Java/Java-Style pages are each a statement about a Java stack, and the encoding page
    *  has nothing to resolve (Rust is UTF-8 by definition). Editor / Completion / Folding
@@ -852,6 +859,10 @@ initialization_options = ""`}</pre>
           <FormRow label="Validation CPU threads" description="Max worker threads the whole-project validation may use. 0 = auto (leaves about half the cores free for the UI). Set 1 for single-threaded so a big project can’t peg every core and freeze the editor.">
             <Input value={String(validationThreads)} placeholder="0"
                    onchange={(v) => commitValidationThreads(v)} ariaLabel="Validation CPU threads" />
+          </FormRow>
+          <FormRow label="Indexing CPU threads" description="Max worker threads the index build, the find-usages reference walk and the encoding scan may use. 1 = serial, the default — indexing is a background job and one that makes the machine unusable has not earned its speed. Raise it when indexing feels slow and there are cores to spare; 0 = auto.">
+            <Input value={String(indexThreads)} placeholder="1"
+                   onchange={(v) => commitIndexThreads(v)} ariaLabel="Indexing CPU threads" />
           </FormRow>
           <FormRow label="Excluded directories" description="Comma-separated folder names skipped by the indexer.">
             <Input value={s.excludedDirs} placeholder="target, .git"

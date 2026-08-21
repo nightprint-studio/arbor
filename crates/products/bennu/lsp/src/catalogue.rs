@@ -32,6 +32,20 @@ pub struct ServerSpec {
     /// Files whose presence marks a workspace root this server can analyse. Searched from
     /// the file upwards.
     pub root_markers: &'static [&'static str],
+    /// An npm package whose presence in a `package.json` **also** marks a root — empty for the
+    /// servers that have no such signal.
+    ///
+    /// The one place a marker has to read a file rather than merely find it. `angular.json` is
+    /// the Angular CLI's marker and it is a good one, but an Nx workspace generates no
+    /// `angular.json` at all, so a marker list alone answers "not an Angular project" for a
+    /// repository whose every dependency says otherwise. `"@angular/core"` in a `package.json`
+    /// is the fact itself rather than a proxy for it.
+    ///
+    /// Matched as a quoted substring, not by parsing: `"@angular/core"` appearing anywhere in a
+    /// `package.json` means `dependencies`, `devDependencies` or `peerDependencies` — all three
+    /// of which mean the same thing here — and a full parse would buy only the ability to reject
+    /// the word appearing in a description, which costs a server start and nothing else.
+    pub package_dep: &'static str,
     /// What to tell the user when the binary isn't there. A bare "not found" leaves them
     /// with no next step, which is the whole reason this field exists.
     ///
@@ -67,6 +81,7 @@ pub const BUILTIN_SERVERS: &[ServerSpec] = &[
         args: &[],
         extensions: &["rs"],
         root_markers: &["Cargo.toml"],
+        package_dep: "",
         install_hint: "It ships with the Rust toolchain.",
         install: &["rustup", "component", "add", "rust-analyzer"],
     },
@@ -78,6 +93,7 @@ pub const BUILTIN_SERVERS: &[ServerSpec] = &[
         args: &[],
         extensions: &["go"],
         root_markers: &["go.mod", "go.work"],
+        package_dep: "",
         install_hint: "It is installed with the Go toolchain.",
         install: &["go", "install", "golang.org/x/tools/gopls@latest"],
     },
@@ -89,6 +105,7 @@ pub const BUILTIN_SERVERS: &[ServerSpec] = &[
         args: &["--stdio"],
         extensions: &["py", "pyi"],
         root_markers: &["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"],
+        package_dep: "",
         install_hint: "It is distributed on npm.",
         install: &["npm", "install", "-g", "pyright"],
     },
@@ -100,6 +117,7 @@ pub const BUILTIN_SERVERS: &[ServerSpec] = &[
         args: &["--background-index"],
         extensions: &["c", "cc", "cpp", "cxx", "h", "hh", "hpp", "hxx", "m", "mm"],
         root_markers: &["compile_commands.json", "compile_flags.txt", "CMakeLists.txt"],
+        package_dep: "",
         install_hint: "Install the `clangd` package (LLVM), or Xcode's command-line tools.",
         // A system package. Bennu installs language servers, not toolchains.
         install: &[],
@@ -112,8 +130,57 @@ pub const BUILTIN_SERVERS: &[ServerSpec] = &[
         args: &["--stdio"],
         extensions: &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"],
         root_markers: &["tsconfig.json", "jsconfig.json", "package.json"],
+        package_dep: "",
         install_hint: "It is distributed on npm.",
         install: &["npm", "install", "-g", "typescript-language-server", "typescript"],
+    },
+    ServerSpec {
+        id: "svelte",
+        name: "Svelte",
+        language: "svelte",
+        cmd: "svelteserver",
+        args: &["--stdio"],
+        extensions: &["svelte"],
+        // `svelte.config.js` first because it is the file that says *this is a Svelte project*
+        // rather than *this is a JavaScript project*, and `find_root` takes the highest match:
+        // in a monorepo whose root has only a `package.json`, the marker that resolves to the
+        // app is the one that has to be there. `package.json` stays as the fallback for the
+        // projects that keep their config in `svelte.config.mjs` or in the Vite config.
+        root_markers: &["svelte.config.js", "svelte.config.mjs"],
+        // A Vite-plus-Svelte app keeps its config in `vite.config.ts` and has no
+        // `svelte.config.*` at all. `package.json` used to be the fallback marker, which made
+        // every Node project a Svelte root — harmless, because only a `.svelte` file routes
+        // here, but it is a claim that is simply false. This says what was meant.
+        package_dep: "svelte",
+        install_hint: "It is distributed on npm.",
+        // The package is `svelte-language-server`; the binary it installs is `svelteserver`.
+        install: &["npm", "install", "-g", "svelte-language-server"],
+    },
+    ServerSpec {
+        id: "angular",
+        name: "Angular",
+        language: "html",
+        cmd: "ngserver",
+        // The probe locations are missing on purpose: they are a path into the project and
+        // cannot be a `&'static str`. See `root_args`, which appends them once the workspace
+        // root is known — without them `ngserver` starts and then answers nothing, because it
+        // never finds the TypeScript and Angular language services it is a front end for.
+        args: &["--stdio"],
+        // **Templates only.** Angular's server also speaks TypeScript, and claiming `.ts` here
+        // would take it away from `typescript-language-server` — one server serves a file, and
+        // the first match wins for every project, not only for Angular ones. Templates are the
+        // half that today has nothing at all, so this is pure gain; a `.ts` file keeps the
+        // server that has always answered for it. Wanting the other trade is a
+        // `[[lsp.servers]]` entry with `id = "angular"`, which shadows this one entirely.
+        extensions: &["html"],
+        // `angular.json` and nothing else — this must not fire on every `.html` in every
+        // project. Without it a JSP-era webapp's static pages would resolve to a server that
+        // is not installed, and the editor would offer Angular's answers about a plain page.
+        root_markers: &["angular.json"],
+        // Nx generates no `angular.json`; its Angular projects are Angular all the same.
+        package_dep: "@angular/core",
+        install_hint: "It is distributed on npm.",
+        install: &["npm", "install", "-g", "@angular/language-server"],
     },
     ServerSpec {
         id: "lua",
@@ -123,6 +190,7 @@ pub const BUILTIN_SERVERS: &[ServerSpec] = &[
         args: &[],
         extensions: &["lua"],
         root_markers: &[".luarc.json", "plugin.toml", ".luacheckrc"],
+        package_dep: "",
         install_hint: "Install the `lua-language-server` package \
                        (Homebrew: `brew install lua-language-server`).",
         // Homebrew / the distro. Same rule as clangd.
@@ -139,6 +207,7 @@ pub const BUILTIN_SERVERS: &[ServerSpec] = &[
         // markers, because a `.wgsl` in an `assets/` folder of a non-Rust project is still a
         // shader — and without a marker above it nothing would start.
         root_markers: &["Cargo.toml", ".git"],
+        package_dep: "",
         install_hint: "It is not published on crates.io, so it is built from its repository \
                        — a few minutes the first time.",
         // Not on crates.io, so the git form. The package is `wgsl-analyzer` with a HYPHEN —
@@ -210,6 +279,60 @@ impl ServerSpec {
             "rust-analyzer" => !is_dead_rustup_proxy(path, "rust-analyzer"),
             _ => true,
         }
+    }
+
+    /// Arguments that can only be written once the **workspace root** is known.
+    ///
+    /// Angular's server is the reason this exists, and it is not a preference: `ngserver` is a
+    /// front end for the TypeScript language service and the Angular language service, neither
+    /// of which it bundles. It locates them by *probing* directories given on the command line,
+    /// and with no `--tsProbeLocations` it starts, completes the handshake, and then answers
+    /// nothing at all — a live server that knows no Angular, which is the worst of the failure
+    /// shapes because nothing reports it.
+    ///
+    /// The probe target is the project's own `node_modules`, so the versions used are the
+    /// project's. That is also why this cannot live in [`args`](ServerSpec::args): it is a path
+    /// into the user's workspace, and `args` is `&'static`.
+    ///
+    /// Not applied to a user-defined server, even one that shadows this id — someone who spells
+    /// out an argv gets exactly that argv.
+    pub fn root_args(&self, root: &Path) -> Vec<String> {
+        match self.id {
+            "angular" => {
+                let probe = root.join("node_modules").to_string_lossy().into_owned();
+                vec![
+                    "--tsProbeLocations".into(),
+                    probe.clone(),
+                    "--ngProbeLocations".into(),
+                    probe,
+                ]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Whether to tell this server that **the client** handles file watching.
+    ///
+    /// The flag is `workspace.didChangeWatchedFiles.dynamicRegistration`, and it decides which
+    /// side watches the project for changes made outside the editor. It is `false` for almost
+    /// everything here on purpose: rust-analyzer reads it as "the client will tell me", stops
+    /// running its own watcher, and then never hears about a file `cargo build` regenerated —
+    /// because Bennu does not in fact deliver those notifications. Silence is the failure mode,
+    /// so the honest answer is to say no and let the server watch.
+    ///
+    /// Svelte's server is the opposite case, and it is not a preference either. Told no, it
+    /// starts **its own chokidar watcher over the whole workspace root** — which for a
+    /// repository that is a SvelteKit app *and* a Rust monorepo means seventeen thousand
+    /// directories, `target/` included, and a process that dies on `EMFILE: too many open files`
+    /// before it has answered anything. A server that is not running answers nothing at all,
+    /// which is strictly worse than a running one that has to be told about external edits
+    /// through `didOpen` / `didChange` like every buffer the editor owns.
+    ///
+    /// So this is not "which is more correct" but "which failure is survivable". A new server
+    /// belongs here when it, too, would rather watch the world than trust the client — the
+    /// symptom is a workspace-sized file watcher appearing in its process tree.
+    pub fn client_side_file_watching(&self) -> bool {
+        matches!(self.id, "svelte")
     }
 
     /// The server-specific `initializationOptions`.
@@ -309,15 +432,40 @@ pub fn extension_of(file: &str) -> String {
 /// workspace root sees the whole graph — which is also the only way cross-crate go-to
 /// works.
 pub fn find_root(file: &Path, markers: &[&str]) -> Option<PathBuf> {
+    find_root_with_dep(file, markers, "")
+}
+
+/// [`find_root`], plus a directory whose `package.json` declares `package_dep`.
+///
+/// Split out rather than folded in because the dependency read is the only part that touches a
+/// file's **contents**, and it must stay off the path of the servers that do not need it: this
+/// runs per keystroke (`is_lsp_file`), and a `.rs` or a `.java` has no business reading anything.
+/// An empty `package_dep` — every server but two — is exactly the old function.
+pub fn find_root_with_dep(file: &Path, markers: &[&str], package_dep: &str) -> Option<PathBuf> {
     let mut highest = None;
     let mut dir = if file.is_dir() { Some(file) } else { file.parent() };
     while let Some(d) = dir {
-        if markers.iter().any(|m| d.join(m).is_file()) {
+        if markers.iter().any(|m| d.join(m).is_file())
+            || (!package_dep.is_empty() && declares_dependency(d, package_dep))
+        {
             highest = Some(d.to_path_buf());
         }
         dir = d.parent();
     }
     highest
+}
+
+/// Whether `dir`'s `package.json` names `dep` as a dependency of any kind.
+///
+/// A quoted substring rather than a parse — see [`ServerSpec::package_dep`]. Read fresh each
+/// time: the alternative is a cache that has to notice an `npm install`, and a small file that
+/// the OS already has in its page cache is cheaper than being wrong about one.
+fn declares_dependency(dir: &Path, dep: &str) -> bool {
+    let manifest = dir.join("package.json");
+    match std::fs::read_to_string(&manifest) {
+        Ok(text) => text.contains(&format!("\"{dep}\"")),
+        Err(_) => false,
+    }
 }
 
 /// `rustup`'s toolchain dirs and the other places a rust-analyzer binary lives.
@@ -623,6 +771,76 @@ mod tests {
         assert_eq!(command("  clippy  "), "clippy", "trimmed");
         // And a server that gets no init options still gets none.
         assert!(spec_by_id("gopls").unwrap().init_options("clippy").is_none());
+    }
+
+    #[test]
+    fn a_dependency_in_package_json_marks_a_root_that_has_no_marker_file() {
+        let tmp = std::env::temp_dir().join("bennu-lsp-pkgdep-test");
+        let app = tmp.join("apps").join("web").join("src");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(
+            tmp.join("package.json"),
+            r#"{"name":"nx-ws","devDependencies":{"@angular/core":"19.0.0"}}"#,
+        )
+        .unwrap();
+        let file = app.join("app.component.html");
+        std::fs::write(&file, "<h1></h1>").unwrap();
+
+        let angular = spec_by_id("angular").unwrap();
+        // No `angular.json` anywhere: the marker list alone says this is not an Angular project.
+        assert!(find_root(&file, angular.root_markers).is_none());
+        // The dependency says otherwise, and it is the one that is right.
+        assert_eq!(
+            find_root_with_dep(&file, angular.root_markers, angular.package_dep),
+            Some(tmp.clone()),
+        );
+        // A different dependency is not this one — the quotes are what stop `@angular/core-x`
+        // and a name that merely contains this one from counting.
+        assert!(find_root_with_dep(&file, &[], "@angular/cor").is_none());
+        assert!(find_root_with_dep(&file, &[], "svelte").is_none());
+
+        // And a server with no dependency signal reads nothing at all.
+        assert!(find_root_with_dep(&file, &[], "").is_none());
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn angulars_probe_locations_point_at_the_projects_own_node_modules() {
+        let angular = spec_by_id("angular").unwrap();
+        let args = angular.root_args(Path::new("/w/shop"));
+        let probe = PathBuf::from("/w/shop").join("node_modules").to_string_lossy().into_owned();
+        assert_eq!(args, ["--tsProbeLocations", &probe, "--ngProbeLocations", &probe]);
+
+        // The static half must NOT contain them: they are a path into the workspace, and a
+        // `ngserver` launched with a stale or absent probe location comes up, handshakes, and
+        // answers nothing — the failure that reports itself as a working server.
+        assert_eq!(angular.args, ["--stdio"]);
+
+        // Nobody else grows arguments from the root.
+        for spec in BUILTIN_SERVERS {
+            if spec.id != "angular" {
+                assert!(spec.root_args(Path::new("/w/shop")).is_empty(), "{}", spec.id);
+            }
+        }
+    }
+
+    #[test]
+    fn no_two_servers_claim_the_same_extension() {
+        // One server serves a file — `server_for` takes the FIRST match — so two catalogue
+        // entries sharing an extension do not cooperate, they shadow each other for every
+        // project on the machine. Angular is the entry this is written for: it also speaks
+        // TypeScript, and giving it `ts` here would have taken every `.ts` file in every
+        // project away from `typescript-language-server`, Angular or not.
+        let mut seen: Vec<(&str, &str)> = Vec::new();
+        for spec in BUILTIN_SERVERS {
+            for ext in spec.extensions {
+                if let Some((other, _)) = seen.iter().find(|(_, e)| e == ext) {
+                    panic!("`{ext}` is claimed by both {other} and {}", spec.id);
+                }
+                seen.push((spec.id, ext));
+            }
+        }
     }
 
     #[test]

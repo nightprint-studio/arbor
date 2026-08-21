@@ -237,8 +237,34 @@ where
     R: Send,
     F: Fn(&T) -> R + Sync,
 {
-    // `0` = the default background budget (leave ~2 cores for the foreground).
-    parallel_map_capped(items, 0, f)
+    parallel_map_capped(items, background_workers(), f)
+}
+
+/// The worker budget for background sweeps, as the host set it. `0` until it does, which is the
+/// `available_parallelism − 2` default.
+static BACKGROUND_WORKERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many workers a background sweep — the index build, the reference walk, the mojibake scan —
+/// may use. `0` restores the automatic budget.
+///
+/// Set by the host rather than read from a file here, for the same reason the validation cap is
+/// passed in: this crate is a leaf and knows nothing about where Bennu keeps its settings. What is
+/// new is that the *automatic* budget is no longer the only possibility. `cores − 2` sounds
+/// considerate and is not: on an eight-core laptop it is six saturated cores for as long as a
+/// large project takes to parse, which the machine feels as a stall in everything else — the
+/// editor included, since the UI shell is on the same machine and not on the two spare cores.
+///
+/// A process-wide atomic and not a parameter because the call sites are three layers down inside
+/// the parse (`read_java_sources`, `parse_sources_parallel`, the reference walk) and threading a
+/// budget through each of them would put a knob in the signature of every function that happens to
+/// be on the path to one.
+pub fn set_background_workers(workers: usize) {
+    BACKGROUND_WORKERS.store(workers, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The current background budget. `0` = automatic.
+pub fn background_workers() -> usize {
+    BACKGROUND_WORKERS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Like [`parallel_map`] but with an explicit worker cap. `max_workers == 0` uses the default

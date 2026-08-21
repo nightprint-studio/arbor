@@ -552,7 +552,9 @@ fn run_with_timeout(mut cmd: Command, secs: u64) -> Result<(bool, String), Strin
     use std::io::Read as _;
     use std::process::Stdio;
 
-    cmd.stdout(Stdio::null()).stderr(Stdio::piped());
+    // stdin null and not inherited: fd 0 is the protocol pipe, and a child that makes it
+    // non-blocking makes it non-blocking for the backend too — see `child.rs::run_streamed`.
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| format!("cannot start the renderer: {e}"))?;
 
     // The pipe is drained on this thread after the wait, which is safe here because the

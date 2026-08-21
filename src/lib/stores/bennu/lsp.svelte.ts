@@ -101,6 +101,23 @@ function createLspStore() {
       return !!ext && servedExtensions.has(ext);
     },
 
+    /**
+     * The server for `path` that is **enabled but not installed**, or null.
+     *
+     * The one thing that turns a silent empty answer into an explicable one. A file whose server
+     * is missing is routed to it all the same — that is deliberate, so a `.ts` never falls
+     * through to the Java engine — and every feature behind it then answers nothing. "No usages
+     * found" is a claim about the code; this is what lets the UI say the other thing instead,
+     * which is a claim about the machine.
+     */
+    missingServerFor(path: string | null | undefined): LspServerInfo | null {
+      const ext = extensionOf(path);
+      if (!ext) return null;
+      return servers.find(
+        (s) => s.enabled && !s.path && s.extensions.some((e) => e.toLowerCase() === ext),
+      ) ?? null;
+    },
+
     /** The status of the server serving `path`, when there is a slot for one. */
     statusFor(path: string | null | undefined): LspStatus | null {
       const ext = extensionOf(path);

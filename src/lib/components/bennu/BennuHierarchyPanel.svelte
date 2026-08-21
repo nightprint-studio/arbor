@@ -158,7 +158,12 @@
           {@const visual = kindGlyph(node.node.kind)}
           {@const Icon = visual.icon}
           {@const sites = node.node.call_sites.length}
-          <Icon size={13} color={visual.color} />
+          <!-- In `.tree-icon`, not bare: that class is where the shared Tree hands a selected row's
+               colour to the icon — including `--jki-color`, which a lettered ring needs or it
+               keeps a panel-background hue on top of a selection fill. -->
+          <span class="tree-icon" style="color: {visual.color}">
+            <Icon size={13} {...visual.props ?? {}} />
+          </span>
           <span class="r-name">{node.node.name}</span>
           {#if node.node.detail}<span class="r-detail">{node.node.detail}</span>{/if}
           <!-- Several calls to the same thing inside one function: the row jumps to the first, and

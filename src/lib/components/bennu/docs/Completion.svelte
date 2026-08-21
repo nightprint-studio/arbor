@@ -23,6 +23,25 @@
   inserted; press <kbd>Alt</kbd> + <kbd>Enter</kbd> → <strong>Import '…'</strong> to pick the package.
 </p>
 <p>
+  In <strong>TypeScript</strong> and <strong>JavaScript</strong> — and in a <code>.svelte</code>
+  file, and in an Angular project's templates — the popup is the language server's:
+  <code>typescript-language-server</code> for the JS family, <code>svelteserver</code>,
+  <code>ngserver</code>. Install it from Settings → Language Servers; without one the file is still
+  coloured, folded and edited, it simply has nothing to suggest.
+</p>
+<p>
+  A JSP's <code>&lt;script&gt;</code> body is the exception, and deliberately: no language server
+  will ever serve a JSP — it is a template that <em>prints</em> JavaScript, half of it
+  <code>&lt;%= %&gt;</code> holes — so Bennu answers it itself. The names declared in the block
+  (<code>var</code>, <code>function</code>, <code>foo: function (…)</code> and their parameters)
+  are offered first, then the browser globals. After <code>document.</code>,
+  <code>location.</code>, <code>Math.</code> and the rest of the platform, the members offered are
+  <strong>read off the object itself</strong> in the engine the page will run in — not a list typed
+  into Bennu, so it cannot be stale. Hover says the same: a local shows the line it was declared
+  on, a platform function how many arguments it really takes. What it cannot know is jQuery:
+  <code>$</code> is offered as a name, but <code>$(…).</code> has no object to read.
+</p>
+<p>
   An <strong>overloaded</strong> method is offered <em>once per signature</em> — each entry showing
   its own parameters and return type — while a method that merely <strong>overrides</strong> an
   inherited one appears once. Inherited members are included; a <code>private</code> member of

@@ -28,6 +28,7 @@ import {
   hoverCardDom, insertWithStops, makeByteToU16, makeU16ToByte,
 } from '$lib/components/shared/ui/code-editor';
 import { StreamLanguage, type StreamParser } from '@codemirror/language';
+import type { Extension } from '@codemirror/state';
 import { insertCompletionText, type Completion, type CompletionContext, type CompletionResult }
   from '@codemirror/autocomplete';
 import type { EditorView, Tooltip } from '@codemirror/view';
@@ -325,11 +326,54 @@ export function signatureCardDom(sig: LspSignature): HTMLElement {
   return dom;
 }
 
+/** How a server-backed descriptor folds and comments. Both default to the stream-mode case,
+ *  which is what {@link lspLanguage} passes and what Rust and every legacy mode want. */
+export interface LspLanguageOptions {
+  /** The language's comment syntax, for `Ctrl+/`. Omit for a Lezer language (lang-html and
+   *  friends carry their own, and theirs is nesting-aware — a `//` inside `<script>` and a
+   *  `<!-- -->` in the markup of the same file). */
+  commentTokens?: { line?: string; block?: { open: string; close: string } };
+  /** Fold from the grammar's own `foldNodeProp`. Only a Lezer language has one. */
+  cmFold?: boolean;
+  /** Fold from the server's `textDocument/foldingRange`. */
+  serverFold?: boolean;
+}
+
 /**
- * Build a descriptor for a server-backed language.
+ * Build a descriptor for a server-backed language from a **ready CodeMirror language
+ * extension** — a Lezer `LanguageSupport` (lang-html) as readily as a `StreamLanguage`.
  *
- * @param id           stable id, for parser caches and debugging (`rust`)
- * @param baseMode     the CodeMirror stream mode that provides the instant, local highlight
+ * Split out from {@link lspLanguage} for the languages whose base highlighter is a real
+ * grammar rather than a stream mode: a `.svelte` file is markup with `<script>` and `<style>`
+ * in it, and a stream mode would colour the whole thing as one flat soup. Which is also why
+ * the fold flags are parameters here — a Lezer grammar folds its own tags immediately, with
+ * no server and no round-trip, and turning that off in favour of `foldingRange` would trade a
+ * working fold gutter for one that appears when a server finishes starting.
+ */
+export function lspLanguageFrom(
+  id: string,
+  cmExtension: Extension,
+  opts: LspLanguageOptions = {},
+): LanguageDescriptor {
+  return {
+    id,
+    createParser: () =>
+      Promise.reject(new Error(`lsp-language:${id} highlights from a CodeMirror mode`)),
+    classify: () => null,
+    cmExtension,
+    cmFold: opts.cmFold ?? false,
+    serverFold: opts.serverFold ?? true,
+    commentTokens: opts.commentTokens,
+    intel: { completion: backendCompletionSource, hover: backendHoverSource },
+  };
+}
+
+/**
+ * Build a descriptor for a server-backed language whose instant, local highlight comes from a
+ * CodeMirror **stream mode**.
+ *
+ * @param id            stable id, for parser caches and debugging (`rust`)
+ * @param baseMode      the stream mode that colours the file before any server answers
  * @param commentTokens the language's comment syntax, for `Ctrl+/`
  */
 export function lspLanguage(
@@ -337,18 +381,8 @@ export function lspLanguage(
   baseMode: StreamParser<unknown>,
   commentTokens: { line?: string; block?: { open: string; close: string } },
 ): LanguageDescriptor {
-  return {
-    id,
-    createParser: () =>
-      Promise.reject(new Error(`lsp-language:${id} highlights from a CodeMirror mode`)),
-    classify: () => null,
-    cmExtension: StreamLanguage.define(baseMode),
-    // A stream mode carries no fold information of its own, so the Lezer path stays off — and the
-    // server's `textDocument/foldingRange` answers instead. It folds by *item*: a `use` block, a doc
-    // comment, a `#[cfg]`-gated module, a match arm. The ranges are pushed by the editor host.
-    cmFold: false,
-    serverFold: true,
-    commentTokens,
-    intel: { completion: backendCompletionSource, hover: backendHoverSource },
-  };
+  // A stream mode carries no fold information of its own, so the Lezer path stays off — and the
+  // server's `textDocument/foldingRange` answers instead. It folds by *item*: a `use` block, a doc
+  // comment, a `#[cfg]`-gated module, a match arm. The ranges are pushed by the editor host.
+  return lspLanguageFrom(id, StreamLanguage.define(baseMode), { commentTokens });
 }

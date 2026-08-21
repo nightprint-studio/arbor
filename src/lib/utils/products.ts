@@ -70,8 +70,8 @@ export const PRODUCTS: ProductIdentity[] = [
     // Crimson rather than the orange the B is drawn in: Merula is already orange, and at the
     // opacity a window tint runs at the two were the same colour. Crimson is the root of the
     // same gradient, so it stays faithful to the icon.
-    id: 'bennu', name: 'Bennu', bird: 'firebird', role: 'Java editor', accent: '#e03131',
-    blurb: 'Editor and semantic engine for legacy Java: navigation, live validation, refactors and run configurations.',
+    id: 'bennu', name: 'Bennu', bird: 'firebird', role: 'Java & Rust editor', accent: '#e03131',
+    blurb: 'Editor and semantic engine for two stacks: legacy Java — Struts, Spring XML, MyBatis, JSP — and Rust, with Cargo, a debugger and a Bevy toolchain of its own. Navigation, live validation, refactors and run configurations on both.',
   },
   {
     id: 'picus', name: 'Picus', bird: 'woodpecker', role: 'SQL studio', accent: '#69db7c',

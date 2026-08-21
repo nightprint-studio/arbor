@@ -781,7 +781,12 @@
     flex-shrink: 0;
     color: var(--text-secondary);
   }
-  :global(.tree .tree-row-selected .tree-icon) { color: var(--accent); }
+  /* `--jki-color` too: a lettered ring (`SymbolKindIcon`) hue-codes its own kind, and its
+     colours are chosen to read against a panel background rather than against a selection fill —
+     on which the class blue goes muddy and the accent one disappears entirely. Handing it
+     `currentColor` takes it with the row. Inert for every other icon, which has no such
+     variable. */
+  :global(.tree .tree-row-selected .tree-icon) { color: var(--accent); --jki-color: currentColor; }
 
   :global(.tree .tree-label) {
     flex: 1;

@@ -250,6 +250,12 @@ fn mux(video: &Path, audio: &[PathBuf], out: &Path) -> Result<(), String> {
     }
 
     let mut cmd = FfmpegCommand::new();
+    // `-nostdin` first, and it is not cosmetic. This child inherits the backend's stdin, which is
+    // the protocol pipe from the shell — and ffmpeg reads stdin for its interactive keys unless
+    // told not to. A muxer quietly consuming frames addressed to tyto-be is the kind of failure
+    // that presents as the backend disconnecting for no reason. The recording command above is
+    // the exception: raw video really does arrive on `pipe:0`.
+    cmd.arg("-nostdin");
     cmd.arg("-hide_banner").arg("-loglevel").arg("error");
     cmd.arg("-i").arg(video);
     for a in audio {

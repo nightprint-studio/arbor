@@ -367,7 +367,7 @@
           {:else}
             <span class="sl-vis sl-vis-none" aria-hidden="true"></span>
           {/if}
-          <span class="tree-icon" style="color: {meta.color}"><Icon size={13} /></span>
+          <span class="tree-icon" style="color: {meta.color}"><Icon size={13} {...meta.props ?? {}} /></span>
           <span class="tree-label">{node.name}</span>
           {#if node.flavour === 'java' && node.kind === 'method' && node.overrides}
             <span class="sl-override" use:tooltip={'Overrides / implements a supertype member'} aria-label="overrides a supertype member">

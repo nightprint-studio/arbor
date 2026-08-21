@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * BennuEditor — the tabbed Java editor area.
+   * BennuEditor — the tabbed editor area.
    *
    * A JetBrains-style tab strip (shared `Tabs`) over the open files, a goto-line
    * overlay (Ctrl+G), a footer Ln/Col, and the shared `CodeEditor` with the Java
@@ -1846,6 +1846,28 @@
 
   /** Find usages of the symbol under the caret (Alt+F7) — opens the popover anchored
    *  there and fills it from `bennu_references`. */
+  /**
+   * Usages of the **component this file is** — the answer `findUsages` cannot give.
+   *
+   * A `.svelte` file has no declaration inside it to put the caret on: the file *is* the
+   * component, and `<Foo />` in another file refers to the module rather than to anything
+   * written here. Its server bridges that with a generated TypeScript shim, and the shim's
+   * declaration sits at **the very start of the file** — so asking for references at offset 0 is
+   * asking about the component, and it answers with the imports and the tags.
+   *
+   * A separate verb rather than a fallback inside Alt+F7: an Alt+F7 that quietly changes its
+   * subject when the caret is not on a name would be answering a question nobody asked.
+   */
+  export async function findComponentUsages() {
+    if (!activePath || !editorComp) return;
+    await runFindUsages(
+      editorComp.getValue(),
+      0,
+      editorComp.coordsAtCaret(),
+      activePath.split(/[\\/]/).pop()?.replace(/\.svelte$/, '') ?? null,
+    );
+  }
+
   export async function findUsages() {
     if (!activePath || !editorComp) return;
     await runFindUsages(

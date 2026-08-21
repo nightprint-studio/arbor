@@ -63,7 +63,17 @@ pub(crate) fn run_streamed(
 
     let (program, rest) = argv.split_first().ok_or("nothing to run")?;
     let mut cmd = Command::new(program);
-    cmd.args(rest).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // **`stdin` must be null, not inherited.** A backend's fd 0 is the protocol pipe from the
+    // shell, and an inherited one is the SAME open file description — so a child that sets
+    // `O_NONBLOCK` on its stdin sets it on ours. Node does exactly that (libuv marks a pipe
+    // non-blocking), which made `npm install -g …` from the Language Servers page end with
+    // `serve loop ended with error: Resource temporarily unavailable` and the window reporting
+    // *bennu-be disconnected* — an editor killed by its own install button.
+    //
+    // Nothing run here reads from stdin anyway: these are package-manager commands whose input
+    // is their argv. Null rather than piped so a prompt fails immediately instead of hanging a
+    // build nobody can answer.
+    cmd.args(rest).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
     {
         use arbor_process_ext::prelude::NoWindowExt;

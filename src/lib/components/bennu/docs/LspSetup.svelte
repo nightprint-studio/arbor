@@ -14,6 +14,8 @@
     <tr><td>Python</td><td>Pyright</td><td><code>.py</code></td><td><code>pyproject.toml</code>, <code>setup.py</code></td></tr>
     <tr><td>C / C++</td><td><code>clangd</code></td><td><code>.c</code>, <code>.cpp</code>, <code>.h</code>, …</td><td><code>compile_commands.json</code>, <code>CMakeLists.txt</code></td></tr>
     <tr><td>TypeScript / JavaScript</td><td><code>typescript-language-server</code></td><td><code>.ts</code>, <code>.tsx</code>, <code>.js</code>, …</td><td><code>tsconfig.json</code>, <code>package.json</code></td></tr>
+    <tr><td>Svelte</td><td><code>svelteserver</code></td><td><code>.svelte</code></td><td><code>svelte.config.js</code>, <code>package.json</code></td></tr>
+    <tr><td>Angular (templates)</td><td><code>ngserver</code></td><td><code>.html</code></td><td><code>angular.json</code></td></tr>
     <tr><td>Lua</td><td><code>lua-language-server</code></td><td><code>.lua</code></td><td><code>.luarc.json</code>, <code>plugin.toml</code></td></tr>
     <tr><td>WGSL</td><td><code>wgsl-analyzer</code></td><td><code>.wgsl</code></td><td><code>Cargo.toml</code>, <code>.git</code></td></tr>
   </tbody>
@@ -40,6 +42,51 @@
   <strong>Bevy</strong> project: its module system is WESL rather than naga_oil, so it does not
   understand <code>#import</code>, and it replaces Bennu's deliberate silence on a composed shader
   with its own reading of those lines.
+</p>
+<h2>Svelte and Angular</h2>
+<p>
+  A <code>.svelte</code> file is coloured as markup with <code>&lt;script&gt;</code> and
+  <code>&lt;style&gt;</code> in it, immediately and with no server. What that cannot know — that a
+  name is a component, a prop, a store — arrives from <code>svelteserver</code> as semantic tokens
+  layered on top, along with completion, hover, diagnostics, go-to, find-usages and rename. The
+  template syntax itself (<code>&#123;#each&#125;</code>, <code>&#123;expr&#125;</code>) stays
+  uncoloured: no HTML grammar can be told it is Svelte, and pretending otherwise would colour it
+  wrongly rather than not at all.
+</p>
+<p>
+  <strong>Angular serves templates, not <code>.ts</code>.</strong> Its server also speaks
+  TypeScript, but one server serves a file here and the first match wins for <em>every</em>
+  project — so claiming <code>.ts</code> would take every TypeScript file on the machine away from
+  <code>typescript-language-server</code>, Angular project or not. Templates are the half that
+  otherwise has nothing, so this is the trade that only adds. A <code>.ts</code> file keeps the
+  server it has always had, which means a rename started in a component's class does not follow the
+  name into its template.
+</p>
+<p>
+  Wanting the other trade is a <code>[[lsp.servers]]</code> entry with
+  <code>id = "angular"</code>: a custom entry shadows the built-in completely, so its
+  <code>extensions</code> and its <code>args</code> are the ones used. Spell out the probe
+  locations if you do — <code>ngserver</code> is a front end for the TypeScript and Angular
+  language services and locates them from the command line; without them it starts, handshakes,
+  and answers nothing.
+</p>
+<p>
+  One difference worth knowing about, because it looks like a Bennu bug when it bites: a language
+  server either watches the project for outside changes itself, or trusts the editor to tell it.
+  Most of them watch for themselves, which is what Bennu wants — it does not deliver those
+  notifications, so a server that stopped watching would quietly stop noticing a file
+  <code>cargo build</code> regenerated. <code>svelteserver</code> is the exception, and is told the
+  editor watches: left to its own devices it walks the entire workspace root, which in a repository
+  that is a Svelte app <em>and</em> something much larger means tens of thousands of directories and
+  a server that dies on <em>too many open files</em> before answering anything. The cost is that it
+  learns about a change only when the file is opened or saved here.
+</p>
+<p>
+  Because a server is selected by <strong>extension</strong>, enabling Angular puts
+  <code>.html</code> into the language-server set for every project, including one that has no
+  <code>angular.json</code> anywhere — where nothing starts, and go-to or rename on a plain page
+  simply finds nothing. Turning Angular off in Settings → Language Servers takes
+  <code>.html</code> back out.
 </p>
 <h2>A server you have not installed</h2>
 <p>

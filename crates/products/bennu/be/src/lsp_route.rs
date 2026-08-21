@@ -394,9 +394,25 @@ pub fn will_rename(file: &str, new_path: &str) -> Vec<SourceEdit> {
     .unwrap_or_default()
 }
 
-/// Re-read the workspace's manifests. `false` when no server covers `scope`, or it refused.
+/// Re-read the workspace's manifests. `false` when no server covers `scope`, or none accepted.
+///
+/// Every covering server, because "reload the workspace" is about the workspace and a polyglot
+/// repository has more than one server holding a stale view of it. One refusal does not make the
+/// others' reloads not have happened, so the answer is "did any".
 pub fn reload_workspace(scope: &str) -> bool {
-    let Some(session) = LspRegistry::global().session_covering(scope) else { return false };
+    let sessions = LspRegistry::global().sessions_covering(scope);
+    if sessions.is_empty() {
+        return false;
+    }
+    let mut any = false;
+    for session in sessions {
+        any |= reload_one(&session);
+    }
+    any
+}
+
+/// One server's reload. Split out so the loop above stays about the policy.
+fn reload_one(session: &LspSession) -> bool {
     match session.reload_workspace() {
         Ok(()) => true,
         Err(e) => {
@@ -451,11 +467,28 @@ fn hierarchy_wire(n: bennu_lsp::prelude::HierarchyNode) -> LspHierarchyNode {
 /// extension for exactly that reason (see [`LspRegistry::session_covering`]); the extension-keyed
 /// lookup the per-buffer requests use would refuse a directory.
 pub fn workspace_symbols(scope: &str, query: &str) -> Vec<LspSymbol> {
-    let Some(session) = LspRegistry::global().session_covering(scope) else { return Vec::new() };
-    tolerate(session.workspace_symbols(query), "workspaceSymbol")
+    // **Every** server covering the scope, not one. A repository is regularly more than one
+    // language, and asking a single session made "Go to type" answer about Rust or about Svelte
+    // depending on which session the map enumerated first — with no way for the user to tell which
+    // question had been asked. Merged, and each server keeps its own vocabulary in the `kind`
+    // field, which is what the two tabs sort rows by.
+    let mut out: Vec<LspSymbol> = LspRegistry::global()
+        .sessions_covering(scope)
         .into_iter()
+        .flat_map(|session| tolerate(session.workspace_symbols(query), "workspaceSymbol"))
         .map(symbol_wire)
-        .collect()
+        .collect();
+
+    // One symbol, one row. Two servers covering a root can both know a name, and one server can
+    // report the same one several times on its own — `svelteserver` answers a single
+    // `<script>` function six times over, because svelte2tsx puts the file in more than one
+    // TypeScript program. Identity is the site, not the name: two different `Foo`s in two files
+    // are two answers, and the navigator's whole job is to let you pick between them.
+    out.sort_by(|a, b| {
+        (&a.file, a.line, a.col, &a.name).cmp(&(&b.file, b.line, b.col, &b.name))
+    });
+    out.dedup_by(|a, b| (&a.file, a.line, a.col, &a.name) == (&b.file, b.line, b.col, &b.name));
+    out
 }
 
 /// Format the file.
@@ -553,29 +586,36 @@ pub fn did_close(file: &str) -> bool {
 /// A server publishes for files nobody has opened (that is the whole value of `cargo check`),
 /// so this cannot be assembled from the open buffers.
 pub fn problems(scope: &str) -> Vec<bennu_proto::prelude::FileDiagnostics> {
-    // By containment, so the project root is a valid scope — which is how a project-wide panel
-    // asks the question.
-    let Some(session) = LspRegistry::global().session_covering(scope) else { return Vec::new() };
-    session
-        .diagnostic_files()
+    // Every covering server, by containment so the project root is a valid scope — which is how a
+    // project-wide panel asks the question. All of them and not one, for the same reason as
+    // `workspace_symbols`: a panel that says "the project's problems" and shows one language's is
+    // not incomplete in a way anybody can see, it just reads as a clean build.
+    LspRegistry::global()
+        .sessions_covering(scope)
         .into_iter()
-        .map(|f| {
-            let diags = session
-                .diagnostics_for(&f, None)
+        .flat_map(|session| {
+            session
+                .diagnostic_files()
                 .into_iter()
-                .map(|d| Diagnostic {
-                    message: if d.source.is_empty() {
-                        d.message
-                    } else {
-                        format!("{}: {}", d.source, d.message)
-                    },
-                    severity: d.severity,
-                    code: d.code,
-                    start: d.start,
-                    end: d.end,
+                .map(|f| {
+                    let diags = session
+                        .diagnostics_for(&f, None)
+                        .into_iter()
+                        .map(|d| Diagnostic {
+                            message: if d.source.is_empty() {
+                                d.message
+                            } else {
+                                format!("{}: {}", d.source, d.message)
+                            },
+                            severity: d.severity,
+                            code: d.code,
+                            start: d.start,
+                            end: d.end,
+                        })
+                        .collect();
+                    bennu_proto::prelude::FileDiagnostics { file: f, diagnostics: diags }
                 })
-                .collect();
-            bennu_proto::prelude::FileDiagnostics { file: f, diagnostics: diags }
+                .collect::<Vec<_>>()
         })
         .filter(|fd| !fd.diagnostics.is_empty())
         .collect()

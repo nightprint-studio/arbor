@@ -287,7 +287,7 @@
 </script>
 
 <TitleBar
-  logoTooltip="Bennu — Java editor"
+  logoTooltip="Bennu — Java &amp; Rust editor"
   menu={hamburgerMenu}
   onNativeMenu={publishNativeMenu}
   nativeMenuEnabled={surfaceStore.hasFocus('bennu')}

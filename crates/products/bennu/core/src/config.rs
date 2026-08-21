@@ -113,6 +113,19 @@ pub struct BennuConfig {
     /// Doesn't affect the one-shot initial index build. `#[serde(default)]` fills a missing key with
     /// `0`, so existing config files get the auto behaviour.
     pub validation_threads: usize,
+    /// **Indexing CPU budget**: the maximum worker threads the background sweeps may use — the
+    /// initial index build, the reference walk behind find-usages, the encoding scan.
+    ///
+    /// `1` by default, which means **serial**. The previous behaviour was `available_parallelism −
+    /// 2`, chosen to leave the foreground room and in practice leaving none: six saturated cores on
+    /// an eight-core machine is felt as a stall in everything, the editor included, for as long as
+    /// a large project takes to parse. A background job that makes the machine unusable has not
+    /// earned its speed.
+    ///
+    /// Raise it when indexing feels slow and the machine has room — `0` restores the automatic
+    /// budget. Distinct from [`validation_threads`](Self::validation_threads), which caps the
+    /// separate whole-project validation sweep.
+    pub index_threads: usize,
     /// **Local history**: keep a private record of what every project file used to be, so a
     /// save, a refactor or a delete can be undone long after the editor's own undo stack has
     /// moved on. `true` by default. Stored in Arbor's data directory, never inside the
@@ -399,6 +412,7 @@ impl Default for BennuConfig {
             search_dependencies: false,
             auto_import: true,
             validation_threads: 0,
+            index_threads: 1,
             jdk_paths: Vec::new(),
             jdk_overrides: BTreeMap::new(),
             encoding_overrides: BTreeMap::new(),

@@ -19,33 +19,70 @@
  * row with no icon reads as a broken row rather than as an unfamiliar one.
  */
 
-import { Box, Braces, Code2, FileCode2, SquareFunction, Variable } from 'lucide-svelte';
+import { Braces, Code2, FileCode2, SquareFunction, Variable } from 'lucide-svelte';
+import SymbolKindIconRaw from './SymbolKindIcon.svelte';
 import type { IconComponent } from '$lib/types/icon';
 
-/** What a row draws for a kind: a lucide component and the colour to tint it. */
+/**
+ * What a row draws for a kind: a component, the colour to tint it, and any props the component
+ * needs beyond a size.
+ *
+ * `props` exists for one entry and it is the important one — see {@link RING} below.
+ */
 export interface KindGlyph {
   icon: IconComponent;
   color: string;
+  /** Extra props for `icon`. Spread by the consumer after `size`. */
+  props?: Record<string, unknown>;
 }
+
+/** The Svelte-5 component as an icon slot — the same cast every icon map in the app uses. */
+const SymbolKindIcon = SymbolKindIconRaw as unknown as IconComponent;
+
+/**
+ * A **type**, drawn as the lettered ring — `C` class, `S` struct, `T` trait, `E` enum.
+ *
+ * These used to be a cube, and a cube is a placeholder: it is what an icon set offers when it has
+ * nothing to say, it says the same nothing for a class as for a struct as for a trait, and three
+ * identical cubes down an outline are three rows a reader has to read the *text* of to tell apart
+ * — which is the job the icon was there to do.
+ *
+ * The ring is not a new device: `SymbolKindIcon.svelte` already draws it for the Go-to *Types*
+ * tab, where every row is a type. Reaching for it here too is a narrowing of that component's
+ * stated scope, and worth it: the reason a mixed list wanted a *shape* was that a shape separates
+ * a type from a function, and a ring does that at least as well while also saying **which** type.
+ * A function is still a function glyph and a field still a field one, so the coarse distinction
+ * survives intact.
+ *
+ * The colour comes from the ring's own table (it hue-codes the role), so these entries carry a
+ * colour only for the consumers that tint a container around the icon.
+ */
+const RING = (color: string, kind: string): KindGlyph => ({
+  icon: SymbolKindIcon,
+  color,
+  props: { kind },
+});
 
 const GLYPHS: Record<string, KindGlyph> = {
   // ── Bennu's own Java scanner ──
-  class:     { icon: Box,            color: 'var(--info)' },
-  interface: { icon: Box,            color: 'var(--info)' },
-  enum:      { icon: Box,            color: 'var(--info)' },
-  record:    { icon: Box,            color: 'var(--info)' },
+  class:     RING('var(--info)', 'class'),
+  interface: RING('var(--success)', 'interface'),
+  enum:      RING('var(--warning)', 'enum'),
+  record:    RING('var(--color-tag, #c792ea)', 'record'),
+  annotation: RING('var(--accent)', 'annotation'),
   method:    { icon: SquareFunction, color: 'var(--color-tag, #c792ea)' },
   field:     { icon: Variable,       color: 'var(--success)' },
   group:     { icon: Braces,         color: 'var(--text-muted)' },
   element:   { icon: Code2,          color: 'var(--color-tag, #c792ea)' },
   // ── from a language server ──
-  struct:    { icon: Box,            color: 'var(--info)' },
-  object:    { icon: Box,            color: 'var(--info)' },
-  // A Rust `trait` is an interface, and reads as one.
-  trait:     { icon: Box,            color: 'var(--info)' },
+  struct:    RING('var(--info)', 'struct'),
+  object:    RING('var(--info)', 'object'),
+  // A Rust `trait` is an interface, and reads as one — but it is called a trait, and the ring is
+  // exactly the device that can say both at once: the interface green, and a `T`.
+  trait:     RING('var(--success)', 'trait'),
   // An `impl` block is not a type — it is a container of members, which is what a module is too.
   impl:      { icon: Braces,         color: 'var(--color-tag, #c792ea)' },
-  'type alias': { icon: Code2,       color: 'var(--text-secondary)' },
+  'type alias': RING('var(--text-secondary)', 'type alias'),
   namespace: { icon: Braces,         color: 'var(--text-muted)' },
   module:    { icon: Braces,         color: 'var(--text-muted)' },
   function:  { icon: SquareFunction, color: 'var(--color-tag, #c792ea)' },

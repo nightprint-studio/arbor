@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * BennuIntentionsOverlay — the Alt+Enter intentions/quick-fix popup for the
-   * Bennu Java editor, modeled on merula's caret-anchored intentions picker.
+   * Bennu editor, modeled on merula's caret-anchored intentions picker.
    *
    * A small floating list anchored at the caret (viewport coords from the store).
    * Fully keyboard-driven: ↑/↓ move the highlight (wrapping), Enter runs the

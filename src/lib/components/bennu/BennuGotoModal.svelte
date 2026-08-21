@@ -55,7 +55,7 @@
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { indexEntries } from '$lib/ipc/bennu/inspect';
-  import { lspWorkspaceSymbols } from '$lib/ipc/bennu/lsp';
+  import { lspWorkspaceSymbols, type LspSymbol } from '$lib/ipc/bennu/lsp';
   import { libraryClasses, libraryFiles, openLibraryFile } from '$lib/ipc/bennu/library';
   import { openLibraryClass } from './log-link';
   import type { TreeNode } from '$lib/types/bennu';
@@ -420,6 +420,9 @@
   const TYPE_KINDS = new Set([
     'struct', 'enum', 'interface', 'trait', 'class', 'namespace', 'module', 'object', 'impl',
     'type alias',
+    // Not a kind any server sends: `unmangle` puts it there for a Svelte component, which the
+    // server reports as a variable and which belongs here.
+    'component',
   ]);
 
   /**
@@ -432,6 +435,28 @@
    *   * **Symbols** — a mixed list, so the distinction worth drawing is function versus constant
    *     versus field, and that one is shape.
    */
+  /**
+   * What `svelte2tsx` calls a component, turned back into what the author called it.
+   *
+   * A `.svelte` file has no declaration inside it to point at — the *file* is the component — so
+   * the Svelte server reports it through the TypeScript shim it generates: a **variable** named
+   * `BennuSidebar__SvelteComponent_`. Left alone it lands in Symbols under a name nobody wrote,
+   * while the Types tab — where somebody looking for a component actually goes — says there is no
+   * such thing.
+   *
+   * The suffix is svelte2tsx's own and is the reliable part; the name in front of it is the file's.
+   */
+  const SVELTE_COMPONENT = /__SvelteComponent_$/;
+  function unmangle(sym: LspSymbol): LspSymbol {
+    if (!SVELTE_COMPONENT.test(sym.name)) return sym;
+    // A kind of its own, not `class`. It belongs with the types — you instantiate it, and it is
+    // what a `<Foo />` in another file refers to — but calling it a class puts a `C` ring on it,
+    // and a Svelte component is not a class in any language anybody is reading. The row draws it
+    // with the file's own icon instead, which is the Svelte mark and stays right the day a
+    // second framework's components arrive.
+    return { ...sym, name: sym.name.replace(SVELTE_COMPONENT, ''), kind: 'component' };
+  }
+
   async function lspSymbolSearch(
     query: string,
     kinds: Set<string>,
@@ -441,7 +466,7 @@
     // A one-character query against a large workspace is a lot of rows for no discrimination, and
     // the server has to walk its whole index to produce them.
     if (!root || query.trim().length < 2) return [];
-    const hits = await lspWorkspaceSymbols(root, query.trim()).catch(() => []);
+    const hits = (await lspWorkspaceSymbols(root, query.trim()).catch(() => [])).map(unmangle);
     return hits
       .filter((s) => (invert ? !kinds.has(s.kind) : kinds.has(s.kind)))
       .map((s, i) => {
@@ -452,8 +477,13 @@
             name: s.name,
             detail: s.detail ?? relativeTo(root, s.file),
             ...(invert
-              ? { icon: glyph.icon, iconProps: { color: glyph.color } }
-              : { icon: SymbolKindIcon, iconProps: { kind: s.kind } }),
+              ? { icon: glyph.icon, iconProps: { color: glyph.color, ...glyph.props } }
+              : s.kind === 'component'
+                // The file's own icon — the Svelte mark. The lettered ring is for kinds whose
+                // distinction is nominal *within* one language; a component's identity is the
+                // framework, and that is a picture everyone already recognises.
+                ? { icon: BennuFileIcon, iconProps: { path: s.file } }
+                : { icon: SymbolKindIcon, iconProps: { kind: s.kind } }),
             tag: s.kind,
             onOpen: () => go(s.file, s.line),
           },

@@ -35,7 +35,8 @@ use std::time::{Duration, Instant};
 use arbor_ipc::prelude::EventSink;
 use bennu_core::prelude::{load_config, CustomLspServer, LspConfig};
 use bennu_lsp::prelude::{
-    background_init_options, find_root, is_dependency_source, locate, locate_custom, spec_by_id,
+    background_init_options, find_root_with_dep, is_dependency_source, locate, locate_custom,
+    spec_by_id,
     FileEdit, FileOp,
     LspSession, ServerAvailability,
     ServerSpec, SessionConfig, SessionObserver, SessionState, BUILTIN_SERVERS,
@@ -145,6 +146,10 @@ struct ResolvedServer {
     args: Vec<String>,
     extensions: Vec<String>,
     root_markers: Vec<String>,
+    /// The npm dependency that also marks a root. Empty for every server but Angular and
+    /// Svelte, and always empty for a user-defined one — a `[[lsp.servers]]` entry says which
+    /// files mark its project and nothing reads inside them.
+    package_dep: String,
     init_options: Option<serde_json::Value>,
     install_hint: String,
     custom: bool,
@@ -165,6 +170,7 @@ impl ResolvedServer {
             args: spec.args.iter().map(|s| s.to_string()).collect(),
             extensions: spec.extensions.iter().map(|s| s.to_string()).collect(),
             root_markers: spec.root_markers.iter().map(|s| s.to_string()).collect(),
+            package_dep: spec.package_dep.to_string(),
             init_options: spec.init_options(check_command),
             install_hint: spec.install_hint.to_string(),
             install: spec.install.iter().map(|s| s.to_string()).collect(),
@@ -191,6 +197,7 @@ impl ResolvedServer {
             args: c.args.clone(),
             extensions: c.extensions.iter().map(|e| e.trim_start_matches('.').to_ascii_lowercase()).collect(),
             root_markers: c.root_markers.clone(),
+            package_dep: String::new(),
             init_options,
             install_hint: String::new(),
             custom: true,
@@ -399,7 +406,7 @@ impl LspRegistry {
         if is_dependency_source(path) {
             return RootKind::Borrowed;
         }
-        match find_root(path, &server.markers()) {
+        match find_root_with_dep(path, &server.markers(), &server.package_dep) {
             Some(root) => RootKind::Own(root),
             None => RootKind::None,
         }
@@ -523,12 +530,21 @@ impl LspRegistry {
                 lean(server.init_options.clone(), background_init_options(&server.id))
             }
         };
+        // Arguments that need the root — Angular's probe locations. Only for a catalogue
+        // server: a `[[lsp.servers]]` entry spells out its own argv and must get exactly it,
+        // even when it shadows a built-in id.
+        let mut args = server.args.clone();
+        if !server.custom {
+            if let Some(spec) = spec_by_id(&server.id) {
+                args.extend(spec.root_args(&root));
+            }
+        }
         let cfg = SessionConfig {
             id: server.id.clone(),
             name: server.name.clone(),
             language: server.language.clone(),
             command,
-            args: server.args.clone(),
+            args,
             root,
             init_options,
             env: Vec::new(),
@@ -722,24 +738,38 @@ impl LspRegistry {
         if let Some(session) = self.session_for(path) {
             return Some(session);
         }
-        let needle = path.replace('\\', "/");
+        self.sessions_covering(path).into_iter().next()
+    }
+
+    /// **Every** ready session that covers `path` — one per language, the longest containing root
+    /// winning within each.
+    ///
+    /// The plural is the point, and it is what [`session_covering`](Self::session_covering) gets
+    /// wrong for a question about the workspace rather than about a buffer. A repository is
+    /// regularly more than one language — this one is a Svelte app inside a Cargo workspace — and
+    /// with two servers rooted at the *same* directory the singular version returned whichever the
+    /// map happened to enumerate first. Not merely incomplete: **non-deterministic**, so "Go to
+    /// type" found Rust or Svelte depending on nothing the user could see or influence.
+    ///
+    /// One per language because two sessions of the same language covering a path means an outer
+    /// workspace and a member opened in its own right; the member's answers are the specific ones,
+    /// and taking both would list every symbol twice.
+    ///
+    /// Ordered by language, so a merged list does not reshuffle between two identical searches.
+    pub fn sessions_covering(&self, path: &str) -> Vec<Arc<LspSession>> {
         let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
-        let mut best: Option<(usize, Arc<LspSession>)> = None;
-        for ((root, _lang), slot) in slots.iter() {
-            let Slot::Ready(session) = slot else { continue };
-            if !session.is_alive() {
-                continue;
-            }
-            let contained = needle == *root
-                || needle.starts_with(&format!("{}/", root.trim_end_matches('/')));
-            if !contained {
-                continue;
-            }
-            if best.as_ref().map(|(len, _)| root.len() > *len).unwrap_or(true) {
-                best = Some((root.len(), Arc::clone(session)));
-            }
-        }
-        best.map(|(_, s)| s)
+        let live: Vec<&SlotKey> = slots
+            .iter()
+            .filter(|(_, slot)| matches!(slot, Slot::Ready(s) if s.is_alive()))
+            .map(|(key, _)| key)
+            .collect();
+        covering_keys(path, live.into_iter())
+            .into_iter()
+            .filter_map(|key| match slots.get(&key) {
+                Some(Slot::Ready(session)) => Some(Arc::clone(session)),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Whether a language server is the engine for `file` — true even while it is starting or
@@ -767,7 +797,7 @@ impl LspRegistry {
         let Some(server) = self.server_for(file, &cfg.lsp) else {
             return false;
         };
-        if find_root(Path::new(file), &server.markers()).is_none() {
+        if find_root_with_dep(Path::new(file), &server.markers(), &server.package_dep).is_none() {
             return false;
         }
         self.binary_present(&server, &cfg.lsp.server_paths)
@@ -1053,6 +1083,36 @@ fn slot_key(root: &str, language: &str) -> SlotKey {
     (root.replace('\\', "/"), language.to_string())
 }
 
+/// Which slots cover `path`: the **longest containing root per language**, ordered by language.
+///
+/// The selection rule, separated from the map it reads so it can be tested — it was wrong in a way
+/// no test could have caught while it lived inside the lookup, because the bug was that two slots
+/// with the *same* root length both lost to whichever came first in a `HashMap`.
+///
+/// One per language and not one overall: a repository is regularly several languages and every one
+/// of them has something to say about the workspace. Longest root within a language: two sessions
+/// of one language covering a path means an outer workspace and a member opened in its own right,
+/// and the member's answers are the specific ones.
+fn covering_keys<'a>(path: &str, keys: impl Iterator<Item = &'a SlotKey>) -> Vec<SlotKey> {
+    let needle = path.replace('\\', "/");
+    let mut best: std::collections::BTreeMap<&str, &SlotKey> = std::collections::BTreeMap::new();
+    for key in keys {
+        let (root, lang) = (&key.0, &key.1);
+        let contained =
+            needle == *root || needle.starts_with(&format!("{}/", root.trim_end_matches('/')));
+        if !contained {
+            continue;
+        }
+        match best.get(lang.as_str()) {
+            Some(current) if current.0.len() >= root.len() => {}
+            _ => {
+                best.insert(lang.as_str(), key);
+            }
+        }
+    }
+    best.into_values().cloned().collect()
+}
+
 /// "…was not found", plus what to do about it.
 fn not_found_message(server: &ResolvedServer) -> String {
     if server.install_hint.is_empty() {
@@ -1262,6 +1322,48 @@ mod tests {
         assert_eq!(
             parse_init_options("x", r#"{"a":1}"#),
             Some(serde_json::json!({ "a": 1 }))
+        );
+    }
+
+    #[test]
+    fn every_language_covering_a_root_answers_a_workspace_question() {
+        let k = |root: &str, lang: &str| (root.to_string(), lang.to_string());
+        let slots = vec![
+            k("/w/app", "rust"),
+            k("/w/app", "svelte"),
+            k("/w/app", "typescript"),
+            k("/elsewhere", "rust"),
+        ];
+
+        // The bug this exists for: two servers rooted at the SAME directory. The singular lookup
+        // kept whichever the map enumerated first, so "Go to type" answered about Rust or about
+        // Svelte with nothing the user could see deciding which.
+        let got = covering_keys("/w/app", slots.iter());
+        let langs: Vec<&str> = got.iter().map(|(_, l)| l.as_str()).collect();
+        assert_eq!(langs, ["rust", "svelte", "typescript"], "one per language, in a stable order");
+
+        // A project that does not contain the path contributes nothing.
+        assert!(got.iter().all(|(root, _)| root == "/w/app"));
+
+        // A file inside the workspace resolves the same set — the question is about the workspace
+        // either way.
+        assert_eq!(covering_keys("/w/app/src/main.rs", slots.iter()).len(), 3);
+
+        // …and a sibling directory that merely shares a prefix is NOT inside it.
+        assert!(covering_keys("/w/application", slots.iter()).is_empty());
+    }
+
+    #[test]
+    fn a_workspace_member_answers_for_itself_rather_than_the_outer_workspace() {
+        let k = |root: &str, lang: &str| (root.to_string(), lang.to_string());
+        // The same language twice: an outer workspace and a member opened in its own right.
+        // Taking both would list every symbol twice; the member's answers are the specific ones.
+        let slots = vec![k("/w", "rust"), k("/w/member", "rust"), k("/w", "svelte")];
+        let got = covering_keys("/w/member/src/lib.rs", slots.iter());
+        assert_eq!(
+            got,
+            vec![k("/w/member", "rust"), k("/w", "svelte")],
+            "longest root per language, and the other language still answers",
         );
     }
 

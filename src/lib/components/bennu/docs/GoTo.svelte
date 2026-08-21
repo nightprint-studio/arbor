@@ -17,6 +17,24 @@
   paid on every use for an answer nobody scrolls.
 </p>
 <p>
+  On a project a <strong>language server</strong> answers for, the first tab is
+  <strong>Types</strong> rather than Classes and its rows come from the server rather than from
+  Bennu's index — a struct, a trait, an enum, a TypeScript interface. Where a repository is several
+  languages at once, <em>every</em> server rooted there is asked and the answers are merged, so a
+  Rust workspace with a Svelte app inside it lists both. A server only answers once it is
+  <strong>running</strong>, and one starts when you open a file it serves: search a repository whose
+  <code>.svelte</code> files you have not opened yet and Svelte contributes nothing, because nothing
+  Svelte is running.
+</p>
+<p>
+  A <strong>Svelte component</strong> is a slightly special case, for a reason worth knowing: a
+  <code>.svelte</code> file has no declaration inside it to point at — the file <em>is</em> the
+  component — so its server reports it through a generated name,
+  <code>BennuSidebar__SvelteComponent_</code>. Bennu shows it under the name you wrote and files it
+  with the types, which is where somebody looking for a component goes. The functions and stores
+  inside the <code>&lt;script&gt;</code> block are ordinary symbols and appear under Symbols.
+</p>
+<p>
   The selected entry is shown <strong>in context</strong> on the right — the declaration with the
   lines around it, or a file’s head — syntax-coloured. A list of names says where there is an
   <code>OrderDao</code>; it does not say whether it is <em>the</em> one you meant, and on a legacy

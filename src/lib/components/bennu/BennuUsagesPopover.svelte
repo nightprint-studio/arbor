@@ -17,6 +17,7 @@
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
   import type { UsageHit } from '$lib/ipc/bennu/nav';
 
   const open = $derived(bennuRefactorStore.usagesOpen);
@@ -25,6 +26,8 @@
   const hits = $derived(bennuRefactorStore.usagesHits);
   const label = $derived(bennuRefactorStore.usagesLabel);
   const symbol = $derived(bennuRefactorStore.usagesSymbol);
+  /** The server this file needs and does not have — see the empty state below. */
+  const missingServer = $derived(bennuLspStore.missingServerFor(projectStore.activeFilePath));
 
   let panelEl = $state<HTMLElement | null>(null);
   let active = $state(0);
@@ -132,7 +135,16 @@
       <div class="usages-state"><Spinner size={13} /> Searching…</div>
     {:else if hits.length === 0}
       <div class="usages-state muted">
-        {#if symbol}No usages of <code>{symbol}</code> found.{:else}Place the caret on a symbol, then press Alt+F7.{/if}
+        <!--
+          "No usages" is a claim about the code, and it must not be made on behalf of a server that
+          is not there. A file is routed to its language server whether or not the binary exists —
+          deliberately, so a `.ts` never falls through to the Java engine — which means every
+          feature behind it answers nothing, convincingly. This says the other thing.
+        -->
+        {#if missingServer}
+          <span><strong>{missingServer.name}</strong> is not installed, so nothing can answer for
+          this file. Install it from Settings → Language Servers.</span>
+        {:else if symbol}No usages of <code>{symbol}</code> found.{:else}Place the caret on a symbol, then press Alt+F7.{/if}
       </div>
     {:else}
       <div class="usages-list">

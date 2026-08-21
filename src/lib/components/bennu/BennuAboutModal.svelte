@@ -47,9 +47,10 @@
   const techStack = [
     { badge: 'Rust',          cls: 'rust',   desc: 'Backend · semantic engine · indexer' },
     { badge: 'Tauri 2',       cls: 'tauri',  desc: 'Native shell · IPC layer' },
-    { badge: 'tree-sitter',   cls: 'ts',     desc: 'Incremental Java / JSP parsing' },
+    { badge: 'tree-sitter',   cls: 'ts',     desc: 'Incremental Java / JSP / WGSL parsing' },
     { badge: 'CodeMirror 6',  cls: 'cm',     desc: 'Editor surface · decorations' },
     { badge: 'fst + rkyv',    cls: 'index',  desc: 'Cross-file symbol index · zero-copy load' },
+    { badge: 'LSP',           cls: 'lsp',    desc: 'rust-analyzer and the rest of the catalogue' },
   ];
 
   // External links. Repo/docs endpoints are placeholders until Bennu ships its
@@ -97,11 +98,15 @@
       <div class="group-label"><Sparkles size={10} /> About the name</div>
       <p class="blurb">
         <b>Bennu</b> — the mythical self-generating firebird that is reborn from its
-        own ashes: a program made to make other programs. A lean Java editor and
-        cross-file semantic engine for legacy <b>Struts2</b>, <b>JSP</b>,
-        <b>Entando</b> and <b>JDBC</b> stacks — the parts of a codebase IntelliJ
-        makes you wade through, made fast and focused. Part of Nightprint Studio's
-        bird-named toolkit alongside Corvus, Merula, Sitta and Tyto.
+        own ashes: a program made to make other programs. A cross-file semantic
+        engine with an editor around it, at home in two places. On <b>legacy
+        Java</b> — <b>Struts2</b>, <b>Spring XML</b>, <b>MyBatis</b>, <b>JSP</b>,
+        <b>JDBC</b> — where the behaviour lives in configuration rather than in
+        code, and Bennu's own index is what makes it navigable. And on <b>Rust</b>,
+        where Cargo, a debugger, the crate graph and a <b>Bevy</b> toolchain —
+        shader preview, scene inspector, WGSL intelligence — are first-class rather
+        than borrowed. Part of Nightprint Studio's bird-named toolkit alongside
+        Corvus, Merula, Sitta and Tyto.
       </p>
 
       <div class="group-label"><Layers size={10} /> Build info</div>
@@ -225,6 +230,7 @@
   .tech-chip.ts    { background: rgba(80,160,110,0.14);  color: #57b98a; border-color: rgba(80,160,110,0.3); }
   .tech-chip.cm    { background: rgba(90,120,220,0.14);  color: #7d9bff; border-color: rgba(90,120,220,0.3); }
   .tech-chip.index { background: rgba(190,130,60,0.14);  color: #d6a058; border-color: rgba(190,130,60,0.3); }
+  .tech-chip.lsp   { background: rgba(150,90,190,0.14);  color: #b184d8; border-color: rgba(150,90,190,0.3); }
 
   .publisher-card {
     display: flex; align-items: center; gap: 11px;

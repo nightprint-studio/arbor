@@ -142,7 +142,7 @@
   turn that off under <strong>Settings → Java → Validate project on open</strong> to skip the
   background work. The sweep is a background citizen — it uses at most about half the CPU cores by
   default (so the editor, go-to and completion stay responsive); cap it under
-  <strong>Settings → Java → Validation CPU threads</strong> (set 1 for single-threaded), and stop a
+  <strong>Settings → Java → Validation CPU threads</strong> (set 1 for single-threaded) — its sibling <strong>Indexing CPU threads</strong> caps the index build and the reference walk the same way, and is serial by default — and stop a
   running sweep with the <strong>Cancel</strong> button on the “Validating…” status in the Build panel.
 </p>
 <p>

@@ -12,11 +12,15 @@
  *    grammar wasm the Merula window parses with).
  * 2. **Lezer languages** — HTML (`@codemirror/lang-html`, with embedded JS/CSS and tag
  *    folding), JSON, Markdown.
- * 3. **language-server backed** — **Rust** ({@link lspLanguage}): a legacy stream mode for the
- *    instant local colour, plus completion / hover / signature help from the server, and
- *    semantic tokens layered over the mode by the editor host. Go-to, find-usages, diagnostics
- *    and rename ride the shared handlers, so they need nothing here.
- * 4. **legacy stream modes** — XML, YAML, `.properties`, CSS/SCSS/LESS, JS/TS, shell and
+ * 3. **language-server backed** — **Rust** ({@link lspLanguage}), plus **TypeScript**,
+ *    **JavaScript**, **Svelte** and **HTML** ({@link lspLanguageFrom}): a base highlighter for
+ *    the instant local colour — a legacy stream mode for Rust, a real Lezer grammar for the
+ *    JS family and the two markup ones — plus completion and hover from the server, and
+ *    semantic tokens layered on top by the editor host. Go-to, find-usages, diagnostics and
+ *    rename ride the shared handlers, so they need nothing here. HTML is in this tier for
+ *    **Angular**, whose server serves a project's templates; where no server serves the file
+ *    the two hooks answer nothing and the tier costs nothing.
+ * 4. **legacy stream modes** — XML, YAML, `.properties`, CSS/SCSS/LESS, shell and
  *    **TOML**, plus SQL through the shared per-dialect modes. Colour only — except a
  *    `Cargo.toml`, which gets the manifest schema's completion and diagnostics on top
  *    ({@link cargoTomlLang}).
@@ -30,7 +34,7 @@
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor';
 import {
   sqlHighlight, dtdLanguage, ronLanguageExtension, wgslLanguageExtension,
-  javascriptStream, type SqlDialect,
+  type SqlDialect,
 } from '$lib/components/shared/ui/code-editor';
 import type { Extension } from '@codemirror/state';
 import { StreamLanguage, type StreamParser } from '@codemirror/language';
@@ -44,8 +48,11 @@ import { shell } from '@codemirror/legacy-modes/mode/shell';
 import { json as jsonLang } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { html } from '@codemirror/lang-html';
+import { javascript } from '@codemirror/lang-javascript';
 import { javaLanguage } from './java-lang';
-import { lspLanguage, backendCompletionSource, backendHoverSource } from './lsp-lang';
+import {
+  lspLanguage, lspLanguageFrom, backendCompletionSource, backendHoverSource,
+} from './lsp-lang';
 import { isSpringPropertyFile, springPropsLang } from './spring-props-lang';
 import { cargoTomlLang, isCargoManifest } from './cargo-toml-lang';
 import { xmlSchemaLang } from './xml-schema-lang';
@@ -98,8 +105,39 @@ function streamLang(id: string, parser: StreamParser<unknown>): LanguageDescript
 // generic one cannot: element/attribute/value completion, ghost text, and a hover carrying the
 // schema's own documentation. Silent when no schema resolves, which is most files.
 const xmlLang = xmlSchemaLang('xml', xml);
-// HTML: the real lang-html tree (embedded JS/CSS highlight + tag folding).
-const htmlLang = cmLang('html', html(), true);
+/**
+ * HTML — the real lang-html tree (embedded JS/CSS highlight + tag folding), **plus** whatever a
+ * language server has to say about it.
+ *
+ * The server, when there is one, is Angular's: `ngserver` serves an Angular project's templates,
+ * which is where a component's own properties, its directives and its pipes are completed. In
+ * every other project nothing serves `.html`, the two hooks answer nothing, and the file is
+ * coloured and folded exactly as it was.
+ *
+ * Folding stays **Lezer's**, not the server's: lang-html folds tag bodies the instant the file
+ * opens, with no process behind it, and `foldingRange` would replace that with a gutter that
+ * appears once a server has started — a worse fold gutter in the projects that have a server and
+ * no fold gutter at all in the ones that do not.
+ */
+const htmlLang = lspLanguageFrom('html', html(), { cmFold: true, serverFold: false });
+
+/**
+ * Svelte — markup with `<script>` and `<style>` in it, which is exactly what lang-html parses,
+ * so the base colour is HTML's tree rather than a flat stream mode. What that base cannot know —
+ * that a name in the template is a component, a prop, a store subscription — arrives as the
+ * server's **semantic tokens**, layered on top by the editor host, the same two-layer scheme Rust
+ * uses.
+ *
+ * Its template syntax (`{#each}`, `{@html}`, `{expr}`) is left uncoloured by the base tree: a
+ * `.svelte` file is not HTML and no HTML grammar can be told that it is. Honest rather than
+ * wrong — a real Svelte grammar is a wasm to build and vendor, which is a bigger decision than a
+ * language entry.
+ *
+ * Comment tokens are lang-html's, deliberately unset here: a `.svelte` file needs `//` inside
+ * `<script>` and `<!-- -->` in the markup, and only the nested grammar knows which the caret is
+ * in. Spelling one of them here would make `Ctrl`/`Cmd`+`/` wrong in half the file.
+ */
+const svelteLang = lspLanguageFrom('svelte', html(), { cmFold: true, serverFold: false });
 // A DTD is not XML — `<!ELEMENT` is a malformed tag to an XML mode — and it is exactly what
 // the `.tld`s and the `struts.xml`s of a legacy project are written against, so it gets its
 // own mode rather than the closest-looking one.
@@ -109,9 +147,30 @@ const dtdLang = cmLang('dtd', dtdLanguage);
 const cssLang = streamLang('css', css);
 const scssLang = streamLang('scss', sCSS);
 const lessLang = streamLang('less', less);
-// The same tokenizer the JSP `<script>` bodies get — object keys, members, call sites, `this`
-// and every shape of number, which the CM5 port left flat. See `js-mode.ts`.
-const jsLang = streamLang('javascript', javascriptStream as unknown as StreamParser<unknown>);
+/**
+ * JavaScript and TypeScript, in four flavours because the grammar has to be told which.
+ *
+ * A real Lezer grammar rather than the stream tokenizer the JSP `<script>` bodies get. That
+ * tokenizer exists because a *fragment* of JavaScript inside markup is regularly not valid on
+ * its own and a parser gives up on it (see `js-mode.ts`); a whole `.ts` file is not a fragment,
+ * and everything the tokenizer cannot have — `interface` and generics, decorators, JSX,
+ * brace folding, real auto-indent — a grammar has for free.
+ *
+ * Four and not one because `typescript` and `jsx` are parse-time flags: `<T>(x) => x` is a type
+ * parameter in TypeScript and an opening tag in JSX, and no single parser can be right about
+ * both. The extension picks, which is exactly what the extension means.
+ *
+ * All four are **server-backed**: `typescript-language-server` serves every one of them, so
+ * completion, hover and the resolve-on-highlight documentation come through the shared backend
+ * hooks, and its semantic tokens refine the grammar's colouring the way they do for Rust.
+ * Folding stays the grammar's — immediate, and right whether or not a server ever starts.
+ */
+const jsFlavour = (id: string, opts: Parameters<typeof javascript>[0]) =>
+  lspLanguageFrom(id, javascript(opts), { cmFold: true, serverFold: false });
+const jsLang = jsFlavour('javascript', {});
+const jsxLang = jsFlavour('javascriptreact', { jsx: true });
+const tsLang = jsFlavour('typescript', { typescript: true });
+const tsxLang = jsFlavour('typescriptreact', { typescript: true, jsx: true });
 const propsLang = streamLang('properties', properties);
 const yamlLang = streamLang('yaml', yaml);
 // Same colouring, plus the intelligence a Spring config file can have and a generic one
@@ -237,11 +296,14 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     case 'dtd': case 'ent': case 'mod': return dtdLang;
     case 'jsp': case 'jspf': case 'tag': case 'tagx': return jspLanguage;
     case 'html': case 'htm': case 'xhtml': return htmlLang;
+    case 'svelte': return svelteLang;
     case 'css': return cssLang;
     case 'scss': return scssLang;
     case 'less': return lessLang;
-    case 'js': case 'mjs': case 'cjs': case 'jsx':
-    case 'ts': case 'tsx': return jsLang;
+    case 'js': case 'mjs': case 'cjs': return jsLang;
+    case 'jsx': return jsxLang;
+    case 'ts': case 'mts': case 'cts': return tsLang;
+    case 'tsx': return tsxLang;
     case 'json': case 'json5': return jsonDesc;
     case 'md': case 'markdown': return markdownDesc;
     case 'yml': case 'yaml': return yamlLang;

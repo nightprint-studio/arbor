@@ -9,6 +9,44 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **Structure opens on every project, not only a Java one.** The panel already answered for Rust, TypeScript, JavaScript and Svelte through their language servers; the rail button, `Alt+2` and the palette entry were still gated on the project being Java, so a Cargo project had a working Structure panel and no way to open it.
+
+- **The File structure popup (`Ctrl+F12`) has icons, nesting rails and lit matches.** It was a list of names with an uppercase kind word on the right; it now uses the same symbol glyphs as the Structure panel, draws a rail per level of nesting, weights the rows that contain others, and matches by subsequence with the matched characters lit — the Go-to navigator's rule, so a filter behaves the same wherever it is offered.
+
+- **A type is drawn as its lettered ring, not a cube.** A class, a struct and a trait were all the same cube — a placeholder that says nothing, and says it identically three times. They now carry `C`, `S` and `T` in the hue of their role, everywhere declarations are listed.
+
+- **Installing a language server no longer kills the backend.** `npm install -g …` from Settings → Language Servers ended with *bennu-be disconnected* and `serve loop ended with error: Resource temporarily unavailable`. The child inherited the backend's stdin — which is the protocol pipe — and Node marks a pipe non-blocking; because inherited streams share one open file description, that flag landed on the backend's own reader. Children are spawned without it now.
+
+- **A backend survives a child that was rude to its stdin.** The frame reader waits where it used to fail, so a stream turned non-blocking under it degrades to polling instead of ending the session, and says once on stderr who to blame. Applies to every product's backend.
+
+- **The recording muxer no longer reads the protocol stream.** `ffmpeg` consumes stdin for its interactive keys unless told not to, and tyto's mux step inherited the backend's.
+
+- **Find usages of a Svelte component** — `Alt+Shift+F7`, or the Command Palette. A `.svelte` file has no declaration inside it to put the caret on, so `Alt+F7` could never be pointed at the component itself; this asks the question the file cannot express.
+
+- **An empty answer no longer speaks for a server that is not installed.** Find usages said "No usages of `x` found" — a claim about the code — on a file whose language server was missing. It now names the server and where to install it.
+
+- **A Svelte component is drawn with the Svelte mark, not a class ring.** It is not a class in any language anybody is reading, and the lettered ring is for kinds whose distinction is nominal within one language.
+
+- **Go to type, the Problems panel and Reload workspace ask every language server, not one.** In a repository that is more than one language they asked a single session, chosen by whichever the map enumerated first — so in a Rust workspace with a Svelte app inside it, "Go to type" answered about Rust or about Svelte with nothing the user could see deciding which. Duplicate rows are collapsed on the way out.
+
+- **A Svelte component is findable by its own name.** Its server reports it as `BennuSidebar__SvelteComponent_`, the name the TypeScript shim generates; it now appears as `BennuSidebar`, filed with the types.
+
+- **The Svelte language server no longer dies on a large repository.** Told nothing about who watches files, it started its own watcher over the whole workspace root — `target/` and every other build directory included — and exited with `EMFILE: too many open files` before answering anything. It is now told the editor watches. Servers that watch well for themselves, rust-analyzer above all, are deliberately left alone.
+
+- **TypeScript and JavaScript are first-class in Bennu.** A real grammar instead of a stream tokenizer — `interface`, generics, decorators, JSX and TSX all parse — plus block folding, auto-indent, and completion and hover from `typescript-language-server`, which was in the catalogue and had never been asked anything.
+
+- **A JSP's `<script>` block has completion and hover.** No language server serves a JSP, so this one is Bennu's own: the block's own declarations, and the browser API read off the objects themselves — `document.` offers what `document` really has, in the engine the page will run in.
+
+- **Bennu's Java indexing no longer takes the machine with it.** The index build, the find-usages reference walk and the encoding scan ran on `cores − 2` threads, which on an eight-core laptop is six saturated cores for as long as a large project takes to parse. Serial now, with *Settings → Java → Indexing CPU threads* to raise it.
+
+- **Bennu is described as what it is.** It has been "Java editor" everywhere since before it could open a Cargo workspace, debug Rust, or preview a Bevy shader.
+
+- **Bennu finds an Angular or Svelte project from its `package.json`.** An Nx workspace generates no `angular.json`, so a marker-file check answered "not an Angular project" for a repository whose every dependency said otherwise.
+
+- **Bennu supports Svelte and Angular through their language servers.** `.svelte` files are highlighted as markup with their script and style blocks parsed, and `svelteserver` adds completion, hover, diagnostics, go-to, find-usages and rename on top; `ngserver` does the same for an Angular project's `.html` templates. Both install from Settings → Language Servers.
+
+- **Angular serves templates only.** Its server answers `null` for completion and go-to on a plain `.ts` — and one server serves a file here, so claiming the extension would have taken every TypeScript file on the machine away from `typescript-language-server` and given back nothing. A `[[lsp.servers]]` entry with `id = "angular"` is there for anyone who wants the other trade.
+
 - **Bennu highlights `.merula` files.** With Merula's own tree-sitter grammar rather than a second, simpler one, so a pattern reads identically in both windows — mini-notation, islands and splices included — and a grammar change reaches both by rebuilding one wasm. Folding collapses a track inside `tracks(…)`, a `meta { … }` block and block comments; `Ctrl`/`Cmd`+`/` toggles a comment. Completion and hover stay in Merula, where the DSL catalogue is.
 
 - **Merula's *Reveal in File Explorer* follows the built-in-explorer setting.** It called the file-system command directly, so it was the one reveal in the app that always went to the OS file manager regardless of the preference — and it reported nothing when it failed.

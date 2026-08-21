@@ -247,7 +247,7 @@ impl LspSession {
             // servers read.
             root_uri: Some(folders[0].uri.clone()),
             workspace_folders: folders,
-            capabilities: client_capabilities(),
+            capabilities: client_capabilities(&cfg.id),
             initialization_options: cfg.init_options.clone(),
         };
 
@@ -714,7 +714,11 @@ fn ellipsize(s: &str, max: usize) -> String {
 /// answer a Rust `mod` rename with a file move we would then silently drop, leaving the
 /// project not compiling. Not claiming it means the server refuses that rename outright,
 /// which is a limitation the user can see.
-fn client_capabilities() -> serde_json::Value {
+fn client_capabilities(server_id: &str) -> serde_json::Value {
+    // Who watches the project for changes made outside the editor. Per server, and for a reason
+    // that is about survival rather than correctness — see `ServerSpec::client_side_file_watching`.
+    let client_watches =
+        crate::catalogue::spec_by_id(server_id).is_some_and(|s| s.client_side_file_watching());
     serde_json::json!({
         "general": {
             // Ours first: Bennu's own coordinate is the UTF-8 byte offset, so a server that
@@ -731,6 +735,7 @@ fn client_capabilities() -> serde_json::Value {
                 "failureHandling": "abort",
             },
             "didChangeConfiguration": { "dynamicRegistration": false },
+            "didChangeWatchedFiles": { "dynamicRegistration": client_watches },
             "symbol": {
                 "symbolKind": { "valueSet": (1..=26).collect::<Vec<u8>>() },
             },
@@ -917,8 +922,36 @@ mod tests {
     }
 
     #[test]
+    fn only_a_server_that_would_watch_the_world_is_told_the_client_watches() {
+        // Svelte's server, told no, starts a chokidar watcher over the whole workspace root and
+        // dies on `EMFILE` in a repository that is a SvelteKit app inside a Rust monorepo.
+        assert_eq!(
+            client_capabilities("svelte")["workspace"]["didChangeWatchedFiles"]
+                ["dynamicRegistration"],
+            serde_json::json!(true)
+        );
+        // rust-analyzer reads the same flag the other way round — as "stop watching, the client
+        // will tell me" — and Bennu does not send those notifications. Saying yes here would buy
+        // nothing and cost every change made outside the editor.
+        for id in ["rust-analyzer", "gopls", "typescript", "angular", "pyright"] {
+            assert_eq!(
+                client_capabilities(id)["workspace"]["didChangeWatchedFiles"]
+                    ["dynamicRegistration"],
+                serde_json::json!(false),
+                "{id} must keep watching for itself",
+            );
+        }
+        // A user-defined server is not in the catalogue and gets the safe answer.
+        assert_eq!(
+            client_capabilities("some-custom-server")["workspace"]["didChangeWatchedFiles"]
+                ["dynamicRegistration"],
+            serde_json::json!(false)
+        );
+    }
+
+    #[test]
     fn the_declared_capabilities_claim_what_bennu_implements() {
-        let caps = client_capabilities();
+        let caps = client_capabilities("rust-analyzer");
         // utf-8 is offered first so a server that supports it removes a conversion.
         assert_eq!(caps["general"]["positionEncodings"][0], serde_json::json!("utf-8"));
         // linkSupport is what separates the name range from the whole declaration.

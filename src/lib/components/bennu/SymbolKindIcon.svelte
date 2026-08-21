@@ -17,9 +17,13 @@
    * trait from an enum. So Rust's kinds are in the table beside Java's rather than in a second
    * component with the same drawing and a table that would drift from this one.
    *
-   * A **mixed** list is the other case and wants the opposite: in the Structure outline or a
-   * hierarchy, "type versus function versus field" is the distinction worth drawing, and that one is
-   * shape — see `symbol-kind-glyph.ts`.
+   * A **mixed** list wants a shape for the coarse distinction — type versus function versus field
+   * — and that is what `symbol-kind-glyph.ts` draws. It reaches back here for the *type* rows only,
+   * and deliberately: the shape an icon set offers for a type is a cube, a cube is what a set
+   * draws when it has nothing to say, and three identical cubes down an outline are three rows a
+   * reader has to read the text of to tell apart. The ring separates a type from a function at
+   * least as well and says *which* type as well, so a mixed list gets both distinctions for the
+   * price of one.
    *
    * Drawn rather than imported: no icon set carries "letter in a ring" as a family, and
    * assembling one out of five unrelated glyphs is how the previous version ended up

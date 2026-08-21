@@ -90,6 +90,9 @@ fn bennu_mojibake_project(
 
     // Decode + scan each file independently on the shared work-stealing pool (leaves ~2 cores free
     // for the UI). Reading in the closure parallelises the I/O too; an unreadable file → no hits.
+    // Same budget as the index build: this walks every source file in the project, which is the
+    // other sweep a user notices their machine doing.
+    bennu_intel::prelude::set_background_workers(bennu_core::config::load().index_threads);
     let scanned: Vec<FileMojibake> = bennu_intel::prelude::parallel_map(&paths, |path| {
         let hits = match std::fs::read(path) {
             Ok(bytes) => {

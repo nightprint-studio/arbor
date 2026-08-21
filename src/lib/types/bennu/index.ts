@@ -1,5 +1,5 @@
 /**
- * Bennu (Java editor) FE types — mirror the BE↔FE contract (`bennu-proto`)
+ * Bennu (Java & Rust editor) FE types — mirror the BE↔FE contract (`bennu-proto`)
  * field-for-field in **snake_case**. The Rust wire shape is authoritative; see
  * `crates/products/bennu/proto/src/contract.rs`. Types only, no UI/state. The
  * commands live in `$lib/ipc/bennu`.
