@@ -66,7 +66,15 @@
 <p>
   The <strong>Project</strong> panel header carries quick actions: create a new file, locate the open
   file in the tree, collapse or expand the whole tree, and an options menu. Right-clicking a file or
-  folder opens a context menu (Open · Rename · Delete · Local History · Copy path · Reveal).
+  folder opens a context menu (Open · Rename · Delete · Local History · Copy path · Reveal in
+  Project · Reveal in File Explorer). <kbd>Shift</kbd>+<kbd>F10</kbd> — or the Menu key — opens the
+  same menu on the focused row, so every entry in it is reachable without the mouse.
+</p>
+<p>
+  <strong>Reveal in File Explorer</strong> shows the row on disk: a folder as the listing, a file
+  selected inside its folder. It honours <em>Settings → File Explorer → Open in the built-in
+  explorer</em>, so it opens Arbor's own explorer window when that is on and the system file
+  manager when it is not.
 </p>
 <p>
   <strong>Delete</strong> — <kbd>Del</kbd> or <kbd>⌫</kbd> on the focused row, or from the context

@@ -14,7 +14,8 @@
   import { projectStore } from '../stores/project.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
   import { fileMetaStore, type MerulaFileMeta } from '../stores/file-meta.svelte';
-  import { fsRevealInDir } from '$lib/ipc/fs';
+  import { revealFile } from '$lib/utils/reveal';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import type { MerulaProjectFile } from '$lib/ipc/merula/merula';
 
   const files = $derived(projectStore.files);
@@ -67,7 +68,13 @@
     if (!file) return;
     if (id === 'rename') merulaStore.openRenameFile(file.path);
     else if (id === 'delete') merulaStore.openDeleteFile(file.path);
-    else if (id === 'reveal') void fsRevealInDir(file.path).catch(() => {});
+    // Through `utils/reveal`, not the FS command underneath it: that is where the
+    // OS-vs-built-in-explorer choice (Settings → File Explorer) is honoured, and this panel
+    // was the last reveal in the app that went around it and always used the system shell.
+    else if (id === 'reveal')
+      void revealFile(file.path).catch((e) =>
+        toastStore.show(`Could not reveal ${file.name}: ${e}`, 'error'),
+      );
   }
 
   function fmtBytes(n: number): string {

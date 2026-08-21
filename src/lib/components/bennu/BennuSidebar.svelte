@@ -17,7 +17,7 @@
     FolderOpen, Folder, FileCode2, FolderTree, Plus, Crosshair,
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
     Copy, LocateFixed, ChevronDown, ChevronRight, FileText, FlaskConical, FileType2,
-    History, Tag, Trash2,
+    History, Tag, Trash2, ExternalLink,
   } from 'lucide-svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { tick } from 'svelte';
@@ -31,6 +31,7 @@
   import BennuRenameFileModal from './BennuRenameFileModal.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { openFolder, revealFile } from '$lib/utils/reveal';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -231,6 +232,24 @@
     treeRef?.scrollToId(path);
   }
 
+  /**
+   * Show the node in a file manager: a folder as the listing, a file selected inside its
+   * folder — the same distinction every OS file manager makes, so "reveal" on a directory
+   * does not open its parent with the folder highlighted.
+   *
+   * Routed through `$lib/utils/reveal` rather than calling the shell directly, because that
+   * is where the OS-vs-built-in choice (Settings → File Explorer → "Open in the built-in
+   * explorer") lives. Bypassing it would make this one entry the only place in the app that
+   * ignores the setting.
+   */
+  async function revealInFileExplorer(node: TreeNode) {
+    try {
+      await (node.is_dir ? openFolder(node.path) : revealFile(node.path));
+    } catch (e) {
+      toastStore.show(`Could not reveal ${relativePath(node.path)}: ${e}`, 'error');
+    }
+  }
+
   // The toolbar's Select-opened-file + the palette both bump this relay.
   let lastReveal = 0;
   $effect(() => {
@@ -342,6 +361,14 @@
   }
 
   function onRowContextMenu(node: TreeNode, e: MouseEvent) {
+    openRowMenu(node, e.clientX, e.clientY);
+  }
+
+  /**
+   * The row menu, opened at a point rather than at an event — because the keyboard opens it
+   * too, and a `Shift+F10` has no cursor to sit under.
+   */
+  function openRowMenu(node: TreeNode, x: number, y: number) {
     // "New file…" creates in this directory (dir node) or the file's directory (file node).
     const newDir = node.is_dir ? node.path : parentDir(node.path);
     // Offered only where there is something to run — an entry that can only report "matched
@@ -368,6 +395,7 @@
           { separator: true, id: 'sep-hist-dir', label: '' },
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
+          { id: 'reveal-fs',     label: 'Reveal in File Explorer', icon: ExternalLink },
           { separator: true, id: 'sep-dir', label: '' },
           bennuUiStore.isExpanded(node.path)
             ? { id: 'collapse', label: 'Collapse', icon: ChevronRight }
@@ -389,8 +417,9 @@
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
           { id: 'reveal',        label: 'Reveal in Project',  icon: LocateFixed },
+          { id: 'reveal-fs',     label: 'Reveal in File Explorer', icon: ExternalLink },
         ];
-    bennuContextMenuStore.show(e.clientX, e.clientY, items, (id) => {
+    bennuContextMenuStore.show(x, y, items, (id) => {
       switch (id) {
         // The submenu leaf decides which shape the dialog opens in — a Java type, with its
         // kind list, or a plain file that only wants a name.
@@ -403,6 +432,7 @@
         case 'copy-path': copyText(node.path); break;
         case 'copy-rel':  copyText(relativePath(node.path)); break;
         case 'reveal':    void revealPath(node.path); break;
+        case 'reveal-fs': void revealInFileExplorer(node); break;
         case 'hist-show':  showHistory(node); break;
         // Labelling needs a revision to pin the name on, and the dialog is where one is
         // chosen — so this opens it rather than inventing a second way to pick.
@@ -471,10 +501,11 @@
   }
 
   /**
-   * F2 on a focused row — the rename key everywhere from IntelliJ to Explorer to Finder.
+   * The keys a focused row owns: Delete, F2 to rename, and Shift+F10 / Menu for its context menu.
    *
-   * Here rather than in the window's key handler because it is about the row that has focus, which
-   * only the tree knows. Directories are skipped for the same reason the menu entry is files-only.
+   * Here rather than in the window's key handler because they are about the row that has focus,
+   * which only the tree knows. Directories are skipped for F2 for the same reason the menu entry
+   * is files-only.
    */
   function onRowKeydown(node: TreeNode, e: KeyboardEvent) {
     // Delete on the focused row — the key every file manager binds, and the one the
@@ -482,6 +513,17 @@
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
       deleting = node;
+      return;
+    }
+    // The keyboard route to the row menu — `Shift+F10` on every platform, plus the dedicated
+    // Menu key where the keyboard has one. Without it every entry below Delete and Rename is
+    // mouse-only, which for a tree that is meant to be driven from the keyboard is a hole.
+    // Anchored to the row, so the menu opens where the focus is instead of where the pointer
+    // was last left.
+    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      e.preventDefault();
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      openRowMenu(node, r.left + 16, r.bottom);
       return;
     }
     if (e.key !== 'F2' || node.is_dir) return;
