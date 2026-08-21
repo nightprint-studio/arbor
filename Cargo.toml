@@ -96,6 +96,7 @@ members = [
     "crates/products/bennu/spel",
     "crates/products/bennu/facts",
     "crates/products/bennu/complete",
+    "crates/products/bennu/npm",
     "crates/products/bennu/ext",
     "crates/products/bennu/spring",
     "crates/products/bennu/jpa",

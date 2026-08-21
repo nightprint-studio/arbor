@@ -74,6 +74,43 @@
   (<code>blend: Additive</code>) both read as the type names they are, which in an asset file
   written by a generator is most of the words on the page.
 </p>
+<h2><code>package.json</code></h2>
+<p>
+  Recognised by <strong>name</strong>, so a <code>tsconfig.json</code> is still ordinary JSON and a
+  manifest under <code>node_modules</code> is left alone. On top of the JSON colouring it gets the
+  two things the syntax cannot say.
+</p>
+<p>
+  <strong>The sections read as headings</strong> — <code>scripts</code>, the four dependency
+  sections, <code>engines</code>, <code>exports</code> — so a long manifest has landmarks instead of
+  four hundred identical strings. A script's command is coloured as what it is: the one string in
+  the file that is code.
+</p>
+<p>
+  <strong>A version says how pinned it is.</strong> Three colours and no more, because this is a
+  glance: a range that <em>floats</em> on install (<code>^5.0.0</code>, <code>~2.1</code>, a
+  comparator), one that is <em>pinned</em> (<code>5.0.0</code>), and one that does not come from the
+  registry at all (<code>workspace:*</code>, <code>file:../lib</code>, a git URL). "What will
+  <code>install</code> actually change" becomes something you can see.
+</p>
+<p>
+  <strong>Run a script from the line that declares it.</strong> Each <code>scripts</code> entry
+  carries a ▶ control naming the command it will run — <code>pnpm dev</code>, not a generic
+  <em>Run</em>: which package manager a repository uses is read off the lockfile beside the manifest
+  (<code>bun.lockb</code>, <code>pnpm-lock.yaml</code>, <code>yarn.lock</code>, else npm), and a
+  control that says what it will type is one you can trust without checking. Output goes to the same
+  Run console a <code>cargo run</code> uses, and a script in a workspace member runs in that
+  member's directory.
+</p>
+<p>
+  <strong>A dependency that is behind</strong> gets the same <em>↑ 6.0.0 available</em> offer a
+  <code>Cargo.toml</code> gets; pressing it writes the new version in place. It appears only where
+  the answer is unambiguous — <code>^</code>, <code>~</code> and an exact version — and stays silent
+  on a comparator range, an alternation, a dist-tag, and every <code>workspace:</code> /
+  <code>file:</code> / git dependency. A wrong "update available" on something pinned on purpose is
+  worse than a missing one. The lookups share the <em>Look crates up online</em> setting and its
+  cache: turning that off makes Bennu local again for both registries.
+</p>
 <h2>merula <code>.merula</code> patterns</h2>
 <p>
   A <code>.merula</code> file is a piece of music for <strong>Merula</strong>. Bennu highlights it

@@ -55,6 +55,7 @@ import {
 } from './lsp-lang';
 import { isSpringPropertyFile, springPropsLang } from './spring-props-lang';
 import { cargoTomlLang, isCargoManifest } from './cargo-toml-lang';
+import { packageJsonLanguage, isPackageManifest } from './package-json-lang';
 import { xmlSchemaLang } from './xml-schema-lang';
 import { jspLanguage } from './jsp-lang';
 import { digLanguage } from './dig/dig-lang';
@@ -304,7 +305,12 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     case 'jsx': return jsxLang;
     case 'ts': case 'mts': case 'cts': return tsLang;
     case 'tsx': return tsxLang;
-    case 'json': case 'json5': return jsonDesc;
+    // A `package.json` before any other JSON: it is not a document with a schema, it is a
+    // manifest whose sections mean things, and which one it is has to be decided by NAME —
+    // `tsconfig.json` given the manifest's rules would have every key in it coloured as a
+    // dependency. See `package-json-lang.ts`.
+    case 'json': case 'json5':
+      return isPackageManifest(path) ? packageJsonLanguage : jsonDesc;
     case 'md': case 'markdown': return markdownDesc;
     case 'yml': case 'yaml': return yamlLang;
     case 'properties': case 'ini': case 'conf': case 'cfg': return propsLang;

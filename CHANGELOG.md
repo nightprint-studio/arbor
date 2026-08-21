@@ -9,6 +9,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **`package.json` gets the treatment `Cargo.toml` has.** Its sections read as headings and a script's command as code; a version is coloured by how pinned it is — floats on install, pinned, or not from the registry at all. Each script carries a ▶ control that names the command it will run, with the package manager read off the lockfile beside the manifest, streaming into the same Run console `cargo run` uses. And a dependency that is behind gets the same *↑ available* offer, honouring the same *Look crates up online* switch and cache.
+
 - **Structure opens on every project, not only a Java one.** The panel already answered for Rust, TypeScript, JavaScript and Svelte through their language servers; the rail button, `Alt+2` and the palette entry were still gated on the project being Java, so a Cargo project had a working Structure panel and no way to open it.
 
 - **The File structure popup (`Ctrl+F12`) has icons, nesting rails and lit matches.** It was a list of names with an uppercase kind word on the right; it now uses the same symbol glyphs as the Structure panel, draws a rail per level of nesting, weights the rows that contain others, and matches by subsequence with the matched characters lit — the Go-to navigator's rule, so a filter behaves the same wherever it is offered.

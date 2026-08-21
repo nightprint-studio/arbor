@@ -64,6 +64,10 @@ mod wgsl_library;
 // The crates.io index — the only part of the Cargo tooling that reaches the network. Its own module
 // because of that, not because of its size: the switch, the cache and the TTL all live with it.
 mod crates_io;
+// The npm registry, and everything else a `package.json` is. Beside `crates_io` and not inside it:
+// the two answer the same question about two ecosystems, and the day one of them grows a private
+// registry or an auth token the other must not inherit it.
+mod npm;
 // Code-intel: `bennu_completion` / `bennu_diagnostics` — completion serves from the
 // per-project index the `index_service` builds; diagnostics stay a stub for now.
 mod intel;

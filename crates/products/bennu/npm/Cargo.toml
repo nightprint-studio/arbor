@@ -1,0 +1,16 @@
+[package]
+name         = "bennu-npm"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "What a `package.json` says, with spans: its dependencies, its scripts, and whether a declared range still admits the latest release. Reads text and files; opens no sockets."
+
+[dependencies]
+# JSON with **spans**, which `serde_json` does not give: every feature here needs to know where a
+# value IS in the buffer — a version to replace, a script to draw a lens over — and a deserialized
+# tree has thrown that away. A `package.json` being edited is also regularly not valid JSON, and a
+# strict parser answers nothing at all about it. So the reader is hand-rolled, for the same reason
+# `bennu-cargo`'s manifest reader is.
+serde = { workspace = true }

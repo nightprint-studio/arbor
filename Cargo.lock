@@ -965,6 +965,7 @@ dependencies = [
  "bennu-jsp",
  "bennu-jsp-grammar",
  "bennu-lsp",
+ "bennu-npm",
  "bennu-plugin",
  "bennu-project",
  "bennu-proto",
@@ -1197,6 +1198,13 @@ dependencies = [
  "bennu-framed",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "bennu-npm"
+version = "0.3.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

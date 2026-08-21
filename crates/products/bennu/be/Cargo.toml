@@ -133,6 +133,10 @@ bennu-deps = { path = "../deps" }
 # The Cargo side: the manifest schema behind Cargo.toml validation + completion, the crate
 # graph the Rust tool window shows, and the cargo command catalogue.
 bennu-cargo = { path = "../cargo" }
+# `package.json` with spans, the npm registry's URL and cache shape, and the range test that
+# decides whether an "update available" is honest. Opens no sockets — this crate is the half
+# that does.
+bennu-npm   = { path = "../npm" }
 # WGSL: naga-backed validation and a tolerant scanner, for a shader with no language
 # server installed. Leaf crate — no Tauri, no IPC.
 bennu-plugin      = { path = "../plugin" }

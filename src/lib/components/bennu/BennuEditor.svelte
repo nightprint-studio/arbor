@@ -89,6 +89,11 @@
   import { isSpringPropertyFile } from './spring-props-lang';
   import { isCargoManifest } from './cargo-toml-lang';
   import { cargoVersionHints, type CargoVersionHint } from '$lib/ipc/bennu/cargo';
+  import {
+    npmManifest, npmRunScript, npmVersionHints,
+    type NpmScript, type NpmVersionHint,
+  } from '$lib/ipc/bennu/npm';
+  import { isPackageManifest } from './package-json-lang';
   import BennuEnvVarModal from './BennuEnvVarModal.svelte';
   import BennuMacroExpandModal from './BennuMacroExpandModal.svelte';
   import { makeByteToU16, makeU16ToByte } from '$lib/components/shared/ui/code-editor';
@@ -639,7 +644,13 @@
   //     exactly why the layer is gated on the host's press handler rather than on one.
   type EditorLens =
     | { kind: 'lsp'; lens: LspLens }
-    | { kind: 'version'; hint: CargoVersionHint };
+    | { kind: 'version'; hint: CargoVersionHint }
+    // The npm hint is the same offer with one difference that matters: its span excludes the
+    // quotes, so the replacement is the bare version rather than a quoted one. Kept as its own
+    // variant rather than normalised into the Cargo one, because a span that means two things
+    // depending on where it came from is the kind of detail that eats a quote six months later.
+    | { kind: 'npm-version'; hint: NpmVersionHint }
+    | { kind: 'script'; script: NpmScript; manager: string };
   let lenses: EditorLens[] = [];
 
   /** Push the current list, keyed by index — the key only has to identify a lens within the list the
@@ -647,20 +658,38 @@
   function pushLenses(next: EditorLens[]) {
     lenses = next;
     editorComp?.setCodeLenses(
-      next.map((entry, key) =>
-        entry.kind === 'lsp'
-          ? { start: entry.lens.start, title: entry.lens.title, actionable: !!entry.lens.command, key }
-          : {
-              start: entry.hint.offset,
-              // An arrow and the accent tone, because this one is an OFFER rather than a count: it
-              // has to survive being glanced past, and a grey line above a line of code reads as a
-              // comment. The word stays so the first one is unambiguous.
-              title: `↑ ${entry.hint.latest} available`,
-              actionable: true,
-              tone: 'accent' as const,
-              key,
-            },
-      ),
+      next.map((entry, key) => {
+        if (entry.kind === 'lsp') {
+          return {
+            start: entry.lens.start,
+            title: entry.lens.title,
+            actionable: !!entry.lens.command,
+            key,
+          };
+        }
+        if (entry.kind === 'script') {
+          // The manager's own name, not a generic "Run": which of npm / yarn / pnpm / bun a
+          // repository uses is a thing people get wrong, and a control that says what it will
+          // actually type is a control you can trust without checking.
+          return {
+            start: entry.script.offset,
+            title: `▶ ${entry.manager} ${entry.script.name}`,
+            actionable: true,
+            tone: 'accent' as const,
+            key,
+          };
+        }
+        return {
+          start: entry.hint.offset,
+          // An arrow and the accent tone, because this one is an OFFER rather than a count: it
+          // has to survive being glanced past, and a grey line above a line of code reads as a
+          // comment. The word stays so the first one is unambiguous.
+          title: `↑ ${entry.hint.latest} available`,
+          actionable: true,
+          tone: 'accent' as const,
+          key,
+        };
+      }),
     );
   }
 
@@ -669,7 +698,7 @@
     if (!path || !isLspFileOf(path)) {
       // Not cleared for a manifest: that buffer's lenses come from the effect below, and clearing
       // here would race it into an empty layer on every keystroke.
-      if (!isCargoManifest(path)) pushLenses([]);
+      if (!isCargoManifest(path) && !isPackageManifest(path)) pushLenses([]);
       return;
     }
     void lspState;
@@ -713,6 +742,74 @@
     return () => { cancelled = true; clearTimeout(t); };
   });
 
+  // ── package.json: run controls, and version hints ───────────────────────────────
+  //
+  // Two sources in one layer, because they belong on the same buffer and the layer is per-buffer:
+  // the scripts arrive at once (a parse of the text, no network) and the hints arrive later (one
+  // registry request per dependency, cached for a day). Pushed together on each pass so a slow
+  // hints answer cannot wipe out the run controls that were already there — which is what
+  // pushing them separately did, and it read as controls that flickered.
+  //
+  // The run controls are drawn from the BUFFER, so a script added a second ago has one before the
+  // file is saved.
+  let npmScripts = $state<NpmScript[]>([]);
+  let npmManager = $state('npm');
+  let npmHints = $state<NpmVersionHint[]>([]);
+
+  $effect(() => {
+    const path = activePath;
+    if (!path || !isPackageManifest(path)) return;
+    const src = projectStore.sourceOf(path);
+    let cancelled = false;
+
+    // Short: this is a parse of text the editor already has, and a run control that appears half a
+    // second after you finish typing a script name looks broken.
+    const scripts = setTimeout(() => {
+      void npmManifest(path, src)
+        .then((m) => {
+          if (cancelled || projectStore.activeFilePath !== path) return;
+          npmScripts = m.scripts;
+          npmManager = m.package_manager;
+        })
+        .catch(() => {});
+    }, 250);
+
+    // Long, for the same reason the Cargo one is: behind it is a request per dependency. A package
+    // being one minor version behind does not become more true by being checked while you type.
+    const hints = setTimeout(() => {
+      void npmVersionHints(path, src)
+        .then((found) => {
+          if (cancelled || projectStore.activeFilePath !== path) return;
+          npmHints = found;
+        })
+        .catch(() => {});
+    }, 900);
+
+    return () => { cancelled = true; clearTimeout(scripts); clearTimeout(hints); };
+  });
+
+  // The two halves, merged. A `$effect` rather than a call at each arrival so the layer is written
+  // once per change of either.
+  $effect(() => {
+    if (!isPackageManifest(activePath)) return;
+    const manager = npmManager;
+    pushLenses([
+      ...npmScripts.map((script) => ({ kind: 'script' as const, script, manager })),
+      ...npmHints.map((hint) => ({ kind: 'npm-version' as const, hint })),
+    ]);
+  });
+
+  // Leaving a manifest drops what was read for it: the next one's scripts arrive a moment after it
+  // opens, and showing the previous file's in the meantime is worse than showing none.
+  $effect(() => {
+    const path = activePath;
+    if (isPackageManifest(path)) return;
+    untrack(() => {
+      npmScripts = [];
+      npmHints = [];
+    });
+  });
+
   /**
    * A lens was pressed.
    *
@@ -732,6 +829,23 @@
     if (!entry) return;
     if (entry.kind === 'version') {
       updateDependencyVersion(entry.hint);
+      return;
+    }
+    if (entry.kind === 'npm-version') {
+      if (!editorComp) return;
+      // The bare version: this span is the string's CONTENTS, quotes excluded — see the variant's
+      // comment. Writing a quoted value here would produce `""6.0.0""`.
+      editorComp.replaceByteRange(entry.hint.start, entry.hint.end, entry.hint.latest);
+      toastStore.show(`${entry.hint.name} → ${entry.hint.latest}`, 'success');
+      return;
+    }
+    if (entry.kind === 'script') {
+      const root = projectStore.project?.root;
+      const file = activePath;
+      if (!root || !file) return;
+      void npmRunScript(root, file, entry.script.name)
+        .then(() => bennuUiStore.showBottom('run'))
+        .catch((e) => toastStore.show(`${entry.manager} ${entry.script.name}: ${e}`, 'error'));
       return;
     }
     const path = activePath;
