@@ -308,6 +308,27 @@ export const codeEditorTheme = EditorView.theme(
     // the error, and a second red would make an ordinary in-progress edit look broken.
     '.cm-tok-invalid':     { textDecoration: 'underline wavy', textDecorationColor: 'var(--danger, #d16969)' },
 
+    // ── Mini-notation (merula's `.merula`) ──
+    //
+    // The six token kinds merula's grammar has that no other language here does. Same CSS
+    // variables — and therefore the same colours — as the Merula window's own editor
+    // (`merula/editor/merula-cm.ts`), because a file must not change appearance depending on
+    // which window it is open in.
+    //
+    // A note and a chord are the *pitch* material and share a hue; the chord is italic + bold
+    // because `'maj7` is a modifier on the note beside it, not a separate voice. A sound name
+    // is the other half of the alphabet — what plays, versus what pitch — so it gets the
+    // cyan. The island brackets and a `$splice` are the seams where mini-notation meets host
+    // code, which is the thing you look for when a pattern misbehaves, so they are the accent
+    // and the only bold ones. `~` and `_` are structure, not content: muted on purpose, so a
+    // dense pattern reads as its sounds rather than as its rests.
+    '.cm-tok-note':        { color: 'var(--grv-syntax-note, #e5c07b)' },
+    '.cm-tok-chord':       { color: 'var(--grv-syntax-note, #e5c07b)', fontStyle: 'italic', fontWeight: '600' },
+    '.cm-tok-sound':       { color: 'var(--grv-syntax-sound, #56b6c2)' },
+    '.cm-tok-island':      { color: 'var(--accent, #56b6c2)', fontWeight: '700' },
+    '.cm-tok-splice':      { color: 'var(--accent, #56b6c2)', fontWeight: '600' },
+    '.cm-tok-mininote':    { color: 'var(--text-muted)' },
+
     // ── Semantic-token MODIFIERS ──
     //
     // Layered on top of a class rather than replacing it, so `mut count` keeps its identifier

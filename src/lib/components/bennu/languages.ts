@@ -6,8 +6,10 @@
  *
  * 1. **tree-sitter grammars** — Java ({@link javaLanguage}: semantic highlight, folding,
  *    go-to, backend completion), JSP ({@link jspLanguage}: namespaced taglibs,
- *    scriptlets, EL/OGNL) and geode's `.dig` ({@link digLanguage}: highlight, folding,
- *    and completion/hover over its closed vocabulary — all local, no backend).
+ *    scriptlets, EL/OGNL), geode's `.dig` ({@link digLanguage}: highlight, folding,
+ *    and completion/hover over its closed vocabulary — all local, no backend) and
+ *    merula's `.merula` ({@link merulaLanguage}: highlight + folding, sharing the very
+ *    grammar wasm the Merula window parses with).
  * 2. **Lezer languages** — HTML (`@codemirror/lang-html`, with embedded JS/CSS and tag
  *    folding), JSON, Markdown.
  * 3. **language-server backed** — **Rust** ({@link lspLanguage}): a legacy stream mode for the
@@ -49,6 +51,7 @@ import { cargoTomlLang, isCargoManifest } from './cargo-toml-lang';
 import { xmlSchemaLang } from './xml-schema-lang';
 import { jspLanguage } from './jsp-lang';
 import { digLanguage } from './dig/dig-lang';
+import { merulaLanguage } from './merula-lang';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
 
 /** A CM-language descriptor: no tree-sitter parser, highlight from `cmExtension`.
@@ -223,6 +226,11 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     case 'toml': return tomlLang;
     // geode's mole scripts — the one non-Java tree-sitter language here.
     case 'dig': return digLanguage;
+    // Merula's own grammar, not a second one — see `merula-lang.ts`. Highlight, folding and
+    // comment toggle only: completion and hover need the DSL catalogue, which lives behind
+    // `merula-be`, and spawning that backend to open a text file is a bigger decision than
+    // colouring one.
+    case 'merula': return merulaLanguage;
     case 'xml': case 'xsd': case 'wsdl': case 'xsl': case 'xslt': case 'tld':
     case 'pom': case 'iml': case 'fxml': case 'svg': return xmlLang;
     // `.ent` / `.mod` are the conventional names for a DTD split across files.

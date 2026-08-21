@@ -9,6 +9,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **Bennu highlights `.merula` files.** With Merula's own tree-sitter grammar rather than a second, simpler one, so a pattern reads identically in both windows — mini-notation, islands and splices included — and a grammar change reaches both by rebuilding one wasm. Folding collapses a track inside `tracks(…)`, a `meta { … }` block and block comments; `Ctrl`/`Cmd`+`/` toggles a comment. Completion and hover stay in Merula, where the DSL catalogue is.
+
 - **Merula's *Reveal in File Explorer* follows the built-in-explorer setting.** It called the file-system command directly, so it was the one reveal in the app that always went to the OS file manager regardless of the preference — and it reported nothing when it failed.
 
 - **Bennu's project tree opens its context menu from the keyboard** — `Shift+F10` or the Menu key on the focused row. Only Delete and Rename had keys of their own; everything else in the menu was mouse-only.

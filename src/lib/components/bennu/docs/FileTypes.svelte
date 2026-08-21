@@ -74,6 +74,25 @@
   (<code>blend: Additive</code>) both read as the type names they are, which in an asset file
   written by a generator is most of the words on the page.
 </p>
+<h2>merula <code>.merula</code> patterns</h2>
+<p>
+  A <code>.merula</code> file is a piece of music for <strong>Merula</strong>. Bennu highlights it
+  with <em>the same grammar Merula's own editor uses</em> — not a second, simpler one — so a file
+  looks the same in both windows, mini-notation included: notes and chords share the pitch colour,
+  sound names the other, the island brackets and a <code>$splice</code> are picked out as the seams
+  where a pattern meets host code, and <code>~</code> / <code>_</code> stay muted so a dense pattern
+  reads as its sounds rather than as its rests.
+</p>
+<p>
+  <strong>Folding</strong> collapses a call's arguments — which is how a whole track inside
+  <code>tracks(…)</code> folds away — a <code>meta &#123; … &#125;</code> front-matter block, and a block
+  comment. <kbd>Ctrl</kbd> + <kbd>/</kbd> toggles a <code>//</code> comment.
+</p>
+<p>
+  Completion, hover and go-to are Merula's window, not this one: they are answered from the DSL
+  catalogue the audio backend serves, and Bennu does not start it. Open the file in Merula for
+  those; edit it here alongside the rest of the project.
+</p>
 <h2>geode <code>.dig</code> scripts</h2>
 <p>
   A <code>.dig</code> file is a mole program for <strong>geode</strong> — indentation-delimited, with
