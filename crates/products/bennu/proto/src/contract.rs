@@ -636,8 +636,21 @@ pub struct IndexStats {
     pub beans: usize,
     /// Config-graph relations / edges (0 when no config / not built).
     pub relations: usize,
-    /// Whether the project's index build (provider + rename engine) has finished.
+    /// Whether **the engine that serves this project** can answer.
+    ///
+    /// Not "the Java index build has finished", which is what it used to mean and what made it
+    /// useless on a Cargo root: there is no Java index there, so it said `false` for ever. A
+    /// readiness signal that always says no is worse than none — it teaches a reader to ignore it,
+    /// and the reader in question went and used `grep` on a project whose references worked
+    /// perfectly from the first call.
+    ///
+    /// So on a Cargo project this is the **language server's** readiness. The counters above stay
+    /// zero there because they count Java things; [`engine`](Self::engine) says why.
     pub ready: bool,
+    /// What answers questions about this project: `bennu-index`, or a language server's name and
+    /// state. The field that stops the zeros above from reading as "not built yet".
+    #[serde(default)]
+    pub engine: String,
 }
 
 // ── encoding report (non-compliant source files) ─────────────────────────────

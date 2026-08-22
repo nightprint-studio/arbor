@@ -2124,6 +2124,7 @@ impl IndexService {
                 beans: 0,
                 relations: 0,
                 ready: false,
+                engine: String::new(),
             };
         };
 
@@ -2151,6 +2152,10 @@ impl IndexService {
             beans,
             relations,
             ready: slot.ready.load(Ordering::Relaxed),
+            // Filled by the caller that knows the project kind — see `index_stats::for_agent`.
+            // Not here, because this method is also the editor's own poll and the editor already
+            // knows which project it opened.
+            engine: String::new(),
         }
     }
 

@@ -9,6 +9,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **`bennu_find_symbol` works on Rust.** "Where does `MoleEntities` live" is the question asked ten times a day on a twenty-three-crate workspace, and the tool answered Java-only — so the caret-addressed half of the toolset could only be reached from a position the caller already had. It asks the language server's workspace symbol search on a Cargo project now. An empty answer says which of the two it is: nothing by that name, or a server that has not loaded the project yet.
+
+- **Every reference says what it is** — `decl`, `import`, `call`, `construct`, `read` — and `bennu_references` filters on it. `kind: ["call", "construct"]` before changing a signature leaves exactly the sites that have to change; `kind: ["construct"]` counts the struct literals that will stop compiling when a field is added, which was previously done by hand.
+
+- **`bennu_implementors`: who implements this trait or interface.** The reverse of go-to-definition, and the question the other tools could not be asked — find-usages on a trait returns its `impl` headers mixed with its bounds and its imports.
+
+- **`bennu_index_stats` reports the engine that serves the project.** On a Cargo root it answered `ready: false` for ever — that is the *Java* index, which has nothing to build there — so a readiness signal that always said no taught its reader to ignore it. It now reports the language server's readiness, and a new `engine` field says which engine the zero counters belong to.
+
 - **A Rust project is no longer told the Java index is still building.** `bennu_project_summary` reported `index.ready: false` on a Cargo root — the *Java* index, which has nothing to build there and so says not-ready for ever — and told the caller to wait for it and to reach for `bennu_class_index`, which walks `.java` files. An AI session acted on both, correctly, and went away from a project it had open to wait for something that was never going to happen. The summary now names the **engine** that actually answers, omits the index where there is none, and points at the language server's own state.
 
 - **Problems shows this project's problems, not its dependencies'.** A language server reports on the whole crate graph it built, so opening one project filled the panel with warnings from a `path` dependency in another repository — real, and not yours to fix from there. The same rule drops a registry checkout and an outer workspace's other members.

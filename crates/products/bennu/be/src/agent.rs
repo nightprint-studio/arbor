@@ -138,7 +138,7 @@ fn bennu_project_summary(
 ///
 /// The longest matching root, so a workspace member opened in its own right reports its own
 /// server rather than the outer workspace's.
-fn server_for_root(root: &str) -> Option<bennu_proto::prelude::LspStatus> {
+pub(crate) fn server_for_root(root: &str) -> Option<bennu_proto::prelude::LspStatus> {
     let needle = root.replace('\\', "/");
     crate::lsp_registry::LspRegistry::global()
         .statuses()
@@ -210,8 +210,10 @@ fn next_steps(
                 .to_string(),
         });
         steps.push(
-            "Use bennu_find_symbol to reach a type or function by name, and bennu_read_file to \
-             read source. bennu_class_index is Java-only and will be empty here."
+            "Use bennu_find_symbol to reach a type or function by name (it asks the server here, \
+             not Bennu's Java index), bennu_references to find its use sites — each one says \
+             whether it is a call, a construction or an import — and bennu_implementors for who \
+             implements a trait. bennu_class_index is Java-only and will be empty here."
                 .to_string(),
         );
         return steps;
@@ -389,10 +391,11 @@ pub struct FindSymbolResult {
 /// Answers from the project's semantic index, so it finds declarations rather than text
 /// occurrences: a method named `process` is one hit here and two hundred lines in a grep.
 ///
-/// **Java projects only.** That index is built for a Maven/Java project; a Cargo project does
-/// not have one, so this returns nothing there — say so rather than concluding the symbol does
-/// not exist. On a Rust project use `bennu_symbol_at` for a position you already have, or
-/// `bennu_references` from any occurrence of the name.
+/// On a project a **language server** owns — Rust, TypeScript, Svelte — the same question is put
+/// to the server's own workspace symbol search instead, so the answer is its index rather than
+/// Bennu's. One caveat that is worth reading before concluding anything from an empty result: a
+/// server answers **nothing** until it has loaded the project, and it loads it lazily. The `note`
+/// says which of the two an empty answer is.
 #[arbor_rpc::handler(mcp(
     title = "Find a type or member by name",
     safety = read,
@@ -403,6 +406,17 @@ fn bennu_find_symbol(_ctx: &BennuState, args: FindSymbolArgs) -> Result<FindSymb
         return Err("bennu_find_symbol needs a non-empty query".into());
     }
     let limit = args.limit.unwrap_or(50).clamp(1, 500);
+
+    // A project Bennu does not index itself is answered by whoever does. This used to return
+    // nothing on a Cargo root and say so — which is honest and useless: "where does `MoleEntities`
+    // live" is the question somebody asks ten times a day on a twenty-three crate workspace, and
+    // without it the caret-addressed half of this toolset can only be reached from a position the
+    // caller already has. That is a tool that starts where the problem is nearly solved.
+    // A Maven root keeps Bennu's index even when a server happens to be running for some file
+    // inside it: that index is what knows about the Struts and Spring halves, which no server does.
+    if is_cargo_root(&args.root) {
+        return find_symbol_via_server(&args.root, &args.query, args.kind.as_deref(), limit);
+    }
     let want_types = !matches!(args.kind.as_deref(), Some("member"));
     let want_members = !matches!(args.kind.as_deref(), Some("type"));
 
@@ -446,25 +460,228 @@ fn bennu_find_symbol(_ctx: &BennuState, args: FindSymbolArgs) -> Result<FindSymb
         Some(format!(
             "Showing {limit} of {total} matches. Narrow the query, or pass a larger limit."
         ))
-    } else if total == 0 && is_cargo_root(&args.root) {
-        // This search reads Bennu's own index and nothing else, and Bennu builds one for Java
-        // projects only. On a Cargo root it is therefore always empty — and the index it was
-        // waiting on is one that will never be built, so "check the stats and try again" sent a
-        // caller to wait forever for a permanent no.
-        Some(
-            "This search reads Bennu's own symbol index, which is built for Java projects only — \
-             a Cargo project never builds one, so this comes back empty however long you wait. \
-             It is not a statement about the project. Use bennu_symbol_at to resolve a position \
-             you already have, bennu_references from any occurrence of the name, or search the \
-             sources directly."
-                .to_string(),
-        )
     } else if total == 0 && !service.index_stats(&args.root).ready {
         Some(
             "No matches, but the semantic index has not finished building — this is not yet \
              an answer. Check bennu_index_stats and try again."
                 .to_string(),
         )
+    } else {
+        None
+    };
+    hits.truncate(limit);
+
+    Ok(FindSymbolResult { hits, total, note })
+}
+
+/// Args for [`bennu_implementors`].
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ImplementorsArgs {
+    /// Absolute path to the project root.
+    pub root: String,
+    /// Absolute path to the file holding the trait, interface or method.
+    pub file: String,
+    /// 1-based line of its name.
+    pub line: u32,
+    /// 1-based character column. Any column within the identifier works.
+    #[serde(default)]
+    pub column: Option<u32>,
+    /// Cap on the results. Defaults to 200.
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// Who implements a trait, an interface, or an abstract method.
+#[derive(Debug, Serialize)]
+pub struct ImplementorsResult {
+    /// What the position resolved to, in the engine's own words.
+    pub target: String,
+    /// The implementing sites, grouped by file, heaviest first.
+    pub files: Vec<UsageFile>,
+    pub total: usize,
+    /// Why the answer is empty or short, when it is.
+    pub note: Option<String>,
+}
+
+/// Find every type that implements the trait or interface at a position.
+///
+/// The **reverse** of go-to-definition, and the question the other tools here cannot be asked.
+/// `bennu_references` on a trait finds the places its name is written — the `impl` headers, the
+/// bounds, the imports — mixed together. This finds the implementations and only those, which is
+/// what "who would break if I add a method to this" actually means.
+///
+/// Also answers it for a **method**: given a trait method, the overrides of it.
+///
+/// Answered by the language server, so it is exact rather than textual — a `impl Trait for Foo`
+/// written through a type alias is still found, and a comment mentioning the name is not.
+#[arbor_rpc::handler(mcp(
+    title = "Find who implements a trait or interface",
+    safety = read,
+))]
+fn bennu_implementors(
+    _ctx: &BennuState,
+    args: ImplementorsArgs,
+) -> Result<ImplementorsResult, String> {
+    let source = read_source(&args.root, &args.file)?;
+    let column = args.column.unwrap_or(1);
+    let (offset, line_text) = offset_of(&source, args.line, column)?;
+    let limit = args.limit.unwrap_or(200).clamp(1, 2_000);
+
+    let Some(found) = crate::lsp_route::implementations(&args.file, &source, offset) else {
+        // No server owns this file. Said plainly rather than as an empty list: Bennu's own Java
+        // engine has no implementations query, so an empty result here would be a claim about the
+        // code that nothing actually checked.
+        return Ok(ImplementorsResult {
+            target: String::new(),
+            files: Vec::new(),
+            total: 0,
+            note: Some(
+                "This question is answered by a language server, and none serves this file. \
+                 Nothing was checked — this is not a statement about the code."
+                    .to_string(),
+            ),
+        });
+    };
+
+    let mut texts: HashMap<String, Option<String>> = HashMap::new();
+    texts.insert(args.file.clone(), Some(source));
+
+    let mut by_file: Vec<(String, Vec<UsageSite>)> = Vec::new();
+    for hit in found.usages {
+        let text = texts
+            .entry(hit.file.clone())
+            .or_insert_with(|| read_source(&args.root, &hit.file).ok());
+        let (line, column) = match text.as_deref() {
+            Some(text) => line_col_of(text, hit.start),
+            None => (hit.line as u32, hit.col as u32),
+        };
+        // Every one of these IS an implementation; the field is carried so the shape matches
+        // `bennu_references` and a caller can hand either result to the same code.
+        let site = UsageSite { line, column, preview: hit.preview, kind: UsageKind::DECL };
+        match by_file.iter_mut().find(|(file, _)| *file == hit.file) {
+            Some((_, sites)) => sites.push(site),
+            None => by_file.push((hit.file, vec![site])),
+        }
+    }
+
+    let total: usize = by_file.iter().map(|(_, sites)| sites.len()).sum();
+    by_file.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
+
+    let mut budget = limit;
+    let mut files = Vec::new();
+    for (file, mut sites) in by_file {
+        sites.sort_by_key(|s| (s.line, s.column));
+        let count = sites.len();
+        sites.truncate(budget);
+        budget -= sites.len();
+        files.push(UsageFile { file, count, usages: sites });
+    }
+
+    let note = if total > limit {
+        Some(format!("Showing {limit} of {total} implementations. Pass a larger limit for the rest."))
+    } else if total == 0 {
+        Some(server_wait_note(&args.file).unwrap_or_else(|| {
+            format!(
+                "Nothing implements what is at line {} column {} — or that position is not a \
+                 trait, an interface or an overridable method. The line reads: {}",
+                args.line,
+                column,
+                line_text.trim(),
+            )
+        }))
+    } else {
+        None
+    };
+
+    Ok(ImplementorsResult { target: found.target_label, files, total, note })
+}
+
+/// The kinds a language server calls a **type**, so `kind: "type"` means the same thing whichever
+/// engine answered. Everything else it reports is filed as a member.
+const SERVER_TYPE_KINDS: &[&str] = &[
+    "class", "struct", "enum", "interface", "trait", "object", "namespace", "module",
+    "type parameter", "type alias", "impl",
+];
+
+/// [`bennu_find_symbol`] for a project a language server owns.
+///
+/// The server's `workspace/symbol`, mapped onto the same result shape Bennu's index produces —
+/// so a caller writes one call and does not branch on the project kind. The vocabulary in
+/// `detail` stays the server's, because a Rust `fn` signature is more useful verbatim than
+/// translated into Java's words.
+///
+/// **An empty answer here has two meanings and they need different responses**, which is the
+/// whole reason this does not just return a list. A server that has not loaded the project
+/// answers nothing at all — measured, not assumed: `workspace/symbol` on a cold `svelteserver`
+/// returns zero for a name that is in the tree, and starts answering once a file has been opened.
+/// Reporting that as "no such symbol" is how a caller concludes something does not exist and goes
+/// and greps a project that could have answered.
+fn find_symbol_via_server(
+    root: &str,
+    query: &str,
+    kind: Option<&str>,
+    limit: usize,
+) -> Result<FindSymbolResult, String> {
+    let want_types = !matches!(kind, Some("member"));
+    let want_members = !matches!(kind, Some("type"));
+    let needle = query.trim().to_lowercase();
+
+    let mut hits: Vec<SymbolHit> = crate::lsp_route::workspace_symbols(root, query.trim())
+        .into_iter()
+        .filter_map(|s| {
+            let is_type = SERVER_TYPE_KINDS.contains(&s.kind.as_str());
+            if (is_type && !want_types) || (!is_type && !want_members) {
+                return None;
+            }
+            Some(SymbolHit {
+                kind: match is_type {
+                    true => "type".to_string(),
+                    false => "member".to_string(),
+                },
+                name: s.name,
+                // The server's own words for what it is, plus its signature when it gave one.
+                // Both, because `struct` and `fn(&self) -> Duration` answer different halves of
+                // "is this the one I meant".
+                detail: match s.detail.filter(|d| !d.is_empty()) {
+                    Some(detail) => format!("{} · {detail}", s.kind),
+                    None => s.kind,
+                },
+                file: Some(s.file),
+                line: Some(s.line as i64),
+            })
+        })
+        .collect();
+
+    // Same ordering rule as the Java path: an exact name beats a substring of a longer one.
+    hits.sort_by_key(|h| (h.name.to_lowercase() != needle, h.name.len(), h.name.to_lowercase()));
+
+    let total = hits.len();
+    let server = server_for_root(root);
+    let note = if total > limit {
+        Some(format!(
+            "Showing {limit} of {total} matches. Narrow the query, or pass a larger limit."
+        ))
+    } else if total == 0 {
+        Some(match &server {
+            Some(s) if s.state == "ready" => format!(
+                "{} is up and has nothing by that name. This is an answer.",
+                s.name,
+            ),
+            Some(s) => format!(
+                "{} is {} — it answers nothing at all until it has loaded the project, so this is \
+                 not an answer yet.{} Ask again in a few seconds.",
+                s.name,
+                s.state,
+                match s.progress.is_empty() {
+                    true => String::new(),
+                    false => format!(" ({})", s.progress),
+                },
+            ),
+            None => "No language server is running for this project, and one is what answers this \
+                     question here. It starts on the first request about a source file — ask \
+                     bennu_symbol_at about any position in one, then repeat this."
+                .to_string(),
+        })
     } else {
         None
     };
@@ -711,6 +928,16 @@ pub struct ReferencesAtArgs {
     /// Cap on the use sites returned. Defaults to 200.
     #[serde(default)]
     pub limit: Option<usize>,
+    /// Keep only occurrences of these kinds: `decl`, `import`, `call`, `construct`, `read`.
+    /// Omit for all of them. An unknown name here matches nothing rather than being ignored, so a
+    /// typo shows as an empty result instead of a silently unfiltered one.
+    ///
+    /// The one that earns its place is `construct`: "how many places build a `FieldCrystal`" is
+    /// the question asked before adding a field to it, and in an unfiltered list it is buried
+    /// under the imports. `kind: ["call", "construct"]` before changing a signature leaves
+    /// exactly the sites that have to change.
+    #[serde(default)]
+    pub kind: Option<Vec<String>>,
 }
 
 /// One place the symbol is used.
@@ -723,6 +950,147 @@ pub struct UsageSite {
     /// The source line, trimmed — enough to tell a call from an assignment without
     /// opening the file.
     pub preview: String,
+    /// What this occurrence *is*: see [`UsageKind`]. Read it before reading the previews — on a
+    /// list of thirteen, the three that are imports are noise for somebody changing a signature.
+    pub kind: &'static str,
+}
+
+/// What an occurrence of a name is doing there.
+///
+/// **Read how much of this is certain**, because the answer differs per variant and a caller
+/// deciding whether to open a file deserves to know which it is trusting.
+///
+/// - `decl` is **exact**: the declaration is asked for by name (`textDocument/definition`, or
+///   Bennu's own resolver) and matched by position. No guessing.
+/// - `import` is as near certain as a line shape gets: a Rust `use` / `pub use`, a Java `import`,
+///   a TypeScript `import` / `export … from`. These begin a line and nothing else does.
+/// - `call`, `construct` and `read` are read off the **character after the name**, which is right
+///   almost always and wrong visibly: the preview line is right there beside it. `construct` is
+///   the one worth the separate name — a `FieldCrystal { … }` literal is the thing you count when
+///   you are about to add a field, and it is invisible in a list where it reads as a call.
+///
+/// A string, not an enum, on the wire: the caller is a language model reading JSON, and
+/// `"import"` needs no schema to understand.
+pub struct UsageKind;
+
+impl UsageKind {
+    pub const DECL: &'static str = "decl";
+    pub const IMPORT: &'static str = "import";
+    pub const CALL: &'static str = "call";
+    pub const CONSTRUCT: &'static str = "construct";
+    pub const READ: &'static str = "read";
+}
+
+/// Whether two paths name the same file, tolerating the separator each engine happens to use.
+fn same_path(a: &str, b: &str) -> bool {
+    a.replace('\\', "/") == b.replace('\\', "/")
+}
+
+/// The full line containing `start`, and the text between `start` and `end` — the occurrence's
+/// own line and its own name, which is what the classifier needs and what a trimmed preview has
+/// already thrown away.
+fn line_and_name(text: &str, start: usize, end: usize) -> (String, String) {
+    let from = text[..start.min(text.len())].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let to = text[start.min(text.len())..]
+        .find('\n')
+        .map(|i| start + i)
+        .unwrap_or(text.len());
+    let name = text.get(start..end.min(text.len())).unwrap_or_default().to_string();
+    (text[from..to].to_string(), name)
+}
+
+/// Classify one occurrence from its line and where the name sits in it.
+///
+/// `name_at` is a **character** index into `line`, matching the column the site carries.
+fn usage_kind(line: &str, name_at: usize, name: &str, is_decl: bool) -> &'static str {
+    if is_decl {
+        return UsageKind::DECL;
+    }
+    let trimmed = line.trim_start();
+    // An import line, in the three languages that reach here. Anchored at the start of the line,
+    // which is what makes it safe: `use` inside an expression is not at column zero, and a doc
+    // comment mentioning "import" is not either.
+    for head in ["use ", "pub use ", "import ", "export ", "from "] {
+        if trimmed.starts_with(head) {
+            return UsageKind::IMPORT;
+        }
+    }
+
+    // What follows the name decides the rest. Whitespace is skipped first: `Foo   {` and `foo (`
+    // are the same thing written with more room.
+    let after: String = line.chars().skip(name_at + name.chars().count()).collect();
+    let after = after.trim_start();
+
+    // A path segment — `FieldCrystal::new()`. The call is reached *through* this name, and that
+    // is worth counting with the calls rather than with the bare reads: `Type::new()` is one of
+    // the places a value is built, which is the question this classification exists to answer.
+    if let Some(rest) = after.strip_prefix("::") {
+        let rest = rest.trim_start();
+        // A turbofish sits between the name and the segment: `Vec::<u8>::new()`.
+        let rest = match rest.strip_prefix('<').and_then(|r| r.find('>').map(|i| &r[i + 1..])) {
+            Some(after_generics) => after_generics.trim_start().strip_prefix("::").unwrap_or(after_generics).trim_start(),
+            None => rest,
+        };
+        let ident_end = rest.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(rest.len());
+        return match rest[ident_end..].trim_start().chars().next() {
+            Some('(') => UsageKind::CALL,
+            Some('{') => UsageKind::CONSTRUCT,
+            _ => UsageKind::READ,
+        };
+    }
+
+    match after.chars().next() {
+        Some('(') => UsageKind::CALL,
+        // A struct literal, and the one this exists for. `if x {` cannot reach here: the name
+        // would have to be the last token before the brace, and a keyword is not the name asked
+        // about.
+        Some('{') => UsageKind::CONSTRUCT,
+        _ => UsageKind::READ,
+    }
+}
+
+#[cfg(test)]
+mod usage_kind_tests {
+    use super::{usage_kind, UsageKind};
+
+    #[test]
+    fn an_import_is_told_from_a_use() {
+        // The three that were noise in a list of thirteen.
+        assert_eq!(usage_kind("use crate::field::FieldCrystal;", 12, "FieldCrystal", false), UsageKind::IMPORT);
+        assert_eq!(usage_kind("pub use super::FieldCrystal;", 15, "FieldCrystal", false), UsageKind::IMPORT);
+        assert_eq!(usage_kind("import com.acme.Order;", 16, "Order", false), UsageKind::IMPORT);
+        // …and a `use` that is not the head of the line is not an import.
+        assert_eq!(usage_kind("    let f = FieldCrystal::new();", 12, "FieldCrystal", false), UsageKind::CALL);
+    }
+
+    #[test]
+    fn a_literal_construction_is_its_own_answer() {
+        // The question that took counting fourteen sites by hand: which of these build one.
+        assert_eq!(
+            usage_kind("    let c = FieldCrystal { hue: 3, size: 1 };", 12, "FieldCrystal", false),
+            UsageKind::CONSTRUCT,
+        );
+        assert_eq!(usage_kind("        FieldCrystal {", 8, "FieldCrystal", false), UsageKind::CONSTRUCT);
+    }
+
+    #[test]
+    fn a_call_survives_the_things_that_sit_between_the_name_and_the_paren() {
+        assert_eq!(usage_kind("    tick(dt);", 4, "tick", false), UsageKind::CALL);
+        assert_eq!(usage_kind("    tick (dt);", 4, "tick", false), UsageKind::CALL);
+        assert_eq!(usage_kind("    let v = Vec::<u8>::new();", 12, "Vec", false), UsageKind::CALL);
+    }
+
+    #[test]
+    fn everything_else_is_a_read_and_the_declaration_is_exact() {
+        assert_eq!(usage_kind("    let n = crystal.hue;", 20, "hue", false), UsageKind::READ);
+        assert_eq!(usage_kind("    let t = &self.tick;", 17, "tick", false), UsageKind::READ);
+
+        // A declaration is asked for, never guessed. Worth an assertion because the shape of one
+        // — `fn tick(` — is indistinguishable from a call by anything a line can say, and the
+        // only reason that never bites is that the declaration's position is known exactly.
+        assert_eq!(usage_kind("    fn tick(&self) {}", 7, "tick", true), UsageKind::DECL);
+        assert_eq!(usage_kind("    fn tick(&self) {}", 7, "tick", false), UsageKind::CALL);
+    }
 }
 
 /// The uses in one file, so a caller can see where the weight is before reading any of it.
@@ -758,6 +1126,11 @@ pub struct ReferencesForAgent {
 /// Addressed by line and column — on the declaration or on any use of it. Results are
 /// grouped by file, heaviest first, each site with its source line, so the shape of the
 /// blast radius is visible before reading a single file.
+///
+/// **Every site says what it is** — `decl`, `import`, `call`, `construct`, `read` — and `kind`
+/// filters on it. That is the difference between reading thirteen lines and reading the four that
+/// matter: before changing a signature, `kind: ["call", "construct"]`; before adding a field to a
+/// struct, `kind: ["construct"]` counts the literals that will stop compiling.
 #[arbor_rpc::handler(mcp(
     name = "bennu_references",
     title = "Find where a symbol is used",
@@ -798,6 +1171,13 @@ fn bennu_references_at(
         });
     };
 
+    // Where the symbol is DECLARED, so exactly one of the sites below can be marked as such
+    // rather than guessed at. Asked once, by the same routing the lookup used; `None` is a
+    // perfectly ordinary answer (a local, or an engine with nothing to say) and simply means no
+    // site is marked.
+    let declared = crate::lsp_route::declaration(&args.file, &source, offset)
+        .unwrap_or_else(|| IndexService::global().declaration(&args.file, &source, offset));
+
     // Both engines report a byte column, which is off by the number of accented characters
     // before it on exactly the sources this editor exists for. Recomputed here against each
     // file read in its own encoding, so a follow-up call at these coordinates lands.
@@ -813,7 +1193,30 @@ fn bennu_references_at(
             Some(text) => line_col_of(text, hit.start),
             None => (hit.line as u32, hit.col as u32),
         };
-        let site = UsageSite { line, column, preview: hit.preview };
+        // Position equality, not name equality: two symbols can share a name and only one of
+        // them is this one's declaration.
+        let is_decl = declared
+            .as_ref()
+            .is_some_and(|d| same_path(&d.file, &hit.file) && d.start == hit.start);
+        // The RAW line, because `preview` is trimmed and the column indexes the original. Falling
+        // back to the preview costs the classifier its offsets, so it is given the name's own
+        // position inside it instead of a column that no longer means anything.
+        let kind = match text.as_deref() {
+            Some(text) => {
+                let (raw, name) = line_and_name(text, hit.start, hit.end);
+                usage_kind(&raw, column.saturating_sub(1) as usize, &name, is_decl)
+            }
+            None => match is_decl {
+                true => UsageKind::DECL,
+                false => UsageKind::READ,
+            },
+        };
+        if let Some(wanted) = &args.kind {
+            if !wanted.iter().any(|k| k == kind) {
+                continue;
+            }
+        }
+        let site = UsageSite { line, column, preview: hit.preview, kind };
         match by_file.iter_mut().find(|(file, _)| *file == hit.file) {
             Some((_, sites)) => sites.push(site),
             None => by_file.push((hit.file, vec![site])),
@@ -839,6 +1242,15 @@ fn bennu_references_at(
         Some(format!(
             "Showing {limit} of {total} use sites; each file still reports its full `count`. \
              Pass a larger limit for the rest."
+        ))
+    } else if total == 0 && args.kind.is_some() {
+        // The filter is the answer here, and saying "nothing uses it" would be a claim about the
+        // code that the caller's own argument caused.
+        Some(format!(
+            "`{}` is used, but no occurrence is of kind {:?}. Drop the `kind` filter to see them \
+             all.",
+            found.target_label,
+            args.kind.as_ref().unwrap(),
         ))
     } else if total == 0 {
         Some(format!(
@@ -938,7 +1350,7 @@ fn index_caveat(root: &str, file: &str) -> String {
 
 /// Which build model governs a root — the same test the editor's own open path makes, so a
 /// project cannot be Cargo there and Maven here.
-fn is_cargo_root(root: &str) -> bool {
+pub(crate) fn is_cargo_root(root: &str) -> bool {
     Path::new(root).join("Cargo.toml").is_file()
 }
 
@@ -2367,6 +2779,7 @@ mod next_steps_tests {
             beans: 0,
             relations: 0,
             ready: false,
+            engine: String::new(),
         }
     }
 

@@ -398,8 +398,14 @@ export interface IndexStats {
   beans: number;
   /** Config-graph relations (edges). */
   relations: number;
-  /** Whether the index/provider has finished building. */
+  /** Whether **the engine that serves this project** can answer. On a Cargo root that is the
+   *  language server, not the Java index — which has nothing to build there and so said `false`
+   *  for ever. */
   ready: boolean;
+  /** What answers questions here: `bennu-index`, or a language server's name and state. Empty on
+   *  the editor's own poll, which already knows what it opened; filled for the agent surface,
+   *  where the zero counters above would otherwise read as "not built yet". */
+  engine?: string;
 }
 
 /** One match of `bennu_find_in_files` — a single line hit in a project file,
