@@ -211,9 +211,13 @@ fn next_steps(
         });
         steps.push(
             "Use bennu_find_symbol to reach a type or function by name (it asks the server here, \
-             not Bennu's Java index), bennu_references to find its use sites — each one says \
-             whether it is a call, a construction or an import — and bennu_implementors for who \
-             implements a trait. bennu_class_index is Java-only and will be empty here."
+             not Bennu's Java index, and it takes `Owner.member` as well as a bare name), \
+             bennu_references for its use sites — each one says whether it is a call, a \
+             construction or an import — bennu_callers to walk the callers transitively, and \
+             bennu_implementors for who implements a trait. Before reading an unfamiliar file, \
+             bennu_outline lists what it declares with the line range of each — then read that \
+             range, not the file. bennu_problems says what is currently wrong without a build. \
+             bennu_class_index is Java-only and will be empty here."
                 .to_string(),
         );
         return steps;
@@ -368,6 +372,14 @@ pub struct SymbolHit {
     pub file: Option<String>,
     /// 1-based declaration line.
     pub line: Option<i64>,
+    /// 1-based character column of the name, when it is known.
+    ///
+    /// Carried so a hit can be handed **straight** to `bennu_references` or `bennu_implementors`,
+    /// which are addressed by position. Without it, finding a symbol by name and then asking about
+    /// it meant opening the file to count columns — which is the step this whole pair exists to
+    /// remove.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<i64>,
 }
 
 /// Results, with an honest word about what was left out.
@@ -432,6 +444,8 @@ fn bennu_find_symbol(_ctx: &BennuState, args: FindSymbolArgs) -> Result<FindSymb
                     detail: entry.fqcn,
                     file: Some(entry.file),
                     line: Some(entry.line as i64),
+                    // Bennu's class index records the declaration line and not its column.
+                    column: None,
                 });
             }
         }
@@ -446,6 +460,7 @@ fn bennu_find_symbol(_ctx: &BennuState, args: FindSymbolArgs) -> Result<FindSymb
                     detail: entry.secondary,
                     file: entry.file,
                     line: entry.line,
+                    column: None,
                 });
             }
         }
@@ -472,6 +487,681 @@ fn bennu_find_symbol(_ctx: &BennuState, args: FindSymbolArgs) -> Result<FindSymb
     hits.truncate(limit);
 
     Ok(FindSymbolResult { hits, total, note })
+}
+
+/// The doc comment attached to the declaration starting at `from_line` (1-based), as its first
+/// **paragraph**, markers stripped.
+///
+/// Why this is read out of the source rather than asked of the server: `documentSymbol` carries a
+/// name, a kind and a `detail` — for rust-analyzer the signature — and **no documentation at all**.
+/// The protocol puts docs in `hover`, which is one round trip per symbol; an outline of thirty
+/// declarations would be thirty requests to answer a question about one file.
+///
+/// The first paragraph and not the whole comment, because an outline is a map and these are its
+/// labels. In a codebase whose comments carry the reasoning, a full doc per entry is the file
+/// again — and the convention in both Rust and Java is that the first paragraph is the summary,
+/// so the cut lands where the author already put a break. The rest arrives with the declaration
+/// when it is read.
+///
+/// **Both attachment shapes**, because which one applies depends on where the engine decided the
+/// declaration starts and that is not worth depending on: if `from_line` is itself a doc line the
+/// comment is read downwards, otherwise upwards from the line above. Attributes and annotations in
+/// between are stepped over — `#[derive(Debug)]` and `@Override` sit between a doc and its item —
+/// but a **blank** line is not, because in both languages a blank line detaches the comment.
+fn doc_summary(source: &str, from_line: u32) -> Option<String> {
+    let lines: Vec<&str> = source.lines().collect();
+    let idx = from_line.checked_sub(1)? as usize;
+    let at = lines.get(idx)?;
+
+    let mut collected: Vec<String> = Vec::new();
+    if is_doc_line(at) {
+        // The engine's range already begins at the comment: read forwards.
+        for line in &lines[idx..] {
+            match strip_doc(line) {
+                Some(text) => collected.push(text),
+                None => break,
+            }
+        }
+    } else {
+        // Above the declaration, past whatever decorates it.
+        let mut i = idx;
+        while i > 0 {
+            let above = lines[i - 1].trim();
+            if above.starts_with('#') || above.starts_with('@') || above.ends_with(',') {
+                i -= 1;
+                continue;
+            }
+            break;
+        }
+        while i > 0 {
+            match strip_doc(lines[i - 1]) {
+                Some(text) => {
+                    collected.push(text);
+                    i -= 1;
+                }
+                None => break,
+            }
+        }
+        collected.reverse();
+    }
+
+    // The first paragraph: everything up to the first blank doc line.
+    let paragraph: Vec<&String> = collected
+        .iter()
+        .skip_while(|l| l.trim().is_empty())
+        .take_while(|l| !l.trim().is_empty())
+        .collect();
+    if paragraph.is_empty() {
+        return None;
+    }
+    let mut text = paragraph.iter().map(|l| l.trim()).collect::<Vec<_>>().join(" ");
+    // A paragraph that is itself an essay is cut rather than carried: the cap is what keeps an
+    // outline an outline.
+    const CAP: usize = 400;
+    if text.chars().count() > CAP {
+        text = text.chars().take(CAP - 1).collect::<String>() + "…";
+    }
+    Some(text)
+}
+
+/// Whether a line is part of a doc comment.
+fn is_doc_line(line: &str) -> bool {
+    strip_doc(line).is_some()
+}
+
+/// A doc line's text without its marker, or `None` when the line is not one.
+///
+/// `//` is deliberately **not** a doc marker in Rust — an ordinary comment above an item is not
+/// attached to it and regularly says something about the line above instead. Java has no such
+/// distinction, so `/** … */` is the only form taken there; a `//` above a method is a note, not
+/// its documentation.
+fn strip_doc(line: &str) -> Option<String> {
+    let t = line.trim_start();
+    for marker in ["///", "//!"] {
+        if let Some(rest) = t.strip_prefix(marker) {
+            return Some(rest.trim_start().to_string());
+        }
+    }
+    if let Some(rest) = t.strip_prefix("/**") {
+        return Some(rest.trim_start_matches('*').trim().trim_end_matches("*/").trim().to_string());
+    }
+    if t.starts_with("*/") {
+        return Some(String::new());
+    }
+    // A continuation line of a block doc: ` * text`. Not a bare `*`, which is multiplication.
+    if let Some(rest) = t.strip_prefix("* ") {
+        return Some(rest.trim_end_matches("*/").trim_end().to_string());
+    }
+    if t == "*" {
+        return Some(String::new());
+    }
+    None
+}
+
+#[cfg(test)]
+mod doc_summary_tests {
+    use super::doc_summary;
+
+    #[test]
+    fn a_rust_doc_above_a_declaration_is_found_past_its_attributes() {
+        let src = "\
+/// Applies the mole's animation for this frame.
+///
+/// The long explanation nobody wants in an outline.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub fn apply_mole_anim() {}
+";
+        // Addressed at the `pub fn` line — the shape when the engine's range excludes the doc.
+        assert_eq!(
+            doc_summary(src, 6).as_deref(),
+            Some("Applies the mole's animation for this frame."),
+        );
+    }
+
+    #[test]
+    fn a_range_that_already_starts_at_the_comment_reads_forwards() {
+        let src = "\
+/// Applies the mole's animation.
+/// Second line of the same paragraph.
+///
+/// A second paragraph, left out.
+pub fn apply_mole_anim() {}
+";
+        assert_eq!(
+            doc_summary(src, 1).as_deref(),
+            Some("Applies the mole's animation. Second line of the same paragraph."),
+        );
+    }
+
+    #[test]
+    fn a_javadoc_block_is_read_the_same_way() {
+        let src = "\
+    /**
+     * Recalculates the order total.
+     *
+     * The rest of it.
+     */
+    @Override
+    public BigDecimal total() {}
+";
+        assert_eq!(doc_summary(src, 7).as_deref(), Some("Recalculates the order total."));
+    }
+
+    #[test]
+    fn a_comment_that_is_not_attached_is_not_this_declarations() {
+        // A blank line detaches it in both languages, and taking it anyway would put the previous
+        // item's explanation on this one — a wrong label is worse than none on a map.
+        let src = "\
+/// Belongs to something else.
+
+pub fn apply_mole_anim() {}
+";
+        assert_eq!(doc_summary(src, 3), None);
+
+        // A plain `//` above an item is a note about the code, not its documentation.
+        let src = "\
+// Bumped in the loop below.
+pub fn apply_mole_anim() {}
+";
+        assert_eq!(doc_summary(src, 2), None);
+
+        // Nothing above at all.
+        assert_eq!(doc_summary("pub fn a() {}\n", 1), None);
+    }
+
+    #[test]
+    fn a_read_by_symbol_starts_at_the_doc_and_at_the_attributes() {
+        use super::doc_start;
+        let src = "\
+/// What it is for.
+#[inline]
+pub fn apply_mole_anim() {}
+";
+        // Line 3 is the `pub fn`. The range has to widen to line 1, or reading a declaration
+        // returns the half of it that says the least.
+        assert_eq!(doc_start(src, 3), 1);
+
+        // No doc, but the attribute is still part of the declaration.
+        let src = "#[inline]\npub fn a() {}\n";
+        assert_eq!(doc_start(src, 2), 1);
+
+        // Already at the comment: nothing to widen.
+        let src = "/// Doc.\npub fn a() {}\n";
+        assert_eq!(doc_start(src, 1), 1);
+
+        // Detached by a blank line — the widening stops where the attachment does.
+        let src = "/// Somebody else's.\n\npub fn a() {}\n";
+        assert_eq!(doc_start(src, 3), 3);
+    }
+
+    #[test]
+    fn an_essay_is_cut_rather_than_carried() {
+        let long = "x".repeat(900);
+        let src = format!("/// {long}\npub fn a() {{}}\n");
+        let out = doc_summary(&src, 2).unwrap();
+        assert!(out.chars().count() <= 400, "{}", out.chars().count());
+        assert!(out.ends_with('…'));
+    }
+}
+
+/// Args for [`bennu_outline`].
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct OutlineArgs {
+    /// Absolute path to the project root.
+    pub root: String,
+    /// Absolute path to the file to describe.
+    pub file: String,
+}
+
+/// One declaration in a file's outline.
+#[derive(Debug, Serialize)]
+pub struct OutlineEntry {
+    /// The name as declared.
+    pub name: String,
+    /// The engine's own word: `struct`, `function`, `field`, `impl`, `class`, `method`.
+    pub kind: String,
+    /// The signature or type, when the engine gave one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// The **first paragraph** of the declaration's doc comment, when it has one.
+    ///
+    /// Here because a signature says what a thing takes and returns, and a doc comment says what
+    /// it is for — and on a well-commented codebase the second is most of what an outline is
+    /// worth reading for. The rest of the comment comes with the declaration when it is read; the
+    /// summary is the label on the map.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    /// 1-based line of the name.
+    pub line: u32,
+    /// 1-based column of the name — so an entry can be handed straight to a positional call.
+    pub column: u32,
+    /// 1-based first and last line of the whole declaration, body included. What to pass to
+    /// `bennu_read_file` to read exactly this and nothing else.
+    pub from_line: u32,
+    pub to_line: u32,
+    /// Nesting: `0` is top level, `1` is a member of the entry above it.
+    pub depth: usize,
+}
+
+/// A file's shape.
+#[derive(Debug, Serialize)]
+pub struct OutlineResult {
+    /// How many lines the file has, so the cost of reading it in full is visible.
+    pub total_lines: u32,
+    pub entries: Vec<OutlineEntry>,
+    pub note: Option<String>,
+}
+
+/// List what a file declares, without reading it.
+///
+/// **The call to make before reading a file you do not know.** A two-thousand-line module is
+/// thirty lines of outline, and each entry carries the line range of its own declaration — so the
+/// next step is `bennu_read_file` with `symbol` or a range, not the whole file. Reading a file in
+/// full to find out what is in it is the most expensive way to ask the cheapest question.
+///
+/// Each entry carries the **first paragraph of its doc comment**, which a language server's own
+/// outline does not: the protocol keeps documentation in `hover`, one round trip per symbol. A
+/// signature says what a thing takes; the comment says what it is for, and on a codebase that
+/// explains itself that is most of what an outline is worth reading for.
+///
+/// Flattened rather than nested, with a `depth`, because that is what a caller scans; the nesting
+/// is still legible and nothing has to be walked to count what is there.
+#[arbor_rpc::handler(mcp(
+    title = "List what a file declares",
+    safety = read,
+))]
+fn bennu_outline(_ctx: &BennuState, args: OutlineArgs) -> Result<OutlineResult, String> {
+    let source = read_source(&args.root, &args.file)?;
+    let total_lines = source.lines().count() as u32;
+    let tree = crate::lsp_route::document_symbols(&args.file, &source);
+
+    let mut entries = Vec::new();
+    flatten_outline(&tree, &source, 0, &mut entries);
+
+    let note = match entries.is_empty() {
+        true => Some(server_wait_note(&args.file).unwrap_or_else(|| {
+            "Nothing was outlined. Either the file declares nothing, or the engine that would              know does not serve this file type."
+                .to_string()
+        })),
+        false => None,
+    };
+    Ok(OutlineResult { total_lines, entries, note })
+}
+
+/// Walk a symbol tree into the flat list with a depth.
+fn flatten_outline(
+    nodes: &[bennu_proto::prelude::LspSymbol],
+    source: &str,
+    depth: usize,
+    out: &mut Vec<OutlineEntry>,
+) {
+    for node in nodes {
+        let (line, column) = line_col_of(source, node.name_start);
+        let (from_line, _) = line_col_of(source, node.start);
+        let (to_line, _) = line_col_of(source, node.end.saturating_sub(1).max(node.start));
+        out.push(OutlineEntry {
+            name: node.name.clone(),
+            kind: node.kind.clone(),
+            detail: node.detail.clone().filter(|d| !d.is_empty()),
+            doc: doc_summary(source, from_line),
+            line,
+            column,
+            from_line,
+            to_line,
+            depth,
+        });
+        flatten_outline(&node.children, source, depth + 1, out);
+    }
+}
+
+/// Args for [`bennu_problems`].
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProblemsArgs {
+    /// Absolute path to the project root.
+    pub root: String,
+    /// Keep only these severities: `error`, `warning`, `info`, `hint`. Omit for all.
+    #[serde(default)]
+    pub severity: Option<Vec<String>>,
+    /// Cap on problems returned. Defaults to 200.
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// Everything wrong in one file.
+#[derive(Debug, Serialize)]
+pub struct FileProblems {
+    pub file: String,
+    /// How many this file has, before the cap.
+    pub count: usize,
+    pub problems: Vec<ProblemEntry>,
+}
+
+/// One reported problem.
+#[derive(Debug, Serialize)]
+pub struct ProblemEntry {
+    pub severity: String,
+    pub message: String,
+    /// 1-based line, and column, of where it starts.
+    pub line: u32,
+    pub column: u32,
+    /// The rule or error code, when there is one (`E0432`, `unused_imports`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+}
+
+/// What a project currently reports as wrong.
+#[derive(Debug, Serialize)]
+pub struct ProblemsResult {
+    pub files: Vec<FileProblems>,
+    pub errors: usize,
+    pub warnings: usize,
+    pub total: usize,
+    pub note: Option<String>,
+}
+
+/// Every problem the project's engine currently reports — **without building**.
+///
+/// The cheap "did I break anything". A language server has already run the project's own checker
+/// and publishes as it finishes, including for files nobody has opened, so this is a read of an
+/// answer that already exists rather than a build that produces one. `bennu_build` is still the
+/// call when you want a compile; this is the one for after an edit.
+///
+/// **Only this project's own files.** A server reports on the whole crate graph it built, which
+/// for a `path` dependency means files in another repository — real, and not yours to fix from
+/// here.
+///
+/// An empty result is not proof of a clean project: a server that has not finished its first
+/// check has published nothing yet, and the note says so when that is the case.
+#[arbor_rpc::handler(mcp(
+    title = "List the project's current problems",
+    safety = read,
+))]
+fn bennu_problems(_ctx: &BennuState, args: ProblemsArgs) -> Result<ProblemsResult, String> {
+    let limit = args.limit.unwrap_or(200).clamp(1, 2_000);
+    let wanted: Option<Vec<String>> =
+        args.severity.as_ref().map(|v| v.iter().map(|s| s.to_lowercase()).collect());
+
+    let mut files = Vec::new();
+    let (mut errors, mut warnings, mut total) = (0usize, 0usize, 0usize);
+    let mut budget = limit;
+
+    for fd in crate::lsp_route::problems(&args.root) {
+        // The wire carries byte offsets and a caller counts lines. Read once per file that has
+        // problems — which is exactly the set worth reading — and only when one survived the
+        // severity filter, so asking for errors on a project full of warnings reads nothing.
+        let mut text: Option<Option<String>> = None;
+        let kept: Vec<ProblemEntry> = fd
+            .diagnostics
+            .into_iter()
+            .filter(|d| wanted.as_ref().is_none_or(|w| w.contains(&d.severity.to_lowercase())))
+            .map(|d| {
+                match d.severity.as_str() {
+                    "error" => errors += 1,
+                    "warning" => warnings += 1,
+                    _ => {}
+                }
+                let source = text.get_or_insert_with(|| read_source(&args.root, &fd.file).ok());
+                let (line, column) = match source.as_deref() {
+                    Some(source) => line_col_of(source, d.start),
+                    // Unreadable — deleted since the server last spoke, or outside the encoding
+                    // it was opened with. The problem is still worth reporting; only its
+                    // coordinates are lost.
+                    None => (0, 0),
+                };
+                ProblemEntry {
+                    severity: d.severity,
+                    message: d.message,
+                    line,
+                    column,
+                    code: Some(d.code).filter(|c| !c.is_empty()),
+                }
+            })
+            .collect();
+        if kept.is_empty() {
+            continue;
+        }
+        total += kept.len();
+        let count = kept.len();
+        let mut kept = kept;
+        kept.truncate(budget);
+        budget -= kept.len();
+        files.push(FileProblems { file: fd.file, count, problems: kept });
+    }
+
+    // Heaviest first, like every other grouped answer here.
+    files.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.file.cmp(&b.file)));
+
+    let note = if total > limit {
+        Some(format!("Showing {limit} of {total} problems. Narrow with `severity`, or raise `limit`."))
+    } else if total == 0 {
+        Some(
+            "Nothing is currently reported. That is not the same as a clean build: a server that              has not finished its first check has published nothing yet — bennu_index_stats says              whether it is up."
+                .to_string(),
+        )
+    } else {
+        None
+    };
+    Ok(ProblemsResult { files, errors, warnings, total, note })
+}
+
+/// Args for [`bennu_callers`].
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CallersArgs {
+    /// Absolute path to the project root.
+    pub root: String,
+    /// Absolute path to the file holding the function. Not needed when `symbol` is given.
+    #[serde(default)]
+    pub file: String,
+    /// 1-based line of its name. Ignored when `symbol` is given.
+    #[serde(default)]
+    pub line: u32,
+    /// 1-based character column. Any column within the identifier works.
+    #[serde(default)]
+    pub column: Option<u32>,
+    /// Address it **by name** instead: `MoleAnim.apply` for a method of a type.
+    #[serde(default)]
+    pub symbol: Option<String>,
+    /// How many levels of caller to walk. `1` is the direct callers; `2` is their callers too.
+    /// Defaults to 2, capped at 5.
+    ///
+    /// Two is the default because it is the depth that answers the question this exists for —
+    /// "is this reached from that command" — while one level answers only "who calls it", which
+    /// is what `bennu_references` already says.
+    #[serde(default)]
+    pub depth: Option<usize>,
+    /// Stop as soon as a caller's name contains this, case-insensitively, and report the chain
+    /// that got there. The direct way to ask "is this reachable from X".
+    #[serde(default)]
+    pub reaches: Option<String>,
+    /// Cap on nodes visited. Defaults to 200.
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// One function in the caller tree.
+#[derive(Debug, Serialize)]
+pub struct CallerNode {
+    pub name: String,
+    /// The server's word for what it is (`function`, `method`).
+    pub kind: String,
+    pub file: String,
+    /// 1-based line of the caller's own declaration.
+    pub line: u32,
+    /// How many steps from the function asked about. `1` is a direct caller.
+    pub depth: usize,
+    /// The chain from the function asked about up to this one, outermost last —
+    /// `["apply_mole_anim", "tick_moles", "on_key_6"]`. The answer to "how is this reached",
+    /// which a flat list of callers cannot give.
+    pub via: Vec<String>,
+}
+
+/// Who calls a function, transitively.
+#[derive(Debug, Serialize)]
+pub struct CallersResult {
+    /// What the position or name resolved to.
+    pub target: String,
+    /// Every caller found, nearest first.
+    pub callers: Vec<CallerNode>,
+    pub total: usize,
+    /// When `reaches` was given: the chain that got there, or absent if nothing did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reached_by: Option<Vec<String>>,
+    /// Why the answer is empty, short, or stopped early.
+    pub note: Option<String>,
+}
+
+/// Who calls this function — **transitively**, to a given depth.
+///
+/// The question a flat find-usages cannot answer: not "who calls `apply_mole_anim`" but "is
+/// `apply_mole_anim` reached from the ⌘6 handler". One level of callers is a list of names you
+/// then have to look up one at a time; two levels is usually the whole answer, and every result
+/// carries the **chain** that reached it rather than only its own name.
+///
+/// `reaches` asks it directly: give a name and the search stops at the first caller matching it,
+/// reporting the path. Absent, it returns the whole tree to `depth`.
+///
+/// Answered by the language server's call hierarchy, so it follows calls rather than text — a
+/// function reached through a trait object is found, and a comment naming it is not.
+#[arbor_rpc::handler(mcp(
+    title = "Find who calls a function, transitively",
+    safety = read,
+))]
+fn bennu_callers(_ctx: &BennuState, args: CallersArgs) -> Result<CallersResult, String> {
+    let (file, line, column) = resolve_position(
+        &args.root,
+        args.symbol.as_deref(),
+        &args.file,
+        args.line,
+        args.column.unwrap_or(1),
+    )?;
+    let source = read_source(&args.root, &file)?;
+    let (offset, line_text) = offset_of(&source, line, column)?;
+    let depth = args.depth.unwrap_or(2).clamp(1, 5);
+    let limit = args.limit.unwrap_or(200).clamp(1, 2_000);
+
+    let Some(root_item) = crate::lsp_route::prepare_hierarchy(&file, &source, offset, true)
+        .into_iter()
+        .next()
+    else {
+        return Ok(CallersResult {
+            target: String::new(),
+            callers: Vec::new(),
+            total: 0,
+            reached_by: None,
+            note: Some(server_wait_note(&file).unwrap_or_else(|| {
+                format!(
+                    "Nothing callable at line {line} column {column} — the position may not be on \
+                     a function. The line reads: {}",
+                    line_text.trim(),
+                )
+            })),
+        });
+    };
+
+    let target = root_item.name.clone();
+    let wanted = args.reaches.as_deref().map(str::to_lowercase);
+    let mut out: Vec<CallerNode> = Vec::new();
+    let mut reached_by = None;
+    // Cycles are ordinary in a call graph — mutual recursion, a trait method calling itself
+    // through a default — so a visited set is not an optimisation here, it is what terminates.
+    let mut seen: std::collections::HashSet<(String, usize)> = std::collections::HashSet::new();
+    let mut frontier = vec![(root_item, vec![target.clone()])];
+    let mut visited = 0usize;
+    let mut capped = false;
+
+    'walk: for level in 1..=depth {
+        let mut next = Vec::new();
+        for (item, chain) in frontier {
+            if visited >= limit {
+                capped = true;
+                break 'walk;
+            }
+            visited += 1;
+            for caller in crate::lsp_route::hierarchy_step(&args.root, item.handle, "incoming") {
+                if !seen.insert((caller.file.clone(), caller.start)) {
+                    continue;
+                }
+                let mut here = chain.clone();
+                here.push(caller.name.clone());
+                out.push(CallerNode {
+                    name: caller.name.clone(),
+                    kind: caller.kind.clone(),
+                    file: caller.file.clone(),
+                    line: caller.line as u32,
+                    depth: level,
+                    via: here.clone(),
+                });
+                if wanted.as_ref().is_some_and(|w| caller.name.to_lowercase().contains(w)) {
+                    reached_by = Some(here.clone());
+                    break 'walk;
+                }
+                next.push((caller, here));
+            }
+        }
+        if next.is_empty() {
+            break;
+        }
+        frontier = next;
+    }
+
+    let total = out.len();
+    let note = if reached_by.is_some() {
+        None
+    } else if let Some(w) = &args.reaches {
+        Some(format!(
+            "Nothing matching `{w}` calls `{target}` within {depth} level(s). Raise `depth`, or \
+             it is genuinely not reached that way.",
+        ))
+    } else if capped {
+        Some(format!(
+            "Stopped after {limit} nodes — the tree is wider than the cap, so this is a partial \
+             answer. Narrow it with `reaches`, or raise `limit`.",
+        ))
+    } else if total == 0 {
+        Some(server_wait_note(&file).unwrap_or_else(|| {
+            format!("Nothing calls `{target}` — it may be an entry point, or called dynamically.")
+        }))
+    } else {
+        None
+    };
+
+    Ok(CallersResult { target, callers: out, total, reached_by, note })
+}
+
+/// A position, from either address: a `symbol` name or an explicit file/line/column.
+///
+/// Extracted the moment a second tool needed it. The by-name half is the one that matters — a
+/// field or a method is named everywhere else, and requiring a line and a column here is what put
+/// a `grep` in front of every one of these calls.
+fn resolve_position(
+    root: &str,
+    symbol: Option<&str>,
+    file: &str,
+    line: u32,
+    column: u32,
+) -> Result<(String, u32, u32), String> {
+    let Some(name) = symbol.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok((file.to_string(), line, column));
+    };
+    let Some((owner, member)) = split_qualified(name) else {
+        return Err(format!(
+            "`{name}` is not a qualified member name. Write it as `Owner.member` (or \
+             `Owner::member`), or address the symbol by file, line and column."
+        ));
+    };
+    let Some(hit) = resolve_member(root, owner, member) else {
+        return Err(format!(
+            "`{name}` did not resolve. Either `{owner}` is not a type this project declares, or \
+             it has no member called `{member}` — check with bennu_find_symbol, whose note says \
+             whether the server is up."
+        ));
+    };
+    Ok((
+        hit.file.unwrap_or_default(),
+        hit.line.unwrap_or(1) as u32,
+        hit.column.unwrap_or(1) as u32,
+    ))
 }
 
 /// Args for [`bennu_implementors`].
@@ -596,6 +1286,131 @@ fn bennu_implementors(
     Ok(ImplementorsResult { target: found.target_label, files, total, note })
 }
 
+/// A name written as `Owner.member` / `Owner::member`, split into its two halves.
+///
+/// `None` when there is no separator — a bare name is not a qualified one, and treating the last
+/// segment of `crate::field::FieldCrystal` as a member would resolve the wrong thing entirely.
+/// So a path is only read as qualified when it has **exactly one** separator, which is what
+/// somebody writes when they mean "this field of that type".
+fn split_qualified(query: &str) -> Option<(&str, &str)> {
+    let q = query.trim();
+    let parts: Vec<&str> = match q.contains("::") {
+        true => q.split("::").collect(),
+        false => q.split('.').collect(),
+    };
+    match parts.as_slice() {
+        [owner, member] if !owner.is_empty() && !member.is_empty() => Some((owner, member)),
+        _ => None,
+    }
+}
+
+/// Find `member` inside `owner`, and say exactly where its name is written.
+///
+/// The gap this closes, in the words of the person who hit it four times in one session: asking
+/// "who reads this field, now that it exists" is a `bennu_references` call, and `bennu_references`
+/// wants a line and a column — so every time it began with a `grep` to find the line. A field is
+/// addressed by its name in every other context; it should be here too.
+///
+/// Two steps, because that is what the protocol offers. The owner is found by workspace search;
+/// its **document symbols** are then walked for a child of that name. The second step is what
+/// makes this exact rather than a guess: a `hue` field of `FieldCrystal` and a `hue` of `Palette`
+/// are two symbols with one name, and only the tree knows which is inside which.
+fn resolve_member(root: &str, owner: &str, member: &str) -> Option<SymbolHit> {
+    let owners: Vec<bennu_proto::prelude::LspSymbol> = crate::lsp_route::workspace_symbols(root, owner)
+        .into_iter()
+        .filter(|s| s.name == owner)
+        .collect();
+
+    for candidate in owners {
+        let Ok(text) = read_source(root, &candidate.file) else { continue };
+        let tree = crate::lsp_route::document_symbols(&candidate.file, &text);
+        let Some(node) = find_in_tree(&tree, owner) else { continue };
+        let Some(field) = node.children.iter().find(|c| c.name == member) else { continue };
+        let (line, column) = line_col_of(&text, field.name_start);
+        return Some(SymbolHit {
+            kind: "member".to_string(),
+            name: format!("{owner}.{member}"),
+            detail: match field.detail.clone().filter(|d| !d.is_empty()) {
+                Some(detail) => format!("{} · {detail}", field.kind),
+                None => field.kind.clone(),
+            },
+            file: Some(candidate.file.clone()),
+            line: Some(line as i64),
+            column: Some(column as i64),
+        });
+    }
+    None
+}
+
+/// The 1-based line range of the declaration `name` in `file`, from the file's own symbol tree.
+///
+/// `name` is `Owner.member` or a bare type / function name. The range is the **whole**
+/// declaration — body included, and whatever the server counted as belonging to it, which for
+/// rust-analyzer includes the doc comment above it.
+///
+/// Exists so a file can be read one declaration at a time. Without it, "show me `apply_mole_anim`"
+/// is a whole-file read followed by the caller counting lines — which is the file spent to learn a
+/// twentieth of it, every time.
+pub(crate) fn declaration_lines(file: &str, source: &str, name: &str) -> Option<(u32, u32)> {
+    let tree = crate::lsp_route::document_symbols(file, source);
+    let node = match split_qualified(name) {
+        Some((owner, member)) => {
+            find_in_tree(&tree, owner)?.children.iter().find(|c| c.name == member)?
+        }
+        None => find_in_tree(&tree, name)?,
+    };
+    let (from, _) = line_col_of(source, node.start);
+    let (to, _) = line_col_of(source, node.end.saturating_sub(1).max(node.start));
+    // Widened upwards over the doc comment when the engine's range starts below it. Reading a
+    // declaration without the paragraph that says why it is the way it is means reading the half
+    // that a careful codebase puts the least information in.
+    Some((doc_start(source, from), to))
+}
+
+/// The first line of the doc comment attached to a declaration starting at `line`, or `line`
+/// itself when there is none. Attributes and annotations are stepped over; a blank line is not.
+fn doc_start(source: &str, line: u32) -> u32 {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut i = line.saturating_sub(1) as usize;
+    if lines.get(i).is_some_and(|l| is_doc_line(l)) {
+        return line;
+    }
+    while i > 0 {
+        let above = lines[i - 1].trim();
+        if above.starts_with('#') || above.starts_with('@') || above.ends_with(',') {
+            i -= 1;
+            continue;
+        }
+        break;
+    }
+    let after_decoration = i;
+    while i > 0 && is_doc_line(lines[i - 1]) {
+        i -= 1;
+    }
+    match i < after_decoration {
+        true => (i + 1) as u32,
+        // No doc: the decoration is part of the declaration and worth keeping, so the range
+        // starts where the attributes do rather than where the engine put it.
+        false => (after_decoration + 1) as u32,
+    }
+}
+
+/// The node named `name` anywhere in a document-symbol tree, outermost first.
+fn find_in_tree<'a>(
+    nodes: &'a [bennu_proto::prelude::LspSymbol],
+    name: &str,
+) -> Option<&'a bennu_proto::prelude::LspSymbol> {
+    for node in nodes {
+        if node.name == name {
+            return Some(node);
+        }
+        if let Some(found) = find_in_tree(&node.children, name) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 /// The kinds a language server calls a **type**, so `kind: "type"` means the same thing whichever
 /// engine answered. Everything else it reports is filed as a member.
 const SERVER_TYPE_KINDS: &[&str] = &[
@@ -626,6 +1441,20 @@ fn find_symbol_via_server(
     let want_members = !matches!(kind, Some("type"));
     let needle = query.trim().to_lowercase();
 
+    // `SavedWorld.extra_moles` — a member named by its owner. Answered exactly, from the owner's
+    // symbol tree, rather than by matching the bare name across the workspace: two structs with a
+    // `hue` field are two symbols with one name, and a substring search cannot tell them apart.
+    if want_members {
+        if let Some((owner, member)) = split_qualified(query) {
+            if let Some(hit) = resolve_member(root, owner, member) {
+                return Ok(FindSymbolResult { hits: vec![hit], total: 1, note: None });
+            }
+            // Fall through to the ordinary search rather than returning empty: the query may be a
+            // path (`crate::field::Foo`) that happens to have one separator, and the bare-name
+            // search will find it.
+        }
+    }
+
     let mut hits: Vec<SymbolHit> = crate::lsp_route::workspace_symbols(root, query.trim())
         .into_iter()
         .filter_map(|s| {
@@ -648,6 +1477,9 @@ fn find_symbol_via_server(
                 },
                 file: Some(s.file),
                 line: Some(s.line as i64),
+                // The server reports the name's own column, which is what makes a hit here
+                // directly usable as the argument to a positional call.
+                column: Some(s.col as i64),
             })
         })
         .collect();
@@ -919,12 +1751,23 @@ pub struct ReferencesAtArgs {
     /// Absolute path to the project root.
     pub root: String,
     /// Absolute path to the file holding the symbol — its declaration, or any use of it.
+    /// Not needed when `symbol` is given.
+    #[serde(default)]
     pub file: String,
-    /// 1-based line of the symbol.
+    /// 1-based line of the symbol. Ignored when `symbol` is given.
+    #[serde(default)]
     pub line: u32,
     /// 1-based character column. Any column within the identifier works.
     #[serde(default)]
     pub column: Option<u32>,
+    /// Address the symbol **by name** instead: `SavedWorld.extra_moles` for a field or method of
+    /// a type, resolved against that type's own symbol tree.
+    ///
+    /// Here because a field is named everywhere else and was addressable only by position here —
+    /// so "who reads this field, now that it exists" began with a `grep` to find the line. When
+    /// this is given, `file`, `line` and `column` are not needed and are ignored.
+    #[serde(default)]
+    pub symbol: Option<String>,
     /// Cap on the use sites returned. Defaults to 200.
     #[serde(default)]
     pub limit: Option<usize>,
@@ -1050,6 +1893,29 @@ fn usage_kind(line: &str, name_at: usize, name: &str, is_decl: bool) -> &'static
 }
 
 #[cfg(test)]
+mod qualified_name_tests {
+    use super::split_qualified;
+
+    #[test]
+    fn a_member_is_named_by_its_owner_and_nothing_else_is() {
+        // What somebody writes when they mean "this field of that type".
+        assert_eq!(split_qualified("SavedWorld.extra_moles"), Some(("SavedWorld", "extra_moles")));
+        assert_eq!(split_qualified("SavedWorld::extra_moles"), Some(("SavedWorld", "extra_moles")));
+        assert_eq!(split_qualified("  Palette.hue  "), Some(("Palette", "hue")));
+
+        // A bare name is not qualified.
+        assert_eq!(split_qualified("extra_moles"), None);
+        // …and neither is a PATH, which is the case that would have resolved the wrong thing:
+        // the last segment of a module path is a type, not a member of the one before it.
+        assert_eq!(split_qualified("crate::field::FieldCrystal"), None);
+        assert_eq!(split_qualified("com.acme.order.Order"), None);
+        // Malformed halves resolve to nothing rather than to an empty owner.
+        assert_eq!(split_qualified(".hue"), None);
+        assert_eq!(split_qualified("Palette."), None);
+    }
+}
+
+#[cfg(test)]
 mod usage_kind_tests {
     use super::{usage_kind, UsageKind};
 
@@ -1127,6 +1993,10 @@ pub struct ReferencesForAgent {
 /// grouped by file, heaviest first, each site with its source line, so the shape of the
 /// blast radius is visible before reading a single file.
 ///
+/// **A field or method can be named instead of pointed at**: `symbol: "SavedWorld.extra_moles"`
+/// resolves against that type's own symbol tree, so asking "who reads this field" no longer starts
+/// with finding its line.
+///
 /// **Every site says what it is** — `decl`, `import`, `call`, `construct`, `read` — and `kind`
 /// filters on it. That is the difference between reading thirteen lines and reading the four that
 /// matter: before changing a signature, `kind: ["call", "construct"]`; before adding a field to a
@@ -1140,6 +2010,17 @@ fn bennu_references_at(
     ctx: &BennuState,
     args: ReferencesAtArgs,
 ) -> Result<ReferencesForAgent, String> {
+    // A name, resolved to a position, before anything positional happens. The rest of this
+    // function then has one kind of input and does not branch again.
+    let (file, line, column) = resolve_position(
+        &args.root,
+        args.symbol.as_deref(),
+        &args.file,
+        args.line,
+        args.column.unwrap_or(1),
+    )?;
+    let args = ReferencesAtArgs { file: file.clone(), line, column: Some(column), ..args };
+
     let source = read_source(&args.root, &args.file)?;
     let (offset, line_text) = offset_of(&source, args.line, args.column.unwrap_or(1))?;
     let limit = args.limit.unwrap_or(200).clamp(1, 2_000);

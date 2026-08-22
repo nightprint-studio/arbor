@@ -228,6 +228,24 @@ pub struct ReadFileArgs {
     pub root: String,
     /// Absolute path to the file to read.
     pub file: String,
+    /// First line to return, 1-based. Omit for the start of the file.
+    #[serde(default)]
+    pub from_line: Option<u32>,
+    /// Last line to return, 1-based and inclusive. Omit for the end of the file.
+    ///
+    /// A range is worth reaching for far more often than it is: a two-thousand-line file read in
+    /// full to look at one function is that whole file spent to learn twenty lines of it, and the
+    /// reply tells you how many lines there are so a second call can widen if the first was short.
+    #[serde(default)]
+    pub to_line: Option<u32>,
+    /// Read exactly one **declaration** instead: `SavedWorld.extra_moles`, or a bare type name.
+    ///
+    /// The precise version of a range, and it needs no line numbers — which is the point, because
+    /// finding the line numbers is what a caller would otherwise read the file to do. The span
+    /// comes from the file's own symbol tree, so it is the whole declaration including its body
+    /// and the doc comment above it. Overrides `from_line` / `to_line`.
+    #[serde(default)]
+    pub symbol: Option<String>,
 }
 
 /// Read a project file as text, decoded with the encoding that file is actually in.
@@ -236,6 +254,10 @@ pub struct ReadFileArgs {
 /// sources are frequently Cp1252 or Latin-1 rather than UTF-8, and the encoding is
 /// resolved from the build manifest and per-file overrides. Reading those bytes as UTF-8
 /// silently mangles every accented character. The reply names the encoding that applied.
+///
+/// **Ask for less than the whole file when you can.** `symbol` returns one declaration and
+/// nothing else; `from_line` / `to_line` return a range. `total_lines` always says how big the
+/// file is, so a short answer is never mistaken for a complete one.
 #[arbor_rpc::handler(mcp(
     title = "Read a project file",
     safety = read,
@@ -248,8 +270,38 @@ fn bennu_read_file(_ctx: &BennuState, args: ReadFileArgs) -> Result<FileContents
         .get(&args.file)
         .or_else(|| cfg.encoding_overrides.get(&args.root))
         .map(|s| s.as_str());
-    read_file(Path::new(&args.root), Path::new(&args.file), &cfg.default_encoding, override_label)
-        .map_err(Into::into)
+    let mut contents =
+        read_file(Path::new(&args.root), Path::new(&args.file), &cfg.default_encoding, override_label)?;
+
+    let total = contents.text.lines().count() as u32;
+    contents.total_lines = total;
+
+    // A named declaration first: it is the precise request, and it decides the range.
+    let (from, to) = match args.symbol.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(name) => match crate::agent::declaration_lines(&args.file, &contents.text, name) {
+            Some(range) => range,
+            None => {
+                return Err(format!(
+                    "`{name}` is not declared in this file — or its symbol tree is not available \
+                     yet, which is what a language server that has not loaded the project looks \
+                     like. bennu_find_symbol says which."
+                ));
+            }
+        },
+        None => (args.from_line.unwrap_or(1).max(1), args.to_line.unwrap_or(total).max(1)),
+    };
+
+    if from > 1 || to < total {
+        contents.text = contents
+            .text
+            .lines()
+            .skip(from.saturating_sub(1) as usize)
+            .take(to.saturating_sub(from).saturating_add(1) as usize)
+            .collect::<Vec<_>>()
+            .join("\n");
+        contents.from_line = from;
+    }
+    Ok(contents)
 }
 
 /// Args for [`bennu_file_stamps`].

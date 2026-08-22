@@ -215,6 +215,16 @@ pub struct FileContents {
     /// stamp means "unknown", which disables the check rather than failing the save.
     #[serde(default)]
     pub stamp: String,
+    /// How many lines the **whole file** has, whatever slice of it `text` is.
+    ///
+    /// Always present, so a partial read is never mistaken for a complete one — which is the
+    /// failure mode a range invites, and the one that would make a caller conclude something is
+    /// absent from a file it only read a fifth of.
+    #[serde(default)]
+    pub total_lines: u32,
+    /// The 1-based line `text` starts at. `0` or `1` mean the start of the file.
+    #[serde(default)]
+    pub from_line: u32,
 }
 
 /// A cheap fingerprint of a file's on-disk state: `"<mtime_nanos>:<len>"`, or `""` when

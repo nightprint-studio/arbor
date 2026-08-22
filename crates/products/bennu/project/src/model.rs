@@ -125,7 +125,15 @@ pub fn read_file(
     let (text, applied) = encoding::decode(&bytes, &label);
     // Normalize to LF so every downstream byte offset (validation, go-to) agrees with the editor's
     // LF document; the on-disk CRLF is restored on save (see `write_file`).
-    Ok(FileContents { text: encoding::normalize_newlines(&text), encoding: applied, stamp })
+    // The whole file: the range slicing, and the two fields that describe it, belong to the
+    // handler that was asked for a range. A reader that was not asked for one says so with zeros.
+    Ok(FileContents {
+        text: encoding::normalize_newlines(&text),
+        encoding: applied,
+        stamp,
+        total_lines: 0,
+        from_line: 0,
+    })
 }
 
 /// A cheap fingerprint of `file`'s current on-disk state — `"<mtime_nanos>:<len>"`, or

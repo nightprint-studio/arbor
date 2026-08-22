@@ -9,6 +9,18 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **`bennu_read_file` can be asked for less than the whole file** — a line range, or `symbol: "SavedWorld.extra_moles"` for exactly one declaration, resolved from the file's own symbol tree so no line numbers have to be known first. Every reply carries `total_lines`, so a partial read is never mistaken for a complete one.
+
+- **`bennu_outline` carries each declaration's doc summary**, which a language server's own outline does not — the protocol keeps documentation in `hover`, one round trip per symbol. A signature says what a thing takes; the comment says what it is for. And a read by `symbol` now starts at the doc comment and its attributes rather than below them.
+
+- **`bennu_outline`: what a file declares, without reading it.** A two-thousand-line module is thirty lines of outline, and each entry carries the line range of its own declaration — so the next call reads that range rather than the file.
+
+- **`bennu_problems`: what is wrong right now, without building.** A language server has already run the project's checker and publishes as it finishes, including for files nobody has opened; this reads an answer that already exists instead of producing one. An empty result says so rather than implying a clean build.
+
+- **A field can be asked about by name.** `bennu_find_symbol` and `bennu_references` take `SavedWorld.extra_moles`, resolved against that type's own symbol tree rather than by matching the bare name — two structs with a `hue` field are two symbols with one name. "Who reads this field, now that it exists" used to begin with a `grep` to find its line; a hit also carries its column now, so it can be handed straight to a positional call.
+
+- **`bennu_callers`: who calls this, transitively.** One level of callers is a list of names to look up one at a time; this walks two by default and every result carries the **chain** that reached it. `reaches: "on_key_6"` asks the question directly — is this function reached from that one — and answers with the path.
+
 - **`bennu_find_symbol` works on Rust.** "Where does `MoleEntities` live" is the question asked ten times a day on a twenty-three-crate workspace, and the tool answered Java-only — so the caret-addressed half of the toolset could only be reached from a position the caller already had. It asks the language server's workspace symbol search on a Cargo project now. An empty answer says which of the two it is: nothing by that name, or a server that has not loaded the project yet.
 
 - **Every reference says what it is** — `decl`, `import`, `call`, `construct`, `read` — and `bennu_references` filters on it. `kind: ["call", "construct"]` before changing a signature leaves exactly the sites that have to change; `kind: ["construct"]` counts the struct literals that will stop compiling when a field is added, which was previously done by hand.
