@@ -9,6 +9,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **A Rust project is no longer told the Java index is still building.** `bennu_project_summary` reported `index.ready: false` on a Cargo root — the *Java* index, which has nothing to build there and so says not-ready for ever — and told the caller to wait for it and to reach for `bennu_class_index`, which walks `.java` files. An AI session acted on both, correctly, and went away from a project it had open to wait for something that was never going to happen. The summary now names the **engine** that actually answers, omits the index where there is none, and points at the language server's own state.
+
 - **Problems shows this project's problems, not its dependencies'.** A language server reports on the whole crate graph it built, so opening one project filled the panel with warnings from a `path` dependency in another repository — real, and not yours to fix from there. The same rule drops a registry checkout and an outer workspace's other members.
 
 - **Problems is not a Java panel any more.** It showed only what Bennu's own whole-project Java validation produced, so on a Rust, TypeScript, Svelte or Angular project it was empty — `bennu_lsp_problems` existed on both sides of the wire and nothing ever called it. Whatever the language servers publish now lands there too, for files you have never opened, arriving on its own as each check finishes. The sources are kept apart so a `cargo check` cannot erase a validation, or the reverse.

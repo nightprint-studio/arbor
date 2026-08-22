@@ -44,8 +44,19 @@ pub struct ProjectSummary {
     /// Frameworks detected in the source: `struts`, `spring`, `jpa`, … Drives which of
     /// the framework-aware tools will have anything to say.
     pub capabilities: Vec<String>,
+    /// Which engine answers navigation questions here — `bennu-index` on a Java project, the
+    /// language server's name on any other. Load-bearing for a caller deciding what to trust:
+    /// they warm up differently, fail differently, and are asked to hurry up differently.
+    pub engine: String,
     /// Indexed type / member counts, and whether the index has finished building.
-    pub index: IndexSummary,
+    ///
+    /// **Absent on a Cargo project**, and that absence is the honest answer rather than a gap.
+    /// This is the *Java* index; on a Rust root it has nothing to build, so it reports zero types
+    /// and `ready: false` **forever** — which a caller reads as "still indexing" and acts on by
+    /// waiting for something that will never happen. That is not a hypothetical: it is what sent
+    /// a session away from a project it had open, told to come back later.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<IndexSummary>,
     /// What to do next, in words — written for a caller that has just arrived.
     pub next_steps: Vec<String>,
 }
@@ -68,9 +79,12 @@ pub struct IndexSummary {
 /// manifest without discarding the index — and it is what makes every other bennu tool
 /// work, because they all answer from the index this starts building.
 ///
-/// The index builds in the background. When `index.ready` is false the project is
-/// usable but navigation and diagnostics will be incomplete; call again in a few
-/// seconds rather than concluding a symbol does not exist.
+/// **Read `engine` before anything else.** It names what actually answers questions here, and
+/// the two answer differently. On a Java project it is Bennu's own index, reported in `index`:
+/// while `index.ready` is false the project is usable but navigation is incomplete, so call again
+/// in a few seconds rather than concluding a symbol does not exist. On a Cargo project it is a
+/// **language server**, `index` is absent entirely — there is no Java index there and none is
+/// being built — and what has to warm up is the server, whose state `engine` carries.
 #[arbor_rpc::handler(mcp(
     title = "Open a project and summarise it",
     safety = read,
@@ -93,6 +107,8 @@ fn bennu_project_summary(
     )?;
     let stats = IndexService::global().index_stats(&args.root);
     let capabilities = detected_capabilities(&info.capabilities);
+    let java = info.kind.is_java();
+    let server = server_for_root(&args.root);
 
     Ok(ProjectSummary {
         root: info.root.clone(),
@@ -101,16 +117,37 @@ fn bennu_project_summary(
         modules: info.modules.clone(),
         jdk: info.jdk.as_ref().map(|j| j.version.clone()),
         source_encoding: info.source_encoding.clone(),
-        next_steps: next_steps(&stats, &capabilities),
-        index: IndexSummary {
+        next_steps: next_steps(java, &stats, server.as_ref(), &capabilities),
+        engine: match (java, &server) {
+            (true, _) => "bennu-index".to_string(),
+            (false, Some(s)) => format!("{} ({})", s.name, s.state),
+            (false, None) => "none — no language server is running for this project".to_string(),
+        },
+        index: java.then(|| IndexSummary {
             ready: stats.ready,
             types: stats.types,
             members: stats.members,
             actions: stats.actions,
             beans: stats.beans,
-        },
+        }),
         capabilities,
     })
+}
+
+/// The language server running for `root`, if one is.
+///
+/// The longest matching root, so a workspace member opened in its own right reports its own
+/// server rather than the outer workspace's.
+fn server_for_root(root: &str) -> Option<bennu_proto::prelude::LspStatus> {
+    let needle = root.replace('\\', "/");
+    crate::lsp_registry::LspRegistry::global()
+        .statuses()
+        .into_iter()
+        .filter(|s| {
+            let r = s.root.replace('\\', "/");
+            needle == r || needle.starts_with(&format!("{}/", r.trim_end_matches('/')))
+        })
+        .max_by_key(|s| s.root.len())
 }
 
 /// The names of the capabilities that came back `true`.
@@ -133,8 +170,53 @@ fn detected_capabilities(set: &bennu_proto::prelude::CapabilitySet) -> Vec<Strin
 /// A description is static and has to cover every project; this sees *this* project and
 /// can say the one useful thing — that the index is still warming, or that a Struts
 /// config graph exists and is worth asking about.
-fn next_steps(stats: &bennu_proto::prelude::IndexStats, capabilities: &[String]) -> Vec<String> {
+fn next_steps(
+    java: bool,
+    stats: &bennu_proto::prelude::IndexStats,
+    server: Option<&bennu_proto::prelude::LspStatus>,
+    capabilities: &[String],
+) -> Vec<String> {
     let mut steps = Vec::new();
+
+    // **Which engine, first.** Everything below depends on it, and getting it wrong is not a
+    // missing sentence but a wrong instruction: a Cargo project was told the semantic index was
+    // "still building" — the *Java* index, which has nothing to build on a Rust root and therefore
+    // reports not-ready for ever — and to reach for `bennu_class_index`, which walks `.java` files
+    // and can only ever come back empty. A caller acted on both, correctly, and went away from a
+    // project it had open to wait for something that was never going to happen.
+    if !java {
+        steps.push(match server {
+            Some(s) if s.state == "ready" => format!(
+                "Navigation here is answered by {}, which is up. There is no Java semantic index                  on a Cargo project and none is being built.",
+                s.name,
+            ),
+            Some(s) if s.state == "starting" => format!(
+                "{} is still loading this project{}. Until it is up, an empty result means it has                  nothing loaded to answer from — not that nothing was found. Seconds, not minutes.",
+                s.name,
+                match s.progress.is_empty() {
+                    true => String::new(),
+                    false => format!(" ({})", s.progress),
+                },
+            ),
+            Some(s) => format!(
+                "{} is not running for this project ({}), and it is what answers questions about                  this language. Nothing here can be resolved until that is fixed — it is not a                  statement about the code.",
+                s.name,
+                match s.message.is_empty() {
+                    true => s.state.clone(),
+                    false => s.message.clone(),
+                },
+            ),
+            None => "No language server is running for this project yet. One starts on the first                      question about a source file, so ask — do not wait for an index; there is no                      Java semantic index on a Cargo project and none is being built."
+                .to_string(),
+        });
+        steps.push(
+            "Use bennu_find_symbol to reach a type or function by name, and bennu_read_file to \
+             read source. bennu_class_index is Java-only and will be empty here."
+                .to_string(),
+        );
+        return steps;
+    }
+
     if !stats.ready {
         steps.push(
             "The semantic index is still building. Navigation and diagnostics will be \
@@ -2265,6 +2347,83 @@ mod project_shape_tests {
     fn dropped_diagnostics_are_counted_rather_than_silently_cut() {
         let note = build_note("cargo", false, 120, 70, "").unwrap();
         assert!(note.contains("70 further problem"), "{note}");
+    }
+}
+
+#[cfg(test)]
+mod next_steps_tests {
+    use super::next_steps;
+    use bennu_proto::prelude::{IndexStats, LspStatus};
+
+    /// A Cargo root's index stats, and they never change: there is no Java index to build, so
+    /// this is exactly what the summary reported for ever.
+    fn stats() -> IndexStats {
+        IndexStats {
+            types: 0,
+            members: 0,
+            jdk_version: String::new(),
+            jar_count: 0,
+            actions: 0,
+            beans: 0,
+            relations: 0,
+            ready: false,
+        }
+    }
+
+    fn server(state: &str) -> LspStatus {
+        LspStatus {
+            id: "rust-analyzer".into(),
+            name: "rust-analyzer".into(),
+            language: "rust".into(),
+            root: "/w/geode".into(),
+            command: "rust-analyzer".into(),
+            version: None,
+            state: state.into(),
+            message: String::new(),
+            progress: String::new(),
+            features: Vec::new(),
+            log_tail: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_cargo_project_is_never_told_the_java_index_is_still_building() {
+        // The report this exists for. `index.ready` is false on a Cargo root and always will be,
+        // so the old wording sent a caller away from a project it had open to wait for something
+        // that was never going to happen — and pointed it at a Java-only tool on the way out.
+        let steps = next_steps(false, &stats(), Some(&server("ready")), &[]);
+        let all = steps.join(" ");
+        assert!(!all.contains("index is still building"), "{all}");
+        assert!(all.contains("rust-analyzer"), "{all}");
+        assert!(all.contains("no Java semantic index"), "{all}");
+        // …and the tool it does suggest is one that can answer.
+        assert!(all.contains("bennu_find_symbol"), "{all}");
+        assert!(all.contains("bennu_class_index is Java-only"), "{all}");
+    }
+
+    #[test]
+    fn a_cargo_project_whose_server_is_warming_is_told_to_wait_for_THAT() {
+        let mut warming = server("starting");
+        warming.progress = "Indexing 43%".into();
+        let all = next_steps(false, &stats(), Some(&warming), &[]).join(" ");
+        assert!(all.contains("Indexing 43%"), "{all}");
+        assert!(all.contains("not that nothing was found"), "{all}");
+    }
+
+    #[test]
+    fn a_cargo_project_with_no_server_is_told_to_ask_rather_than_wait() {
+        // A server starts on the first question, so "wait" is the one instruction that cannot
+        // work — nothing will happen until something asks.
+        let all = next_steps(false, &stats(), None, &[]).join(" ");
+        assert!(all.contains("ask"), "{all}");
+        assert!(all.contains("do not wait"), "{all}");
+    }
+
+    #[test]
+    fn a_java_project_still_gets_the_java_guidance() {
+        let all = next_steps(true, &stats(), None, &[]).join(" ");
+        assert!(all.contains("semantic index is still building"), "{all}");
+        assert!(all.contains("bennu_class_index"), "{all}");
     }
 }
 

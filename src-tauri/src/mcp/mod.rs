@@ -314,9 +314,12 @@ see the same projects the user has open, with the same configuration.
 Bennu is a code intelligence engine for Java and Rust projects, aimed at legacy \
 enterprise stacks (Struts, JSP, Spring XML, MyBatis) where behaviour is spread across \
 XML configuration rather than expressed in the code. Call bennu_project_summary first: \
-it opens a project and reports its build model, frameworks and index state. Its semantic \
-index builds in the background — when a lookup comes back empty and the index is not \
-ready, that means 'not yet', not 'nothing there'.
+it opens a project and reports its build model, frameworks, and which engine answers \
+questions about it. Two engines, and they warm up differently: a Java project is served \
+by Bennu's own semantic index, which builds in the background; a Rust one by a language \
+server, and there is no Java index there to wait for. Either way, an empty lookup while \
+the engine is still coming up means 'not yet', not 'nothing there' — the reply says which \
+it is.
 
 Tyto captures the screen. Use it to see what the user sees when no other interface \
 exposes it.
