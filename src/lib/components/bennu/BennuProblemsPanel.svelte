@@ -4,8 +4,14 @@
    *   • **Errors** / **Warnings** (/ Info / Hints) are the top-level nodes.
    *   • Under each, problems are sub-grouped by their source — a **JDK** node (no JDK / fallback
    *     JDK), an **Encoding** node (files not valid in the declared encoding), and one node per
-   *     **file** carrying diagnostics (the active file's LIVE buffer validation shared via
-   *     `bennuDiagnosticsStore`, plus every other file from the whole-project validation).
+   *     **file** carrying diagnostics.
+   *
+   * A file's rows can come from any of **four** sources, which is the point: the active buffer's
+   * live validation, the whole-project Java validation, a project mojibake scan, and — the one
+   * that was missing until it was noticed — whatever the **language servers** are publishing.
+   * That last one is what makes this panel say anything at all on a Rust, TypeScript or Svelte
+   * project: `bennu_lsp_problems` existed on both sides of the wire and nothing ever called it,
+   * so Problems was, in practice, a Java panel.
    *   • Each node (severity and file) is collapsible; the leaf rows click to jump.
    *
    * Because grouping is severity-first, one file can appear under both Errors and Warnings — each
@@ -155,6 +161,26 @@
       fd.diagnostics.forEach((d, i) => {
         out.push({
           id: `proj:${fd.file}:${i}`, severity: d.severity,
+          groupKey: `file:${norm(fd.file)}`, groupLabel: label, groupIcon: FileCode2,
+          label: d.message,
+          title: fd.file,
+          copy: d.message,
+          onClick: () => void projectStore.openFile(fd.file).then(() => bennuUiStore.requestGotoOffset(d.start)),
+        });
+      });
+    }
+
+    // What the LANGUAGE SERVERS report. Its own pass and not merged into the list above, because
+    // the two lists have different lifecycles and a project can legitimately have both — a
+    // polyglot repository whose Java half was validated and whose Rust half is being checked.
+    // The active file is skipped for the same reason: its live rows are ahead of anything a
+    // server published before the last keystroke.
+    for (const fd of bennuDiagnosticsStore.serverDiagnostics) {
+      if (norm(fd.file) === activeNorm) continue;
+      const label = baseName(fd.file);
+      fd.diagnostics.forEach((d, i) => {
+        out.push({
+          id: `lsp:${fd.file}:${i}`, severity: d.severity,
           groupKey: `file:${norm(fd.file)}`, groupLabel: label, groupIcon: FileCode2,
           label: d.message,
           title: fd.file,

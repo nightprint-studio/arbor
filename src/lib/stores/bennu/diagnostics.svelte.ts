@@ -18,6 +18,7 @@ import {
   type EncodingIssue,
 } from '$lib/ipc/bennu/inspect';
 import type { Diagnostic, FileDiagnostics } from '$lib/types/bennu';
+import { SvelteMap } from 'svelte/reactivity';
 
 /** Normalise a path to forward slashes so BE (`/`) and FE (`\`) keys compare. */
 function norm(path: string): string {
@@ -35,6 +36,21 @@ function createBennuDiagnosticsStore() {
   // SEPARATE from `projectDiagnostics` so a subsequent save's silent validation refresh doesn't
   // wipe them (and vice-versa) — they're an independent, explicitly-run project view.
   let mojibakeDiagnostics = $state<FileDiagnostics[]>([]);
+  // What the LANGUAGE SERVERS are reporting, project-wide. Its own list for the same reason the
+  // mojibake hits have one: it has a different lifecycle. The validation list is the result of a
+  // run you asked for; this one is **pushed** — rust-analyzer publishes as `cargo check` finishes,
+  // for files nobody has opened, which is the whole value of it — so either replacing the other
+  // would make a `cargo check` erase a validation, or the reverse, depending on which landed last.
+  //
+  // Not armed, and deliberately: the armed flag exists because a legacy Java project's whole-project
+  // validation can surface thousands of problems nobody asked for. A server's diagnostics are not
+  // that — they are what your build already says about your code, and hiding them until somebody
+  // presses something is hiding the answer to "why did it not compile".
+  //
+  // Keyed by **root**, and that is not bookkeeping: a workspace has several, each with its own
+  // servers publishing on their own schedule, and one flat list replaced per answer meant the
+  // second root's problems erasing the first's every time either one changed.
+  let serverDiagnostics = $state<Map<string, FileDiagnostics[]>>(new SvelteMap());
   // Whether project-wide problems are "armed": once the user runs an explicit "Validate project"
   // (opting into the project-wide view), a save silently refreshes it (cross-file). Before that we
   // don't auto-populate the panel — on a legacy project with thousands of dependency problems, a
@@ -101,6 +117,21 @@ function createBennuDiagnosticsStore() {
     /** Clear the project-validation diagnostics (a new run starts, or the results go stale). */
     clearProjectDiagnostics() { projectDiagnostics = []; },
 
+    /** What the language servers report, across every open root, grouped by file. */
+    get serverDiagnostics(): FileDiagnostics[] {
+      return [...serverDiagnostics.values()].flat();
+    },
+    /** Total problems the servers are currently reporting. */
+    get serverProblemCount() {
+      return this.serverDiagnostics.reduce((n, f) => n + f.diagnostics.length, 0);
+    },
+    /** Replace what the servers of ONE root report. Called whenever one of them publishes; never
+     *  arms anything, because these are not a view somebody opted into — they are what the build
+     *  already says about the code. */
+    setServerDiagnostics(root: string, list: FileDiagnostics[]) {
+      serverDiagnostics.set(root, list);
+    },
+
     /** The project mojibake-scan hits, grouped by file (empty until a scan is added to Problems). */
     get mojibakeDiagnostics() { return mojibakeDiagnostics; },
     /** Total mojibake hits currently shown in the Problems panel. */
@@ -149,6 +180,7 @@ function createBennuDiagnosticsStore() {
       encodingIssues = [];
       projectDiagnostics = [];
       mojibakeDiagnostics = [];
+      serverDiagnostics.clear();
       activeFile = null;
       activeFileDiagnostics = [];
       armed = false;

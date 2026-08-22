@@ -9,9 +9,10 @@
 <p>
   Java files are checked <strong>as you type</strong>, without compiling. Errors show as red
   squiggles, warnings as yellow, and everything is also listed in the Problems panel. (Java, JSP and
-  config XML are the files an analyzer understands; a Rust, <code>.dig</code>, TOML or SQL buffer is
-  edited and highlighted but not checked — in a Cargo project the checker is
-  <strong>Check project</strong>, which runs <code>cargo check</code>.)
+  config XML are the files an analyzer understands; a <code>.dig</code>, TOML or SQL buffer is
+  edited and highlighted but not checked. A language a <strong>server</strong> serves — Rust,
+  TypeScript, Svelte — is checked by that server instead, and its results land in the same Problems
+  panel.)
 </p>
 <p>
   <strong>Static imports are understood</strong>: a member you bring in with
@@ -157,6 +158,27 @@
   a file also silently refreshes the whole panel, so a fix that resolves an error in a
   <em>different</em> file (one that used what you changed) clears there too — again without re-running
   validation by hand.
+</p>
+<p>
+  <strong>It is not a Java panel.</strong> Whatever a <strong>language server</strong> reports lands
+  here too — rust-analyzer's <code>cargo check</code>, TypeScript's, Svelte's, Angular's on a
+  template — including for files you have never opened, which is most of what a check produces. It
+  arrives on its own: a server publishes as its check finishes, and the panel follows. Nothing has
+  to be run by hand and nothing has to be armed, because those are not a project-wide sweep somebody
+  opted into — they are what your build already says about your code.
+</p>
+<p>
+  <strong>Only this project's files.</strong> A server reports on the whole crate graph it built,
+  which for a <code>path</code> dependency means files in another repository — open geode and the
+  panel would fill with the engine's warnings. They are real and they are not yours to fix from a
+  window that does not have that project open, so they are left out. Open that project to see them;
+  that is what opening a project means. The same rule drops a registry checkout and, when a session
+  sits on an outer workspace, that workspace's other members.
+</p>
+<p>
+  The four sources are kept apart on purpose. A polyglot repository can have a Java half that was
+  validated and a Rust half that is being checked, and either replacing the other would mean a
+  <code>cargo check</code> quietly erasing a validation depending on which finished last.
 </p>
 <h3>Machine-generated expressions</h3>
 <p>

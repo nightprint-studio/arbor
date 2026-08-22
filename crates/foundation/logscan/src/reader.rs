@@ -10,7 +10,7 @@
 //! have stdout's chatter interrupting stderr's trace. Two readers cost two `Option<Level>`.
 
 use crate::ansi::{strip, StyleRun};
-use crate::common::level_of;
+use crate::common::{diagnostic_level, level_of};
 use crate::model::{Level, Line, Span, Token};
 use crate::rule::{Part, RuleSet};
 use crate::scan::scan;
@@ -32,7 +32,12 @@ pub fn interpret(rules: &RuleSet, raw: &str) -> Line {
 fn level_from(rules: &RuleSet, text: &str, parts: &[Part]) -> Option<Level> {
     if let Some(explicit) =
         parts.iter().filter(|p| p.token == Token::Level).find_map(|p| {
-            level_of(text[p.start..p.end].trim_matches(|c| c == '[' || c == ']' || c == ':'))
+            let word = text[p.start..p.end].trim_matches(|c| c == '[' || c == ']' || c == ':');
+            // Upper case first, then the lower-case diagnostic words. Trying both here rather
+            // than in one table is what keeps `error` in prose from being a level: only a span a
+            // rule has already called a level ever reaches this, and the only rule that tags a
+            // lower-case one requires it at column zero followed by a colon.
+            level_of(word).or_else(|| diagnostic_level(word))
         })
     {
         return Some(explicit);

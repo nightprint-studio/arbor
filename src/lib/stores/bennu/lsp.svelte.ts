@@ -19,9 +19,10 @@
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
-  lspServers, lspStatus, lspRestart, lspStop, lspInstall,
+  lspServers, lspStatus, lspRestart, lspStop, lspInstall, lspProblems,
   type LspServerInfo, type LspStatus,
 } from '$lib/ipc/bennu/lsp';
+import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
 import type { SourceEdit } from '$lib/types/bennu';
 
 /** Payload of `arbor://bennu/lsp-diagnostics`. */
@@ -68,6 +69,34 @@ function createLspStore() {
 
   let attached = false;
   const unlisteners: UnlistenFn[] = [];
+
+  /**
+   * Re-read the project-wide problem list, once a burst of publications has settled.
+   *
+   * rust-analyzer publishes **per file** as `cargo check` walks the crate graph — dozens of events
+   * in a second on a workspace. Asking after each one would be dozens of round-trips producing the
+   * same list, and a panel that reshuffles while it is being read.
+   *
+   * Debounced rather than coalesced by root: a workspace's servers all publish into the same
+   * burst, and the call is by root anyway, so the last root to publish asks for everything that
+   * covers it — which is every server there, since `bennu_lsp_problems` merges them.
+   */
+  const problemsTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  function scheduleProblems(root: string) {
+    // A timer **per root**, not one shared. A workspace's roots publish independently, and a
+    // single timer meant the last one to fire cancelled every other root's pending question —
+    // so in a two-project workspace one of them never got asked.
+    const existing = problemsTimers.get(root);
+    if (existing) clearTimeout(existing);
+    problemsTimers.set(root, setTimeout(() => {
+      problemsTimers.delete(root);
+      void lspProblems(root)
+        .then((files) => bennuDiagnosticsStore.setServerDiagnostics(root, files))
+        // Silent: a server that went away mid-burst is not a thing to interrupt anybody about,
+        // and the next publication asks again.
+        .catch(() => {});
+    }, 500));
+  }
 
   function recomputeExtensions() {
     const set = new Set<string>();
@@ -275,13 +304,27 @@ function createLspStore() {
 
       unlisteners.push(
         await listen<LspStatus[]>('arbor://bennu/lsp-status', (e) => {
+          const before = new Set(statuses.filter((s) => s.state === 'ready').map((s) => s.root));
           statuses = e.payload ?? [];
+          // A server that has just become ready has diagnostics from before anybody was
+          // listening — it may have finished a `cargo check` while the window was starting. Ask
+          // once, on the transition only: a status event arrives several times a second while a
+          // workspace loads, and asking on each would be a request per progress tick.
+          for (const s of statuses) {
+            if (s.state === 'ready' && !before.has(s.root)) scheduleProblems(s.root);
+          }
         }),
       );
       unlisteners.push(
         await listen<DiagnosticsEvent>('arbor://bennu/lsp-diagnostics', (e) => {
           const file = e.payload?.file;
           if (file) onDiagnostics?.(file);
+          // …and the project-wide list the Problems panel shows. Two consumers of one event,
+          // because they are two different questions: the editor wants the squiggles in the
+          // buffer you are looking at, and the panel wants every file the servers have anything
+          // to say about — which is most of the value, since a server publishes for files nobody
+          // has opened. That is what `cargo check` is.
+          if (e.payload?.root) scheduleProblems(e.payload.root);
         }),
       );
       unlisteners.push(

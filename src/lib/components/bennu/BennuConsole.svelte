@@ -3,7 +3,7 @@
    * The console: a stream of interpreted output, however long it gets.
    *
    * One component rather than three. Run, Build and Tests were each rendering the same
-   * `RunLogLine[]` with their own copy of the row markup, the stream colours and the
+   * `RunLogLine[]` with their own copy of the row markup, the level colours and the
    * scroll-to-bottom effect — three places to fix a bug, and three that had already drifted
    * (only Run stopped following when you scrolled up to read something).
    *
@@ -62,21 +62,35 @@
   let rowH = $state(0);
 
   /**
-   * Whether a stderr line should be spared the red.
+   * The row's colour class.
    *
-   * stderr-is-red is a good default for a stream nobody interprets. Once the lines ARE
-   * interpreted it becomes a lie about the common case: Tomcat, and any `java.util.logging`
-   * default, writes its ordinary `INFO` chatter to stderr, and a console that paints a hundred
-   * startup lines red has no way left to show the one that is actually wrong.
+   * **Red means the line said it was an error.** Nothing else does — and in particular the
+   * *stream* does not, which is the assumption this used to make.
+   *
+   * A stream is a channel, not a severity, and treating it as one gets the common case backwards
+   * in both directions. `cargo` writes its **entire** log to standard error: `Compiling`,
+   * `Finished`, `Running`, every warning. Tomcat and every `java.util.logging` default put their
+   * ordinary `INFO` chatter there. Painting all of that red leaves nothing to say when something
+   * is actually wrong — a console where everything is red is a console with no colours.
+   *
+   * So a known level maps to its own colour, and a line nobody could interpret is **neutral**,
+   * whichever pipe it arrived on. What keeps that from losing real failures is that the two
+   * that carry no level word are recognised anyway: Rust's `thread '…' panicked at`, and the
+   * JVM's `Error: Could not find or load main class` — see `arbor-logscan`'s `common.rs`.
+   *
+   * `warn` gets the warning hue rather than being merely spared the red: "not an error" and "a
+   * warning" are different things to say, and a build with three hundred quiet lines and two
+   * amber ones is readable at a glance in a way neither red nor grey alone is.
    */
-  function isCalm(l: RunLogLine): boolean {
-    return l.stream === 'err' && (l.level === 'info' || l.level === 'debug' || l.level === 'trace');
-  }
-
   function rowClass(_text: string, index: number): string {
     const l = lines[index];
     if (!l) return '';
-    return `stream-${l.stream}${isCalm(l) ? ' calm' : ''}`;
+    // These two are ours, not the program's, and never carried a level: what you typed, and our
+    // own status lines.
+    if (l.stream === 'in' || l.stream === 'meta') return `stream-${l.stream}`;
+    // No class at all when nothing said anything: the row's own colour is the neutral body one,
+    // and inventing a `stream-out` class for it would be a name that claims the stream decided.
+    return l.level ? `level-${l.level}` : '';
   }
 </script>
 
@@ -141,9 +155,15 @@
     padding: 0 12px;
     color: var(--text-secondary);
   }
-  :global(.vtv.bc .vtv-row.stream-err) { color: var(--error); }
-  /* …unless the line said what it was, and what it was is routine — see `isCalm`. */
-  :global(.vtv.bc .vtv-row.stream-err.calm) { color: var(--text-secondary); }
+  /* What the line said it was. The stream it arrived on says nothing — see `rowClass`. */
+  :global(.vtv.bc .vtv-row.level-fatal) { color: var(--error); font-weight: 600; }
+  :global(.vtv.bc .vtv-row.level-error) { color: var(--error); }
+  :global(.vtv.bc .vtv-row.level-warn)  { color: var(--warning); }
+  /* Routine. The same body colour an ordinary stdout line has: an `INFO` is not worth a hue, and
+     spending one on it is how the two that matter stop standing out. */
+  :global(.vtv.bc .vtv-row.level-info)  { color: var(--text-secondary); }
+  :global(.vtv.bc .vtv-row.level-debug) { color: var(--text-muted); }
+  :global(.vtv.bc .vtv-row.level-trace) { color: var(--text-muted); }
   :global(.vtv.bc .vtv-row.stream-meta) { color: var(--text-muted); font-style: italic; }
   /* What you typed, marked the way a shell marks it — so a transcript reads as a conversation
      rather than as the program talking to itself. */

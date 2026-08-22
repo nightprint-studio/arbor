@@ -143,6 +143,21 @@
     reading the ninety around it. Levels are recognised in upper case
     (<code>ERROR</code>, <code>[WARN]</code>, <code>SEVERE</code>): a viewer that painted the
     word <em>Error</em> in a sentence red would be a viewer whose colours mean nothing.</li>
+  <li><strong>What a line says beats where it came from.</strong> A compiler writes its warnings
+    to standard error — <code>rustc</code>, <code>cargo</code>, <code>javac</code> and
+    <code>gcc</code> all do — so colouring by stream paints a warning exactly the colour of an
+    error, and then has nothing left to say when something is actually wrong. A
+    <code>warning:</code> at the start of a line is amber, an <code>error:</code> is red, and
+    rustc's <code>note:</code> and <code>help:</code> are the quiet colour they deserve: they are
+    halves of one diagnostic, not four problems. The source excerpt underneath — the
+    <code>--&gt;</code>, the bars, the numbered line — stays part of the diagnostic above it.</li>
+  <li><strong>Red means the line said it was an error</strong>, and nothing else does. A line
+    nobody could interpret is neutral whichever pipe it came down: <code>cargo</code> writes its
+    <em>entire</em> log to standard error — <code>Compiling</code>, <code>Finished</code>,
+    <code>Running</code> — and a console where all of that is red is a console with no colours
+    left. The two failures that carry no level word are recognised anyway, so nothing real is
+    lost: Rust's <code>thread '…' panicked at</code>, and the JVM's <code>Error: Could not find or
+    load main class</code>.</li>
   <li><strong>Stack frames are links.</strong> A frame in a class this project declares
     (<code>at com.acme.Order.total(Order.java:118)</code>) opens that file at that line.
     A frame in the <strong>JDK or a dependency</strong> opens too, in that class's source view

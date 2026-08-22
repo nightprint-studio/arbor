@@ -9,7 +9,7 @@
 //! something to render. The rest is here for hosts writing their own rules.
 
 pub use crate::ansi::{strip, StyleRun};
-pub use crate::common::level_of;
+pub use crate::common::{common_continues, diagnostic_level, level_of};
 pub use crate::java::{class_of, is_synthetic, java_continues, method_of, outer_class};
 pub use crate::model::{Colour, Level, Line, Link, Piece, Span, Style, Token};
 pub use crate::reader::{interpret, LogReader};

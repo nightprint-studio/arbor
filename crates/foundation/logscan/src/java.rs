@@ -38,7 +38,10 @@ impl RuleSet {
 /// Whether a line continues the one above it: an indented line, a stack frame, a
 /// `Caused by:` / `Suppressed:` head, or the `... 23 more` tail.
 pub fn java_continues(text: &str) -> bool {
-    if text.starts_with(' ') || text.starts_with('\t') {
+    // The language-neutral shapes first: indentation, and a compiler's source gutter. The console
+    // that uses this rule set serves a `cargo` run as readily as a Maven one, and a `35 |` line
+    // falling out of its diagnostic is visible as a red line inside an amber block.
+    if crate::common::common_continues(text) {
         return true;
     }
     let t = text.trim_start();

@@ -580,6 +580,17 @@ pub fn did_close(file: &str) -> bool {
     true
 }
 
+/// Whether `file` is inside `root`.
+///
+/// By **path components**, not by string prefix: a project at `/w/app2` is not inside `/w/app`,
+/// and a string comparison says it is. Separators are normalised because one side of this comes
+/// from the frontend and the other off the filesystem.
+fn under(root: &str, file: &str) -> bool {
+    let root = root.replace('\\', "/");
+    let file = file.replace('\\', "/");
+    std::path::Path::new(&file).starts_with(std::path::Path::new(&root))
+}
+
 /// Every file a server currently reports problems in, with their diagnostics — the
 /// project-wide Problems panel.
 ///
@@ -597,6 +608,17 @@ pub fn problems(scope: &str) -> Vec<bennu_proto::prelude::FileDiagnostics> {
             session
                 .diagnostic_files()
                 .into_iter()
+                // **Only files inside the project that was asked about.** A server reports on the
+                // whole crate graph it built, which for a `path` dependency means files in another
+                // repository entirely — open geode and the panel filled up with fulcrum's
+                // warnings. They are real, they are not yours to fix from here, and a list with
+                // somebody else's problems in it is a list nobody reads. Open that project to see
+                // them; that is what opening a project means.
+                //
+                // It also covers the other direction: a session's root can sit ABOVE the scope
+                // (an outer Cargo workspace), and its siblings' problems are no more relevant
+                // than a dependency's.
+                .filter(|f| under(scope, f))
                 .map(|f| {
                     let diags = session
                         .diagnostics_for(&f, None)
@@ -1093,5 +1115,25 @@ mod tests {
         assert_eq!(w.edits.len(), 1, "the auto-import must survive");
         assert_eq!(w.resolve_id, Some(7));
         assert!(w.auto_import.is_none(), "that is the native engine's mechanism");
+    }
+
+    #[test]
+    fn a_dependencys_problems_are_not_this_projects_problems() {
+        // The report this exists for: open geode, and the panel filled with warnings from
+        // fulcrum — a `path` dependency in another repository. rust-analyzer reports on the whole
+        // crate graph it built, and every one of those is real; none of them is yours to fix from
+        // a window that does not have that project open.
+        assert!(under("/w/geode", "/w/geode/crates/app/src/main.rs"));
+        assert!(!under("/w/geode", "/w/fulcrum/crates/mesh/src/lib.rs"));
+        // A registry checkout, which is the same situation with a longer path.
+        assert!(!under("/w/geode", "/home/me/.cargo/registry/src/x/serde-1.0/src/lib.rs"));
+
+        // Components, not a string prefix: this is the case a `starts_with` on the raw string
+        // gets wrong, and it is a real directory layout rather than a contrived one.
+        assert!(!under("/w/app", "/w/app2/src/main.rs"));
+        assert!(under("/w/app", "/w/app"));
+
+        // Both separators, because one side comes from the frontend and the other off the disk.
+        assert!(under("C:/w/app", "C:\\w\\app\\src\\main.rs"));
     }
 }
