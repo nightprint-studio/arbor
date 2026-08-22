@@ -82,6 +82,11 @@ pub use crate::graph::{
 };
 pub use crate::graph_svg::{generate_svg_to_file, ThemeColors};
 pub use crate::status::{get_status, get_status_with, FileStatus, RepoStatus, StatusEntry};
+// NOTE: the `stage` FUNCTIONS are intentionally NOT re-exported flat — `stage_all`
+// / `unstage_paths` / `discard_paths` read as bare verbs with no hint of what they
+// act on, and `explorer::stage` already owns the short name. Call sites reach them
+// by module path (`corvus_git::stage::stage_paths`), same precedent as `explorer`
+// and `list_remote_branches` above.
 // NOTE: `list_remote_branches` is intentionally NOT re-exported flat here — two
 // distinct functions own the name (`branch::list_remote_branches(&Repository)
 // -> Vec<BranchInfo>` lists remote-tracking branches of an open repo;

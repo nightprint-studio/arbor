@@ -3,7 +3,7 @@
   import type { StatusEntry } from '$lib/types/corvus/git';
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import { stageFile } from '$lib/ipc/corvus/stage';
+  import { stagePaths } from '$lib/ipc/corvus/stage';
   import { tooltip } from '$lib/actions/tooltip';
 
   let { conflicts, onResolved }: { conflicts: StatusEntry[]; onResolved: () => void } = $props();
@@ -16,7 +16,7 @@
     if (!tab || resolving.has(path)) return;
     resolving = new Set([...resolving, path]);
     try {
-      await stageFile(tab.id, path);
+      await stagePaths(tab.id, [path]);
       uiStore.showToast(`Marked ${path} as resolved`, 'success');
       onResolved();
     } catch (err) {

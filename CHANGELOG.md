@@ -7,6 +7,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Staging a folder no longer leaves half a moved file behind.** A file moved on disk was filed under the folder it *left*, so "Stage Folder" staged only its departure and the arrival reappeared afterwards as an untracked file somewhere else. A rename is now shown, staged, unstaged and discarded as the two paths it is.
+
+- **"Stage File" and "Stage Folder" are the same operation.** They were two implementations of one idea and only one of them handled deletions the way "Stage All" does — which is why Stage All always worked and the other two sometimes did not. There is now one verb per action, taking a list.
+
 ### Added
 
 - **`bennu_read_file` can be asked for less than the whole file** — a line range, or `symbol: "SavedWorld.extra_moles"` for exactly one declaration, resolved from the file's own symbol tree so no line numbers have to be known first. Every reply carries `total_lines`, so a partial read is never mistaken for a complete one.

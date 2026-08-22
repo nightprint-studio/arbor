@@ -1,17 +1,19 @@
 //! `stage` domain — git-index + commit handlers, served **out-of-process** by
 //! corvus-be.
 //!
-//! Same handler set (and function names → method names) as the shell's
-//! in-process copy (`crate::ipc::corvus::stage`), but the context is
-//! [`CorvusState`] instead of the shell's `AppState`: the repo is opened by the
-//! shell-pushed path ([`crate::repo::open`]). The git work here is **direct
-//! libgit2** (not `corvus-git` CLI wrappers), ported byte-for-byte from the
-//! in-process source — the `revparse_single("HEAD")` peel-bug workarounds, the
-//! initial-commit branches, the `0x3000 >> 12` stage extraction, and the
-//! `cleanup_state()`-only-when-clean discipline are all preserved exactly. The
-//! error strings match in-process: a git2 error surfaced via the old
-//! `AppError::Git` Displays as `"Git error: {e}"`, `AppError::CommitNotFound`
-//! as `"Commit not found: {oid}"`, and `AppError::Other(s)` as the bare string.
+//! The context is [`CorvusState`]: the repo is opened by the shell-pushed path
+//! ([`crate::repo::open`]). The index mutations themselves live in
+//! [`corvus_git::stage`] — one verb per operation, each taking a **list of
+//! paths**, so "Stage File" and "Stage Folder" are the same code with a
+//! different list length and cannot drift apart. What stays here is the glue
+//! that needs shell-pushed state: the repo handle, the recovery-snapshot
+//! policy, and the plugin hooks.
+//!
+//! The `revparse_single("HEAD")` peel-bug workarounds, the initial-commit
+//! branches, the `0x3000 >> 12` stage extraction and the
+//! `cleanup_state()`-only-when-clean discipline are preserved exactly. Error
+//! strings are the wire contract: a git2 error Displays as `"Git error: {e}"`,
+//! a missing commit as `"Commit not found: {oid}"`, and anything else bare.
 //!
 //! **Hooks fire here, in-process to this backend** (plugin-relocation Wave 0).
 //! `commit` fires the vetoable `corvus:pre_commit` *before* opening/mutating the
@@ -25,7 +27,7 @@
 //! none was pushed — same configured limits as in-process (W0b).
 
 use corvus_core::prelude::{hooks, CorvusState};
-use git2::{IndexAddOption, Status};
+use git2::Status;
 use serde_json::json;
 
 use crate::repo::{git, open, snapshot_policy};
@@ -102,182 +104,60 @@ fn commit(state: &CorvusState, tab_id: String, message: String, amend: bool) -> 
 // Stage / Unstage
 // ---------------------------------------------------------------------------
 
+/// Stage a list of paths in ONE index write — the single verb behind both
+/// "Stage File" and "Stage Folder", because a single file is the one-element
+/// case. Fanning out N single-path RPCs would race on `.git/index`: each opens
+/// its own handle, rewrites the whole index, and the last writer wins.
+///
+/// A **rename is two paths** and the caller sends both halves — see
+/// [`corvus_git::stage`] for why, and for why this is `git add -A -- <paths>`
+/// rather than a hand-rolled add-or-remove.
 #[arbor_rpc::handler]
-fn stage_file(state: &CorvusState, tab_id: String, path: String) -> Result<(), String> {
+fn stage_paths(state: &CorvusState, tab_id: String, paths: Vec<String>) -> Result<(), String> {
     let r = open(state, &tab_id)?;
-
-    // libgit2's `index.add_path` calls `stat` on the workdir file, which
-    // fails (ENOENT / NotFound) when the file has been deleted — the very
-    // case the user is trying to stage.  The git CLI handles this by
-    // detecting a deletion and calling the equivalent of `remove_path`.
-    // Mirror that behaviour: if the file isn't on disk, stage the removal.
-    let exists_on_disk = r.workdir()
-        .map(|w| w.join(&path).exists())
-        .unwrap_or(false);
-
-    let mut index = r.index().map_err(|e| format!("Git error: {e}"))?;
-    let p = std::path::Path::new(&path);
-    if exists_on_disk {
-        index.add_path(p).map_err(|e| format!("Git error: {e}"))?;
-    } else {
-        index.remove_path(p).map_err(|e| format!("Git error: {e}"))?;
-    }
-    index.write().map_err(|e| format!("Git error: {e}"))?;
-    Ok(())
+    corvus_git::stage::stage_paths(&r, &paths).map_err(|e| e.to_string())
 }
 
+/// Reset a list of paths back to HEAD in one pass — the single verb behind both
+/// "Unstage File" and "Unstage Folder".
 #[arbor_rpc::handler]
-fn unstage_file(state: &CorvusState, tab_id: String, path: String) -> Result<(), String> {
+fn unstage_paths(state: &CorvusState, tab_id: String, paths: Vec<String>) -> Result<(), String> {
     let r = open(state, &tab_id)?;
-
-    // revparse_single("HEAD") resolves HEAD directly to a commit Object via the
-    // rev-parse engine — it does NOT call git_reference_peel which is the function
-    // that triggers the InvalidSpec (-12) bug in vendored libgit2.
-    // reset_default() expects a *commit* object (not a tree), so we must NOT use
-    // the "HEAD^{tree}" specifier here.
-    match r.revparse_single("HEAD") {
-        Ok(head_obj) => {
-            // Normal path: reset the index entry for this path back to HEAD commit.
-            r.reset_default(Some(&head_obj), std::iter::once(path.as_str()))
-                .map_err(|e| format!("unstage '{path}': {e}"))?;
-        }
-        Err(_) => {
-            // Initial-commit scenario: HEAD doesn't exist yet, so remove the
-            // path from the index directly (equivalent to `git rm --cached`).
-            let mut index = r.index().map_err(|e| {
-                format!("unstage '{path}': cannot open index: {e}")
-            })?;
-            index.remove_path(std::path::Path::new(&path)).map_err(|e| {
-                format!("unstage '{path}': {e}")
-            })?;
-            index.write().map_err(|e| {
-                format!("unstage '{path}': cannot write index: {e}")
-            })?;
-        }
-    }
-
-    Ok(())
+    corvus_git::stage::unstage_paths(&r, &paths).map_err(|e| e.to_string())
 }
 
 #[arbor_rpc::handler]
 fn stage_all(state: &CorvusState, tab_id: String) -> Result<(), String> {
     let r = open(state, &tab_id)?;
-    let mut index = r.index().map_err(|e| format!("Git error: {e}"))?;
-    index.add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
-        .map_err(|e| format!("Git error: {e}"))?;
-    index.write().map_err(|e| format!("Git error: {e}"))?;
-    Ok(())
+    corvus_git::stage::stage_all(&r).map_err(|e| e.to_string())
 }
 
 #[arbor_rpc::handler]
 fn unstage_all(state: &CorvusState, tab_id: String) -> Result<(), String> {
     let r = open(state, &tab_id)?;
-    // Use revparse_single to avoid the peel_to_commit libgit2 bug.
-    match r.revparse_single("HEAD") {
-        Ok(head_obj) => {
-            r.reset(&head_obj, git2::ResetType::Mixed, None)
-                .map_err(|e| format!("Git error: {e}"))?;
-        }
-        Err(_) => {
-            // Initial commit: clear the index entirely.
-            let mut index = r.index().map_err(|e| format!("Git error: {e}"))?;
-            index.clear().map_err(|e| format!("Git error: {e}"))?;
-            index.write().map_err(|e| format!("Git error: {e}"))?;
-        }
-    }
-    Ok(())
+    corvus_git::stage::unstage_all(&r).map_err(|e| e.to_string())
 }
 
-/// Stage a whole list of paths **atomically** — open the index ONCE, apply every
-/// add/remove, then a single `index.write()`. This is what the "stage folder" action calls:
-/// fanning out N concurrent `stage_file` RPCs would race on `.git/index` (each opens its own
-/// handle, reads the on-disk index, mutates one entry, and writes the WHOLE index back — the
-/// last writer wins, so only a subset of the folder ends up staged, or `index.lock` collides).
-/// One handler, one write = no race.
+/// Throw away the working-tree changes of a list of paths: ONE recovery
+/// snapshot for the group (not one per file), then the mutation. The snapshot
+/// is this layer's job because the retention policy is shell-pushed config.
 #[arbor_rpc::handler]
-fn stage_paths(state: &CorvusState, tab_id: String, paths: Vec<String>) -> Result<(), String> {
-    let r = open(state, &tab_id)?;
-    let workdir = r.workdir().map(|w| w.to_path_buf());
-    let mut index = r.index().map_err(|e| format!("Git error: {e}"))?;
-    for path in &paths {
-        // Same deletion handling as `stage_file`: a file missing from the workdir is staged as a
-        // removal (libgit2's `add_path` would fail its `stat`).
-        let exists_on_disk = workdir.as_ref().map(|w| w.join(path).exists()).unwrap_or(false);
-        let p = std::path::Path::new(path);
-        if exists_on_disk {
-            index.add_path(p).map_err(|e| format!("Git error: {e}"))?;
-        } else {
-            index.remove_path(p).map_err(|e| format!("Git error: {e}"))?;
-        }
+fn discard_paths(state: &CorvusState, tab_id: String, paths: Vec<String>) -> Result<(), String> {
+    if paths.is_empty() {
+        return Ok(());
     }
-    index.write().map_err(|e| format!("Git error: {e}"))?;
-    Ok(())
-}
-
-/// Unstage a whole list of paths **atomically** (the "unstage folder" action). On a repo with a
-/// HEAD, a single `reset_default` resets every pathspec at once; on an initial commit (no HEAD),
-/// remove them all from one index handle before a single write. Avoids the same concurrent-index
-/// race as [`stage_paths`].
-#[arbor_rpc::handler]
-fn unstage_paths(state: &CorvusState, tab_id: String, paths: Vec<String>) -> Result<(), String> {
-    let r = open(state, &tab_id)?;
-    match r.revparse_single("HEAD") {
-        Ok(head_obj) => {
-            r.reset_default(Some(&head_obj), paths.iter().map(String::as_str))
-                .map_err(|e| format!("unstage: {e}"))?;
-        }
-        Err(_) => {
-            // Initial-commit scenario: no HEAD yet → remove each path from the index directly.
-            let mut index = r.index().map_err(|e| format!("unstage: cannot open index: {e}"))?;
-            for path in &paths {
-                index.remove_path(std::path::Path::new(path))
-                    .map_err(|e| format!("unstage '{path}': {e}"))?;
-            }
-            index.write().map_err(|e| format!("unstage: cannot write index: {e}"))?;
-        }
-    }
-    Ok(())
-}
-
-#[arbor_rpc::handler]
-fn discard_file(state: &CorvusState, tab_id: String, path: String) -> Result<(), String> {
     let r = open(state, &tab_id)?;
 
-    let file_status = r.status_file(std::path::Path::new(&path)).unwrap_or(Status::empty());
-
-    // Safety net: snapshot the workdir before discarding so untracked files
-    // and local edits can be recovered from the Recovery tab.
     let policy = snapshot_policy(state);
     let _ = corvus_git::recovery::snapshot_with_policy(
         &git(state),
         &r,
         corvus_git::recovery::RecoveryKind::Discard,
-        format!("discard '{path}'"),
+        format!("discard {} file(s)", paths.len()),
         &policy,
     );
 
-    if file_status.intersects(Status::WT_NEW) {
-        // Untracked / new file — delete it from the filesystem.
-        let abs = r.workdir()
-            .ok_or_else(|| "bare repository".to_string())?
-            .join(&path);
-        if abs.exists() {
-            if abs.is_dir() {
-                std::fs::remove_dir_all(&abs)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                std::fs::remove_file(&abs)
-                    .map_err(|e| e.to_string())?;
-            }
-        }
-    } else {
-        // Tracked file — restore from index.
-        let mut checkout_opts = git2::build::CheckoutBuilder::new();
-        checkout_opts.path(&path).force();
-        r.checkout_index(None, Some(&mut checkout_opts))
-            .map_err(|e| format!("Git error: {e}"))?;
-    }
-    Ok(())
+    corvus_git::stage::discard_paths(&r, &paths).map_err(|e| e.to_string())
 }
 
 #[arbor_rpc::handler]
@@ -322,52 +202,6 @@ fn discard_all(state: &CorvusState, tab_id: String) -> Result<(), String> {
     checkout_opts.force();
     r.checkout_index(None, Some(&mut checkout_opts))
         .map_err(|e| format!("Git error: {e}"))?;
-    Ok(())
-}
-
-/// Discard a whole list of paths **atomically** (the "discard folder" action): ONE recovery
-/// snapshot for the group, then per-path — delete untracked files, and restore tracked ones via a
-/// SINGLE `checkout_index` carrying every tracked pathspec. Fanning out N concurrent `discard_file`
-/// RPCs would take N snapshots and race on `checkout_index`; this takes one snapshot and one checkout.
-#[arbor_rpc::handler]
-fn discard_paths(state: &CorvusState, tab_id: String, paths: Vec<String>) -> Result<(), String> {
-    let r = open(state, &tab_id)?;
-
-    // One snapshot for the whole folder (not one per file).
-    let policy = snapshot_policy(state);
-    let _ = corvus_git::recovery::snapshot_with_policy(
-        &git(state),
-        &r,
-        corvus_git::recovery::RecoveryKind::Discard,
-        format!("discard {} file(s)", paths.len()),
-        &policy,
-    );
-
-    let workdir = r.workdir().ok_or_else(|| "bare repository".to_string())?.to_path_buf();
-    let mut checkout_opts = git2::build::CheckoutBuilder::new();
-    let mut any_tracked = false;
-    for path in &paths {
-        let file_status = r.status_file(std::path::Path::new(path)).unwrap_or(Status::empty());
-        if file_status.intersects(Status::WT_NEW) {
-            // Untracked / new — delete from disk.
-            let abs = workdir.join(path);
-            if abs.exists() {
-                if abs.is_dir() {
-                    std::fs::remove_dir_all(&abs).map_err(|e| e.to_string())?;
-                } else {
-                    std::fs::remove_file(&abs).map_err(|e| e.to_string())?;
-                }
-            }
-        } else {
-            // Tracked — queue it for the single index checkout below.
-            checkout_opts.path(path);
-            any_tracked = true;
-        }
-    }
-    if any_tracked {
-        checkout_opts.force();
-        r.checkout_index(None, Some(&mut checkout_opts)).map_err(|e| format!("Git error: {e}"))?;
-    }
     Ok(())
 }
 

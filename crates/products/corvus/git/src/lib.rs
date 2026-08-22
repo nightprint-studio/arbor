@@ -11,6 +11,7 @@
 //!
 //! Domains extracted so far: **bisect** ([`bisect`]) + saved sessions
 //! ([`bisect_sessions`]), **stash** ([`stash`]), **reset** + tags ([`reset`]),
+//! the index mutations behind the Stage panel ([`stage`]),
 //! encoding-aware decode ([`encoding`]), the **recovery** snapshot journal
 //! ([`recovery`]), and the File-Explorer git awareness ([`explorer`] — overlay
 //! badges + light inline actions, shared with `sitta-be`).
@@ -45,6 +46,7 @@ pub mod reset;
 pub mod search;
 pub mod stats;
 pub mod status;
+pub mod stage;
 pub mod stash;
 pub mod submodule;
 pub mod tickets;

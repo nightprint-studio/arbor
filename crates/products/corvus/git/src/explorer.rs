@@ -555,7 +555,7 @@ pub fn unstage(paths: &[String]) -> Result<(), String> {
     if rels.is_empty() {
         return Ok(());
     }
-    // revparse_single avoids the peel_to_commit libgit2 bug (see unstage_file).
+    // revparse_single avoids the peel_to_commit libgit2 bug (see stage::unstage_paths).
     match repo.revparse_single("HEAD") {
         Ok(head) => {
             repo.reset_default(Some(&head), rels.iter().map(|s| s.as_str()))

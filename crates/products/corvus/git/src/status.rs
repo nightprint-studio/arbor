@@ -83,17 +83,13 @@ pub fn get_status_with(repo: &Repository, detect_renames: bool) -> Result<RepoSt
     for entry in statuses.iter() {
         let s = entry.status();
         let path = entry.path().unwrap_or("").to_string();
-        let old_path = entry
-            .head_to_index()
-            .and_then(|d| d.old_file().path().map(|p| p.to_string_lossy().to_string()))
-            .or_else(|| {
-                entry
-                    .index_to_workdir()
-                    .and_then(|d| d.old_file().path().map(|p| p.to_string_lossy().to_string()))
-            });
 
         // Conflicted
         if s.contains(git2::Status::CONFLICTED) {
+            let (path, old_path) = delta_paths(
+                entry.head_to_index().or_else(|| entry.index_to_workdir()),
+                &path,
+            );
             conflicted.push(StatusEntry {
                 path,
                 old_path,
@@ -119,27 +115,27 @@ pub fn get_status_with(repo: &Repository, detect_renames: bool) -> Result<RepoSt
             continue;
         }
 
-        // Index (staged)
-        let index_status = index_status_from_flags(s);
-        if let Some(st) = &index_status {
-            let op = if matches!(st, FileStatus::Renamed) { old_path.clone() } else { None };
+        // Index (staged) — the HEAD→index side, so a staged rename is filed
+        // under where the file is in the index.
+        if let Some(st) = index_status_from_flags(s) {
+            let (path, old_path) = delta_paths(entry.head_to_index(), &path);
             staged.push(StatusEntry {
-                path: path.clone(),
-                old_path: op,
-                index_status: index_status.clone(),
+                path,
+                old_path,
+                index_status: Some(st),
                 workdir_status: None,
             });
         }
 
-        // Workdir (unstaged)
-        let workdir_status = workdir_status_from_flags(s);
-        if let Some(st) = &workdir_status {
-            let op = if matches!(st, FileStatus::Renamed) { old_path.clone() } else { None };
+        // Workdir (unstaged) — the index→workdir side, so a file moved on disk
+        // is filed under where it now IS.
+        if let Some(st) = workdir_status_from_flags(s) {
+            let (path, old_path) = delta_paths(entry.index_to_workdir(), &path);
             unstaged.push(StatusEntry {
-                path: path.clone(),
-                old_path: op,
+                path,
+                old_path,
                 index_status: None,
-                workdir_status: workdir_status.clone(),
+                workdir_status: Some(st),
             });
         }
     }
@@ -183,6 +179,32 @@ pub fn get_status_with(repo: &Repository, detect_renames: bool) -> Result<RepoSt
         is_cherry_picking,
         is_reverting,
     })
+}
+
+/// Where a status side puts the file **now** (`path`) and, when it moved, where
+/// it **was** (`old_path`).
+///
+/// libgit2's `git_status_entry.path` is always the *old* side of a rename, so a
+/// moved file used to be filed under the folder it left. That single fact broke
+/// the Stage panel three ways: the row appeared in the wrong directory, staging
+/// it staged only the departure, and the arrival surfaced on the next refresh as
+/// an untracked file in a folder the user had never touched. `DiffFile` already
+/// keys renames by the new path — this is status agreeing with it.
+///
+/// `old_path` is `Some` only when the two genuinely differ, which is exactly a
+/// rename or a copy. Callers that mutate the index must pass **both** paths:
+/// git stages a move as a removal plus an addition.
+fn delta_paths(delta: Option<git2::DiffDelta<'_>>, fallback: &str) -> (String, Option<String>) {
+    let Some(d) = delta else {
+        return (fallback.to_string(), None);
+    };
+    let as_string = |p: Option<&std::path::Path>| p.map(|p| p.to_string_lossy().into_owned());
+    match (as_string(d.new_file().path()), as_string(d.old_file().path())) {
+        (Some(new), Some(old)) if new != old => (new, Some(old)),
+        (Some(new), _) => (new, None),
+        (None, Some(old)) => (old, None),
+        (None, None) => (fallback.to_string(), None),
+    }
 }
 
 fn index_status_from_flags(s: git2::Status) -> Option<FileStatus> {

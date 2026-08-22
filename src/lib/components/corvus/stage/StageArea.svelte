@@ -17,7 +17,8 @@
   import { compactMiddleDirs } from '$lib/utils/file-tree/compact-middle-dirs';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import StashDialog from '$lib/components/shared/internal/StashDialog.svelte';
-  import { getStatus, stageFile, unstageFile, stageAll, unstageAll, discardFile, discardAll, stagePatch, stagePaths, unstagePaths, discardPaths } from '$lib/ipc/corvus/stage';
+  import { getStatus, stageAll, unstageAll, discardAll, stagePatch, stagePaths, unstagePaths, discardPaths, pathsOf } from '$lib/ipc/corvus/stage';
+  import type { StatusEntry } from '$lib/types/corvus/git';
   import { stashSave } from '$lib/ipc/corvus/branch';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
   import { getWorkdirDiff } from '$lib/ipc/corvus/diff';
@@ -62,10 +63,10 @@
     /** Sorted snapshot of `children.values()` — baked in at build time so the
      *  template never allocates/sorts per render. */
     sortedChildren: StageTreeNode[];
-    entry?: { path: string; workdir_status?: string; index_status?: string };
+    entry?: StatusEntry;
   }
 
-  function buildStageTree(entries: { path: string }[]): StageTreeNode {
+  function buildStageTree(entries: StatusEntry[]): StageTreeNode {
     const root: StageTreeNode = { name: '', fullPath: '', children: new Map(), sortedChildren: [] };
     for (const entry of entries) {
       const parts = entry.path.split('/');
@@ -78,7 +79,7 @@
         }
         node = node.children.get(part)!;
       }
-      node.entry = entry as StageTreeNode['entry'];
+      node.entry = entry;
     }
     // Post-pass: populate sortedChildren on every node so the template can iterate
     // pre-sorted arrays without a filter/sort allocation per render.
@@ -185,7 +186,7 @@
   }
 
   // ── Discard confirmation ─────────────────────────────────────────────────
-  type DiscardTarget = { kind: 'file'; path: string } | { kind: 'all'; count: number } | { kind: 'folder'; paths: string[] };
+  type DiscardTarget = ({ kind: 'paths' } & CtxTarget) | { kind: 'all'; count: number };
   let discardPending = $state<DiscardTarget | null>(null);
 
   function isConfirmDiscardEnabled() {
@@ -193,13 +194,48 @@
   }
 
   // ── Context menu ────────────────────────────────────────────────
-  type FileCtx = { x: number; y: number; items: MenuItem[]; path: string; paths?: string[] };
+  /** What an action operates on: the git paths to send, plus how to name the
+   *  target in a toast. A file and a folder differ only in how these two are
+   *  built, which is why there is one handler per verb and not two. */
+  type CtxTarget = { paths: string[]; label: string };
+  type FileCtx = CtxTarget & { x: number; y: number; items: MenuItem[] };
   let ctxMenu = $state<FileCtx | null>(null);
 
-  function openUnstagedCtx(e: MouseEvent, path: string) {
+  const basename = (p: string) => p.split('/').pop() ?? p;
+  /** A moved file is two paths and the tooltip says so — same `old → new` shape
+   *  the diff chrome uses, so the same file reads the same everywhere. */
+  const pathLabel = (e: StatusEntry) => (e.old_path ? `${e.old_path} → ${e.path}` : e.path);
+
+  /** The entries under a folder node, depth-first. Walks `children` — the map the
+   *  tree was built from — because compact mode rewrites `sortedChildren` only. */
+  function collectLeafEntries(node: StageTreeNode): StatusEntry[] {
+    const out: StatusEntry[] = [];
+    function collect(n: StageTreeNode) {
+      if (n.entry) out.push(n.entry);
+      for (const child of n.children.values()) collect(child);
+    }
+    for (const child of node.children.values()) collect(child);
+    return out;
+  }
+
+  const fileTarget = (entry: StatusEntry): CtxTarget =>
+    ({ paths: pathsOf(entry), label: basename(entry.path) });
+
+  /** A rename contributes two paths but is still one file, so the count the user
+   *  sees comes from the entries — never from `paths.length`. */
+  function folderTarget(node: StageTreeNode): CtxTarget & { count: number } {
+    const entries = collectLeafEntries(node);
+    return {
+      paths: entries.flatMap(pathsOf),
+      label: `${entries.length} file${entries.length !== 1 ? 's' : ''} in ${node.name}`,
+      count: entries.length,
+    };
+  }
+
+  function openUnstagedCtx(e: MouseEvent, entry: StatusEntry) {
     e.preventDefault();
     ctxMenu = {
-      x: e.clientX, y: e.clientY, path,
+      x: e.clientX, y: e.clientY, ...fileTarget(entry),
       items: [
         { id: 'stage',   label: 'Stage File',      icon: Plus, iconColor: 'var(--success)' },
         { id: 'discard', label: 'Discard Changes',  icon: RotateCcw, danger: true },
@@ -207,35 +243,25 @@
     };
   }
 
-  function openStagedCtx(e: MouseEvent, path: string) {
+  function openStagedCtx(e: MouseEvent, entry: StatusEntry) {
     e.preventDefault();
     ctxMenu = {
-      x: e.clientX, y: e.clientY, path,
+      x: e.clientX, y: e.clientY, ...fileTarget(entry),
       items: [
         { id: 'unstage', label: 'Unstage File', icon: Minus, iconColor: 'var(--warning)' },
       ],
     };
   }
 
-  function collectLeafPaths(node: StageTreeNode): string[] {
-    const paths: string[] = [];
-    function collect(n: StageTreeNode) {
-      if (n.entry) paths.push(n.entry.path);
-      for (const child of n.children.values()) collect(child);
-    }
-    for (const child of node.children.values()) collect(child);
-    return paths;
-  }
-
   function openUnstagedFolderCtx(e: MouseEvent, node: StageTreeNode) {
     e.preventDefault();
     e.stopPropagation();
-    const paths = collectLeafPaths(node);
+    const { count, ...target } = folderTarget(node);
     ctxMenu = {
-      x: e.clientX, y: e.clientY, path: node.fullPath, paths,
+      x: e.clientX, y: e.clientY, ...target,
       items: [
-        { id: 'stage-folder',   label: `Stage Folder (${paths.length})`,    icon: Plus,     iconColor: 'var(--success)' },
-        { id: 'discard-folder', label: `Discard Folder (${paths.length})`,  icon: RotateCcw, danger: true },
+        { id: 'stage',   label: `Stage Folder (${count})`,    icon: Plus,     iconColor: 'var(--success)' },
+        { id: 'discard', label: `Discard Folder (${count})`,  icon: RotateCcw, danger: true },
         { id: 'sep-1', label: '', separator: true },
         { id: 'stash-all', label: 'Stash All Changes…', icon: Archive, iconColor: 'var(--color-stash)', action: 'stash' },
       ],
@@ -245,26 +271,23 @@
   function openStagedFolderCtx(e: MouseEvent, node: StageTreeNode) {
     e.preventDefault();
     e.stopPropagation();
-    const paths = collectLeafPaths(node);
+    const { count, ...target } = folderTarget(node);
     ctxMenu = {
-      x: e.clientX, y: e.clientY, path: node.fullPath, paths,
+      x: e.clientX, y: e.clientY, ...target,
       items: [
-        { id: 'unstage-folder', label: `Unstage Folder (${paths.length})`, icon: Minus, iconColor: 'var(--warning)' },
+        { id: 'unstage', label: `Unstage Folder (${count})`, icon: Minus, iconColor: 'var(--warning)' },
       ],
     };
   }
 
   async function handleCtxSelect(id: string) {
     if (!ctxMenu) return;
-    const { path, paths } = ctxMenu;
+    const target: CtxTarget = { paths: ctxMenu.paths, label: ctxMenu.label };
     ctxMenu = null;
-    if      (id === 'stage')          await handleStage(path);
-    else if (id === 'discard')        handleDiscard(path);
-    else if (id === 'unstage')        await handleUnstage(path);
-    else if (id === 'stage-folder')   await handleStageFolder(paths ?? []);
-    else if (id === 'discard-folder') handleDiscardFolder(paths ?? []);
-    else if (id === 'unstage-folder') await handleUnstageFolder(paths ?? []);
-    else if (id === 'stash-all')      stashOpen = true;
+    if      (id === 'stage')     await handleStage(target);
+    else if (id === 'unstage')   await handleUnstage(target);
+    else if (id === 'discard')   handleDiscard(target);
+    else if (id === 'stash-all') stashOpen = true;
   }
 
   $effect(() => {
@@ -324,8 +347,8 @@
         const remaining = await getWorkdirDiff(tab.id, currentDiffStaged);
         const fileEntry = remaining.find(df => df.path === f.path);
         if (!fileEntry || fileEntry.hunks.length === 0) {
-          if (currentDiffStaged) await unstageFile(tab.id, f.path);
-          else await stageFile(tab.id, f.path);
+          if (currentDiffStaged) await unstagePaths(tab.id, pathsOf(f));
+          else await stagePaths(tab.id, pathsOf(f));
           diffStore.setFiles([]);
         } else {
           diffStore.setFiles(remaining);
@@ -356,88 +379,41 @@
     }
   }
 
-  async function handleStage(path: string) {
-    if (!tab) return;
+  async function handleStage({ paths, label }: CtxTarget) {
+    if (!tab || paths.length === 0) return;
     try {
-      await stageFile(tab.id, path);
+      await stagePaths(tab.id, paths);
       await refreshStatus();
-      uiStore.showToast(`Staged ${path.split('/').pop()}`, 'success');
+      uiStore.showToast(`Staged ${label}`, 'success');
     } catch (err) {
       uiStore.showToast(`Stage failed: ${err}`, 'error');
     }
   }
 
-  async function handleUnstage(path: string) {
-    if (!tab) return;
+  async function handleUnstage({ paths, label }: CtxTarget) {
+    if (!tab || paths.length === 0) return;
     try {
-      await unstageFile(tab.id, path);
+      await unstagePaths(tab.id, paths);
       await refreshStatus();
+      uiStore.showToast(`Unstaged ${label}`, 'success');
     } catch (err) {
       uiStore.showToast(`Unstage failed: ${err}`, 'error');
     }
   }
 
-  function handleDiscard(path: string) {
-    if (!tab) return;
-    if (isConfirmDiscardEnabled()) {
-      discardPending = { kind: 'file', path };
-    } else {
-      executeDiscardFile(path);
-    }
+  function handleDiscard(target: CtxTarget) {
+    if (!tab || target.paths.length === 0) return;
+    if (isConfirmDiscardEnabled()) discardPending = { kind: 'paths', ...target };
+    else executeDiscard(target);
   }
 
-  async function handleStageFolder(paths: string[]) {
-    if (!tab || paths.length === 0) return;
-    try {
-      await stagePaths(tab!.id, paths);
-      await refreshStatus();
-      uiStore.showToast(`Staged ${paths.length} file${paths.length !== 1 ? 's' : ''}`, 'success');
-    } catch (err) {
-      uiStore.showToast(`Stage folder failed: ${err}`, 'error');
-    }
-  }
-
-  async function handleUnstageFolder(paths: string[]) {
-    if (!tab || paths.length === 0) return;
-    try {
-      await unstagePaths(tab!.id, paths);
-      await refreshStatus();
-      uiStore.showToast(`Unstaged ${paths.length} file${paths.length !== 1 ? 's' : ''}`, 'success');
-    } catch (err) {
-      uiStore.showToast(`Unstage folder failed: ${err}`, 'error');
-    }
-  }
-
-  function handleDiscardFolder(paths: string[]) {
-    if (!tab || paths.length === 0) return;
-    if (isConfirmDiscardEnabled()) {
-      discardPending = { kind: 'folder', paths };
-    } else {
-      executeDiscardFolder(paths);
-    }
-  }
-
-  async function executeDiscardFolder(paths: string[]) {
+  async function executeDiscard({ paths, label }: CtxTarget) {
     if (!tab) return;
     try {
-      await discardPaths(tab!.id, paths);
-      for (const p of paths) {
-        if (diffStore.selectedFile?.path === p) diffStore.setFiles([]);
-      }
+      await discardPaths(tab.id, paths);
+      if (paths.includes(diffStore.selectedFile?.path ?? '')) diffStore.setFiles([]);
       await refreshStatus();
-      uiStore.showToast(`Discarded ${paths.length} file${paths.length !== 1 ? 's' : ''}`, 'warning');
-    } catch (err) {
-      uiStore.showToast(`Discard folder failed: ${err}`, 'error');
-    }
-  }
-
-  async function executeDiscardFile(path: string) {
-    if (!tab) return;
-    try {
-      await discardFile(tab.id, path);
-      if (diffStore.selectedFile?.path === path) diffStore.setFiles([]);
-      await refreshStatus();
-      uiStore.showToast(`Discarded ${path.split('/').pop()}`, 'warning');
+      uiStore.showToast(`Discarded ${label}`, 'warning');
     } catch (err) {
       uiStore.showToast(`Discard failed: ${err}`, 'error');
     }
@@ -466,8 +442,7 @@
     const pending = discardPending;
     discardPending = null;
     if (!pending) return;
-    if (pending.kind === 'file') await executeDiscardFile(pending.path);
-    else if (pending.kind === 'folder') await executeDiscardFolder(pending.paths);
+    if (pending.kind === 'paths') await executeDiscard(pending);
     else await executeDiscardAll();
   }
 
@@ -637,7 +612,7 @@
                 class="file-entry"
                 class:selected={diffStore.selectedFile?.path === entry.path}
                 onclick={() => loadDiff(entry.path, false)}
-                oncontextmenu={(e) => openUnstagedCtx(e, entry.path)}
+                oncontextmenu={(e) => openUnstagedCtx(e, entry)}
                 role="row" tabindex="0"
                 onkeydown={(e) => e.key === 'Enter' && loadDiff(entry.path, false)}
               >
@@ -647,10 +622,10 @@
                   class:s-deleted={ws === 'deleted'}
                   class:s-renamed={ws === 'renamed'}
                 >{ws === 'added' || ws === 'untracked' ? 'A' : ws === 'modified' ? 'M' : ws === 'deleted' ? 'D' : ws === 'renamed' ? 'R' : '?'}</span>
-                <span class="filename truncate" use:tooltip={entry.path}>{entry.path.split('/').pop()}</span>
+                <span class="filename truncate" use:tooltip={pathLabel(entry)}>{basename(entry.path)}</span>
                 <div class="file-actions">
-                  <button class="file-btn stage-btn" onclick={(e) => { e.stopPropagation(); handleStage(entry.path); }} use:tooltip={'Stage file'}><Plus size={12} /></button>
-                  <button class="file-btn discard-btn" onclick={(e) => { e.stopPropagation(); handleDiscard(entry.path); }} use:tooltip={'Discard changes'}><RotateCcw size={11} /></button>
+                  <button class="file-btn stage-btn" onclick={(e) => { e.stopPropagation(); handleStage(fileTarget(entry)); }} use:tooltip={'Stage file'}><Plus size={12} /></button>
+                  <button class="file-btn discard-btn" onclick={(e) => { e.stopPropagation(); handleDiscard(fileTarget(entry)); }} use:tooltip={'Discard changes'}><RotateCcw size={11} /></button>
                 </div>
               </div>
             {/each}
@@ -670,7 +645,7 @@
               ariaLabel="Unstaged files"
               onSelect={(n: StageTreeNode) => { if (n.entry) loadDiff(n.entry.path, false); }}
               onContextMenu={(n: StageTreeNode, e: MouseEvent) =>
-                n.entry ? openUnstagedCtx(e, n.entry.path) : openUnstagedFolderCtx(e, n)}
+                n.entry ? openUnstagedCtx(e, n.entry) : openUnstagedFolderCtx(e, n)}
             >
               {#snippet row({ node }: { node: StageTreeNode })}
                 {#if node.entry}
@@ -682,10 +657,10 @@
                     class:s-deleted={ws === 'deleted'}
                     class:s-renamed={ws === 'renamed'}
                   >{ws === 'added' || ws === 'untracked' ? 'A' : ws === 'modified' ? 'M' : ws === 'deleted' ? 'D' : ws === 'renamed' ? 'R' : '?'}</span>
-                  <span class="filename truncate" use:tooltip={entry.path}>{node.name}</span>
+                  <span class="filename truncate" use:tooltip={pathLabel(entry)}>{node.name}</span>
                   <div class="file-actions">
-                    <button class="file-btn stage-btn" onclick={(e) => { e.stopPropagation(); handleStage(entry.path); }} use:tooltip={'Stage file'}><Plus size={12} /></button>
-                    <button class="file-btn discard-btn" onclick={(e) => { e.stopPropagation(); handleDiscard(entry.path); }} use:tooltip={'Discard changes'}><RotateCcw size={11} /></button>
+                    <button class="file-btn stage-btn" onclick={(e) => { e.stopPropagation(); handleStage(fileTarget(entry)); }} use:tooltip={'Stage file'}><Plus size={12} /></button>
+                    <button class="file-btn discard-btn" onclick={(e) => { e.stopPropagation(); handleDiscard(fileTarget(entry)); }} use:tooltip={'Discard changes'}><RotateCcw size={11} /></button>
                   </div>
                 {:else}
                   <Folder size={11} class="folder-icon" />
@@ -735,7 +710,7 @@
                 class="file-entry"
                 class:selected={diffStore.selectedFile?.path === entry.path}
                 onclick={() => loadDiff(entry.path, true)}
-                oncontextmenu={(e) => openStagedCtx(e, entry.path)}
+                oncontextmenu={(e) => openStagedCtx(e, entry)}
                 role="row" tabindex="0"
                 onkeydown={(e) => e.key === 'Enter' && loadDiff(entry.path, true)}
               >
@@ -745,9 +720,9 @@
                   class:s-deleted={is === 'deleted'}
                   class:s-renamed={is === 'renamed'}
                 >{is === 'added' || is === 'untracked' ? 'A' : is === 'modified' ? 'M' : is === 'deleted' ? 'D' : is === 'renamed' ? 'R' : 'M'}</span>
-                <span class="filename truncate" use:tooltip={entry.path}>{entry.path.split('/').pop()}</span>
+                <span class="filename truncate" use:tooltip={pathLabel(entry)}>{basename(entry.path)}</span>
                 <div class="file-actions">
-                  <button class="file-btn unstage-btn" onclick={(e) => { e.stopPropagation(); handleUnstage(entry.path); }} use:tooltip={'Unstage file'}><X size={11} /></button>
+                  <button class="file-btn unstage-btn" onclick={(e) => { e.stopPropagation(); handleUnstage(fileTarget(entry)); }} use:tooltip={'Unstage file'}><X size={11} /></button>
                 </div>
               </div>
             {/each}
@@ -766,7 +741,7 @@
               ariaLabel="Staged files"
               onSelect={(n: StageTreeNode) => { if (n.entry) loadDiff(n.entry.path, true); }}
               onContextMenu={(n: StageTreeNode, e: MouseEvent) =>
-                n.entry ? openStagedCtx(e, n.entry.path) : openStagedFolderCtx(e, n)}
+                n.entry ? openStagedCtx(e, n.entry) : openStagedFolderCtx(e, n)}
             >
               {#snippet row({ node }: { node: StageTreeNode })}
                 {#if node.entry}
@@ -778,9 +753,9 @@
                     class:s-deleted={is === 'deleted'}
                     class:s-renamed={is === 'renamed'}
                   >{is === 'added' || is === 'untracked' ? 'A' : is === 'modified' ? 'M' : is === 'deleted' ? 'D' : is === 'renamed' ? 'R' : 'M'}</span>
-                  <span class="filename truncate" use:tooltip={entry.path}>{node.name}</span>
+                  <span class="filename truncate" use:tooltip={pathLabel(entry)}>{node.name}</span>
                   <div class="file-actions">
-                    <button class="file-btn unstage-btn" onclick={(e) => { e.stopPropagation(); handleUnstage(entry.path); }} use:tooltip={'Unstage file'}><X size={11} /></button>
+                    <button class="file-btn unstage-btn" onclick={(e) => { e.stopPropagation(); handleUnstage(fileTarget(entry)); }} use:tooltip={'Unstage file'}><X size={11} /></button>
                   </div>
                 {:else}
                   <Folder size={11} class="folder-icon" />
@@ -831,10 +806,8 @@
 
 {#if discardPending}
   <DiscardConfirmModal
-    target={discardPending.kind === 'file'
-      ? discardPending.path.split('/').pop() ?? discardPending.path
-      : discardPending.kind === 'folder'
-      ? `${discardPending.paths.length} file${discardPending.paths.length !== 1 ? 's' : ''} in folder`
+    target={discardPending.kind === 'paths'
+      ? discardPending.label
       : `all ${discardPending.count} unstaged file${discardPending.count !== 1 ? 's' : ''}`}
     onConfirm={onDiscardConfirm}
     onCancel={onDiscardCancel}

@@ -149,7 +149,7 @@ pub enum RecoveryKind {
     ResetHard,
     /// Before a branch checkout that would overwrite dirty workdir.
     Checkout,
-    /// Before `discard_file` / `discard_all`.
+    /// Before `discard_paths` / `discard_all`.
     Discard,
     /// Before `force_stash_apply` overwrites workdir files with the stash's
     /// untracked-tree blobs to satisfy the user's "use stash" decisions.
