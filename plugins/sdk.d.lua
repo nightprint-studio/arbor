@@ -1254,7 +1254,8 @@ local Ui = {}
 ---Live `actions.change` on `select` / `checkbox` / `toggle` / `radio`: each
 ---of those form-nodes accepts an `actions = { change = "..." }` field. When
 ---set, the action fires on every selection / flip (not just Submit) with
----`{ value }` in the payload — handy for "window picker" / live-filter
+---`{ value, node_id }` in the payload — `node_id` so one handler behind
+---several fields can tell which one moved — handy for "window picker" / live-filter
 ---controls that should re-fetch immediately, or boolean toggles / segmented
 ---switches that should re-render dependent content. (For pure show/hide of
 ---dependent nodes you usually do NOT need actions.change — gate them with

@@ -138,11 +138,39 @@ pub fn record_with_pipeline_via(
     pipeline: &str,
     run_id:   &str,
 ) {
+    push_via(
+        buffer, sink, level, plugin, message,
+        Some(pipeline.to_string()), Some(run_id.to_string()),
+    );
+}
+
+/// AppHandle-free variant of [`record`] — an untagged entry pushed onto the
+/// given buffer and broadcast through the given sink.
+///
+/// What a `&AppState` handler uses: the frontend's `record_plugin_log` reaches
+/// the panel this way, because a platform handler holds state and not a handle.
+pub fn record_via(
+    buffer:  &Mutex<PluginLogBuffer>,
+    sink:    &Arc<dyn EventSink>,
+    level:   &str,
+    plugin:  &str,
+    message: String,
+) {
+    push_via(buffer, sink, level, plugin, message, None, None);
+}
+
+/// The one body behind both `*_via` entry points: push, then broadcast.
+fn push_via(
+    buffer:   &Mutex<PluginLogBuffer>,
+    sink:     &Arc<dyn EventSink>,
+    level:    &str,
+    plugin:   &str,
+    message:  String,
+    pipeline: Option<String>,
+    run_id:   Option<String>,
+) {
     let entry = match buffer.lock() {
-        Ok(mut b) => b.push(
-            level, plugin, message,
-            Some(pipeline.to_string()), Some(run_id.to_string()),
-        ),
+        Ok(mut b) => b.push(level, plugin, message, pipeline, run_id),
         Err(e) => {
             tracing::error!("plugin_logs mutex poisoned: {e}");
             return;

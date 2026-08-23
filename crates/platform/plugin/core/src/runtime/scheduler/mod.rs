@@ -134,10 +134,11 @@ impl PluginHost {
             return;
         };
         let Some(self_arc) = self.self_arc.clone() else {
-            tracing::warn!(
-                "spawn_scheduler('{plugin_name}:{}'): host self-pointer missing — skipping",
+            self.reporter(plugin_name).error(format!(
+                "schedule '{}' could not be registered: the host has no self-reference \
+                 — it will never fire",
                 schedule.action,
-            );
+            ));
             return;
         };
 
@@ -153,10 +154,10 @@ impl PluginHost {
             opts_from(schedule),
             action,
         ) {
-            tracing::warn!(
-                "scheduler register failed for '{plugin_name}:{}': {e}",
+            self.reporter(plugin_name).error(format!(
+                "schedule '{}' could not be registered: {e} — it will never fire",
                 schedule.action,
-            );
+            ));
         }
     }
 }

@@ -1612,17 +1612,11 @@ fn main() {
     // implicit prefix a Lua subscriber gets (`arbor.events.on("commit", …)`
     // resolves to `corvus:commit`), so it must be the same string the hook
     // constants are built from — not a second copy that can drift.
+    // Both plugin pools — the profile's `installed/` and its marketplace dir — are scanned by
+    // the host itself (`arbor_plugin_core`'s `plugin_roots`): which roots hold a profile's
+    // packages is not a per-product decision, and every backend that answered it separately
+    // got it wrong. Nothing to pass here.
     app.plugin_host(hooks::NS, build_hook_dispatcher);
-    // After the Flip (plugin-relocation Phase 2) this backend is the sole loader of
-    // the Corvus product's plugins, so it must scan the marketplace install dir
-    // just like the launcher host does (`setup/scheduler.rs`'s
-    // `set_extra_plugin_roots`). The host's built-in `plugin_dir()` only covers the
-    // `installed/` pool; without this, marketplace-installed plugins (the bulk)
-    // never load and no contributions reach the Corvus window.
-    app.plugin_host_handle()
-        .lock()
-        .expect("corvus-be: plugin host poisoned at extra-roots set")
-        .set_extra_plugin_roots(vec![arbor_core::prelude::marketplace_plugins_dir()]);
 
     // The state every handler gets: event egress + the hook broker + the reverse
     // channel. `Arc`-shared so `CorvusNsHost` (which the git `arbor.*` namespaces

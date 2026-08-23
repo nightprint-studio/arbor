@@ -1,7 +1,29 @@
 import { invoke } from '@tauri-apps/api/core';
 import { platform } from './rpc';
 import { host } from './host';
+import { reportPluginError } from '$lib/utils/plugin-report';
 import type { PluginManifest, PluginInfo, ExtensionsReport } from '../types/plugin';
+
+/**
+ * Run a plugin's own code and make sure a failure is heard.
+ *
+ * The three entry points below (`execHook`, `firePluginAction`, `fireCommand`)
+ * are the only ways the frontend asks a plugin to *do* something, and their
+ * callers are overwhelmingly fire-and-forget — `.catch(() => {})` on a click
+ * handler, because there is nothing sensible for a click to do about it. That
+ * left every one of those failures with no reader at all.
+ *
+ * Reporting here rather than at each call site is the difference between one
+ * place and twenty: a new panel, a new node type, a new context menu inherits it
+ * by construction. The promise still rejects — a caller that does have something
+ * to say about a failure keeps the chance to say it.
+ */
+function reporting<T>(plugin: string, what: string, p: Promise<T>): Promise<T> {
+  return p.catch((e) => {
+    reportPluginError(plugin, what, e);
+    throw e;
+  });
+}
 
 export const listPlugins = () =>
   platform<PluginManifest[]>('list_plugins');
@@ -43,12 +65,17 @@ export const getPluginsEnabled = () =>
 export const setPluginsEnabled = (enabled: boolean) =>
   host<void>('set_plugins_enabled', { enabled });
 
+/** Fire a hook at every subscriber. Not attributable to one plugin, so a
+ *  failure here is the host's — it reaches the console the ordinary way. */
 export const execHook = (hook: string, contextJson: string) =>
   host<void>('exec_hook', { hook, context_json: contextJson });
 
 /** Fire a specific action on a specific plugin (called by the frontend when user interacts with plugin-registered UI). */
 export const firePluginAction = (pluginName: string, action: string, contextJson: string) =>
-  host<void>('fire_plugin_action', { plugin_name: pluginName, action, context_json: contextJson });
+  reporting(
+    pluginName, `action '${action}' failed`,
+    host<void>('fire_plugin_action', { plugin_name: pluginName, action, context_json: contextJson }),
+  );
 
 /**
  * Invoke a registered command on behalf of `callerPlugin` (declarative
@@ -61,7 +88,10 @@ export const fireCommand = (
   id: string,
   args: unknown,
   contextJson: string,
-) => host<void>('fire_command', { caller_plugin: callerPlugin, id, args, context_json: contextJson });
+) => reporting(
+  callerPlugin, `command '${id}' failed`,
+  host<void>('fire_command', { caller_plugin: callerPlugin, id, args, context_json: contextJson }),
+);
 
 /**
  * Enable a plugin. Returns the ordered list of plugins that were actually

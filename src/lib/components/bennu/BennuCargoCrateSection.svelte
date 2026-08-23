@@ -7,17 +7,24 @@
    * component holding three nested loops, and because a crate row is the thing most likely to gain
    * something (a size, a rebuild time, a lint count).
    *
+   * The one question those groups cannot answer is **where the crate is** — asked constantly on a
+   * workspace of forty. So the header carries it: a button, and a right-click menu shared with the
+   * Dependencies panel (`build-unit-menu`).
+   *
    * ## The rows are actions, not decoration
    *
    * Every command row launches into the Run console, and every target row either runs (a binary) or
    * opens its source. That is the whole point of the panel: `cargo clippy -p bennu-cargo` is two
    * clicks instead of a remembered command line.
    */
-  import { Boxes, Cog, FileCode2, Play, ToggleLeft } from 'lucide-svelte';
+  import { Boxes, Cog, FileCode2, LocateFixed, Play, ToggleLeft } from 'lucide-svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { buildUnitDir, openBuildUnitMenu } from './build-unit-menu';
   import {
     hasComponent,
     type CargoCommandDef, type CargoCrate, type CargoToolchain,
@@ -94,10 +101,18 @@
   {onToggle}
   badge={total || null}
   badgeTitle="Declared dependencies, across all three kinds"
+  onContextMenu={(x, y) => openBuildUnitMenu(x, y, crate)}
 >
   {#snippet icon()}<Boxes size={13} />{/snippet}
   {#snippet actions()}
     <span class="cc-meta">
+      <IconButton
+        tooltip="Focus this crate in the Project tree"
+        size={20}
+        onclick={() => bennuUiStore.focusInTree(buildUnitDir(crate))}
+      >
+        <LocateFixed size={11} />
+      </IconButton>
       {#if kind}<Badge variant="tone" tone="neutral" size="sm" label={kind} />{/if}
       {#if crate.version}
         <span class="cc-version" use:tooltip={crate.version === 'inherited'

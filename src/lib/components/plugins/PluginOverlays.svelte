@@ -51,8 +51,9 @@
   /** Round-trip the picker's answer. An empty path IS the cancel signal. */
   function answerPicker(req: PluginPickFile, path: string) {
     const ctx = { path, ...(req.extra ?? {}) };
-    firePluginAction(req.plugin_name, req.action, JSON.stringify(ctx))
-      .catch((e) => console.error(`plugin '${req.plugin_name}': action '${req.action}' failed`, e));
+    // Reported by `firePluginAction` itself — swallowed here because a picker
+    // that has already closed has nothing left to do about it.
+    firePluginAction(req.plugin_name, req.action, JSON.stringify(ctx)).catch(() => {});
     pluginStore.clearPickFile();
   }
 

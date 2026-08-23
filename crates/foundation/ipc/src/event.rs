@@ -68,3 +68,16 @@ pub trait EventSink: Send + Sync {
 /// the call that produced it, and it can only do that if it does not have to know which
 /// product's vocabulary this particular run speaks.
 pub const PROGRESS_TOPIC: &str = "arbor://progress";
+
+/// The topic a backend announces a plugin's `arbor.log.*` line on.
+///
+/// **Raw**, and that is the whole design: the payload is `{ level, plugin, message }` and
+/// nothing else. A log entry also carries a sequence number and a timestamp, and those cannot
+/// be minted here — five backends numbering independently would produce five interleaved
+/// sequences for one panel, and the frontend keys its list on that number. So the shell
+/// intercepts this topic, pushes the line into the **one** buffer it already owns, and emits
+/// the finished entry on `arbor://plugin-log`. Which is also what makes the panel's initial
+/// load complete: history and stream come from the same place.
+///
+/// The shell's own host records directly and never emits this.
+pub const PLUGIN_LOG_TOPIC: &str = "arbor://plugin-log-raw";

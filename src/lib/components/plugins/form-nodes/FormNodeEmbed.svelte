@@ -41,6 +41,7 @@
   import { onDestroy } from 'svelte';
   import type { FormNode } from '$lib/types/plugin';
   import type { FormNodeCtx } from './ctx';
+  import { reportPluginError } from '$lib/utils/plugin-report';
 
   interface Props {
     node: FormNode;
@@ -176,7 +177,7 @@
     try {
       return JSON.stringify(message) ?? null;
     } catch (e) {
-      console.error('embed: message could not be serialised', e, message);
+      reportPluginError(ctx.pluginName, `embed '${n.id}': message could not be serialised`, e);
       return null;
     }
   }

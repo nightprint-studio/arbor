@@ -228,9 +228,13 @@ function createBennuUiStore() {
   let caretLine = $state(1);
   let caretCol = $state(1);
 
-  // "Reveal in project tree" relay — the toolbar's Select-opened-file button and
-  // the palette bump this; the sidebar reacts by expanding + scrolling to it.
-  let revealNonce = $state(0);
+  // "Reveal in project tree" relay — the toolbar's Select-opened-file button, the palette and
+  // the build-unit panels bump this; the sidebar reacts by expanding + scrolling to it.
+  //
+  // `path` names WHAT to reveal, `null` meaning "whatever file is open" — the two are one relay
+  // because they are one action from the sidebar's side, and the nonce is what makes asking twice
+  // for the same target fire twice.
+  let revealTarget = $state<{ path: string | null; nonce: number }>({ path: null, nonce: 0 });
 
   return {
     get caretLine() { return caretLine; },
@@ -272,7 +276,7 @@ function createBennuUiStore() {
     get cargoAddOpen() { return cargoAddOpen; },
     get gotoTarget()   { return gotoTarget; },
     get gotoOffsetTarget() { return gotoOffsetTarget; },
-    get revealNonce()  { return revealNonce; },
+    get revealTarget() { return revealTarget; },
     get treeExpanded() { return treeExpanded; },
 
     /** Toggle a left tool window (clicking the active one closes it). */
@@ -460,7 +464,22 @@ function createBennuUiStore() {
      *  the reveal relay the sidebar watches). */
     revealActiveInTree() {
       leftPanel = 'project';
-      revealNonce += 1;
+      revealTarget = { path: null, nonce: revealTarget.nonce + 1 };
+    },
+
+    /**
+     * Put the Project tree **on** a path — expanded, selected, scrolled to, and holding the
+     * keyboard focus.
+     *
+     * What the Cargo and Dependencies panels mean by "Focus in Project": those panels list the
+     * project by build unit, and the question they leave you with is where that crate or module
+     * actually lives. Distinct from {@link revealActiveInTree}, which follows the editor and
+     * takes no argument — here the target is a directory nobody has opened, and probably cannot
+     * open, because it is a folder.
+     */
+    focusInTree(path: string) {
+      leftPanel = 'project';
+      revealTarget = { path, nonce: revealTarget.nonce + 1 };
     },
 
     // ── Project-tree expansion (controlled) ──────────────────────────────────

@@ -33,6 +33,7 @@ pub use consts::{ARBOR_API_VERSION, ARBOR_APP_VERSION, current_os};
 pub use manifest::{
     discover_in_roots, discover_plugins, forget_plugin_state, install_plugin_for,
     load_plugin_states, load_plugin_states_for, load_states, plugin_dir, plugin_products,
+    plugin_roots,
     save_plugin_states, save_plugin_states_for, save_states, set_plugin_state_for,
     PluginStates,
 };

@@ -84,6 +84,12 @@
   same menu on the focused row, so every entry in it is reachable without the mouse.
 </p>
 <p>
+  The tree can also be sent somewhere from <em>outside</em>: <strong>Focus in Project</strong>, on a
+  crate in the Cargo panel or a module in Dependencies, opens the tree on that folder — expanded,
+  selected, and with the keyboard focus on it, so the arrows carry on from there. Clicking any row,
+  or opening any file, hands the selection back to whatever the editor is showing.
+</p>
+<p>
   <strong>Reveal in File Explorer</strong> shows the row on disk: a folder as the listing, a file
   selected inside its folder. It honours <em>Settings → File Explorer → Open in the built-in
   explorer</em>, so it opens Arbor's own explorer window when that is on and the system file

@@ -622,6 +622,24 @@ function createProjectStore() {
      *  Dependencies, Generate, validation, index status) on `!isCargo`. */
     get isCargo()        { return project?.kind === 'cargo'; },
     get activeFilePath() { return activeFilePath; },
+    /**
+     * `path` written relative to the open project's root, forward slashes — the root itself
+     * being `.`. Falls back to the absolute path when it is outside the project, which is the
+     * honest answer rather than a chain of `../`.
+     *
+     * On the store because the root is: every panel that shows a path to a person wants it
+     * short, and a second copy of this arithmetic is a second place to get the trailing
+     * separator wrong.
+     */
+    relativePath(path: string): string {
+      const fwd = canonPath(path);
+      const root = project?.root;
+      if (!root) return fwd;
+      const rootFwd = canonPath(root).replace(/\/+$/, '');
+      if (fwd === rootFwd) return '.';
+      const prefix = rootFwd + '/';
+      return fwd.startsWith(prefix) ? fwd.slice(prefix.length) : fwd;
+    },
     get openFilePaths()  { return openFilePaths; },
     /** True while the open project is the mock demo. MOCK — remove with the mock. */
     get isDemo()         { return isDemo; },

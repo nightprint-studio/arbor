@@ -302,45 +302,67 @@ fn harden_os_table(lua: &Lua, manifest: &Manifest) -> Result<()> {
 // require() sandbox — restrict to the plugin's own directory
 // ---------------------------------------------------------------------------
 
+/// The file a `require` names, relative to the plugin directory — or `None` when the argument
+/// is not a module name at all.
+///
+/// The whole of the sandbox's traversal guard, and it lives here rather than inline because it
+/// is the one piece of `setup_require_sandbox` with an invariant worth stating: **a name made
+/// of plain segments joins to a path that cannot leave the directory it is joined to.** That is
+/// checkable without a Lua state, so it is checked.
+///
+/// `..` is rejected as a segment, and so is anything carrying a separator, a drive colon or a
+/// NUL — the three ways a name reaches outside on the platforms Arbor runs on.
+fn module_file(modname: &str) -> Option<PathBuf> {
+    let segments: Vec<&str> = modname.split('.').collect();
+    let plain = |s: &&str| {
+        !s.is_empty() && *s != "." && *s != ".." && !s.contains(['/', '\\', ':', '\0'])
+    };
+    if segments.is_empty() || !segments.iter().all(plain) {
+        return None;
+    }
+    let rel: PathBuf = segments.iter().collect();
+    Some(rel.with_extension("lua"))
+}
+
 fn setup_require_sandbox(lua: &Lua, plugin_dir: &Path) -> Result<()> {
     let dir = plugin_dir.to_path_buf();
 
     // Build the custom searcher as a Rust function.
     let sandbox_searcher = lua
         .create_function(move |lua_ctx, modname: String| {
-            // "ui.forms" → "ui/forms.lua" (OS separator)
-            let sep  = std::path::MAIN_SEPARATOR_STR;
-            let rel  = modname.replace('.', sep);
-            let candidate = dir.join(format!("{rel}.lua"));
-
-            // Verify path is inside the plugin directory (path-traversal guard).
-            let canon_dir = match std::fs::canonicalize(&dir) {
-                Ok(p)  => p,
-                Err(_) => return Ok(mlua::MultiValue::from_vec(vec![
-                    mlua::Value::String(lua_ctx.create_string(
-                        format!("\tcannot resolve plugin dir: {}", dir.display()).as_bytes()
-                    )?)
-                ])),
-            };
-            let canon_file = match std::fs::canonicalize(&candidate) {
-                Ok(p)  => p,
-                Err(_) => return Ok(mlua::MultiValue::from_vec(vec![
-                    mlua::Value::String(lua_ctx.create_string(
-                        format!("\tno file '{rel}.lua' in plugin dir").as_bytes()
-                    )?)
-                ])),
-            };
-            if !canon_file.starts_with(&canon_dir) {
+            // ── The guard is on the NAME, not on where the file physically lives ──
+            //
+            // What has to be stopped is a plugin requiring its way OUT: `require("..secrets")`,
+            // a separator smuggled through the name, an absolute path. Every one of those is
+            // visible in the name itself, and a name made only of plain segments joins to a
+            // path that cannot leave the plugin directory — so checking the name is both
+            // sufficient and the whole of it.
+            //
+            // Deliberately NOT "resolve the symlinks and compare against the plugin directory".
+            // A package installed as links into a working tree — which is how one is developed,
+            // and what `scripts/link-dev-plugins.mjs` produces — has every module physically
+            // outside that directory, so canonicalizing rejected the entire package with a
+            // message about traversal that named nothing the author had done. And it bought
+            // nothing: a plugin cannot create a symlink (no `io`, and `arbor.fs` has no such
+            // verb), so the only links in its directory are ones somebody installed on purpose.
+            let Some(rel) = module_file(&modname) else {
                 return Err(mlua::Error::RuntimeError(format!(
-                    "require '{}': path traversal detected", modname
+                    "require '{modname}': not a module name — a plugin may require its own \
+                     files by name (`ui.forms`), and nothing else"
                 )));
-            }
+            };
+            let candidate = dir.join(&rel);
 
-            let code = match std::fs::read_to_string(&canon_file) {
+            let code = match std::fs::read_to_string(&candidate) {
                 Ok(c)  => c,
-                Err(e) => return Err(mlua::Error::RuntimeError(format!(
-                    "require '{}': {e}", modname
-                ))),
+                // A miss is a STRING, not an error: `require` collects what each searcher had
+                // to say and reports them together, so "no such module here" has to leave the
+                // other searchers a turn.
+                Err(_) => return Ok(mlua::MultiValue::from_vec(vec![
+                    mlua::Value::String(lua_ctx.create_string(
+                        format!("\tno file '{}.lua' in plugin dir", rel.display()).as_bytes()
+                    )?)
+                ])),
             };
 
             let loader = lua_ctx.load(code).set_name(modname).into_function()?;
@@ -419,8 +441,9 @@ package.preload["arbor.hooks"]      = function() return a.hooks end
 
 #[cfg(test)]
 mod tests {
-    use super::BUILDERS_LUA;
+    use super::{module_file, BUILDERS_LUA};
     use mlua::Lua;
+    use std::path::PathBuf;
 
     /// Exec the builder chunk against a hand-built `arbor` global.
     ///
@@ -486,5 +509,41 @@ mod tests {
             .eval()
             .unwrap();
         assert_eq!(title, "Hi");
+    }
+
+    // ── require() name guard ─────────────────────────────────────────────────
+
+    #[test]
+    fn a_plain_name_becomes_a_file_beside_the_manifest() {
+        assert_eq!(module_file("state"), Some(PathBuf::from("state.lua")));
+    }
+
+    #[test]
+    fn a_dotted_name_becomes_a_subdirectory() {
+        assert_eq!(module_file("ui.forms"), Some(PathBuf::from("ui").join("forms.lua")));
+    }
+
+    #[test]
+    fn every_way_out_of_the_plugin_directory_is_refused() {
+        // `..` as a segment, a separator smuggled through the name, an absolute path, a
+        // Windows drive, an empty segment from `a..b`, and a NUL.
+        for bad in [
+            "..", "..secrets", "a..b", "ui..forms",
+            "../etc/passwd", "..\\windows", "/etc/passwd", "C:\\secrets", "a\0b", "",
+        ] {
+            assert_eq!(module_file(bad), None, "accepted {bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_joined_module_file_is_always_inside_the_directory_it_joins_to() {
+        // The invariant the guard rests on: nothing `module_file` returns can climb out, so
+        // no second check against the resolved location is needed — which is what let a
+        // symlinked dev install be mistaken for an attack.
+        let root = PathBuf::from("/plugins/acme");
+        for name in ["state", "ui.forms", "a.b.c.d"] {
+            let joined = root.join(module_file(name).unwrap());
+            assert!(joined.starts_with(&root), "{name} escaped: {joined:?}");
+        }
     }
 }

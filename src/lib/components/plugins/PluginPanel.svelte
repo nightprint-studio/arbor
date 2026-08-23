@@ -34,6 +34,7 @@
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import ExperimentalBadge from '$lib/components/shared/ui/ExperimentalBadge.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
+  import { reportPluginWarning } from '$lib/utils/plugin-report';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -302,7 +303,7 @@
           `Uninstalled "${name}" with ${warnings.length} warning(s) — see logs`,
           'warning',
         );
-        for (const w of warnings) console.warn('[plugin uninstall]', w);
+        for (const w of warnings) reportPluginWarning(name, `uninstall: ${w}`);
       } else {
         uiStore.showToast(`Uninstalled "${name}"`, 'success');
       }

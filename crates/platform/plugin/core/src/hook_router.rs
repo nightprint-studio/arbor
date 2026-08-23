@@ -118,11 +118,7 @@ pub fn fire(lua: &Lua, hook: &str, context_json: &str) -> Result<()> {
                 Err(_) => continue,
             };
             if let Err(e) = func.call::<mlua::Value>(ctx.clone()) {
-                tracing::warn!(target: "plugin", "hook '{hook}' handler error: {e}");
-                crate::lua_ctx::record(
-                    lua, "error",
-                    format!("hook '{hook}' handler error: {e}"),
-                );
+                crate::lua_ctx::report(lua, "error", format!("hook '{hook}' handler error: {e}"));
             }
         }
     }
@@ -148,8 +144,7 @@ pub fn fire_collecting(
             match func.call::<mlua::Value>(ctx.clone()) {
                 Ok(v)  => out.push(v),
                 Err(e) => {
-                    tracing::warn!(target: "plugin", "hook '{hook}' handler error: {e}");
-                    crate::lua_ctx::record(
+                    crate::lua_ctx::report(
                         lua, "error",
                         format!("hook '{hook}' handler error: {e}"),
                     );
@@ -189,7 +184,10 @@ pub fn fire_broadcast(host: &PluginHost, hook: &str, context_json: &str) {
         if !has_wildcard && !plugin.manifest.hooks.subscribes_to(hook) { continue; }
 
         if let Err(e) = fire(&plugin.lua, hook, context_json) {
-            tracing::warn!("hook '{hook}' error in '{}': {e}", plugin.manifest.name);
+            crate::lua_ctx::report(
+                &plugin.lua, "error",
+                format!("hook '{hook}' could not be dispatched: {e}"),
+            );
         }
     }
 }
@@ -204,7 +202,10 @@ pub fn fire_on(host: &PluginHost, plugin_name: &str, hook: &str, context_json: &
     if let Some(plugin) = host.plugins.iter().find(|p| p.manifest.name == plugin_name) {
         if !plugin.is_enabled() { return; }
         if let Err(e) = fire(&plugin.lua, hook, context_json) {
-            tracing::warn!("hook '{hook}' error in '{plugin_name}': {e}");
+            crate::lua_ctx::report(
+                &plugin.lua, "error",
+                format!("hook '{hook}' could not be dispatched: {e}"),
+            );
         }
     }
 }
@@ -230,7 +231,10 @@ pub fn fire_vetoable(host: &PluginHost, hook: &str, context_json: &str) -> Optio
 
         let mut returns: Vec<mlua::Value> = Vec::new();
         if let Err(e) = fire_collecting(&plugin.lua, hook, context_json, &mut returns) {
-            tracing::warn!("hook '{hook}' fire_collecting error in '{}': {e}", plugin.manifest.name);
+            crate::lua_ctx::report(
+                &plugin.lua, "error",
+                format!("vetoable hook '{hook}' could not be dispatched: {e}"),
+            );
             continue;
         }
 

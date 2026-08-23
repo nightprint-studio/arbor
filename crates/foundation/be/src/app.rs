@@ -46,6 +46,9 @@ impl App {
     /// `build_hook_dispatcher`) and the shared trigger engine installed. After
     /// this, [`hooks`](Self::hooks) / [`plugin_host_handle`](Self::plugin_host_handle)
     /// are available for the product to build its state + adapter.
+    ///
+    /// The host scans both of the profile's plugin pools on its own — see
+    /// `arbor_plugin_core`'s `plugin_roots`. No backend has to name a root.
     pub fn plugin_host<H>(&mut self, product_id: &str, build_hooks: H) -> &mut Self
     where
         H: FnOnce(&Arc<Mutex<PluginHost>>) -> HookDispatcher,

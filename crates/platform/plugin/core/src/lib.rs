@@ -35,6 +35,7 @@ pub mod host_pure;
 pub mod lua_api;
 pub mod lua_ctx;
 pub mod prelude;
+pub mod report;
 pub mod runtime;
 pub mod sandbox;
 pub mod settings_store;

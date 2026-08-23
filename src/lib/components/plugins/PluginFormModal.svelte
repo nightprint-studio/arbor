@@ -41,6 +41,7 @@
   import { firePluginAction } from '$lib/ipc/plugin';
   import { toArr }           from './form-nodes/helpers';
   import { uiStore }          from '$lib/stores/ui.svelte';
+  import { reportPluginWarning } from '$lib/utils/plugin-report';
 
   let {
     form,
@@ -253,7 +254,10 @@
         // from showing nothing as "active" forever).
         if (id !== null && !sidecarIds.includes(id)) {
           // eslint-disable-next-line no-console
-          console.warn(`[plugin:${form.plugin_name}] set_sidecar: unknown id "${id}" — known: ${sidecarIds.join(', ')}`);
+          reportPluginWarning(
+            form.plugin_name,
+            `set_sidecar: unknown id "${id}" — known: ${sidecarIds.join(', ')}`,
+          );
           return;
         }
         activeSidecar = id;
@@ -331,7 +335,10 @@
           // round-3 decision. Last-write-wins is preserved (the latter ref
           // overwrites) so a value still ships, but warn loudly.
           // eslint-disable-next-line no-console
-          console.warn(`[plugin:${form.plugin_name}] name collision across regions: "${k}" — last value wins`);
+          reportPluginWarning(
+            form.plugin_name,
+            `name collision across regions: "${k}" — last value wins`,
+          );
         }
         seenOwned.add(k);
         all[k] = v;
@@ -443,9 +450,9 @@
     for (const it of allItems) {
       if ('separator' in it) continue;
       if (!sidecarIds.includes(it.id)) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[plugin:${form.plugin_name}] activity_bar item "${it.id}" has no matching sidecar (known: ${sidecarIds.join(', ') || '<none>'})`
+        reportPluginWarning(
+          form.plugin_name,
+          `activity_bar item "${it.id}" has no matching sidecar (known: ${sidecarIds.join(', ') || '<none>'})`,
         );
       }
     }

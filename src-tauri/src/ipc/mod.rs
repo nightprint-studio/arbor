@@ -2447,6 +2447,15 @@ fn spawn_garrulus_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<Stri
 /// on. Free when nobody is subscribed, which is the normal case.
 fn forward_backend_event(app: &AppHandle, program: &'static str, topic: String, payload: serde_json::Value) {
     use tauri::Emitter;
+    // A plugin's log line is the one backend event with a destination *instead of* the
+    // webview: it arrives raw and leaves as a numbered entry on `arbor://plugin-log`, from
+    // the single buffer the Plugin Logs panel also loads its history out of. Forwarding the
+    // raw topic on as well would put every line in the panel twice, unnumbered.
+    if topic == arbor_ipc::prelude::PLUGIN_LOG_TOPIC {
+        let field = |k: &str| payload.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        crate::plugin_logs::record(app, &field("level"), &field("plugin"), field("message"));
+        return;
+    }
     event_tap::tap().publish(program, &topic, &payload);
     let _ = app.emit(&topic, payload);
 }

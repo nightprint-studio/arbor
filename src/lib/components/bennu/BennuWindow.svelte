@@ -26,7 +26,7 @@
     Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck, History,
     Palette,
     TextCursorInput, ListChecks, BookOpen, FlaskConical, ListRestart, Bug, Braces, Languages,
-    Cog, Network,
+    Cog, Network, Plug, Store, ScrollText, LayoutDashboard,
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -60,6 +60,11 @@
   import { pluginStore } from '$lib/stores/plugin.svelte';
   import { listPluginInfo } from '$lib/ipc/plugin';
   import { pluginPaletteCommands } from '$lib/contributions/command-palette';
+  import { reloadPlugins } from '$lib/ipc/plugin';
+  // The icon names a PLUGIN may use — its own vocabulary, not this window's. Consulted as a
+  // fallback by `iconResolver` so a contributed command or view keeps the glyph it asked for
+  // instead of collapsing into the generic one.
+  import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
   import PluginOverlays from '$lib/components/plugins/PluginOverlays.svelte';
   import PluginViewPanel from '$lib/components/plugins/PluginViewPanel.svelte';
   import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
@@ -1044,10 +1049,36 @@
     'book': BookOpen as unknown as IconComponent,
     'languages': Languages as unknown as IconComponent,
     'network': Network as unknown as IconComponent,
+    'plug': Plug as unknown as IconComponent,
+    'store': Store as unknown as IconComponent,
+    'scroll': ScrollText as unknown as IconComponent,
+    'layout': LayoutDashboard as unknown as IconComponent,
   };
-  function iconResolver(name: string): IconComponent { return ICONS[name] ?? ICONS.command; }
+  /** This window's own names first, then the plugin vocabulary, then the generic glyph.
+   *
+   *  In that order because the two overlap and Bennu's meaning wins where it does: `list` here
+   *  is the Forms panel's, not lucide's `List`. Everything a plugin can name that Bennu has no
+   *  word for — `Eye`, `GitBranch`, `Rocket` — comes from the second lookup, which is what
+   *  stops every contributed command from rendering as the same ⌘. */
+  function iconResolver(name: string): IconComponent {
+    return ICONS[name] ?? (PLUGIN_ICONS[name] as IconComponent | undefined) ?? ICONS.command;
+  }
 
   function run(fn: () => void) { bennuUiStore.closePalette(); queueMicrotask(fn); }
+
+  /** Re-scan the plugin directories and reload what is there, reporting either way.
+   *
+   *  Silence would be the wrong answer for both outcomes: a reload that worked looks identical
+   *  to one that never ran, and a reload that failed is exactly the moment you are already
+   *  suspicious that something is not loading. */
+  async function reloadAllPlugins() {
+    try {
+      await reloadPlugins();
+      toastStore.show('Plugins reloaded', 'success');
+    } catch (e) {
+      toastStore.show(`Plugin reload failed: ${e}`, 'error');
+    }
+  }
 
   const paletteSections = $derived.by<PaletteSection[]>(() => {
     const q = paletteQuery.trim().toLowerCase();
@@ -1189,6 +1220,10 @@
       { id: 'problems',  title: 'Toggle Problems',  icon: 'alert',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
       { id: 'todos',     title: 'Toggle TODO',      icon: 'todo',        shortcut: 'Alt+7', action: () => run(() => bennuUiStore.toggleBottom('todos')), when: true },
       { id: 'terminal',  title: 'Toggle Terminal',  icon: 'terminal',    shortcut: 'Alt+F12', action: () => run(() => bennuUiStore.toggleBottom('terminal')), when: true },
+      // Why a plugin did nothing. Docked rather than modal, so it belongs beside the other
+      // panel toggles — and in the palette, because it is opened exactly when something is
+      // wrong and the hamburger is one more thing to remember.
+      { id: 'pluginlogs', title: 'Toggle Plugin Logs', icon: 'scroll',    action: () => run(() => bennuUiStore.togglePluginLogs()), when: true },
       { id: 'maven',     title: 'Toggle Maven',     icon: 'maven',       shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: javaTools },
       { id: 'cargo',     title: 'Toggle Cargo',     icon: 'cog',         shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('cargo')), when: projectStore.isCargo },
       // Runs the real `cargo add`. In the View section beside the Cargo window because that is where
@@ -1213,6 +1248,17 @@
       // One entry per generator, so every one is reachable by name from the keyboard. The
       // toolbar's list is per-file and comes from the backend; this one is per-project and
       // cannot be, so it is the whole table.
+      // One entry per view a loaded plugin registered. A view has no rail button of its own —
+      // the rail is Bennu's tools — so without this the only way to open one is a plugin
+      // calling `arbor.ui.open_panel` on its own behalf, which is the plugin deciding, not you.
+      ...pluginViews.map((v) => ({
+        id: `pview:${v.plugin_name}:${v.id}`,
+        title: `Open View: ${v.label}`,
+        icon: v.icon ?? 'layout',
+        shortcut: undefined as string | undefined,
+        action: () => run(() => bennuUiStore.showRight(`plugin:${v.plugin_name}:${v.id}`)),
+        when: true,
+      })),
       ...JPA_PALETTE_ACTIONS.map((a) => ({
         id: `jpa:${a.id}`,
         title: `JPA: ${a.title.toLowerCase()}…`,
@@ -1339,6 +1385,18 @@
       { id: 'settings', title: 'Settings', icon: 'command', shortcut: 'Ctrl+,', action: () => run(() => bennuUiStore.openSettings()), when: true },
       { id: 'customizerails', title: 'Customize Activity Bar…', icon: 'sliders',
         action: () => run(() => bennuUiStore.openCustomizeRails()), when: true },
+      // The three doors of the plugin host. They were in the hamburger only — which is the
+      // menu you go to when you already know what you are looking for, and the palette is
+      // the one you go to when you do not.
+      { id: 'plugins', title: 'Plugin Manager', icon: 'plug',
+        action: () => run(() => bennuUiStore.togglePlugins()), when: true },
+      { id: 'marketplace', title: 'Plugin Marketplace', icon: 'store',
+        action: () => run(() => sharedUiStore.openMarketplace()), when: true },
+      // Picks up a plugin edited on disk without restarting Bennu — the loop anyone writing
+      // one is in all day. Routed through `host()`, so it reloads **bennu-be's** host and not
+      // whichever backend happened to be named first.
+      { id: 'reloadplugins', title: 'Reload plugins', icon: 'refresh-cw',
+        action: () => run(() => void reloadAllPlugins()), when: true },
       { id: 'mcpactivity', title: 'AI activity…', icon: 'activity',
         action: () => run(() => window.dispatchEvent(new CustomEvent('arbor:open-mcp-activity'))), when: true },
       { id: 'mcptools', title: 'AI tools…', icon: 'bot',

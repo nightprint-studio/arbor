@@ -37,6 +37,24 @@ arbor.log.error("fatal: " .. err)
   and plugins disabled at startup never get a Lua VM in the first place.
 </p>
 
+<h3>What else lands there</h3>
+<p>
+  The panel is not only what a plugin says about itself — it is also where Arbor
+  says what went wrong with it, attributed to the plugin that caused it. A hook
+  handler that throws, a <code>arbor.command.fire</code> that is refused, a
+  dependency that does not resolve, a schedule that could not be registered, a
+  contribution rejected by its point's schema, a deprecated payload field, a
+  subscription to a hook nothing fires: each one appears as an
+  <code>error</code> or a <code>warn</code> line under the plugin's own name.
+</p>
+<p>
+  So does the half that happens in the window. An action the plugin fired that
+  came back refused, a form patch aimed at a field that does not exist, a page
+  payload that would not serialise — those used to fail silently in the webview,
+  and now reach the same panel. A plugin that misbehaves has one place to look,
+  not two.
+</p>
+
 <h3>Plugin Logs panel</h3>
 <p>
   The panel streams new lines in real time and is the canonical place to

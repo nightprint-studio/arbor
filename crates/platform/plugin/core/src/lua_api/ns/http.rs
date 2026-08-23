@@ -30,6 +30,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let pname = ctx.plugin_name.clone();
     let net_perm = ctx.network_perm.clone();
     let host = ctx.host_weak.clone();
+    let reporter = ctx.reporter();
 
     // Per-plugin atomic counter for synthetic callback names. Same pattern
     // as `__job_done_<id>__` so concurrent in-flight requests can't
@@ -56,6 +57,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
             let url_owned   = url.clone();
             let hook_owned  = hook_name.clone();
             let host_c      = host.clone();
+            let reporter_c  = reporter.clone();
 
             // Drive the HTTP call on a dedicated thread with its own
             // current-thread Tokio runtime — plugin-core has no ambient
@@ -68,7 +70,9 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
                 {
                     Ok(rt) => rt,
                     Err(e) => {
-                        tracing::warn!("arbor.http.get: failed to build runtime: {e}");
+                        reporter_c.error(format!(
+                            "arbor.http.get('{url_owned}'): failed to build the request                              runtime: {e} — the callback will never fire"
+                        ));
                         return;
                     }
                 };

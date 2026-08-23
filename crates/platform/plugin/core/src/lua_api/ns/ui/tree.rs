@@ -28,7 +28,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
 fn install_set(ctx: &ApiCtx, lua: &Lua, tree_table: &Table) -> Result<()> {
     let pname = ctx.plugin_name.clone();
     let store = ctx.tree_store.clone();
-    let app_ctx = ctx.app_ctx.clone();
+    let reporter = ctx.reporter();
     let contribs_set = ctx.contributions.clone();
     let set_fn = lua.create_function(move |_, (sidebar_id, body): (String, mlua::Value)| {
         // Accept either `{nodes = {...}, title = "..."}` or a bare array of nodes.
@@ -73,18 +73,10 @@ fn install_set(ctx: &ApiCtx, lua: &Lua, tree_table: &Table) -> Result<()> {
                             let s = arr.to_string();
                             if s.len() > 400 { format!("{}…", &s[..400]) } else { s }
                         };
-                        tracing::warn!(target: "plugin",
-                            "[{}] arbor.ui.tree.set('{}'): breadcrumb deserialization failed: {} (input: {})",
-                            pname, sidebar_id, e, preview,
-                        );
-                        if let Some(ref c) = app_ctx {
-                            c.record_plugin_log(
-                                "error", &pname,
-                                &format!(
-                                    "arbor.ui.tree.set('{sidebar_id}'): breadcrumb deserialization failed: {e}"
-                                ),
-                            );
-                        }
+                        reporter.error(format!(
+                            "arbor.ui.tree.set('{sidebar_id}'): breadcrumb deserialization \
+                             failed: {e} (input: {preview})"
+                        ));
                         Vec::new()
                     }
                 }
@@ -112,18 +104,10 @@ fn install_set(ctx: &ApiCtx, lua: &Lua, tree_table: &Table) -> Result<()> {
                         let s = nodes_json_array.to_string();
                         if s.len() > 400 { format!("{}…", &s[..400]) } else { s }
                     };
-                    tracing::warn!(target: "plugin",
-                        "[{}] arbor.ui.tree.set('{}'): nodes deserialization failed: {} (input: {})",
-                        pname, sidebar_id, e, preview,
-                    );
-                    if let Some(ref c) = app_ctx {
-                        c.record_plugin_log(
-                            "error", &pname,
-                            &format!(
-                                "arbor.ui.tree.set('{sidebar_id}'): nodes deserialization failed: {e}"
-                            ),
-                        );
-                    }
+                    reporter.error(format!(
+                        "arbor.ui.tree.set('{sidebar_id}'): nodes deserialization failed: {e} \
+                         (input: {preview})"
+                    ));
                     Vec::new()
                 }
             };

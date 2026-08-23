@@ -7,6 +7,11 @@
    * header toolbar can Collapse-all / Expand-all and Select-opened-file can reveal a
    * path. Clicking a file opens it in the editor.
    *
+   * Two things ask this panel to move: the editor, through Select-opened-file, and the build-unit
+   * panels, through `focusInTree` — "show me where this crate lives". They arrive on one relay
+   * (`bennuUiStore.revealTarget`) because from here they are one action, differing only in whether
+   * a path came with them.
+   *
    * Header actions (keyboard-reachable, all `.ps-btn`): New file (＋), Select opened
    * file (locate), Collapse all / Expand all (chevrons), and an Options kebab. New
    * file + a couple of Options entries are stubs (toast) until bennu-be serves them.
@@ -20,10 +25,10 @@
     History, Tag, Trash2, ExternalLink,
   } from 'lucide-svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import Tree from '$lib/components/shared/ui/Tree.svelte';
-  import type { RowSnippetCtx } from '$lib/components/shared/ui/Tree.svelte';
+  import type { RowSnippetCtx, TreeController } from '$lib/components/shared/ui/Tree.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import BennuFilterBar from './BennuFilterBar.svelte';
@@ -32,6 +37,7 @@
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { openFolder, revealFile } from '$lib/utils/reveal';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -64,9 +70,19 @@
 
   let pickerOpen = $state(false);
   let filter = $state('');
-  // The Tree instance — for its imperative `scrollToId` (the tree is virtualized, so a
+  // The Tree instance — for its imperative `scrollToId` / `focusId` (the tree is virtualized, so a
   // DOM `scrollIntoView` on the selected row can't work when it's off-screen).
-  let treeRef = $state<{ scrollToId: (id: string, block?: 'center' | 'nearest') => void } | null>(null);
+  let treeRef = $state<TreeController | null>(null);
+
+  /**
+   * A directory the tree was told to sit on, or `null` when it follows the editor.
+   *
+   * The tree's selection is normally the open file, which is a fact about the editor rather than
+   * about the tree. "Focus in Project" selects something no editor can hold — a crate's folder —
+   * so it needs a place of its own, and it takes precedence until the next thing you click or open
+   * makes the tree follow the editor again.
+   */
+  let focusedPath = $state<string | null>(null);
 
   // The store's tree root is a single dir node; render its children as the top level
   // so the project folder itself isn't an extra nesting level.
@@ -184,7 +200,17 @@
     catch { /* mock fallback already applied by the store */ }
   }
 
+  // Opening any file — a tab, a Go-to, a click in another panel — hands the selection back to the
+  // editor. Without this the tree would keep pointing at the crate while a file from somewhere else
+  // is on screen, which is the tree lying about where you are.
+  $effect(() => {
+    void projectStore.activeFilePath;
+    untrack(() => { focusedPath = null; });
+  });
+
   function onRowSelect(node: TreeNode) {
+    // Any click hands the selection back to the editor — the pin is for one revealed row, not a mode.
+    focusedPath = null;
     if (!node.is_dir) void projectStore.openFile(node.path);
   }
 
@@ -206,19 +232,23 @@
   function collapseAll() { bennuUiStore.collapseAllTree(); }
   function expandAll() { bennuUiStore.expandTreeIds(allDirIds(rootChildren)); }
 
-  /** Ancestor directory paths of a file path within the project tree. */
-  function ancestorsOf(filePath: string): string[] {
-    const out: string[] = [];
+  /**
+   * The ancestor directory ids leading to `path`, or `null` when the tree has no such row.
+   *
+   * The two answers are different and both are needed: an empty array means "a top-level row,
+   * nothing to expand", `null` means "not in this project" — which is what a crate reached by a
+   * path dependency outside the root looks like, and the only case worth saying out loud.
+   */
+  function trailTo(path: string): string[] | null {
+    let found: string[] | null = null;
     const walk = (n: TreeNode, trail: string[]): boolean => {
-      if (n.path === filePath) return true;
+      if (n.path === path) { found = trail; return true; }
       if (!n.is_dir) return false;
-      for (const c of n.children) {
-        if (walk(c, [...trail, n.path])) { out.push(...trail, n.path); return true; }
-      }
+      for (const c of n.children) if (walk(c, [...trail, n.path])) return true;
       return false;
     };
-    for (const n of rootChildren) walk(n, []);
-    return out;
+    for (const n of rootChildren) if (walk(n, [])) break;
+    return found;
   }
 
   /** Select-opened-file: expand the active file's ancestor folders, then scroll its
@@ -227,7 +257,8 @@
   async function revealActive() {
     const path = projectStore.activeFilePath;
     if (!path) return;
-    bennuUiStore.expandTreeIds(ancestorsOf(path));
+    focusedPath = null;
+    bennuUiStore.expandTreeIds(trailTo(path) ?? []);
     await tick();
     treeRef?.scrollToId(path);
   }
@@ -246,43 +277,61 @@
     try {
       await (node.is_dir ? openFolder(node.path) : revealFile(node.path));
     } catch (e) {
-      toastStore.show(`Could not reveal ${relativePath(node.path)}: ${e}`, 'error');
+      toastStore.show(`Could not reveal ${projectStore.relativePath(node.path)}: ${e}`, 'error');
     }
   }
 
-  // The toolbar's Select-opened-file + the palette both bump this relay.
+  // The toolbar's Select-opened-file, the palette and the build-unit panels all bump this relay.
+  // A target path means a specific row was asked for; `null` means "the file that is open".
   let lastReveal = 0;
   $effect(() => {
-    const n = bennuUiStore.revealNonce;
-    if (n !== lastReveal) { lastReveal = n; void revealActive(); }
+    const { path, nonce } = bennuUiStore.revealTarget;
+    if (nonce === lastReveal) return;
+    lastReveal = nonce;
+    void (path ? focusNode(path) : revealActive());
   });
+
+  /**
+   * Sit the tree on a path: expand what it takes to see it, open it if it is a folder, select
+   * it, scroll to it, and take the keyboard focus.
+   *
+   * Focus moves because this action IS "put me there" — leaving it behind would select a row the
+   * arrow keys then refuse to walk from, which is the half-done version of the same feature.
+   */
+  async function focusNode(path: string) {
+    const rel = projectStore.relativePath(path);
+    const trail = trailTo(path);
+    if (trail === null) {
+      // The root crate / parent module has no row of its own: the tree renders the root's
+      // CHILDREN as its top level, so the root is the panel rather than something in it.
+      toastStore.show(
+        rel === '.'
+          ? `${projectStore.project?.name ?? 'That'} is the project root — this whole tree is it.`
+          : `${rel} isn't inside this project's tree.`,
+        rel === '.' ? 'info' : 'warning',
+      );
+      return;
+    }
+    // The node itself too: focusing a crate and seeing its folder still shut answers "where is
+    // it" but not "what is in it", which is the next question every time.
+    bennuUiStore.expandTreeIds([...trail, path]);
+    focusedPath = path;
+    await tick();
+    treeRef?.scrollToId(path);
+    await treeRef?.focusId(path);
+  }
 
   /** Reveal a file in the tree: open it (so it becomes the selected row), expand its
    *  ancestor folders, and scroll the selected row into view. */
   async function revealPath(path: string) {
+    focusedPath = null;
     await projectStore.openFile(path);
-    bennuUiStore.expandTreeIds(ancestorsOf(path));
+    bennuUiStore.expandTreeIds(trailTo(path) ?? []);
     await tick();
     treeRef?.scrollToId(path);
   }
 
   // ── Right-click context menu (read-only; FS mutations are a later wave) ──────
-  /** `path` relative to the project root, forward slashes. Falls back to the
-   *  absolute path when it isn't under the root. */
-  function relativePath(path: string): string {
-    const root = projectStore.project?.root;
-    const fwd = path.replace(/\\/g, '/');
-    if (!root) return fwd;
-    const rootFwd = root.replace(/\\/g, '/').replace(/\/+$/, '');
-    if (fwd === rootFwd) return '.';
-    const prefix = rootFwd + '/';
-    return fwd.startsWith(prefix) ? fwd.slice(prefix.length) : fwd;
-  }
-
-  function copyText(text: string) {
-    void navigator.clipboard?.writeText(text).catch(() => { /* clipboard denied — ignore */ });
-  }
-
   /** What "New ›" offers. Two entries for now — a Java type, and a plain file — because
    *  those are the two the tree is actually used to create; the dialog behind the first one
    *  is where the choice between class / interface / enum / … is made, exactly where
@@ -429,8 +478,8 @@
         case 'rename':    renamePath = node.path; break;
         case 'delete':    deleting = node; break;
         case 'open':      void projectStore.openFile(node.path); break;
-        case 'copy-path': copyText(node.path); break;
-        case 'copy-rel':  copyText(relativePath(node.path)); break;
+        case 'copy-path': void copyToClipboard(node.path); break;
+        case 'copy-rel':  void copyToClipboard(projectStore.relativePath(node.path)); break;
         case 'reveal':    void revealPath(node.path); break;
         case 'reveal-fs': void revealInFileExplorer(node); break;
         case 'hist-show':  showHistory(node); break;
@@ -459,8 +508,8 @@
     const node = deleting;
     if (!node) return '';
     const what = node.is_dir
-      ? `${relativePath(node.path)} and everything in it`
-      : relativePath(node.path);
+      ? `${projectStore.relativePath(node.path)} and everything in it`
+      : projectStore.relativePath(node.path);
     return `${what}\n\nIt goes into Bennu's local history, not the system trash — undo it right away with Ctrl/Cmd+Z, or restore it later from Local History › Deleted.`;
   });
 
@@ -597,7 +646,7 @@
         rowHeight={TREE_ROW_H}
         getId={(n) => n.path}
         getChildren={(n) => (n.is_dir ? n.children : undefined)}
-        selectedId={projectStore.activeFilePath}
+        selectedId={focusedPath ?? projectStore.activeFilePath}
         expandedIds={bennuUiStore.treeExpanded}
         {onExpandToggle}
         {filter}

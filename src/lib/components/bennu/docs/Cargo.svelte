@@ -30,6 +30,14 @@
 </ul>
 
 <p>
+  The crate header answers one more question, the one the three groups cannot: <strong>where the
+  crate is</strong>. Its <strong>locate</strong> button — or <strong>Focus in Project</strong> from a
+  right-click on the header — opens the Project tree on that crate's folder, expanded, selected and
+  holding the keyboard focus, so the arrows carry on from there. The same menu opens the crate's
+  <code>Cargo.toml</code> and copies its path.
+</p>
+
+<p>
   The common commands are in the <strong>command palette</strong> too
   (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>, "Cargo: …"), aimed at the whole workspace — the
   panel has to be open to click a row in it, and reaching a verb from wherever you are is what the

@@ -23,6 +23,7 @@ use arbor_plugin_types::prelude::{hook_names, LoadFailure};
 
 use super::loaded::{DormantPlugin, LoadedPlugin, PluginActivity, ServiceIndex};
 use crate::contribution::ContributionRegistry;
+use crate::report::PluginReporter;
 use crate::sandbox::LuaApiInstaller;
 use crate::tree::{IconRegistry, TreeStore};
 
@@ -99,6 +100,16 @@ impl PluginHost {
             activity:           PluginActivity::new(),
             services:           ServiceIndex::new(),
         }
+    }
+
+    /// A [`PluginReporter`] for one of this host's plugins.
+    ///
+    /// The host-side door onto the same sink `arbor.log.*` writes to, for the failures a plugin
+    /// causes without ever reaching its own Lua VM: a dependency that does not resolve, a cycle,
+    /// a command that could not be dispatched. Those plugins have no VM to report through — the
+    /// host is the only thing that knows they exist.
+    pub fn reporter(&self, plugin: &str) -> PluginReporter {
+        PluginReporter::new(plugin, self.app_ctx.clone())
     }
 
     /// Install the host context handle. Called once at boot from the host

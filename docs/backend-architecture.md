@@ -227,7 +227,14 @@ Hooks fired by OOP handlers must reach the Lua plugins, so the **plugin host liv
 the product BE** (not the shell).
 
 - `.plugin_host("corvus", build_hook_dispatcher)` builds the `PluginHost` (filtered to the
-  product), its headless `BackendAppCtx`, the hook dispatcher, and the scheduler.
+  product), its headless `BackendAppCtx`, the hook dispatcher, and the scheduler. Nothing
+  about plugin **roots** is passed: a profile keeps its packages in two directories —
+  `installed/` and `marketplace_plugins/` — and `arbor_plugin_core::prelude::plugin_roots`
+  answers with both, recomputed per discovery so a live profile switch needs no
+  re-registration. It used to be a per-call-site decision, and every site that took only the
+  first directory was silently wrong: in a debug build both resolve to something populated,
+  so the mistake only surfaced in a release build, as an empty Plugin Manager or an
+  extension reported missing while installed.
 - `arbor.*` namespaces are published via `.api_installer(...)`. The host-side `NsHost` impl
   (e.g. `CorvusNsHost` in corvus's `main.rs`) bridges git/provider/workspace calls and
   fires hooks onto the **same** state broker the RPC handlers use.
@@ -376,8 +383,8 @@ Key files (all under `profiles/<profile>/`, TOML for config / JSON for state):
 | `corvus/workspaces.json` | corvus-be | workspaces + groups + active id (repos referenced by **UUID**) |
 | `corvus/repos.json` | corvus-be | UUID → `{ path, remote_url, display_name }` — **the only place absolute repo paths live** |
 | `corvus/workspace-state/<id>.json` | corvus-be | per-workspace open-tab snapshots |
-| `plugins/installed/<name>/` | plugin host | installed plugin folders (`plugin.toml` + `main.lua` + …) |
-| `plugins/marketplace_plugins/<name>/` | marketplace | marketplace-installed plugin folders |
+| `plugins/installed/<name>/` | plugin host | installed plugin folders (`plugin.toml` + `main.lua` + …). In a **debug** build `plugin_dir()` points at the workspace's `plugins/` instead, so this pool is release-only |
+| `plugins/marketplace_plugins/<name>/` | marketplace | marketplace-installed plugin folders — the bulk of a real installation |
 | `plugins/plugin_states.json` | plugin host | `name → enabled` |
 | `plugins/marketplace_installed.json` | marketplace | install ledger (name → version/sha/`install_path`) |
 | `plugins/plugin_data/<name>/global.json` | plugin (`arbor.settings.global`) | **small** per-plugin state (e.g. compile/run commands) |

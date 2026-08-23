@@ -72,6 +72,20 @@ impl AppCtx for BackendAppCtx {
         false
     }
 
+    /// Announce a plugin's log line so the shell can file it.
+    ///
+    /// The trait's default is a no-op, and inheriting it is what made the Plugin Logs panel
+    /// permanently empty: since the plugin hosts moved into the product backends, every
+    /// `arbor.log.*` call in the app was made through THIS context — and went nowhere, with
+    /// the panel showing an empty list rather than an error, so nothing said the channel was
+    /// gone. See [`PLUGIN_LOG_TOPIC`] for why the entry is finished shell-side.
+    fn record_plugin_log(&self, level: &str, plugin: &str, message: &str) {
+        self.sink.emit(
+            arbor_ipc::prelude::PLUGIN_LOG_TOPIC,
+            serde_json::json!({ "level": level, "plugin": plugin, "message": message }),
+        );
+    }
+
     // Extensions run in the shell, which owns the wasm engine — a second engine per backend
     // would compile every module again and give a plugin a different instance depending on
     // which process it happened to load in. Blocks on the reply, like `open_path`.

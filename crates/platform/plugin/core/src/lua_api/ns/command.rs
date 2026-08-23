@@ -81,8 +81,9 @@ fn install_fire(ctx: &ApiCtx, lua: &Lua, cmd_table: &Table) -> Result<()> {
     // deadlock on the non-reentrant PluginHost mutex). Failures are logged to
     // the plugin's log stream; there is no return value (commands are
     // fire-and-forget, like the palette flow).
-    let host   = ctx.host_weak.clone();
-    let caller = ctx.plugin_name.clone();
+    let host     = ctx.host_weak.clone();
+    let caller   = ctx.plugin_name.clone();
+    let reporter = ctx.reporter();
     let fn_ = lua.create_function(
         move |lua_ctx, (id, ctx_val): (String, Option<mlua::Value>)| {
             let ctx_json: serde_json::Value = match ctx_val {
@@ -90,17 +91,17 @@ fn install_fire(ctx: &ApiCtx, lua: &Lua, cmd_table: &Table) -> Result<()> {
                 Some(v) => lua_ctx.from_value(v)
                     .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?,
             };
-            let caller_p = caller.clone();
-            let host_c   = host.clone();
+            let caller_p   = caller.clone();
+            let host_c     = host.clone();
+            let reporter_c = reporter.clone();
             std::thread::spawn(move || {
                 if let Some(arc) = host_c.and_then(|w| w.upgrade()) {
                     if let Ok(host) = arc.lock() {
                         if let Err(e) = host.invoke_command(&caller_p, &id, &ctx_json) {
-                            tracing::warn!(
-                                target: "plugin",
-                                "arbor.command.fire('{id}') in '{caller_p}': {} ({})",
+                            reporter_c.error(format!(
+                                "arbor.command.fire('{id}'): {} ({})",
                                 e.message(), e.kind(),
-                            );
+                            ));
                         }
                     }
                 }

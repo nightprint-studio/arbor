@@ -52,10 +52,9 @@ pub fn wire(app: &tauri::App) {
         // the Plugin Manager reads corvus-be's host. See `Manifest::targets` +
         // `lifecycle.rs`'s `Some("launcher")` filter arm.
         host.set_product("launcher");
-        // Marketplace install dir is scanned alongside the host's dev
-        // `plugin_dir()` during reload. Passed as an extra root so
-        // `arbor-plugin-core` itself stays free of any marketplace coupling.
-        host.set_extra_plugin_roots(vec![arbor_plugin_marketplace::prelude::plugins_dir()]);
+        // No extra roots: the marketplace dir is one of the profile's two plugin pools and
+        // the host scans it itself (`arbor_plugin_core`'s `plugin_roots`). Naming it here
+        // was the arrangement that let four backends forget it.
     }
 
     let scheduler = Arc::new(Scheduler::new(ctx, rt_handle));

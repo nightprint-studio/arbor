@@ -23,10 +23,27 @@ use super::consts::current_os;
 // Discovery
 // ---------------------------------------------------------------------------
 
-/// Walk a single root looking for `plugin.toml` files. Convenience wrapper
-/// around [`discover_in_roots`] for the common "no marketplace overlay" case.
+/// Every root a profile's plugins live in, in precedence order.
+///
+/// **Two pools, and both of them always.** [`plugin_dir`] is the host pool — the profile's
+/// `installed/`, or the workspace's `plugins/` in a debug build. The marketplace pool is the
+/// other, and on a real installation it holds essentially everything the user has.
+///
+/// This used to be a per-call-site decision, and every site that took only the first pool was
+/// silently wrong: in a debug build both resolve to something populated, so the mistake is
+/// invisible until a release build, where it becomes "the Plugin Manager is empty" or "no
+/// extension provides mesh-source@1/primitives" — a missing root wearing a missing-package
+/// error message.
+///
+/// Computed per call, not cached: the marketplace root is per **profile**, and a live profile
+/// switch has to change the answer without anybody re-registering anything.
+pub fn plugin_roots() -> Vec<PathBuf> {
+    vec![plugin_dir(), arbor_core::prelude::marketplace_plugins_dir()]
+}
+
+/// Every plugin the active profile has, across both [`plugin_roots`].
 pub fn discover_plugins() -> Result<Vec<Manifest>> {
-    Ok(discover_in_roots(&[plugin_dir()])?.0)
+    Ok(discover_in_roots(&plugin_roots())?.0)
 }
 
 /// Same as `discover_plugins`, but caller-supplied roots. The host shell

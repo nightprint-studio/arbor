@@ -16,10 +16,19 @@
 //!
 //! ## The check
 //!
-//! One rule: the resolved path must be inside a plugin root. Canonicalised first, so a
-//! symlinked package (how a plugin under development is usually installed) resolves to where
-//! its files really are, and `..` cannot walk out. Nothing else is served, whatever the URL
-//! says.
+//! One rule: the requested path must be inside a plugin root, **as written**. No `..` in it,
+//! and it starts with a root — with those two, it cannot name anything outside one.
+//!
+//! Deliberately not "canonicalise and then compare". A package under development is installed
+//! as links into the checkout it is written in — sometimes the whole directory, sometimes one
+//! link per shipped file — so its files really live nowhere near a plugin root, and resolving
+//! before comparing turned every one of them into a 403 on a URL that reads perfectly.
+//! Chasing that with a list of each package's real directory only covered the first shape.
+//!
+//! Where a package's bytes physically sit is a decision of whoever installed it, and a plugin
+//! cannot make links (no `io`, and `arbor.fs` has no such verb) — so following them costs
+//! nothing that was not already granted. Which files exist under a root is the boundary; how
+//! they got there is not.
 //!
 //! Every installed package can read every other's files through this. That is the same reach
 //! `arbor.fs` already grants a plugin over its neighbours: packages the user installed are one
@@ -103,47 +112,43 @@ fn refuse(status: StatusCode) -> Response<Cow<'static, [u8]>> {
         .expect("static response builds")
 }
 
-/// The real file behind a requested path, or `None` when it is not a plugin's.
+/// The file behind a requested path, or `None` when it is not a plugin's.
 fn resolve(requested: &Path) -> Option<PathBuf> {
-    // Canonicalise the request FIRST. It resolves `..`, symlinks and `.` in one step, and
-    // fails outright when the file does not exist — so everything below compares two real
-    // paths rather than two strings that might mean the same place.
-    let real = std::fs::canonicalize(requested).ok()?;
-    allowed_roots().into_iter().any(|root| real.starts_with(&root)).then_some(real)
+    within_roots(requested, &allowed_roots()).then(|| requested.to_path_buf())
 }
 
-/// Every directory a plugin's files may really live in.
+/// Whether `requested` names something under one of `roots` — decided on the path as written.
 ///
-/// The two plugin roots, and then — the part that is easy to leave out and produces a 403 on
-/// a path that looks perfectly right — **each package's own real directory**. A package under
-/// development is usually a symlink into the repo it is written in, so canonicalising the
-/// request lands somewhere no root covers. Canonicalising the roots does not help: the roots
-/// are real directories; it is the entries inside them that point elsewhere.
+/// Split out from [`resolve`] because it is the whole of the security decision and the only
+/// part that can be tested: `resolve` answers against the profile this machine happens to
+/// have, this answers against whatever roots you hand it.
+fn within_roots(requested: &Path, roots: &[PathBuf]) -> bool {
+    // `..` is the only component that can walk a path out of a prefix it starts with. Without
+    // one, "starts with a root" and "is inside that root" are the same statement.
+    if requested.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return false;
+    }
+    roots.iter().any(|root| requested.starts_with(root))
+}
+
+/// The two directories a profile keeps plugins in, each in both the form the rest of the app
+/// builds paths from and its resolved form.
 ///
-/// Both halves are needed, and neither is redundant: the roots cover ordinary installs
-/// (including files added after this list was built), the package directories cover the
-/// symlinked ones.
+/// Both, because a root can itself be reached through a link — a workspace checked out under
+/// one on macOS (`/tmp` → `/private/tmp`) is the ordinary case — and a request built from the
+/// one spelling must not be refused for not matching the other.
 fn allowed_roots() -> Vec<PathBuf> {
     let mut out = Vec::new();
     for root in [
         arbor_plugin_core::prelude::plugin_dir(),
         arbor_plugin_marketplace::prelude::plugins_dir(),
     ] {
-        let Ok(root) = std::fs::canonicalize(&root) else { continue };
-        let entries = std::fs::read_dir(&root).ok();
-        out.push(root);
-        let Some(entries) = entries else { continue };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            if let Ok(real) = std::fs::canonicalize(&path) {
-                if !out.iter().any(|r| real.starts_with(r)) {
-                    out.push(real);
-                }
+        if let Ok(real) = std::fs::canonicalize(&root) {
+            if real != root {
+                out.push(real);
             }
         }
+        out.push(root);
     }
     out
 }
@@ -227,51 +232,55 @@ mod tests {
 
     #[test]
     fn a_path_outside_every_root_is_refused() {
-        // `resolve` canonicalises, so this also covers `..` walking out of a plugin folder:
-        // the resolved path simply is not under a root any more.
-        assert!(resolve(Path::new("/etc/passwd")).is_none());
+        let roots = vec![PathBuf::from("/profiles/p/plugins")];
+        assert!(!within_roots(Path::new("/etc/passwd"), &roots));
+        assert!(!within_roots(Path::new("/profiles/p/plugins-elsewhere/x"), &roots));
     }
 
     #[test]
-    fn a_path_that_does_not_exist_is_refused() {
-        assert!(resolve(Path::new("/definitely/not/here/at/all.wasm")).is_none());
+    fn dot_dot_is_refused_even_when_it_starts_inside() {
+        // The one component that can leave a prefix it starts with. `starts_with` alone would
+        // say yes to this, which is why it is checked separately rather than trusted away.
+        let roots = vec![PathBuf::from("/profiles/p/plugins")];
+        assert!(!within_roots(Path::new("/profiles/p/plugins/../../../etc/passwd"), &roots));
     }
 
     #[test]
-    fn a_symlinked_package_serves_from_where_its_files_really_are() {
-        // The shape that broke twice: `plugins/<pkg>` is a symlink into the repo the package
-        // is developed in, so the canonical path of its files is nowhere near the plugin
-        // root. If only the roots were listed, every file in a linked package would 403 on a
-        // path that reads correctly.
-        let tmp = std::env::temp_dir().join("arbor-plugin-assets-symlink-test");
+    fn a_package_linked_whole_serves_its_files() {
+        // `plugins/<pkg>` is a link into the checkout the package is written in. Nothing here
+        // resolves it — the request names a path under the root, and that is the question.
+        let roots = vec![PathBuf::from("/profiles/p/plugins")];
+        assert!(within_roots(
+            Path::new("/profiles/p/plugins/bevy-runtime/web/runtime_bg.wasm"),
+            &roots,
+        ));
+    }
+
+    #[test]
+    fn a_package_linked_file_by_file_serves_its_files() {
+        // The shape that broke the shader preview: the package directory is REAL and only its
+        // entries are links, so canonicalising the request landed in the source checkout and
+        // no list of package directories could have covered it.
+        let tmp = std::env::temp_dir().join(format!("arbor-plugin-assets-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let root = tmp.join("plugins");
-        let real = tmp.join("elsewhere").join("my-pkg").join("web");
-        std::fs::create_dir_all(&root).unwrap();
+        let pkg = root.join("bevy-runtime");
+        let real = tmp.join("checkout").join("web");
+        std::fs::create_dir_all(&pkg).unwrap();
         std::fs::create_dir_all(&real).unwrap();
         std::fs::write(real.join("runtime_bg.wasm"), b"\0asm").unwrap();
 
         #[cfg(unix)]
-        std::os::unix::fs::symlink(real.parent().unwrap(), root.join("my-pkg")).unwrap();
+        std::os::unix::fs::symlink(&real, pkg.join("web")).unwrap();
         #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(real.parent().unwrap(), root.join("my-pkg")).unwrap();
+        std::os::windows::fs::symlink_dir(&real, pkg.join("web")).unwrap();
 
-        // What `allowed_roots` does, against this fixture rather than the real profile.
-        let mut roots = vec![std::fs::canonicalize(&root).unwrap()];
-        for entry in std::fs::read_dir(&root).unwrap().flatten() {
-            if entry.path().is_dir() {
-                roots.push(std::fs::canonicalize(entry.path()).unwrap());
-            }
-        }
-
-        let requested = root.join("my-pkg").join("web").join("runtime_bg.wasm");
-        let resolved = std::fs::canonicalize(&requested).unwrap();
-        assert!(
-            roots.iter().any(|r| resolved.starts_with(r)),
-            "a linked package's real path must be covered: {resolved:?} vs {roots:?}",
-        );
-        // And the root alone is NOT enough — which is the whole point.
-        assert!(!resolved.starts_with(std::fs::canonicalize(&root).unwrap()));
+        let requested = pkg.join("web").join("runtime_bg.wasm");
+        assert!(within_roots(&requested, &[root.clone()]), "{requested:?} refused");
+        // And it really reads through the link — the check being right is only half of it.
+        assert_eq!(std::fs::read(&requested).unwrap(), b"\0asm");
+        // The old rule, for the record: resolved, it is nowhere near the root.
+        assert!(!std::fs::canonicalize(&requested).unwrap().starts_with(&root));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

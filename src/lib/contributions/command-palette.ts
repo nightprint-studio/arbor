@@ -53,7 +53,8 @@ export function pluginPaletteCommands(): PluginPaletteCommand[] {
         // Logged, not swallowed. A palette entry that fails silently is indistinguishable
         // from one that did nothing, and that is exactly the bug this file exists to fix.
         firePluginAction(c.plugin_name, `command:${c.item_id}`, '{}')
-          .catch((e) => console.error(`plugin '${c.plugin_name}': command '${c.item_id}' failed`, e));
+          // `firePluginAction` puts the failure in the Plugin Logs panel.
+          .catch(() => {});
       },
     };
   });

@@ -25,6 +25,15 @@
     actions?: Snippet;
     children: Snippet;
     onToggle?: () => void;
+    /**
+     * Right-click on the header, as a **point** rather than as an event.
+     *
+     * A point because the keyboard opens a context menu too (<kbd>Shift</kbd>+<kbd>F10</kbd>,
+     * the Menu key) and a key press has no cursor to sit under — so the widget turns both
+     * routes into the one thing a menu actually needs, instead of every consumer deriving the
+     * header's rectangle for itself.
+     */
+    onContextMenu?: (x: number, y: number) => void;
   }
 
   let {
@@ -39,20 +48,41 @@
     actions,
     children,
     onToggle,
+    onContextMenu,
   }: Props = $props();
 
   function toggle() {
     expanded = !expanded;
     onToggle?.();
   }
+
+  /** The keyboard's way in. Anchored to the header's bottom-left, where a menu opened by a
+   *  right-click on the row would also start. */
+  function onHeaderKeydown(e: KeyboardEvent) {
+    if (!onContextMenu) return;
+    if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
+    e.preventDefault();
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    onContextMenu(r.left + 8, r.bottom);
+  }
 </script>
 
 <div class="section">
-  <div class="section-header-row">
+  <!-- The handler sits on the HEADER row, not on the section: a section body holds rows — and
+       often nested sections — that have menus of their own, and a right-click there must not
+       bubble up into this one's. -->
+  <div
+    class="section-header-row"
+    role="presentation"
+    oncontextmenu={onContextMenu
+      ? (e) => { e.preventDefault(); onContextMenu(e.clientX, e.clientY); }
+      : undefined}
+  >
     <button
       class="section-header"
       class:open={expanded}
       onclick={toggle}
+      onkeydown={onHeaderKeydown}
       aria-expanded={expanded}
     >
       <span class="section-chevron" class:open={expanded}>
@@ -170,7 +200,10 @@
     pointer-events: none;
     transition: opacity var(--transition-fast);
   }
-  .section-header-row:hover .section-actions {
+  /* `:focus-within` as well as hover: an action button reached with Tab would otherwise take
+     the focus ring while still invisible, which is a place the keyboard can get stuck. */
+  .section-header-row:hover .section-actions,
+  .section-header-row:focus-within .section-actions {
     opacity: 1;
     pointer-events: auto;
   }

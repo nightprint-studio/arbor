@@ -14,6 +14,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use crate::error::{PluginCoreError, Result};
 use crate::lua_api::ctx::ApiCtx;
 use crate::lua_api::helpers::contrib_write::contribute_patch_payload;
+use crate::report::PluginReporter;
 use crate::contribution::{
     ContributionPoint, PluginContribution, WhenClause, validate_built_in,
 };
@@ -30,6 +31,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
 fn install_contribute(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     let pname = ctx.plugin_name.clone();
     let reg = ctx.contributions.clone();
+    let reporter = ctx.reporter();
     let fn_ = lua.create_function(move |_, (point, item): (String, mlua::Table)| {
         let item_id = item.get::<String>("id").map_err(|_| {
             mlua::Error::RuntimeError("arbor.ui.contribute: 'id' is required".to_string())
@@ -65,7 +67,7 @@ fn install_contribute(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
         let mut group    = group_top;
 
         lift_legacy_payload_fields(
-            &LiftTarget { pname: &pname, point: &point, item_id: &item_id },
+            &LiftTarget { reporter: &reporter, point: &point, item_id: &item_id },
             &mut payload, &mut when, &mut disabled, &mut group,
             disabled_top.is_some(),
         );
@@ -75,11 +77,10 @@ fn install_contribute(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
         // ones must match their documented shape or the contribution is
         // dropped.
         if let Err(e) = validate_built_in(&point, &payload) {
-            tracing::error!(
-                target: "plugin",
-                plugin = %pname, point = %point, item_id = %item_id,
-                "contribution rejected — schema validation failed: {}", e,
-            );
+            reporter.error(format!(
+                "contribution to '{point}' (id='{item_id}') rejected — \
+                 schema validation failed: {e}"
+            ));
             return Ok(());
         }
 
@@ -100,10 +101,14 @@ fn install_contribute(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     Ok(())
 }
 
-/// Identity of the contribution being lifted — used only to build the
-/// deprecation warning messages.
+/// Identity of the contribution being lifted, plus where to say so.
+///
+/// The reporter travels with the identity rather than beside it: these warnings
+/// are the plugin author's cleanup list, and the panel is where they will read
+/// it — a `tracing` line alone reaches nobody in a backend process, which has no
+/// subscriber at all.
 struct LiftTarget<'a> {
-    pname: &'a str,
+    reporter: &'a PluginReporter,
     point: &'a str,
     item_id: &'a str,
 }
@@ -118,54 +123,48 @@ fn lift_legacy_payload_fields(
     group: &mut Option<String>,
     disabled_top_set: bool,
 ) {
-    let LiftTarget { pname, point, item_id } = *target;
+    let LiftTarget { reporter, point, item_id } = *target;
     let group_top_set = group.is_some();
     if let Some(obj) = payload.as_object_mut() {
         if let Some(legacy) = obj.remove("when") {
             if when.is_some() {
-                tracing::warn!(
-                    target: "plugin",
-                    "[{pname}] contribution to '{point}' (id='{item_id}'): \
-                     both top-level `when` and `payload.when` set; ignoring `payload.when`",
-                );
+                reporter.warn(format!(
+                    "contribution to '{point}' (id='{item_id}'): both top-level `when` \
+                     and `payload.when` set; ignoring `payload.when`"
+                ));
             } else {
-                tracing::warn!(
-                    target: "plugin",
-                    "[{pname}] contribution to '{point}' (id='{item_id}'): \
-                     `payload.when` is deprecated — move to top-level `when`",
-                );
+                reporter.warn(format!(
+                    "contribution to '{point}' (id='{item_id}'): `payload.when` is deprecated \
+                     — move to top-level `when`"
+                ));
                 *when = serde_json::from_value(legacy).ok();
             }
         }
         if let Some(legacy) = obj.remove("disabled") {
             if disabled_top_set {
-                tracing::warn!(
-                    target: "plugin",
-                    "[{pname}] contribution to '{point}' (id='{item_id}'): \
-                     both top-level `disabled` and `payload.disabled` set; ignoring `payload.disabled`",
-                );
+                reporter.warn(format!(
+                    "contribution to '{point}' (id='{item_id}'): both top-level `disabled` \
+                     and `payload.disabled` set; ignoring `payload.disabled`"
+                ));
             } else {
-                tracing::warn!(
-                    target: "plugin",
-                    "[{pname}] contribution to '{point}' (id='{item_id}'): \
-                     `payload.disabled` is deprecated — move to top-level `disabled`",
-                );
+                reporter.warn(format!(
+                    "contribution to '{point}' (id='{item_id}'): `payload.disabled` is deprecated \
+                     — move to top-level `disabled`"
+                ));
                 *disabled = legacy.as_bool().unwrap_or(false);
             }
         }
         if let Some(legacy) = obj.remove("group") {
             if group_top_set {
-                tracing::warn!(
-                    target: "plugin",
-                    "[{pname}] contribution to '{point}' (id='{item_id}'): \
-                     both top-level `group` and `payload.group` set; ignoring `payload.group`",
-                );
+                reporter.warn(format!(
+                    "contribution to '{point}' (id='{item_id}'): both top-level `group` \
+                     and `payload.group` set; ignoring `payload.group`"
+                ));
             } else {
-                tracing::warn!(
-                    target: "plugin",
-                    "[{pname}] contribution to '{point}' (id='{item_id}'): \
-                     `payload.group` is deprecated — move to top-level `group`",
-                );
+                reporter.warn(format!(
+                    "contribution to '{point}' (id='{item_id}'): `payload.group` is deprecated \
+                     — move to top-level `group`"
+                ));
                 *group = legacy.as_str().map(String::from);
             }
         }

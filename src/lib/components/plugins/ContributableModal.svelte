@@ -84,7 +84,8 @@
     onLoadFiredFor = containerId;
     if (def.on_load && ownerPlugin) {
       firePluginAction(ownerPlugin, def.on_load, '{}')
-        .catch(err => console.warn(`[ContributableModal] on_load failed: ${err}`));
+        // Reported by `firePluginAction`; the modal opens with defaults.
+        .catch(() => {});
     }
   });
 

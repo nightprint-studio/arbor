@@ -16,7 +16,11 @@ pub use crate::contribution::{
     PluginContribution, WhenClause, DataFieldMatch, StringOrVec,
     points, payloads, validate_built_in,
 };
-pub use crate::lua_ctx::{install as install_lua_ctx, record as record_lua, PluginLuaCtx};
+pub use crate::lua_ctx::{
+    install as install_lua_ctx, record as record_lua, report as report_lua,
+    reporter as lua_reporter, PluginLuaCtx,
+};
+pub use crate::report::PluginReporter;
 pub use crate::settings_store::{
     SettingsMap, global_settings_path, load_settings_file, plugin_data_dir,
     project_settings_path, save_settings_file,
@@ -35,7 +39,7 @@ pub use crate::sandbox::{
 };
 pub use crate::runtime::{
     ARBOR_API_VERSION, ARBOR_APP_VERSION, current_os,
-    discover_in_roots, discover_plugins, forget_plugin_state, install_plugin_for,
+    discover_in_roots, discover_plugins, forget_plugin_state, install_plugin_for, plugin_roots,
     load_plugin_states, load_plugin_states_for, load_states, plugin_dir, plugin_products,
     save_plugin_states, save_plugin_states_for, save_states, set_plugin_state_for,
     PluginStates,

@@ -132,3 +132,11 @@
   <li><kbd>Ctrl</kbd> + <kbd>,</kbd> — settings</li>
   <li><kbd>F1</kbd> — documentation</li>
 </ul>
+<p>
+  The palette also carries the plugin host: <strong>Plugin Manager</strong>,
+  <strong>Plugin Marketplace</strong>, <strong>Toggle Plugin Logs</strong> and
+  <strong>Reload plugins</strong> — which re-reads the plugin directories without restarting
+  Bennu, the loop you are in while writing one. Anything a loaded plugin registered with
+  <code>arbor.command.register</code> appears under <strong>Plugin Commands</strong>, and each
+  view a plugin contributes gets its own <strong>Open View: …</strong> entry.
+</p>

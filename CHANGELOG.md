@@ -9,11 +9,31 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **A plugin's failures reach the Plugin Logs panel.** A hook handler that threw, a command that was refused, a dependency that did not resolve, a schedule that could not be registered, a contribution rejected by its schema — all of them were written to a terminal log that a backend process does not even have a subscriber for, so the panel that exists to show plugin failures showed none of them. The same now goes for the half that happens in the window: an action fired from a panel, a form patch aimed at a field that does not exist, a page payload that would not serialise, each of which used to be swallowed by an empty catch.
+
+- **A shader that does not compile says so.** The headless renderer ran without a log at all, so a material naga refused came back the same way one that renders to nothing does: an empty picture, exit 0, and not one line anywhere to say which line of WGSL was wrong. It now carries the compiler's own message.
+
+- **A form field's live change action says which field changed.** The two ways of writing one `actions.change` differed in what they reported, not just in how they dispatched: the scoped form named the field, the bare string did not — so one handler behind several fields could not tell them apart, and did nothing at all. Both name it now.
+
+- **The Plugin Logs panel shows plugin logs again.** Recording a line was implemented for the shell's plugin host and nowhere else, so once each product's plugins moved into its own backend every `arbor.log.*` call in the app went into a no-op — and the panel showed an empty list rather than an error, which is the version of a broken channel that nothing reports.
+
+- **A plugin's own files load when the package is installed as symlinks.** The `plugin:` scheme resolved a request through its links and then demanded it land under a plugin folder, so a package linked in from the checkout you are editing had every file refused — a black viewport where a shader preview should be. Containment is decided on the requested path now, which is where an escape is actually visible.
+
+- **A plugin installed as symlinks loads.** The `require` sandbox resolved every module and demanded it sit physically inside the plugin folder, so a package linked in from the checkout you are editing failed wholesale with a message about path traversal — naming something its author had not done. The guard is on the module name now, which is where an escape is actually visible.
+
+- **Bennu's command palette reaches the plugin host.** Plugin Manager, Marketplace, Plugin Logs and a Reload were in the hamburger only, and a plugin's contributed views had no door at all — the only way to open one was the plugin opening it for you. All of them are in the palette now, and a contributed command keeps the icon it asked for instead of collapsing into the generic one.
+
+- **A wasm extension no longer kills the app on macOS.** Calling one from a signed build ended the process outright — no error, no log, the window simply gone — because the hardened runtime refuses to execute code a JIT produced at runtime unless the app says it runs one. Arbor now says so.
+
+- **Marketplace-installed plugins and extensions are found in a release build.** A profile keeps its packages in two directories, and which callers looked in both was decided one call site at a time — so on an installed Arbor, Bennu, Garrulus, Sitta and Tyto listed no plugins at all, and a shader preview reported its mesh extension as "not installed" while it sat in the other directory. Both are now one answer that nobody has to remember to ask for.
+
 - **Staging a folder no longer leaves half a moved file behind.** A file moved on disk was filed under the folder it *left*, so "Stage Folder" staged only its departure and the arrival reappeared afterwards as an untracked file somewhere else. A rename is now shown, staged, unstaged and discarded as the two paths it is.
 
 - **"Stage File" and "Stage Folder" are the same operation.** They were two implementations of one idea and only one of them handled deletions the way "Stage All" does — which is why Stage All always worked and the other two sometimes did not. There is now one verb per action, taking a list.
 
 ### Added
+
+- **Focus a crate — or a Maven module — in the Project tree.** The Cargo and Dependencies panels list a project by build unit but never said where each one lives; on a forty-crate workspace that is a scroll through the tree every time. A locate button on the header, or **Focus in Project** from a right-click on it, opens the tree on that folder — expanded, selected, and holding the keyboard focus. The same menu opens the unit's manifest and copies its path.
 
 - **`bennu_read_file` can be asked for less than the whole file** — a line range, or `symbol: "SavedWorld.extra_moles"` for exactly one declaration, resolved from the file's own symbol tree so no line numbers have to be known first. Every reply carries `total_lines`, so a partial read is never mistaken for a complete one.
 

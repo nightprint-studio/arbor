@@ -24,11 +24,15 @@
    * separate rather than merged, because the two answer different questions and mixing them is how a
    * dependency panel becomes unreadable.
    *
+   * Each group header carries **Focus in Project** — a button and a right-click menu, shared with
+   * the Cargo panel (`build-unit-menu`): the panel names units the tree also has rows for, and
+   * hunting for the folder by hand is the thing that reading a dependency list sends you to do.
+   *
    * All of it comes from `bennu_dependencies`, which reads manifests plus whatever has already been
    * resolved. Nothing here runs Maven or Cargo, so refreshing is cheap and the panel opens
    * instantly.
    */
-  import { Library, Package, GitFork, Layers, Network, RefreshCw, CircleSlash } from 'lucide-svelte';
+  import { Library, Package, GitFork, Layers, LocateFixed, Network, RefreshCw, CircleSlash } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
@@ -40,6 +44,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { buildUnitDir, openBuildUnitMenu } from './build-unit-menu';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { dependenciesStore } from '$lib/stores/bennu/dependencies.svelte';
   import {
@@ -265,8 +270,18 @@
             onToggle={() => toggle(m.module.manifest)}
             badge={m.deps.length}
             badgeTitle={`Dependencies this ${unitWord} declares`}
+            onContextMenu={(x, y) => openBuildUnitMenu(x, y, m.module)}
           >
             {#snippet icon()}<Package size={13} />{/snippet}
+            {#snippet actions()}
+              <IconButton
+                tooltip={`Focus this ${unitWord} in the Project tree`}
+                size={20}
+                onclick={() => bennuUiStore.focusInTree(buildUnitDir(m.module))}
+              >
+                <LocateFixed size={11} />
+              </IconButton>
+            {/snippet}
             {#if m.deps.length === 0}
               <p class="dep-none">
                 No dependencies.

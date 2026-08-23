@@ -21,18 +21,26 @@ use crate::runtime::loaded::{
 use arbor_plugin_types::prelude::{hook_names, LoadFailure, Manifest, ScheduleRegistry};
 
 use crate::runtime::manifest::{
-    discover_in_roots, forget_plugin_state, load_plugin_states_for, plugin_dir,
+    discover_in_roots, forget_plugin_state, load_plugin_states_for, plugin_roots,
     set_plugin_state_for, topo_sort_manifests,
 };
 
 impl PluginHost {
-    /// Walk every configured plugin root (host `plugin_dir()` + the extra
-    /// roots installed by the shell crate via `set_extra_plugin_roots`).
-    /// Centralises the discovery call so reload / list / refresh paths agree
-    /// on the roots in play.
+    /// Walk every configured plugin root: the profile's two pools
+    /// ([`plugin_roots`]) plus whatever the embedder added via
+    /// `set_extra_plugin_roots`. Centralises the discovery call so reload /
+    /// list / refresh paths agree on the roots in play.
+    ///
+    /// Extras are deduplicated against the pools: an embedder that names the
+    /// marketplace root explicitly (several did, before it became a pool) must
+    /// not turn every package into a shadowed-name warning.
     fn discover_plugins_with_extras(&self) -> Result<(Vec<Manifest>, Vec<arbor_plugin_types::prelude::ManifestParseFailure>)> {
-        let mut roots: Vec<PathBuf> = vec![plugin_dir()];
-        roots.extend(self.extra_plugin_roots.iter().cloned());
+        let mut roots: Vec<PathBuf> = plugin_roots();
+        for extra in &self.extra_plugin_roots {
+            if !roots.contains(extra) {
+                roots.push(extra.clone());
+            }
+        }
         discover_in_roots(&roots)
     }
 
@@ -118,7 +126,9 @@ impl PluginHost {
         // Sort topologically so dependencies are loaded before dependents.
         let (sorted, cycle_names) = topo_sort_manifests(all_manifests);
         for name in cycle_names {
-            tracing::error!("plugin '{name}' is in a dependency cycle — skipping");
+            self.reporter(&name).error(
+                "in a dependency cycle — skipping. Nothing this plugin contributes will load.",
+            );
             self.load_failures.push(LoadFailure {
                 name:        name.clone(),
                 version:     String::new(),
@@ -200,6 +210,9 @@ impl PluginHost {
 
             // Check each declared dependency.
             let mut dep_error: Option<String> = None;
+            // Collected rather than reported inline: `self.reporter(...)` borrows the host, and
+            // the loop below is already holding `&manifest` out of it. Drained right after.
+            let mut optional_notes: Vec<String> = Vec::new();
             'dep_check: for dep in &manifest.dependencies {
                 match loaded_versions.get(&dep.name) {
                     None => {
@@ -209,10 +222,10 @@ impl PluginHost {
                             ));
                             break 'dep_check;
                         }
-                        tracing::warn!(
-                            "plugin '{name}': optional dependency '{}' not found — continuing",
+                        optional_notes.push(format!(
+                            "optional dependency '{}' not found — continuing without it",
                             dep.name
-                        );
+                        ));
                     }
                     Some(loaded_ver) if !dep.version.is_empty() => {
                         let ok = semver::VersionReq::parse(&dep.version)
@@ -226,7 +239,7 @@ impl PluginHost {
                                 dep.name, loaded_ver, dep.version
                             );
                             if dep.optional {
-                                tracing::warn!("plugin '{name}': {msg} (optional — continuing)");
+                                optional_notes.push(format!("{msg} (optional — continuing)"));
                             } else {
                                 dep_error = Some(msg);
                                 break 'dep_check;
@@ -237,8 +250,12 @@ impl PluginHost {
                 }
             }
 
+            for note in optional_notes {
+                self.reporter(&name).warn(note);
+            }
+
             if let Some(err) = dep_error {
-                tracing::warn!("plugin '{name}' skipped: {err}");
+                self.reporter(&name).error(format!("skipped: {err}"));
                 self.load_failures.push(LoadFailure {
                     name:        name.clone(),
                     version:     manifest.version.clone(),
@@ -587,15 +604,16 @@ impl PluginHost {
         // Dormant entries (disabled-at-startup, no live VM) — drop the manifest.
         self.dormant.retain(|d| d.manifest.name != name);
 
-        // Step 2: remove the on-disk plugin folder.
-        // We resolve via the manifest dir first when the plugin was loaded (so
-        // dev plugins shipped from the workspace `plugins/` are honoured), and
-        // fall back to `plugin_dir()/<name>` when we only have the name.
-        let plugins_root = plugin_dir();
-        let folder = plugins_root.join(name);
-        if folder.exists() {
-            if let Err(e) = std::fs::remove_dir_all(&folder) {
-                warnings.push(format!("failed to remove {}: {e}", folder.display()));
+        // Step 2: remove the on-disk plugin folder — from **every** pool that has one.
+        // Only the name is in hand here, and a package can sit in either the host pool or
+        // the marketplace one; removing it from the first and stopping would uninstall a
+        // plugin that comes straight back on the next reload.
+        for root in plugin_roots() {
+            let folder = root.join(name);
+            if folder.exists() {
+                if let Err(e) = std::fs::remove_dir_all(&folder) {
+                    warnings.push(format!("failed to remove {}: {e}", folder.display()));
+                }
             }
         }
 

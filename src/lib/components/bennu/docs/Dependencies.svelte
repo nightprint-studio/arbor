@@ -38,6 +38,12 @@
   where "why is <em>this</em> version of that library here" gets answered.
 </p>
 <p>
+  Each group header carries <strong>Focus in Project</strong> — its locate button, or a right-click
+  on the header — which opens the Project tree on that module's (or crate's) folder, expanded and
+  selected, with the keyboard focus on it. The same menu opens its <code>pom.xml</code> /
+  <code>Cargo.toml</code> and copies its path.
+</p>
+<p>
   Reading it runs nothing: the poms are files, and the classpath is the one already resolved for the
   index. Imported BOMs and version ranges are the two things it will not compute — a version only
   they can answer stays blank unless the resolved classpath settles it, which is not a guess but the

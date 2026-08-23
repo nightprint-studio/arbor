@@ -24,6 +24,7 @@ use arbor_plugin_types::prelude::{
 };
 
 use crate::contribution::ContributionRegistry;
+use crate::report::PluginReporter;
 use crate::runtime::host::PluginHost;
 use crate::runtime::loaded::{PluginActivity, ServiceIndex, TimerCancels, TimerCounter};
 use crate::sandbox::{ApiInstallParams, SandboxRegistries};
@@ -103,6 +104,16 @@ pub struct ApiCtx {
 }
 
 impl ApiCtx {
+    /// A [`PluginReporter`] for the plugin this context belongs to.
+    ///
+    /// Clone one into a namespace closure next to `plugin_name` and use it wherever the closure
+    /// would otherwise `tracing::warn!` on its own: the console still gets the line, and the
+    /// Plugin Logs panel — the surface the plugin's author actually watches — stops being the
+    /// one place a plugin failure does not appear.
+    pub fn reporter(&self) -> PluginReporter {
+        PluginReporter::new(self.plugin_name.clone(), self.app_ctx.clone())
+    }
+
     /// Build an `ApiCtx` from the parameters that the sandbox builder hands
     /// to a [`LuaApiInstaller`](crate::sandbox::LuaApiInstaller). Centralises
     /// the permission-snapshot destructuring so every consumer of

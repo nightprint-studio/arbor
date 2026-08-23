@@ -67,9 +67,8 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
 }
 
 fn install_on(ctx: &ApiCtx, lua: &Lua, events_table: &Table) -> Result<()> {
-    // Snapshot both at install time: the closure outlives the ApiCtx.
+    // Snapshot at install time: the closure outlives the ApiCtx.
     let product = ctx.product.clone();
-    let plugin_name = ctx.plugin_name.clone();
 
     let fn_ = lua.create_function(move |lua_ctx, (event, func): (String, mlua::Function)| {
         // A host that never bound a product (headless / unit-test runs) cannot
@@ -79,7 +78,7 @@ fn install_on(ctx: &ApiCtx, lua: &Lua, events_table: &Table) -> Result<()> {
             None => event.clone(),
         };
 
-        warn_if_unknown(lua_ctx, &plugin_name, &event, &resolved);
+        warn_if_unknown(lua_ctx, &event, &resolved);
 
         let registry: Table = lua_ctx.globals().get("__arbor_hooks__")?;
         let list: mlua::Result<Table> = registry.get(resolved.clone());
@@ -109,7 +108,7 @@ fn install_on(ctx: &ApiCtx, lua: &Lua, events_table: &Table) -> Result<()> {
 /// wrote a namespace the host actually fires in. A subscription to another
 /// plugin's event (`compile-action:build_done`) matches neither and stays
 /// silent, which is the whole reason the check is not simply "not in catalog".
-fn warn_if_unknown(lua: &Lua, plugin: &str, requested: &str, resolved: &str) {
+fn warn_if_unknown(lua: &Lua, requested: &str, resolved: &str) {
     // A pattern is a subscription to a shape, not to a name: `garrulus:*` is
     // legal, and so is a pattern that only matches hooks a later release adds.
     if hook_ns::is_pattern(resolved) || hook_catalog::find(resolved).is_some() {
@@ -142,8 +141,7 @@ fn warn_if_unknown(lua: &Lua, plugin: &str, requested: &str, resolved: &str) {
          The subscription is registered anyway, but nothing will deliver to it."
     );
 
-    tracing::warn!(target: "plugin", "plugin '{plugin}': {message}");
-    crate::lua_ctx::record(lua, "warn", message);
+    crate::lua_ctx::report(lua, "warn", message);
 }
 
 fn install_emit(ctx: &ApiCtx, lua: &Lua, events_table: &Table) -> Result<()> {

@@ -62,6 +62,12 @@
     collapseAll(): void;
     /** Both of the above, when the direction is itself a variable. */
     setAllExpanded(next: boolean): void;
+    /** Bring a row into view. The row must already be in the flat list — expand its
+     *  ancestors first, and let the expansion land (`await tick()`) before calling. */
+    scrollToId(id: string, block?: 'center' | 'nearest'): void;
+    /** Put keyboard focus on a row, so the arrows carry on from there. Async because a row
+     *  that was scrolled to has to be rendered before it can be focused. */
+    focusId(id: string): Promise<boolean>;
   };
 
   export type RowSnippetCtx<T> = {
@@ -483,6 +489,32 @@
     scheduleRecompute();
   }
 
+  /**
+   * Move keyboard focus to a row, and say whether there was one.
+   *
+   * The counterpart to {@link scrollToId}, and almost always its next line: a consumer that
+   * reveals a row on the user's behalf has moved their place in the tree, and leaving focus
+   * behind means the arrows still walk wherever they were. Returns `false` when the row is not
+   * rendered — either it is not in the tree at all, or it is outside the virtualized slice, so
+   * scroll to it first.
+   *
+   * Rows are matched by `data-tree-id` rather than by a CSS selector built from the id: ids here
+   * are file paths, which carry quotes and backslashes that an attribute selector would have to
+   * escape correctly on every platform.
+   */
+  export async function focusId(id: string): Promise<boolean> {
+    // Virtualization is this widget's own doing, so working around it is too: a row that
+    // `scrollToId` just brought into range is not in the DOM yet — the recompute it schedules
+    // runs on the next frame. Measure now instead, and let the slice render.
+    recomputeViewport();
+    await tick();
+    const row = [...(treeEl?.querySelectorAll<HTMLElement>('[data-tree-id]') ?? [])]
+      .find((el) => el.dataset.treeId === id);
+    if (!row) return false;
+    row.focus();
+    return true;
+  }
+
   // ── Click handlers ──────────────────────────────────────────────────
   function handleClick(node: T, hasKids: boolean, e: MouseEvent) {
     e.stopPropagation();
@@ -602,6 +634,7 @@
           class:tree-row-expandable={r.hasChildren}
           class:tree-row-leaf={!r.hasChildren}
           class:tree-row-drop-hover={isDropHover}
+          data-tree-id={r.id}
           style="position: absolute; left: 0; right: 0; top: {(startIdx + vi) * rowHeight}px; height: {rowHeight}px; min-height: {rowHeight}px; padding-left: {basePadding + r.depth * indentSize}px; display: flex; align-items: center; gap: {cellGap}px; box-sizing: border-box;"
           role="treeitem"
           aria-expanded={r.hasChildren ? r.expanded : undefined}

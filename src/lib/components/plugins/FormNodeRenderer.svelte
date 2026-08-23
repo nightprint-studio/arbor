@@ -78,6 +78,7 @@
   import FormNodePipelineEditor from './form-nodes/FormNodePipelineEditor.svelte';
 
   import './form-nodes/form-node-styles.css';
+  import { reportPluginWarning } from '$lib/utils/plugin-report';
 
   interface Props {
     pluginName:        string;
@@ -540,8 +541,9 @@
           }
         }
         if (!name) {
-          console.warn(
-            `[arbor.ui.form.${p.op}] id="${targetId}" did not resolve to any value-bearing node — payload dropped.`,
+          reportPluginWarning(
+            pluginName,
+            `arbor.ui.form.${p.op}: id="${targetId}" did not resolve to any value-bearing node — payload dropped`,
           );
           return;
         }
@@ -551,8 +553,9 @@
       // a typo or a field that hasn't been mounted yet. The write still goes
       // through so latent code paths keep their semantics.
       if (!(name in values)) {
-        console.warn(
-          `[arbor.ui.form.${p.op}] name="${name}" doesn't match any current form field — writing anyway. Check for a typo, or that the target field is mounted.`,
+        reportPluginWarning(
+          pluginName,
+          `arbor.ui.form.${p.op}: name="${name}" doesn't match any current form field — writing anyway. Check for a typo, or that the target field is mounted.`,
         );
       }
       switch (p.op) {
@@ -890,7 +893,13 @@
     const change = node?.actions?.change;
     if (!change) return;
     if (typeof change === 'string') {
-      handleButtonAction(change, false, { value });
+      // `node_id` rides along with the legacy payload too. Without it the two forms of this
+      // one slot differ in what they SAY, not just in how they are dispatched: the scoped
+      // form names the field that changed, the bare string did not — so a plugin with one
+      // handler behind several fields could not tell them apart, and the handler returned
+      // early on every one. That failure is silent by construction (the control moves, the
+      // event fires, nothing happens), which is exactly the kind that costs an afternoon.
+      handleButtonAction(change, false, { value, node_id: node?.id ?? node?.name });
     } else {
       handleScopedDispatch(node.id, 'change', change, value, { stateKeys: node.scope_state });
     }
