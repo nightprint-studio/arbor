@@ -33,6 +33,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **The shader render tool draws on real geometry.** It offered four primitives and silently substituted a sphere for anything else, so asking it about a tile or a blade of grass answered about a ball and reported success — while the panel beside it had been listing every installed mesh package for a while. It now takes any `<package>/<shape>` an installed `mesh-source` offers, along with that shape's own parameters, and an unknown name is an error that lists what is available.
+
 - **Focus a crate — or a Maven module — in the Project tree.** The Cargo and Dependencies panels list a project by build unit but never said where each one lives; on a forty-crate workspace that is a scroll through the tree every time. A locate button on the header, or **Focus in Project** from a right-click on it, opens the tree on that folder — expanded, selected, and holding the keyboard focus. The same menu opens the unit's manifest and copies its path.
 
 - **`bennu_read_file` can be asked for less than the whole file** — a line range, or `symbol: "SavedWorld.extra_moles"` for exactly one declaration, resolved from the file's own symbol tree so no line numbers have to be known first. Every reply carries `total_lines`, so a partial read is never mistaken for a complete one.

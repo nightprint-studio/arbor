@@ -24,6 +24,14 @@
 //! runs it. A machine without that package installed gets a sentence saying so rather than a
 //! feature that silently is not there.
 //!
+//! ## What it is drawn on
+//!
+//! Whatever the panel can draw it on. The built-in shapes are here, and so is every mesh an
+//! installed `mesh-source` package offers, addressed `<package>/<shape>` — see
+//! [`crate::shader_mesh`] for why that matters more than it sounds: most of what goes wrong
+//! with a material goes wrong in the coupling between the shader and the geometry, and a
+//! sphere is the one shape that cannot show it.
+//!
 //! ## What "it compiled" means here
 //!
 //! wgpu does not refuse a bad shader — it logs and renders nothing. So a run whose log carries
@@ -82,10 +90,27 @@ pub struct ShaderRenderArgs {
     /// impossible to see in the picture.
     #[serde(default)]
     pub data: Option<Vec<f32>>,
-    /// `sphere` (default) · `cube` · `plane` · `torus`. A sphere shows a lighting term from
-    /// every angle; a plane is right for a shader that writes colour and not shape.
+    /// What to draw the material on.
+    ///
+    /// Built in: `sphere` (default) · `cube` · `plane` · `torus` · `capsule` · `cylinder`. A
+    /// sphere shows a lighting term from every angle; a plane is right for a shader that
+    /// writes colour and not shape.
+    ///
+    /// **Or a mesh from an installed package**, addressed `<package>/<shape>` —
+    /// `fulcrum/hex_tile`, `primitives/sphere`. That is usually the one you want: a shader is
+    /// written against geometry, and a material whose grass only grows on upward faces or
+    /// whose sides are meant to stay bare cannot be judged on a sphere at all. A name that is
+    /// neither is an error listing what is installed, not a silent sphere.
     #[serde(default)]
     pub mesh: Option<String>,
+    /// Values for the mesh's own parameters, by the names its JSON Schema declares — read
+    /// them from the shape's `params-schema` in the package's `catalogue()`.
+    ///
+    /// Only for a mesh from a package: a built-in shape has no schema, and passing parameters
+    /// with one is reported rather than ignored, because a caller who tunes a subdivision
+    /// count and sees no change has been told the shape reacts to it.
+    #[serde(default)]
+    pub mesh_params: Option<serde_json::Value>,
     /// The instant to render, in seconds, for a material that animates. Default 0. The clock
     /// is pinned, so the same value renders the same image every time.
     #[serde(default)]
@@ -343,8 +368,17 @@ fn shader_errors(stderr: &str) -> Vec<String> {
     safety = read,
     output = image,
 ))]
-fn bennu_shader_render(_ctx: &BennuState, args: ShaderRenderArgs) -> Result<InlineImage, String> {
+fn bennu_shader_render(ctx: &BennuState, args: ShaderRenderArgs) -> Result<InlineImage, String> {
     let renderer = renderer_path()?;
+
+    // The geometry first, because it is the argument most likely to be wrong and the one whose
+    // failure used to be invisible: an unknown name fell through onto a sphere, so a render
+    // asked about a tile answered about a ball and reported success.
+    //
+    // Blocking host calls, and safe here: the serve loop dispatches each request on its own
+    // worker thread, which is the same reason this may wait ninety seconds on a child.
+    let mesh_name = args.mesh.as_deref().unwrap_or("sphere");
+    let geometry = crate::shader_mesh::build(ctx, mesh_name, args.mesh_params.as_ref())?;
 
     // The source, and a file for it. The renderer takes a path because a shader is a file
     // everywhere else in this system; a buffer that is not on disk gets a temporary one.
@@ -488,7 +522,7 @@ fn bennu_shader_render(_ctx: &BennuState, args: ShaderRenderArgs) -> Result<Inli
     cmd.arg("--shader").arg(&shader_path)
         .arg("--out").arg(&out)
         .arg("--size").arg(format!("{size}x{size}"))
-        .arg("--mesh").arg(args.mesh.as_deref().unwrap_or("sphere"))
+        .arg("--mesh").arg(mesh_name)
         .arg("--time").arg(format!("{}", args.time.unwrap_or(0.0)))
         .arg("--distance").arg(format!("{}", args.distance.unwrap_or(2.6)))
         .arg("--pitch").arg(format!("{}", args.pitch.unwrap_or(0.3)))
@@ -496,6 +530,16 @@ fn bennu_shader_render(_ctx: &BennuState, args: ShaderRenderArgs) -> Result<Inli
         .arg("--checker").arg(if args.checker.unwrap_or(true) { "on" } else { "off" });
     if extension {
         cmd.arg("--extension");
+    }
+    // Vertices go through a FILE. A mesh worth previewing is tens of thousands of floats,
+    // which is past what any platform's command line will carry.
+    let mesh_path = std::env::temp_dir().join(format!("arbor-shader-mesh-{}.json", std::process::id()));
+    if let Some(data) = &geometry {
+        let text = serde_json::to_string(data)
+            .map_err(|e| format!("cannot encode the mesh: {e}"))?;
+        std::fs::write(&mesh_path, text)
+            .map_err(|e| format!("cannot write the mesh: {e}"))?;
+        cmd.arg("--mesh-file").arg(&mesh_path);
     }
     if !data.is_empty() {
         let list: Vec<String> = data.iter().map(|f| format!("{f}")).collect();
@@ -513,6 +557,9 @@ fn bennu_shader_render(_ctx: &BennuState, args: ShaderRenderArgs) -> Result<Inli
 
     let result = run_with_timeout(cmd, RENDER_TIMEOUT_SECS);
     let _ = std::fs::remove_file(&shader_path);
+    if geometry.is_some() {
+        let _ = std::fs::remove_file(&mesh_path);
+    }
     let (status_ok, stderr) = result?;
 
     let errors = shader_errors(&stderr);

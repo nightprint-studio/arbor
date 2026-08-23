@@ -54,6 +54,7 @@ mod cargo_intel;
 // WGSL, for a project with no language server installed: naga for the diagnostics (the
 // compiler wgpu really runs), a tolerant scanner for everything the editor wants while the
 // file is still being typed.
+mod shader_mesh;
 mod shader_render;
 mod shader_uniform;
 mod wgsl_intel;

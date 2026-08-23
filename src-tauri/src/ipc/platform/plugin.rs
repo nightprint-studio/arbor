@@ -448,6 +448,13 @@ pub(crate) fn reload_runtime(state: &AppState) -> Result<(), AppError> {
     if let Ok(mut jobs) = state.jobs.lock() {
         jobs.cancel_by_plugin(None);
     }
+
+    // The wasm side of "reload" — and the half that used to be missing. A package's
+    // extensions are compiled once and kept by path, so rebuilding one and pressing Reload
+    // re-read the Lua and re-ran the PREVIOUS build of the component: a mesh source that
+    // gained a shape kept offering the old list, which reads as the rebuild not having
+    // happened. Reload is exactly the moment a module on disk is expected to have changed.
+    crate::plugin_wasm::forget_compiled();
     {
         let mut host = state.lock_plugin_host()?;
         host.reload()?;

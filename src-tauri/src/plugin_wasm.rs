@@ -126,10 +126,15 @@ pub fn engine() -> Result<&'static WasmHost, String> {
 
 /// Drop every cached component compilation.
 ///
-/// Called whenever the plugin set moves. Without it a reinstall writes a different module to
-/// the same path and the engine keeps handing back the previous build: the user updates a
-/// package, nothing changes, and nothing anywhere says why. The cache is a speed optimisation
-/// and this is what keeps it from being a correctness one.
+/// Called whenever the plugin set moves — a marketplace install, and every plugin reload.
+/// Without it a reinstall writes a different module to the same path and the engine keeps
+/// handing back the previous build: the user updates a package, nothing changes, and nothing
+/// anywhere says why. The cache is a speed optimisation and this is what keeps it from being a
+/// correctness one.
+///
+/// Reload matters as much as install, and for the same reason one directory further out: a
+/// package developed in place is rebuilt by its own `build.sh`, never by Arbor, so Reload is
+/// the ONLY moment the app is told the bytes on disk are not the bytes it compiled.
 pub fn forget_compiled() {
     // Only if an engine was ever built — creating one here just to clear it would compile
     // Cranelift's machinery on a path that has nothing to do.
