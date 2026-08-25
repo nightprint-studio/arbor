@@ -15,6 +15,8 @@
 </script>
 
 <script lang="ts">
+  import { tooltip } from '$lib/actions/tooltip';
+
   /**
    * The repository, as it is on disk.
    *
@@ -330,7 +332,7 @@
         <Badge variant="tone" tone="neutral" size="sm" label="excluded" />
       {/if}
       {#if node.file.status}
-        <span class="st-mark st-{node.file.status}" title={STATUS_HINT[node.file.status]}></span>
+        <span class="st-mark st-{node.file.status}" use:tooltip={STATUS_HINT[node.file.status]}></span>
       {/if}
       <!-- Only when the row says something its folder's header does not: it
            declares its own engine, or it is the one script in a sorted folder
@@ -420,7 +422,12 @@
     flex-shrink: 0;
   }
   .st-modified { background: var(--warning); }
-  .st-new { background: var(--success); }
+  /* `--info`, not `--success`, and not because green reads badly here.
+     In Picus a green dot means **an open session** — the connections panel is built
+     on being able to answer that from across the sidebar — and a second green dot
+     three panels away meaning "file nobody has reviewed yet" is how a signal stops
+     being one. `new` is something to look at, not something that is well. */
+  .st-new { background: var(--info); }
   .st-error { background: var(--error); }
 
   .st-empty {

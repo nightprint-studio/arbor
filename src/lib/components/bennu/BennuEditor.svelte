@@ -18,7 +18,7 @@
     DownloadCloud, FileDown, Variable, Database, Clock, Columns3, ListPlus, SquarePen,
     Languages,
   } from 'lucide-svelte';
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
@@ -325,6 +325,11 @@
     const path = activePath;
     if (!path) return;
 
+    // Remembered across restarts (debounced hard in the store — this runs on every arrow key).
+    // The live `viewStates` snapshot below is finer while the window is open; this is the part
+    // that survives closing it.
+    projectStore.rememberCaret(path, line, col);
+
     if (pendingJump) {
       const arrived =
         isSamePath(pendingJump.file, path) && Math.abs(pendingJump.line - line) <= 1;
@@ -385,22 +390,67 @@
   /** Ctrl+Alt+→ — jump forward again after a Back. */
   export function navForward() { void navGo(bennuNavStore.forward()); }
 
-  // ── Goto relay: Structure / Outline / Problems request a jump; scroll there. ──
+  // ── Restore the caret a restart lost ─────────────────────────────────────────
+  //
+  // `viewStates` restores a tab you switched away from, but it dies with the window: reopening
+  // Bennu brought the tabs back and put every one of them at the top of the file. The store
+  // remembers a line/col per tab in the persisted session, and this places it.
+  //
+  // It waits for the BUFFER, not just for the tab. On a restored session the active file's text
+  // is fetched *after* `activeFilePath` is set, so the editor mounts empty — and a jump to line
+  // 400 of an empty document lands on line 1 and stays there once the text arrives. Reading
+  // `sourceOf` makes this re-run when the text lands, which is the moment the line exists.
+  //
+  // Once per tab activation: a live view state (a tab you have already been in) is the finer
+  // answer, and a go-to that asked for a specific line outranks both — hence the relays below
+  // claim the tab through this same flag.
+  let restoredCaretFor: string | null = null;
+  $effect(() => {
+    const path = activePath;
+    const source = path ? projectStore.sourceOf(path) : '';
+    if (!path || !source || isPreviewTab) return;
+    if (restoredCaretFor === path || viewStates.has(path)) return;
+    restoredCaretFor = path;
+    const caret = projectStore.caretOf(path);
+    if (!caret || (caret.line === 1 && caret.col === 1)) return;
+    void tick().then(() => {
+      if (projectStore.activeFilePath !== path) return;
+      editorComp?.scrollToLineCol(caret.line, caret.col);
+    });
+  });
+
+  // ── Goto relays: Structure / Outline / Problems / Find request a jump; scroll there. ──
+  //
+  // **One request, one jump.** These used to read `editorComp` inside the tracked scope, and
+  // `editorComp` is `$state` that changes on every tab switch (the editor remounts under
+  // `{#key activePath}`). So the LAST go-to re-fired on every switch and dragged the freshly
+  // activated tab to that stale line — which is what "switching tabs loses the cursor position"
+  // actually was: the restored caret was not lost, it was overwritten a frame later.
+  //
+  // The fix is to depend on the request alone and consume its nonce, then perform the jump after
+  // `tick()`. The wait is load-bearing rather than cosmetic: a CROSS-FILE go-to is
+  // `openFile(f)` followed by `requestGoto(line)`, so at the instant the effect runs the mounted
+  // editor may still be the OLD file's. After the flush, `editorComp` is the one for the file the
+  // jump was asked about.
+  let consumedGotoNonce = 0;
   $effect(() => {
     const t = bennuUiStore.gotoTarget;
-    if (!t) return;
-    // Read `nonce` so a repeat jump to the same line re-fires.
-    void t.nonce;
-    editorComp?.scrollToLineCol(t.line, 1);
+    if (!t || t.nonce === consumedGotoNonce) return;
+    consumedGotoNonce = t.nonce;
+    // A go-to names the line; the remembered caret must not overrule it when the buffer lands.
+    restoredCaretFor = projectStore.activeFilePath;
+    void tick().then(() => editorComp?.scrollToLineCol(t.line, 1));
   });
 
   // ── Goto-by-byte-offset relay: the Forms tool window requests a jump to a `<form>`
   //    tag / field-name byte span; move the caret there and reveal it. ──
+  let consumedGotoOffsetNonce = 0;
   $effect(() => {
     const t = bennuUiStore.gotoOffsetTarget;
-    if (!t) return;
-    void t.nonce; // repeat jump to the same offset re-fires
-    editorComp?.scrollToByteOffset(t.offset);
+    if (!t || t.nonce === consumedGotoOffsetNonce) return;
+    consumedGotoOffsetNonce = t.nonce;
+    restoredCaretFor = projectStore.activeFilePath;
+    void tick().then(() => editorComp?.scrollToByteOffset(t.offset));
   });
 
   // ── Edits → store ────────────────────────────────────────────────────────────
@@ -432,7 +482,9 @@
     const req = bennuAstStore.selectRequest;
     if (!req || req.at === lastAstSelect) return;
     lastAstSelect = req.at;
-    editorComp?.selectByteRange(req.start, req.end);
+    // After the flush, like the go-to relays above — and for the same reason: the editor that
+    // has to perform the selection may not be mounted yet at the moment the request lands.
+    void tick().then(() => editorComp?.selectByteRange(req.start, req.end));
   });
 
   // ── Diagnostics (byte spans) from the backend, re-fetched per active file ─────

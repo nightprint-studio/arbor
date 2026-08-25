@@ -13,6 +13,7 @@
   import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import PicusDialectChip from '../PicusDialectChip.svelte';
+  import PicusConnectionStateDot from '../PicusConnectionStateDot.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { connectionsStore, connectionColorVar } from '$lib/stores/picus/connections.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
@@ -53,7 +54,13 @@
   oncontextmenu={menuFromPointer}
 >
   {#snippet icon()}
-    <span class="cr-twist" class:cr-open={open}><ChevronRight size={12} /></span>
+    <!-- The twisty and the session state, in one fixed-width lead so the dots line
+         up in a column down the list: "which of these is open" is a question about
+         the whole panel, and it should be answerable without reading a single name. -->
+    <span class="cr-lead">
+      <span class="cr-twist" class:cr-open={open}><ChevronRight size={12} /></span>
+      <PicusConnectionStateDot state={conn.state} />
+    </span>
   {/snippet}
   <span class="cr-name">{conn.name}</span>
   {#snippet badges()}
@@ -109,6 +116,11 @@
 </SidebarItem>
 
 <style>
+  .cr-lead {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
   .cr-twist {
     display: inline-flex;
     color: var(--text-disabled);
@@ -134,5 +146,8 @@
     color: var(--text-muted);
     cursor: pointer;
   }
-  .cr-act:hover { background: var(--bg-overlay); color: var(--success); }
+  /* A neutral hover, like every other icon button in the app. It used to go green,
+     which turned Disconnect and ⋯ green as well — and green in this panel is a
+     claim about the session, not a way of saying "you are pointing at me". */
+  .cr-act:hover { background: var(--bg-overlay); color: var(--text-primary); }
 </style>

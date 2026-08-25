@@ -711,7 +711,7 @@
   {#snippet footer()}
     <div class="panel-footer">
       <span>Plugins directory:
-        <button class="plugins-link" onclick={openPluginsDirectory} title="Apri la cartella plugins nel file manager">
+        <button class="plugins-link" onclick={openPluginsDirectory} use:tooltip={'Apri la cartella plugins nel file manager'}>
           <FolderOpen size={11} />
           plugins/
         </button>

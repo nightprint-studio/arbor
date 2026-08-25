@@ -39,6 +39,16 @@ pub const WORKSPACE_WINDOW_LABEL: &str = "workspace";
 /// pulled on mount.
 const OPEN_PRODUCT_EVENT: &str = "workspace://open-product";
 
+/// Event asking the container to CLOSE a product's tab — the tabbed half of
+/// [`super::close_product_window`], which can only destroy windows and a tab is
+/// not one. Without it the launcher's Stop was a no-op for every product the
+/// user runs as a tab: the button reported success, the tab stayed, and the
+/// headless backend went on running.
+///
+/// No pending-flag twin (unlike [`OPEN_PRODUCT_EVENT`]): stopping a product the
+/// container has not mounted yet is not a thing to remember for later.
+const CLOSE_PRODUCT_EVENT: &str = "workspace://close-product";
+
 /// Product id the container should show as soon as it mounts. Set by
 /// [`open_workspace_window`] and consumed once by [`take_workspace_intent`] —
 /// the same pull-flag pattern Tyto uses for its snip intent.
@@ -136,6 +146,31 @@ fn hosted_remove(product: &str) -> bool {
         .ok()
         .and_then(|mut g| g.as_mut().map(|s| s.remove(product)))
         .unwrap_or(false)
+}
+
+/// Products the container is hosting as tabs right now.
+///
+/// Read by [`super::list_running_products`], which otherwise counts WINDOWS — so a product open
+/// only as a tab reported as "not running", and the welcome page never even offered a Stop for it.
+pub fn hosted_ids() -> Vec<String> {
+    HOSTED
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().map(|s| s.iter().cloned().collect::<Vec<String>>()))
+        .unwrap_or_default()
+}
+
+/// Ask the container to close `product`'s tab. A no-op when the container is not open — and
+/// harmless when it is open without that tab, since the frontend treats closing an absent tab as
+/// nothing to do.
+///
+/// The tab's own close path then reports back through [`workspace_tab_closed`], which is what
+/// actually tears the backend down: one teardown, whoever asked for it.
+pub fn request_close_tab(app: &AppHandle, product: &str) {
+    if let Some(w) = app.get_webview_window(WORKSPACE_WINDOW_LABEL) {
+        tracing::info!("workspace: asking the container to close the `{product}` tab");
+        let _ = w.emit(CLOSE_PRODUCT_EVENT, product.to_string());
+    }
 }
 
 /// Drain the hosted set — used when the container itself goes away.

@@ -50,6 +50,20 @@
   file, a configuration or a log.
 </p>
 
+<h2>Which ones are open</h2>
+<p>
+  Every row in the sidebar carries a dot beside its twisty: <b>filled green</b> when the
+  session is open, <b>hollow</b> when it is not, <b>amber</b> while it is opening. Filled or
+  hollow, not colour alone — the shape carries the answer on its own.
+</p>
+<p>
+  In Picus green means <i>this session is open</i> and nothing else, which is why the
+  connection colour picker does not offer green: a connection whose own colour was green
+  would put two meanings in one colour, and colour is what the eye resolves first. The
+  identity colour is also drawn as a <b>bar</b> rather than a dot — on the pill, and on
+  every tab bound to the connection — so the two are told apart by shape as well.
+</p>
+
 <h2>Managing a connection</h2>
 <p>
   Right-click a connection in the sidebar — or use the <b>⋯</b> button on its row — for
@@ -95,8 +109,18 @@
   through — narrow the filter and it comes back.
 </p>
 <p>
-  Only the connection currently in use has a catalogue loaded; the others say so rather than
-  showing another database's tables under their name.
+  Opening a connection reads its catalogue — the tables, views, sequences and triggers that
+  completion, abbreviation expansion and the live checks all work from. A tab bound to a
+  connection gets <i>that</i> connection's catalogue, so two tabs on two databases are each
+  as clever as the other.
+</p>
+<p>
+  A few catalogues are kept at a time, not all of them: they are large, and a database
+  nobody has looked at since this morning is not worth the memory. A connection whose
+  catalogue has been dropped says so instead of showing an empty tree — select it and it is
+  read again. Nothing is ever re-read on a timer: a schema that reloads under you while you
+  are writing DML from it is worse than a stale one you know is stale, so <b>Refresh</b> is
+  yours to press.
 </p>
 <p>
   Opening a table shows its rows, its structure — columns, primary key, foreign keys in
@@ -124,10 +148,20 @@
   is explicit and visible, never a hidden global mode.
 </p>
 <ul>
+  <li>A tab whose connection is <b>not open</b> says so before you press anything: the pill
+    carries the same state dot the sidebar does, and <b>Connect</b> appears beside it. Nothing
+    that needs a session is offered meanwhile — Run, Run all, the transaction controls — each
+    saying why rather than merely greying out, and the live validation indicator falls back to
+    "nothing to check against" instead of leaving its last verdict on screen.</li>
+  <li>On the toolbar, colour means what the button does: <b>green</b> starts something
+    (Run, Run all, Generate, Write), <b>red</b> stops it (Cancel), <b>blue</b> writes to
+    disk (Save). Everything that only reads or exports stays grey, and a coloured button
+    turns grey the moment it is unavailable.</li>
   <li><kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs the statement under the cursor, or the selection.</li>
   <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> runs the whole script.</li>
   <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> cancels a running query, or the row count
-    running behind one.</li>
+    running behind one. Press it <b>again</b> to stop waiting for the server: the connection is
+    dropped and a new one opened, so the tab is usable even when the database will not answer.</li>
   <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> cycles the active connection.</li>
   <li><kbd>Ctrl</kbd>+<kbd>Click</kbd> on a name in the SQL opens that table, view, sequence
     or trigger's structure — the schema is the authority on whether the word names one, so it
@@ -160,6 +194,65 @@
   are right-aligned with tabular figures so magnitudes line up down the column. Confusing
   a null with an empty string is expensive when you are about to write DML from what you
   see.
+</p>
+<h2>Which table a column came from</h2>
+<p>
+  When a result draws on <b>more than one table</b>, each column gets a small coloured bar
+  under its name and a legend appears above the grid saying which colour is which table.
+  Clicking a table in the legend dims every column that is not its own, so a join forty
+  columns wide can be read one table at a time; clicking it again brings everything back.
+</p>
+<p>
+  A result from a single table shows neither — there would be nothing to tell apart.
+  Hovering any column header still names its origin as
+  <code>table.column</code>, which is how you see what a column aliased to something
+  else really is. Columns that are computed rather than read — a <code>count(*)</code>,
+  an expression — have no origin and carry no bar.
+</p>
+<p>
+  The origins come from the server's own description of the result, not from reading the
+  statement, so they are right about <code>*</code>, aliases and subqueries.
+</p>
+<p>
+  A <b>view counts as one table</b> — its own. The server names the relation the statement
+  asked for, and that is the view, not the tables inside it; so selecting from a single
+  view shows no bars and no legend however many tables it joins. Joining two views shows
+  two. A statement the server cannot describe — a multi-statement paste, a
+  <code>SET</code> — shows no origins at all rather than guessing.
+</p>
+<h2>Tracing a column through the views</h2>
+<p>
+  When the answer you want is <i>which table is this really in</i>, and the query reads a
+  view that reads another view, the <b>Lineage</b> pane follows it. Press <b>Trace
+  columns</b> and each column of the result is walked back through the views to the table
+  it comes from:
+</p>
+<pre><code>CODSA  ←  V_TIPI.CENINT  ←  TAB_TIPI.CENINT</code></pre>
+<p>
+  The chain matters as much as its end — it is what shows <i>which view renamed it</i>,
+  and a column whose name changed on the way is marked.
+</p>
+<p>
+  Not every column has one table behind it, and the pane distinguishes the reasons rather
+  than lumping them together:
+</p>
+<ul>
+  <li><b>Computed</b> — an expression, a function, a concatenation. It names what the value
+    is made of, and there is nothing to write back through.</li>
+  <li><b>One of several</b> — a <code>UNION</code> whose arms read different tables. The
+    value <i>is</i> a real column, of one table for some rows and another for the rest;
+    which one a given row came from is not in the result. Deliberately not called
+    computed: there are two writable tables here, not none.</li>
+  <li><b>Not followed</b> — the walk stopped, and says where and why: an ambiguous bare
+    name, a table in another schema, a construct Picus does not read.</li>
+</ul>
+<p>
+  This is a <b>deduction</b>, not the server's own answer — it is read out of the views'
+  SQL, so it can be wrong where the reported origins cannot. That is why it is asked for
+  and never computed behind a query, and why, once traced, the grid's colour bars turn
+  <b>dashed</b> and the legend says <i>traced to</i>: two colourings that looked identical
+  would be the one way to misread this badly. Running a new statement drops the trace
+  rather than quietly redoing it.
 </p>
 <h2>Scrolling a result</h2>
 <p>
@@ -197,6 +290,32 @@
   written to.
 </p>
 
+<h2>Filtering by what is actually there</h2>
+<p>
+  Each column's filter box has a small funnel beside it that opens <b>the values that
+  column holds</b>, each with the number of rows it accounts for. Tick the ones you want
+  and the grid narrows as you go; the box then shows what is picked, and the <b>×</b>
+  beside it clears the column.
+</p>
+<p>
+  The list is exact, and it is not the same thing as typing: picking <code>ROMA</code>
+  selects the rows whose value <i>is</i> <code>ROMA</code>, where typing <code>ROMA</code>
+  would also bring back <code>ROMANO</code>. A column is filtered one way or the other,
+  never both.
+</p>
+<p>
+  Each column's list is narrowed by the filters on the <b>other</b> columns, so after
+  choosing a region the province list is that region's provinces. It is taken when the
+  list opens and does not move while it is open — otherwise ticking a value would delete
+  every other value from the list you are picking from. Columns holding thousands of
+  distinct values list the first few hundred and say so: at that point the text box is
+  the better tool.
+</p>
+<p>
+  A grid narrowed to nothing says so, and offers to clear the filters — an empty result
+  and a result you filtered away look identical otherwise.
+</p>
+
 <h2>Sorting and filtering a result you only partly hold</h2>
 <p>
   While a result is still filling, the column sort and the per-column filters are
@@ -207,8 +326,19 @@
 <p>
   As soon as the whole result is loaded — which for most queries is immediately, on the
   first window — both come back and behave as they always have. Until then the row counter
-  in the panel header reads <b>loaded of total</b> rather than just the total, and pointing
+  in the footer reads <b>loaded of total</b> rather than just the total, and pointing
   at it says why the two controls are standing down.
+</p>
+<p>
+  You do not have to scroll to the end to get them back: the button at the <b>head of the
+  filter row</b> fetches the rest in one act, and turns into a stop while it runs. What has
+  already arrived is kept if you stop it.
+</p>
+<p>
+  On a result too large to hold in memory at once the button is <b>not offered</b> — past
+  that size the oldest windows are dropped as new ones arrive, so it would fetch forever
+  and never hand the controls back. Narrow the query with a <code>WHERE</code> instead;
+  the row counter's tooltip says which of the two cases you are in.
 </p>
 <p>
   To reach a specific distant row, query it with a <code>WHERE</code> on an indexed column
@@ -400,9 +530,19 @@
 
 <h2>The plan</h2>
 <p>
-  Beside the rows a statement returned, a <b>Plan</b> pane: what the server says it will do,
-  as an indented tree with the estimated cost and rows on each step, and the text of the plan
-  for pasting somewhere else.
+  Beside the rows a statement returned, a <b>Plan</b> pane, in three readings of the same
+  answer. <b>Steps</b> is the indented tree, in execution order, with the cost and rows on
+  each one. <b>Text</b> is the engine's own output, for pasting somewhere else.
+</p>
+<p>
+  <b>Diagram</b> is the shape: the root on top, its inputs below it, and every edge drawn
+  <i>as thick as the number of rows travelling along it</i> — so the place where a thin line
+  becomes a rope is where the query went wrong, found without reading a number. Under each box
+  a bar shows how much of the work happens at <i>that</i> node rather than in its subtree,
+  which is the difference between a plan that blames its root for everything and one that
+  points at the step you can do something about. Colour is spent on one thing only: a node
+  whose row estimate was wrong by the same factor the Steps list badges. Click a box for the
+  server's own filter, sort and index conditions.
 </p>
 <p>
   <b>Analyze</b> is a separate action, and it is separate because it <i>runs the statement</i>.

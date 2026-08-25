@@ -7,6 +7,7 @@
    */
   import type { FilterKey } from './canopy';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   interface Chip { key: FilterKey; label: string; count: number; color: string; active: boolean; }
   interface Props { chips: Chip[]; onpick: (k: FilterKey) => void; }
@@ -23,7 +24,7 @@
   <Dropdown {items} position="fixed" direction="down" width="190px">
     {#snippet trigger({ open, toggle })}
       <button class="trigger" class:open onclick={toggle}
-              aria-haspopup="menu" aria-expanded={open} title="Filter">
+              aria-haspopup="menu" aria-expanded={open} use:tooltip={'Filter'}>
         <span class="dot" style="background:{current.color};box-shadow:0 0 6px {current.color}"></span>
         <span class="label">{current.label}</span>
         <span class="count">{current.count}</span>

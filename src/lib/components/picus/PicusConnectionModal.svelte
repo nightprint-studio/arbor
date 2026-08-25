@@ -36,7 +36,9 @@
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import PicusDialectChip from './PicusDialectChip.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
-  import { connectionsStore } from '$lib/stores/picus/connections.svelte';
+  import {
+    connectionsStore, connectionColorSlot, CONNECTION_COLOR_SLOTS,
+  } from '$lib/stores/picus/connections.svelte';
   import {
     type ConnectionField,
     type ConnectionSpec,
@@ -78,7 +80,9 @@
   let service = $state('');
   let schema = $state('');
   let username = $state('');
-  let colorIdx = $state(2);
+  /** The first offered slot, never a hard-coded number: the default used to be `2`,
+   *  which is the green this product reserves for "the session is open". */
+  let colorIdx = $state(CONNECTION_COLOR_SLOTS[0]);
   let readOnly = $state(false);
   let tls = $state(false);
   /** The free-form driver parameters. The script root is not among them — it is a
@@ -125,7 +129,9 @@
       service = spec?.database ?? '';
       schema = spec?.schema ?? '';
       username = spec?.user ?? '';
-      colorIdx = spec?.colorIdx ?? 2;
+      // Through the mapper: an existing connection may carry a slot this product no
+      // longer offers, and the form must open on a swatch that is actually in the row.
+      colorIdx = connectionColorSlot(spec?.colorIdx);
       readOnly = spec?.readOnly ?? false;
       tls = spec?.tls ?? false;
       scriptRoot = spec?.scriptRoot ?? '';
@@ -380,12 +386,15 @@
 
       <FormField
         label="Colour"
-        hint="Shown on the sidebar row, on every tab bound to this session, and in the status bar — the way two databases stay distinguishable."
+        hint="Shown on the sidebar row, on every tab bound to this session, and in the status bar — the way two databases stay distinguishable. Green is not offered: it is what a connected session's dot is."
       >
+        <!-- The picker is positional over the list it is given, so the two mappings
+             are explicit: what it shows are the offered slots, and what it reports is
+             a position in that list, turned back into a palette slot here. -->
         <ColorPalettePicker
-          colors={Array.from({ length: 12 }, (_, i) => `var(--ws-color-${i})`)}
-          value={colorIdx}
-          onChange={(i) => (colorIdx = i)}
+          colors={CONNECTION_COLOR_SLOTS.map((slot) => `var(--ws-color-${slot})`)}
+          value={CONNECTION_COLOR_SLOTS.indexOf(connectionColorSlot(colorIdx))}
+          onChange={(i) => (colorIdx = CONNECTION_COLOR_SLOTS[i] ?? CONNECTION_COLOR_SLOTS[0])}
           ariaLabel="Connection colour"
         />
       </FormField>

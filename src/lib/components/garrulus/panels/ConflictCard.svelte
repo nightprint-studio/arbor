@@ -21,6 +21,7 @@
   import { noteFolder, noteName } from './note-path';
   import { computeDiff } from '$lib/utils/conflict/conflict-diff';
   import type { Conflict, ConflictResolution } from '$lib/ipc/garrulus';
+  import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {
     conflict: Conflict;
@@ -77,7 +78,7 @@
 <section class="cc" data-conflict-card aria-label="Conflict in {title}">
   <header class="cc-head">
     <span class="cc-icon"><AlertTriangle size={15} /></span>
-    <span class="cc-name" title={conflict.path}>{title}</span>
+    <span class="cc-name" use:tooltip={conflict.path}>{title}</span>
     {#if folder}<span class="cc-folder">{folder}</span>{/if}
     {#if blocks > 0}
       <Badge

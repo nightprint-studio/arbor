@@ -71,6 +71,11 @@
 
   const bucket = $derived(tone ? null : resolveBucket(kind));
   const shown  = $derived(label ?? kind ?? '');
+
+  // Aliased because this component already has a **prop** called `tooltip`, and it
+  // is public API — every call site passes `tooltip=`. Renaming the prop to free the
+  // name would be changing a contract to satisfy an import.
+  import { tooltip as hoverTip } from '$lib/actions/tooltip';
 </script>
 
 {#if shown}
@@ -103,7 +108,7 @@
     class:b-tuple={bucket === 'tuple'}
     class:b-unit={bucket === 'unit'}
     class:b-unknown={bucket === 'unknown'}
-    title={tooltip ?? undefined}
+    use:hoverTip={tooltip ?? undefined}
   >{shown}</span>
 {/if}
 

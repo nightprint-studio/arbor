@@ -198,7 +198,7 @@
       <span class="sec-title-icon" style:color={sev.color}>
         <ShieldAlert size={14} />
       </span>
-      <span class="modal-title" title={cleanTitle}>{cleanTitle}</span>
+      <span class="modal-title" use:tooltip={cleanTitle}>{cleanTitle}</span>
 
       <Badge
         variant="chip"
@@ -322,7 +322,7 @@
           <div class="meta-section">
             <div class="meta-label"><FileCode2 size={11} /> Location</div>
             <div class="meta-value mono path-row">
-              <span class="path-text" title={fileLabel}>{fileLabel}</span>
+              <span class="path-text" use:tooltip={fileLabel}>{fileLabel}</span>
               <CopyButton
                 value={fileLabel}
                 variant="icon"

@@ -153,15 +153,19 @@ function createSurfaceStore() {
     /** Add the Canopy home tab and focus it — the container's "new tab". */
     openHome() { this.show('home'); },
 
-    close(id: SurfaceId) {
+    /** Close a tab. Resolves once the SHELL has torn its backend down, so a caller that means to
+     *  restart the product can wait for the old one to be gone before asking for a new one. */
+    close(id: SurfaceId): Promise<void> {
       const idx = tabs.indexOf(id);
-      if (idx === -1) return;
+      if (idx === -1) return Promise.resolve();
       const wasMounted = mounted.includes(id);
       tabs = tabs.filter((t) => t !== id);
       mounted = mounted.filter((t) => t !== id);
       // Closing a tab ends that product, exactly like closing its window: the
       // shell tears the backend down and clears the launcher node.
-      if (wasMounted && id !== 'home') void workspaceTabClosed(id).catch(() => {});
+      const torndown = wasMounted && id !== 'home'
+        ? workspaceTabClosed(id).catch(() => {})
+        : Promise.resolve();
       if (active === id) {
         // Focus the neighbour, like a browser: the tab to the right, else left.
         active = tabs[idx] ?? tabs[idx - 1] ?? null;
@@ -174,6 +178,7 @@ function createSurfaceStore() {
         void markMounted('home');
       }
       persist();
+      return torndown;
     },
 
     /** Step through the tabs (wrapping), for the next/previous shortcuts. */

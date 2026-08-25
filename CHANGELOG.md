@@ -9,6 +9,32 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **A query tab bound to a connection has that connection's intelligence.** The catalogue was held for one connection at a time — the selected one — so a tab bound to any other lost completion, abbreviation expansion and live validation with nothing on screen to say why, and switching back and forth re-read hundreds of relations each way. A few catalogues are now held at once, and every reader asks for the connection it means.
+
+- **Opening a connection gives the editor its catalogue.** The schema is read for the selected connection, and the only thing that ever selected one was clicking its row in the sidebar — so the catalogue arrived as a side effect of expanding the tree, and connecting any other way (the row's plug, the context menu, a query tab's toolbar) left completion, abbreviation expansion and live validation with nothing to work from. Opening a connection now selects it.
+
+- **A fully typed SQL abbreviation expands without a wasted keypress.** Typing a table name to the end left the completion popup open over a name with nothing left to add — and an open popup owns Tab and suppresses the expansion preview, so `s#v_ws_elenchi` appeared not to work until a first Tab accepted a completion that changed nothing. The popup now closes when it has nothing to offer.
+
+- **A ghost-text proposal is no longer lost when the completion popup was in the way.** The preview stands down while the popup is up, but it never asked again once the popup closed, so a proposal was silently dropped whenever the popup happened to be open — or still loading — at the moment the caret settled, and dismissing the popup with Escape left it dropped for good.
+
+- **Red states are red again.** A colour token that was never defined was used across Bennu, Corvus, Merula, Picus and Sitta — a failed validation, a delete button's hover, a file that would not export — so each of those resolved to nothing and the state it marked was invisible.
+
+- **Chip bars announce what they are.** The filter and tag chips used across Bennu, Picus and the task panels declared themselves a toolbar to a screen reader without a name or a way to reach the group, so the buttons inside were read with nothing to say what they belonged to.
+
+- **Stored credentials no longer go missing after a restart.** Every Arbor secret lives in one OS-keychain item, and Windows caps that item at 2560 bytes stored as UTF-16 — the whole vault had to fit in 1280 characters. Past that, saving refused: but the in-memory copy had already been updated, so the credential worked for the rest of the session and was simply never written, turning up missing at the next launch. The vault now spills into further items when it no longer fits in one, and a write that fails leaves the in-memory copy alone so the error is the truth about what is stored. A vault that is present but unreadable is also an error now, instead of loading as empty and being overwritten by the next save.
+
+- **Bennu keeps the caret when you switch tabs.** Any go-to — a Problems row, a Find hit, the Structure panel — re-fired on every subsequent tab switch, dragging the tab you had just opened to that stale line. The jump now happens once, for the navigation that asked for it.
+
+- **Bennu reopens each tab on the line you left it.** The session restored the tabs and put every one of them at the top of the file; the caret is now remembered per tab and restored with them.
+
+- **A result with two columns of the same name no longer takes the panel down.** `SELECT *` across a join returns the name twice, and the grid identified a column by it: the duplicate crashed the render outright, so a query that had run and whose rows were in memory left a dead tab behind. The grid identifies a column by its position now — which also fixes sorting or filtering the second one silently acting on the first.
+
+- **A result's own column is not hidden by the row key Picus injected.** The injected key was matched by name, so a query already containing a column of that name lost it from the grid.
+
+- **Picus can always stop a query that will not stop.** Cancel sent the server's cancellation key and waited for a reply — on a database that had stopped answering, one that never came — so the escalation that drops the connection was unreachable, and the tab answered "still waiting on the previous statement" for the rest of the session. The wait is now bounded, and a second Cancel drops the connection immediately.
+
+- **A product can be stopped and restarted from the Welcome page.** Stop only ever destroyed *windows*, so for a product running as a tab of the container it did nothing at all — and the card did not even offer it, because a tab was never counted as running. Both homes now report tabs as running and end them, backend included.
+
 - **A plugin's failures reach the Plugin Logs panel.** A hook handler that threw, a command that was refused, a dependency that did not resolve, a schedule that could not be registered, a contribution rejected by its schema — all of them were written to a terminal log that a backend process does not even have a subscriber for, so the panel that exists to show plugin failures showed none of them. The same now goes for the half that happens in the window: an action fired from a panel, a form patch aimed at a field that does not exist, a page payload that would not serialise, each of which used to be swallowed by an empty catch.
 
 - **A shader that does not compile says so.** The headless renderer ran without a log at all, so a material naga refused came back the same way one that renders to nothing does: an empty picture, exit 0, and not one line anywhere to say which line of WGSL was wrong. It now carries the compiler's own message.
@@ -31,7 +57,49 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **"Stage File" and "Stage Folder" are the same operation.** They were two implementations of one idea and only one of them handled deletions the way "Stage All" does — which is why Stage All always worked and the other two sometimes did not. There is now one verb per action, taking a list.
 
+### Changed
+
+- **Picus toolbar buttons carry colour where colour means something.** Green starts (Run, Run all, Generate, Write), red stops (Cancel), blue writes to disk (Save); everything that only reads or exports stays neutral, and the colour drops out the moment a button is unavailable.
+
+- **A query tab says whether it can run.** Run looked available whatever the connection was doing, and the only way to find out was to press it and read the failure. With no session the pill carries the state dot and a **Connect** button beside it, while Run, Run all and the transaction controls are unavailable and say why. Ctrl+Enter answers the same way instead of spending a round trip to be refused.
+
+- **Completion, hover, ghost text and the SQL diagnostics agree with Run about where a statement ends.** They split the buffer on top-level `;` while Run asked the backend's parser, so an Oracle `CREATE PROCEDURE … BEGIN … END;` came apart into fragments for one of them and stayed whole for the other — and the caret could be in a different statement depending on which one was asking. The boundaries now come from the parser for all of them, falling back to the local split only until the answer for that buffer lands.
+
+- **The live-validation tick no longer survives its connection.** Closing a session left the last verdict on the toolbar — a green tick claiming the database accepted every statement, about a database nothing was talking to. It falls back to "nothing to check against" the moment the session goes.
+
+- **A Picus connection says whether it is open, without being hovered.** Each row in the sidebar carries a state dot — filled green when the session is open, hollow when it is not, amber while it is opening. The connect/disconnect button that used to be the only answer lives in the row's hover actions, so telling several connections apart meant a pass with the mouse over every one.
+
+- **In Picus green means "connected", and only that.** The connection colour picker no longer offers the palette's greens — and one of them used to be the default for a new connection — while a connection's identity colour is drawn as a bar rather than a dot. The script tree's "new file" dot is blue, and the row actions no longer turn green on hover. A connection already saved with a green slot renders in another colour; what is stored is left alone.
+
+- **The data grid bands every other row.** On a result wider than the window, the band is what ties a value two hundred columns along back to the row number it belongs to. Hover and selection still outrank it, and a theme can retune or remove it with `--grid-row-stripe`.
+
+- **A wide result scrolls at the speed of what you can see.** The data grid virtualises its columns as well as its rows: a 250-column `SELECT *` used to draw every column for every visible row — some ten thousand cells a frame for a viewport showing fifteen of them.
+
+- **Sorting, filters and dragged column widths reset when the result's columns change** — and survive re-running the same query. They used to carry over to whatever came next, applying a width dragged for one column to whichever column happened to land in its place.
+
+- **A SQL abbreviation that names an unknown table says how much was searched.** "the schema has no table called `TORN`" left the interesting question open — a connection reads one schema, and a relation outside it is not in the catalogue the abbreviation can see. The refusal now says so, unless it has a near-miss to offer instead.
+
+- **Bennu's hover on a local it cannot type names the expression's shape.** It used to quote the first 120 characters of the initializer, which on a builder chain is spent entirely inside the arguments and cut off before the calls that decide the type. It now reads `service.search(…).map(…).orElseGet(…)`.
+
+### Removed
+
+- **"Generate DML from this result" is gone from the result panel** until the result carries the table it came from. It never did: it re-set the generator to whatever table the generator already had, opened the panel, and reported success.
+
 ### Added
+
+- **Load the rest of a result in one act.** Sorting and the per-column filters wait until a windowed result is fully loaded, and the only way to get there was to drag the scrollbar to the end. A button at the head of the filter row now fetches the rest, and stops on a second press keeping what arrived. It is not offered on a result too large to hold whole — that one would fetch forever.
+
+- **Filter a grid by the values that are in it.** Every column's filter box now has a funnel beside it that lists the column's own values with the number of rows each accounts for — tick what you want instead of scrolling the result to find out what is there. Picking is exact, where typing is a substring, and each column's list is narrowed by the filters on the others. Applies to every filterable grid in Arbor, Picus results included.
+
+- **A grid narrowed to nothing says so, and offers to clear the filters** — instead of the same "no rows" an empty result shows.
+
+- **Trace a column back through the views it came through.** A new Lineage pane beside the rows: press Trace and every column of the result is followed through the views' own SQL to the table it is read from — `CODSA ← V_TIPI.CENINT ← TAB_TIPI.CENINT` — with renames marked, computed columns naming what they are made of, and anything unfollowable saying where the trail stopped. It is a deduction rather than the server's answer, so a traced grid draws its colour bars dashed and says so.
+
+- **A result says which table each column came from.** On a query drawing on more than one table, a coloured bar under each column header and a legend above the grid naming the tables; picking one dims the rest, so a wide join can be read a table at a time. A single-table result shows neither. Hovering any header names the column's origin as `table.column`, which is how an alias reveals what it really is.
+
+- **A query plan can be read as a diagram.** A third view beside the step list and the engine's text: the root on top, edges as thick as the rows travelling along them, and a bar per node showing how much of the work happens *there* rather than in its subtree. Colour marks one thing — a row estimate the planner got badly wrong — on the same thresholds the list badges.
+
+- **Restart a product from either home.** Alongside Stop, on the Welcome page's product cards and in the launcher's footer — the way to pick up a rebuilt backend without restarting Arbor.
 
 - **The shader render tool draws on real geometry.** It offered four primitives and silently substituted a sphere for anything else, so asking it about a tile or a blade of grass answered about a ball and reported success — while the panel beside it had been listing every installed mesh package for a while. It now takes any `<package>/<shape>` an installed `mesh-source` offers, along with that shape's own parameters, and an unknown name is an error that lists what is available.
 

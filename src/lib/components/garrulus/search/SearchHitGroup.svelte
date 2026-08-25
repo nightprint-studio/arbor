@@ -78,7 +78,7 @@
       type="button"
       class="hg-title"
       data-hit-row
-      title={hit.id}
+      use:tooltip={hit.id}
       onclick={onSelect}
       ondblclick={() => onOpen?.()}
       onkeydown={onHeaderKey}

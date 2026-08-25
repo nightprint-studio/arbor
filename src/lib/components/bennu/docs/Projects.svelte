@@ -38,8 +38,9 @@
 <p>
   A <strong>workspace</strong> is a named, colored group of projects you can switch between as a
   unit. Hold several projects in one workspace and keep several workspaces side by side — the same
-  project may belong to more than one. Each workspace remembers its own open tabs, so switching
-  reopens exactly where you left off.
+  project may belong to more than one. Each workspace remembers its own open tabs — and the line
+  each of them was on — so switching, or reopening Bennu tomorrow, puts you back where you left
+  off rather than at the top of every file.
 </p>
 <p>
   <strong>There is always one.</strong> A default workspace called <em>Scratch</em> exists from the

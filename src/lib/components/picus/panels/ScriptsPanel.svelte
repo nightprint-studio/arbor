@@ -31,6 +31,7 @@
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import { FOREIGN_ENGINES, folderEngine, isForeignEngine, type ForeignEngine } from '$lib/types/picus';
+  import { tooltip } from '$lib/actions/tooltip';
 
   let query = $state('');
 
@@ -220,7 +221,7 @@
       something says otherwise. A quiet chip is inherited — the solid one is where it is set.
       A script carries a chip of its own only when it says something its folder does not.
     </p>
-    <p class="sp-root" title={picusProjectStore.root}>
+    <p class="sp-root" use:tooltip={picusProjectStore.root}>
       <Database size={11} />
       {connection.name} · {picusProjectStore.root}
     </p>

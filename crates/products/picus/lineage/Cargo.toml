@@ -1,0 +1,22 @@
+[package]
+name         = "picus-lineage"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "picus — tracing a result column back through a stack of views to the base table it is read from, or saying exactly where the trail ends."
+
+# Pure. A catalogue is a trait the caller implements, so this crate never reads a
+# database, a file or a clock — which is what lets every branch of the resolution
+# be a unit test instead of a live view somebody has to keep working.
+[dependencies]
+picus-parse = { path = "../parse" }
+picus-types = { path = "../types" }
+serde       = { workspace = true }
+
+[dev-dependencies]
+serde_json  = { workspace = true }
+
+[lints.rust]
+missing_debug_implementations = "warn"

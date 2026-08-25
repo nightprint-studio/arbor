@@ -208,7 +208,7 @@
               {#if open_}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}
             {/if}
           </button>
-          <button class="tc-name" type="button" onclick={() => open(t.file, t.line)} title={t.fqcn}>
+          <button class="tc-name" type="button" onclick={() => open(t.file, t.line)} use:tooltip={t.fqcn}>
             <span class="tc-simple">{simpleOf(t)}</span>
             <!-- The second line answers "which of the three OrderTests is this" — the package,
                  or the module when you are sorting by one. -->

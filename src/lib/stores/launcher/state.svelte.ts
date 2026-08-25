@@ -15,7 +15,7 @@ import {
   listRecentProjects, forgetRecentProject, type RecentProject,
 } from '$lib/ipc/recents';
 import { windowModeStore } from '$lib/stores/window-mode.svelte';
-import { openProduct, openProjectIn } from '$lib/utils/open-product';
+import { openProduct, openProjectIn, restartProduct } from '$lib/utils/open-product';
 
 const IDS = BASE.map((t) => t.id);
 
@@ -82,7 +82,18 @@ function createLauncherState() {
       try { await forgetRecentProject(r.product, r.path); } catch { await loadRecents(); }
     },
 
+    /**
+     * Stop a product: close its windows **and** its container tab, whichever it is running as.
+     *
+     * Both live behind the one shell command, deliberately. A home can only reach the tabs of its
+     * OWN window, and the Canopy launcher is not the container — so a Stop implemented on this
+     * side could only ever stop half the products, which is exactly the half it could see.
+     */
     stop(id: string) { return closeProductWindow(id); },
+
+    /** Stop a product and start it again — see {@link restartProduct} for why the two homes share
+     *  one implementation of it. */
+    restart(id: string) { return restartProduct(id); },
 
     /** Re-check the release feed; today every product reports up to date. */
     async refreshVersions() { latest = await fetchLatestVersions(IDS); },

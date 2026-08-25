@@ -20,10 +20,23 @@ use std::sync::{Arc, Mutex, MutexGuard};
 // says so.
 use picus_db_api::prelude::SchemaSnapshot;
 
+/// Every view's defining `SELECT`, as `(name, sql)`.
+pub type ViewDefinitions = Arc<Vec<(String, String)>>;
+
 /// Schemas read so far, by connection id.
+///
+/// The view definitions live here too rather than in a cache of their own, and that
+/// is deliberate: they go stale at **exactly** the same moments a snapshot does — a
+/// re-read, a disconnect — so a second cache would be a second invalidation to keep
+/// in step, and the failure when it drifted would be a lineage drawn from the SQL of
+/// a view that no longer exists.
 #[derive(Default)]
 pub struct SchemaCache {
     by_connection: Mutex<HashMap<String, Arc<SchemaSnapshot>>>,
+    /// Read whole, once per connection, because tracing a column cannot know which
+    /// views it will need until it is already walking them. See
+    /// `DbSession::view_definitions`.
+    definitions: Mutex<HashMap<String, ViewDefinitions>>,
 }
 
 impl std::fmt::Debug for SchemaCache {
@@ -48,13 +61,29 @@ impl SchemaCache {
         self.lock().insert(connection.to_string(), schema);
     }
 
+    /// The view definitions read for a connection, if they have been.
+    pub fn definitions(&self, connection: &str) -> Option<ViewDefinitions> {
+        self.lock_definitions().get(connection).cloned()
+    }
+
+    /// Store a connection's view definitions, replacing any previous set.
+    pub fn put_definitions(&self, connection: &str, definitions: ViewDefinitions) {
+        self.lock_definitions().insert(connection.to_string(), definitions);
+    }
+
     /// Forget one connection's schema — what a re-read and a disconnect do.
+    ///
+    /// The definitions go with it. They describe the same database at the same
+    /// moment, and keeping one half of that pair would be worse than keeping
+    /// neither.
     pub fn invalidate(&self, connection: &str) {
         self.lock().remove(connection);
+        self.lock_definitions().remove(connection);
     }
 
     pub fn clear(&self) {
         self.lock().clear();
+        self.lock_definitions().clear();
     }
 
     pub fn len(&self) -> usize {
@@ -70,6 +99,10 @@ impl SchemaCache {
     /// take the whole panel down for a cache.
     fn lock(&self) -> MutexGuard<'_, HashMap<String, Arc<SchemaSnapshot>>> {
         self.by_connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn lock_definitions(&self) -> MutexGuard<'_, HashMap<String, ViewDefinitions>> {
+        self.definitions.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 

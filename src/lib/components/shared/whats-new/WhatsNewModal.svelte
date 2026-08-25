@@ -71,9 +71,9 @@
       case 'Added':      return { Icon: Plus,        accent: 'var(--success)',  rgb: '46, 160, 67'   };
       case 'Changed':    return { Icon: Pencil,      accent: 'var(--accent)',   rgb: '77, 120, 204'  };
       case 'Fixed':      return { Icon: Bug,         accent: 'var(--warning)',  rgb: '210, 153, 34'  };
-      case 'Removed':    return { Icon: Trash2,      accent: 'var(--danger)',   rgb: '218, 54, 51'   };
+      case 'Removed':    return { Icon: Trash2,      accent: 'var(--error)',   rgb: '218, 54, 51'   };
       case 'Deprecated': return { Icon: ArchiveX,    accent: 'var(--text-muted)', rgb: '138, 145, 156' };
-      case 'Security':   return { Icon: ShieldAlert, accent: 'var(--danger)',   rgb: '218, 54, 51'   };
+      case 'Security':   return { Icon: ShieldAlert, accent: 'var(--error)',   rgb: '218, 54, 51'   };
       default:           return { Icon: Sparkles,    accent: 'var(--accent)',   rgb: '77, 120, 204'  };
     }
   }

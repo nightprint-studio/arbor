@@ -27,19 +27,8 @@
   import { schemaStore } from '$lib/stores/picus/schema.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
-  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+  import { openConnection } from '../open-connection';
   import type { Connection } from '$lib/types/picus';
-
-  /**
-   * Open a session and surface the failure where the click was.
-   *
-   * A connect failure is ordinary — a server down, a VPN off, a password changed —
-   * so it gets a toast rather than a modal, and the row simply stays disconnected.
-   */
-  async function openConnection(id: string) {
-    const message = await connectionsStore.connect(id);
-    if (message) toastStore.show(message, 'error');
-  }
 
   let query = $state('');
   let searchBar: SearchBar | undefined = $state();
@@ -49,18 +38,21 @@
   const needle = $derived(query.trim().toLowerCase());
 
   /**
-   * Whether the loaded catalogue has anything matching the filter.
+   * Whether one connection's catalogue has anything matching the filter.
    *
    * Answered with `some` rather than by building the four lists: on a schema with
-   * hundreds of tables this runs on every keystroke, and the panel only needs a
-   * yes or a no.
+   * hundreds of tables this runs on every keystroke, for every connection held, and
+   * the panel only needs a yes or a no. An unread connection answers `false`
+   * immediately — the cheap case is also the common one.
    */
-  const schemaMatches = $derived.by(() => {
+  function schemaMatches(connectionId: string): boolean {
     if (!needle) return false;
+    const catalogue = schemaStore.of(connectionId);
+    if (!catalogue.loaded) return false;
     const has = (list: { name: string }[]) => list.some((o) => o.name.toLowerCase().includes(needle));
-    return has(schemaStore.tables) || has(schemaStore.views)
-      || has(schemaStore.sequences) || has(schemaStore.triggers);
-  });
+    return has(catalogue.tables) || has(catalogue.views)
+      || has(catalogue.sequences) || has(catalogue.triggers);
+  }
 
   const visible = $derived(
     connectionsStore.connections.filter((c) => {
@@ -69,9 +61,11 @@
         c.name.toLowerCase().includes(needle) ||
         c.alias.toLowerCase().includes(needle) ||
         c.schema.toLowerCase().includes(needle) ||
-        // Objects belong to the connection whose catalogue is loaded — never to
-        // every row on screen.
-        (c.id === schemaStore.connectionId && schemaMatches)
+        // Objects belong to the connection whose catalogue they came from — never
+        // to every row on screen. Asked per connection now that several catalogues
+        // are held, so a filter finds objects in any of them and not only in the
+        // selected one.
+        schemaMatches(c.id)
       );
     }),
   );
@@ -119,7 +113,9 @@
       case 'disconnect': void connectionsStore.disconnect(conn.id); break;
       case 'refresh':
         connectionsStore.setActive(conn.id);
-        void schemaStore.load(conn.id);
+        // `refresh`, not `ensure`: this is the user saying the catalogue is stale,
+        // so already having one is the reason to re-read rather than not to.
+        void schemaStore.refresh(conn.id);
         break;
       case 'edit': picusUiStore.openConnectionEditor(conn.id); break;
       case 'details': picusUiStore.openConnectionDetails(conn.id); break;

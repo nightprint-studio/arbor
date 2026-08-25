@@ -159,6 +159,10 @@ export interface ProjectSession {
   open_files: string[];
   /** The active tab (one of `open_files`), or ''. */
   active_file: string;
+  /** Where the caret was in each open tab, `"line:col"` (1-based), positionally aligned with
+   *  {@link open_files}; `''` for a tab the caret never visited. May be shorter than — or absent
+   *  from — a session written by an older build, so read it defensively. */
+  open_carets?: string[];
 }
 
 /** Mirrors the BE `BennuWorkspace` — one named workspace: an ordered set of Java projects with

@@ -17,6 +17,7 @@
    * this window and simply had no dialog in it. It is the same component Corvus's settings
    * panel renders.
    */
+  import { tooltip } from '$lib/actions/tooltip';
   import {
     Settings, Coffee, Boxes, FileType, TextCursorInput, ListTree, Bug,
     FoldVertical, Braces, RotateCcw, Wand2, Plus, Trash2, TriangleAlert, FolderOpen,
@@ -743,7 +744,7 @@
                   />
                 </div>
                 {#if srv.path}
-                  <div class="lsp-srv-path" title={srv.path}>{srv.path}</div>
+                  <div class="lsp-srv-path" use:tooltip={srv.path}>{srv.path}</div>
                 {:else}
                   <!-- Not "not found" full stop: the hint is what turns a dead end into a next
                        step, which is the whole reason the catalogue carries one. The hint says
@@ -765,7 +766,7 @@
                         {#snippet iconStart()}<Download size={13} />{/snippet}
                         {bennuLspStore.installing === srv.id ? 'Installing…' : 'Install'}
                       </Button>
-                      <code class="lsp-install-cmd" title={srv.install.join(' ')}>
+                      <code class="lsp-install-cmd" use:tooltip={srv.install.join(' ')}>
                         {srv.install.join(' ')}
                       </code>
                       <CopyButton value={srv.install.join(' ')} title="Copy the install command" />
@@ -913,7 +914,7 @@ initialization_options = ""`}</pre>
           <div class="bs-paths">
             {#each stepExcludes as p (p)}
               <div class="bs-path">
-                <span class="bs-path-txt bs-mono" title={p}>{p}</span>
+                <span class="bs-path-txt bs-mono" use:tooltip={p}>{p}</span>
                 <button class="bs-path-del" type="button" onclick={() => void removeExclude(p)} aria-label="Remove pattern"><Trash2 size={13} /></button>
               </div>
             {/each}
@@ -968,7 +969,7 @@ initialization_options = ""`}</pre>
             <div class="bs-paths">
               {#each jdkPaths as p (p)}
                 <div class="bs-path">
-                  <span class="bs-path-txt" title={p}>{p}</span>
+                  <span class="bs-path-txt" use:tooltip={p}>{p}</span>
                   <button class="bs-path-del" type="button" onclick={() => removeJdkPath(p)} aria-label="Remove JDK path"><Trash2 size={13} /></button>
                 </div>
               {/each}

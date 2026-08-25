@@ -108,7 +108,7 @@
         <EmptyState message="None yet. Click the left margin of a Java file to set one." />
       {:else}
         {#each byFile as group (group.file)}
-          <div class="bm-file" title={group.file}>{fileName(group.file)}</div>
+          <div class="bm-file" use:tooltip={group.file}>{fileName(group.file)}</div>
           {#each group.list as bp (bp.line)}
             <div class="bm-row" class:off={!bp.enabled}>
               <Toggle

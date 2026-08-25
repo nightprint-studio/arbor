@@ -48,6 +48,8 @@
 </script>
 
 <script lang="ts">
+  import { tooltip } from '$lib/actions/tooltip';
+
   /**
    * The syntax tree of the document in front of the user.
    *
@@ -230,7 +232,7 @@
           class="ap-tab"
           class:ap-on={tab.id === activeTab}
           aria-selected={tab.id === activeTab}
-          title={tab.hint}
+          use:tooltip={tab.hint}
           onclick={() => onTab?.(tab.id)}
         >
           {tab.label}

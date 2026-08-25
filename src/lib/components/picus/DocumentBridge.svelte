@@ -32,6 +32,7 @@
   import { astStore } from '$lib/stores/picus/ast.svelte';
   import { bufferRestructureStore } from '$lib/stores/picus/restructure-buffer.svelte';
   import { parseFaultStore } from '$lib/stores/picus/parse-faults.svelte';
+  import { statementSpanStore } from '$lib/stores/picus/statement-spans.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import type { Dialect } from '$lib/types/picus';
 
@@ -100,6 +101,21 @@
     parseFaultStore.follow(untrack(() => editor.getValue()), dialect);
   });
 
+  /**
+   * Where the statements are, for the same reason and on the same terms.
+   *
+   * Not gated on a panel either, and gated on nothing else: completion, hover,
+   * ghost text and the semantic diagnostics all read these boundaries through
+   * `scanSql`, so a buffer nobody is asking about is a buffer where the caret is in
+   * the wrong statement. Everything downstream degrades gracefully until the answer
+   * lands — see `statementSpanStore`.
+   */
+  $effect(() => {
+    if (!editor) return;
+    void text;
+    statementSpanStore.follow(untrack(() => editor.getValue()), dialect);
+  });
+
   $effect(() => {
     const request = astStore.selectRequest;
     if (!request || !editor) return;
@@ -112,5 +128,6 @@
     astStore.clear();
     bufferRestructureStore.clear();
     parseFaultStore.clear();
+    statementSpanStore.clear();
   });
 </script>

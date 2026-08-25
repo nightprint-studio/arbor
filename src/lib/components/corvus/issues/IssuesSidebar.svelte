@@ -401,16 +401,22 @@
       <div class="is-search-row">
         <div class="is-search-wrap">
           <Search size={12} class="is-search-icon" />
+          <!-- The help is split into the widget's two parts rather than handed over
+               as one newline-joined block. A native `title` renders those newlines;
+               the tooltip does not, so the whole thing would have arrived as a
+               single unreadable line. Headline: what the box does by default.
+               Detail: the two prefixes, which are the part nobody guesses. -->
           <input
             class="is-search"
             type="text"
             placeholder="Search by title or code — # for code only, ~ for text only"
-            title={'Default: matches both ticket title and code.\n' +
-                   '  e.g. "PROJ-42" finds that ticket and anything mentioning it.\n' +
-                   'Prefix with # to force code-only search:\n' +
-                   '  e.g. "#PROJ-42" matches the ticket key only, ignoring titles/comments.\n' +
-                   'Prefix with ~ to force text-only search:\n' +
-                   '  e.g. "~PROJ-42" matches titles/comments only, not the key.'}
+            use:tooltip={{
+              content: 'Matches both the ticket title and its code.',
+              description:
+                'Prefix with # to search codes only — "#PROJ-42" matches that key and '
+                + 'ignores titles and comments. Prefix with ~ to search text only — '
+                + '"~PROJ-42" matches titles and comments and not the key.',
+            }}
             bind:value={searchQuery}
             oninput={onSearchInput}
           />

@@ -16,7 +16,7 @@
   import { onMount } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
   import {
-    takeWorkspaceIntent, WORKSPACE_OPEN_PRODUCT_EVENT,
+    takeWorkspaceIntent, WORKSPACE_CLOSE_PRODUCT_EVENT, WORKSPACE_OPEN_PRODUCT_EVENT,
   } from '$lib/ipc/window';
   import { surfaceStore, SURFACES, type SurfaceId } from '$lib/stores/surfaces.svelte';
   import SurfaceBoot from './SurfaceBoot.svelte';
@@ -33,6 +33,12 @@
     if (product && isSurfaceId(product)) surfaceStore.show(product);
   }
 
+  /** Honour a "stop this product" request — the shell's `close_product_window` reaching the half
+   *  of Arbor that has no windows to destroy. Closing the tab is what tears its backend down. */
+  function closeRequested(product: string | null) {
+    if (product && isSurfaceId(product)) void surfaceStore.close(product);
+  }
+
   surfaceStore.enterContainer();
 
   onMount(() => {
@@ -41,7 +47,11 @@
     void takeWorkspaceIntent().then(showRequested).catch(() => {});
     // …and listen from here on, for launches into an already-open container.
     const un = listen<string>(WORKSPACE_OPEN_PRODUCT_EVENT, (e) => showRequested(e.payload));
-    return () => { void un.then((off) => off()); };
+    const unClose = listen<string>(WORKSPACE_CLOSE_PRODUCT_EVENT, (e) => closeRequested(e.payload));
+    return () => {
+      void un.then((off) => off());
+      void unClose.then((off) => off());
+    };
   });
 
   // Tab navigation. Capture phase: a product shell's own global key handler must

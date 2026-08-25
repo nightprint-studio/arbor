@@ -17,9 +17,11 @@
     tool: DecoratedTool;
     onaction: () => void;
     onstop: () => void;
+    /** Stop and start again — the way to pick up a rebuilt backend without restarting Arbor. */
+    onrestart: () => void;
     onpickVer: (v: string) => void;
   }
-  let { tool, onaction, onstop, onpickVer }: Props = $props();
+  let { tool, onaction, onstop, onrestart, onpickVer }: Props = $props();
 
   const A = $derived(tool.accent);
   // Map the Canopy action kind → shared Button variant + colour.
@@ -80,6 +82,10 @@
         <Button variant={actionVariant} color={actionColor} block onclick={onaction}>{tool.actionLabel}</Button>
       </div>
       {#if tool.isRunning}
+        <Button variant="tonal" color="#e0b688" onclick={onrestart}
+                tooltip={{ content: 'Close it and start it again — picks up a rebuilt backend' }}>
+          Restart
+        </Button>
         <Button variant="tonal" color="#f0908c" onclick={onstop}>Stop</Button>
       {/if}
       <CanopyVersionMenu versions={tool.verMenu} current={tool.versionLabel} onpick={onpickVer} />
@@ -112,6 +118,6 @@
   .status-label { font-size: var(--font-size-xs); color: #c5b39f; }
   .ver { font-family: var(--canopy-mono); font-size: var(--font-size-xs); color: #b39d88; margin-top: 3px; }
 
-  .actions { display: flex; gap: 8px; margin-top: 12px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   .act-main { flex: 1; display: flex; }
 </style>

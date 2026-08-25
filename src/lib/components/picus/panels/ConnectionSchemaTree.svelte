@@ -62,14 +62,24 @@
 
   const filtering = $derived(needle !== '');
 
-  /** True while the loaded snapshot is the one this connection describes. */
-  const isLoaded = $derived(schemaStore.connectionId === connection.id);
+  /**
+   * **This** connection's catalogue, asked for by id.
+   *
+   * Not the store's selected one. Several are held now, so a connection that has
+   * been read keeps showing its own objects after the selection moves elsewhere —
+   * which is what a tree under a connection's own name should have been doing all
+   * along. What it must never do is show a *different* database's tables under this
+   * name, and asking by id is what makes that impossible rather than merely
+   * unlikely.
+   */
+  const catalogue = $derived(schemaStore.of(connection.id));
+  const isLoaded = $derived(catalogue.loaded);
 
   function listOf(group: SchemaGroup): { name: string }[] {
-    return group === 'tables' ? schemaStore.tables
-      : group === 'views' ? schemaStore.views
-      : group === 'sequences' ? schemaStore.sequences
-      : schemaStore.triggers;
+    return group === 'tables' ? catalogue.tables
+      : group === 'views' ? catalogue.views
+      : group === 'sequences' ? catalogue.sequences
+      : catalogue.triggers;
   }
 
   /** The names of a group that pass the filter. */
@@ -182,21 +192,19 @@
 <div class="cst-meta" style:--conn-color={connectionColorVar(connection)}>
   {connection.schema}
   {#if connection.dbVersion}· database version {connection.dbVersion}{/if}
-  {#if isLoaded && schemaStore.loadedAt}
-    <span class="cst-stamp">cached {schemaStore.loadedAt}</span>
+  {#if isLoaded && catalogue.loadedAt}
+    <span class="cst-stamp">cached {catalogue.loadedAt}</span>
   {/if}
 </div>
 
-{#if schemaStore.loading}
+{#if catalogue.loading}
   <p class="cst-note"><Spinner size={10} /> reading schema…</p>
-{:else if schemaStore.error}
-  <!-- A failed read leaves no catalogue at all, so it is the answer for whichever
-       connection is being looked at. -->
-  <p class="cst-note cst-bad">{schemaStore.error}</p>
+{:else if catalogue.error}
+  <p class="cst-note cst-bad">{catalogue.error}</p>
 {:else if !isLoaded}
-  <!-- One catalogue is held at a time, for the connection in use. Showing another
-       connection's tables under this name is the kind of quiet wrongness that gets
-       a DELETE written against the wrong database. -->
+  <!-- Only a few catalogues are held at once, so one read a while ago may have been
+       evicted. Selecting the connection reads it again — which is also what happens
+       the first time. -->
   <p class="cst-note">
     {connection.state === 'disconnected'
       ? 'Not connected — open the session to read its schema.'

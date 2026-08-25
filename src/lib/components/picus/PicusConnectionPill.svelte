@@ -25,6 +25,7 @@
   import { Database, Lock, ChevronDown } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { connectionColorVar } from '$lib/stores/picus/connections.svelte';
+  import PicusConnectionStateDot from './PicusConnectionStateDot.svelte';
   import { DIALECTS, type Connection } from '$lib/types/picus';
 
   interface Props {
@@ -52,7 +53,11 @@
 
 {#snippet body()}
   {#if connection}
-    <span class="cp-dot" style:background={color}></span>
+    <span class="cp-swatch" style:background={color}></span>
+    <!-- Which connection AND whether it is open, in the same glance. The pill is
+         where a tab's binding is stated, and "can I run this" is half of that
+         binding — reading it used to mean going to the sidebar and hovering. -->
+    <PicusConnectionStateDot state={connection.state} />
     {#if density === 'titlebar'}
       <Database size={12} />
     {/if}
@@ -66,7 +71,7 @@
       <Lock size={10} class="cp-lock" />
     {/if}
   {:else}
-    <span class="cp-dot cp-dot-empty"></span>
+    <span class="cp-swatch cp-swatch-empty"></span>
     <span class="cp-name cp-muted">No connection</span>
   {/if}
   {#if interactive}
@@ -130,13 +135,20 @@
     background: color-mix(in srgb, var(--warning) 18%, var(--bg-overlay));
   }
 
-  .cp-dot {
-    width: 8px;
-    height: 8px;
+  /* A BAR, not a dot, and the shape is the point.
+     This marker is the connection's identity — its slot in the shared workspace
+     palette — and one of the twelve palette colours is the same green as
+     `--success`. Picus reserves the round green dot for "the session is open"
+     (`PicusConnectionStateDot`), so identity is drawn as a colour swatch instead:
+     a stripe, like the accent bar a selected sidebar row already wears. Two
+     vocabularies, two shapes, no green that has to be interpreted. */
+  .cp-swatch {
+    width: 3px;
+    height: 11px;
     border-radius: 2px;
     flex-shrink: 0;
   }
-  .cp-dot-empty {
+  .cp-swatch-empty {
     background: transparent;
     border: 1px dashed var(--border);
   }
@@ -171,7 +183,7 @@
     color: var(--text-muted);
   }
   .cp-status .cp-name { font-weight: 400; color: var(--text-secondary); }
-  .cp-status .cp-dot { width: 7px; height: 7px; }
+  .cp-status .cp-swatch { height: 9px; }
   button.cp-status:hover { background: var(--bg-hover); border-color: transparent; }
   .cp-status.cp-ro { background: transparent; border: none; }
   .cp-status.cp-ro .cp-name { color: var(--warning); }

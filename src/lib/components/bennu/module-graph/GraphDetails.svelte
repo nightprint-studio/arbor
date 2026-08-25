@@ -9,6 +9,7 @@
   import { ArrowRight, ArrowLeft, FileCode2, TriangleAlert } from 'lucide-svelte';
   import type { GraphNode } from '$lib/ipc/bennu/deps';
   import { moduleWord } from '$lib/ipc/bennu/deps';
+  import { tooltip } from '$lib/actions/tooltip';
 
   let {
     node,
@@ -32,7 +33,7 @@
 
 <div class="gd">
   <div class="gd-head">
-    <span class="gd-name" title={node.id}>{node.name || node.id}</span>
+    <span class="gd-name" use:tooltip={node.id}>{node.name || node.id}</span>
     {#if node.kind}<span class="gd-kind">{node.kind}</span>{/if}
   </div>
 
@@ -51,15 +52,15 @@
     </div>
     <div>
       <!-- The number worth opening this window for. -->
-      <dt title={`${word} that rebuild when this one changes`}>Rebuilds</dt>
+      <dt use:tooltip={`${word} that rebuild when this one changes`}>Rebuilds</dt>
       <dd class:gd-hot={node.impact > 0}>{node.impact}</dd>
     </div>
     <div>
-      <dt title={`${word} this one is built on, transitively`}>Built on</dt>
+      <dt use:tooltip={`${word} this one is built on, transitively`}>Built on</dt>
       <dd>{node.reach}</dd>
     </div>
     <div>
-      <dt title="Third-party dependencies it declares">Third-party</dt>
+      <dt use:tooltip={'Third-party dependencies it declares'}>Third-party</dt>
       <dd>{node.external}</dd>
     </div>
   </dl>

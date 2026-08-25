@@ -292,7 +292,7 @@
 
                   <div class="row-body">
                     <div class="row-line-1">
-                      <span class="row-name" title={s.key.name}>{s.key.name}</span>
+                      <span class="row-name" use:tooltip={s.key.name}>{s.key.name}</span>
                     </div>
                     <div class="row-line-2">
                       <span class="row-kind">{triggerKindLabel(s.trigger)}</span>

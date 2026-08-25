@@ -121,7 +121,7 @@
     width: 26px; height: 26px; border: none; border-radius: var(--radius-sm);
     background: transparent; color: var(--text-muted); cursor: pointer;
   }
-  .model-del:hover { background: var(--bg-hover); color: var(--danger); }
+  .model-del:hover { background: var(--bg-hover); color: var(--error); }
   .model-dl { display: flex; flex-direction: column; gap: 6px; }
   .model-dl-head { display: flex; align-items: center; justify-content: space-between; }
   .model-phase { font-size: var(--font-size-xs); color: var(--text-secondary); }

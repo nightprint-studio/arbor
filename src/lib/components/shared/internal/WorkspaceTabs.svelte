@@ -39,7 +39,7 @@
           role="tab"
           aria-selected={isActive}
           onclick={() => surfaceStore.show(id)}
-          onauxclick={(e) => { if (e.button === 1) surfaceStore.close(id); }}
+          onauxclick={(e) => { if (e.button === 1) void surfaceStore.close(id); }}
         >
           {#if id === 'home'}
             <LayoutGrid size={13} />
@@ -54,7 +54,7 @@
             class="wt-close"
             aria-label="Close {def.label} tab"
             use:tooltip={'Close tab'}
-            onclick={() => surfaceStore.close(id)}
+            onclick={() => void surfaceStore.close(id)}
           >
             <X size={11} />
           </button>

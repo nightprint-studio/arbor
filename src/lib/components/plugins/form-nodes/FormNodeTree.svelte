@@ -902,7 +902,7 @@
             class="pf-tree-result"
             class:active={i === currentHit}
             onclick={() => jumpToHit(i)}
-            title={hit.labels.join(' › ')}
+            use:tooltip={hit.labels.join(' › ')}
           >
             <span class="pf-tree-result-path">
               {#each hit.labels as lbl, j}

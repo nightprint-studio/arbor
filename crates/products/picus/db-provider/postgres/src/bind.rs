@@ -47,6 +47,7 @@ use tokio_postgres::{Client, Row, Statement};
 
 use crate::cursor::{bounded_body, is_large_object, plan_execution, ExecutionPlan};
 use crate::error::map_pg;
+use crate::origins::RelationCache;
 use crate::rows;
 use crate::sql::{
     guard_read_only, leading_keyword, quote_ident, single_statement, strip_leading_noise,
@@ -60,6 +61,7 @@ use crate::sql::{
 /// here in the product's own words before the server refuses it in its own.
 pub async fn execute_bound(
     client: &Client,
+    relations: &RelationCache,
     sql: &str,
     binds: &[BindValue],
     window: u32,
@@ -91,6 +93,9 @@ pub async fn execute_bound(
     }
 
     let columns = describe(&described);
+    // From the same description the columns came from, so the positions are the
+    // server's own and not a re-derivation of them.
+    let column_sources = relations.sources(client, described.columns()).await;
     let plan = plan_bound(sql);
     // Nothing is masked on the direct path: masking means rewriting the projection,
     // and the direct path is the one where the statement is *not* rewritten. Saying
@@ -144,6 +149,7 @@ pub async fn execute_bound(
         masked_columns,
         hidden_columns: Vec::new(),
         row_key: Vec::new(),
+        column_sources,
         effective_sql: None,
     })
 }
@@ -163,6 +169,7 @@ fn write_result(affected: u64, started: Instant) -> ExecuteResult {
         masked_columns: Vec::new(),
         hidden_columns: Vec::new(),
         row_key: Vec::new(),
+        column_sources: Vec::new(),
         effective_sql: None,
     }
 }

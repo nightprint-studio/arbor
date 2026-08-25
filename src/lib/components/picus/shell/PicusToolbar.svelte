@@ -10,12 +10,29 @@
    *
    * Rebinding a query tab to another connection is an explicit act with a
    * visible control, never a hidden global mode.
+   *
+   * ## Which buttons are coloured, and why only those
+   *
+   * The bar used to be a row of identical grey glyphs, which asks the reader to
+   * find Run by parsing shapes. Colour marks **what an action does to the world**,
+   * in three classes and no others:
+   *
+   *  • green (`--success`) — it starts something: Run, Run all, Generate, Write
+   *  • red (`--error`) — it stops something: Cancel
+   *  • accent — it persists something: Save
+   *
+   * Everything that only reads, refreshes, exports or navigates stays neutral. That
+   * restraint is the feature: if Refresh and Export were coloured too, green would
+   * stop meaning "this runs" and the bar would be back to being decoration. Only the
+   * glyph takes the colour (`iconColor`, not `color`) — a fully green "Run" reads as
+   * a call to action, and a toolbar is not a landing page.
    */
   import {
     Play, Square, Save, GitCompare, Download, Plus, FormInput, RefreshCw, Check,
-    ListOrdered, Lock,
+    ListOrdered, Lock, Plug,
   } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import FloatingBar from '$lib/components/shared/ui/FloatingBar.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -29,8 +46,11 @@
   import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
   import { picusEditorStore } from '$lib/stores/picus/editor.svelte';
   import { saveOpenScript } from '../save-script';
+  import { openConnection } from '../open-connection';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
-  import { connectionsStore, connectionColorVar } from '$lib/stores/picus/connections.svelte';
+  import {
+    connectionsStore, connectionColorVar, isSessionOpen,
+  } from '$lib/stores/picus/connections.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
@@ -74,6 +94,31 @@
   ];
 
   const queryState = $derived(tab ? queryStore.read(tab.id) : null);
+
+  /**
+   * Whether this tab has a session to run against — and, when it has not, the
+   * sentence that says so.
+   *
+   * `read-only` counts as open: it refuses *writes*, which is the server's answer
+   * to a statement, not a reason to grey out Run.
+   *
+   * Run used to look available whatever the connection was doing, and the only way
+   * to find out was to press it and read the failure in Messages. The state is
+   * knowable before the click, so it is said before the click — and because
+   * `Button` keeps an explained-disabled control hoverable and focusable, the
+   * reason is reachable by mouse and by keyboard rather than being a grey button
+   * with no story.
+   */
+  const sessionOpen = $derived(isSessionOpen(conn));
+  const runBlock = $derived(
+    !conn
+      ? 'This tab is not bound to a connection.'
+      : conn.state === 'connecting'
+        ? `${conn.name} is still opening…`
+        : sessionOpen
+          ? ''
+          : `${conn.name} is not open — connect it first.`,
+  );
   // How long the result is belongs to the STATUS BAR, in one place, for query
   // tabs and table tabs alike — a second copy here would have to be kept in step
   // with it, and the copy this toolbar used to draw came from the schema cache's
@@ -122,7 +167,7 @@
   }
 </script>
 
-<div class="ptb" role="toolbar" aria-label="Document actions" tabindex="-1">
+<FloatingBar toolbar ariaLabel="Document actions">
   {#if kind === 'generate'}
     <!-- The source switch lives on the Source card only: one control, one home.
          Duplicating it here made the same choice reachable from two places that
@@ -131,6 +176,7 @@
       variant="ghost"
       size="sm"
       disabled={!dmlStore.canGenerate}
+      iconColor="var(--success)"
       tooltip={{ content: 'Generate the SQL for every enabled target', shortcut: 'Ctrl+G' }}
       ariaLabel="Generate"
       onclick={onGenerate}
@@ -142,6 +188,7 @@
       variant="ghost"
       size="sm"
       disabled={!dmlStore.generated || dmlStore.applied}
+      iconColor="var(--success)"
       tooltip={{ content: 'Write the generated SQL into the scripts', shortcut: 'Ctrl+Shift+W' }}
       ariaLabel="Write to scripts"
       onclick={onWrite}
@@ -168,11 +215,11 @@
     <Button
       variant="ghost"
       size="sm"
-      disabled={queryState?.running}
-      tooltip={{
-        content: 'Run the selection, or the statement under the cursor',
-        shortcut: 'Ctrl+Enter',
-      }}
+      disabled={queryState?.running || !!runBlock}
+      iconColor="var(--success)"
+      tooltip={runBlock
+        ? { content: runBlock }
+        : { content: 'Run the selection, or the statement under the cursor', shortcut: 'Ctrl+Enter' }}
       ariaLabel="Run"
       onclick={() => runQuery('statement')}
     >
@@ -182,11 +229,14 @@
     <Button
       variant="icon"
       size="sm"
-      disabled={queryState?.running}
-      tooltip={{
-        content: 'Run every statement in this tab, in order, stopping at the first failure',
-        shortcut: 'Ctrl+Shift+Enter',
-      }}
+      disabled={queryState?.running || !!runBlock}
+      iconColor="var(--success)"
+      tooltip={runBlock
+        ? { content: runBlock }
+        : {
+            content: 'Run every statement in this tab, in order, stopping at the first failure',
+            shortcut: 'Ctrl+Shift+Enter',
+          }}
       ariaLabel="Run all"
       onclick={() => runQuery('buffer')}
     >
@@ -196,13 +246,18 @@
       variant="icon"
       size="sm"
       disabled={!queryState?.running && !result?.counting}
-      tooltip={{ content: 'Cancel the running query, or the row count behind it', shortcut: 'Ctrl+Shift+C' }}
+      iconColor="var(--error)"
+      tooltip={{
+        content: 'Cancel the running query, or the row count behind it — press again to drop the '
+          + 'connection without waiting for the server',
+        shortcut: 'Ctrl+Shift+C',
+      }}
       ariaLabel="Cancel"
       onclick={() => { if (tab && conn) void queryStore.cancel(tab.id, conn.id); }}
     >
       {#snippet iconStart()}<Square size={13} />{/snippet}
     </Button>
-    <Button variant="icon" size="sm" title="Save script" ariaLabel="Save script" onclick={() => notYet('Saving a query')}>
+    <Button variant="icon" size="sm" iconColor="var(--accent)" title="Save script" ariaLabel="Save script" onclick={() => notYet('Saving a query')}>
       {#snippet iconStart()}<Save size={14} />{/snippet}
     </Button>
     <!-- The database's own verdict on what is in the editor. Beside the actions,
@@ -216,6 +271,7 @@
       connectionId={conn?.id ?? ''}
       dialect={conn?.dialect}
       busy={!!queryState?.running}
+      {sessionOpen}
     />
 
     <span class="ptb-spacer"></span>
@@ -258,6 +314,28 @@
         <PicusConnectionPill connection={conn} density="toolbar" {open} onclick={toggle} />
       {/snippet}
     </Dropdown>
+    <!-- After the pill, not beside Run, because it acts on the CONNECTION rather than
+         on the statement: the left of this bar is what to do with the SQL, the right
+         is which database it goes to, and Connect belongs to the second. It also keeps
+         Run from shifting sideways every time a session opens or closes.
+
+         Tonal accent rather than ghost: while it is here it is the only thing on the
+         bar that can be pressed, and it should look like it. -->
+    {#if conn && !sessionOpen}
+      <Button
+        variant="tonal"
+        color="var(--accent)"
+        size="sm"
+        loading={conn.state === 'connecting'}
+        disabled={conn.state === 'connecting'}
+        tooltip={{ content: `Open the session on ${conn.name}` }}
+        ariaLabel={`Connect to ${conn.name}`}
+        onclick={() => void openConnection(conn.id)}
+      >
+        {#snippet iconStart()}<Plug size={13} />{/snippet}
+        Connect
+      </Button>
+    {/if}
 
   {:else if kind === 'table'}
     <!-- Sub-views exist for things with rows; a sequence or a trigger has only
@@ -315,6 +393,7 @@
       variant="ghost"
       size="sm"
       disabled={!fileDirty || saving}
+      iconColor="var(--accent)"
       tooltip={{
         content: 'Write this file back in its own encoding and line endings, then re-check the repository',
         shortcut: 'Ctrl+S',
@@ -391,7 +470,7 @@
       <span>{picusProjectStore.folderCount} folders</span>
     </div>
   {/if}
-</div>
+</FloatingBar>
 
 <style>
   /* A floating strip, not a band welded to the card's edges.
@@ -400,17 +479,10 @@
      top of the window read as one grey mass. A few pixels of `bg-base` around it
      is what makes it a toolbar sitting on a page instead of a stripe painted
      across one; same reason the panels themselves float inside the rails. */
-  .ptb {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    height: 32px;
-    flex-shrink: 0;
-    margin: 3px 6px;
-    padding: 0 8px;
-    border-radius: var(--radius-sm);
-    background: var(--bg-elevated);
-  }
+  /* The surface — inset by `3px 6px`, rounded, on `--bg-elevated` — moved to
+     `shared/ui/FloatingBar`, which is now where that look is defined for every
+     strip that floats inside a panel. This file keeps only what makes it a
+     *toolbar*: the spacer, the info cluster, the read-only marker. */
   .ptb-spacer { flex: 1; }
   .ptb-sep {
     width: 1px;

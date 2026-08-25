@@ -55,7 +55,7 @@
     color: var(--success);
   }
   .pvs.err {
-    color: var(--danger);
+    color: var(--error);
     font-variant-numeric: tabular-nums;
   }
   .pvs.muted {

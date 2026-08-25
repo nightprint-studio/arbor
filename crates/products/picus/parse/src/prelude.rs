@@ -8,7 +8,8 @@ pub use crate::dml::{Assignment, ColumnRef, DmlOperation, DmlShape, ValueCell, V
 pub use crate::error::{ParseError, ParseErrorKind};
 pub use crate::literal::{decode as decode_literal, LiteralValue};
 pub use crate::object::{ObjectKind, ObjectRef};
-pub use crate::parser::{language, parse, SqlParser};
+pub use crate::parser::{language, parse, project, SqlParser};
+pub use crate::projection::{ColumnSource, Cte, FromItem, FromSource, Projected, Projection};
 pub use crate::range::{line_col, ByteRange};
 pub use crate::select::SelectShape;
 pub use crate::statement::{ParsedFile, Segment, Statement, StatementKind};

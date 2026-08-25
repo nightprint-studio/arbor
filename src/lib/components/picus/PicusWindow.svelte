@@ -15,7 +15,7 @@
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import { picusSettingsStore } from '$lib/stores/picus/settings.svelte';
-  import { connectionsStore } from '$lib/stores/picus/connections.svelte';
+  import { connectionsStore, isSessionOpen } from '$lib/stores/picus/connections.svelte';
   import { schemaStore } from '$lib/stores/picus/schema.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
@@ -97,12 +97,34 @@
    */
   $effect(() => {
     const active = connectionsStore.active;
-    const open = active?.state === 'connected' || active?.state === 'read-only';
-    if (active && open && schemaStore.connectionId !== active.id) {
-      void schemaStore.load(active.id);
+    const open = isSessionOpen(active);
+    if (active && open) {
+      schemaStore.select(active.id);
+      void schemaStore.ensure(active.id);
     } else if (!active || active.state === 'disconnected') {
-      if (schemaStore.connectionId) schemaStore.clear();
+      // Only this connection's catalogue. The others belong to sessions that are
+      // still up, and dropping them would blank the tabs bound to them.
+      if (active) schemaStore.forget(active.id);
+      else schemaStore.select('');
     }
+  });
+
+  /**
+   * …and give the tab you are typing in its own connection's catalogue.
+   *
+   * A tab carries its own binding, which need not be the selected connection —
+   * that is the whole point of binding a tab. Without this the editor's
+   * intelligence followed the **sidebar** rather than the buffer: completion,
+   * abbreviation expansion and live validation all went quiet on a tab bound
+   * anywhere else, with nothing on screen to say why.
+   *
+   * `ensure` rather than `load`: this fires on every tab switch, and a catalogue
+   * already held is the common case. The store keeps a few, so moving between two
+   * tabs on two databases costs one read each and nothing after that.
+   */
+  $effect(() => {
+    const bound = picusTabsStore.connectionOf(picusTabsStore.active);
+    if (bound && isSessionOpen(bound)) void schemaStore.ensure(bound.id);
   });
 
   /**

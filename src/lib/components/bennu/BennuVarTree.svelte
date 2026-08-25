@@ -52,7 +52,7 @@
     <span class="vt-name">{node.value.name}</span>
     {#if tag(node.value.kind)}<span class="vt-tag">{tag(node.value.kind)}</span>{/if}
     <span class="vt-eq">=</span>
-    <span class="vt-value" title={node.value.value}>{node.value.value}</span>
+    <span class="vt-value" use:tooltip={node.value.value}>{node.value.value}</span>
     {#if node.value.type_name}
       <span class="vt-type">{node.value.type_name}</span>
     {/if}

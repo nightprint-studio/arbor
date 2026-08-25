@@ -102,6 +102,23 @@ pub trait DbSession: Send + Sync {
     /// them at a time.
     async fn trigger_detail(&self, name: &str) -> DbResult<TriggerDetail>;
 
+    /// Every view's defining `SELECT`, as `(name, sql)`.
+    ///
+    /// **All of them, in one round trip**, which is the whole reason this exists
+    /// beside [`table_detail`](Self::table_detail). Tracing a column back through a
+    /// stack of views does not know which views it will need until it is walking
+    /// them, and asking one at a time would be a round trip per level per column —
+    /// on a schema of a couple of hundred views that is the difference between an
+    /// answer and a progress bar. The text is small next to a catalogue read.
+    ///
+    /// The default is **empty**, so an engine that cannot produce these does not
+    /// have to pretend: a lineage over an empty set resolves nothing and says the
+    /// definitions could not be read, which is the truth and is already a state the
+    /// caller renders.
+    async fn view_definitions(&self) -> DbResult<Vec<(String, String)>> {
+        Ok(Vec::new())
+    }
+
     /// Run a statement — **any** statement. The one door.
     ///
     /// A read opens a held result and returns its first `window` rows; a write

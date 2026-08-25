@@ -19,6 +19,7 @@
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
   import type { UsageHit } from '$lib/ipc/bennu/nav';
+  import { tooltip } from '$lib/actions/tooltip';
 
   const open = $derived(bennuRefactorStore.usagesOpen);
   const anchor = $derived(bennuRefactorStore.usagesAnchor);
@@ -157,7 +158,7 @@
             aria-selected={i === active}
             onmousemove={() => (active = i)}
             onclick={() => jump(h)}
-            title={h.file}
+            use:tooltip={h.file}
           >
             <span class="u-icon"><CornerDownRight size={12} /></span>
             <span class="u-file"><FileCode2 size={11} /> {baseName(h.file)}</span>

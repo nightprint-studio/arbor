@@ -73,6 +73,7 @@ pub mod literal;
 pub mod object;
 pub mod parser;
 pub mod prelude;
+pub mod projection;
 pub mod range;
 pub mod select;
 pub mod statement;

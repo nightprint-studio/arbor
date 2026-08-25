@@ -348,12 +348,12 @@
   .vm-icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; background: transparent; color: var(--text-muted); border-radius: var(--radius-sm); cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast); }
   .vm-icon:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
   .vm-icon:disabled { opacity: 0.35; cursor: default; }
-  .vm-icon-danger:hover:not(:disabled) { background: var(--danger-subtle); color: var(--danger); }
+  .vm-icon-danger:hover:not(:disabled) { background: var(--error-subtle); color: var(--error); }
 
   .vm-params { display: flex; flex-direction: column; gap: 6px; padding-left: 24px; }
   .vm-param-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .vm-param-name { font-size: var(--font-size-sm); color: var(--text-secondary); flex-shrink: 0; font-family: var(--font-code); }
-  .vm-req { color: var(--danger); margin-left: 2px; }
+  .vm-req { color: var(--error); margin-left: 2px; }
   .vm-param-row :global(.input-wrap) { max-width: 170px; }
 
   .vm-card-msg { display: flex; flex-direction: column; gap: 7px; padding-left: 24px; }

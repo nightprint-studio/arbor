@@ -33,6 +33,7 @@
    * **Nothing is written until the button.** A result that lands in an existing file goes through
    * the ordinary edit path, so it is undoable like any other edit.
    */
+  import { tooltip } from '$lib/actions/tooltip';
   import {
     Database, Plus, Trash2, Search, Type, ListChecks, Box, FileText, ChevronUp, ChevronDown,
     ArrowRight, ArrowLeft, ArrowLeftRight, Link2,
@@ -1103,7 +1104,7 @@
         {#if body === 'query' && methodName}
           <!-- The name is the one thing worth reading before the body: it is what Spring Data
                parses, and it built itself out of the conditions rather than being typed. -->
-          <div class="jg-name" title="The method name Spring Data will parse">{methodName}</div>
+          <div class="jg-name" use:tooltip={'The method name Spring Data will parse'}>{methodName}</div>
         {/if}
         <CodePreview
           code={result?.preview ?? ''}

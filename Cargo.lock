@@ -6870,6 +6870,7 @@ dependencies = [
  "picus-db-postgres",
  "picus-emit",
  "picus-inventory",
+ "picus-lineage",
  "picus-parse",
  "picus-project",
  "picus-rewrite",
@@ -6944,6 +6945,16 @@ dependencies = [
  "arbor-fs",
  "picus-parse",
  "picus-project",
+ "picus-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "picus-lineage"
+version = "0.3.0"
+dependencies = [
+ "picus-parse",
  "picus-types",
  "serde",
  "serde_json",

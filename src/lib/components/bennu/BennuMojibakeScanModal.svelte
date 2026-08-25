@@ -125,7 +125,7 @@
                 {#if expanded.has(f.file)}<ChevronDown size={13} />{:else}<ChevronRight size={13} />{/if}
                 <FileWarning size={13} class="fw" />
                 <span class="fname">{baseName(f.file)}</span>
-                <span class="fpath" title={f.file}>{f.file}</span>
+                <span class="fpath" use:tooltip={f.file}>{f.file}</span>
                 <span class="count">{f.hits.length}</span>
               </button>
               {#if expanded.has(f.file)}
@@ -215,7 +215,7 @@
     font-family: var(--font-mono, monospace);
   }
   .hit:hover { background: var(--bg-hover); color: var(--text-primary); }
-  .hit .bad { color: var(--danger); }
+  .hit .bad { color: var(--error); }
   .hit .arrow { color: var(--text-muted); }
   .hit .fix { color: var(--success); }
   .hit .off { margin-left: auto; color: var(--text-muted); font-size: var(--font-size-xs); }

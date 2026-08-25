@@ -344,7 +344,7 @@
               disabled={!openable}
               onmousemove={() => (active = gi)}
               onclick={() => open(r)}
-              title={r.file ?? r.secondary}
+              use:tooltip={r.file ?? r.secondary}
             >
               <Box size={12} />
               <span class="r-primary">{r.primary}</span>

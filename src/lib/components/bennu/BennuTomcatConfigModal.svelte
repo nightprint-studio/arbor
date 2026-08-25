@@ -24,6 +24,7 @@
   import { bennuTomcatStore } from '$lib/stores/bennu/tomcat.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { detectTomcat, hotswapJsp, type TomcatDetection } from '$lib/ipc/bennu/tomcat';
+  import { tooltip } from '$lib/actions/tooltip';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -172,7 +173,7 @@
         <div class="facts">
           <div class="fact">
             <span class="fk">Source JSP root</span>
-            <span class="fv" title={detection?.source_webapp ?? ''}>
+            <span class="fv" use:tooltip={detection?.source_webapp ?? ''}>
               {detection?.source_webapp || '—'}
             </span>
           </div>

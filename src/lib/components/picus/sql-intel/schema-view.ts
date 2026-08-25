@@ -14,9 +14,14 @@
  *
  *  • the editor is bound to a connection at all (a script file with no database
  *    open is not evidence of anything);
- *  • the snapshot in the store describes **that** connection — not the one that
- *    happened to be active a minute ago;
- *  • the snapshot is not mid-load, carries no error, and is not empty.
+ *  • a catalogue has been read for **that** connection — asked for by id, so a tab
+ *    bound to one connection is never answered from another's;
+ *  • that catalogue is not mid-load, carries no error, and is not empty.
+ *
+ * The middle one used to read "the store's single snapshot happens to describe this
+ * connection", which meant only the *selected* connection had any intelligence at
+ * all: a query tab on any other one lost completion, expansion and validation
+ * silently. The store holds several now, and this asks it for the right one.
  *
  * When `known` is false the object still answers every question — it simply
  * answers "I don't know", and every caller degrades to keywords and buffer text.
@@ -61,12 +66,10 @@ function ci(a: string, b: string): boolean {
  */
 export function schemaViewFor(connectionId: string | undefined): SchemaView {
   const connection = connectionsStore.byId(connectionId);
-  const describesThisConnection = !!connectionId
-    && schemaStore.connectionId === connectionId
-    && !schemaStore.loading
-    && !schemaStore.error;
-  const relations = describesThisConnection ? schemaStore.relations : NOTHING;
-  const sequences = describesThisConnection ? schemaStore.sequences : NO_SEQUENCES;
+  const catalogue = schemaStore.of(connectionId);
+  const describesThisConnection = catalogue.loaded && !catalogue.loading;
+  const relations = describesThisConnection ? catalogue.relations : NOTHING;
+  const sequences = describesThisConnection ? catalogue.sequences : NO_SEQUENCES;
   // An empty catalogue is indistinguishable from an unread one, and guessing which
   // it is would be guessing about the only thing that must not be guessed.
   const known = describesThisConnection && relations.length > 0;
@@ -120,14 +123,18 @@ const detailAttempted = new Set<string>();
 export async function ensureRelationDetail(
   connectionId: string | undefined, name: string,
 ): Promise<TableInfo | null> {
-  if (!connectionId || !name || schemaStore.connectionId !== connectionId) return null;
-  const current = schemaStore.relation(name);
+  if (!connectionId || !name) return null;
+  // Against that connection's own catalogue, not the selected one's — a tab bound
+  // elsewhere would otherwise pull the constraints of a same-named table on a
+  // different database, which is the worst kind of right-looking answer.
+  const view = schemaViewFor(connectionId);
+  const current = view.relation(name);
   if (!current) return null;
   const key = `${connectionId}::${current.name.toUpperCase()}`;
   if (current.foreignKeys !== undefined || detailAttempted.has(key)) return current;
   detailAttempted.add(key);
   try {
-    return await schemaStore.detail(current.name);
+    return await schemaStore.detail(current.name, connectionId);
   } catch {
     return current;
   }

@@ -41,9 +41,57 @@ import { picusResultsStore } from './result.svelte';
 import { picusSettingsStore } from './settings.svelte';
 import { txStore } from './tx.svelte';
 
+/**
+ * The palette slots Picus offers for a connection's colour — **the twelve minus the
+ * greens**.
+ *
+ * `--ws-color-2` (`#4db84d`) and `--ws-color-11` (`#7eae2a`) are gone on purpose. In
+ * Picus a green mark is a claim about the *session*: the sidebar's state dot is green
+ * when a connection is open, and that has to be readable across the whole panel
+ * without interpretation. A connection whose identity colour was green would put two
+ * meanings in one colour — and shaping them differently (a bar for identity, a circle
+ * for state) helps at the second glance, not at the first. Colour is what the eye
+ * resolves first, so the collision has to be removed at the source.
+ *
+ * The rest of the palette is untouched, and so is Corvus's: this is a Picus rule,
+ * because "connected" is a Picus concept.
+ */
+export const CONNECTION_COLOR_SLOTS: number[] = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10];
+
+/**
+ * The slot a connection actually renders in, mapped into {@link CONNECTION_COLOR_SLOTS}.
+ *
+ * Asked here rather than trusted from the record, because a stored `colorIdx` can be a
+ * green one: written by a build from before this rule, or by a hand-edited connections
+ * file. Mapping at render time keeps the invariant true for what is already on disk
+ * without rewriting anybody's configuration behind their back — the stored value stays
+ * whatever it was, and would come back if the rule ever changed.
+ */
+export function connectionColorSlot(colorIdx: number | null | undefined): number {
+  const idx = Number.isInteger(colorIdx) ? (colorIdx as number) : 0;
+  if (CONNECTION_COLOR_SLOTS.includes(idx)) return idx;
+  return CONNECTION_COLOR_SLOTS[Math.abs(idx) % CONNECTION_COLOR_SLOTS.length];
+}
+
+/**
+ * Does this connection have a session open?
+ *
+ * `read-only` counts. It is an OPEN session that refuses writes — the server's answer
+ * to a statement, not the absence of a server — and treating it as closed would grey
+ * out Run on a connection that reads perfectly well.
+ *
+ * Here rather than spelled out at each call site: the toolbar gates Run on it, the
+ * query and file views gate live validation on it, and the transaction cluster gates
+ * every one of its buttons on it. Four copies of a two-branch condition is four places
+ * for `read-only` to be forgotten.
+ */
+export function isSessionOpen(conn: Pick<Connection, 'state'> | null | undefined): boolean {
+  return conn?.state === 'connected' || conn?.state === 'read-only';
+}
+
 /** Resolve a connection's palette slot to the CSS variable holding its colour. */
 export function connectionColorVar(conn: Pick<Connection, 'colorIdx'> | null | undefined): string {
-  return `var(--ws-color-${conn?.colorIdx ?? 0})`;
+  return `var(--ws-color-${connectionColorSlot(conn?.colorIdx)})`;
 }
 
 /** Strip the live-state fields a row carries on top of its editable spec. */

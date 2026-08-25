@@ -15,6 +15,7 @@
   import { merulaStore } from '../merula-store.svelte';
   import { launcherStore } from '../stores/launcher.svelte';
   import { laneColor } from '../palette';
+  import { tooltip } from '$lib/actions/tooltip';
 
   const tracks = $derived(launcherStore.tracks);
   const scenes = $derived(launcherStore.scenes);
@@ -49,7 +50,7 @@
       <span class="lp-meta">{scenes.length} {scenes.length === 1 ? 'scene' : 'scenes'}{#if liveCount > 0} · <span class="lp-playing">{liveCount} playing</span>{/if}</span>
     {/snippet}
     {#snippet actions()}
-      <div class="lp-quant" title="Launch quantization — clips fire on this cycle grid">
+      <div class="lp-quant" use:tooltip={'Launch quantization — clips fire on this cycle grid'}>
         <span class="lp-quant-label">Quantize</span>
         {#each [1, 2, 4] as q (q)}
           <button
@@ -71,7 +72,7 @@
           <!-- Header row: stop-all corner + track names -->
           <button
             class="corner"
-            title="Stop all clips"
+            use:tooltip={'Stop all clips'}
             disabled={!launcherStore.anyActive}
             onclick={() => launcherStore.stopAll()}
           >
@@ -84,7 +85,7 @@
               class="col-head"
               class:playing={act != null}
               style:--c={laneColor(ti)}
-              title={act != null ? `${name || `#${ti + 1}`} — playing ${act}${queued ? ' (queued)' : ''}` : (name || `track ${ti + 1}`)}
+              use:tooltip={act != null ? `${name || `#${ti + 1}`} — playing ${act}${queued ? ' (queued)' : ''}` : (name || `track ${ti + 1}`)}
             >
               <span class="dot" style:background={laneColor(ti)}></span>
               <span class="col-name">{name || `#${ti + 1}`}</span>
@@ -101,13 +102,13 @@
             <button
               class="scene-launch"
               class:active={launcherStore.isSceneActive(s.name)}
-              title={`Launch scene "${s.name}"`}
+              use:tooltip={`Launch scene "${s.name}"`}
               onclick={() => launcherStore.launchScene(s.name)}
             >
               <Play size={11} class="tri" />
               <span class="scene-name">{s.name}</span>
               {#if inert > 0}
-                <span class="warn" title={`${inert} clip${inert === 1 ? '' : 's'} target a track that doesn't exist`}>
+                <span class="warn" use:tooltip={`${inert} clip${inert === 1 ? '' : 's'} target a track that doesn't exist`}>
                   <AlertTriangle size={11} />
                 </span>
               {/if}
@@ -121,7 +122,7 @@
                   class:active={on && !queued}
                   class:armed={queued}
                   style:--c={laneColor(ti)}
-                  title={on ? 'Stop' : `Launch ${s.name} on ${tracks[ti] || `#${ti + 1}`}`}
+                  use:tooltip={on ? 'Stop' : `Launch ${s.name} on ${tracks[ti] || `#${ti + 1}`}`}
                   onclick={() => toggleCell(ti, s.name)}
                 >
                   {#if on && !queued}<Square size={10} />{:else}<Play size={10} class="tri" />{/if}
@@ -191,7 +192,7 @@
     cursor: pointer;
     transition: color var(--transition-fast), border-color var(--transition-fast);
   }
-  .corner:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+  .corner:hover:not(:disabled) { color: var(--error); border-color: var(--error); }
   .corner:disabled { opacity: 0.4; cursor: default; }
 
   .col-head {

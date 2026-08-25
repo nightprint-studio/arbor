@@ -17,6 +17,7 @@
    * Because grouping is severity-first, one file can appear under both Errors and Warnings — each
    * with only its rows of that severity. The header count is every leaf row.
    */
+  import { tooltip } from '$lib/actions/tooltip';
   import {
     AlertTriangle, CircleAlert, Info, CircleCheckBig, ChevronRight, ChevronDown,
     Coffee, FileWarning, FileCode2,
@@ -310,7 +311,7 @@
                   role="treeitem"
                   onclick={() => row.onClick?.()}
                   oncontextmenu={(e) => onRowContextMenu(row, e)}
-                  title={row.title}
+                  use:tooltip={row.title}
                 >
                   <span class="pb-icon sev-{row.severity}"><RowIc size={12} /></span>
                   <span class="pb-msg">{row.label}</span>

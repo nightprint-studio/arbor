@@ -253,6 +253,10 @@ a#ordini~importo:number(12,2)
     <code>&gt;</code> — the related ones first — columns inside <code>(…)</code> and
     <code>[…]</code>, the distinguishing column after <code>&gt;table:</code>, and the
     operators. Values are never suggested: what to compare a column to is your data.</li>
+  <li>While the completion list is open it owns <kbd>Tab</kbd>, so the preview waits.
+    The list closes on its own once what you have typed is a complete name with nothing
+    longer to reach — so typing a name to the end hands <kbd>Tab</kbd> straight back to
+    the expansion.</li>
   <li>The SQL warnings stand down on a line that is an abbreviation. It is not SQL, and
     measuring it as SQL would bury it in squiggles.</li>
 </ul>

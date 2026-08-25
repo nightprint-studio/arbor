@@ -32,6 +32,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { tooltip } from '$lib/actions/tooltip';
   import {
     AlertCircle, AlertTriangle, ChevronDown, ChevronRight, FileText,
     PencilRuler, Type as TypeIcon, Hash, ToggleLeft, Slash,
@@ -579,12 +580,12 @@
           {activeSiteCount === 1 ? 'site' : 'sites'} ready
           {#if activeFileCount > 1}across <strong>{activeFileCount}</strong> files{/if}
           {#if beSkippedCount > 0}
-            <span class="be-skip-tag" title="Skipped by the engine (eval error / type mismatch / container hit)">
+            <span class="be-skip-tag" use:tooltip={'Skipped by the engine (eval error / type mismatch / container hit)'}>
               · {beSkippedCount} skipped
             </span>
           {/if}
           {#if userSkippedCount > 0}
-            <span class="be-skip-tag-user" title="Skipped by you via the checkbox">
+            <span class="be-skip-tag-user" use:tooltip={'Skipped by you via the checkbox'}>
               · {userSkippedCount} excluded
             </span>
           {/if}
@@ -656,7 +657,7 @@
                 <span class="be-old">{s.old_preview}</span>
                 <span class="be-arrow">→</span>
                 {#if s.will_skip}
-                  <span class="be-skip-chip" title={s.skip_reason}>
+                  <span class="be-skip-chip" use:tooltip={s.skip_reason}>
                     <AlertTriangle size={10} /> skip
                   </span>
                   {#if s.skip_reason}

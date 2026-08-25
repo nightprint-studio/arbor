@@ -114,8 +114,12 @@ fn unresolved_local_hover(
 ) -> Option<crate::rename::HoverInfo> {
     let (written, initializer) = local_declaration_of(node, bytes, name)?;
     let doc = match initializer {
-        Some(expr) => format!("Type not resolved from the initializer `{}`.", ellipsize(&expr, 120)),
-        None => "Type not resolved.".to_string(),
+        Some(expr) => format!(
+            "The type could not be inferred from the initializer — `{}`. \
+             Hovering a part of the chain shows how far the inference gets.",
+            summarize_expr(expr, bytes)
+        ),
+        None => "The type could not be inferred.".to_string(),
     };
     Some(crate::rename::HoverInfo {
         signature: format!("{written} {name}"),
@@ -125,28 +129,100 @@ fn unresolved_local_hover(
     })
 }
 
-/// The `(written type, initializer text)` of the local named `name`, searched outwards from `node`
+/// How much of an initializer's shape a tooltip is allowed to spend.
+const MAX_SHAPE_CHARS: usize = 110;
+
+/// An initializer rendered as its **shape**: the calls that decide its type, with their arguments
+/// elided (`repo.search(…).map(…).orElseGet(…)`).
+///
+/// This replaced "the first 120 characters of the source text", which on exactly the expressions
+/// that defeat the inference is unreadable. A builder chain spends that whole budget inside its own
+/// arguments — `…builder().applicativo(root.getId().getIdprg()).chiave1(exact_value(…` — and is cut
+/// off *before* the `.map(…).orElseGet(…)` that actually determines the type, so the card ends up
+/// quoting the least relevant part of the expression back at the reader. The shape fits on a line
+/// and names the links that matter.
+///
+/// When even the shape is too long the **head** is dropped rather than the tail: the type comes out
+/// of the last call, so that is the end worth keeping.
+fn summarize_expr(node: tree_sitter::Node, bytes: &[u8]) -> String {
+    fn text(node: tree_sitter::Node, bytes: &[u8]) -> String {
+        node.utf8_text(bytes).unwrap_or("").to_string()
+    }
+    fn field(node: tree_sitter::Node, name: &str, bytes: &[u8]) -> Option<String> {
+        node.child_by_field_name(name).map(|n| text(n, bytes))
+    }
+    /// `()` or `(…)` — whether a call takes arguments, never which ones.
+    fn call_args(node: tree_sitter::Node) -> &'static str {
+        match node.child_by_field_name("arguments") {
+            Some(a) if a.named_child_count() > 0 => "(…)",
+            _ => "()",
+        }
+    }
+
+    // Walk down the receiver chain, collecting the links outermost-first.
+    let mut links: Vec<String> = Vec::new();
+    let mut current = node;
+    loop {
+        let link = match current.kind() {
+            "method_invocation" => {
+                format!("{}{}", field(current, "name", bytes).unwrap_or_default(), call_args(current))
+            }
+            "field_access" => field(current, "field", bytes).unwrap_or_default(),
+            _ => break,
+        };
+        links.push(link);
+        match current.child_by_field_name("object") {
+            Some(receiver) => current = receiver,
+            None => break,
+        }
+    }
+    links.reverse();
+
+    // Whatever the chain stands on: a name, a `new`, or an expression this does not model — a
+    // ternary, a lambda, a cast — which is simply shown, shortened.
+    let base = match current.kind() {
+        "object_creation_expression" => format!(
+            "new {}{}",
+            field(current, "type", bytes).unwrap_or_default(),
+            call_args(current)
+        ),
+        "identifier" | "this" | "super" | "scoped_identifier" | "type_identifier"
+        | "string_literal" | "decimal_integer_literal" | "null_literal" => text(current, bytes),
+        _ => ellipsize(&text(current, bytes), 60),
+    };
+
+    let mut parts: Vec<String> = std::iter::once(base).chain(links).collect();
+    let mut trimmed = false;
+    while parts.len() > 1 && parts.join(".").chars().count() > MAX_SHAPE_CHARS {
+        parts.remove(0);
+        trimmed = true;
+    }
+    let joined = ellipsize(&parts.join("."), MAX_SHAPE_CHARS);
+    if trimmed { format!("…{joined}") } else { joined }
+}
+
+/// The `(written type, initializer)` of the local named `name`, searched outwards from `node`
 /// through the enclosing scopes. Covers the two forms that carry an inferred type: an ordinary
 /// declaration and an enhanced-`for` variable.
-fn local_declaration_of(
-    node: tree_sitter::Node,
+fn local_declaration_of<'t>(
+    node: tree_sitter::Node<'t>,
     bytes: &[u8],
     name: &str,
-) -> Option<(String, Option<String>)> {
+) -> Option<(String, Option<tree_sitter::Node<'t>>)> {
     fn text(n: &tree_sitter::Node, bytes: &[u8]) -> Option<String> {
         n.utf8_text(bytes).ok().map(|s| s.to_string())
     }
-    /// `(type, value)` of `decl` when it declares `name`.
-    fn declares(
-        decl: &tree_sitter::Node,
+    /// `(type, value)` of `decl` when it declares `name`. The value comes back as a NODE: the
+    /// caller renders its shape, which cannot be done from the flattened source text.
+    fn declares<'t>(
+        decl: &tree_sitter::Node<'t>,
         bytes: &[u8],
         name: &str,
-    ) -> Option<(String, Option<String>)> {
+    ) -> Option<(String, Option<tree_sitter::Node<'t>>)> {
         let declared = decl.child_by_field_name("type").and_then(|t| text(&t, bytes))?;
         if decl.kind() == "enhanced_for_statement" {
             let n = decl.child_by_field_name("name").and_then(|n| text(&n, bytes))?;
-            return (n == name)
-                .then(|| (declared, decl.child_by_field_name("value").and_then(|v| text(&v, bytes))));
+            return (n == name).then(|| (declared, decl.child_by_field_name("value")));
         }
         let mut w = decl.walk();
         for d in decl.named_children(&mut w) {
@@ -154,7 +230,7 @@ fn local_declaration_of(
                 continue;
             }
             if d.child_by_field_name("name").and_then(|n| text(&n, bytes)).as_deref() == Some(name) {
-                return Some((declared, d.child_by_field_name("value").and_then(|v| text(&v, bytes))));
+                return Some((declared, d.child_by_field_name("value")));
             }
         }
         None
@@ -1303,7 +1379,16 @@ mod local_hover_tests {
     fn declaration(src: &str, needle: &str, name: &str) -> Option<(String, Option<String>)> {
         let (tree, at) = ident_at(src, needle);
         let node = tree.root_node().named_descendant_for_byte_range(at, at).unwrap();
-        local_declaration_of(node, src.as_bytes(), name)
+        let (written, init) = local_declaration_of(node, src.as_bytes(), name)?;
+        Some((written, init.map(|n| n.utf8_text(src.as_bytes()).unwrap().to_string())))
+    }
+
+    /// The initializer of `name`, rendered as the shape the hover card shows.
+    fn shape(src: &str, needle: &str, name: &str) -> String {
+        let (tree, at) = ident_at(src, needle);
+        let node = tree.root_node().named_descendant_for_byte_range(at, at).unwrap();
+        let (_, init) = local_declaration_of(node, src.as_bytes(), name).expect("declared");
+        super::summarize_expr(init.expect("has an initializer"), src.as_bytes())
     }
 
     #[test]
@@ -1344,7 +1429,42 @@ mod local_hover_tests {
         let info = unresolved_local_hover(src.as_bytes(), node, "properties").expect("a card");
         assert_eq!(info.signature, "val properties");
         assert_eq!(info.kind, "variable");
-        assert!(info.doc.unwrap().contains("Retriever.properties(svc)"));
+        // The shape, not the source text: the arguments are elided on purpose.
+        assert!(info.doc.unwrap().contains("Retriever.properties(…)"));
+    }
+
+    /// The case the card used to be useless on: a builder chain whose *shape* is the answer and
+    /// whose *text* is a page. Everything that decides the type — the search, the `map`, the
+    /// `orElseGet` — has to survive; the arguments must not.
+    #[test]
+    fn a_builder_chain_reads_as_its_shape() {
+        let src = "class C { void m() {\n\
+                     val pair =\n\
+                       service.search(\n\
+                           Filter.builder()\n\
+                               .applicativo(root.getId().getIdprg())\n\
+                               .chiave1(exact(root.getComkey1()))\n\
+                           .build()\n\
+                       ).map(it -> Pair.of(it.getId(), factory.builder(it).get()))\n\
+                        .orElseGet(() -> create(root));\n\
+                   } }";
+        assert_eq!(shape(src, "pair =", "pair"), "service.search(…).map(…).orElseGet(…)");
+    }
+
+    /// A chain that stands on something other than a name still reads, and a chain longer than the
+    /// budget loses its HEAD — the type comes out of the last call.
+    #[test]
+    fn a_shape_keeps_the_end_it_is_about() {
+        let src = "class C { void m() { val x = new Builder().a().b(); } }";
+        assert_eq!(shape(src, "x =", "x"), "new Builder().a().b()");
+
+        let long = format!(
+            "class C {{ void m() {{ val y = seed{}.last(); }} }}",
+            (0..30).map(|i| format!(".step{i}(arg)")).collect::<String>()
+        );
+        let cut = shape(&long, "y =", "y");
+        assert!(cut.starts_with('…'), "the head is what was dropped: {cut}");
+        assert!(cut.ends_with(".last()"), "the call that decides the type survived: {cut}");
     }
 
     #[test]

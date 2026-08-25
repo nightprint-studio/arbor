@@ -4,6 +4,7 @@ use picus_types::prelude::DialectScope;
 use tree_sitter::{Language, Parser};
 
 use crate::error::{ParseError, ParseErrorKind};
+use crate::projection::Projection;
 use crate::range::ByteRange;
 use crate::statement::ParsedFile;
 use crate::walk;
@@ -81,6 +82,39 @@ impl SqlParser {
 /// [`SqlParser`] in a loop.
 pub fn parse(source: &str, scope: DialectScope) -> ParsedFile {
     SqlParser::new().parse(source, scope)
+}
+
+/// The [`Projection`] of the first `SELECT` in `source` — what it produces and out
+/// of what.
+///
+/// A **separate door** rather than a field on [`ParsedFile`], and that is the whole
+/// design: this walks derived tables, `WITH` and both arms of every set operation,
+/// which is far more than the editor's per-keystroke parse should ever pay for.
+/// Only the one caller that is tracing a value back through a stack of views asks
+/// for it, and it pays for itself.
+///
+/// `None` when `source` holds no `SELECT` — a `CREATE VIEW` body should be handed in
+/// as its `SELECT`, which is what `pg_get_viewdef` returns.
+pub fn project(source: &str, scope: DialectScope) -> Option<Projection> {
+    let mut parser = SqlParser::new();
+    let inner = parser.inner.as_mut()?;
+    let tree = inner.parse(source.as_bytes(), None)?;
+    // The first `select_statement` anywhere in the file, so a body wrapped in
+    // parentheses or preceded by a comment still answers. Depth-first, so the
+    // outermost one wins over a subquery inside it.
+    let node = first_select(tree.root_node())?;
+    walk::projection_of(node, source)
+}
+
+/// The outermost `select_statement` in a tree, or `None`.
+fn first_select(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
+    if node.kind() == "select_statement" {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    // Collected first so the cursor is not borrowed across the recursion.
+    let children: Vec<_> = node.named_children(&mut cursor).collect();
+    children.into_iter().find_map(first_select)
 }
 
 fn failed(source: &str, scope: DialectScope, reason: &str) -> ParsedFile {

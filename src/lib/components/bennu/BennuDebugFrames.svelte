@@ -112,7 +112,7 @@
     class:library={!frame.project}
     class:nested={inRun}
     type="button"
-    title={fullName(frame)}
+    use:tooltip={fullName(frame)}
     onclick={() => bennuDebugStore.selectFrame(frame.index)}
   >
     <span class="df-method">{p.lead}</span>
@@ -124,7 +124,7 @@
   <div class="df-title">
     Frames
     {#if bennuDebugStore.stopped?.thread_name}
-      <span class="df-thread" title="The suspended thread">{bennuDebugStore.stopped.thread_name}</span>
+      <span class="df-thread" use:tooltip={'The suspended thread'}>{bennuDebugStore.stopped.thread_name}</span>
     {/if}
     <!-- An explicit spacer rather than `margin-left: auto` on the first button: the thread
          badge is conditional, and two competing autos would split the gap instead of pushing

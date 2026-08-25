@@ -29,7 +29,7 @@
   import { validationStore } from '$lib/stores/picus/validation.svelte';
   import { picusProvidersStore } from '$lib/stores/picus/providers.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
-  import { connectionsStore } from '$lib/stores/picus/connections.svelte';
+  import { connectionsStore, isSessionOpen } from '$lib/stores/picus/connections.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusEditorStore, type PicusEditorHandle } from '$lib/stores/picus/editor.svelte';
@@ -110,6 +110,9 @@
   const catalogue = $derived(
     dialect && connectionsStore.active?.dialect === dialect ? connectionsStore.active.id : undefined,
   );
+  /** …and whether that borrowed connection is actually open. A closed one has a
+   *  catalogue cached but no session, so it can complete names and cannot validate. */
+  const catalogueOpen = $derived(!!catalogue && isSessionOpen(connectionsStore.active));
   const language = $derived(sqlLanguage(dialect, catalogue));
 
   // The buffer as edited. The diagnostics follow what is on screen rather than
@@ -119,8 +122,11 @@
   let edited = $state<string | null>(null);
   $effect(() => { void tab.file; edited = null; });
   const buffer = $derived(edited ?? text);
-  /** Whether the borrowed connection's engine can validate. */
-  const canValidate = $derived(picusProvidersStore.capabilities(dialect)?.validate ?? false);
+  /** Whether the borrowed connection can validate — its engine, and its session.
+   *  Without the second half a closed connection left the last green tick on screen. */
+  const canValidate = $derived(
+    catalogueOpen && (picusProvidersStore.capabilities(dialect)?.validate ?? false),
+  );
   // The colour the editor gives up on past 10 000 characters into a line, put
   // back for the literals — see `sql-intel/long-line.ts`.
   const marks = $derived(longLineMarks(buffer, dialect ?? 'oracle'));
@@ -276,7 +282,10 @@
       {/key}
       <!-- Keeps the right-hand tools describing THIS buffer, and turns a click in
            one of them into a selection here. -->
-      <DocumentBridge {editor} text={edited ?? buffer ?? ''} />
+      <!-- The dialect matters here as much as in a query tab: it decides what ends a
+           statement, and a file with no engine is parsed as the portable intersection
+           rather than as whichever one comes first. -->
+      <DocumentBridge {editor} text={edited ?? buffer ?? ''} {dialect} />
     </div>
   </div>
 {/if}

@@ -188,7 +188,7 @@
           <span
             class="pf-status-dot"
             data-tone={dot.tone ?? 'muted'}
-            title={dot.tooltip ?? undefined}
+            use:tooltip={dot.tooltip ?? undefined}
           ></span>
         {/if}
         {#if isComponent && tlNs}

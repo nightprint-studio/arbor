@@ -438,6 +438,17 @@ pub struct ProjectSession {
     pub open_files: Vec<String>,
     /// The active tab (one of `open_files`), or empty.
     pub active_file: String,
+    /// Where the caret was in each open tab, `"line:col"` (both 1-based), **positionally aligned
+    /// with `open_files`**; `""` for a tab the caret never visited.
+    ///
+    /// A parallel array rather than a `path → caret` table because this struct is serialized as a
+    /// TOML *array-of-tables* (`[[workspaces.projects]]`), where every field must be a scalar or
+    /// an inline array — a nested table here would have to be emitted after the arrays and is the
+    /// classic way to trip `toml`'s "values must be emitted before tables".
+    ///
+    /// Read defensively: a shorter (or absent) list means "no remembered caret" for the tabs it
+    /// does not reach, which is exactly what a file written by an older build looks like.
+    pub open_carets: Vec<String>,
 }
 
 /// One named **workspace** — an ordered set of Java projects, each with its own editor session,
@@ -574,6 +585,7 @@ mod tests {
                     root: (*r).to_string(),
                     open_files: vec![format!("{r}/A.java")],
                     active_file: format!("{r}/A.java"),
+                    open_carets: vec!["12:5".to_string()],
                 })
                 .collect(),
         }
@@ -687,6 +699,31 @@ scroll = 42
         assert_eq!(store.workspaces[0].id, "default");
         assert_eq!(store.active_id, "default");
         assert_eq!(store.workspaces[0].projects[0].root, "c:/proj");
+    }
+
+    /// The remembered carets survive the TOML round trip, and a file written before they existed
+    /// still loads — with no carets rather than with none of its tabs.
+    #[test]
+    fn carets_round_trip_and_an_older_file_still_loads() {
+        let store = BennuWorkspaces {
+            active_id: "w1".to_string(),
+            workspaces: vec![ws("w1", "Backend", &["c:/a"])],
+        };
+        let back = parse_workspaces(&toml::to_string_pretty(&store).unwrap());
+        assert_eq!(back.workspaces[0].projects[0].open_carets, vec!["12:5".to_string()]);
+
+        // Exactly what a session written by a build without this field looks like.
+        let older = "active_id = \"w1\"\n\
+                     [[workspaces]]\n\
+                     id = \"w1\"\n\
+                     active_project = \"/p\"\n\
+                     [[workspaces.projects]]\n\
+                     root = \"/p\"\n\
+                     open_files = [\"/p/A.java\"]\n\
+                     active_file = \"/p/A.java\"\n";
+        let old = parse_workspaces(older);
+        assert_eq!(old.workspaces[0].projects[0].open_files.len(), 1, "the tabs survived");
+        assert!(old.workspaces[0].projects[0].open_carets.is_empty(), "no caret is remembered");
     }
 
     /// An empty / unparseable body yields an empty store (no panic, no error).

@@ -120,13 +120,39 @@ fn picus_expand_sql(
 
     let view = view_of(&schema);
     let expanded = expand(&input, &view)
-        .map_err(|error| error.to_string())
+        .map_err(|error| refusal_text(&error, &view))
         .and_then(|statement| sql_for(&statement, &schema, DialectScope::One(dialect)));
 
     Ok(match expanded {
         Ok(sql) => Expansion::expanded(sql, context),
         Err(reason) => Expansion::refused(reason, context),
     })
+}
+
+/// The language's refusal, plus the one fact only the host can supply.
+///
+/// "the schema has no table called `TORN`" is a complete sentence and still leaves the reader
+/// stuck, because the question it raises is *which* catalogue was consulted. A connection reads
+/// **one** schema, and a relation outside it — another schema, or one the catalogue read skips —
+/// is simply not in what the abbreviation can see. That is indistinguishable, from the editor, from
+/// the feature being broken: the preview does not appear and neither does a reason the user can act
+/// on. So the refusal says how much was searched.
+///
+/// Only for an unknown table with **no near-miss to offer**. When the language has a suggestion,
+/// that is the actionable answer and this would bury it; and every other refusal is about the
+/// abbreviation itself, where the size of the catalogue is noise.
+fn refusal_text(error: &arbor_sql_abbrev::prelude::AbbrevError, view: &SchemaView) -> String {
+    use arbor_sql_abbrev::prelude::AbbrevError;
+    let said = error.to_string();
+    match error {
+        AbbrevError::UnknownTable { suggestion: None, .. } => format!(
+            "{said}. This connection's catalogue holds {} relation(s), all from the one schema the \
+             connection is pinned to — a table in another schema is not in it. Re-read the object \
+             tree if the table is newer than the catalogue.",
+            view.tables.len()
+        ),
+        _ => said,
+    }
 }
 
 /// Is this text an abbreviation at all?
@@ -382,6 +408,30 @@ mod tests {
         // number is a visible mistake in a preview, an unquoted string is a
         // syntax error the user has to work out.
         assert_eq!(kind_of("geometry"), ValueKind::Other);
+    }
+
+    #[test]
+    fn an_unknown_table_says_how_much_was_searched() {
+        use arbor_sql_abbrev::prelude::AbbrevError;
+        let view = SchemaView::new(vec![TableMeta::new("ORDINI", Vec::new())]);
+        let said = refusal_text(
+            &AbbrevError::UnknownTable { name: "TORN".into(), suggestion: None },
+            &view,
+        );
+        assert!(said.contains("TORN"), "it still says what was not found: {said}");
+        assert!(said.contains("1 relation"), "…and how much there was to find it in: {said}");
+        assert!(said.contains("another schema"), "…and the reason it is most often missing");
+
+        // A near miss IS the answer — the catalogue's size would only bury it.
+        let near = refusal_text(
+            &AbbrevError::UnknownTable { name: "ORDNI".into(), suggestion: Some("ORDINI".into()) },
+            &view,
+        );
+        assert!(near.contains("ORDINI") && !near.contains("catalogue"), "{near}");
+
+        // Every other refusal is about the abbreviation, where the catalogue's size says nothing.
+        let other = refusal_text(&AbbrevError::MissingValue { column: "ID".into() }, &view);
+        assert!(!other.contains("catalogue"), "{other}");
     }
 
     #[test]

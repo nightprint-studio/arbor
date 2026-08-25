@@ -19,6 +19,7 @@
   import IconifyIconView from '@iconify/svelte';
   import { getFileIcon } from '$lib/utils/file-icons';
   import { formatAgo } from '$lib/utils/format';
+  import { tooltip } from '$lib/actions/tooltip';
 
   /** One merged row. `tracked` is false for a file the history has never recorded — it
    *  is shown, but there is nothing to open for it yet. */
@@ -85,7 +86,7 @@
           <button
             type="button"
             class="hf-restore"
-            title="Put it back where it was"
+            use:tooltip={'Put it back where it was'}
             onclick={() => onRestore(row)}
           >
             <RotateCcw size={11} /> Restore

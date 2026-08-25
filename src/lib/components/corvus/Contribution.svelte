@@ -25,7 +25,7 @@
     <Contribution point="arbor:diff-toolbar">
       {#snippet item({ payload, fire })}
         {@const p = payload as { icon: string; action: string; tooltip?: string }}
-        <button title={p.tooltip} onclick={() => fire()}>
+        <button use:tooltip={p.tooltip} onclick={() => fire()}>
           <PluginIcon name={p.icon} size={14} />
         </button>
       {/snippet}
@@ -79,6 +79,8 @@
 </script>
 
 <script lang="ts">
+  import { tooltip } from '$lib/actions/tooltip';
+
   import type { Snippet } from 'svelte';
   import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { pluginStore }       from '$lib/stores/plugin.svelte';

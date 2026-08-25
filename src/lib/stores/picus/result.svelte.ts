@@ -27,6 +27,7 @@
 
 import type { CellValue, Column } from '$lib/types/picus';
 import {
+  type ColumnSource,
   type ExecuteResult,
   closeResult,
   countResult,
@@ -39,6 +40,9 @@ const ROW_BUDGET = 20_000;
 
 /** Window size used when neither the setting nor the first window says anything. */
 const FALLBACK_WINDOW = 500;
+
+/** Yield for a moment — used only to wait on a window somebody else asked for. */
+const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** One loaded range. `start` is absolute within the result. */
 interface Range {
@@ -87,8 +91,32 @@ export interface PicusResult {
    * addressable. Preferred over the client-side key derivation when present.
    */
   readonly rowKey: string[];
+  /**
+   * Which relation each column is read from, for the columns read from one.
+   *
+   * Sparse and self-locating — each entry names the column index it is about — so
+   * dropping the hidden trailing columns is a filter, never a slice taken in step.
+   * Empty whenever nothing is claimed: an engine that does not report origins, a
+   * statement that could not be described, a result computed from no table at all.
+   */
+  readonly columnSources: ColumnSource[];
   /** The exact count is being computed in the background. */
   readonly counting: boolean;
+  /**
+   * Fetch every remaining window until the result is complete — or `undefined`
+   * when it never could be.
+   *
+   * Absent rather than present-and-refusing, because the grid reads its presence
+   * as the promise that pressing it ends with sorting and filtering back. Past
+   * {@link ROW_BUDGET} the farthest ranges are dropped as new ones arrive, so a
+   * result larger than the budget cannot *become* complete however long it is
+   * fetched — and a button that runs forever is worse than no button.
+   */
+  readonly loadAll: (() => void) | undefined;
+  /** A {@link loadAll} is in flight. */
+  readonly loadingAll: boolean;
+  /** Stop a running {@link loadAll}; what has arrived is kept. */
+  stopLoadAll(): void;
   /** Stop waiting on the exact count — the connection is wanted for something the
    *  user is watching. The planner's estimate stands. */
   abandonCount(): void;
@@ -321,28 +349,107 @@ export function createResult(connectionId: string, res: ExecuteResult): PicusRes
     pending.add(from);
     focus = from;
     void resultWindow(connectionId, resultId, from, count)
-      .then((w) => {
-        // `pending.delete` returning false means this result was reset or closed
-        // between the ask and the answer: the rows belong to a cursor nobody is
-        // looking at any more, and merging them would corrupt the one that is.
-        if (closed || !pending.delete(from)) return;
-        // The echoed offset places the rows, not the local one — a window that
-        // came back for a different range than asked still lands where it belongs.
-        const at = w.offset ?? from;
-        const got = w.rows ?? [];
-        insert(at, got);
-        // An empty window IS the end, whatever the flag says. Without this, a
-        // backend that answers a past-the-end offset with `{ rows: [], endOfResult:
-        // false }` would leave a gap the grid re-asks for the moment it re-runs —
-        // and re-runs on every arrival. One wrong flag, one infinite request loop.
-        if (w.endOfResult || !got.length) endIndex = at + got.length;
-        else knownFloor = Math.max(knownFloor, at + got.length + 1);
-        error = '';
-      })
+      .then((w) => absorb(from, w))
       .catch((e) => {
         pending.delete(from);
         error = String(e);
       });
+  }
+
+  /**
+   * Take a window that came back for `from` into the ranges.
+   *
+   * Shared by the scroll-driven `request` and by `loadAll`, because everything
+   * subtle about a late window lives here — which offset it really answers for,
+   * what an empty one proves, and when it belongs to a cursor nobody is reading
+   * any more. Two copies of this is two chances to get the request loop wrong.
+   */
+  function absorb(from: number, w: Awaited<ReturnType<typeof resultWindow>>) {
+    // `pending.delete` returning false means this result was reset or closed
+    // between the ask and the answer: the rows belong to a cursor nobody is
+    // looking at any more, and merging them would corrupt the one that is.
+    if (closed || !pending.delete(from)) return;
+    // The echoed offset places the rows, not the local one — a window that
+    // came back for a different range than asked still lands where it belongs.
+    const at = w.offset ?? from;
+    const got = w.rows ?? [];
+    insert(at, got);
+    // An empty window IS the end, whatever the flag says. Without this, a
+    // backend that answers a past-the-end offset with `{ rows: [], endOfResult:
+    // false }` would leave a gap the grid re-asks for the moment it re-runs —
+    // and re-runs on every arrival. One wrong flag, one infinite request loop.
+    if (w.endOfResult || !got.length) endIndex = at + got.length;
+    else knownFloor = Math.max(knownFloor, at + got.length + 1);
+    error = '';
+  }
+
+  // ── Loading the whole thing ───────────────────────────────────────────────
+  //
+  // Scrolling to the end to get sorting and filtering back is not a feature, it is
+  // what you are reduced to without this: the controls are visibly there, they say
+  // they come back "once all of it is loaded", and the only way to load all of it
+  // was to drag the scrollbar the whole way down. This is that, as one button.
+
+  let bulk = $state(false);
+  /** Set by `stopLoadingAll`; read at the top of every iteration. */
+  let bulkStopped = false;
+
+  /**
+   * Short enough to be held whole.
+   *
+   * `evict` drops the farthest ranges past {@link ROW_BUDGET}, so on a bigger
+   * result `complete()` is not merely slow to reach — it is unreachable, and the
+   * loop below would fetch until the cursor was closed. The check is repeated
+   * inside the loop because `total()` moves: the exact count can land mid-load and
+   * turn a result the estimate called small into one that is not.
+   */
+  function canLoadAll(): boolean {
+    return !closed && !complete() && total() <= ROW_BUDGET;
+  }
+
+  async function loadAll(): Promise<void> {
+    if (bulk || !canLoadAll()) return;
+    bulk = true;
+    bulkStopped = false;
+    try {
+      // `complete()` is `!approximate() && covered()`, so with only the planner's
+      // guess for a length there is no number for "covered" to be measured against
+      // and the loop could not end on anything but an empty window. The count is
+      // normally already in flight; this waits for the answer rather than starting
+      // a second one.
+      while (!closed && !bulkStopped && counting) await pause(60);
+      if (approximate() && !closed && !bulkStopped) {
+        counting = true;
+        try {
+          const r = await countResult(connectionId, resultId);
+          if (!closed) exactTotal = r.total;
+        } catch {
+          /* no cheap count on this engine — the empty-window end still terminates */
+        } finally {
+          counting = false;
+        }
+      }
+
+      while (!closed && !bulkStopped && !complete()) {
+        if (!canLoadAll()) break;
+        const from = firstGap(0, total());
+        if (from === null) break;
+        // The grid asked for this one first. Let its answer land rather than
+        // fetching the same window twice; the gap moves on by itself.
+        if (pending.has(from)) { await pause(40); continue; }
+
+        pending.add(from);
+        try {
+          absorb(from, await resultWindow(connectionId, resultId, from, windowSize));
+        } catch (e) {
+          pending.delete(from);
+          error = String(e);
+          return;
+        }
+      }
+    } finally {
+      bulk = false;
+    }
   }
 
   /**
@@ -376,7 +483,11 @@ export function createResult(connectionId: string, res: ExecuteResult): PicusRes
     maskedColumns: res.maskedColumns ?? [],
     hiddenColumns: res.hiddenColumns ?? [],
     rowKey: res.rowKey ?? [],
+    columnSources: res.columnSources ?? [],
     get counting() { return counting; },
+    get loadAll() { return canLoadAll() ? () => void loadAll() : undefined; },
+    get loadingAll() { return bulk; },
+    stopLoadAll() { bulkStopped = true; },
     /**
      * Give up on the exact count, because something the user is waiting on needs
      * the connection.
@@ -407,6 +518,7 @@ export function createResult(connectionId: string, res: ExecuteResult): PicusRes
     async close() {
       if (closed) return;
       closed = true;
+      bulkStopped = true;
       pending.clear();
       ranges = [];
       loaded = 0;

@@ -348,6 +348,39 @@ pub async fn read_view_definition(
     Ok(rows.first().and_then(|r| r.get(0)))
 }
 
+/// Every view's defining `SELECT` in one schema, as `(name, sql)`.
+///
+/// The whole set at once, deliberately — see
+/// [`DbSession::view_definitions`](picus_db_api::prelude::DbSession::view_definitions).
+/// Following a column through a stack of views cannot know which definitions it will
+/// need until it is already walking them, and one round trip per level per column is
+/// how a feature becomes a progress bar.
+///
+/// A definition that comes back NULL is dropped rather than stored empty: an entry
+/// with no SQL would resolve to "this view selects nothing", which is a statement
+/// about the database that would not be true.
+pub(crate) async fn read_view_definitions(
+    client: &Client,
+    schema: &str,
+) -> DbResult<Vec<(String, String)>> {
+    const SQL: &str = "
+        SELECT c.relname, pg_get_viewdef(c.oid, true)
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = $1 AND c.relkind IN ('v', 'm')
+         ORDER BY c.relname";
+
+    let rows = client.query(SQL, &[&schema]).await.map_err(map_pg)?;
+    Ok(rows
+        .iter()
+        .filter_map(|row| {
+            let name: String = row.get(0);
+            let sql: Option<String> = row.get(1);
+            sql.map(|sql| (name, sql))
+        })
+        .collect())
+}
+
 /// Outgoing foreign keys of one relation, with the column order preserved.
 ///
 /// `unnest(… ) WITH ORDINALITY` is what preserves it: `conkey` is an array whose

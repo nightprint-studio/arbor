@@ -34,6 +34,7 @@
 -->
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
+  import { tooltip } from '$lib/actions/tooltip';
   import {
     AlertCircle, AlertTriangle, ChevronDown, ChevronRight, FileText,
     Replace, Sigma, X as XIcon,
@@ -477,7 +478,7 @@
               <code class="rm-site-key">{node.site.key_name}</code>
               <span class="rm-site-path">@ {node.site.field_path.join('.')}</span>
               {#if node.site.preview}
-                <span class="rm-site-preview" title={node.site.preview}>{node.site.preview}</span>
+                <span class="rm-site-preview" use:tooltip={node.site.preview}>{node.site.preview}</span>
               {/if}
             {/if}
           {/snippet}

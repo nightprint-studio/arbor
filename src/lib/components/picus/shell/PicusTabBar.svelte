@@ -4,9 +4,10 @@
    *
    * Built on the shared `Tabs` widget (panel variant: reorder, close, overflow,
    * "+"), with one Picus-specific piece in the `itemContent` snippet: a tab
-   * bound to a database wears that connection's colour as its leading dot, so
+   * bound to a database wears that connection's colour as its leading swatch, so
    * "which database is this query about" is answered without reading a word.
    */
+  import { tooltip } from '$lib/actions/tooltip';
   import {
     FileText, Table2, Play, FormInput, Layers, Eye, ListOrdered, Zap, Replace,
     X, XCircle, ArrowRightFromLine, Copy,
@@ -125,7 +126,7 @@
     {@const conn = connectionsStore.byId(tab.connectionId)}
     {@const Icon = item.icon}
     {#if conn}
-      <span class="ptab-dot" style:background={connectionColorVar(conn)} aria-hidden="true"></span>
+      <span class="ptab-swatch" style:background={connectionColorVar(conn)} aria-hidden="true"></span>
     {:else if Icon}
       <Icon size={13} />
     {/if}
@@ -134,7 +135,7 @@
       <PicusDialectChip engine={tab.dialect} terse />
     {/if}
     {#if tab.dirty}
-      <span class="ptab-dirty" title="Unsaved changes" aria-label="Unsaved changes"></span>
+      <span class="ptab-dirty" use:tooltip={'Unsaved changes'} aria-label="Unsaved changes"></span>
     {/if}
   {/snippet}
 </Tabs>
@@ -150,9 +151,11 @@
 {/if}
 
 <style>
-  .ptab-dot {
-    width: 8px;
-    height: 8px;
+  /* The connection's colour as a BAR — see `PicusConnectionPill`: a round marker
+     would collide with the green dot that means "the session is open". */
+  .ptab-swatch {
+    width: 3px;
+    height: 11px;
     border-radius: 2px;
     flex-shrink: 0;
   }

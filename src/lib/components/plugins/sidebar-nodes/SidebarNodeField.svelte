@@ -213,7 +213,7 @@
             type="button"
             class="vec-axis-label"
             disabled={vro}
-            title={`Drag to edit · double-click to reset · Shift = fine, Ctrl = coarse`}
+            use:tooltip={`Drag to edit · double-click to reset · Shift = fine, Ctrl = coarse`}
             onmousedown={(e) => !vro && ctx.startVecDrag(n, axis, av, e)}
             ondblclick={() => !vro && ctx.resetVecAxis(n, axis)}
           >{axis.toUpperCase()}</button>
@@ -249,7 +249,7 @@
     <button
       type="button"
       class="entity-ref-pill"
-      title={`Entity ${eid}${ename ? ' · ' + ename : ''} — click to focus`}
+      use:tooltip={`Entity ${eid}${ename ? ' · ' + ename : ''} — click to focus`}
       onclick={() => ctx.fireAction(eact, { entity: eid })}
     >
       <span class="entity-ref-id">#{eid}</span>

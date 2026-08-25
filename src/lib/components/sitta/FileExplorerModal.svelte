@@ -3176,8 +3176,8 @@
               <div class="fx-trash-row" class:selected={trashSel.has(it.id)} onclick={(e) => clickTrashRow(it.id, e)}>
                 <input type="checkbox" class="fx-trash-check" checked={trashSel.has(it.id)} tabindex="-1" aria-hidden="true" />
                 <span class="fx-entry-ico"><Icon icon={entryIcon(it.name, false)} width={16} height={16} /></span>
-                <span class="fx-trash-name" title={it.name}>{it.name}</span>
-                <span class="fx-trash-from" title={it.original_path}>{it.original_path}</span>
+                <span class="fx-trash-name" use:tooltip={it.name}>{it.name}</span>
+                <span class="fx-trash-from" use:tooltip={it.original_path}>{it.original_path}</span>
                 <span class="fx-trash-when">{it.deleted_at != null ? formatDate(it.deleted_at * 1000) : ''}</span>
               </div>
             {/each}
@@ -3463,14 +3463,14 @@
               <div class="fx-pv-noprev"><span class="fx-pv-bigico"><Icon icon={entryIcon(e.name, e.is_dir)} width={52} height={52} /></span><span>No preview available</span></div>
             {/if}
           </div>
-          <div class="fx-pv-name" title={e.name}>{e.name}</div>
+          <div class="fx-pv-name" use:tooltip={e.name}>{e.name}</div>
         {:else}
           {@const e = leadEntry}
           <div class="fx-info-thumb">
             {#if isImage(e.name)}<img class="fx-info-img" src={convertFileSrc(e.path)} alt={e.name} loading="lazy" />
             {:else}<Icon icon={entryIcon(e.name, e.is_dir, true)} width={44} height={44} />{/if}
           </div>
-          <div class="fx-pv-name" title={e.name}>{e.name}</div>
+          <div class="fx-pv-name" use:tooltip={e.name}>{e.name}</div>
           <dl class="fx-pv-meta">
             <div class="fx-pv-row"><dt>Type</dt><dd>{e.is_dir ? 'Folder' : (extOf(e.name).toUpperCase() || 'File') + ' file'}</dd></div>
             {#if !e.is_dir && e.size != null}<div class="fx-pv-row"><dt>Size</dt><dd>{formatSize(e.size)}</dd></div>{/if}
@@ -3531,7 +3531,7 @@
         <button class="fx-op-cancel" onclick={cancelFsOp} use:tooltip={'Cancel'} aria-label="Cancel operation"><X size={13} /></button>
       </div>
       <div class="fx-op-bar"><div class="fx-op-fill" style="width:{opPct(fsOp)}%"></div></div>
-      {#if fsOp.current}<span class="fx-op-detail" title={fsOp.current}>{fsOp.current}</span>{/if}
+      {#if fsOp.current}<span class="fx-op-detail" use:tooltip={fsOp.current}>{fsOp.current}</span>{/if}
     </div>
   {/if}
   </div>
@@ -3835,7 +3835,7 @@
   .fx-op-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .fx-op-title { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary); }
   .fx-op-cancel { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: none; background: transparent; color: var(--text-muted); border-radius: var(--radius-sm); cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast); }
-  .fx-op-cancel:hover { background: var(--bg-hover); color: var(--danger); }
+  .fx-op-cancel:hover { background: var(--bg-hover); color: var(--error); }
   .fx-op-bar { height: 5px; border-radius: 3px; background: var(--bg-base); overflow: hidden; }
   .fx-op-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 120ms linear; }
   .fx-op-detail { font-size: var(--font-size-2xs); color: var(--text-muted); font-family: var(--font-code); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3851,7 +3851,7 @@
   .fx-fp-chip.on { background: var(--accent-subtle); border-color: transparent; color: var(--accent); }
   .fx-fp-foot { display: flex; justify-content: space-between; align-items: center; padding-top: 4px; border-top: 1px solid var(--border-subtle); }
   .fx-fp-clear { background: transparent; border: none; color: var(--text-muted); font-size: var(--font-size-xs); cursor: pointer; padding: 4px 2px; }
-  .fx-fp-clear:hover:not(:disabled) { color: var(--danger); }
+  .fx-fp-clear:hover:not(:disabled) { color: var(--error); }
   .fx-fp-clear:disabled { opacity: 0.4; cursor: default; }
   .fx-fp-done { background: var(--accent); border: none; color: #fff; border-radius: var(--radius-sm); font-size: var(--font-size-xs); padding: 4px 14px; cursor: pointer; }
 
@@ -3861,7 +3861,7 @@
   .fx-trash-actions { display: inline-flex; align-items: center; gap: 6px; }
   .fx-trash-btn { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: var(--font-size-xs); padding: 3px 9px; cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }
   .fx-trash-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
-  .fx-trash-btn.danger:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+  .fx-trash-btn.danger:hover:not(:disabled) { color: var(--error); border-color: var(--error); }
   .fx-trash-btn:disabled { opacity: 0.4; cursor: default; }
   .fx-trash-list { flex: 1; overflow-y: auto; padding: 4px 0; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
   .fx-trash-row { display: flex; align-items: center; gap: 10px; padding: 5px 12px; cursor: pointer; font-size: var(--font-size-sm); user-select: none; }
@@ -3882,7 +3882,7 @@
   /* Pinned favourite rows — show the remove (×) affordance on hover. */
   .fx-sb-item-pinned .fx-sb-unpin { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: var(--radius-sm); color: var(--text-disabled); opacity: 0; transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast); }
   .fx-sb-item-pinned:hover .fx-sb-unpin { opacity: 1; }
-  .fx-sb-unpin:hover { background: var(--bg-hover); color: var(--danger); }
+  .fx-sb-unpin:hover { background: var(--bg-hover); color: var(--error); }
 
   /* ── Sidebar ── */
   .fx-sidebar { width: 196px; flex-shrink: 0; background: var(--bg-base); border-radius: var(--radius-lg); overflow-y: auto; padding-bottom: 8px; display: flex; flex-direction: column; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; transition: width var(--anim-dur-panel, 180ms) cubic-bezier(.16,1,.3,1); }
@@ -3959,7 +3959,7 @@
   .fx-drive-pct { font-size: var(--font-size-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .fx-drive-bar { height: 6px; border-radius: 3px; background: var(--bg-base); overflow: hidden; }
   .fx-drive-fill { height: 100%; background: var(--accent); border-radius: 3px; }
-  .fx-drive-fill.full { background: var(--danger); }
+  .fx-drive-fill.full { background: var(--error); }
   .fx-drive-sub { font-size: var(--font-size-2xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .fx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
   :global(.fx-tile) { min-width: 0; }

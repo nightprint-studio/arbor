@@ -48,8 +48,13 @@ impl DbProvider for PostgresProvider {
             config.password(s.expose());
         }
 
+        // Whether one was resolved at all, kept because the failure below cannot be
+        // told apart from any other config error once the secret has been dropped.
+        let had_secret = secret.is_some();
+
         let tls = TlsChoice::build(spec.tls)?;
-        let client = spawn_connection(&config, &tls).await?;
+        let client = spawn_connection(&config, &tls).await
+            .map_err(|e| explain_missing_password(e, had_secret, &spec.user))?;
 
         // The secret has done its job. Dropping it here rather than at the end of
         // the function zeroes it as early as possible.
@@ -75,6 +80,31 @@ impl DbProvider for PostgresProvider {
         let server_version = read_server_version(&client).await;
         Ok(Box::new(PgSession::new(client, tls, spec.clone(), server_version)))
     }
+}
+
+/// Turn the driver's `password missing` into a sentence about *this* connection.
+///
+/// ## Why this is worth a function
+///
+/// `tokio-postgres` raises `password missing` **client-side**, the moment the server
+/// asks for one and the config has none. It is a true statement about the config and
+/// a useless one about the situation: it names nothing the reader can act on, and —
+/// worse — it reads like a driver fault rather than what it is, *the keychain had
+/// nothing for this connection*.
+///
+/// That ambiguity has cost real time. A vault that failed to load and a connection
+/// that genuinely has no password stored arrive here identically, because both end as
+/// "no secret was resolved". A vault failure does surface on its own (the broker
+/// propagates it), so reaching this point means the vault answered and answered
+/// **empty** — which is exactly what the message now says.
+fn explain_missing_password(error: DbError, had_secret: bool, user: &str) -> DbError {
+    if had_secret || !error.to_string().contains("password missing") {
+        return error;
+    }
+    DbError::AuthFailed(format!(
+        "the server asked for a password for `{user}` and none is stored for this connection. \
+         Open the connection and enter it — it goes to Arbor's keychain, not into the project."
+    ))
 }
 
 /// Connect and drive the connection task.

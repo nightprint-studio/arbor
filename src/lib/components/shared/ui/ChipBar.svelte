@@ -26,11 +26,26 @@
     tooltip?: string;
     /** Disable the chip — rendered dim, no click. */
     disabled?: boolean;
+    /**
+     * An arbitrary colour for this chip, rendered as a swatch before the label
+     * (any CSS colour, typically a `var(--…)`).
+     *
+     * For a chip bar acting as a **legend** — where the colour is the thing being
+     * explained and has to match something else on screen exactly. `tone` cannot do
+     * that job: it is a fixed set of semantic roles, and a legend's colours come
+     * from a palette that has as many entries as there are things to name.
+     *
+     * A chip with a `color` uses it for its active border and tint too, so the
+     * selected state stays the same colour it is explaining rather than reverting
+     * to the accent.
+     */
+    color?: string;
   }
 </script>
 
 <script lang="ts">
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
+  import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {
     items:     ChipItem[];
@@ -46,10 +61,20 @@
      *  not just the active one. Off by default so existing filter bars keep
      *  the neutral-until-selected look. */
     tintInactive?: boolean;
+    /**
+     * What this bar of chips is for, announced to a screen reader.
+     *
+     * Defaults to the primary use in the header note — a bar of filter chips — so
+     * every existing call site is labelled truthfully without being touched. A bar
+     * doing anything else (a legend, a set of tags) should say what it is: a
+     * toolbar announced as "Filters" when it filters nothing is worse than the
+     * generic name it replaced.
+     */
+    ariaLabel?: string;
     onSelect:  (sel: string | string[]) => void;
   }
 
-  let { items, selected, multi = false, size = 'md', tintCount = true, tintInactive = false, onSelect }: Props = $props();
+  let { items, selected, multi = false, size = 'md', tintCount = true, tintInactive = false, ariaLabel = 'Filters', onSelect }: Props = $props();
 
   function isActive(id: string): boolean {
     if (multi) return Array.isArray(selected) && selected.includes(id);
@@ -67,7 +92,18 @@
   }
 </script>
 
-<div class="chip-bar sz-{size}" class:tint-inactive={tintInactive} role="toolbar">
+<!-- `tabindex="-1"` because a `role="toolbar"` must be focusable as a unit: the
+     chips inside are real buttons and take their own turn in the tab order, but the
+     group has to be reachable programmatically for a screen reader to announce what
+     the buttons belong to. Every other toolbar in Arbor carries both this and a
+     label; this one had neither. -->
+<div
+  class="chip-bar sz-{size}"
+  class:tint-inactive={tintInactive}
+  role="toolbar"
+  tabindex="-1"
+  aria-label={ariaLabel}
+>
   {#each items as it (it.id)}
     {@const Icon = it.icon ? PLUGIN_ICONS[it.icon] : null}
     {@const active = isActive(it.id)}
@@ -76,11 +112,14 @@
       class="chip"
       class:active
       class:disabled={it.disabled}
+      class:swatched={!!it.color}
       data-tone={it.tone ?? 'neutral'}
-      title={it.tooltip ?? undefined}
+      style:--chip-color={it.color}
+      use:tooltip={it.tooltip ?? undefined}
       disabled={!!it.disabled}
       onclick={() => handleClick(it.id)}
     >
+      {#if it.color}<span class="chip-swatch" aria-hidden="true"></span>{/if}
       {#if Icon}<Icon size={size === 'sm' ? 10 : 11} class="chip-icon" />{/if}
       <span class="chip-label">{it.label}</span>
       {#if it.count !== undefined && it.count !== null}
@@ -143,6 +182,26 @@
   .chip.active[data-tone="error"]   { color: var(--error);   background: color-mix(in srgb, var(--error)   14%, transparent); border-color: color-mix(in srgb, var(--error)   36%, transparent); }
   .chip.active[data-tone="muted"]   { color: var(--text-secondary); background: var(--bg-overlay); border-color: var(--border); }
   .chip.active[data-tone="neutral"] { color: var(--text-primary);   background: var(--bg-overlay); border-color: var(--border-strong, var(--border)); }
+
+  /* ── Swatched chips (opt-in per item via `color`) ────────────────────── */
+  /* Last among the active rules on purpose: an explicit colour is the most
+     specific thing an item can say about itself, so it outranks `data-tone`.
+     The label stays the ordinary text colour — the swatch is what carries the
+     identity, and tinting the words as well makes a legend of five entries read
+     as five different states. */
+  .chip-swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    background: var(--chip-color, var(--text-disabled));
+  }
+  .chip.swatched.active {
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--chip-color) 14%, transparent);
+    border-color: color-mix(in srgb, var(--chip-color) 55%, transparent);
+  }
+  .chip.swatched:not(.active) { color: var(--text-secondary); }
 
   /* ── Inactive-chip tinting (opt-in via tintInactive) ─────────────────── */
   /* Colours inactive chips by their data-tone so a filter bar reads like a

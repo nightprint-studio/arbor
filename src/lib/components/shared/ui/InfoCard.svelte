@@ -44,6 +44,7 @@
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
   import Badge from './Badge.svelte';
   import Card from './Card.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {
     title:       string;
@@ -107,7 +108,7 @@
         {/if}
         {#each meta as m, i}
           {#if i > 0 || subtitle}<span class="info-meta-sep">·</span>{/if}
-          <span class="info-meta-item" title={m.tooltip ?? undefined}>
+          <span class="info-meta-item" use:tooltip={m.tooltip ?? undefined}>
             {#if m.label}<span class="info-meta-label">{m.label}</span>{/if}
             <span class="info-meta-value">{m.value}</span>
           </span>
@@ -126,7 +127,7 @@
           class:primary={act.variant === 'primary'}
           class:danger={act.variant === 'danger'}
           disabled={!!act.disabled}
-          title={act.tooltip ?? act.label ?? undefined}
+          use:tooltip={act.tooltip ?? act.label ?? undefined}
           onclick={act.onClick}
         >
           {#if AIcon}<AIcon size={12} />{/if}

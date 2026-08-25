@@ -994,7 +994,7 @@
                           </select>
                           <GitBranch size={10} class="muted-icon"/>
                           <input class="input alias-branch" placeholder="branch name" bind:value={entry.branch} />
-                          <button class="icon-btn subtle" onclick={() => removeGroupMemberRow(i)} title="Remove row">
+                          <button class="icon-btn subtle" onclick={() => removeGroupMemberRow(i)} use:tooltip={'Remove row'}>
                             <X size={11}/>
                           </button>
                         </div>

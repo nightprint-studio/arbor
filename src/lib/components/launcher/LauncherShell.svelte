@@ -20,7 +20,7 @@
   import { fetchInstalledVersions, fetchLatestVersions } from './versions';
   import { getLauncherConfig, setLauncherCloseToTray, type WindowMode } from '$lib/ipc/config';
   import { windowModeStore } from '$lib/stores/window-mode.svelte';
-  import { openProduct } from '$lib/utils/open-product';
+  import { openProduct, restartProduct } from '$lib/utils/open-product';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { Settings as SettingsIcon, X as CloseIcon } from 'lucide-svelte';
   import McpSettingsModal from '$lib/components/launcher/mcp/McpSettingsModal.svelte';
@@ -118,6 +118,10 @@
   function doStop(t: { id: string; name: string }) {
     void closeProductWindow(t.id);
     fire(t.name + ' stopped', '#9aa3b2');
+  }
+  function doRestart(t: { id: string; name: string; accent?: string }) {
+    fire('Restarting ' + t.name + '…', t.accent ?? '#9aa3b2');
+    void restartProduct(t.id).catch((e) => console.error('restartProduct failed', t.id, e));
   }
   // Single version per product today; selecting it is a no-op until a real
   // version-switch lands.
@@ -255,6 +259,7 @@
       {#if card}
         <DetailCard tool={card}
                     onaction={() => doAction(card)} onstop={() => doStop(card)}
+                    onrestart={() => doRestart(card)}
                     onpickVer={(v) => pickVer(card.id, v)} />
       {/if}
     </div>

@@ -463,17 +463,30 @@ struct ProductState<'a> {
     running: bool,
 }
 
-/// Tell the launcher a product's running state changed so its Canopy node can
-/// flip "In esecuzione" / revert. No-op when the launcher window isn't around.
+/// Tell **every home** a product's running state changed, so its node can flip
+/// "In esecuzione" / revert.
+///
+/// Arbor has two homes and they are two different windows: the Canopy launcher
+/// (`main`, and the dedicated launcher window) and the welcome page on the
+/// container's home tab (`workspace`). This used to address `main` alone, so a
+/// user in tabbed mode watched a welcome page that never changed its mind: every
+/// card said "not running", and the Stop button — which only appears on a running
+/// card — was never offered at all.
+///
+/// Broadcast rather than a list of labels: the payload says which product it is
+/// about, a window that does not care ignores it, and the alternative is a set of
+/// labels that goes stale the next time a surface is added.
 pub fn emit_product_state(app: &AppHandle, id: &str, running: bool) {
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.emit("arbor://product-state", ProductState { id, running });
-    }
+    let _ = app.emit("arbor://product-state", ProductState { id, running });
 }
 
-/// Product ids that currently have at least one open window. The launcher reads
-/// this once on mount to seed its running state (windows opened before its
-/// `arbor://product-state` listener existed wouldn't be reflected otherwise).
+/// Product ids that are running: one with at least one open window, **or** one the
+/// tabbed container is hosting. Each home reads this once on mount to seed its
+/// running state (anything started before its `arbor://product-state` listener
+/// existed wouldn't be reflected otherwise).
+///
+/// The hosted half is not a detail: in tabbed mode a product has no window of its
+/// own, so counting windows reported every tab as stopped.
 #[tauri::command]
 pub fn list_running_products(app: AppHandle) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
@@ -482,6 +495,11 @@ pub fn list_running_products(app: AppHandle) -> Vec<String> {
             if !ids.iter().any(|x| x == id) {
                 ids.push(id.to_string());
             }
+        }
+    }
+    for id in workspace::hosted_ids() {
+        if !ids.contains(&id) {
+            ids.push(id);
         }
     }
     ids
@@ -602,6 +620,14 @@ pub fn close_product_window(app: AppHandle, id: String) {
             let _ = w.destroy();
         }
     }
+    // …and the tab, which is where the product lives in tabbed mode. Both, not either: a product
+    // can be open as a tab AND detached into its own window, and Stop means stop.
+    //
+    // This is what made "the backends cannot be stopped except from the launcher" true — the
+    // launcher happened to be the one home whose products were windows. The backend teardown is
+    // not repeated here: destroying the last window and closing the tab each already end it,
+    // through the window-destroyed handler and `workspace_tab_closed` respectively.
+    workspace::request_close_tab(&app, &id);
 }
 
 /// Relaunch the whole app. Used by the fatal "git backend stopped" overlay in

@@ -422,6 +422,36 @@ function prefixOf(context: CursorContext): string {
   return 'prefix' in context ? context.prefix : '';
 }
 
+/**
+ * Is there anything left for the popup to offer?
+ *
+ * `false` once what has been typed **is** one of the options and nothing longer
+ * starts the same way. The popup then has one entry, identical to the text under
+ * it, and accepting it would write what is already there.
+ *
+ * That is not harmless, and it is the reason this exists. An open popup **owns
+ * Tab** — which is the key that expands the abbreviation — and while it is open the
+ * ghost preview stands down entirely. So a fully typed `s#v_ws_elenchi` showed no
+ * expansion at all: the first Tab accepted a completion that changed nothing, and
+ * only the edit *that* dispatched let the preview through. It read as the feature
+ * being broken and then spontaneously working.
+ *
+ * `ORDINI` alongside `ORDINI_DETTAGLIO` still offers: the name is complete but the
+ * list is not, and closing there would take the longer one away.
+ */
+function nothingLeftToOffer(options: Completion[], typed: string): boolean {
+  if (!typed) return false;
+  const upper = typed.toUpperCase();
+  let exact = false;
+  for (const option of options) {
+    const label = option.label.toUpperCase();
+    if (label === upper) exact = true;
+    // Something longer to reach — keep offering, whatever else matched.
+    else if (label.startsWith(upper)) return false;
+  }
+  return exact;
+}
+
 // ── The two sources ───────────────────────────────────────────────────────────
 
 /**
@@ -473,7 +503,20 @@ function createAbbrevCompletion(dialect: Dialect, connectionId: string): Complet
 
     const options = await candidatesFor(answer.context, connectionId);
     if (!options || options.length === 0) return null;
-    return { from: ctx.pos - prefixOf(answer.context).length, options, validFor: VALID_FOR };
+    const prefix = prefixOf(answer.context);
+    if (nothingLeftToOffer(options, prefix)) return null;
+    return {
+      from: ctx.pos - prefix.length,
+      options,
+      // A predicate rather than the bare pattern, and the difference is load-bearing.
+      // `validFor` is what stops CodeMirror re-asking the source while a word is
+      // being typed — which also stopped it ever re-deciding whether the popup
+      // should still be there. With the pattern alone, typing the last character of
+      // a table name left the popup open over a complete name with nothing to add,
+      // holding Tab hostage. Now that keystroke invalidates the result, the source
+      // runs once more, and the refusal above closes it.
+      validFor: (text: string) => VALID_FOR.test(text) && !nothingLeftToOffer(options, text),
+    };
   };
 }
 

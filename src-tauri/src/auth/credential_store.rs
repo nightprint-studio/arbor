@@ -23,6 +23,27 @@
 //! `resolve_credentials`, so the in-memory map is authoritative — the shell is
 //! the only writer, so there is nothing external to invalidate against. The
 //! public API is unchanged; only the backing storage moved from N items to one.
+//!
+//! # The size ceiling, and why it was invisible
+//!
+//! One item has a limit. Windows caps a credential blob at 2560 bytes and stores it as
+//! UTF-16, so the *entire* vault had to fit in 1280 characters — a few OAuth tokens and
+//! two database passwords go past that. What happened then was the worst available
+//! outcome: `set_password` refused, but the in-memory mirror had already been updated,
+//! so the secret was there for the rest of the session and every lookup succeeded. It
+//! was missing at the next launch, hours later, with nothing to connect it to.
+//!
+//! Both halves of that are fixed here, and they are separate bugs:
+//!
+//!  * the vault **spills into numbered items** when it no longer fits in one, so a
+//!    write that has somewhere to go is not refused;
+//!  * a write that fails anyway **does not update the mirror**, so the error a caller
+//!    gets is the truth about what is stored rather than a note about something that
+//!    seemed to work.
+//!
+//! And a third, next to them: an item that is present but unparseable used to load as
+//! an empty vault, which meant the next save of any credential overwrote it with just
+//! that one. It is an error now — see [`read_vault_from_store`].
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -33,8 +54,102 @@ use crate::error::{AppError, Result};
 
 /// Keychain service — shows as the item name in Keychain Access.
 const SERVICE: &str = "Arbor";
-/// The single item's account: `Arbor` / `credentials`.
+/// The vault's first item: `Arbor` / `credentials`.
 const VAULT_ACCOUNT: &str = "credentials";
+
+/// Marker that turns the head item into a pointer at N pieces instead of the vault
+/// itself. A JSON object starts with `{`, so this can never be mistaken for one —
+/// which is what lets a vault written by an older build keep loading unchanged.
+const CHUNK_MARKER: &str = "ARBOR-CHUNKED:";
+
+/// How much of one keychain item a chunk may use, in UTF-16 code units.
+///
+/// **This is why chunking exists at all.** Windows caps a credential blob at
+/// `CRED_MAX_CREDENTIAL_BLOB_SIZE` = 2560 *bytes*, and `keyring` stores the value as
+/// UTF-16 — so the whole vault had to fit in **1280 characters**. A handful of OAuth
+/// tokens and two database passwords is past that, and what happened then was not an
+/// error anybody saw: `set_password` refused, the in-memory mirror had already been
+/// updated, so every session kept working perfectly and the secret was simply never
+/// written. It came back missing at the next launch. See the write path below for the
+/// other half of that fix.
+///
+/// 1100 rather than 1280 leaves room for the platform's own accounting and for the
+/// item's other fields.
+const CHUNK_UNITS: usize = 1100;
+
+/// The account holding piece `i` (0 is the head, which is the marker itself).
+fn chunk_account(i: usize) -> String {
+    format!("{VAULT_ACCOUNT}.{i}")
+}
+
+/// Does this string fit in one keychain item?
+fn fits(text: &str) -> bool {
+    text.encode_utf16().count() <= CHUNK_UNITS
+}
+
+/// Cut `text` into pieces that each fit.
+///
+/// By characters, measuring UTF-16 units: a password with an accent in it costs one
+/// unit here and two bytes there, and a split that landed mid-character would write a
+/// piece that cannot be reassembled.
+fn split_chunks(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut units = 0usize;
+    for ch in text.chars() {
+        let size = ch.len_utf16();
+        if units + size > CHUNK_UNITS && !current.is_empty() {
+            out.push(std::mem::take(&mut current));
+            units = 0;
+        }
+        current.push(ch);
+        units += size;
+    }
+    if !current.is_empty() {
+        out.push(current);
+    }
+    out
+}
+
+/// What the head item turned out to be.
+enum Head {
+    /// The vault itself, as an older build wrote it.
+    Plain(String),
+    /// A pointer at this many pieces.
+    Chunked(usize),
+}
+
+fn read_head(text: String) -> Head {
+    // Bound to a `let` rather than matched inline: the borrow `strip_prefix` takes would
+    // otherwise live for the whole `match` — temporaries in a scrutinee do — and the
+    // `Plain` arm needs to move `text` out.
+    let count = text.strip_prefix(CHUNK_MARKER).and_then(|n| n.trim().parse::<usize>().ok());
+    match count {
+        Some(n) => Head::Chunked(n),
+        None => Head::Plain(text),
+    }
+}
+
+/// How many pieces the vault was last stored in, so a shrinking vault cleans up after
+/// itself instead of leaving secrets behind in items nothing points at any more.
+///
+/// Only ever touched by [`read_vault_from_store`] and [`write_vault_to_store`], both of
+/// which run with the [`VAULT`] lock already held — so the order is always VAULT then
+/// this one, never the reverse, and there is no second path to invert it. It is a
+/// `Mutex` rather than a plain `static mut` for safety, not for the locking.
+static CHUNKS_ON_DISK: Mutex<usize> = Mutex::new(0);
+
+fn entry_for(account: &str) -> Result<Entry> {
+    Entry::new(SERVICE, account).map_err(|e| AppError::AuthFailed(e.to_string()))
+}
+
+fn read_item(account: &str) -> Result<Option<String>> {
+    match entry_for(account)?.get_password() {
+        Ok(text) => Ok(Some(text)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(AppError::AuthFailed(e.to_string())),
+    }
+}
 
 // ── In-memory vault ────────────────────────────────────────────────────────────
 
@@ -46,29 +161,101 @@ const VAULT_ACCOUNT: &str = "credentials";
 static VAULT: LazyLock<Mutex<Option<HashMap<String, String>>>> =
     LazyLock::new(|| Mutex::new(None));
 
-/// Read + parse the vault item from the OS store. A missing item or an
-/// unparseable blob yields an empty map — a corrupt vault just means re-auth,
-/// never a crash. This is the *only* function that reads the keychain (hence the
-/// single prompt).
+/// Read + reassemble the vault from the OS store.
+///
+/// A **missing** item is an empty vault — that is a first run, and it is the one case
+/// where starting from nothing is right.
+///
+/// An item that is present and does **not** parse is an **error**, and that is a
+/// deliberate reversal. It used to fall back to an empty map on the reasoning that a
+/// corrupt vault only means re-auth; but the map is what the next write persists, so
+/// "start empty" meant the next credential saved anywhere in the app would overwrite
+/// the item with just itself and delete every other secret in it. Refusing to load is
+/// recoverable — re-auth, or fix the item — and silently deleting everything is not.
 fn read_vault_from_store() -> Result<HashMap<String, String>> {
-    let entry = Entry::new(SERVICE, VAULT_ACCOUNT)
-        .map_err(|e| AppError::AuthFailed(e.to_string()))?;
-    match entry.get_password() {
-        Ok(json) => Ok(serde_json::from_str(&json).unwrap_or_default()),
-        Err(keyring::Error::NoEntry) => Ok(HashMap::new()),
-        Err(e) => Err(AppError::AuthFailed(e.to_string())),
+    // A missing item and a blank one are the same thing: nothing is stored, and nothing
+    // can be lost by starting from an empty map. Only a non-blank item that will not
+    // parse is the dangerous case the doc above is about.
+    let head = read_item(VAULT_ACCOUNT)?.unwrap_or_default();
+    if head.trim().is_empty() {
+        *CHUNKS_ON_DISK.lock().unwrap_or_else(|p| p.into_inner()) = 0;
+        return Ok(HashMap::new());
     }
+
+    let (json, chunks) = match read_head(head) {
+        Head::Plain(text) => (text, 0),
+        Head::Chunked(count) => {
+            let mut joined = String::new();
+            for i in 1..=count {
+                let account = chunk_account(i);
+                let piece = read_item(&account)?.ok_or_else(|| {
+                    AppError::AuthFailed(format!(
+                        "the credential vault is stored in {count} parts and `{account}` is \
+                         missing — nothing has been overwritten; the remaining parts are intact"
+                    ))
+                })?;
+                joined.push_str(&piece);
+            }
+            (joined, count)
+        }
+    };
+
+    let map = serde_json::from_str(&json).map_err(|e| {
+        AppError::AuthFailed(format!(
+            "the credential vault could not be read ({e}). It has been left exactly as it is \
+             rather than replaced, so nothing is lost — but stored credentials are unavailable \
+             until it can be parsed."
+        ))
+    })?;
+    *CHUNKS_ON_DISK.lock().unwrap_or_else(|p| p.into_inner()) = chunks;
+    Ok(map)
 }
 
-/// Persist the whole map back to the single keychain item (one write).
+/// Persist the whole map, across as many items as it takes.
+///
+/// One item while it fits, which is the common case and the one the single-item design
+/// was for: one macOS prompt per session. Past that the vault spills into
+/// `credentials.1`, `.2`, … and the head becomes a marker naming the count. More items
+/// means more prompts on macOS, and that is the right trade — a prompt is an
+/// inconvenience, a secret that silently failed to save is data loss.
+///
+/// Stale pieces from a larger previous write are deleted, so a vault that shrinks does
+/// not leave secrets sitting in items nothing points at.
 fn write_vault_to_store(map: &HashMap<String, String>) -> Result<()> {
-    let json = serde_json::to_string(map)
-        .map_err(|e| AppError::AuthFailed(e.to_string()))?;
-    let entry = Entry::new(SERVICE, VAULT_ACCOUNT)
-        .map_err(|e| AppError::AuthFailed(e.to_string()))?;
-    entry
-        .set_password(&json)
-        .map_err(|e| AppError::AuthFailed(e.to_string()))
+    let json = serde_json::to_string(map).map_err(|e| AppError::AuthFailed(e.to_string()))?;
+    let previous = *CHUNKS_ON_DISK.lock().unwrap_or_else(|p| p.into_inner());
+
+    let written = if fits(&json) {
+        entry_for(VAULT_ACCOUNT)?
+            .set_password(&json)
+            .map_err(|e| AppError::AuthFailed(e.to_string()))?;
+        0
+    } else {
+        let pieces = split_chunks(&json);
+        // The pieces go down BEFORE the head points at them: a crash between the two
+        // leaves a head naming a count whose parts are all present, which reads back
+        // fine. The other order would leave a head pointing at pieces that do not
+        // exist yet.
+        for (i, piece) in pieces.iter().enumerate() {
+            entry_for(&chunk_account(i + 1))?
+                .set_password(piece)
+                .map_err(|e| AppError::AuthFailed(e.to_string()))?;
+        }
+        entry_for(VAULT_ACCOUNT)?
+            .set_password(&format!("{CHUNK_MARKER}{}", pieces.len()))
+            .map_err(|e| AppError::AuthFailed(e.to_string()))?;
+        pieces.len()
+    };
+
+    for i in (written + 1)..=previous {
+        // Best effort: a leftover that will not delete is untidy, not incorrect, and
+        // failing the whole write over it would be worse than leaving it.
+        let _ = entry_for(&chunk_account(i)).and_then(|e| {
+            e.delete_credential().map_err(|err| AppError::AuthFailed(err.to_string()))
+        });
+    }
+    *CHUNKS_ON_DISK.lock().unwrap_or_else(|p| p.into_inner()) = written;
+    Ok(())
 }
 
 /// Look up one account in the vault, loading it from the store on first use.
@@ -82,14 +269,27 @@ fn read_vault(key: &str) -> Result<Option<String>> {
 
 /// Mutate the vault (loading it on first use) and persist the result. The whole
 /// read-modify-write runs under the lock so concurrent saves serialise.
+///
+/// **The change is applied to a copy and only adopted once the write succeeded.** It
+/// used to mutate the live map first and write afterwards, which is the other half of
+/// how a password could be reported saved and not be: a refused write left memory
+/// holding a secret the store did not have, every lookup for the rest of the session
+/// answered from memory and worked, and the loss only surfaced at the next launch —
+/// by which time nothing connected it to the write that failed hours earlier.
+///
+/// Now a failed write leaves the mirror exactly as the store has it. The caller's
+/// error is then the whole truth: the secret is not saved, and nothing in the process
+/// will pretend otherwise.
 fn mutate_vault(f: impl FnOnce(&mut HashMap<String, String>)) -> Result<()> {
     let mut guard = VAULT.lock().unwrap_or_else(|p| p.into_inner());
     if guard.is_none() {
         *guard = Some(read_vault_from_store()?);
     }
-    let map = guard.as_mut().expect("vault loaded above");
-    f(map);
-    write_vault_to_store(map)
+    let mut next = guard.as_ref().expect("vault loaded above").clone();
+    f(&mut next);
+    write_vault_to_store(&next)?;
+    *guard = Some(next);
+    Ok(())
 }
 
 // ── Per-account credential (OAuth tokens, refresh tokens, Jira/Linear keys) ─────
@@ -257,5 +457,47 @@ mod tests {
         // Force the vault loaded (empty is fine) so we don't hit the store.
         seed(&[]);
         assert_eq!(get("definitely-absent.test", "").unwrap(), None);
+    }
+
+    // ── The chunking, which is what keeps a vault from silently failing to save ──
+
+    #[test]
+    fn a_small_vault_still_fits_in_one_item() {
+        let json = r#"{"github.com/arbor":"gho_short","picus/local":"hunter2"}"#;
+        assert!(fits(json));
+        assert_eq!(split_chunks(json).len(), 1);
+    }
+
+    /// The case the bug was: more than 1280 characters of credentials. Windows refuses
+    /// the write outright at that size, so what matters is that it never gets there.
+    #[test]
+    fn a_vault_past_the_windows_ceiling_is_split_and_reassembles_exactly() {
+        let json = format!(r#"{{"a":"{}","b":"{}"}}"#, "x".repeat(1500), "y".repeat(1500));
+        assert!(!fits(&json), "this is the size that used to be unwritable");
+
+        let pieces = split_chunks(&json);
+        assert!(pieces.len() > 1, "it has to be split to be storable at all");
+        assert!(pieces.iter().all(|p| fits(p)), "every piece has to fit on its own");
+        assert_eq!(pieces.concat(), json, "and rejoin byte for byte");
+    }
+
+    /// A split that landed inside a character would write pieces that cannot be
+    /// reassembled — a password with an accent in it is enough to hit this.
+    #[test]
+    fn chunks_never_cut_a_character_in_half() {
+        let json = format!(r#"{{"pw":"{}"}}"#, "è🔑".repeat(700));
+        let pieces = split_chunks(&json);
+        assert!(pieces.len() > 1);
+        assert!(pieces.iter().all(|p| fits(p)));
+        assert_eq!(pieces.concat(), json);
+    }
+
+    #[test]
+    fn the_head_tells_a_pointer_from_a_vault() {
+        // A vault written by a build from before chunking existed still loads.
+        assert!(matches!(read_head(r#"{"a":"b"}"#.to_string()), Head::Plain(_)));
+        assert!(matches!(read_head(format!("{CHUNK_MARKER}4")), Head::Chunked(4)));
+        // Anything that is not the marker is the vault itself, never a count.
+        assert!(matches!(read_head("CHUNKED:4".to_string()), Head::Plain(_)));
     }
 }

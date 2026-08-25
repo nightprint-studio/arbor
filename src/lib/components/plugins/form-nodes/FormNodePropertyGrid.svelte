@@ -100,7 +100,7 @@
         ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); collapsed[key] = !folded; } }
         : undefined}
     >
-      <span class="pf-pg-label" title={row.label}>
+      <span class="pf-pg-label" use:tooltip={row.label}>
         {#if isGroup && row.collapsible}
           <ChevronRight size={11} class="pf-pg-chevron {folded ? '' : 'pf-pg-chevron-open'}" />
         {/if}

@@ -38,7 +38,8 @@
  *   empty selection — a proposal during a drag-select would be noise.
  * - **Never shown while the completion popup is open.** Both want Tab, and the
  *   popup is the more specific intent; ghost text stands down rather than
- *   competing for the key.
+ *   competing for the key — and asks again as soon as the popup closes, so
+ *   standing down never turns into staying down.
  * - Tab accepts, Esc dismisses. A dismissal sticks until the caret moves or the
  *   document changes, so Esc means "not here" rather than "not for a moment".
  * - Any edit or cursor move invalidates a pending request: a stale suggestion
@@ -223,10 +224,33 @@ const inlineCompletionPlugin = ViewPlugin.fromClass(
     /** Caret offset the user pressed Esc at; nothing is offered there again. */
     private dismissedAt = -1;
 
+    /**
+     * Whether the completion popup was up last time we looked.
+     *
+     * Tracked because standing down for the popup (see `request`) used to be
+     * **permanent**: the request was skipped and only a further edit or caret move
+     * would ever schedule another. So a proposal was silently lost whenever the
+     * popup happened to be open — or merely still `pending` — at the instant the
+     * caret settled, and the way back was to press a key and have the second
+     * attempt find a warm cache. That reads as "it does not work, then for no
+     * reason it does".
+     *
+     * Dismissing the popup with Escape had the same shape and no way out at all:
+     * nothing about it changes the document or the selection, so no proposal was
+     * ever asked for again.
+     */
+    private popupWasOpen = false;
+
     constructor(private readonly view: EditorView) {}
 
     update(update: ViewUpdate) {
-      if (!update.docChanged && !update.selectionSet) return;
+      // A transaction that only opened or closed the popup changes neither, and it
+      // is exactly the moment the answer to "may I show something?" flips.
+      const popupOpen = completionStatus(update.state) !== null;
+      const popupChanged = popupOpen !== this.popupWasOpen;
+      this.popupWasOpen = popupOpen;
+
+      if (!update.docChanged && !update.selectionSet && !popupChanged) return;
       // Typing means the situation changed, so a previous dismissal no longer
       // applies. Moving the caret elsewhere is handled by the position check.
       if (update.docChanged) this.dismissedAt = -1;
@@ -269,7 +293,10 @@ const inlineCompletionPlugin = ViewPlugin.fromClass(
       if (!cursor.empty || state.selection.ranges.length !== 1) return;
       // The completion popup owns Tab while it is open. Standing down is
       // deliberate — two things competing for one key is worse than one of them
-      // being unavailable for a moment.
+      // being unavailable for a moment — and it is only ever *for a moment*: the
+      // plugin watches the popup's status and asks again the instant it closes.
+      // `pending` counts as open, because a source that is still thinking is about
+      // to own the key.
       if (completionStatus(state) !== null) return;
       if (cursor.head === this.dismissedAt) return;
 

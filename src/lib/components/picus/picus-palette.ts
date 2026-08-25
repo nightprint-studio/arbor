@@ -34,6 +34,7 @@ import { destinationSetsStore } from '$lib/stores/picus/destination-sets.svelte'
 import { dmlStore } from '$lib/stores/picus/dml.svelte';
 import { picusProjectStore } from '$lib/stores/picus/project.svelte';
 import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
+import { queryStore } from '$lib/stores/picus/query.svelte';
 import { picusUiStore, type SidebarSection } from '$lib/stores/picus/ui.svelte';
 import { schemaStore } from '$lib/stores/picus/schema.svelte';
 import { engineLabel } from '$lib/types/picus';
@@ -240,6 +241,13 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
     // one named above the editor.
     { id: 'runquery', title: 'Run the selection, or the statement under the cursor', icon: 'play', shortcut: 'Ctrl+Enter', when: tab?.kind === 'query', action: () => a.run(() => a.runQuery('statement')) },
     { id: 'runall', title: 'Run every statement in this tab', subtitle: 'In order, stopping at the first failure', icon: 'play', shortcut: 'Ctrl+Shift+Enter', when: tab?.kind === 'query', action: () => a.run(() => a.runQuery('buffer')) },
+    // A verb nobody would find by looking: the panel's icon says nothing on its own,
+    // and "where does this column come from" is a question people ask in words long
+    // before they think to look for a button. The subtitle names the situation it is
+    // for rather than restating the title.
+    // Reveals the dock as well as the pane: an entry that switched a pane inside a
+    // panel nobody has open does nothing visible, and reads as broken.
+    { id: 'lineage', title: 'Trace where these columns come from', subtitle: 'Follows each column of the result through the views to the table it is read from', icon: 'git-branch', when: tab?.kind === 'query', action: () => a.run(() => { queryStore.setPane(tab.id, 'lineage'); picusUiStore.showBottom('results'); }) },
     { id: 'newconn', title: 'Add a connection…', icon: 'plus', shortcut: 'Ctrl+Shift+N', when: true, action: () => a.run(() => picusUiStore.openConnectionEditor(null)) },
     { id: 'cycleconn', title: 'Switch to the next connection', icon: 'database', shortcut: 'Ctrl+Shift+D', when: connectionsStore.connections.length > 1, action: () => a.run(() => connectionsStore.cycle(1)) },
     { id: 'editconn', title: 'Edit the active connection…', icon: 'pencil', shortcut: 'F4', when: !!connectionsStore.active, action: () => a.run(() => picusUiStore.openConnectionEditor(activeConnectionId)) },

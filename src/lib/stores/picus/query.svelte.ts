@@ -30,7 +30,7 @@ import {
   type SourceRelation,
 } from '$lib/ipc/picus/db';
 import { picusBindsStore } from './binds.svelte';
-import { connectionsStore } from './connections.svelte';
+import { connectionsStore, isSessionOpen } from './connections.svelte';
 import { picusProvidersStore } from './providers.svelte';
 import { createResult, formatRowTotal, picusResultsStore } from './result.svelte';
 import { picusSettingsStore } from './settings.svelte';
@@ -61,10 +61,16 @@ export interface HistoryEntry {
  * statement, and it lives here because the panel it appears in is this panel. Its
  * contents belong to `picusPlanStore`, keyed by the same tab.
  */
-export type ResultPane = 'results' | 'messages' | 'plan';
+export type ResultPane = 'results' | 'messages' | 'plan' | 'lineage';
 
-/** Everything one query tab owns. */
-interface QueryTabState {
+/**
+ * Everything one query tab owns.
+ *
+ * Exported because it is what `read()` hands back, and the result panel is now
+ * several components that each render a part of it — a shape crossing a component
+ * boundary has to be nameable there.
+ */
+export interface QueryTabState {
   sql: string;
   messages: QueryLogEntry[];
   running: boolean;
@@ -221,6 +227,15 @@ function createQueryStore() {
    * editor.
    */
   const editors = new Map<string, () => EditorSelection>();
+
+  /**
+   * Tabs whose cancellation is in flight.
+   *
+   * Not reactive and not per-tab state: nothing renders it. Its only job is to tell a *second*
+   * press of Cancel from the first, so the second means "stop waiting for the server" instead of
+   * queueing a second identical wait behind the first one.
+   */
+  const cancelling = new Set<string>();
   let history = $state<HistoryEntry[]>([]);
   let historyFilter = $state('');
   let seq = 0;
@@ -592,6 +607,22 @@ function createQueryStore() {
         state.pane = 'messages';
         return;
       }
+      // The SESSION, not just the binding. A tab can be bound to a connection
+      // nobody has opened, and this is knowable here — sending the statement only
+      // to have the backend answer "this connection is not open" spends a round
+      // trip to say the same thing later, and says it in the backend's words.
+      //
+      // The guard is in the store rather than on the button because Run is reachable
+      // from three places, and Ctrl+Enter must mean exactly what the toolbar means.
+      const bound = connectionsStore.byId(connectionId);
+      if (bound && !isSessionOpen(bound)) {
+        state.error = bound.state === 'connecting'
+          ? `${bound.name} is still opening — try again in a moment.`
+          : `${bound.name} is not open. Connect it first — the plug on its row in the `
+            + 'sidebar, or Connect in this tab\'s toolbar.';
+        state.pane = 'messages';
+        return;
+      }
       if (state.running) {
         // Said rather than swallowed. A Run that does nothing and explains nothing
         // is indistinguishable from a broken button, and this is exactly the state
@@ -600,7 +631,8 @@ function createQueryStore() {
           {
             time: stamp(),
             text: 'This tab is still waiting on the previous statement. Cancel it first '
-              + '(Ctrl+Shift+C) — if the server will not stop it, that reconnects.',
+              + '(Ctrl+Shift+C) — if the server will not stop it, that reconnects; press it '
+              + 'again to drop the connection without waiting.',
             level: 'error',
           },
           ...state.messages,
@@ -609,7 +641,7 @@ function createQueryStore() {
         return;
       }
 
-      const dialect = connectionsStore.byId(connectionId)?.dialect ?? 'postgres';
+      const dialect = bound?.dialect ?? 'postgres';
       const selection = editors.get(tabId)?.() ?? NO_SELECTION;
 
       // A selection is an instruction, not a hint: the user drew the boundary and
@@ -747,37 +779,59 @@ function createQueryStore() {
       const say = (text: string, level: QueryLogEntry['level'] = 'info') => {
         state.messages = [{ time: stamp(), text, level }, ...state.messages];
       };
-      say('Cancellation requested…');
-      try {
-        await rpcCancel(connectionId);
-      } catch (e) {
-        say(String(e), 'error');
+
+      // A second press while the first is still waiting means "stop waiting" — skip the grace
+      // period and abandon the connection now. Without it the only thing a repeat press did was
+      // start a second identical wait behind the first.
+      const escalateNow = cancelling.has(tabId);
+      if (escalateNow) {
+        say('Dropping this connection now, without waiting for the server any longer.', 'error');
+      } else {
+        cancelling.add(tabId);
+        say('Cancellation requested…');
+        // Fired, NOT awaited before the clock starts.
+        //
+        // `picus_cancel` opens a SECOND connection to the server to send the cancellation key, and
+        // a database that has stopped answering does not answer that one either — it has no
+        // timeout of its own, so the promise can simply never settle. Awaiting it here put the
+        // whole escalation *behind* it, which is how a tab reached the state where Cancel did
+        // nothing, said nothing, and every Run answered "still waiting on the previous statement"
+        // for the rest of the session. The request is still worth sending — it is what stops a
+        // statement that CAN be stopped — but the recovery must not depend on it replying.
+        void rpcCancel(connectionId).catch((e) => say(String(e), 'error'));
       }
-      if (!state.running) return;
-
-      await new Promise((done) => setTimeout(done, CANCEL_GRACE_MS));
-      if (!state.running) return;
-
-      say(
-        'The server has not stopped it. Dropping this connection and opening a new one — '
-          + 'the statement may still be running there until the database ends it.',
-        'error',
-      );
-      // Invalidate the run FIRST. Its reply may still arrive, and by then this tab
-      // may be running something else; the ordinal is what stops it landing on top.
-      nextRun(tabId);
-      state.running = false;
-      state.pane = 'messages';
-      // Every result on this connection belonged to a socket that is about to go.
-      picusResultsStore.releaseConnection(connectionId);
 
       try {
-        await resetConnection(connectionId);
-        say('Reconnected. This tab can run statements again.');
-        // The sidebar reads the pool; it is a different socket now.
-        void connectionsStore.load();
-      } catch (e) {
-        say(`The connection could not be reopened — ${e}`, 'error');
+        if (!escalateNow) {
+          if (!state.running) return; // only the background row count was running
+          await new Promise((done) => setTimeout(done, CANCEL_GRACE_MS));
+          if (!state.running) return;
+          say(
+            'The server has not stopped it. Dropping this connection and opening a new one — '
+              + 'the statement may still be running there until the database ends it.',
+            'error',
+          );
+        }
+        // Invalidate the run FIRST. Its reply may still arrive, and by then this tab
+        // may be running something else; the ordinal is what stops it landing on top.
+        nextRun(tabId);
+        state.running = false;
+        state.pane = 'messages';
+        // Every result on this connection belonged to a socket that is about to go.
+        picusResultsStore.releaseConnection(connectionId);
+
+        try {
+          await resetConnection(connectionId);
+          say('Reconnected. This tab can run statements again.');
+          // The sidebar reads the pool; it is a different socket now.
+          void connectionsStore.load();
+        } catch (e) {
+          say(`The connection could not be reopened — ${e}`, 'error');
+        }
+      } finally {
+        // Whatever happened, the tab is no longer mid-cancel: `state.running` is false by now, so
+        // the next press starts a fresh one rather than escalating something already finished.
+        cancelling.delete(tabId);
       }
     },
 
@@ -786,6 +840,7 @@ function createQueryStore() {
     /** The tab is gone: drop its text and close the cursor it was holding. */
     forget(tabId: string) {
       editors.delete(tabId);
+      cancelling.delete(tabId);
       picusResultsStore.release(tabId);
       // Its bound values go with it. They are somebody's customer numbers as often
       // as not, and a closed tab has no business keeping them in memory.

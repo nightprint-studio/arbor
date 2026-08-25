@@ -22,8 +22,8 @@ pub use crate::error::{DbError, DbResult};
 pub use crate::plan::{PlanNode, PlanRequest, QueryPlan};
 pub use crate::provider::{DbProvider, DbSession};
 pub use crate::query::{
-    BindSlot, BindValue, CellValue, ExecuteResult, LobMasking, ResultCount, ResultWindow,
-    DEFAULT_WINDOW_ROWS,
+    BindSlot, BindValue, CellValue, ColumnSource, ExecuteResult, LobMasking, ResultCount,
+    ResultWindow, DEFAULT_WINDOW_ROWS,
 };
 pub use crate::tx::{TxCapability, TxOutcome, TxState};
 pub use crate::registry::DbProviderRegistry;

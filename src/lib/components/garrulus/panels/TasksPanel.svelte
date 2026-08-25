@@ -26,6 +26,7 @@
   import { garrulusVaultStore } from '$lib/stores/garrulus/vault.svelte';
   import { noteFolder, noteName } from './note-path';
   import { SCAN_CAP, scanVaultTasks, setTaskState, type TaskScan, type VaultTask } from './vault-tasks';
+  import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {
     /** Open the note a task lives in. Absent while no editor is mounted. */
@@ -215,7 +216,7 @@
             type="button"
             class="tk-note"
             disabled={!onOpenNote}
-            title={onOpenNote ? `Open ${group.title}` : 'No editor is attached to this panel yet'}
+            use:tooltip={onOpenNote ? `Open ${group.title}` : 'No editor is attached to this panel yet'}
             onclick={() => onOpenNote?.(group.note)}
           >
             <span class="tk-note-name">{group.title || noteName(group.note)}</span>
@@ -232,7 +233,7 @@
                 class:on={task.done}
                 disabled={writing !== null}
                 aria-pressed={task.done}
-                title={task.done ? 'Mark as not done' : 'Mark as done'}
+                use:tooltip={task.done ? 'Mark as not done' : 'Mark as done'}
                 onclick={() => void toggle(task)}
               >
                 {#if task.done}<SquareCheckBig size={12} />{:else}<Square size={12} />{/if}

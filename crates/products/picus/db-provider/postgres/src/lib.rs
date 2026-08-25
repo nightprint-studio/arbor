@@ -32,6 +32,7 @@ pub mod cursor;
 pub mod depends;
 pub mod descriptor;
 pub mod error;
+pub mod origins;
 pub mod plan;
 pub mod prelude;
 pub mod provider;

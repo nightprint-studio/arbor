@@ -22,6 +22,7 @@
   import { themeStore } from '$lib/stores/theme.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   let elapsed = $state(0);
   let paused = $state(false);
@@ -91,8 +92,8 @@
       <span class="rec" class:paused>
         <span class="dot"></span>{paused ? 'PAUSED' : 'REC'}
       </span>
-      {#if targetLabel}<span class="target" title={targetLabel}>{targetLabel}</span>{/if}
-      <button type="button" class="icon-btn ghost" onclick={toggleExpanded} title="Compact view" aria-label="Compact view">
+      {#if targetLabel}<span class="target" use:tooltip={targetLabel}>{targetLabel}</span>{/if}
+      <button type="button" class="icon-btn ghost" onclick={toggleExpanded} use:tooltip={'Compact view'} aria-label="Compact view">
         <Minimize2 size={14} />
       </button>
     </div>
@@ -103,7 +104,7 @@
       <button type="button" class="ctl" onclick={togglePause} disabled={stopping || busy}>
         {#if paused}<Play size={14} fill="currentColor" /> Resume{:else}<Pause size={14} fill="currentColor" /> Pause{/if}
       </button>
-      <button type="button" class="ctl stop" onclick={stop} disabled={stopping} title="Stop and save">
+      <button type="button" class="ctl stop" onclick={stop} disabled={stopping} use:tooltip={'Stop and save'}>
         <Square size={13} fill="currentColor" /> Stop
       </button>
     </div>
@@ -112,13 +113,13 @@
       <span class="dot"></span>{paused ? 'PAUSED' : 'REC'}
     </span>
     <span class="time">{formatDuration(elapsed)}</span>
-    <button type="button" class="icon-btn" onclick={togglePause} disabled={stopping || busy} title={paused ? 'Resume' : 'Pause'} aria-label={paused ? 'Resume' : 'Pause'}>
+    <button type="button" class="icon-btn" onclick={togglePause} disabled={stopping || busy} use:tooltip={paused ? 'Resume' : 'Pause'} aria-label={paused ? 'Resume' : 'Pause'}>
       {#if paused}<Play size={14} fill="currentColor" />{:else}<Pause size={14} fill="currentColor" />{/if}
     </button>
-    <button type="button" class="stop pill" onclick={stop} disabled={stopping} title="Stop recording and save the file">
+    <button type="button" class="stop pill" onclick={stop} disabled={stopping} use:tooltip={'Stop recording and save the file'}>
       <Square size={12} fill="currentColor" /> Stop
     </button>
-    <button type="button" class="icon-btn ghost" onclick={toggleExpanded} title="Expanded view" aria-label="Expanded view">
+    <button type="button" class="icon-btn ghost" onclick={toggleExpanded} use:tooltip={'Expanded view'} aria-label="Expanded view">
       <Maximize2 size={13} />
     </button>
   {/if}

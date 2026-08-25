@@ -7,8 +7,8 @@
 
 //! ## What is deliberately *not* here
 //!
-//! The capability modules — `activity`, `bind`, `depends`, `plan`, `tx` — and
-//! `catalog`. They are `pub` so rustdoc can navigate them, but no call site outside
+//! The capability modules — `activity`, `bind`, `depends`, `origins`, `plan`, `tx` —
+//! and `catalog`. They are `pub` so rustdoc can navigate them, but no call site outside
 //! this crate reaches them: they are what [`PgSession`] delegates to, and everyone
 //! else arrives through the `DbSession` trait.
 //!

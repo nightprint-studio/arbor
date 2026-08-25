@@ -14,6 +14,7 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { moveRowFocus } from './row-focus';
   import { garrulusNotesStore, type CatalogueNote } from '$lib/stores/garrulus/notes.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {
     items: { note: CatalogueNote; meta?: string | null }[];
@@ -60,7 +61,7 @@
         class="gn-row"
         class:selected={path != null && path === activePath}
         disabled={path == null}
-        title={path ?? 'This note declares a frontmatter uid, so it has no path to open by.'}
+        use:tooltip={path ?? 'This note declares a frontmatter uid, so it has no path to open by.'}
         onclick={() => path && onOpen(path)}
         onkeydown={(e) => onKeydown(e, item.note)}
       >

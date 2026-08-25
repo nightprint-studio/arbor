@@ -110,7 +110,7 @@
   .v-accent { color: var(--accent); }
   .v-accent:hover:not(:disabled) { color: var(--accent); }
   .v-danger:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--danger) 18%, transparent);
-    color: var(--danger);
+    background: color-mix(in srgb, var(--error) 18%, transparent);
+    color: var(--error);
   }
 </style>

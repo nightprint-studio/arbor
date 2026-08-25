@@ -27,6 +27,7 @@
   import { parseFaultStore } from '$lib/stores/picus/parse-faults.svelte';
   import { validationStore } from '$lib/stores/picus/validation.svelte';
   import { picusProvidersStore } from '$lib/stores/picus/providers.svelte';
+  import { isSessionOpen } from '$lib/stores/picus/connections.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
   import { queryStore } from '$lib/stores/picus/query.svelte';
@@ -95,8 +96,18 @@
     // of thing to the editor: ranges the host asks it to paint.
     ...longLineMarks(tabState.sql, conn?.dialect ?? 'postgres'),
   ]);
-  /** Whether this connection's engine can validate at all — gates the round trip. */
-  const canValidate = $derived(picusProvidersStore.capabilities(conn?.dialect)?.validate ?? false);
+  /**
+   * Whether there is anything to validate against — gates the round trip.
+   *
+   * Both halves matter, and the session half was missing. `follow` re-runs when the
+   * text or the connection *id* changes, so closing a session left the last verdict
+   * on screen: a green tick claiming "the database accepts every statement here"
+   * about a database nothing was talking to. Reading the state here is what makes the
+   * indicator fall back to "nothing to check against" the moment the session goes.
+   */
+  const canValidate = $derived(
+    isSessionOpen(conn) && (picusProvidersStore.capabilities(conn?.dialect)?.validate ?? false),
+  );
 
   const diagnostics = $derived([
     ...sqlDiagnostics(tabState.sql, conn?.dialect ?? 'postgres', conn?.id),

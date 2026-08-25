@@ -117,6 +117,31 @@ pub enum LobMasking {
     Off,
 }
 
+/// Where one result column is read from.
+///
+/// ## Sparse, and it carries its own position
+///
+/// A column with no origin — a computed expression, a literal, an engine that does
+/// not report one — simply has no entry, and the entry that does exist names the
+/// index it describes. So a caller that hides the trailing columns
+/// ([`ExecuteResult::hidden_columns`]) *filters* this list instead of slicing it in
+/// step with `columns`, and there is no length to keep aligned: the alignment bug
+/// this shape is avoiding is the kind that shows the wrong table's name against a
+/// column and is never noticed, because a plausible name in the wrong place looks
+/// exactly like a right one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnSource {
+    /// Position in [`ExecuteResult::columns`] this describes.
+    pub index: usize,
+    /// The relation the column is read from, as the catalogue spells it.
+    pub table: String,
+    /// The column's name **in that relation**. Differs from the result column's own
+    /// name when the projection aliased it, and is empty when the engine named a
+    /// relation but not a column within it — a row address such as `ctid`.
+    pub name: String,
+}
+
 /// The outcome of running one statement — **every** statement.
 ///
 /// One shape for reads and writes alike, so the caller never has to classify SQL
@@ -181,6 +206,15 @@ pub struct ExecuteResult {
     /// the rows are not addressable — in which case nothing was masked either.
     #[serde(default)]
     pub row_key: Vec<String>,
+    /// Which relation each column is read from, for those that are read from one.
+    ///
+    /// Sparse — see [`ColumnSource`]. Empty in three different situations that a
+    /// caller must treat identically: the engine does not report origins at all, the
+    /// statement could not be described, or nothing in the result came from a
+    /// relation. All three mean *no claim is being made*, which is not the same as
+    /// "these columns have no source" and must never be rendered as if it were.
+    #[serde(default)]
+    pub column_sources: Vec<ColumnSource>,
     /// The statement that actually ran against the data, when it differs from the one
     /// the caller sent — because a key was injected into its projection, or its large
     /// objects were wrapped into sizes. `None` when what ran is what was asked for.
@@ -254,7 +288,8 @@ mod tests {
         let json = serde_json::to_value(ExecuteResult::default()).unwrap();
         for key in [
             "resultId", "columns", "rows", "estimatedRows", "totalRows", "elapsedMs", "rowCount",
-            "endOfResult", "affected", "maskedColumns", "hiddenColumns", "rowKey", "effectiveSql",
+            "endOfResult", "affected", "maskedColumns", "hiddenColumns", "rowKey", "columnSources",
+            "effectiveSql",
         ] {
             assert!(json.get(key).is_some(), "missing `{key}`");
         }
@@ -265,5 +300,36 @@ mod tests {
         }
 
         assert_eq!(serde_json::to_value(ResultCount { total: 7 }).unwrap()["total"], 7);
+    }
+
+    #[test]
+    fn a_source_survives_hiding_the_trailing_columns() {
+        // The shape's whole reason for existing: an injected key column is dropped
+        // from the end of `columns`, and the sources of what remains must come
+        // through unshifted and un-truncated by their own arithmetic.
+        let sources = vec![
+            ColumnSource { index: 0, table: "comunicazioni".into(), name: "id".into() },
+            ColumnSource { index: 2, table: "enti".into(), name: "denominazione".into() },
+            ColumnSource { index: 3, table: "comunicazioni".into(), name: "ctid".into() },
+        ];
+        let visible = 3; // the fourth column is the injected key
+
+        let kept: Vec<_> = sources.iter().filter(|s| s.index < visible).collect();
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[1].index, 2, "a filter must not renumber what it keeps");
+        assert_eq!(kept[1].table, "enti");
+    }
+
+    #[test]
+    fn a_source_is_camel_case_on_the_wire() {
+        let json = serde_json::to_value(ColumnSource {
+            index: 4,
+            table: "comunicazioni".into(),
+            name: "data_invio".into(),
+        })
+        .unwrap();
+        assert_eq!(json["index"], 4);
+        assert_eq!(json["table"], "comunicazioni");
+        assert_eq!(json["name"], "data_invio");
     }
 }

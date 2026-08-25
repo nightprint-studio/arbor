@@ -16,6 +16,7 @@
   import { clockTime, dayLabel, formatBytes } from '$lib/utils/format';
   import { kindMeta, revisionTitle } from './kind';
   import type { TimelineRow } from './timeline-rows';
+  import { tooltip } from '$lib/actions/tooltip';
 
   let {
     rows,
@@ -78,7 +79,7 @@
               <span class="ht-title">
                 {revisionTitle(row.kind, row.title)}
                 <span class="ht-chip tone-{meta.tone}">{meta.label}</span>
-                {#if row.label}<span class="ht-chip tone-warning" title="Labelled — never expires">🏷 {row.label}</span>{/if}
+                {#if row.label}<span class="ht-chip tone-warning" use:tooltip={'Labelled — never expires'}>🏷 {row.label}</span>{/if}
               </span>
               <span class="ht-meta">
                 {#if row.files > 1}{row.files} files{:else if row.size}{formatBytes(row.size)}{:else}—{/if}

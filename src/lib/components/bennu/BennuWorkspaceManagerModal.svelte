@@ -306,7 +306,7 @@
     color: var(--text-muted); border-radius: var(--radius-sm);
     transition: background var(--transition-fast), color var(--transition-fast);
   }
-  .proj-remove:hover { background: var(--danger-subtle); color: var(--danger); }
+  .proj-remove:hover { background: var(--error-subtle); color: var(--error); }
   .proj-empty { padding: 16px 8px; font-size: var(--font-size-xs); color: var(--text-muted); }
 
   .detail-foot { display: flex; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); margin-top: 8px; }

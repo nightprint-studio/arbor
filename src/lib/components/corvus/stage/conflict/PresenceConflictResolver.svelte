@@ -146,11 +146,11 @@
   }
   .presence-banner.added :global(svg) { color: var(--success); }
   .presence-banner.deleted {
-    background: color-mix(in srgb, var(--danger) 10%, transparent);
+    background: color-mix(in srgb, var(--error) 10%, transparent);
     color: var(--text-primary);
-    border-bottom-color: color-mix(in srgb, var(--danger) 35%, transparent);
+    border-bottom-color: color-mix(in srgb, var(--error) 35%, transparent);
   }
-  .presence-banner.deleted :global(svg) { color: var(--danger); }
+  .presence-banner.deleted :global(svg) { color: var(--error); }
 
   .presence-choice-row {
     display: flex;
@@ -179,8 +179,8 @@
     background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
   .presence-choice.danger.active {
-    border-color: var(--danger);
-    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    border-color: var(--error);
+    background: color-mix(in srgb, var(--error) 12%, transparent);
   }
   .presence-choice-title {
     display: inline-flex;
@@ -191,7 +191,7 @@
     color: var(--text-primary);
   }
   .presence-choice.active .presence-choice-title { color: var(--accent); }
-  .presence-choice.danger.active .presence-choice-title { color: var(--danger); }
+  .presence-choice.danger.active .presence-choice-title { color: var(--error); }
   .presence-choice-sub {
     font-size: var(--font-size-xs);
     color: var(--text-secondary);
@@ -228,7 +228,7 @@
     font-weight: 600;
   }
   .presence-preview-title.kept    { color: var(--success); }
-  .presence-preview-title.removed { color: var(--danger); }
+  .presence-preview-title.removed { color: var(--error); }
 
   .presence-preview-body {
     margin: 0;

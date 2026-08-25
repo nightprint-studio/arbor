@@ -11,6 +11,7 @@
    * Pairs with `keystrokesStore` and the global `toggle_keystrokes`
    * keybinding wired in AppShell.
    */
+  import { tooltip } from '$lib/actions/tooltip';
   import {
     Keyboard, MousePointerClick, Filter, Type, Repeat,
     Tag, AlignJustify,
@@ -156,7 +157,7 @@
             class:selected={position === anchor.id}
             aria-pressed={position === anchor.id}
             aria-label={anchor.label}
-            title={anchor.label}
+            use:tooltip={anchor.label}
             onclick={() => (position = anchor.id)}
           >
             <span class="anchor-mini">
@@ -228,7 +229,7 @@
             class:selected={tone === opt.value}
             aria-pressed={tone === opt.value}
             aria-label={opt.label}
-            title={opt.label}
+            use:tooltip={opt.label}
             onclick={() => (tone = opt.value)}
             style="--swatch: {opt.value === 'accent' ? 'var(--accent)'
                           : opt.value === 'mono'   ? 'var(--text-primary)'

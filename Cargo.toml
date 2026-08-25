@@ -141,6 +141,7 @@ members = [
     "crates/products/picus/core",
     "crates/products/picus/db-provider/api",
     "crates/products/picus/db-provider/postgres",
+    "crates/products/picus/lineage",
     "crates/products/picus/diff",
     "crates/products/picus/be",
     # Garrulus (notes): the same layering as Picus — a leaf model, a parser over

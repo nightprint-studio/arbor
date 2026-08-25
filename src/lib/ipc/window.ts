@@ -69,6 +69,16 @@ export function focusWindow(label: string): Promise<void> {
 export const WORKSPACE_OPEN_PRODUCT_EVENT = 'workspace://open-product';
 
 /**
+ * Pushed to the container to CLOSE a product's tab — the tabbed half of `close_product_window`,
+ * which can only destroy windows.
+ *
+ * Every "stop this product" gesture goes through the shell rather than through whichever home the
+ * user pressed it in: the Canopy launcher is a different window from the container, so a home that
+ * closed the tab itself could only ever stop the products in its OWN window.
+ */
+export const WORKSPACE_CLOSE_PRODUCT_EVENT = 'workspace://close-product';
+
+/**
  * Open the tabbed container, or focus it if it's already up, optionally landing
  * on `product`'s tab. Used instead of `open_<product>_window` when the user's
  * window mode is `tabbed`.

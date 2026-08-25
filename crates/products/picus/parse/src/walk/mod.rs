@@ -8,6 +8,7 @@
 
 mod dml;
 mod names;
+mod projection;
 mod select;
 
 use picus_types::prelude::DialectScope;
@@ -19,6 +20,8 @@ use crate::error::{ParseError, ParseErrorKind, ERROR_TEXT_LIMIT};
 use crate::object::{ObjectKind, ObjectRef};
 use crate::statement::{ParsedFile, Statement, StatementKind};
 use names::{field_ref, leading_keywords, object_kind_from_keywords, object_ref, range_of, text_of};
+
+pub(crate) use projection::projection_of;
 
 pub(crate) fn walk_file(root: Node, source: &str, scope: DialectScope) -> ParsedFile {
     walk_at_depth(root, source, scope, 0)

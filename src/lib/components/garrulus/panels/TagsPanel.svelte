@@ -237,7 +237,7 @@
                     class="tg-value"
                     class:active
                     aria-pressed={active}
-                    title={active
+                    use:tooltip={active
                       ? `Stop filtering by ${group.facet.key}:${value}`
                       : `Show the notes where ${group.facet.key} is ${value}`}
                     onclick={() => applyField(group.facet.key, value)}

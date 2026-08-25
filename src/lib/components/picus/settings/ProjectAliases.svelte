@@ -25,6 +25,7 @@
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { picusProjectStore } from '$lib/stores/picus/project.svelte';
   import { CLEAR_ID, ENGINE_CHOICES, ROLE_CHOICES, engineChoiceLabel } from '../engine-choices';
+  import { tooltip } from '$lib/actions/tooltip';
   import {
     ALIAS_SCOPE_CHOICES,
     ALIAS_SCOPE_LABELS,
@@ -200,7 +201,7 @@
       {@const count = reach[alias.name]}
       {@const scope = aliasScope(alias)}
       <div class="pa-row">
-        <span class="pa-name" title="Matched as a whole word, case-insensitively">{alias.name}</span>
+        <span class="pa-name" use:tooltip={'Matched as a whole word, case-insensitively'}>{alias.name}</span>
         <span class="pa-icon">
           {#if alias.engine && isDialect(alias.engine as FolderEngine)}
             <Database size={12} />

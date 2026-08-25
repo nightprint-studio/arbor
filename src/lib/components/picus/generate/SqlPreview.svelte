@@ -26,6 +26,7 @@
   import { dmlStore } from '$lib/stores/picus/dml.svelte';
   import { sqlLanguage } from '../picus-sql-language';
   import { FOLDER_ROLE_SHORT, engineLabel, isDialect } from '$lib/types/picus';
+  import { tooltip } from '$lib/actions/tooltip';
 
   const targets = $derived(dmlStore.enabledTargets);
 
@@ -75,7 +76,7 @@
     {/if}
     <span class="sp-spacer"></span>
     {#if target}
-      <span class="sp-path" title={target.file}>{target.file}</span>
+      <span class="sp-path" use:tooltip={target.file}>{target.file}</span>
       <Button variant="icon" size="xs" title="Copy the generated SQL" ariaLabel="Copy the generated SQL" onclick={copy}>
         {#snippet iconStart()}<Copy size={13} />{/snippet}
       </Button>

@@ -23,6 +23,7 @@
   import Modal from './Modal.svelte';
   import ModalHeader from './ModalHeader.svelte';
   import ModalFooter from './ModalFooter.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   interface ChunkItem {
     label: string;
@@ -206,9 +207,9 @@
           </span>
           <span class="index">{i + 1}</span>
           <span class="name-block">
-            <span class="name" title={it.path}>{np.name || it.label}</span>
+            <span class="name" use:tooltip={it.path}>{np.name || it.label}</span>
             {#if np.dir}
-              <span class="dir" title={np.dir}>{np.dir}</span>
+              <span class="dir" use:tooltip={np.dir}>{np.dir}</span>
             {/if}
           </span>
           {#if it.meta}
@@ -223,7 +224,7 @@
               onclick={() => move(i, -1)}
               disabled={i === 0}
               aria-label="Move up"
-              title="Move up"
+              use:tooltip={'Move up'}
             >
               <ChevronUp size={12} />
             </button>
@@ -232,7 +233,7 @@
               onclick={() => move(i, +1)}
               disabled={i === items.length - 1}
               aria-label="Move down"
-              title="Move down"
+              use:tooltip={'Move down'}
             >
               <ChevronDown size={12} />
             </button>
@@ -247,7 +248,7 @@
           <button
             class="btn-ghost link-btn"
             onclick={sortAlpha}
-            title="Sort by path A → Z"
+            use:tooltip={'Sort by path A → Z'}
           >
             <ArrowUpAZ size={12} />
             Sort A–Z
@@ -256,7 +257,7 @@
             class="btn-ghost link-btn"
             onclick={resetOrder}
             disabled={!isReordered()}
-            title="Restore the initial order"
+            use:tooltip={'Restore the initial order'}
           >
             <RotateCcw size={12} />
             Reset

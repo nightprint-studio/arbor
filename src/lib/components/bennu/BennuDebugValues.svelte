@@ -109,9 +109,9 @@
       <div class="dv-watch">
         <span class="dv-expr">{watch.expression}</span>
         {#if watch.error}
-          <span class="dv-error" title={watch.error}>{watch.error}</span>
+          <span class="dv-error" use:tooltip={watch.error}>{watch.error}</span>
         {:else if watch.value}
-          <span class="dv-value" title={watch.value.value}>{watch.value.value}</span>
+          <span class="dv-value" use:tooltip={watch.value.value}>{watch.value.value}</span>
           {#if watch.value.type_name}<span class="dv-type">{watch.value.type_name}</span>{/if}
           {#if watch.value.object}
             <button

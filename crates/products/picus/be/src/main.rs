@@ -110,6 +110,9 @@ mod binds;
 mod depends;
 // The plan for a statement: what the server says it will do, or what it just did.
 mod plan;
+// Where a column comes from, when the answer is several views deep — a deduction
+// from the views' own SQL, asked for explicitly and never computed behind a query.
+mod lineage;
 // Explicit transactions — open one, look at what you did, then decide.
 mod tx;
 

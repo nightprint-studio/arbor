@@ -26,6 +26,7 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   /** Paths the user chose not to decide about yet. Cleared per path once it resolves. */
   let deferred = $state<Set<string>>(new Set());
@@ -87,7 +88,7 @@
         Autosave is paused for this file so neither version is lost. Pick which one to keep —
         the other is discarded.
       </p>
-      <p class="bx-path" title={path}>{path}</p>
+      <p class="bx-path" use:tooltip={path}>{path}</p>
     </div>
 
     {#snippet footer()}

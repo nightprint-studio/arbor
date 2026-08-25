@@ -30,6 +30,7 @@
   import ArborLogo from './internal/ArborLogo.svelte';
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   interface BootProgress {
     phase:    string;
@@ -207,7 +208,7 @@
             </div>
           </div>
           <div class="boot-meta">
-            <span class="boot-message" title={displayMessage}>{displayMessage}</span>
+            <span class="boot-message" use:tooltip={displayMessage}>{displayMessage}</span>
             <span class="boot-count">{progress.current ?? 0}<span class="boot-count-sep">/</span>{progress.total}</span>
           </div>
         {:else}
@@ -215,7 +216,7 @@
             <div class="boot-bar-indeterminate"></div>
           </div>
           <div class="boot-meta">
-            <span class="boot-message" title={displayMessage}>{displayMessage}</span>
+            <span class="boot-message" use:tooltip={displayMessage}>{displayMessage}</span>
           </div>
         {/if}
       </div>

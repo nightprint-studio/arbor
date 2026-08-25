@@ -119,7 +119,7 @@
         <span class="pe-step-flag" use:tooltip={'Allow failure'}>⚠</span>
       {/if}
       {#if step.summary}
-        <span class="pe-step-summary" title={step.summary}>{step.summary}</span>
+        <span class="pe-step-summary" use:tooltip={step.summary}>{step.summary}</span>
       {/if}
     </button>
     <div class="pe-row-actions pe-step-actions">

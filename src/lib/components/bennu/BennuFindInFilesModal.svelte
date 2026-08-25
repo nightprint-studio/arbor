@@ -61,6 +61,7 @@
   import { findInFiles, getFindPrefs, readFile, setFindPrefs, type FindSources } from '$lib/ipc/bennu';
   import { isJarEntry, openLibraryFile } from '$lib/ipc/bennu/library';
   import type { FindHit } from '$lib/types/bennu';
+  import { tooltip } from '$lib/actions/tooltip';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -674,7 +675,7 @@
         >
           {#snippet row({ item }: { item: Row })}
             {#if item.kind === 'file'}
-              <div class="ff-group-head" class:ext={item.external} title={item.file}>
+              <div class="ff-group-head" class:ext={item.external} use:tooltip={item.file}>
                 <!-- The tree's own icon rule, not a stand-in for it: a `.java` wears the kind it
                      declares and everything else its file type, exactly as in the project tree
                      and the go-to modals. One generic document glyph for every result was the
@@ -707,7 +708,7 @@
           {#if previewError}
             <p class="ff-pv-note">This file can’t be previewed.</p>
           {:else if previewText && current}
-            <div class="ff-pv-head" title={previewFile}>{previewLabel}</div>
+            <div class="ff-pv-head" use:tooltip={previewFile}>{previewLabel}</div>
             <div class="ff-pv-body">
               <!-- The real editor, so the context is coloured exactly as the buffer is — the
                    same grammar, not a second highlighter that agrees with it on Java and not on

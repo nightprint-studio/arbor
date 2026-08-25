@@ -27,6 +27,7 @@
   import { garrulusVaultStore } from '$lib/stores/garrulus/vault.svelte';
   import { typeToken } from '../search/query-tokens';
   import { countMatching, mapWithLimit } from './facets';
+  import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {
     /** Bring the search results on screen after a row has filtered them. Absent →
@@ -129,7 +130,7 @@
             class="tp-row"
             class:active
             aria-pressed={active}
-            title={active ? `Stop filtering by ${type.name}` : `Show every ${type.name}`}
+            use:tooltip={active ? `Stop filtering by ${type.name}` : `Show every ${type.name}`}
             onclick={() => apply(type.id)}
           >
             <!-- The type's own accent, which is the one colour in this window

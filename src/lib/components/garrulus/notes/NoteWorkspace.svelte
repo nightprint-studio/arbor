@@ -161,7 +161,7 @@
     <StateBlock tone="error" label="Could not open {note.path} — {note.error}" />
   {:else}
     <div class="gnw-head">
-      <span class="gnw-path" title={note.path}>{note.path}</span>
+      <span class="gnw-path" use:tooltip={note.path}>{note.path}</span>
       <span class="gnw-spacer"></span>
       <span class="gnw-count">{words} {words === 1 ? 'word' : 'words'}</span>
       <span class="gnw-state">

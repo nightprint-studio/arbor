@@ -20,6 +20,7 @@
    * space the program never printed.
    */
   import type { LogLevel, LogLink, LogPiece } from '$lib/types/log';
+  import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {
     /** The whole line — the fallback when there are no pieces, and what a copy should see. */
@@ -61,7 +62,7 @@
         data-colour={p.colour ?? undefined}
         data-bold={p.bold ? '' : undefined}
         data-lib={p.link?.kind === 'source' ? '' : undefined}
-        title={hint(p.link)}
+        use:tooltip={hint(p.link)}
         onclick={() => open(p.link)}
       >{p.text}</button>{:else}<span
         class="lg"

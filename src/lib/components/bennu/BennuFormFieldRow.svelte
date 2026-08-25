@@ -69,7 +69,7 @@
 >
   <span class="ff-name">{field.name || '(unnamed)'}</span>
 
-  <span class="ff-value" title={field.value ?? undefined}>
+  <span class="ff-value" use:tooltip={field.value ?? undefined}>
     {#if field.value}<span class="ff-eq">=</span> {field.value}{/if}
   </span>
 

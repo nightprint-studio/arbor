@@ -108,7 +108,7 @@
 
           <div class="t-body">
             <div class="t-head">
-              <span class="t-label" title={t.label}>{t.label}</span>
+              <span class="t-label" use:tooltip={t.label}>{t.label}</span>
               {#if active && t.progress != null}
                 <span class="t-pct">{Math.round(t.progress)}%</span>
               {/if}

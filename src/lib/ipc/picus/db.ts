@@ -303,6 +303,28 @@ export function triggerDetail(id: string, name: string): Promise<TriggerDetail> 
 // a tab closing, a new statement replacing it, a connection going down — has to
 // reach `picus_close_result`; the lifetime is owned by `stores/picus/result`.
 
+/**
+ * Where one result column is read from.
+ *
+ * Sparse, and each entry carries the position it is about: a column with no origin —
+ * a computed expression, a literal, an engine that does not report one — simply has
+ * no entry. So dropping the hidden trailing columns is a **filter on `index`**, never
+ * a slice taken in step with `columns`; the bug that shape is avoiding puts a
+ * plausible table name against the wrong column, where nothing ever looks wrong.
+ */
+export interface ColumnSource {
+  /** Position in `columns` this describes. */
+  index: number;
+  /** The relation the column is read from, as the catalogue spells it. */
+  table: string;
+  /**
+   * The column's name in that relation. Differs from the result column's own name
+   * when the projection aliased it; empty when the engine named a relation but not a
+   * column within it (a row address such as `ctid`).
+   */
+  name: string;
+}
+
 /** The answer to any statement: a read opens a result, a write reports its count. */
 export interface ExecuteResult {
   /** Handle of the held cursor. `null` for a statement that returns no rows. */
@@ -347,6 +369,16 @@ export interface ExecuteResult {
    * the rows are not addressable.
    */
   rowKey?: string[];
+  /**
+   * Which relation each column is read from, for those that are read from one.
+   *
+   * Absent or empty in three situations a reader must treat identically: the engine
+   * does not report origins, the statement could not be described, or nothing in the
+   * result came from a relation. All three mean *no claim is being made* — which is
+   * not the same as "these columns have no source" and must not be shown as if it
+   * were.
+   */
+  columnSources?: ColumnSource[];
   /**
    * The statement that actually ran, when it differs from the one sent — a key was
    * spliced into its projection, or its large objects were wrapped into sizes.

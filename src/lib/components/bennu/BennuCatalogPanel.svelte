@@ -418,7 +418,7 @@
                   {/if}
                 {/each}
                 {#if childrenOf(r).length > 0}
-                  <span class="argn" title="{childrenOf(r).length} parameters">{childrenOf(r).length}</span>
+                  <span class="argn" use:tooltip={'{childrenOf(r).length} parameters'}>{childrenOf(r).length}</span>
                 {/if}
                 {#if r.line}<span class="row-line">{r.line}</span>{/if}
               </div>
@@ -474,7 +474,7 @@
     class="tag type"
     class:on
     type="button"
-    title={on ? `Hide the fields of ${text}` : `Show the fields of ${text}`}
+    use:tooltip={on ? `Hide the fields of ${text}` : `Show the fields of ${text}`}
     onclick={() => toggleType(key, file, text)}
   >
     {#if on}<ChevronDown size={9} />{:else}<ChevronRight size={9} />{/if}

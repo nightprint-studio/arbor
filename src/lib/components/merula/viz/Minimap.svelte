@@ -12,6 +12,7 @@
   import { laneColor, sectionColor } from '../palette';
   import type { VizLane } from './arrangement.svelte';
   import type { LoopRegion } from '../stores/transport-ui.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {
     lanes: VizLane[];
@@ -60,7 +61,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-<div class="mm" bind:this={el} onmousedown={startDrag} title="Drag to pan the timeline">
+<div class="mm" bind:this={el} onmousedown={startDrag} use:tooltip={'Drag to pan the timeline'}>
   <!-- Section bands (full height, tinted) -->
   {#each lanes[0]?.sections ?? [] as s (s.name + '@' + s.start)}
     <div class="mm-band" style="left: {pct(s.start)}; width: {wpct(s.start, s.end)}; --sc: {sectionColor(s.name)}"></div>

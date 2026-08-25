@@ -21,6 +21,7 @@ use tokio_postgres::{Client, SimpleQueryMessage};
 use crate::catalog;
 use crate::cursor::{self, CursorHandle, CursorRegistry, ExecutionPlan};
 use crate::error::map_pg;
+use crate::origins::RelationCache;
 use crate::rows::{self, Fetched};
 use crate::sql::{guard_read_only, quote_ident, quote_qualified};
 use crate::tls::TlsChoice;
@@ -53,6 +54,10 @@ pub struct PgSession {
     cancelled_seq: AtomicU64,
     /// The results this session is holding open, and the policy that ends them.
     cursors: CursorRegistry,
+    /// Relation names by oid, so a result can say which table each column is read
+    /// from. Per session because an oid is only meaningful within one database, and
+    /// stable under a live connection — see [`crate::origins`].
+    relations: RelationCache,
 }
 
 impl PgSession {
@@ -73,6 +78,7 @@ impl PgSession {
             run_seq: AtomicU64::new(0),
             cancelled_seq: AtomicU64::new(0),
             cursors: CursorRegistry::new(),
+            relations: RelationCache::new(),
         }
     }
 
@@ -102,12 +108,23 @@ impl PgSession {
         *self.closed.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    /// Column types for a statement, when it is preparable. `None` is not a
-    /// failure — it means "show the columns untyped", which several perfectly good
-    /// statements (`SET`, a multi-statement paste) legitimately produce.
-    async fn column_types(&self, sql: &str) -> Option<Vec<(String, Type)>> {
-        let stmt = self.client.prepare(sql).await.ok()?;
-        Some(stmt.columns().iter().map(|c| (c.name().to_string(), c.type_().clone())).collect())
+    /// What the server says a statement's columns are: their types, and which
+    /// relation each is read from.
+    ///
+    /// Both come out of one `prepare`, because both are in the same reply — asking
+    /// separately would be a second Parse/Describe round trip on the user's own
+    /// connection for information that had already arrived.
+    ///
+    /// A `None` for the types is not a failure: it means "show the columns untyped",
+    /// which several perfectly good statements (`SET`, a multi-statement paste)
+    /// legitimately produce. The sources are empty in that case and in every other
+    /// case where nothing can be claimed — see [`crate::origins`].
+    async fn describe(&self, sql: &str) -> (Option<Vec<(String, Type)>>, Vec<ColumnSource>) {
+        let Ok(stmt) = self.client.prepare(sql).await else { return (None, Vec::new()) };
+        let types =
+            stmt.columns().iter().map(|c| (c.name().to_string(), c.type_().clone())).collect();
+        let sources = self.relations.sources(&self.client, stmt.columns()).await;
+        (Some(types), sources)
     }
 
     /// Run a statement over the simple protocol and shape the reply.
@@ -306,7 +323,11 @@ impl PgSession {
         // planning-only round trips; a Cancel that landed during one has nothing to
         // interrupt on the server, so it is honoured here.
         let estimated_rows = self.estimated_rows(body).await;
-        let types = self.column_types(body).await;
+        // The sources are of `body` — the statement as asked for. Deliberately not of
+        // the masked rewrite below: masking wraps the projection without reordering
+        // or renaming it, so the positions still hold, and describing the wrapper
+        // would report the subquery rather than the tables under it.
+        let (types, column_sources) = self.describe(body).await;
         self.check_cancelled(seq)?;
 
         let window = window.max(1);
@@ -413,6 +434,7 @@ impl PgSession {
             // The engine never injects a key; `be` fills these in when it did.
             hidden_columns: Vec::new(),
             row_key: Vec::new(),
+            column_sources,
             effective_sql,
         })
     }
@@ -441,7 +463,7 @@ impl PgSession {
         started: Instant,
     ) -> DbResult<ExecuteResult> {
         let estimated_rows = self.estimated_rows(body).await;
-        let types = self.column_types(body).await;
+        let (types, column_sources) = self.describe(body).await;
         self.check_cancelled(seq)?;
 
         let id = self.cursors.next_id();
@@ -482,6 +504,7 @@ impl PgSession {
                     masked_columns: Vec::new(),
                     hidden_columns: Vec::new(),
                     row_key: Vec::new(),
+                    column_sources,
                     effective_sql: None,
                 })
             }
@@ -530,7 +553,7 @@ impl PgSession {
         seq: u64,
         started: Instant,
     ) -> DbResult<ExecuteResult> {
-        let types = self.column_types(sql).await;
+        let (types, column_sources) = self.describe(sql).await;
         self.check_cancelled(seq)?;
 
         let window = window.max(1);
@@ -552,6 +575,8 @@ impl PgSession {
                 masked_columns: Vec::new(),
                 hidden_columns: Vec::new(),
                 row_key: Vec::new(),
+                // No result set, so there are no columns for a source to be about.
+                column_sources: Vec::new(),
                 effective_sql: None,
             });
         }
@@ -576,6 +601,7 @@ impl PgSession {
             masked_columns: Vec::new(),
             hidden_columns: Vec::new(),
             row_key: Vec::new(),
+            column_sources,
             effective_sql: None,
         })
     }
@@ -658,6 +684,10 @@ impl DbSession for PgSession {
         catalog::read_trigger_detail(&self.client, self.schema(), name)
             .await?
             .ok_or_else(|| DbError::NotFound(format!("trigger {name}")))
+    }
+
+    async fn view_definitions(&self) -> DbResult<Vec<(String, String)>> {
+        catalog::read_view_definitions(&self.client, self.schema()).await
     }
 
     async fn execute(&self, sql: &str, window: u32, masking: LobMasking) -> DbResult<ExecuteResult> {
@@ -878,7 +908,15 @@ impl DbSession for PgSession {
         binds: &[BindValue],
         window: u32,
     ) -> DbResult<ExecuteResult> {
-        crate::bind::execute_bound(&self.client, sql, binds, window, self.spec.read_only).await
+        crate::bind::execute_bound(
+            &self.client,
+            &self.relations,
+            sql,
+            binds,
+            window,
+            self.spec.read_only,
+        )
+        .await
     }
 
     async fn explain(&self, sql: &str, request: PlanRequest) -> DbResult<QueryPlan> {
@@ -887,7 +925,7 @@ impl DbSession for PgSession {
 
     async fn validate(&self, sql: &str) -> DbResult<()> {
         // Parse + describe, never execute — `prepare` is exactly that. This is the
-        // same call `column_types` makes; the difference is only that there the
+        // same call `describe` makes; the difference is only that there the
         // error is swallowed and here it IS the answer.
         //
         // Deliberately NOT through `map_pg`: that collapses `42P01`/`42703` (unknown

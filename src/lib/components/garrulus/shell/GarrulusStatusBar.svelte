@@ -12,6 +12,7 @@
    */
   import { NotebookPen } from 'lucide-svelte';
   import type { Snippet } from 'svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {
     /** Display name of the open vault, or `null` when none is open. */
@@ -43,7 +44,7 @@
   <span class="gf-spacer"></span>
 
   {#if notePath}
-    <span class="gf-item gf-muted gf-path" title={notePath}>{notePath}</span>
+    <span class="gf-item gf-muted gf-path" use:tooltip={notePath}>{notePath}</span>
   {/if}
 
   {#if footerExtra}{@render footerExtra()}{/if}

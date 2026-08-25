@@ -24,6 +24,7 @@
   import { Square, PenTool, MousePointer2, AppWindow, Monitor, Video, Camera, X, Maximize2 } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { recorderStore, type SelectMethod } from '$lib/stores/tyto/recorder.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   type Rect = { x: number; y: number; w: number; h: number };
   type HoverRect = Rect & { id?: string; name?: string };
@@ -240,10 +241,10 @@
   <div class="toolbar" role="toolbar" tabindex="-1" aria-label="Capture selection"
        onmousedown={(e) => e.stopPropagation()} onmouseup={(e) => e.stopPropagation()} onwheel={(e) => e.stopPropagation()}>
     <div class="tb-modes" role="group" aria-label="Selection method">
-      <button type="button" class="tb-mode" class:on={mode === 'rect'} onclick={() => setMode('rect')} title="Rectangle" aria-pressed={mode === 'rect'}>
+      <button type="button" class="tb-mode" class:on={mode === 'rect'} onclick={() => setMode('rect')} use:tooltip={'Rectangle'} aria-pressed={mode === 'rect'}>
         <Square size={14} />
       </button>
-      <button type="button" class="tb-mode" class:on={mode === 'free'} onclick={() => setMode('free')} title="Freehand" aria-pressed={mode === 'free'}>
+      <button type="button" class="tb-mode" class:on={mode === 'free'} onclick={() => setMode('free')} use:tooltip={'Freehand'} aria-pressed={mode === 'free'}>
         <PenTool size={14} />
       </button>
       <!-- Always shown so the feature is discoverable; disabled (with a reason) when
@@ -254,7 +255,7 @@
         class:on={mode === 'smart'}
         onclick={() => setMode('smart')}
         disabled={!canSmart}
-        title={canSmart ? 'Smart (pick an element)' : 'Smart pick — no UI elements detected here'}
+        use:tooltip={canSmart ? 'Smart (pick an element)' : 'Smart pick — no UI elements detected here'}
         aria-pressed={mode === 'smart'}
       >
         <MousePointer2 size={14} />
@@ -265,12 +266,12 @@
         class:on={mode === 'window'}
         onclick={() => setMode('window')}
         disabled={!canWindow}
-        title={canWindow ? 'Window (pick a window)' : 'Window pick — no windows detected'}
+        use:tooltip={canWindow ? 'Window (pick a window)' : 'Window pick — no windows detected'}
         aria-pressed={mode === 'window'}
       >
         <AppWindow size={14} />
       </button>
-      <button type="button" class="tb-mode" class:on={mode === 'display'} onclick={() => setMode('display')} title="Display (whole monitor)" aria-pressed={mode === 'display'}>
+      <button type="button" class="tb-mode" class:on={mode === 'display'} onclick={() => setMode('display')} use:tooltip={'Display (whole monitor)'} aria-pressed={mode === 'display'}>
         <Monitor size={14} />
       </button>
     </div>
@@ -279,10 +280,10 @@
 
     <!-- Record / Screenshot 2-way toggle so Capture knows what to do. -->
     <div class="tb-cap" role="group" aria-label="Capture mode">
-      <button type="button" class="tb-cap-btn" class:on={recorderStore.mode === 'record'} onclick={() => recorderStore.setMode('record')} title="Record video" aria-pressed={recorderStore.mode === 'record'}>
+      <button type="button" class="tb-cap-btn" class:on={recorderStore.mode === 'record'} onclick={() => recorderStore.setMode('record')} use:tooltip={'Record video'} aria-pressed={recorderStore.mode === 'record'}>
         <Video size={13} /> Record
       </button>
-      <button type="button" class="tb-cap-btn" class:on={recorderStore.mode === 'screenshot'} onclick={() => recorderStore.setMode('screenshot')} title="Screenshot" aria-pressed={recorderStore.mode === 'screenshot'}>
+      <button type="button" class="tb-cap-btn" class:on={recorderStore.mode === 'screenshot'} onclick={() => recorderStore.setMode('screenshot')} use:tooltip={'Screenshot'} aria-pressed={recorderStore.mode === 'screenshot'}>
         <Camera size={13} /> Shot
       </button>
     </div>
@@ -293,16 +294,16 @@
       class="tb-btn monitor"
       onclick={() => void recorderStore.switchSelectionMonitor()}
       disabled={!canSwitchMonitor}
-      title={canSwitchMonitor ? 'Switch monitor' : 'Only one monitor'}
+      use:tooltip={canSwitchMonitor ? 'Switch monitor' : 'Only one monitor'}
     >
       <Monitor size={13} /> {recorderStore.selectMonitorName}
     </button>
 
     <button type="button" class="tb-btn confirm" disabled={!canConfirm} onclick={confirm}>{captureVerb} <span class="tb-k">Enter</span></button>
-    <button type="button" class="tb-btn expand" onclick={expand} title="Full control panel" aria-label="Full control panel">
+    <button type="button" class="tb-btn expand" onclick={expand} use:tooltip={'Full control panel'} aria-label="Full control panel">
       <Maximize2 size={13} />
     </button>
-    <button type="button" class="tb-btn cancel" onclick={closeTyto} title="Close Tyto">
+    <button type="button" class="tb-btn cancel" onclick={closeTyto} use:tooltip={'Close Tyto'}>
       <X size={13} /> <span class="tb-k">Esc</span>
     </button>
   </div>

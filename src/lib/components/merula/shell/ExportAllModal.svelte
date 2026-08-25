@@ -30,6 +30,7 @@
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import RenderFormatFields from './RenderFormatFields.svelte';
   import { FolderOpen, Download } from 'lucide-svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   import {
     merulaExportPlan, merulaExportAll,
@@ -145,7 +146,7 @@
                   {e.title ?? e.stem}
                   <span class="rel">{e.rel}</span>
                 </span>
-                <span class="cycles" title={`render length from: ${e.cycles_from}`}>
+                <span class="cycles" use:tooltip={`render length from: ${e.cycles_from}`}>
                   {e.cycles} {e.cycles === 1 ? 'cycle' : 'cycles'}
                   {#if e.cycles_from !== 'meta'}<em>({e.cycles_from})</em>{/if}
                 </span>
@@ -167,7 +168,7 @@
           />
           <FormRow label="Output folder">
             <div class="dir">
-              <span class="path" title={outDir}>{outDir || 'Choose a folder…'}</span>
+              <span class="path" use:tooltip={outDir}>{outDir || 'Choose a folder…'}</span>
               <Button size="sm" variant="secondary" onclick={() => (pickerOpen = true)}>
                 {#snippet iconStart()}<FolderOpen size={14} />{/snippet}
                 Browse
@@ -221,7 +222,7 @@
   }
   .files li { border-bottom: 1px solid var(--border-subtle); }
   .files li:last-child { border-bottom: none; }
-  .files li.err { background: var(--danger-subtle); }
+  .files li.err { background: var(--error-subtle); }
 
   label { display: flex; align-items: center; gap: 10px; padding: 6px 10px; cursor: pointer; }
   label:hover { background: var(--bg-hover); }
@@ -229,7 +230,7 @@
   .rel { font-size: var(--font-size-xs); color: var(--text-disabled); font-family: var(--font-code); }
   .cycles { font-size: var(--font-size-xs); color: var(--text-secondary); white-space: nowrap; }
   .cycles em { color: var(--text-disabled); font-style: normal; }
-  .why { margin: 0 10px 6px 34px; font-size: var(--font-size-xs); color: var(--danger); }
+  .why { margin: 0 10px 6px 34px; font-size: var(--font-size-xs); color: var(--error); }
 
   .opts { display: flex; flex-direction: column; gap: 2px; flex: none; }
   .dir { display: flex; align-items: center; gap: 8px; min-width: 0; }

@@ -12,6 +12,7 @@
   import ModalHeader from './ModalHeader.svelte';
   import ModalFooter from './ModalFooter.svelte';
   import Button      from './ui/Button.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   let { url, scheme, onConfirm, onCancel }: {
     url:       string;
@@ -43,7 +44,7 @@
 
   <div class="ext-body">
     <p class="ext-lead">This link will open in {target}, outside Arbor.</p>
-    <div class="ext-url" title={url}>{url}</div>
+    <div class="ext-url" use:tooltip={url}>{url}</div>
     <label class="ext-remember">
       <input type="checkbox" bind:checked={remember} />
       <span>Always allow <strong>{scheme}</strong> links from the address bar</span>

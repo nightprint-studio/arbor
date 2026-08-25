@@ -130,7 +130,7 @@
                 oncancel={() => (editingId = null)}
               />
             {:else}
-              <div class="cap-name" title={cap.name}>{cap.name}</div>
+              <div class="cap-name" use:tooltip={cap.name}>{cap.name}</div>
               <div class="cap-meta">
                 {#if cap.kind === 'record'}<Video size={11} />
                 {:else if cap.kind === 'frames'}<Images size={11} />

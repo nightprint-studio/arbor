@@ -16,6 +16,7 @@
    */
   import { Replace, CornerDownRight, TriangleAlert } from 'lucide-svelte';
   import type { EditorView, KeyBinding } from '@codemirror/view';
+  import { tooltip } from '$lib/actions/tooltip';
 
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
@@ -208,13 +209,13 @@
             <button
               type="button"
               class="br-hit"
-              title={rowLabel(hit)}
+              use:tooltip={rowLabel(hit)}
               onclick={() => store.reveal(hit)}
             >
               <span class="br-line">{hit.line}</span>
               <span class="br-text">{oneLine(hit.text)}</span>
               {#if hit.problem}
-                <span class="br-bad" title={hit.problem}><TriangleAlert size={11} /></span>
+                <span class="br-bad" use:tooltip={hit.problem}><TriangleAlert size={11} /></span>
               {:else if hit.replacement}
                 <span class="br-after">
                   <CornerDownRight size={10} />

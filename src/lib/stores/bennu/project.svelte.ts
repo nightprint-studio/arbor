@@ -135,6 +135,26 @@ function createProjectStore() {
   let activeFilePath = $state<string | null>(null);
   let openFilePaths = $state<string[]>([]);
 
+  // ── Where the caret was, per open tab ─────────────────────────────────────────
+  // Persisted with the session, so a restart reopens the tabs *at the line you were on* rather
+  // than at the top of each file. Absolute-path keyed and global like `sources`, because a file
+  // opened from another workspace project is the same buffer wherever it is listed.
+  //
+  // Plain Map: nothing renders a caret from here. The editor reads it once, when it mounts a tab
+  // it has no live view state for; from then on the live per-tab snapshot in `BennuEditor` is the
+  // finer answer (it carries the scroll offset too) and this is only what gets written to disk.
+  const carets = new Map<string, { line: number; col: number }>();
+
+  /** `"line:col"` ⇄ the pair, for the persisted (TOML-friendly) form. Tolerant on the way in:
+   *  anything that is not two positive integers is "no remembered caret". */
+  function parseCaret(text: string): { line: number; col: number } | null {
+    const m = /^(\d+):(\d+)$/.exec(text.trim());
+    if (!m) return null;
+    const line = Number(m[1]);
+    const col = Number(m[2]);
+    return line > 0 && col > 0 ? { line, col } : null;
+  }
+
   // ── Workspace (N projects) ────────────────────────────────────────────────────
   // The flat `project`/`tree`/`openFilePaths`/`activeFilePath` above are the ACTIVE project's
   // live, reactive view. The other workspace projects live stashed in `sessions` (plain map —
@@ -338,12 +358,30 @@ function createProjectStore() {
     // The ACTIVE root comes from the live flat state, the rest from their stashed sessions.
     // `workspaceRoots` always includes the active root.
     const roots = workspaceRoots.includes(activeRoot) ? workspaceRoots : [activeRoot];
+    // The carets ride alongside the tab list, one slot per tab — see `ProjectSession.open_carets`
+    // for why it is a parallel array and not a table.
+    const caretsFor = (paths: string[]) =>
+      paths.map((p) => {
+        const c = carets.get(p);
+        return c ? `${c.line}:${c.col}` : '';
+      });
     const projects = roots.map((r) => {
       if (r === activeRoot) {
-        return { root: r, open_files: openFilePaths, active_file: activeFilePath ?? '' };
+        return {
+          root: r,
+          open_files: openFilePaths,
+          active_file: activeFilePath ?? '',
+          open_carets: caretsFor(openFilePaths),
+        };
       }
       const s = sessions.get(r);
-      return { root: r, open_files: s?.openFilePaths ?? [], active_file: s?.activeFilePath ?? '' };
+      const paths = s?.openFilePaths ?? [];
+      return {
+        root: r,
+        open_files: paths,
+        active_file: s?.activeFilePath ?? '',
+        open_carets: caretsFor(paths),
+      };
     });
     return { active_project: activeRoot, projects };
   }
@@ -353,13 +391,17 @@ function createProjectStore() {
   // list + the `workspace.toml` write). Never persists the demo or a null project; a burst of tab
   // opens/closes coalesces into one write.
   let persistTimer: ReturnType<typeof setTimeout> | undefined;
-  function persistWorkspace() {
+  /** `delay` is longer for the caret, which changes on every arrow key: a tab open is one event
+   *  the user is waiting on, a caret move is hundreds a minute, and both write the same file. */
+  function persistWorkspace(delay = 300) {
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
       if (!project || isDemo) return;
       workspacesStore.saveActiveSession(snapshotSession());
-    }, 300);
+    }, delay);
   }
+  /** How long the caret must sit still before its position is worth a write. */
+  const CARET_PERSIST_MS = 1500;
 
   /** Open a file as the active tab (loads source + encoding if needed), refusing binaries.
    *  The persistence-free core, shared by the public {@link openFile} (which persists after)
@@ -422,6 +464,7 @@ function createProjectStore() {
     openFilePaths = [];
     sources.clear();
     encodings.clear();
+    carets.clear();
     // Drop dirty/save state from the previous project.
     savedContent.clear();
     dirty.clear();
@@ -641,6 +684,28 @@ function createProjectStore() {
       return fwd.startsWith(prefix) ? fwd.slice(prefix.length) : fwd;
     },
     get openFilePaths()  { return openFilePaths; },
+
+    /**
+     * Remember where the caret is in `path`, so a restart reopens the tab on that line.
+     *
+     * Called on every caret move, which is why the write is debounced hard (see
+     * {@link CARET_PERSIST_MS}) and why the map is not reactive: nothing on screen reads it —
+     * the editor keeps its own, finer, per-tab view state for the length of a session.
+     */
+    rememberCaret(path: string, line: number, col: number) {
+      const key = canonPath(path);
+      const before = carets.get(key);
+      if (before && before.line === line && before.col === col) return;
+      carets.set(key, { line, col });
+      persistWorkspace(CARET_PERSIST_MS);
+    },
+
+    /** The remembered caret for `path`, or `null`. The editor asks once, when it opens a tab it
+     *  has no live view state for — a restored session being exactly that case. */
+    caretOf(path: string): { line: number; col: number } | null {
+      return carets.get(canonPath(path)) ?? null;
+    },
+
     /** True while the open project is the mock demo. MOCK — remove with the mock. */
     get isDemo()         { return isDemo; },
     /** Recently-opened project roots (most recent first). */
@@ -851,10 +916,17 @@ function createProjectStore() {
           info = await ipcOpenProject(p.root, canonPath(p.root) === wanted);
         } catch { continue; } // a project that's gone
         const root = canonPath(info.root);
+        const paths = p.open_files.map(canonPath);
+        // The carets ride positionally alongside the tabs, and a session written before they
+        // existed simply has none — hence the index-wise read rather than a zip.
+        paths.forEach((path, i) => {
+          const caret = parseCaret(p.open_carets?.[i] ?? '');
+          if (caret) carets.set(path, caret);
+        });
         sessions.set(root, {
           info: { ...info, root },
           tree: null,
-          openFilePaths: p.open_files.map(canonPath),
+          openFilePaths: paths,
           activeFilePath: p.active_file ? canonPath(p.active_file) : null,
         });
         workspaceRoots = [...workspaceRoots, root];

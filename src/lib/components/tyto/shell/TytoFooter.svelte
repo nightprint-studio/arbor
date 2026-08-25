@@ -6,6 +6,7 @@
    */
   import { Circle, Video, Camera, Images, FolderOpen } from 'lucide-svelte';
   import { recorderStore, formatDuration } from '$lib/stores/tyto/recorder.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   const captureCount = $derived(recorderStore.captures.length);
   const frames = $derived(recorderStore.mode === 'record' && recorderStore.recordOutput === 'frames');
@@ -32,7 +33,7 @@
   </div>
 
   <div class="right">
-    <span class="out" title={recorderStore.outputDir}>
+    <span class="out" use:tooltip={recorderStore.outputDir}>
       <FolderOpen size={12} />
       {recorderStore.outputDir}
     </span>

@@ -179,7 +179,7 @@
               class="pp-main"
               data-problem-row
               disabled={!onOpenNote}
-              title={onOpenNote
+              use:tooltip={onOpenNote
                 ? `Open ${noteName(link.from)}, where the link is written`
                 : 'No editor is attached to this panel yet'}
               onclick={() => onOpenNote?.(link.from)}
@@ -217,7 +217,7 @@
               class="pp-main"
               data-problem-row
               disabled={!onOpenNote}
-              title={onOpenNote ? `Open ${noteName(id)}` : 'No editor is attached to this panel yet'}
+              use:tooltip={onOpenNote ? `Open ${noteName(id)}` : 'No editor is attached to this panel yet'}
               onclick={() => onOpenNote?.(id)}
             >
               <span class="pp-text"><b>{noteName(id)}</b></span>

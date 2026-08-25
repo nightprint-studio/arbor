@@ -11,6 +11,34 @@
     width?: number;
     /** Secondary label shown beside the header (e.g. a SQL type). */
     hint?: string;
+    /**
+     * A colour identifying what this column belongs to — drawn as a bar across the
+     * bottom of its header. Any CSS colour, typically a `var(--…)`.
+     *
+     * **The header, never the body.** A tint running down the column would cut the
+     * uninterrupted horizontal band that makes the alternating rows readable: the two
+     * are antagonistic, and following a row across forty columns is the job that
+     * matters more. A consumer wanting to group columns visually gets the header bar
+     * and nothing else, on purpose.
+     */
+    accent?: string;
+    /**
+     * Draw the accent bar **dashed** rather than solid.
+     *
+     * For a consumer whose grouping is inferred rather than known. A dashed line
+     * already reads as provisional everywhere a person has met one, which makes it
+     * the only marker that survives nobody reading the caption — and a caption is
+     * exactly what does not get read when two colourings look identical.
+     */
+    accentProvisional?: boolean;
+    /**
+     * Push this column's header into the background — for a grid highlighting a
+     * subset of its columns. Nothing is hidden and nothing moves: dimming is the only
+     * form of emphasis that cannot make a reader think a column is missing.
+     */
+    muted?: boolean;
+    /** Tooltip for the header cell, when the label alone does not say enough. */
+    title?: string;
   }
 
   /** One cell. `null` is a genuine null and renders differently from `''`. */
@@ -53,6 +81,20 @@
      * a range still in flight — the source is responsible for ignoring a repeat.
      */
     request: (start: number, count: number) => void;
+    /**
+     * Fetch the rest of the result, in one act, so `complete` becomes true and
+     * sorting and filtering come back.
+     *
+     * Optional, and absent means **cannot** rather than "not implemented": a source
+     * whose result is bigger than what it is willing to hold at once must not offer
+     * this, because the button would fetch forever and never hand the controls back.
+     * The grid offers it only while `complete` is false.
+     */
+    loadAll?: () => void;
+    /** A `loadAll` is running — the grid shows it and offers to stop. */
+    loadingAll?: boolean;
+    /** Stop a running `loadAll`; whatever arrived is kept. */
+    stopLoadAll?: () => void;
     /** Rows asked for in one go. */
     chunk?: number;
     /** How far beyond the viewport to look for a gap before asking. */
@@ -61,12 +103,18 @@
 </script>
 
 <script lang="ts">
+  import { tooltip } from '$lib/actions/tooltip';
+
   /**
    * DataGrid — virtualised, sortable, filterable tabular viewport.
    *
-   * Rows are fixed-height boxes inside a translateY window over a full-height
-   * spacer, so only the visible slice (± overscan) is ever in the DOM: a result
-   * set of 100k rows scrolls as smoothly as one of ten.
+   * Virtualised in **both** axes, because a SQL result is large in both. Rows are
+   * fixed-height boxes inside a translateY window over a full-height spacer, so only
+   * the visible slice (± overscan) is ever in the DOM: 100k rows scroll as smoothly
+   * as ten. Columns are the same idea with a prefix sum instead of arithmetic (each
+   * has its own width) and two empty spacer tracks holding the width of what is not
+   * drawn — a 250-column `SELECT *` across a join costs the fifteen columns you can
+   * see, not ten thousand cells per paint.
    *
    * Two rendering rules it exists to get right once, everywhere:
    *  • **NULL is not the empty string.** A null cell reads `NULL` in muted
@@ -93,7 +141,10 @@
    * Keyboard: ↑/↓ move the selected row, PageUp/PageDown jump a viewport,
    * Home/End go to the ends, Enter fires `onActivate`. Column headers are
    * buttons — sorting never needs the mouse. Per-column filters live in an
-   * optional second header row enabled with `filterable`. End on a windowed
+   * optional second header row enabled with `filterable`: a text box, and a
+   * picker listing the values the column actually holds with their row counts
+   * (`DataGridFilterCell`), so narrowing a result never requires knowing in
+   * advance what is in it. End on a windowed
    * source jumps to the last row of the RESULT and pulls the tail in, so reaching
    * the far end never needs the scrollbar.
    *
@@ -101,7 +152,13 @@
    * shared/internal — generic props + snippets only.
    */
   import { untrack } from 'svelte';
+  import { ArrowDownToLine, Square } from 'lucide-svelte';
   import DataCellValue from './DataCellValue.svelte';
+  import DataGridFilterCell from './DataGridFilterCell.svelte';
+  import {
+    distinctValues, isActiveFilter, valuePasses,
+    type ColumnFilter, type DistinctSet,
+  } from './data-grid-filter';
 
   interface Props {
     columns: DataGridColumn[];
@@ -181,38 +238,101 @@
    */
   const windowed = $derived(!!source && !source.complete);
 
+  /**
+   * `partialNotice`, plus the way out when there is one.
+   *
+   * The notice states a fact and used to stop there, which left the reader with
+   * "these come back once all of it is loaded" and no way to load all of it short
+   * of dragging the scrollbar to the end. Where the button exists it is named; where
+   * it does not — a result too large to hold whole — the fact stands alone, which is
+   * the honest version.
+   */
+  const filterNotice = $derived(
+    source?.loadAll
+      ? `${partialNotice} Load all of it with the button at the head of this row.`
+      : partialNotice,
+  );
+
+  // ── Column identity ───────────────────────────────────────────────────────
+  //
+  // **A column is its position, never its `id`.** The grid is positional by
+  // construction — `rows` is row-major and aligned with `columns` — and `id` is a
+  // name a consumer chose, which for a SQL result is the column name and therefore
+  // NOT unique: `SELECT *` across a join of two legacy tables returns `TIPLAV`
+  // twice, and one real result did so at positions 150 and 246 out of 247.
+  //
+  // That was fatal rather than cosmetic. Keying the header's `{#each}` by `id`
+  // threw `each_key_duplicate` mid-render, which takes the whole panel — and with
+  // it the tab — down; the query had run and its rows were in memory, and what the
+  // user saw was a studio that had stopped answering. The quieter half was already
+  // wrong too: sorting or filtering the second `TIPLAV` resolved through
+  // `findIndex` and silently acted on the first.
+  //
+  // So sort, filters and widths are all keyed by index below, and `id` goes back to
+  // being what the type says it is: a label a consumer reads in the `cell` snippet.
+  /**
+   * The column set as one value.
+   *
+   * Sorting by column 3 of the previous result, or a width dragged for a column
+   * that is no longer there, are not opinions to carry over — but re-running the
+   * SAME query must not throw away the widths somebody just dragged. Comparing the
+   * shape tells the two apart.
+   */
+  const columnSignature = $derived(
+    JSON.stringify(columns.map((c) => [c.id, c.label])),
+  );
+
   // ── Sorting ───────────────────────────────────────────────────────────────
-  let sortColumn = $state<string | null>(null);
+  let sortColumn = $state<number | null>(null);
   let sortDir = $state<SortDirection>('asc');
 
-  function cycleSort(id: string) {
-    if (sortColumn !== id) { sortColumn = id; sortDir = 'asc'; return; }
+  function cycleSort(index: number) {
+    if (sortColumn !== index) { sortColumn = index; sortDir = 'asc'; return; }
     if (sortDir === 'asc') { sortDir = 'desc'; return; }
     sortColumn = null;
   }
 
   // ── Filtering ─────────────────────────────────────────────────────────────
-  let filters = $state<Record<string, string>>({});
+  /** One filter per column, by index. Sparse: an unfiltered column has no entry. */
+  let filters = $state<Record<number, ColumnFilter>>({});
+
+  /** Set or clear one column's filter, leaving the others alone. */
+  function setFilter(ci: number, next: ColumnFilter | undefined) {
+    const copy = { ...filters };
+    if (next) copy[ci] = next;
+    else delete copy[ci];
+    filters = copy;
+  }
 
   // ── Column widths ─────────────────────────────────────────────────────────
   // Seeded from the column definitions; the user's drags win afterwards.
-  let widths = $state<Record<string, number>>({});
-  const widthFor = (c: DataGridColumn) => widths[c.id] ?? c.width ?? 160;
+  let widths = $state<Record<number, number>>({});
+  const widthFor = (c: DataGridColumn, index: number) => widths[index] ?? c.width ?? 160;
+
+  // A different column set starts clean — see `columnSignature`.
+  $effect(() => {
+    void columnSignature;
+    untrack(() => {
+      sortColumn = null;
+      filters = {};
+      widths = {};
+    });
+  });
 
   // WebView2 drops native HTML5 drag events, so the resize handle runs on plain
   // pointer events (the same choice the shared tab strip makes).
-  let dragging: { id: string; startX: number; startW: number } | null = null;
+  let dragging: { index: number; startX: number; startW: number } | null = null;
 
-  function startResize(e: PointerEvent, c: DataGridColumn) {
+  function startResize(e: PointerEvent, c: DataGridColumn, index: number) {
     e.preventDefault();
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    dragging = { id: c.id, startX: e.clientX, startW: widthFor(c) };
+    dragging = { index, startX: e.clientX, startW: widthFor(c, index) };
   }
   function moveResize(e: PointerEvent) {
     if (!dragging) return;
     const next = Math.max(56, dragging.startW + (e.clientX - dragging.startX));
-    widths = { ...widths, [dragging.id]: next };
+    widths = { ...widths, [dragging.index]: next };
   }
   function endResize(e: PointerEvent) {
     if (!dragging) return;
@@ -237,22 +357,45 @@
   /** Rows carry their original index so selection survives sorting/filtering. */
   const indexed = $derived(baseRows.map((r, i) => ({ row: r, index: i })));
 
+  /** The filters that would actually exclude something, paired with their column. */
+  const activeFilters = $derived(
+    Object.entries(filters)
+      .map(([index, f]) => [Number(index), f] as const)
+      .filter(([ci, f]) => ci < columns.length && isActiveFilter(f)),
+  );
+
   const filtered = $derived.by(() => {
-    const active = Object.entries(filters).filter(([, v]) => v.trim() !== '');
-    if (!active.length) return indexed;
+    if (!activeFilters.length) return indexed;
     return indexed.filter(({ row }) =>
-      active.every(([colId, needle]) => {
-        const ci = columns.findIndex((c) => c.id === colId);
-        if (ci < 0) return true;
-        return String(row[ci] ?? '').toLowerCase().includes(needle.trim().toLowerCase());
-      }),
+      activeFilters.every(([ci, f]) => valuePasses(row[ci], f)),
     );
   });
 
+  /**
+   * The values in one column, for its picker — over the rows that pass every
+   * **other** column's filter.
+   *
+   * Excluding this column's own filter is what makes a second visit to the picker
+   * useful: a list narrowed by what you already picked from it would only ever
+   * show you your own selection back. Excluding the *others* is what makes the
+   * first pick useful — after choosing a region, the list of provinces should be
+   * that region's provinces and not the country's.
+   *
+   * Called on demand, when a picker opens, and never as part of a render.
+   */
+  function distinctFor(ci: number): DistinctSet {
+    const others = activeFilters.filter(([i]) => i !== ci);
+    const scope = others.length
+      ? baseRows.filter((row) => others.every(([i, f]) => valuePasses(row[i], f)))
+      : baseRows;
+    return distinctValues(scope, ci);
+  }
+
   const view = $derived.by(() => {
-    if (!sortColumn) return filtered;
-    const ci = columns.findIndex((c) => c.id === sortColumn);
-    if (ci < 0) return filtered;
+    // `0` is a column, so the null check is explicit rather than falsy.
+    if (sortColumn === null) return filtered;
+    const ci = sortColumn;
+    if (ci < 0 || ci >= columns.length) return filtered;
     const numeric = columns[ci]?.type === 'number';
     const factor = sortDir === 'asc' ? 1 : -1;
     return [...filtered].sort((a, b) => {
@@ -286,6 +429,7 @@
    */
   let scrollLeft = $state(0);
   let viewH = $state(0);
+  let viewW = $state(0);
 
   /** Rows the scrollbar spans: the result's length, not what is in memory. */
   const viewLength = $derived(windowed ? (source?.total ?? 0) : view.length);
@@ -394,9 +538,101 @@
     e.preventDefault();
   }
 
-  const gridTemplate = $derived(
-    (showRowNumbers ? '52px ' : '') + columns.map((c) => `${widthFor(c)}px`).join(' '),
+  // ── Column virtualisation ─────────────────────────────────────────────────
+  //
+  // The same idea as the rows, in the other axis, and it became load-bearing for the
+  // same reason: a legacy `SELECT *` across a join is 250 columns wide, and drawing
+  // every one of them for every visible row is ~10 000 cells per paint — for a
+  // viewport that shows about fifteen of them. Scrolling such a result was slow in a
+  // way that had nothing to do with how much data had arrived.
+  //
+  // The mechanics differ from the vertical case in one respect: rows are a uniform
+  // `rowHeight`, so their window is arithmetic, while columns each have their own
+  // width. So the offsets are a prefix sum, and the window is found by walking it.
+  //
+  // What holds the layout together is that the header, the filter row and every body
+  // row take the SAME template and the SAME slice — a lead track for everything
+  // scrolled past, the visible columns, then a trailing track for the rest. The two
+  // spacer tracks keep the total width (and therefore the horizontal scrollbar, and
+  // therefore `min-width: max-content`) exactly what it was when every column was
+  // drawn.
+
+  /** The pinned row-number track, which is not one of `columns`. */
+  const gutterW = $derived(showRowNumbers ? 52 : 0);
+
+  /** Where each column starts, in column space (the gutter excluded); `[n]` is the total. */
+  const colOffsets = $derived.by(() => {
+    const out = new Array<number>(columns.length + 1);
+    let x = 0;
+    for (let i = 0; i < columns.length; i += 1) {
+      out[i] = x;
+      x += widthFor(columns[i], i);
+    }
+    out[columns.length] = x;
+    return out;
+  });
+
+  /**
+   * How much beyond each edge of the viewport is drawn anyway.
+   *
+   * In pixels rather than in columns because a column's width is the user's to drag:
+   * "two columns" is 90px of overscan on one result and 900 on another. This is the
+   * budget that keeps a fling from showing a blank band before the next paint.
+   */
+  const COLUMN_OVERSCAN_PX = 400;
+
+  /** `[first, last)` — the columns worth drawing at this scroll position. */
+  const colWindow = $derived.by(() => {
+    const n = columns.length;
+    if (!n) return { first: 0, last: 0 };
+    const offsets = colOffsets;
+    // Before the first layout there is no width to measure against, and rendering
+    // nothing would flash an empty grid; a generous guess is corrected on the next
+    // frame, which is what the row window does with `viewH` too.
+    const usable = (viewW > 0 ? viewW : 1200) + COLUMN_OVERSCAN_PX * 2;
+    const from = scrollLeft - gutterW - COLUMN_OVERSCAN_PX;
+    const to = from + usable;
+    let first = 0;
+    while (first < n - 1 && offsets[first + 1] <= from) first += 1;
+    let last = first + 1;
+    while (last < n && offsets[last] < to) last += 1;
+    return { first, last };
+  });
+
+  /** The columns actually rendered, paired with their real index in `columns`. */
+  const visibleColumns = $derived(
+    columns.slice(colWindow.first, colWindow.last)
+      .map((col, i) => ({ col, index: colWindow.first + i })),
   );
+
+  /** Width of everything scrolled past, and of everything still to come. */
+  const leadW = $derived(colOffsets[colWindow.first] ?? 0);
+  const trailW = $derived(
+    Math.max(0, (colOffsets[columns.length] ?? 0) - (colOffsets[colWindow.last] ?? 0)),
+  );
+
+  const gridTemplate = $derived(
+    (showRowNumbers ? '52px ' : '')
+      + `${leadW}px `
+      + visibleColumns.map(({ col, index }) => `${widthFor(col, index)}px`).join(' ')
+      + ` ${trailW}px`,
+  );
+
+  /** 1-based, and the row-number gutter counts as a column when it is shown. */
+  const ariaColCount = $derived(columns.length + (showRowNumbers ? 1 : 0));
+  const ariaColIndex = (index: number) => index + 1 + (showRowNumbers ? 1 : 0);
+
+  /**
+   * Which rows carry the faint band — see `.dg-alt`.
+   *
+   * Takes the **display position** (`start + i`), never the row's own index. Two
+   * reasons, and both of them are bugs if you get it wrong: with the rows
+   * virtualised, the position within the rendered slice would make the banding
+   * crawl as you scroll; and after a sort or a filter the original indices are no
+   * longer consecutive, so striping by them produces runs of two and three rows of
+   * the same tint — a pattern that looks like it means something and does not.
+   */
+  const striped = (displayIndex: number) => displayIndex % 2 === 1;
 </script>
 
 <div class="dg {klass}">
@@ -420,19 +656,46 @@
         style:transform={`translateX(${scrollLeft}px)`}
       ></div>
     {/if}
-    {#each columns as col (col.id)}
-      <div class="dg-th" class:dg-num={col.type === 'number'}>
+    <!-- The columns scrolled past, as one empty track. An item auto-places into the
+         first free track, so the spacer has to exist as an element or the first real
+         header would land in it. -->
+    <div class="dg-pad" aria-hidden="true"></div>
+    <!-- Unkeyed on purpose: a column IS its position here (see `columnSignature`),
+         and `col.id` is a consumer's name for it — a SQL result can carry the same
+         one twice, which as a key is a fatal `each_key_duplicate`. -->
+    {#each visibleColumns as { col, index: ci }}
+      <!-- No `role="columnheader"`: the header is a SIBLING of the scrolling body
+           (see `scrollLeft`), so it is not inside the `role="grid"` and a header role
+           out there would describe a table that does not exist. The body's cells
+           carry `aria-colindex` instead, which is what virtualisation actually
+           requires — only a slice of them is in the DOM. -->
+      <div
+        class="dg-th"
+        class:dg-num={col.type === 'number'}
+        class:dg-muted={col.muted}
+        class:dg-accented={!!col.accent}
+        class:dg-provisional={!!col.accent && col.accentProvisional}
+        style:--dg-accent={col.accent}
+        use:tooltip={col.title ?? (windowed ? partialNotice : undefined)}
+      >
         {#if sortable}
+          <!-- One tooltip, on the cell, covering the whole header including the
+               label and the resize handle. The button used to carry a duplicate: a
+               *native* `title` on a child shadows an ancestor's, so with `title=`
+               the cell's never appeared over the label. An action does not shadow —
+               it fires — so keeping both would now mean two tooltips racing over one
+               header. And the cell is the better host anyway: it is still live when
+               the button goes `disabled`, which is exactly when `partialNotice` has
+               something to explain. -->
           <button
             type="button"
             class="dg-sort"
             disabled={windowed}
-            title={windowed ? partialNotice : undefined}
-            onclick={() => cycleSort(col.id)}
+            onclick={() => cycleSort(ci)}
             aria-label={`Sort by ${col.label}`}
           >
             <span class="dg-th-label">{col.label}</span>
-            {#if sortColumn === col.id && !windowed}
+            {#if sortColumn === ci && !windowed}
               <span class="dg-sort-mark" aria-hidden="true">{sortDir === 'asc' ? '▲' : '▼'}</span>
             {/if}
           </button>
@@ -446,13 +709,16 @@
             role="separator"
             aria-orientation="vertical"
             aria-label={`Resize ${col.label}`}
-            onpointerdown={(e) => startResize(e, col)}
+            onpointerdown={(e) => startResize(e, col, ci)}
             onpointermove={moveResize}
             onpointerup={endResize}
           ></span>
         {/if}
       </div>
     {/each}
+    <!-- …and the columns not reached yet, so the row keeps its full width and the
+         horizontal scrollbar spans the whole result rather than the visible slice. -->
+    <div class="dg-pad" aria-hidden="true"></div>
   </div>
 
   {#if filterable}
@@ -461,28 +727,55 @@
       style:grid-template-columns={gridTemplate}
       style:transform={`translateX(${-scrollLeft}px)`}
     >
-      <!-- Held still over the pinned gutter, like the header cell above it. -->
+      <!-- Held still over the pinned gutter, like the header cell above it.
+           It is also where the way OUT of the partial state lives: the filter row
+           is where a reader finds out the controls are unavailable, so it is where
+           the button that makes them available belongs. Telling someone sorting
+           comes back "once all of it is loaded" and leaving them to drag the
+           scrollbar there is not an answer. -->
       {#if showRowNumbers}
         <div
           class="dg-filter-cell dg-gutter-filter"
-          aria-hidden="true"
           style:transform={`translateX(${scrollLeft}px)`}
-        ></div>
+        >
+          {#if windowed && source?.loadAll}
+            <button
+              type="button"
+              class="dg-loadall"
+              class:dg-loading={!!source.loadingAll}
+              aria-label={source.loadingAll ? 'Stop loading the rest' : 'Load every row'}
+              use:tooltip={source.loadingAll
+                ? 'Loading the rest of the result — click to stop. What has arrived is kept.'
+                : 'Load the whole result, so sorting and filtering come back'}
+              onclick={() => (source?.loadingAll ? source?.stopLoadAll?.() : source?.loadAll?.())}
+            >
+              {#if source.loadingAll}
+                <Square size={9} />
+              {:else}
+                <ArrowDownToLine size={12} />
+              {/if}
+            </button>
+          {/if}
+        </div>
       {/if}
-      {#each columns as col (col.id)}
-        <div class="dg-filter-cell">
-          <input
-            class="dg-filter"
-            type="text"
-            placeholder={windowed ? 'partial' : 'filter'}
-            aria-label={`Filter ${col.label}`}
+      <div class="dg-pad" aria-hidden="true"></div>
+      {#each visibleColumns as { col, index: ci }}
+        <!-- The reason sits on the CELL, not on the controls inside it, and that is
+             the whole point of it being here: they are `disabled` in exactly the case
+             the tooltip explains, and a disabled control fires no pointer events — so
+             a tooltip attached to one would be silent precisely when it has something
+             to say. The wrapper is always live. -->
+        <div class="dg-filter-cell" use:tooltip={windowed ? filterNotice : undefined}>
+          <DataGridFilterCell
+            label={col.label}
+            filter={filters[ci]}
             disabled={windowed}
-            title={windowed ? partialNotice : undefined}
-            value={filters[col.id] ?? ''}
-            oninput={(e) => (filters = { ...filters, [col.id]: e.currentTarget.value })}
+            distinct={() => distinctFor(ci)}
+            onChange={(next) => setFilter(ci, next)}
           />
         </div>
       {/each}
+      <div class="dg-pad" aria-hidden="true"></div>
     </div>
   {/if}
 
@@ -491,15 +784,30 @@
     bind:this={scrollEl}
     onscroll={onScroll}
     bind:clientHeight={viewH}
+    bind:clientWidth={viewW}
     onkeydown={onKeyDown}
     role="grid"
     aria-label={ariaLabel}
     aria-rowcount={viewLength}
+    aria-colcount={ariaColCount}
     tabindex="0"
   >
     {#if !viewLength}
       <div class="dg-empty">
-        {#if empty}{@render empty()}{:else}<span>{emptyMessage}</span>{/if}
+        <!-- A grid narrowed to nothing is not an empty grid, and saying "No rows"
+             for both is how a filter gets left on: the result looks like it came
+             back empty, and the thing that emptied it is a box two rows up that
+             nobody is looking at. It says which state this is, and undoes it. -->
+        {#if activeFilters.length && baseRows.length}
+          <span>
+            No row matches the {activeFilters.length === 1
+              ? 'filter'
+              : `${activeFilters.length} filters`} on this result.
+          </span>
+          <button type="button" class="dg-unfilter" onclick={() => (filters = {})}>
+            Clear {activeFilters.length === 1 ? 'it' : 'them'}
+          </button>
+        {:else if empty}{@render empty()}{:else}<span>{emptyMessage}</span>{/if}
       </div>
     {:else}
       <div class="dg-spacer" style:height={`${totalH}px`}>
@@ -507,6 +815,7 @@
           {#each slice as entry, i (entry.index)}
             <div
               class="dg-row"
+              class:dg-alt={striped(start + i)}
               class:dg-selected={selectedRow === entry.index}
               class:dg-row-pending={entry.row === undefined}
               style:grid-template-columns={gridTemplate}
@@ -522,13 +831,20 @@
               {#if showRowNumbers}
                 <!-- The ordinal is known before the row is: that is the point of
                      scaling the scrollbar to the total. -->
-                <span class="dg-cell dg-gutter" role="gridcell">{entry.index + 1}</span>
+                <span class="dg-cell dg-gutter" role="gridcell" aria-colindex={1}>{entry.index + 1}</span>
               {/if}
-              {#each columns as col, ci (col.id)}
+              <span class="dg-pad" role="presentation"></span>
+              {#each visibleColumns as { col, index: ci }}
                 {#if entry.row === undefined}
                   <!-- A row on its way. A quiet bar, never `NULL`: a value that is
                        absent and a value that has not arrived are different facts. -->
-                  <span class="dg-cell" class:dg-num={col.type === 'number'} role="gridcell">
+                  <span
+                    class="dg-cell"
+                    class:dg-num={col.type === 'number'}
+                   
+                    role="gridcell"
+                    aria-colindex={ariaColIndex(ci)}
+                  >
                     <DataCellValue value={null} loading />
                   </span>
                 {:else}
@@ -536,7 +852,9 @@
                   <span
                     class="dg-cell"
                     class:dg-num={col.type === 'number'}
+                   
                     role="gridcell"
+                    aria-colindex={ariaColIndex(ci)}
                     tabindex={-1}
                     ondblclick={editable ? () => onEditCell?.(entry.index, ci) : undefined}
                     oncontextmenu={onContextMenuCell
@@ -551,6 +869,7 @@
                   </span>
                 {/if}
               {/each}
+              <span class="dg-pad" role="presentation"></span>
             </div>
           {/each}
         </div>
@@ -597,6 +916,17 @@
     flex-shrink: 0;
   }
 
+  /* The two spacer tracks that stand in for the columns outside the viewport.
+     Nothing to draw — no border, no background — so a scrolled grid looks exactly
+     like one that renders every column. `min-width: 0` because a grid item's
+     automatic minimum size would otherwise refuse to shrink a 0px track. */
+  .dg-pad {
+    min-width: 0;
+    border: none;
+    background: none;
+    pointer-events: none;
+  }
+
   .dg-th {
     position: relative;
     display: flex;
@@ -615,6 +945,38 @@
     white-space: nowrap;
   }
   .dg-th.dg-num { justify-content: flex-end; }
+
+  /* The identity bar. Along the bottom edge, inside the cell, so it reads as
+     underlining the label rather than as a border between two rows of chrome — and
+     it stops at the header, which is the whole point (see `DataGridColumn.accent`).
+     `::after` rather than a `border-bottom`: the cell already has a border on its
+     right, and a coloured bottom border would join it at the corner and look like a
+     box being drawn around the column. */
+  .dg-th.dg-accented::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 1px; /* clears the cell's own right border, so bars do not touch */
+    bottom: 0;
+    height: 2px;
+    background: var(--dg-accent, transparent);
+    transition: opacity var(--transition-fast);
+  }
+  /* Inferred rather than known. A repeating gradient rather than a `border-style`,
+     because the bar is a painted box: same geometry, same colour, and the only thing
+     that changes is that it is no longer continuous. */
+  .dg-th.dg-provisional::after {
+    background: repeating-linear-gradient(
+      to right,
+      var(--dg-accent, transparent) 0 5px,
+      transparent 5px 9px
+    );
+  }
+
+  /* Dimmed rather than hidden: a column that vanished from the eye while its data
+     stayed would read as the grid having filtered itself. */
+  .dg-th.dg-muted { color: var(--text-disabled); }
+  .dg-th.dg-muted::after { opacity: 0.25; }
   /* Stacked above the scrolling labels, and opaque, so they pass underneath it
      rather than through it while it holds its place. */
   .dg-gutter-th {
@@ -677,7 +1039,27 @@
     position: relative;
     z-index: 1;
     background: var(--bg-elevated);
+    justify-content: center;
   }
+  /* Accent, not neutral: while a result is partial this is the only thing on the
+     row that can be pressed, and everything beside it is deliberately greyed. */
+  .dg-loadall {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 20px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .dg-loadall:hover { background: var(--accent-subtle); }
+  .dg-loadall.dg-loading { color: var(--error); }
+  .dg-loadall.dg-loading:hover { background: var(--error-subtle); }
   .dg-filter-cell {
     display: flex;
     align-items: center;
@@ -685,22 +1067,9 @@
     border-right: 1px solid var(--border-subtle);
     min-width: 0;
   }
-  .dg-filter {
-    width: 100%;
-    min-width: 0;
-    height: 20px;
-    padding: 0 6px;
-    background: var(--bg-input);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    color: var(--text-primary);
-    font-family: var(--font-code);
-    font-size: var(--font-size-2xs);
-    outline: none;
-  }
-  .dg-filter:focus { border-color: var(--border-focus); }
-  .dg-filter::placeholder { color: var(--text-disabled); font-style: italic; }
-  .dg-filter:disabled { opacity: 0.5; cursor: default; }
+  /* The box, the value picker and the clear button live in `DataGridFilterCell`,
+     which is where a column filter's whole behaviour is now defined. What stays
+     here is the cell that positions it in the grid. */
 
   /* ── Body ───────────────────────────────────────────────────────────────── */
   .dg-body {
@@ -716,17 +1085,51 @@
   .dg-window { position: absolute; top: 0; left: 0; right: 0; will-change: transform; }
 
   .dg-row { cursor: default; }
-  .dg-row:hover { background: var(--bg-hover); }
-  .dg-row.dg-selected { background: var(--bg-selected); }
-  /* No hover affordance on a row there is nothing to interact with yet. */
+
+  /* ── The row band ───────────────────────────────────────────────────────────
+     Every other row carries a faint wash. On a result wider than the window this is
+     the only thing tying a value 200 columns along back to the row number it
+     belongs to: the eye rides an uninterrupted horizontal bar instead of counting
+     cells.
+
+     Three decisions behind one declaration:
+
+     • **Rows, not columns, and not both.** Banding the columns as well makes a
+       checkerboard — and worse than noisy, it is antagonistic: the row bar works
+       precisely because it is uninterrupted, and a column band crossing every other
+       cell chops it into segments. The horizontal axis is the one that needs help
+       here; the vertical one is served by the header staying put.
+
+     • **Mixed from `--text-primary`, not a hard-coded white.** Themes here are
+       user-supplied JSON, so a fixed white overlay is invisible on a light theme
+       and wrong on a tinted one. Mixing the foreground gives a wash that always
+       contrasts with its own background, in any theme, and needs no new token.
+       `--grid-row-stripe` is honoured first for a theme that wants to tune it — or
+       set it to `transparent` and turn the banding off.
+
+     • **It loses to everything.** The three row backgrounds are a strict order —
+       stripe < hover < selection — and the rules below are written in it, so the
+       later one wins wherever specificity ties. Keep them adjacent and in this
+       order; the `:hover` twin on the selection rule is what stops the (more
+       specific) hover rule from greying out a row you have selected. */
+  .dg-row.dg-alt {
+    background: var(--grid-row-stripe, color-mix(in srgb, var(--text-primary) 3%, transparent));
+  }
+  /* Hover outranks the stripe — and a row whose values have not arrived has nothing
+     to hover, so it is excluded here rather than reset afterwards. */
+  .dg-row:not(.dg-row-pending):hover { background: var(--bg-hover); }
+  /* Selection outranks both, hovered or not. */
+  .dg-row.dg-selected,
+  .dg-row.dg-selected:hover { background: var(--bg-selected); }
+  /* Nothing to interact with yet. */
   .dg-row-pending { cursor: progress; }
-  .dg-row-pending:hover { background: none; }
 
   /* Vertical separators only.
      A `border-bottom` on every cell as well draws the full 1990s spreadsheet grid:
      a mesh of lines with the data trapped in it, where the loudest thing on screen
-     is the furniture. Rows are told apart by the hover and the selection — which is
-     how IntelliJ's own data grid does it, and the layout target for this window. */
+     is the furniture. Rows are told apart by the band, the hover and the selection —
+     which is how IntelliJ's own data grid does it, and the layout target for this
+     window. */
   .dg-cell {
     display: flex;
     align-items: center;
@@ -766,10 +1169,20 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 8px;
     height: 100%;
     min-height: 80px;
     color: var(--text-muted);
     font-family: var(--font-ui-sans);
     font-size: var(--font-size-sm);
   }
+  .dg-unfilter {
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+  }
+  .dg-unfilter:hover { text-decoration: underline; }
 </style>

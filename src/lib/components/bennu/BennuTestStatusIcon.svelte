@@ -14,6 +14,7 @@
   import { Circle, CircleCheck, CircleMinus, CircleX, TriangleAlert } from 'lucide-svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import type { RowStatus } from '$lib/stores/bennu/tests.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   let { status, size = 13 }: { status: RowStatus; size?: number } = $props();
 
@@ -30,9 +31,9 @@
 
 {#if mark}
   {@const Ic = mark.icon}
-  <span class="tsi tsi-{status}" aria-label={mark.label} title={mark.label}><Ic {size} /></span>
+  <span class="tsi tsi-{status}" aria-label={mark.label} use:tooltip={mark.label}><Ic {size} /></span>
 {:else}
-  <span class="tsi tsi-running" aria-label="Running" title="Running"><Spinner size={size} /></span>
+  <span class="tsi tsi-running" aria-label="Running" use:tooltip={'Running'}><Spinner size={size} /></span>
 {/if}
 
 <style>

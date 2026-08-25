@@ -518,7 +518,7 @@
                     onclick={() => (selectedId = cfg.id)}
                     ondblclick={runSelected}
                     oncontextmenu={(e) => openRowMenu(e, cfg)}
-                    title={cfg.id === activeId ? 'Active configuration' : ''}
+                    use:tooltip={cfg.id === activeId ? 'Active configuration' : ''}
                   >
                     <span class="cfg-mark" class:active={cfg.id === activeId}>
                       {#if cfg.id === activeId}
@@ -532,7 +532,7 @@
                          "Application" are otherwise indistinguishable in this list. -->
                     {#if isMultiModule}
                       {@const mod = cfg.kind === 'junit' ? (cfg.testScope === 'module' ? cfg.testTarget : '') : cfg.module}
-                      {#if mod}<span class="cfg-mod" title={mod}>{mod}</span>{/if}
+                      {#if mod}<span class="cfg-mod" use:tooltip={mod}>{mod}</span>{/if}
                     {/if}
                     {#if cfg.id === activeId}<span class="cfg-badge">active</span>{/if}
                   </button>

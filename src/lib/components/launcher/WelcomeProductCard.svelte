@@ -8,6 +8,7 @@
    * accent is the product's own, used only on the tile, the running edge and
    * the action, so five cards read as a family.
    */
+  import { RotateCcw } from 'lucide-svelte';
   import ProductIcon from '$lib/components/shared/internal/ProductIcon.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
@@ -17,9 +18,20 @@
   interface Props {
     tool: DecoratedTool;
     onlaunch: () => void;
-    onstop: () => void;
+    /** Both may be async — the card disables its actions until they settle. */
+    onstop: () => void | Promise<void>;
+    onrestart: () => void | Promise<void>;
   }
-  let { tool, onlaunch, onstop }: Props = $props();
+  let { tool, onlaunch, onstop, onrestart }: Props = $props();
+
+  /** True from the click until the shell reports the product down and back up. Both buttons are
+   *  disabled meanwhile: a second Stop mid-restart would fight the launch it is waiting for. */
+  let busy = $state(false);
+  async function run(action: () => void | Promise<void>) {
+    if (busy) return;
+    busy = true;
+    try { await action(); } finally { busy = false; }
+  }
 
   // `verMenu` entries are `{ v, active }`, not bare strings — the version string
   // is `v`, and mapping the whole record in gave the Select an object where it
@@ -66,13 +78,24 @@
   </div>
 
   <!-- Real buttons, not full-width hairlines: the action keeps a comfortable
-       size and sits left, with Stop beside it in the danger colour. -->
+       size and sits left, with Restart and Stop beside it — the one that ends
+       the product last, and in the danger colour. -->
   <div class="pc-actions">
     <Button variant="tonal" color={tool.accent} size="md" onclick={onlaunch}>
       {tool.actionLabel}
     </Button>
     {#if tool.isRunning}
-      <Button variant="danger" size="md" onclick={onstop}>Stop</Button>
+      <Button
+        variant="outline"
+        size="md"
+        disabled={busy}
+        tooltip={{ content: 'Close it and start it again — picks up a rebuilt backend' }}
+        onclick={() => void run(onrestart)}
+      >
+        {#snippet iconStart()}<RotateCcw size={14} />{/snippet}
+        Restart
+      </Button>
+      <Button variant="danger" size="md" disabled={busy} onclick={() => void run(onstop)}>Stop</Button>
     {/if}
   </div>
 </article>
@@ -133,7 +156,7 @@
     color: var(--text-muted);
   }
 
-  .pc-actions { display: flex; align-items: center; gap: 8px; }
+  .pc-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   /* Give the primary action presence without stretching it across the card. */
   .pc-actions :global(.btn-tonal) { min-width: 108px; justify-content: center; }
 </style>

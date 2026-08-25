@@ -180,7 +180,7 @@
   .br-old { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: right; }
   .br-arrow { color: var(--text-disabled); flex-shrink: 0; display: inline-flex; }
   .br-new { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-  .br-new-bad { color: var(--danger); display: inline-flex; align-items: center; gap: 4px; }
+  .br-new-bad { color: var(--error); display: inline-flex; align-items: center; gap: 4px; }
   .br-foot { font-size: var(--font-size-xs); color: var(--text-muted); }
   .br-foot-btns { display: flex; gap: 8px; }
 </style>

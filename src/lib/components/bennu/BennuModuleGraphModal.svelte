@@ -53,8 +53,9 @@
   import { onMount, tick } from 'svelte';
   import {
     ArrowLeft, ArrowLeftRight, ArrowRight, BookOpen, Braces, Crosshair, Download, FileText,
-    FlaskConical, Maximize, Minus, Network, Plus, Sheet, TriangleAlert,
+    FlaskConical, Network, Sheet, TriangleAlert,
   } from 'lucide-svelte';
+  import ZoomControls, { clampZoom } from '$lib/components/shared/ui/ZoomControls.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
@@ -461,7 +462,7 @@
         {zoom}
         onSelect={(i) => (selected = i)}
         onOpen={(i) => void openManifest(i)}
-        onZoom={(by) => (zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, +(zoom + by).toFixed(2))))}
+        onZoom={(by) => (zoom = clampZoom(zoom, by, { min: ZOOM_MIN, max: ZOOM_MAX }))}
       />
 
       {#if legendOpen}
@@ -537,21 +538,16 @@
             ><ArrowLeft size={11} /></button>
           </span>
         {/if}
-        <span class="mg-zoom">
-          <button type="button" aria-label="Zoom out" use:tooltip={'Zoom out'}
-            onclick={() => (zoom = Math.max(ZOOM_MIN, +(zoom - ZOOM_STEP).toFixed(2)))}>
-            <Minus size={12} />
-          </button>
-          <button type="button" class="mg-zoom-level" use:tooltip={'Reset to 100%'}
-            onclick={() => (zoom = 1)}>{Math.round(zoom * 100)}%</button>
-          <button type="button" aria-label="Zoom in" use:tooltip={'Zoom in'}
-            onclick={() => (zoom = Math.min(ZOOM_MAX, +(zoom + ZOOM_STEP).toFixed(2)))}>
-            <Plus size={12} />
-          </button>
-          <button type="button" aria-label="Fit" use:tooltip={'Fit the whole graph'} onclick={fit}>
-            <Maximize size={11} />
-          </button>
-        </span>
+        <ZoomControls
+          value={zoom}
+          min={ZOOM_MIN}
+          max={ZOOM_MAX}
+          step={ZOOM_STEP}
+          onFit={fit}
+          fitLabel="Fit the whole graph"
+          ariaLabel="Zoom the module graph"
+          onChange={(next) => (zoom = next)}
+        />
       {/if}
       <!-- The other window about dependencies — the flat, per-module list with versions and their
            origins. Closes this one on the way: leaving a panel open behind a modal is not an action a
@@ -647,19 +643,4 @@
   .mg-seg button:hover { background: var(--bg-hover); color: var(--text-primary); }
   .mg-seg button.on { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
 
-  .mg-zoom {
-    display: inline-flex; align-items: center;
-    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
-    overflow: hidden;
-  }
-  .mg-zoom button {
-    display: inline-flex; align-items: center; justify-content: center;
-    height: 20px; padding: 0 5px;
-    background: none; border: none; color: var(--text-muted); cursor: pointer;
-  }
-  .mg-zoom button:hover { background: var(--bg-hover); color: var(--text-primary); }
-  .mg-zoom-level {
-    min-width: 40px;
-    font-family: var(--font-code); font-size: var(--font-size-3xs);
-  }
 </style>

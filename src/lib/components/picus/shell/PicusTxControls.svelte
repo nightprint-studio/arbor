@@ -41,9 +41,23 @@
     dialect: Dialect | undefined;
     /** A statement is in flight on this tab. Its falling edge re-reads the state. */
     busy?: boolean;
+    /** Whether the connection has a session. Everything here is a statement sent on
+     *  one, so with no session there is nothing any of these buttons can do. */
+    sessionOpen?: boolean;
   }
 
-  let { connectionId, dialect, busy = false }: Props = $props();
+  let { connectionId, dialect, busy = false, sessionOpen = true }: Props = $props();
+
+  /**
+   * Why none of this can be pressed, or `''` when it can.
+   *
+   * `BEGIN`, `COMMIT` and `ROLLBACK` are statements like any other: they need an open
+   * session. Offering them on a closed connection is offering a round trip whose only
+   * possible outcome is the backend's refusal — and the state this cluster draws is
+   * the *server's*, so on a connection that stopped answering the band itself may be
+   * the last thing it said rather than what is true now.
+   */
+  const blocked = $derived(sessionOpen ? '' : 'The connection is not open — connect it first.');
 
   const ROLLBACK_ONLY =
     'A statement failed inside this transaction. PostgreSQL accepts nothing further on '
@@ -123,8 +137,8 @@
     <Button
       variant="ghost"
       size="sm"
-      disabled={failed || snapshot.busy}
-      tooltip={failed ? COMMIT_REFUSED : 'Commit — make every statement in this transaction permanent'}
+      disabled={!!blocked || failed || snapshot.busy}
+      tooltip={blocked || (failed ? COMMIT_REFUSED : 'Commit — make every statement in this transaction permanent')}
       ariaLabel="Commit transaction"
       onclick={() => void act('commit')}
     >
@@ -135,8 +149,8 @@
       variant="ghost"
       size="sm"
       color="var(--warning)"
-      disabled={snapshot.busy}
-      tooltip={'Roll back — undo every statement in this transaction'}
+      disabled={!!blocked || snapshot.busy}
+      tooltip={blocked || 'Roll back — undo every statement in this transaction'}
       ariaLabel="Roll back transaction"
       onclick={() => void act('rollback')}
     >
@@ -147,8 +161,8 @@
     <Button
       variant="icon"
       size="sm"
-      disabled={snapshot.busy}
-      tooltip={'Begin a transaction — statements stop taking effect until you commit'}
+      disabled={!!blocked || snapshot.busy}
+      tooltip={blocked || 'Begin a transaction — statements stop taking effect until you commit'}
       ariaLabel="Begin transaction"
       onclick={() => void act('begin')}
     >

@@ -17,6 +17,7 @@
    * and a mask on top of the value must not also re-decide what a null looks like.
    */
   import type { DataGridValue } from './DataGrid.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {
     value: DataGridValue;
@@ -32,7 +33,7 @@
 {:else if value === null || value === undefined}
   <span class="dcv-null">NULL</span>
 {:else if value === ''}
-  <span class="dcv-blank" title="empty string"></span>
+  <span class="dcv-blank" use:tooltip={'empty string'}></span>
 {:else}
   {value}
 {/if}

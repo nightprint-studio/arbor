@@ -42,6 +42,7 @@
   import { dmlStore, presetForRole } from '$lib/stores/picus/dml.svelte';
   import { picusProjectStore, type FolderEntry } from '$lib/stores/picus/project.svelte';
   import { picusUiStore } from '$lib/stores/picus/ui.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
   import {
     declaredEngine,
     engineIsUnsupported,
@@ -150,7 +151,7 @@
         {@const anyWritable = writable || folder.files.some(fileAcceptsGeneration)}
         {#if files.length || !needle}
           <div class="ad-group">
-            <span class="ad-group-name" title={folder.path}>{folder.path}</span>
+            <span class="ad-group-name" use:tooltip={folder.path}>{folder.path}</span>
             <PicusDialectChip
               engine={folderEngine(folder)}
               terse

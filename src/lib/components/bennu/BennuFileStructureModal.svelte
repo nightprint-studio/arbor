@@ -28,6 +28,7 @@
   import { markupOutline, type MarkupNode } from './markup-outline';
   import { lspDocumentSymbols, type LspSymbol } from '$lib/ipc/bennu/lsp';
   import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -272,7 +273,7 @@
             style="height:{ROW_H}px"
             onmousemove={() => (active = gi)}
             onclick={() => pick(row)}
-            title={it.detail ? `${it.kind} · ${it.detail}` : it.kind}
+            use:tooltip={it.detail ? `${it.kind} · ${it.detail}` : it.kind}
           >
             <!-- One rail per level of nesting. The padding alone said how deep a row was and
                  not *what it was under*, which on an outline of forty members is the whole

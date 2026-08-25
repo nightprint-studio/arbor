@@ -34,6 +34,7 @@
 -->
 <script lang="ts">
   import { ChevronDown, ChevronRight, RefreshCw, Trash2 } from 'lucide-svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
@@ -291,7 +292,7 @@
           type="button"
           class="args"
           class:open={argsOpen[key(entry)]}
-          title={argsOpen[key(entry)] ? 'Collapse the arguments' : 'Show the whole call'}
+          use:tooltip={argsOpen[key(entry)] ? 'Collapse the arguments' : 'Show the whole call'}
           onclick={() => (argsOpen[key(entry)] = !argsOpen[key(entry)])}>
           {argsOpen[key(entry)] ? laidOut(entry.arguments) : entry.arguments}
         </button>

@@ -24,6 +24,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { cloudIsCancelled, cloudCancel } from '$lib/ipc/cloud';
   import type { CloudManyFileState, CloudManyAggregate } from '$lib/types/cloud';
+  import { tooltip } from '$lib/actions/tooltip';
 
   type Phase = 'download' | 'merge';
 
@@ -261,7 +262,7 @@
           {#each files as f (f.index)}
             <li class="cdp-file cdp-file-{f.status}">
               <FileText size={11} class="cdp-file-icon" />
-              <span class="cdp-file-name" title={f.basename}>{f.basename}</span>
+              <span class="cdp-file-name" use:tooltip={f.basename}>{f.basename}</span>
               <span class="cdp-file-status">
                 {#if f.status === 'downloading'}
                   <Loader size={10} class="cdp-spin" />

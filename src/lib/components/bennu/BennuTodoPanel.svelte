@@ -111,7 +111,7 @@
         class:off={hiddenKinds.has(k)}
         type="button"
         onclick={() => toggleKind(k)}
-        title={hiddenKinds.has(k) ? `Show ${k}` : `Hide ${k}`}
+        use:tooltip={hiddenKinds.has(k) ? `Show ${k}` : `Hide ${k}`}
       >{k} <span class="chip-n">{countOf(k)}</span></button>
     {/each}
   </div>

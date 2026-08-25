@@ -498,7 +498,7 @@
           </div>
           <div class="ss-preview">
             {#if previewText && current}
-              <div class="ss-pv-head" title={previewOf}>{previewOf}</div>
+              <div class="ss-pv-head" use:tooltip={previewOf}>{previewOf}</div>
               <div class="ss-pv-body">
                 <!-- The matched bytes are marked, not just the line: a structural pattern can
                      match a fragment of a long statement, and banding the whole line would say

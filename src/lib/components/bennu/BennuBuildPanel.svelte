@@ -19,6 +19,7 @@
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore, formatMs } from '$lib/stores/bennu/run.svelte';
   import type { BuildDiagnostic } from '$lib/types/bennu';
+  import { tooltip } from '$lib/actions/tooltip';
 
   const diags = $derived(bennuRunStore.diagnostics);
   const lines = $derived(bennuRunStore.lines);
@@ -155,7 +156,7 @@
         <div class="vslow">
           <div class="vslow-head">Slowest files</div>
           {#each vres.files.slice(0, 5) as f (f.file)}
-            <button class="vslow-row" onclick={() => openFileAt(f.file)} title={f.file}>
+            <button class="vslow-row" onclick={() => openFileAt(f.file)} use:tooltip={f.file}>
               <span class="vslow-name">{baseName(f.file)}</span>
               {#if f.errors || f.warnings}
                 <span class="vslow-diags">{f.errors ? `${f.errors}e` : ''}{f.errors && f.warnings ? ' ' : ''}{f.warnings ? `${f.warnings}w` : ''}</span>
@@ -176,7 +177,7 @@
             class="diag-row"
             onclick={() => openDiagnostic(d)}
             disabled={!d.file}
-            title={d.file ?? ''}
+            use:tooltip={d.file ?? ''}
           >
             <span class="diag-icon sev-{d.severity}"><Ic size={13} /></span>
             <span class="diag-msg">{d.message}</span>

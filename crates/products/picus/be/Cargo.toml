@@ -60,6 +60,9 @@ picus-parse     = { path = "../parse" }
 picus-inventory = { path = "../inventory" }
 picus-analyze   = { path = "../analyze" }
 picus-rewrite   = { path = "../rewrite" }
+# Tracing a result column back through a stack of views to the table behind it.
+# Pure: this crate supplies the catalogue, that one does the walking.
+picus-lineage   = { path = "../lineage" }
 # The encoding context a folder's files are decoded in. Picus supplies the policy
 # (which encoding a folder expects); arbor-fs owns the mechanism.
 arbor-fs   = { path = "../../../foundation/fs" }

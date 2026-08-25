@@ -17,13 +17,17 @@
    * so this renders an indented list and no recursion is needed. A child feeds the
    * node above it, which is the direction the eye reads a plan in.
    */
-  import { Calculator, Gauge, FileText } from 'lucide-svelte';
+  import { Calculator, Gauge } from 'lucide-svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
-  import Button from '$lib/components/shared/ui/Button.svelte';
+  import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { formatElapsed } from '$lib/stores/picus/query.svelte';
   import type { PlanNode, QueryPlan } from '$lib/ipc/picus/plan';
+  import QueryPlanGraph from './QueryPlanGraph.svelte';
+  import {
+    deviation as deviationOf, formatCost as cost, formatRows as rows, MARK_FROM, SERIOUS_FROM,
+  } from './plan-graph';
 
   interface Props {
     plan: QueryPlan;
@@ -33,40 +37,28 @@
 
   let { plan, sql = '' }: Props = $props();
 
-  /** The engine's own text, for the moment somebody wants to paste it somewhere. */
-  let showText = $state(false);
-
   /**
-   * How far the estimate missed, as a signed factor — positive when the planner
-   * expected too few rows.
+   * Which of the three readings is on screen.
    *
-   * Clamped to one on both sides: a zero is a division, and "the planner expected
-   * none and got none" is not a discrepancy.
-   */
-  function deviation(node: PlanNode): number | null {
-    if (!plan.analyzed || node.rows === null || node.actualRows === null) return null;
-    const expected = Math.max(node.rows, 1);
-    const got = Math.max(node.actualRows, 1);
-    return got >= expected ? got / expected : -(expected / got);
-  }
-
-  /**
-   * Only a real discrepancy is marked.
+   * Three views of one plan, and each answers a question the others answer badly.
+   * The **list** reads: every detail line, in execution order, scannable and
+   * copyable. The **diagram** shows the shape — where the rows multiply, which
+   * single node is the cost — which no list can. The **text** is the engine's own
+   * output, for the moment it has to go into a ticket verbatim.
    *
-   * Under a factor of two the planner was right; marking that would put a badge on
-   * every node of every plan, which is the same as marking nothing.
+   * One switch rather than a toggle per view: they are exclusive, and two independent
+   * toggles for three states is a state machine the reader has to work out.
    */
-  const MARK_FROM = 2;
-  /** Where a discrepancy stops being interesting and starts being the answer. */
-  const SERIOUS_FROM = 10;
+  let view = $state<'list' | 'graph' | 'text'>('list');
+  const views: TabItem[] = [
+    { id: 'list', label: 'Steps' },
+    { id: 'graph', label: 'Diagram' },
+    { id: 'text', label: 'Text' },
+  ];
 
-  function rows(n: number | null): string {
-    return n === null ? '—' : Math.round(n).toLocaleString();
-  }
-
-  function cost(n: number | null): string {
-    return n === null ? '—' : n.toFixed(2);
-  }
+  /** The thresholds and the arithmetic are `plan-graph.ts`, so the diagram and this
+   *  list can never disagree about which node was badly estimated. */
+  const deviation = (node: PlanNode) => deviationOf(plan, node);
 </script>
 
 <div class="pl">
@@ -88,15 +80,14 @@
     {#if plan.analyzed && plan.actualMs !== null}
       <span class="pl-total pl-total-actual">actual {formatElapsed(plan.actualMs)}</span>
     {/if}
-    <Button
-      variant="icon"
-      size="xs"
-      tooltip={showText ? 'Back to the plan' : 'The engine’s own text — what you paste into a ticket'}
-      ariaLabel="Toggle the engine's own plan text"
-      onclick={() => (showText = !showText)}
-    >
-      {#snippet iconStart()}<FileText size={13} />{/snippet}
-    </Button>
+    <Tabs
+      items={views}
+      value={view}
+      variant="pill"
+      size="sm"
+      ariaLabel="How to read the plan"
+      onSelect={(id) => (view = id as 'list' | 'graph' | 'text')}
+    />
     <CopyButton
       value={plan.text}
       title="Copy the plan as the engine printed it"
@@ -111,8 +102,10 @@
     <div class="pl-sql" use:tooltip={sql}><code>{sql}</code></div>
   {/if}
 
-  {#if showText}
+  {#if view === 'text'}
     <pre class="pl-text">{plan.text}</pre>
+  {:else if view === 'graph'}
+    <QueryPlanGraph {plan} />
   {:else}
     <ul class="pl-nodes">
       {#each plan.nodes as node, i (i)}

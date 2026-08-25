@@ -139,7 +139,7 @@
       role="option"
       aria-selected={r.index === selected}
       data-row={r.index}
-      title={r.node.id}
+      use:tooltip={r.node.id}
       onclick={() => onPick(r.index)}
       ondblclick={() => onOpen(r.index)}
     >

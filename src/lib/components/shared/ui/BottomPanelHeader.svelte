@@ -31,6 +31,19 @@
     onClose?: () => void;
     /** Force-hide the close button even when `onClose` is set. */
     hideClose?: boolean;
+    /**
+     * Draw the line under the header. Default `true`.
+     *
+     * The line exists to separate the header from content **butting against it**.
+     * A panel whose content floats — an inset toolbar, a rounded strip, a grid held
+     * off the edge — is already separated by the gap that shows the background
+     * through, which is how the whole app draws boundaries. Adding the line as well
+     * draws the same edge twice, and the doubled version is the one people notice.
+     *
+     * A prop rather than a change to every panel: most dock panels put a flush list
+     * or a log directly under this, and those genuinely need the line.
+     */
+    divider?: boolean;
   }
 
   let {
@@ -41,10 +54,11 @@
     actions,
     onClose,
     hideClose = false,
+    divider = true,
   }: Props = $props();
 </script>
 
-<div class="bp-header">
+<div class="bp-header" class:bp-flush={!divider}>
   {#if icon}
     <span class="bp-icon">{@render icon()}</span>
   {/if}
@@ -87,6 +101,10 @@
     border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
   }
+
+  /* Content that floats is already separated by the gap around it; the line would
+     draw that same edge a second time. See the `divider` prop. */
+  .bp-header.bp-flush { border-bottom: none; }
 
   .bp-icon {
     display: flex;

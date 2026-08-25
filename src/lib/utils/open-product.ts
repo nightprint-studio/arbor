@@ -7,7 +7,9 @@
  * launcher did before; in `tabbed` mode the workspace products land as tabs in
  * the container and everything else still opens its own window.
  */
-import { PRODUCT_WINDOW_OPENERS, openLauncherWindow } from '$lib/ipc/app';
+import {
+  PRODUCT_WINDOW_OPENERS, closeProductWindow, listRunningProducts, openLauncherWindow,
+} from '$lib/ipc/app';
 import { openWorkspaceWindow } from '$lib/ipc/window';
 import { setOpenIntent } from '$lib/ipc/recents';
 import { windowModeStore } from '$lib/stores/window-mode.svelte';
@@ -45,6 +47,39 @@ export async function openProduct(id: string): Promise<void> {
   await opener?.();
 }
 
+/** How long {@link restartProduct} waits for the old surfaces (and their backend) to be gone. */
+const STOP_WAIT_MS = 5000;
+/** How often it asks. The shell answers from memory — this is cheap. */
+const STOP_POLL_MS = 120;
+
+/**
+ * Stop a product and start it again — the way to pick up a rebuilt backend without restarting
+ * Arbor itself.
+ *
+ * Here rather than in either home, for the same reason {@link openProduct} is: Arbor has two of
+ * them (the Canopy launcher window and the container's welcome tab) and they must mean the same
+ * thing by Restart.
+ *
+ * The wait in the middle is the whole verb. A product's headless backend is torn down when its
+ * last surface goes, and that teardown is asynchronous — for a tab it even happens in another
+ * window. Launching straight after the stop races it, and the race is one the NEW backend loses:
+ * it gets attached and then detached by the old one's teardown, leaving a window whose every call
+ * answers "unknown method". So this waits for the shell to agree the product is gone — and gives
+ * up waiting rather than hanging, because a Restart that never completes is worse than one that
+ * goes ahead.
+ */
+export async function restartProduct(id: string): Promise<void> {
+  await closeProductWindow(id).catch(() => {});
+  const until = Date.now() + STOP_WAIT_MS;
+  for (;;) {
+    let running: string[];
+    try { running = await listRunningProducts(); } catch { break; }
+    if (!running.includes(id) || Date.now() >= until) break;
+    await new Promise((done) => setTimeout(done, STOP_POLL_MS));
+  }
+  await openProduct(id);
+}
+
 /**
  * Open a product **on a specific project** — the recents click.
  *
@@ -67,5 +102,5 @@ export async function openProjectIn(product: string, path: string): Promise<void
 export async function detachSurface(id: SurfaceId): Promise<void> {
   if (id === 'home') await openLauncherWindow();
   else await PRODUCT_WINDOW_OPENERS[id]?.();
-  surfaceStore.close(id);
+  void surfaceStore.close(id);
 }

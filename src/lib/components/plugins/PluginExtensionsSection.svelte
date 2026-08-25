@@ -110,7 +110,7 @@
         {#if !runtimeAvailable}
           <span
             class="pxs-note"
-            title="This build found and validated these declarations but cannot instantiate them."
+            use:tooltip={'This build found and validated these declarations but cannot instantiate them.'}
           >
             <Info size={11} /> declared only
           </span>

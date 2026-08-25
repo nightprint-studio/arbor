@@ -34,6 +34,7 @@
   import { openProduct } from '$lib/utils/open-product';
   import { windowModeStore } from '$lib/stores/window-mode.svelte';
   import type { WindowMode } from '$lib/ipc/config';
+  import { tooltip } from '$lib/actions/tooltip';
 
   type ProductFilter = 'all' | 'running' | 'update';
 
@@ -164,7 +165,8 @@
             {#each shownTools as t (t.id)}
               <WelcomeProductCard tool={t}
                                   onlaunch={() => launch(t)}
-                                  onstop={() => void launcherState.stop(t.id)} />
+                                  onstop={() => launcherState.stop(t.id)}
+                                  onrestart={() => launcherState.restart(t.id)} />
             {:else}
               <p class="sec-empty">No product matches this filter.</p>
             {/each}
@@ -181,7 +183,7 @@
 
           <div class="rgrid">
             {#each shownRecents as r (r.product + r.path)}
-              <button type="button" class="rcard" onclick={() => openRecent(r)} title={r.path}>
+              <button type="button" class="rcard" onclick={() => openRecent(r)} use:tooltip={r.path}>
                 <!-- The PRODUCT's icon, not a monogram of the project name. A row already
                      spells the project out in full on the next line, so a letter derived
                      from it added nothing; what the row could not say was which application

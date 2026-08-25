@@ -32,6 +32,23 @@
     /** Optional CSS color override (e.g. 'var(--brand-linear)') applied to background for primary,
         text for ghost/icon. Use sparingly — most callers should pick a variant. */
     color?: string;
+    /**
+     * Colour the **icon** only, leaving the label in ordinary text.
+     *
+     * For toolbars, where a row of identical grey glyphs makes the reader parse
+     * shapes to find Run. Colour here marks what an action *does to the world* —
+     * green starts something, red stops it, accent writes something — and nothing
+     * else takes a colour, because colouring every button is the same as colouring
+     * none of them.
+     *
+     * Distinct from {@link color}, which tints the whole control (label included)
+     * and turns a toolbar button into a call to action. Same name and same meaning
+     * as `iconColor` on `Dropdown` and `ContextMenu` items.
+     *
+     * Drops out when the button is unavailable: a bright green Run on a greyed-out
+     * button says "go" while the button says "you cannot".
+     */
+    iconColor?: string;
     onclick?: (e: MouseEvent) => void;
     /** Leading icon snippet — rendered before the label. */
     iconStart?: Snippet;
@@ -55,6 +72,7 @@
     ariaExpanded,
     ariaHaspopup,
     color,
+    iconColor,
     onclick,
     iconStart,
     iconEnd,
@@ -63,6 +81,14 @@
   }: Props = $props();
 
   const tipInput = $derived<TooltipInput>(tooltip ?? title ?? '');
+
+  /** Both colour overrides, as one `style` — either, neither or both. */
+  const styleVars = $derived(
+    [
+      color ? `--btn-color:${color}` : '',
+      iconColor ? `--btn-icon-color:${iconColor}` : '',
+    ].filter(Boolean).join(';') || undefined,
+  );
 
   /** Unavailable, for either reason. */
   const inert = $derived(disabled || loading);
@@ -118,7 +144,8 @@
   class="btn btn-{variant} sz-{size}"
   class:block
   class:has-color={!!color}
-  style={color ? `--btn-color:${color}` : undefined}
+  class:has-icon-color={!!iconColor}
+  style={styleVars}
   onclick={handleClick}
 >
   {#if loading}
@@ -208,6 +235,16 @@
     color: var(--btn-color);
     border-color: var(--btn-color);
   }
+
+  /* ---- Icon colour (--btn-icon-color) ----
+     Lucide draws with `stroke="currentColor"`, so colouring the svg is enough and
+     the label keeps the button's own text colour. */
+  .btn.has-icon-color :global(svg) { color: var(--btn-icon-color); }
+  /* Unavailable wins. Falling back to `inherit` hands the glyph back to whatever
+     the button is currently painted in — which for a greyed-out one is grey, and
+     for a hovered one is the hover colour. */
+  .btn.has-icon-color:disabled :global(svg),
+  .btn.has-icon-color[aria-disabled='true'] :global(svg) { color: inherit; }
 
   /* ---- Loading ---- */
   :global(.btn-spin) { animation: btn-spin-anim 1s linear infinite; }

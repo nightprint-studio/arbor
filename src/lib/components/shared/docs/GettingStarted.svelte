@@ -85,7 +85,8 @@
 
 <h2>The home screen</h2>
 <p>Arbor starts on a <strong>Welcome</strong> page: a card per product — state, version and Launch on each — over <strong>Recent projects</strong>. The products can be filtered down to what's running or what has an update, and the two buttons at the top open or clone a repository. Opening a product replaces the Welcome tab rather than leaving it behind; <kbd>Ctrl</kbd>+<kbd>T</kbd> — or <strong>+</strong> in the tab strip — brings it back.</p>
-<p>The standalone launcher window is a different screen: it draws the Nightprint suite as a circuit-tree — pick a node and the footer shows that product's state, version and <strong>Launch</strong>.</p>
+<p>A running product's card also carries <strong>Restart</strong> and <strong>Stop</strong>. Both end the product wherever it is running — its own window or a tab of this one — and with it the headless backend behind it; Restart then starts it again, which is how you pick up a rebuilt backend without restarting Arbor.</p>
+<p>The standalone launcher window is a different screen: it draws the Nightprint suite as a circuit-tree — pick a node and the footer shows that product's state, version and <strong>Launch</strong> — plus <strong>Restart</strong> and <strong>Stop</strong> once it is running.</p>
 <p><strong>Recent</strong> is what you last worked on across every product, newest first. A row carries the glyph of the product that opened it; clicking it starts that product directly on that project. Entries can be filtered, and removed with the × on hover. The chips in the title bar filter the products down to what's running or what has an update.</p>
 <p>The list is filled by the products themselves as they open something, so it works even for products that aren't running.</p>
 

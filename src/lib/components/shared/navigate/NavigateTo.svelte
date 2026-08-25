@@ -69,6 +69,7 @@
   import Select from '../ui/Select.svelte';
   import type { LanguageDescriptor } from '../ui/code-editor';
   import Kbd from '../internal/Kbd.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
   import {
     fuzzyMatchPrepared,
     prepareCandidate,
@@ -804,7 +805,7 @@
     {#if anyPreview}
       <div class="nv-preview">
         {#if preview}
-          <div class="nv-pv-head" title={preview.title}>{preview.title}</div>
+          <div class="nv-pv-head" use:tooltip={preview.title}>{preview.title}</div>
           <div class="nv-pv-body">
             <CodePreview
               text={preview.text}

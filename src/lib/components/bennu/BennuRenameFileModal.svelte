@@ -30,6 +30,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { lspWillRename } from '$lib/ipc/bennu/lsp';
   import { baseName } from '$lib/utils/paths';
+  import { tooltip } from '$lib/actions/tooltip';
 
   let {
     /** Absolute path of the file to rename. */
@@ -170,7 +171,7 @@
     {#if implied && implied.files.length > 0}
       <ul class="rf-files">
         {#each implied.files as f (f)}
-          <li><FileCode2 size={11} /> <span title={f}>{baseName(f)}</span></li>
+          <li><FileCode2 size={11} /> <span use:tooltip={f}>{baseName(f)}</span></li>
         {/each}
       </ul>
     {/if}

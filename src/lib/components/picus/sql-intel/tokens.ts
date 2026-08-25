@@ -5,9 +5,16 @@
  * (Tree-sitter) in the backend; what the editor needs while you type is something
  * that never blocks, never throws, and is right about the only thing that really
  * matters for intelligence: **where the text is code and where it is not**. A
- * scanner that gets strings, comments and dollar-quoting right can answer "which
- * statement is the caret in", "what is the word before the dot" and "which tables
- * are in scope" well enough to be useful, and is honest about the rest.
+ * scanner that gets strings, comments and dollar-quoting right can answer "what is
+ * the word before the dot" and "which tables are in scope" well enough to be
+ * useful, and is honest about the rest.
+ *
+ * **Where the statements are is the one question it no longer answers on its own.**
+ * That is a parse — a semicolon inside a PL/SQL block ends nothing — and the parser
+ * is in the backend, which the Run path was already asking. `scanSql` takes the
+ * boundaries from `statementSpanStore` and groups its own tokens by them, falling
+ * back to the local `;` split only until the answer for this exact buffer lands. One
+ * question, one authority; the tokens stay here, where they are free.
  *
  * Dialect matters even at this level: PostgreSQL has `$tag$ … $tag$` bodies and
  * nested block comments, Oracle allows `$` and `#` inside identifiers. Getting
@@ -19,6 +26,7 @@
  */
 
 import type { Dialect } from '$lib/types/picus';
+import { statementSpanStore } from '$lib/stores/picus/statement-spans.svelte';
 
 export type TokenKind =
   /** A bare identifier or keyword. `value` is upper-cased — SQL folds case. */
@@ -249,16 +257,23 @@ export interface SqlStatement {
 }
 
 /**
- * Split a scan into statements on top-level `;`.
+ * Split a scan into statements on top-level `;` — **the fallback**.
  *
- * **The known limit.** A PL/SQL or PL/pgSQL block contains semicolons of its own,
- * so an Oracle `CREATE PROCEDURE … BEGIN … END;` is split into fragments rather
- * than kept whole. That is a deliberate trade rather than an oversight: getting it
- * right needs the real grammar, and the failure mode of splitting is benign —
- * each fragment is analysed on its own merits, so an `INSERT` inside a trigger
- * body still gets checked against the schema, and the leftovers (`END`, `x := 1`)
- * name no tables and produce nothing. PostgreSQL bodies are dollar-quoted, so they
- * arrive as a single string token and are simply not analysed at all.
+ * Used until the backend has answered about this exact buffer, and whenever it
+ * cannot; {@link statementsFromSpans} is the path that normally runs. It stays
+ * because a round trip must never be what stands between a keystroke and a
+ * completion popup.
+ *
+ * **The known limit, which is why it is no longer the primary.** A PL/SQL or
+ * PL/pgSQL block contains semicolons of its own, so an Oracle
+ * `CREATE PROCEDURE … BEGIN … END;` comes apart into fragments rather than staying
+ * whole. The failure mode is benign in isolation — each fragment is analysed on its
+ * own merits, so an `INSERT` inside a trigger body is still checked against the
+ * schema, and the leftovers (`END`, `x := 1`) name no tables and produce nothing.
+ * What is *not* benign is that the Run path never split it that way, so for the
+ * fifth of a second this is in force the two sides can disagree about which
+ * statement the caret is in. PostgreSQL bodies are dollar-quoted, so they arrive as
+ * a single string token and are simply not analysed at all.
  */
 export function splitStatements(scan: TokenScan): SqlStatement[] {
   const out: SqlStatement[] = [];
@@ -281,6 +296,54 @@ export function splitStatements(scan: TokenScan): SqlStatement[] {
     current.push(t);
   }
   flush(current.length ? current[current.length - 1].to : 0);
+  return out;
+}
+
+/**
+ * The same grouping, from boundaries the **backend's parser** found.
+ *
+ * The preferred path — see {@link splitStatements} for the limit this removes: a
+ * PL/SQL block's own semicolons no longer cut it into fragments, because the
+ * boundaries come from something that knows what a block is.
+ *
+ * Only the boundaries come from over there. The tokens are still this side's, and
+ * each statement takes the significant ones that fall inside its span. `from` is
+ * kept as the first of those rather than as the span's own start, so that a leading
+ * comment belongs to no statement exactly as it did before — the boundaries change,
+ * the convention every consumer reads does not.
+ *
+ * A span with nothing significant in it (a stray `;`, a comment-only tail) produces
+ * no statement, which is what the local split does with the same input.
+ */
+export function statementsFromSpans(
+  scan: TokenScan,
+  spans: readonly { start: number; end: number }[],
+): SqlStatement[] {
+  const out: SqlStatement[] = [];
+  // One pass over the tokens for all spans: both lists are in document order, so
+  // the cursor into the tokens only ever moves forward. A `find` per span would be
+  // quadratic on the scripts this exists for.
+  let i = 0;
+  for (const span of spans) {
+    while (i < scan.tokens.length && scan.tokens[i].from < span.start) i += 1;
+    const tokens: SqlToken[] = [];
+    let j = i;
+    while (j < scan.tokens.length && scan.tokens[j].to <= span.end) {
+      if (scan.tokens[j].kind !== 'comment') tokens.push(scan.tokens[j]);
+      j += 1;
+    }
+    i = j;
+    // The terminator is a boundary, not content — `splitStatements` drops it and
+    // every consumer downstream has always read a token list without it. Only a
+    // TRAILING one: the semicolons inside a PL/SQL block are part of the block, and
+    // the whole reason these spans are worth asking for is that the block stays one
+    // statement.
+    while (tokens.length && tokens[tokens.length - 1].kind === 'punct'
+           && tokens[tokens.length - 1].text === ';') {
+      tokens.pop();
+    }
+    if (tokens.length) out.push({ tokens, from: tokens[0].from, to: span.end });
+  }
   return out;
 }
 
@@ -322,19 +385,50 @@ export function inLiteral(scan: TokenScan, offset: number): boolean {
 //
 // Completion, hover, diagnostics and ghost text all run against the same buffer,
 // often within the same keystroke. Scanning once per buffer version instead of
-// four times is the difference between free and noticeable on a large script. Two
-// entries because two editors can be alive at once in a tabbed window.
+// four times is the difference between free and noticeable on a large script.
+//
+// Three entries, not two: two editors can be alive at once in a tabbed window, and
+// a buffer briefly has two entries of its own — the one grouped locally and the one
+// regrouped when the backend's boundaries arrive. Two would evict the other editor
+// every time an answer landed.
 
-interface CacheEntry { src: string; dialect: Dialect; scan: TokenScan; statements: SqlStatement[]; }
+interface CacheEntry {
+  src: string;
+  dialect: Dialect;
+  /** The boundaries this entry was grouped by — see `scanSql`. */
+  spans: readonly { start: number; end: number }[] | null;
+  scan: TokenScan;
+  statements: SqlStatement[];
+}
 const cache: CacheEntry[] = [];
 
-/** {@link tokenize} + {@link splitStatements}, memoised on the exact buffer text. */
+/**
+ * {@link tokenize} plus the statement grouping, memoised on the exact buffer text.
+ *
+ * The grouping comes from `statementSpanStore` — the backend's parser — whenever it
+ * has an answer for this exact text, and from {@link splitStatements} otherwise.
+ * Every consumer of this function gets the better boundaries without knowing that
+ * either source exists, which is the point: five modules asked the same question
+ * and would have needed the same fix five times.
+ *
+ * The fallback is not a degraded mode to be ashamed of, it is the normal state for
+ * the first fifth of a second after a keystroke. Completion cannot wait for a round
+ * trip and must never be the thing that waits.
+ *
+ * The spans are part of the cache key — by identity, since the store hands back the
+ * same array until it has a new answer. Without that, an entry computed before the
+ * reply landed would be handed out for the rest of that buffer's life.
+ */
 export function scanSql(src: string, dialect: Dialect): { scan: TokenScan; statements: SqlStatement[] } {
-  const hit = cache.find((e) => e.src === src && e.dialect === dialect);
+  const spans = statementSpanStore.for(src);
+  const hit = cache.find((e) => e.src === src && e.dialect === dialect && e.spans === spans);
   if (hit) return { scan: hit.scan, statements: hit.statements };
-  const scan = tokenize(src, dialect);
-  const statements = splitStatements(scan);
-  cache.unshift({ src, dialect, scan, statements });
-  cache.length = Math.min(cache.length, 2);
+  // The lexing itself never depends on the spans, so a cached scan for this text is
+  // reused when only the boundaries arrived.
+  const scan = cache.find((e) => e.src === src && e.dialect === dialect)?.scan
+    ?? tokenize(src, dialect);
+  const statements = spans ? statementsFromSpans(scan, spans) : splitStatements(scan);
+  cache.unshift({ src, dialect, spans, scan, statements });
+  cache.length = Math.min(cache.length, 3);
   return { scan, statements };
 }
